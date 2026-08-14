@@ -2819,7 +2819,9 @@ export function SegmentedControl({
         <label
           key={opt.value}
           className={cn(
-            "relative z-10 cursor-pointer px-3 py-1 text-center text-xs font-medium transition-colors duration-(--dur-1)",
+            "relative z-10 cursor-pointer rounded-[5px] px-3 py-1 text-center text-xs font-medium transition-colors duration-(--dur-1)",
+            // the radio is sr-only (clipped), so its focus ring must paint on the label
+            "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent",
             opt.value === value ? "text-fg" : "text-fg-muted hover:text-fg-secondary",
           )}
         >
