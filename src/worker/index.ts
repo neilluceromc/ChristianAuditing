@@ -27,10 +27,16 @@ async function main() {
     } catch (err) {
       console.error("[worker] tick failed:", err);
     }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    for (let i = 0; i < POLL_MS / 500 && !shuttingDown; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
   }
   await prisma.$disconnect();
   console.log("[worker] stopped cleanly");
 }
 
-main();
+main().catch(async (err) => {
+  console.error("[worker] fatal:", err);
+  await prisma.$disconnect();
+  process.exit(1);
+});
