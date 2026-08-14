@@ -1305,6 +1305,8 @@ git commit -m "feat(db): seed with fixtures covering every enum state"
 
 The single source of truth mapping every domain enum value to one of six semantic families. Nothing else in the app may pick a status colour.
 
+> **Phase 3 caveat (from review):** `EmploymentStatus` values (`ACTIVE`/`OFFBOARDING`/`OFFBOARDED`) are deliberately NOT in the map. If the employees table later renders them as status pills, they must be added explicitly — uppercase `OFFBOARDING`/`OFFBOARDED` would otherwise fall through to neutral, and `ACTIVE` would collide with the reservation key (inflight — semantically wrong for employment).
+
 **Files:**
 - Create: `src/lib/status.test.ts`, then `src/lib/status.ts`
 
