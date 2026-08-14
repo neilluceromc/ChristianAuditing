@@ -1,10 +1,12 @@
+name: inventory
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     env_file: .env
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -13,9 +15,21 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    profiles: ["prod"]
+    image: inventory-app
+    build: .
+    restart: "no"
+    command: ["node_modules/.bin/prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+
   web:
     profiles: ["prod"]
-    build: .
+    image: inventory-app
     restart: unless-stopped
     env_file: .env
     environment:
@@ -23,39 +37,60 @@ services:
       HOSTNAME: 0.0.0.0
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     profiles: ["prod"]
-    build: .
+    image: inventory-app
     restart: unless-stopped
     command: ["node_modules/.bin/tsx", "src/worker/index.ts"]
+    stop_grace_period: 30s
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   backup:
     profiles: ["prod"]
     image: postgres:16-alpine
     restart: unless-stopped
-    env_file: .env
+    # Interval anchors to container start, not wall clock — accepted at this scale.
     entrypoint: >
       sh -c 'while true; do
-        pg_dump -h db -U $${POSTGRES_USER} $${POSTGRES_DB} > /backups/inventory-$$(date +%Y%m%d).sql;
+        ts=$$(date +%Y%m%d-%H%M%S);
+        if pg_dump -h db -U $${POSTGRES_USER} -d $${POSTGRES_DB} -Fc -f /backups/.tmp-$$ts.dump; then
+          mv /backups/.tmp-$$ts.dump /backups/inventory-$$ts.dump;
+          ls -1t /backups/inventory-*.dump | tail -n +15 | xargs -r rm -f;
+          echo "[backup] ok $$ts";
+        else
+          rm -f /backups/.tmp-$$ts.dump;
+          echo "[backup] FAILED $$ts" >&2;
+        fi;
         sleep 86400;
       done'
     environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
       PGPASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - ./backups:/backups
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./backups:/backups
 
 volumes:
   pgdata:

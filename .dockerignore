@@ -7,4 +7,12 @@ design_handover
 e2e
 test-results
 playwright-report
-.env
+.env*
+!.env.example
+coverage
+*.tsbuildinfo
+.claude
+uploads
+README.md
+Dockerfile
+docker-compose.yml
