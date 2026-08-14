@@ -947,10 +947,10 @@ The schema and worker now exist, so the Dockerfile's inputs are complete — thi
 
 ```bash
 npx tsc --noEmit
-docker compose build
+docker compose --profile prod build
 ```
 
-Expected: typecheck PASS; image builds to completion (prisma generate + next build + run-stage generate all succeed).
+Expected: typecheck PASS; image builds to completion (prisma generate + next build + run-stage generate all succeed). Note: the `--profile prod` flag is required — the buildable services are profile-gated, so a bare `docker compose build` silently builds nothing. The Dockerfile pins `npm@11` in its `npm ci` stages so the image build matches the npm that generated the lockfile (node:22-alpine bundles npm 10, which rejects this lockfile's bundleDependencies entries).
 
 - [ ] **Step 6: Commit**
 
