@@ -1,28 +1,48 @@
 "use client";
 
-import { useId, useState } from "react";
+import { cloneElement, useId, useState } from "react";
 import { cn } from "@/lib/cn";
 
+type TriggerProps = {
+  "aria-describedby"?: string;
+  onFocus?: React.FocusEventHandler;
+  onBlur?: React.FocusEventHandler;
+};
+
+/**
+ * The trigger child must itself be focusable (button, link, input…) for the
+ * keyboard path to work — tooltips on non-interactive elements are an axe
+ * violation anyway. The child is cloned to carry aria-describedby.
+ */
 export function Tooltip({
   content,
   children,
   className,
 }: {
   content: string;
-  children: React.ReactElement<{ "aria-describedby"?: string; onFocus?: () => void; onBlur?: () => void }>;
+  children: React.ReactElement<TriggerProps>;
   className?: string;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
+  const child = cloneElement(children, {
+    "aria-describedby": id,
+    onFocus: (e: React.FocusEvent<Element>) => {
+      children.props.onFocus?.(e);
+      setOpen(true);
+    },
+    onBlur: (e: React.FocusEvent<Element>) => {
+      children.props.onBlur?.(e);
+      setOpen(false);
+    },
+  });
   return (
     <span
       className={cn("relative inline-flex", className)}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onBlur={() => setOpen(false)}
     >
-      {children}
+      {child}
       <span
         role="tooltip"
         id={id}
@@ -32,7 +52,7 @@ export function Tooltip({
           open ? "opacity-100" : "opacity-0",
         )}
         style={{
-          background: "#101828",
+          background: "var(--tooltip-bg)",
           transition: "opacity var(--dur-2) var(--ease-std)",
         }}
       >

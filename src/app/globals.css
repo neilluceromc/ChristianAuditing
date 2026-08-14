@@ -38,6 +38,9 @@
   --st-closed-bg: transparent; --st-closed-text: #667085;   --st-closed-border: #d0d5dd;
   --st-failed-border: #f97066; /* dashed, EXECUTION_FAILED only */
 
+  /* tooltip is deliberately theme-invariant: always dark bubble, light text */
+  --tooltip-bg: #101828;
+
   /* form feedback */
   --error-border: #fda29b;
   --error-shadow: rgba(217, 45, 32, 0.08);
