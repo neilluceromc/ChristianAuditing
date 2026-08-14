@@ -88,9 +88,12 @@ Enums come verbatim from the brief §5.
 - **Asset** — unique tag (`BR-LT-0148` pattern), model, serial, category FK, type FK, status
   (7 values), assignee FK (nullable), purchase date/cost/PR link, warrantyUntil, vendor/RMA/quote
   fields (repair view is a saved filter over `status=DEFECTIVE` — no new enum), notes.
-- **AssetSecret** — encrypted credential rows; every reveal writes a `SECRET_READ` audit entry;
-  UI auto-hides after 30 s.
+- **AssetSecret** — credential rows encrypted at rest with AES-256-GCM using a key from the
+  `SECRET_ENCRYPTION_KEY` env var (never stored plaintext); every reveal writes a `SECRET_READ`
+  audit entry; UI auto-hides after 30 s.
 - **AssetDocument** — uploads with kind + signed flag (accountability forms scan back in here).
+  Files are stored on a local Docker volume (`uploads/`), with path + checksum in the row —
+  no external object storage on a single-machine deploy.
 - **Reservation** — asset ↔ employee hold; `ACTIVE | FULFILLED | RELEASED | EXPIRED`; expiry date.
   Reserved stock still reads `SPARE` in inventory, with a hold marker.
 - **PurchaseRequest** — state `DRAFT → SUBMITTED → IT_REVIEWED → COMPLETED` + `CANCELLED`;
