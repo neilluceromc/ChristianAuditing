@@ -4,7 +4,7 @@
     {
       "name": "design-prototype",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "ChristianAuditing-main/design_handover"],
+      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "design_handover"],
       "port": 4173
     }
   ]
