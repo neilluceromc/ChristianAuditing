@@ -1,1 +1,228 @@
 @import "tailwindcss";
+
+/* ── Colour tokens — light (design_handover/README.md "Design tokens") ── */
+:root {
+  --canvas: #f6f7f9;
+  --surface: #ffffff;
+  --surface-subtle: #fcfcfd;
+  --surface-accent: #f8fbfe;
+  --surface-raised: #ffffff;
+  --border: #e4e7ec;
+  --border-strong: #d0d5dd;
+  --border-faint: #f2f4f7;
+  --text: #101828;
+  --text-secondary: #475467;
+  --text-muted: #667085;
+  --text-faint: #98a2b3;
+  --accent: #2563a8;
+  --accent-hover: #1d4e87;
+  --accent-fg: #ffffff;
+  --accent-soft-bg: #eff6fc;
+  --accent-soft-border: #cfe2f4;
+  --accent-soft-text: #1d4e87;
+  --accent-tint: #f2f7fc;
+
+  /* status dots */
+  --st-neutral-dot: #667085;
+  --st-inflight-dot: #2563a8;
+  --st-settled-dot: #079455;
+  --st-attention-dot: #dc6803;
+  --st-fault-dot: #d92d20;
+  --st-closed-ring: #98a2b3;
+  /* status pills: bg / text / border */
+  --st-neutral-bg: #f2f4f7;   --st-neutral-text: #475467;   --st-neutral-border: #e4e7ec;
+  --st-inflight-bg: #eff6fc;  --st-inflight-text: #1d4e87;  --st-inflight-border: #cfe2f4;
+  --st-settled-bg: #ecfdf3;   --st-settled-text: #067647;   --st-settled-border: #abefc6;
+  --st-attention-bg: #fffaeb; --st-attention-text: #b54708; --st-attention-border: #fedf89;
+  --st-fault-bg: #fef3f2;     --st-fault-text: #b42318;     --st-fault-border: #fecdca;
+  --st-closed-bg: transparent; --st-closed-text: #667085;   --st-closed-border: #d0d5dd;
+  --st-failed-border: #f97066; /* dashed, EXECUTION_FAILED only */
+
+  /* form feedback */
+  --error-border: #fda29b;
+  --error-shadow: rgba(217, 45, 32, 0.08);
+  --required-mark: #d92d20;
+  --error-text: #b42318;
+  --focus-shadow: rgba(37, 99, 168, 0.12);
+
+  /* elevation */
+  --elev-card: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --elev-pop: 0 12px 30px -10px rgba(16, 24, 40, 0.3);
+  --elev-drawer: -14px 0 34px -10px rgba(16, 24, 40, 0.28);
+  --elev-dialog: 0 28px 60px -16px rgba(16, 24, 40, 0.5);
+  --elev-toast: 0 16px 32px -12px rgba(16, 24, 40, 0.55);
+
+  /* motion */
+  --dur-1: 90ms;   /* hover, focus ring, checkbox, pill tint — linear */
+  --dur-2: 140ms;  /* menu, popover, tooltip, chip removal */
+  --dur-3: 200ms;  /* row enter, skeleton swap, tab underline */
+  --dur-4: 260ms;  /* drawer, dialog, mobile nav */
+  --dur-exit: 340ms;
+  --dur-earn: 420ms;
+  --ease-std: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-seg: cubic-bezier(0.34, 1.3, 0.64, 1);
+
+  /* density: the ONLY thing the toggle changes (41px → 33px) */
+  --row-h: 41px;
+
+  /* placeholder stripes for product imagery */
+  --placeholder-stripes: repeating-linear-gradient(135deg, #eef1f5 0 6px, #f7f9fb 6px 12px);
+}
+
+[data-density="compact"] {
+  --row-h: 33px;
+}
+
+/* ── Colour tokens — dark (re-derived, not inverted) ── */
+[data-theme="dark"] {
+  --canvas: #0f1115;
+  --surface: #171a20;
+  --surface-subtle: #1a1e25;
+  --surface-accent: #152435;
+  --surface-raised: #1d2129;
+  --border: #262b33;
+  --border-strong: #333a45;
+  --border-faint: #1e232b;
+  --text: #e6e9ef;
+  --text-secondary: #c7cdd8;
+  --text-muted: #9aa4b2;
+  --text-faint: #6b7480;
+  --accent: #6aa9e0;
+  --accent-hover: #8fc0ea;
+  --accent-fg: #0b1119;
+  --accent-soft-bg: #152435;
+  --accent-soft-border: #274864;
+  --accent-soft-text: #8fc0ea;
+  --accent-tint: #152435;
+
+  --st-neutral-dot: #8b95a2;
+  --st-inflight-dot: #6aa9e0;
+  --st-settled-dot: #34b47c;
+  --st-attention-dot: #e79c33;
+  --st-fault-dot: #ef6a5f;
+  --st-closed-ring: #6b7480;
+  --st-neutral-bg: #1d2129;   --st-neutral-text: #a8b2c0;   --st-neutral-border: #333a45;
+  --st-inflight-bg: #152435;  --st-inflight-text: #8fc0ea;  --st-inflight-border: #274864;
+  --st-settled-bg: #0f2a1e;   --st-settled-text: #5fd39b;   --st-settled-border: #1d4634;
+  --st-attention-bg: #2d2214; --st-attention-text: #e7b168; --st-attention-border: #4a3a1d;
+  --st-fault-bg: #2d1917;     --st-fault-text: #f28b80;     --st-fault-border: #4d2622;
+  --st-closed-bg: transparent; --st-closed-text: #8b95a2;   --st-closed-border: #3a424e;
+
+  --placeholder-stripes: repeating-linear-gradient(135deg, #1a1e25 0 6px, #1d2129 6px 12px);
+}
+
+/* ── Map tokens into Tailwind utility namespaces ── */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-accent: var(--surface-accent);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-faint: var(--border-faint);
+  --color-fg: var(--text);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-muted);
+  --color-fg-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft-bg);
+  --color-accent-soft-border: var(--accent-soft-border);
+  --color-accent-soft-text: var(--accent-soft-text);
+  --color-accent-tint: var(--accent-tint);
+
+  --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, Menlo, monospace;
+
+  --shadow-card: var(--elev-card);
+  --shadow-pop: var(--elev-pop);
+  --shadow-drawer: var(--elev-drawer);
+  --shadow-dialog: var(--elev-dialog);
+  --shadow-toast: var(--elev-toast);
+
+  --radius-card: 8px;   /* cards and inputs */
+  --radius-btn: 7px;    /* buttons and selects */
+  --radius-ctl: 6px;    /* small controls and pills */
+  --radius-micro: 5px;  /* micro pills */
+}
+
+/* ── Base rules ── */
+:root {
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+/* Focus ring is always this — never a colour swap. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Mono metadata always aligns its digits */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Named keyframes (design_handover/README.md "Motion spec") ── */
+@keyframes fade {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop {
+  0% { opacity: 0; transform: scale(0.84); }
+  70% { transform: scale(1.05); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes ringout {
+  from { box-shadow: 0 0 0 0 rgba(37, 99, 168, 0.4); }
+  to { box-shadow: 0 0 0 10px transparent; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes shim {
+  from { background-position: -220px 0; }
+  to { background-position: 220px 0; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes sheet {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes veil {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Hard requirement, not an enhancement. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
