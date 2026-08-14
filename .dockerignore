@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+backups
+docs
+design_handover
+e2e
+test-results
+playwright-report
+.env
