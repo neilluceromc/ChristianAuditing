@@ -1,0 +1,432 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums (brief §5 — values are verbatim) ────────────────────────────
+
+enum Role {
+  admin
+  it_staff
+  purchasing_staff
+  finance_staff
+  viewer
+}
+
+enum AssetStatus {
+  DEPLOYED
+  SPARE
+  DEFECTIVE
+  DONATED
+  TEMPORARY
+  BUYOUT
+  DISPOSE
+}
+
+enum PurchaseRequestState {
+  DRAFT
+  SUBMITTED
+  IT_REVIEWED
+  COMPLETED
+  CANCELLED
+}
+
+enum PurchaseUnitState {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ApprovalState {
+  PENDING
+  CLAIMED
+  APPROVED
+  REJECTED
+  EXECUTED
+  EXECUTION_FAILED
+}
+
+enum ApprovalType {
+  lifecycle_assign         @map("lifecycle.assign")
+  lifecycle_replace        @map("lifecycle.replace")
+  lifecycle_transfer       @map("lifecycle.transfer")
+  lifecycle_return         @map("lifecycle.return")
+  lifecycle_change_status  @map("lifecycle.change-status")
+}
+
+enum ReservationState {
+  ACTIVE
+  FULFILLED
+  RELEASED
+  EXPIRED
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  OFFBOARDING
+  OFFBOARDED
+}
+
+enum Priority {
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum NoteKind {
+  COMMENT
+  SUBMIT
+  IT_REVIEW
+  IT_REJECT
+  REQUEST_INFO
+  CANCEL
+  COMPLETE
+}
+
+enum JobType {
+  EXECUTE_APPROVAL
+  DELIVER_WEBHOOK
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  DEAD
+}
+
+enum DeliveryStatus {
+  PENDING
+  RETRYING
+  DELIVERED
+  DEAD
+}
+
+// ── Identity & access ─────────────────────────────────────────────────
+
+model User {
+  id               String           @id @default(cuid())
+  email            String           @unique
+  name             String
+  passwordHash     String?          // null = SSO-only account
+  role             Role
+  isPermanentAdmin Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  preferences      UserPreference[]
+  purchaseRequests PurchaseRequest[] @relation("requestedBy")
+  notes            NoteEntry[]
+  claimedApprovals Approval[]       @relation("claimedBy")
+  requestedApprovals Approval[]     @relation("approvalRequestedBy")
+  documents        AssetDocument[]
+  rateEvents       RateEvent[]
+}
+
+model UserPreference {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key    String // e.g. "columns:inventory"
+  value  Json
+
+  @@unique([userId, key])
+}
+
+model RateEvent {
+  id     String   @id @default(cuid())
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind   String   // "mutation" | "import"
+  at     DateTime @default(now())
+
+  @@index([userId, kind, at])
+}
+
+// ── Reference data ────────────────────────────────────────────────────
+
+model Department {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  locked    Boolean    @default(false)
+  employees Employee[]
+  policies  EquipmentPolicy[]
+}
+
+model AssetCategory {
+  id     String      @id @default(cuid())
+  name   String      @unique
+  locked Boolean     @default(false)
+  types  AssetType[]
+  assets Asset[]
+}
+
+model AssetType {
+  id         String        @id @default(cuid())
+  name       String
+  categoryId String
+  category   AssetCategory @relation(fields: [categoryId], references: [id])
+  assets     Asset[]
+  policySlots PolicySlot[]
+
+  @@unique([categoryId, name])
+}
+
+model Vendor {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  assets Asset[]
+}
+
+// ── People ────────────────────────────────────────────────────────────
+
+model Employee {
+  id           String           @id @default(cuid())
+  employeeNo   String           @unique // EMP-0042
+  name         String
+  title        String
+  departmentId String
+  department   Department       @relation(fields: [departmentId], references: [id])
+  m365Status   String?          // canonical: pending|active|offboarding|inactive; custom stored as-is; null = never synced
+  employment   EmploymentStatus @default(ACTIVE)
+  joinedAt     DateTime
+  assets       Asset[]
+  reservations Reservation[]
+  approvals    Approval[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+// ── Assets ────────────────────────────────────────────────────────────
+
+model Asset {
+  id                String        @id @default(cuid())
+  tag               String        @unique // BR-LT-0148
+  model             String
+  serial            String?
+  categoryId        String
+  category          AssetCategory @relation(fields: [categoryId], references: [id])
+  typeId            String?
+  type              AssetType?    @relation(fields: [typeId], references: [id])
+  status            AssetStatus   @default(SPARE)
+  assigneeId        String?
+  assignee          Employee?     @relation(fields: [assigneeId], references: [id])
+  purchasedAt       DateTime?
+  cost              Decimal?      @db.Decimal(12, 2)
+  purchaseRequestId String?
+  warrantyUntil     DateTime?
+  // repair fields (repairs view = saved filter over status=DEFECTIVE; no new enum)
+  vendorId          String?
+  vendor            Vendor?       @relation(fields: [vendorId], references: [id])
+  rmaRef            String?
+  repairQuote       Decimal?      @db.Decimal(12, 2)
+  defectiveSince    DateTime?
+  notes             String?
+  secrets           AssetSecret[]
+  documents         AssetDocument[]
+  reservations      Reservation[]
+  approvals         Approval[]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model AssetSecret {
+  id         String   @id @default(cuid())
+  assetId    String
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  label      String
+  ciphertext String   // AES-256-GCM: base64(iv || tag || data), key from SECRET_ENCRYPTION_KEY
+  createdAt  DateTime @default(now())
+}
+
+model AssetDocument {
+  id           String   @id @default(cuid())
+  assetId      String
+  asset        Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  kind         String   // "receipt" | "accountability-form" | ...
+  fileName     String
+  path         String   // relative path under uploads/ volume
+  checksum     String
+  signed       Boolean  @default(false)
+  uploadedById String?
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model Reservation {
+  id         String           @id @default(cuid())
+  assetId    String
+  asset      Asset            @relation(fields: [assetId], references: [id])
+  employeeId String
+  employee   Employee         @relation(fields: [employeeId], references: [id])
+  state      ReservationState @default(ACTIVE)
+  reason     String?
+  expiresAt  DateTime?
+  resolvedAt DateTime?
+  createdAt  DateTime         @default(now())
+}
+
+// ── Purchasing ────────────────────────────────────────────────────────
+
+model PurchaseRequest {
+  id            String               @id @default(cuid())
+  refNo         String               @unique // PR-0188
+  state         PurchaseRequestState @default(DRAFT)
+  requestedById String
+  requestedBy   User                 @relation("requestedBy", fields: [requestedById], references: [id])
+  submittedAt   DateTime?
+  reviewedAt    DateTime?
+  reviewedById  String?
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+  cancelReason  String?
+  units         PurchaseUnit[]
+  notes         NoteEntry[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+}
+
+model PurchaseUnit {
+  id           String            @id @default(cuid())
+  requestId    String
+  request      PurchaseRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  description  String
+  specs        String?
+  qty          Int               @default(1)
+  unitPrice    Decimal?          @db.Decimal(12, 2)
+  state        PurchaseUnitState @default(PENDING)
+  itSlotNotes  String?
+  financeNotes String?
+  createdAt    DateTime          @default(now())
+}
+
+// Append-only conversation thread (enforced by DB trigger, Task 4)
+model NoteEntry {
+  id        String          @id @default(cuid())
+  requestId String
+  request   PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User            @relation(fields: [authorId], references: [id])
+  kind      NoteKind
+  text      String
+  createdAt DateTime        @default(now())
+}
+
+// ── Approvals ─────────────────────────────────────────────────────────
+
+model Approval {
+  id               String        @id @default(cuid())
+  refNo            String        @unique // APR-2039
+  type             ApprovalType
+  state            ApprovalState @default(PENDING)
+  payload          Json          // before→after change description
+  priority         Priority      @default(NORMAL)
+  slaAt            DateTime
+  requestedById    String
+  requestedBy      User          @relation("approvalRequestedBy", fields: [requestedById], references: [id])
+  claimedById      String?
+  claimedBy        User?         @relation("claimedBy", fields: [claimedById], references: [id])
+  claimedAt        DateTime?
+  resolvedAt       DateTime?
+  resolutionReason String?
+  workerError      String?       // verbatim error for EXECUTION_FAILED retry UI
+  assetId          String?
+  asset            Asset?        @relation(fields: [assetId], references: [id])
+  employeeId       String?
+  employee         Employee?     @relation(fields: [employeeId], references: [id])
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([state, slaAt])
+}
+
+// ── Audit (append-only by DB trigger, Task 4) ─────────────────────────
+
+model AuditEntry {
+  id         String   @id @default(cuid())
+  actorId    String?  // null = system
+  actorLabel String   // denormalized display name, survives user deletion
+  entityType String   // "asset" | "employee" | "approval" | ...
+  entityId   String
+  action     String   // "create" | "update" | "SECRET_READ" | ...
+  diff       Json?    // { field: { from, to } } per changed field
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ── Equipment policies ────────────────────────────────────────────────
+
+model EquipmentPolicy {
+  id                    String       @id @default(cuid())
+  name                  String       @unique
+  appliesToDepartmentId String?
+  appliesToDepartment   Department?  @relation(fields: [appliesToDepartmentId], references: [id])
+  appliesToTitle        String?      // role policy beats department policy
+  slots                 PolicySlot[]
+}
+
+model PolicySlot {
+  id          String          @id @default(cuid())
+  policyId    String
+  policy      EquipmentPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  name        String          // "laptop", "monitor", ...
+  assetTypeId String?
+  assetType   AssetType?      @relation(fields: [assetTypeId], references: [id])
+  required    Boolean         @default(true)
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────
+
+model WebhookEndpoint {
+  id         String            @id @default(cuid())
+  url        String
+  secret     String
+  events     String[]          // event names this endpoint subscribes to
+  active     Boolean           @default(true)
+  deliveries WebhookDelivery[]
+  createdAt  DateTime          @default(now())
+}
+
+model WebhookDelivery {
+  id            String          @id @default(cuid())
+  endpointId    String
+  endpoint      WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  event         String
+  payload       Json
+  status        DeliveryStatus  @default(PENDING)
+  attempts      Int             @default(0)
+  lastError     String?
+  nextAttemptAt DateTime?
+  deliveredAt   DateTime?
+  createdAt     DateTime        @default(now())
+}
+
+model FeatureFlag {
+  id          String  @id @default(cuid())
+  key         String  @unique // "m365_sso", ...
+  enabled     Boolean @default(false)
+  description String
+  value       Json?
+}
+
+// ── Worker queue (polled with FOR UPDATE SKIP LOCKED) ─────────────────
+
+model Job {
+  id        String    @id @default(cuid())
+  type      JobType
+  payload   Json
+  status    JobStatus @default(PENDING)
+  attempts  Int       @default(0)
+  runAt     DateTime  @default(now())
+  lastError String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([status, runAt])
+}
