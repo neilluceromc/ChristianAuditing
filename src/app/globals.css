@@ -59,6 +59,7 @@
   --dur-4: 260ms;  /* drawer, dialog, mobile nav */
   --dur-exit: 340ms;
   --dur-earn: 420ms;
+  --dur-press: 70ms; /* button :active scale — below noticing, above feeling */
   --ease-std: cubic-bezier(0.2, 0, 0, 1);
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);

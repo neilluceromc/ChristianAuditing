@@ -1495,6 +1495,7 @@ Every hex/duration/curve from `design_handover/README.md` becomes a custom prope
   --dur-4: 260ms;  /* drawer, dialog, mobile nav */
   --dur-exit: 340ms;
   --dur-earn: 420ms;
+  --dur-press: 70ms; /* button :active scale — below noticing, above feeling */
   --ease-std: cubic-bezier(0.2, 0, 0, 1);
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
@@ -1994,7 +1995,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-busy={loading || undefined}
       className={cn(
         "relative inline-flex items-center justify-center gap-1.5 rounded-(--radius-btn) font-medium",
-        "transition-[background,border-color,opacity] duration-(--dur-1)",
+        "[transition:background_var(--dur-1)_linear,border-color_var(--dur-1)_linear,opacity_var(--dur-1)_linear,scale_var(--dur-press)_linear]",
         "active:scale-[.965] disabled:pointer-events-none disabled:opacity-55",
         VARIANT[variant],
         SIZE[size],
@@ -2029,7 +2030,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       ref={ref}
       className={cn(
         "inline-flex size-[34px] items-center justify-center rounded-(--radius-btn)",
-        "transition-[background,border-color] duration-(--dur-1) active:scale-[.965]",
+        "[transition:background_var(--dur-1)_linear,border-color_var(--dur-1)_linear,scale_var(--dur-press)_linear] active:scale-[.965]",
         "disabled:pointer-events-none disabled:opacity-55",
         VARIANT[variant],
         className,

@@ -40,7 +40,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-busy={loading || undefined}
       className={cn(
         "relative inline-flex items-center justify-center gap-1.5 rounded-(--radius-btn) font-medium",
-        "transition-[background,border-color,opacity] duration-(--dur-1)",
+        "[transition:background_var(--dur-1)_linear,border-color_var(--dur-1)_linear,opacity_var(--dur-1)_linear,scale_var(--dur-press)_linear]",
         "active:scale-[.965] disabled:pointer-events-none disabled:opacity-55",
         VARIANT[variant],
         SIZE[size],
@@ -75,7 +75,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       ref={ref}
       className={cn(
         "inline-flex size-[34px] items-center justify-center rounded-(--radius-btn)",
-        "transition-[background,border-color] duration-(--dur-1) active:scale-[.965]",
+        "[transition:background_var(--dur-1)_linear,border-color_var(--dur-1)_linear,scale_var(--dur-press)_linear] active:scale-[.965]",
         "disabled:pointer-events-none disabled:opacity-55",
         VARIANT[variant],
         className,
