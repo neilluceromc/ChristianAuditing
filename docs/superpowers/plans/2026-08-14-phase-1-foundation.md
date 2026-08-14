@@ -49,6 +49,14 @@ Responsibilities: `src/lib/status.ts` is the ONLY place an enum value maps to a 
 
 The repo root is non-empty (design_handover/, docs/), so `create-next-app` cannot run here — we write the scaffold files directly.
 
+> **Post-review amendments (approved and applied after code review):**
+> 1. `.gitignore` uses `.env*` + `!.env.example` (covers `.env.local` variants — the encryption key must never be committable), anchors `/out/` and `/build/`, and adds `uploads/`, `/coverage`, `*.log`, `.DS_Store`.
+> 2. `vitest.config.ts` include is `src/**/*.test.{ts,tsx}`; unit tests stay node-env by design (component behaviour is covered by Playwright).
+> 3. `src/lib/cn.ts` wraps `twMerge(clsx(...))` (dep: `tailwind-merge`) so caller `className` overrides win over component defaults — primitives depend on this.
+> 4. `<html>` carries `suppressHydrationWarning` (theme/density become cookie-driven in Phase 2).
+> 5. `package.json` adds `"engines": {"node": ">=22"}`, a `lint` script, and devDeps `eslint`, `eslint-config-next`, `@eslint/eslintrc` with a flat `eslint.config.mjs` (`next/core-web-vitals` + `next/typescript` — includes jsx-a11y at authoring time).
+> 6. Recorded decisions: jsdom component tests declined for Phase 1 (revisit in Phase 2); CI workflow deferred; `/dev/kitchen-sink` gets a production `notFound()` guard in Task 16; `color-scheme` added to tokens in Task 7.
+
 **Files:**
 - Create: `package.json`, `tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `vitest.config.ts`, `.gitignore`, `src/app/layout.tsx`, `src/app/globals.css` (minimal now, tokens in Task 7), `src/app/page.tsx`, `src/lib/cn.ts`
 
@@ -1542,6 +1550,13 @@ Every hex/duration/curve from `design_handover/README.md` becomes a custom prope
 }
 
 /* ── Base rules ── */
+:root {
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 body {
   background: var(--canvas);
   color: var(--text);
@@ -3654,6 +3669,8 @@ function Demos() {
 }
 
 export default function KitchenSinkPage() {
+  // Dev-only review surface — never served in production builds.
+  if (process.env.NODE_ENV === "production") notFound();
   return (
     <ToastProvider>
       <Demos />
@@ -3661,6 +3678,8 @@ export default function KitchenSinkPage() {
   );
 }
 ```
+
+(Note the extra import this needs at the top of the file: `import { notFound } from "next/navigation";`)
 
 - [ ] **Step 2: Verify in the browser**
 
@@ -3774,6 +3793,7 @@ Expected: 5 passed. If axe reports contrast violations from token values, fix th
 
 ```bash
 npx tsc --noEmit
+npm run lint
 npm run test
 npm run build
 ```
@@ -3792,6 +3812,7 @@ git push -u origin phase-1-foundation
 
 ## Phase completion checklist
 
+- [ ] `npm run lint` green
 - [ ] `npm run test` green (status map unit tests)
 - [ ] `npm run e2e` green (axe light + dark, density, dialog, drawer)
 - [ ] `npm run build` succeeds
