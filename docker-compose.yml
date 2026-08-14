@@ -4,7 +4,12 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
-    env_file: .env
+    # Explicit vars only — the db container must never see app secrets like
+    # SECRET_ENCRYPTION_KEY (key and ciphertext would share one blast radius).
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -30,6 +35,7 @@ services:
   web:
     profiles: ["prod"]
     image: inventory-app
+    build: .
     restart: unless-stopped
     env_file: .env
     environment:
@@ -74,7 +80,7 @@ services:
         ts=$$(date +%Y%m%d-%H%M%S);
         if pg_dump -h db -U $${POSTGRES_USER} -d $${POSTGRES_DB} -Fc -f /backups/.tmp-$$ts.dump; then
           mv /backups/.tmp-$$ts.dump /backups/inventory-$$ts.dump;
-          ls -1t /backups/inventory-*.dump | tail -n +15 | xargs -r rm -f;
+          ls -1t /backups/inventory-*.dump 2>/dev/null | tail -n +15 | xargs -r rm -f;
           echo "[backup] ok $$ts";
         else
           rm -f /backups/.tmp-$$ts.dump;
