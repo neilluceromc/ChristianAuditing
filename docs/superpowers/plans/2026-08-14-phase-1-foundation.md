@@ -441,6 +441,16 @@ git commit -m "feat(infra): Docker Compose (db/web/worker/backup) and Dockerfile
 **Files:**
 - Create: `prisma/schema.prisma`, `src/server/db/client.ts`, `src/worker/index.ts`
 
+> **Post-review amendments (approved and applied — the committed schema supersedes the snippet below where they differ):**
+> 1. **`MISSING` added as the 8th `AssetStatus`** — the offboarding wizard's first-class "Missing" outcome needs a schema home. It maps to the **fault** family in the status system (Tasks 6/16 updated accordingly).
+> 2. **Job leases**: `lockedAt`/`lockedBy` columns + `@@index([status, lockedAt])` so a died-holding-a-job worker can be reaped without double-execution; partial unique = one live EXECUTE_APPROVAL job per approval. Phase 4's claim must be one raw `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING *` that sets the lease atomically; the reaper keys on `lockedAt`, never `updatedAt`.
+> 3. **All `@updatedAt` columns carry `@default(now())`** so raw-SQL inserts don't violate NOT NULL.
+> 4. **Cascade rule — evidence is Restrict, secrets/prefs are Cascade**: AssetDocument, NoteEntry, WebhookDelivery, Approval.asset/employee, Asset.assignee/type/vendor/purchaseRequest, PolicySlot.assetType are all `Restrict`; AssetSecret/UserPreference/RateEvent stay Cascade. Hard deletes are the exception the schema resists — terminal states (`DISPOSE`, `OFFBOARDED`, `CANCELLED`, `active=false`, `disabled=true`) are the intended paths.
+> 5. **Index pass** for the brief's query patterns: Asset(status/assignee/category/type), Approval(claimedBy/employee/asset), NoteEntry(request), Employee(employment), PurchaseRequest(state/requestedBy), WebhookDelivery(status,nextAttemptAt), AuditEntry(entityType+createdAt, actorId).
+> 6. **Integrity SQL migration**: one-ACTIVE-hold-per-asset partial unique on Reservation; `lower(email)` unique on User; `purchase_request_ref_seq`/`approval_ref_seq` sequences for atomic PR-/APR- numbers; CHECK constraints on qty/prices.
+> 7. **User hardened for Phase 2**: `disabled` flag, `entraObjectId String? @unique`, `updatedAt`; `reviewedById` and `Asset.purchaseRequestId` became real relations; `Asset.serial` unique (nullable); `locked` on AssetType + Vendor.
+> 8. **Recorded decisions**: Employee↔User stay UNLINKED (logins are staff-only; offboarding never touches accounts); WebhookEndpoint.secret encryption deferred to Phase 8; seed's EXECUTION_FAILED `workerError` text corrected (Task 5) — there is deliberately no unique on Asset.assigneeId; `engines.npm >=11` guards lockfile regeneration.
+
 - [ ] **Step 1: Write `prisma/schema.prisma`** (complete — this is the whole domain from spec §3)
 
 ```prisma
@@ -1139,6 +1149,7 @@ async function main() {
       mk("BR-LT-0075", "Dell Latitude 5400", "Laptop", "DONATED", { warrantyUntil: day(-400) }),
       mk("BR-LT-0060", "ThinkPad E14", "Laptop", "BUYOUT", { warrantyUntil: day(-500) }),
       mk("BR-LT-0031", "Acer Aspire 5", "Laptop", "DISPOSE", { warrantyUntil: day(-900) }),
+      mk("BR-LT-0027", "HP ProBook 440", "Laptop", "MISSING", { notes: "Not returned at offboarding — investigation open", warrantyUntil: day(-300) }),
       mk("BR-LT-0210", "ThinkPad T14 Gen 4", "Laptop", "TEMPORARY", { assigneeId: emp("EMP-0095").id }),
       mk("BR-MN-0902", "Dell P2422H", "Monitor", "DEPLOYED", { assigneeId: emp("EMP-0042").id, cost: 9_500 }),
       mk("BR-MN-0731", "Dell P2419H", "Monitor", "DEFECTIVE", { defectiveSince: day(-9), vendorId: vendors[1].id, rmaRef: "RMA-8841", cost: 8_000, notes: "Backlight flicker" }),
@@ -1215,7 +1226,7 @@ async function main() {
       { refNo: "APR-2035", type: "lifecycle_assign", state: "APPROVED", priority: "NORMAL", slaAt: day(1), requestedById: itStaff.id, claimedById: admin.id, claimedAt: day(-1), payload: { note: "queued for execution" } },
       { refNo: "APR-2031", type: "lifecycle_transfer", state: "EXECUTED", priority: "NORMAL", slaAt: day(-2), requestedById: itStaff.id, claimedById: admin.id, resolvedAt: day(-2), payload: { from: "EMP-0042", to: "EMP-0051" } },
       { refNo: "APR-2028", type: "lifecycle_replace", state: "REJECTED", priority: "HIGH", slaAt: day(-5), requestedById: itStaff.id, claimedById: admin.id, resolvedAt: day(-5), resolutionReason: "Replacement not justified; repair quote pending", payload: {} },
-      { refNo: "APR-2025", type: "lifecycle_assign", state: "EXECUTION_FAILED", priority: "NORMAL", slaAt: day(-3), requestedById: itStaff.id, claimedById: admin.id, workerError: "P2002: unique constraint violated on Asset.assigneeId — asset already assigned", payload: {} },
+      { refNo: "APR-2025", type: "lifecycle_assign", state: "EXECUTION_FAILED", priority: "NORMAL", slaAt: day(-3), requestedById: itStaff.id, claimedById: admin.id, workerError: "Execution guard: target employee EMP-0093 is OFFBOARDED — assignment refused", payload: {} },
     ],
   });
 
@@ -1279,7 +1290,7 @@ Expected: `Seed complete.` with no errors.
 docker compose exec db psql -U inventory -d inventory -c "select 'assets', count(*) from \"Asset\" union all select 'approvals', count(*) from \"Approval\" union all select 'prs', count(*) from \"PurchaseRequest\";"
 ```
 
-Expected: assets 21, approvals 7, prs 5.
+Expected: assets 22, approvals 7, prs 5.
 
 - [ ] **Step 4: Commit**
 
@@ -1305,8 +1316,8 @@ import { statusFamily, isSystemFailure, STATUS_FAMILIES } from "./status";
 
 describe("statusFamily", () => {
   const cases: Array<[string, string]> = [
-    // Asset status (7)
-    ["DEPLOYED", "settled"], ["SPARE", "neutral"], ["DEFECTIVE", "fault"],
+    // Asset status (8 — MISSING is the approved schema extension for the offboarding wizard)
+    ["DEPLOYED", "settled"], ["SPARE", "neutral"], ["DEFECTIVE", "fault"], ["MISSING", "fault"],
     ["DONATED", "closed"], ["TEMPORARY", "attention"], ["BUYOUT", "closed"], ["DISPOSE", "closed"],
     // Purchase request state (5)
     ["DRAFT", "neutral"], ["SUBMITTED", "inflight"], ["IT_REVIEWED", "inflight"],
@@ -1368,8 +1379,8 @@ export const STATUS_FAMILIES = [
 export type StatusFamily = (typeof STATUS_FAMILIES)[number];
 
 const MAP: Record<string, StatusFamily> = {
-  // Asset status
-  DEPLOYED: "settled", SPARE: "neutral", DEFECTIVE: "fault", DONATED: "closed",
+  // Asset status (MISSING: custody lost — a fault demanding investigation, not "fine for now")
+  DEPLOYED: "settled", SPARE: "neutral", DEFECTIVE: "fault", MISSING: "fault", DONATED: "closed",
   TEMPORARY: "attention", BUYOUT: "closed", DISPOSE: "closed",
   // Purchase request state
   DRAFT: "neutral", SUBMITTED: "inflight", IT_REVIEWED: "inflight",
@@ -3401,7 +3412,7 @@ import { ToastProvider, useToast } from "@/components/ui/toast";
 import { Tooltip } from "@/components/ui/tooltip";
 
 const ALL_STATUSES = [
-  "DEPLOYED", "SPARE", "DEFECTIVE", "DONATED", "TEMPORARY", "BUYOUT", "DISPOSE",
+  "DEPLOYED", "SPARE", "DEFECTIVE", "MISSING", "DONATED", "TEMPORARY", "BUYOUT", "DISPOSE",
   "DRAFT", "SUBMITTED", "IT_REVIEWED", "COMPLETED", "CANCELLED",
   "PENDING", "APPROVED", "REJECTED", "CLAIMED", "EXECUTED", "EXECUTION_FAILED",
   "ACTIVE", "FULFILLED", "RELEASED", "EXPIRED",
@@ -3711,7 +3722,7 @@ export default function KitchenSinkPage() {
 npm run dev
 ```
 
-Open `http://localhost:3000/dev/kitchen-sink`. Check: all 27 status values render (closed hollow, EXECUTION_FAILED dashed diamond); theme toggle flips every colour; density toggle changes table row height only; dialog and drawer trap focus and close on ESC; loading button keeps width. Stop the server.
+Open `http://localhost:3000/dev/kitchen-sink`. Check: all 28 status values render (closed hollow, EXECUTION_FAILED dashed diamond); theme toggle flips every colour; density toggle changes table row height only; dialog and drawer trap focus and close on ESC; loading button keeps width. Stop the server.
 
 - [ ] **Step 3: Typecheck and commit**
 
@@ -3841,6 +3852,7 @@ git push -u origin phase-1-foundation
 - [ ] `npm run e2e` green (axe light + dark, density, dialog, drawer)
 - [ ] `npm run build` succeeds
 - [ ] `npm run db:seed` idempotent (run twice, no errors)
+- [ ] `docker compose --profile prod build` succeeds against the final phase-1 tree (re-run after the schema integrity pass)
 - [ ] Backup-restore drill once: run the backup service's pg_dump manually, restore it into a scratch database, confirm row counts match (an untested backup is not a backup)
 - [ ] Kitchen sink eyeballed in both themes at both densities, and at 375px width
 - [ ] Merge `phase-1-foundation` (use superpowers:finishing-a-development-branch)
