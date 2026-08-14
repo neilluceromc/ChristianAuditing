@@ -10,7 +10,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-theme="light" data-density="comfortable">
+    <html lang="en" data-theme="light" data-density="comfortable" suppressHydrationWarning>
       <body className="bg-canvas text-fg font-sans antialiased">{children}</body>
     </html>
   );

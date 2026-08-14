@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
-/** Join class names; false/undefined values drop out. */
+/** Join class names; later Tailwind utilities win over conflicting earlier ones. */
 export function cn(...inputs: ClassValue[]) {
-  return clsx(inputs);
+  return twMerge(clsx(inputs));
 }
