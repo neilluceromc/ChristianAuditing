@@ -35,11 +35,34 @@ type Layer = {
   container: HTMLElement | null;
   modal: boolean;
   onClose: () => void;
-  inerted: HTMLElement[];
 };
 
 const layers: Layer[] = [];
 let savedBodyOverflow: string | null = null;
+const inertOwned = new Set<HTMLElement>();
+
+/**
+ * Inert follows the CURRENT top modal, recomputed on every push/pop —
+ * per-layer bookkeeping breaks when an outer modal closes before an
+ * inner one. Elements already inert for reasons outside this module are
+ * never touched.
+ */
+function syncInert() {
+  const top = [...layers].reverse().find((l) => l.modal);
+  for (const child of Array.from(document.body.children)) {
+    if (!(child instanceof HTMLElement)) continue;
+    const want = !!top?.container && !child.contains(top.container);
+    const owned = inertOwned.has(child);
+    if (want && !owned) {
+      if (child.inert) continue; // foreign inert — leave it alone
+      child.inert = true;
+      inertOwned.add(child);
+    } else if (!want && owned) {
+      child.inert = false;
+      inertOwned.delete(child);
+    }
+  }
+}
 
 function handleKeydown(e: KeyboardEvent) {
   const top = layers[layers.length - 1];
@@ -86,32 +109,18 @@ function pushLayer(layer: Layer) {
   if (layers.length === 0) {
     document.addEventListener("keydown", handleKeydown, true);
   }
-  if (layer.modal) {
-    if (!layers.some((l) => l.modal)) {
-      savedBodyOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-    }
-    if (layer.container) {
-      for (const child of Array.from(document.body.children)) {
-        if (
-          child instanceof HTMLElement &&
-          !child.contains(layer.container) &&
-          !child.inert
-        ) {
-          child.inert = true;
-          layer.inerted.push(child);
-        }
-      }
-    }
+  if (layer.modal && !layers.some((l) => l.modal)) {
+    savedBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
   }
   layers.push(layer);
+  syncInert();
 }
 
 function popLayer(layer: Layer) {
   const i = layers.indexOf(layer);
   if (i !== -1) layers.splice(i, 1);
-  for (const el of layer.inerted) el.inert = false;
-  layer.inerted.length = 0;
+  syncInert();
   if (layer.modal && !layers.some((l) => l.modal) && savedBodyOverflow !== null) {
     document.body.style.overflow = savedBodyOverflow;
     savedBodyOverflow = null;
@@ -150,7 +159,6 @@ export function useFocusTrap(
       container,
       modal: true,
       onClose: () => onCloseRef.current(),
-      inerted: [],
     };
     pushLayer(layer);
 
@@ -170,6 +178,11 @@ export function useFocusTrap(
  * Non-modal overlay layer (menus, popovers): participates in the ESC
  * stack — the top layer closes first — without trapping Tab or locking
  * scroll. onClose identity may change freely between renders.
+ *
+ * RULE: any component INSIDE an overlay that needs its own ESC behaviour
+ * (combobox, typeahead, inline editor) must register a layer with this
+ * hook. A local keydown handler will never see Escape — the stack's
+ * capture listener consumes it and would close the whole overlay instead.
  */
 export function useOverlayLayer(active: boolean, onClose: () => void) {
   const onCloseRef = useRef(onClose);
@@ -183,7 +196,6 @@ export function useOverlayLayer(active: boolean, onClose: () => void) {
       container: null,
       modal: false,
       onClose: () => onCloseRef.current(),
-      inerted: [],
     };
     pushLayer(layer);
     return () => popLayer(layer);
