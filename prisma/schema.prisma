@@ -247,6 +247,8 @@ model Asset {
   @@index([assigneeId])
   @@index([categoryId])
   @@index([typeId])
+  @@index([purchaseRequestId])
+  @@index([vendorId])
 }
 
 model AssetSecret {
@@ -271,7 +273,7 @@ model AssetDocument {
   checksum     String
   signed       Boolean  @default(false)
   uploadedById String?
-  uploadedBy   User?    @relation(fields: [uploadedById], references: [id])
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
   createdAt    DateTime @default(now())
 }
 
@@ -287,6 +289,9 @@ model Reservation {
   resolvedAt DateTime?
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @default(now()) @updatedAt
+
+  @@index([assetId])
+  @@index([employeeId])
 }
 
 // ── Purchasing ────────────────────────────────────────────────────────
@@ -300,7 +305,7 @@ model PurchaseRequest {
   submittedAt   DateTime?
   reviewedAt    DateTime?
   reviewedById  String?
-  reviewedBy    User?                @relation("reviewedBy", fields: [reviewedById], references: [id])
+  reviewedBy    User?                @relation("reviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
   completedAt   DateTime?
   cancelledAt   DateTime?
   cancelReason  String?
@@ -356,7 +361,7 @@ model Approval {
   requestedById    String
   requestedBy      User          @relation("approvalRequestedBy", fields: [requestedById], references: [id])
   claimedById      String?
-  claimedBy        User?         @relation("claimedBy", fields: [claimedById], references: [id])
+  claimedBy        User?         @relation("claimedBy", fields: [claimedById], references: [id], onDelete: Restrict)
   claimedAt        DateTime?
   resolvedAt       DateTime?
   resolutionReason String?
@@ -398,7 +403,7 @@ model EquipmentPolicy {
   id                    String       @id @default(cuid())
   name                  String       @unique
   appliesToDepartmentId String?
-  appliesToDepartment   Department?  @relation(fields: [appliesToDepartmentId], references: [id])
+  appliesToDepartment   Department?  @relation(fields: [appliesToDepartmentId], references: [id], onDelete: Restrict)
   appliesToTitle        String?      // role policy beats department policy
   slots                 PolicySlot[]
 }
