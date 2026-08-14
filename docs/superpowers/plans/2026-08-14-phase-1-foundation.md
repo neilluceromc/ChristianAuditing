@@ -2855,6 +2855,14 @@ git commit -m "feat(ui): Tabs and SegmentedControl"
 
 ESC closes every overlay; focus is trapped while open and returned on close. Dialog is reserved for irreversible decisions (352px, pop). Drawer is the right-side sheet (376px default, sheet+veil 260ms fired together).
 
+> **Post-review amendments (approved and applied — the COMMITTED FILES supersede every code block below; an empirical review found the original blocks defective, do not re-transcribe them):**
+> 1. `use-focus-trap.ts` was rewritten around a module-level **overlay layer stack**: the hook returns a state-backed CALLBACK REF (fixes the trap never installing under conditional mounting `{open && <Dialog/>}`); `onClose` lives in a ref (fixes focus being yanked to the first control on every parent render); scroll lock is stack-scoped with the saved value restored only when the last modal leaves (fixes a permanent scroll-lock leak); ESC is handled by the TOP layer only (one ESC = one layer, fixes stacked overlays all closing at once); Tab is constrained by the topmost modal with container-focused and zero-focusable edge cases plugged; background body subtrees get `inert`; focus-return guards `isConnected`; the FOCUSABLE selector covers contenteditable/summary/media and filters invisible nodes. A second export `useOverlayLayer(active, onClose)` lets non-modal overlays (Menu) join the ESC stack.
+> 2. `menu.tsx`: ArrowUp from the trigger now focuses the LAST item (was second-to-last); ESC and item-select return focus to the trigger (click-outside deliberately does not — focus follows the click); ESC handled via the layer stack.
+> 3. `dialog.tsx`/`drawer.tsx`: callback-ref trap wiring; `aria-labelledby` pointing at the visible heading (was duplicate aria-label); dialog gets `max-h` + overflow scroll; drawer's initial focus goes to the panel, not the ✕ button.
+> 4. `toast.tsx`: timeouts tracked and cleared on unmount; fault toasts are `role="alert"` with an sr-only tone prefix (tone was colour-only); viewport is `pointer-events-none`; `useToast` outside a provider throws instead of silently no-oping.
+> 5. Known limitation (recorded, not fixed): the Menu list is absolutely positioned, not portaled — it will clip inside scroll containers. Address when the RowActionsMenu pattern is built (Phase 3) with anchored portal positioning.
+> 6. Task 16's kitchen sink mounts Dialog/Drawer CONDITIONALLY (the pattern that originally broke), and Task 17 asserts scroll-lock restoration.
+
 **Files:**
 - Create: `src/components/ui/use-focus-trap.ts`, `src/components/ui/dialog.tsx`, `src/components/ui/drawer.tsx`, `src/components/ui/menu.tsx`, `src/components/ui/toast.tsx`
 
@@ -3696,26 +3704,31 @@ function Demos() {
           />
           <Button onClick={() => toast("Audit entry written", "settled")}>Toast</Button>
         </div>
-        <Dialog
-          open={dialogOpen}
-          onClose={() => setDialogOpen(false)}
-          title="Cancel request PR-0198?"
-          footer={
-            <>
-              <Button variant="ghost" onClick={() => setDialogOpen(false)}>Keep it</Button>
-              <Button variant="danger" onClick={() => setDialogOpen(false)}>Cancel request</Button>
-            </>
-          }
-        >
-          This can't be undone. A reason is required and will be appended to the thread.
-        </Dialog>
-        <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="Fill slot — headset">
-          <EmptyState
-            title="No spares available"
-            description="All Jabra Evolve2 units are deployed. Reserve from the next purchase instead."
-            actions={<Button variant="primary" size="sm">Reserve incoming</Button>}
-          />
-        </Drawer>
+        {/* Conditionally mounted ON PURPOSE — this is the pattern that once broke the trap */}
+        {dialogOpen && (
+          <Dialog
+            open
+            onClose={() => setDialogOpen(false)}
+            title="Cancel request PR-0198?"
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setDialogOpen(false)}>Keep it</Button>
+                <Button variant="danger" onClick={() => setDialogOpen(false)}>Cancel request</Button>
+              </>
+            }
+          >
+            This can't be undone. A reason is required and will be appended to the thread.
+          </Dialog>
+        )}
+        {drawerOpen && (
+          <Drawer open onClose={() => setDrawerOpen(false)} title="Fill slot — headset">
+            <EmptyState
+              title="No spares available"
+              description="All Jabra Evolve2 units are deployed. Reserve from the next purchase instead."
+              actions={<Button variant="primary" size="sm">Reserve incoming</Button>}
+            />
+          </Drawer>
+        )}
       </Section>
 
       <Section title="Empty state">
@@ -3832,14 +3845,18 @@ test.describe("kitchen sink", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
     // focus returned to the trigger
     await expect(page.getByRole("button", { name: "Open dialog" })).toBeFocused();
+    // scroll lock fully released (regression guard: saved-overflow clobbering)
+    expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
   });
 
-  test("drawer closes on ESC", async ({ page }) => {
+  test("drawer closes on ESC and releases the scroll lock", async ({ page }) => {
     await page.goto("/dev/kitchen-sink");
     await page.getByRole("button", { name: "Open drawer" }).click();
     await expect(page.getByRole("dialog", { name: "Fill slot — headset" })).toBeVisible();
+    expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
   });
 });
 ```

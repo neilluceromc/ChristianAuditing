@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useFocusTrap } from "./use-focus-trap";
 
 export function Dialog({
@@ -17,7 +17,8 @@ export function Dialog({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
-  const ref = useFocusTrap(open, onClose);
+  const setTrapRef = useFocusTrap(open, onClose);
+  const titleId = useId();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted || !open) return null;
@@ -31,15 +32,15 @@ export function Dialog({
         style={{ animation: "veil var(--dur-4) var(--ease-std)" }}
       />
       <div
-        ref={ref}
+        ref={setTrapRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-[352px] rounded-(--radius-card) border border-border bg-surface-raised p-4 shadow-dialog"
+        className="relative max-h-[calc(100vh-2rem)] w-[352px] max-w-full overflow-y-auto rounded-(--radius-card) border border-border bg-surface-raised p-4 shadow-dialog"
         style={{ animation: "pop var(--dur-4) var(--ease-std)" }}
       >
-        <h2 className="text-[15px] font-semibold text-fg">{title}</h2>
+        <h2 id={titleId} className="text-[15px] font-semibold text-fg">{title}</h2>
         <div className="mt-2 text-[13px] text-fg-secondary">{children}</div>
         {footer && <div className="mt-4 flex justify-end gap-2">{footer}</div>}
       </div>

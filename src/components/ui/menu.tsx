@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
+import { useOverlayLayer } from "./use-focus-trap";
 
 export interface MenuItem {
   label: string;
@@ -15,7 +16,11 @@ export function Menu({
   items,
   align = "end",
 }: {
-  trigger: (props: { onClick: () => void; "aria-expanded": boolean; "aria-haspopup": "menu" }) => React.ReactNode;
+  trigger: (props: {
+    onClick: () => void;
+    "aria-expanded": boolean;
+    "aria-haspopup": "menu";
+  }) => React.ReactNode;
   items: MenuItem[];
   align?: "start" | "end";
 }) {
@@ -23,19 +28,34 @@ export function Menu({
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const focusTrigger = () => {
+    rootRef.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
+  };
+
+  // ESC (top overlay layer only) closes the menu and returns focus to the
+  // trigger. Click-outside closes WITHOUT refocusing — focus follows the click.
+  useOverlayLayer(open, () => {
+    setOpen(false);
+    focusTrigger();
+  });
+
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        const nodes = Array.from(listRef.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not([aria-disabled])") ?? []);
+        const nodes = Array.from(
+          listRef.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not([aria-disabled])") ?? [],
+        );
         if (nodes.length === 0) return;
         const i = nodes.indexOf(document.activeElement as HTMLElement);
-        const next = e.key === "ArrowDown" ? nodes[(i + 1) % nodes.length] : nodes[(i - 1 + nodes.length) % nodes.length];
+        const next =
+          e.key === "ArrowDown"
+            ? nodes[(i + 1) % nodes.length]
+            : nodes[i <= 0 ? nodes.length - 1 : i - 1];
         next.focus();
       }
     }
@@ -69,6 +89,7 @@ export function Menu({
               disabled={item.disabled}
               onClick={() => {
                 setOpen(false);
+                focusTrigger();
                 item.onSelect();
               }}
               className={cn(

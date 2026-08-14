@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useFocusTrap } from "./use-focus-trap";
 
 export function Drawer({
@@ -17,7 +17,10 @@ export function Drawer({
   width?: number;
   children: React.ReactNode;
 }) {
-  const ref = useFocusTrap(open, onClose);
+  // Initial focus goes to the panel itself, not the ✕ Close button — a
+  // stray Enter must never dismiss a drawer someone just opened to fill in.
+  const setTrapRef = useFocusTrap(open, onClose, { initialFocus: "container" });
+  const titleId = useId();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted || !open) return null;
@@ -31,16 +34,16 @@ export function Drawer({
         style={{ animation: "veil var(--dur-4) var(--ease-std)" }}
       />
       <div
-        ref={ref}
+        ref={setTrapRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         tabIndex={-1}
-        className="absolute inset-y-0 right-0 flex flex-col border-l border-border bg-surface-raised shadow-drawer"
+        className="absolute inset-y-0 right-0 flex max-w-full flex-col border-l border-border bg-surface-raised shadow-drawer"
         style={{ width, animation: "sheet var(--dur-4) var(--ease-std)" }}
       >
         <div className="flex items-center justify-between border-b border-border-faint px-4 py-3">
-          <h2 className="text-[15px] font-semibold text-fg">{title}</h2>
+          <h2 id={titleId} className="text-[15px] font-semibold text-fg">{title}</h2>
           <button
             type="button"
             onClick={onClose}
