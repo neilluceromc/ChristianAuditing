@@ -277,6 +277,14 @@ git commit -m "feat(scaffold): Next.js 15 app skeleton with Tailwind v4 and Vite
 **Files:**
 - Create: `docker-compose.yml`, `Dockerfile`, `.dockerignore`, `.env`, `.env.example`
 
+> **Post-review amendments (approved and applied after code review — the committed files supersede the snippets below where they differ):**
+> 1. **Migrations reach prod** via a one-shot `migrate` compose service (`prisma migrate deploy`, prod profile); `web`/`worker` depend on `service_completed_successfully`.
+> 2. **Backups are atomic and rotated**: pg_dump `-Fc` to a temp file, promoted on success only, timestamped names, keep-14 rotation, failures logged loudly. 24h-sleep cadence kept (drift accepted).
+> 3. **Postgres binds loopback only** (`127.0.0.1:5432`) — LAN access would let anyone drop the append-only audit triggers. `.env.example` ships an EMPTY password with generate instructions plus a rotation-footgun note (initdb reads it on first boot only); DATABASE_URL documented as local-dev-only (compose overrides it in containers).
+> 4. **Runtime image uses prod-only node_modules** (extra `proddeps` stage, `npm ci --omit=dev`); `tsx` and `prisma` moved to dependencies (runtime needs); run-stage `npx prisma generate`; container runs as `node`, not root; compose project pinned `name: inventory` so the volume doesn't key off the folder name; `web` gets an HTTP healthcheck; `worker` gets `stop_grace_period: 30s`; `.dockerignore` uses `.env*`/`!.env.example` and excludes more build-context noise.
+> 5. **The image is knowingly unbuildable until Task 3** (no prisma/schema.prisma yet) — `docker compose build` is Task 3's verification, not Task 2's. Task 2 verifies with `docker compose --profile prod config --quiet` + db up.
+> 6. Recorded decisions: worker code must use **relative imports** (tsx ignores tsconfig paths at runtime); backup-restore drill added to the phase checklist; full deployment README deferred to Phase 8.
+
 - [ ] **Step 1: Write `.env.example`** (committed; `.env` is the same content, uncommitted)
 
 ```
@@ -884,10 +892,14 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 - [ ] **Step 3: Write `src/worker/index.ts`** (stub — real executors are Phase 4)
 
+NOTE: worker code must use **relative imports only** — tsx does not honour tsconfig `paths` at runtime, so `@/…` imports would crash in the container.
+
 ```ts
 import { prisma } from "../server/db/client";
 
 const POLL_MS = 5000;
+
+let shuttingDown = false;
 
 async function tick() {
   // Phase 4 replaces this with FOR UPDATE SKIP LOCKED job claiming.
@@ -899,7 +911,14 @@ async function tick() {
 
 async function main() {
   console.log("[worker] started (stub); polling every", POLL_MS, "ms");
-  for (;;) {
+  // Finish the current tick before exiting so a SIGTERM never tears down mid-write.
+  process.on("SIGTERM", () => {
+    shuttingDown = true;
+  });
+  process.on("SIGINT", () => {
+    shuttingDown = true;
+  });
+  while (!shuttingDown) {
     try {
       await tick();
     } catch (err) {
@@ -907,6 +926,8 @@ async function main() {
     }
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
+  await prisma.$disconnect();
+  console.log("[worker] stopped cleanly");
 }
 
 main();
@@ -920,13 +941,16 @@ npx prisma migrate dev --name init
 
 Expected: migration created under `prisma/migrations/`, client generated, DB in sync.
 
-- [ ] **Step 5: Verify typecheck**
+- [ ] **Step 5: Verify typecheck AND that the production image now builds**
+
+The schema and worker now exist, so the Dockerfile's inputs are complete — this is the deferred Task 2 build verification:
 
 ```bash
 npx tsc --noEmit
+docker compose build
 ```
 
-Expected: PASS.
+Expected: typecheck PASS; image builds to completion (prisma generate + next build + run-stage generate all succeed).
 
 - [ ] **Step 6: Commit**
 
@@ -3817,6 +3841,7 @@ git push -u origin phase-1-foundation
 - [ ] `npm run e2e` green (axe light + dark, density, dialog, drawer)
 - [ ] `npm run build` succeeds
 - [ ] `npm run db:seed` idempotent (run twice, no errors)
+- [ ] Backup-restore drill once: run the backup service's pg_dump manually, restore it into a scratch database, confirm row counts match (an untested backup is not a backup)
 - [ ] Kitchen sink eyeballed in both themes at both densities, and at 375px width
 - [ ] Merge `phase-1-foundation` (use superpowers:finishing-a-development-branch)
 
