@@ -1,0 +1,182 @@
+import type { Role } from "@prisma/client";
+
+export type WorkspaceId = "it" | "purchasing" | "finance" | "admin";
+
+// Brief §2 — the role/workspace table, verbatim.
+export const ROLE_WORKSPACES: Record<Role, WorkspaceId[]> = {
+  admin: ["it", "purchasing", "finance", "admin"],
+  it_staff: ["it"],
+  purchasing_staff: ["purchasing"],
+  finance_staff: ["finance"],
+  viewer: ["it"],
+};
+
+export const ROLE_LANDING: Record<Role, string> = {
+  admin: "/",
+  it_staff: "/inventory",
+  purchasing_staff: "/purchases",
+  finance_staff: "/finance/assets",
+  viewer: "/inventory",
+};
+
+export const WORKSPACE_META: Record<WorkspaceId, { label: string; landing: string }> = {
+  it: { label: "IT", landing: "/inventory" },
+  purchasing: { label: "Purchasing", landing: "/purchases" },
+  finance: { label: "Finance", landing: "/finance/assets" },
+  admin: { label: "Admin", landing: "/admin/users" },
+};
+
+export interface NavItem {
+  label: string;
+  href: string;
+  badge?: "approvals";
+  /** restrict the item to these roles, within an already-allowed workspace */
+  roles?: Role[];
+}
+
+export interface NavSection {
+  heading: string;
+  items: NavItem[];
+}
+
+// Brief §2 — the four workspace IAs, verbatim.
+export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
+  it: [
+    { heading: "Overview", items: [{ label: "Home", href: "/" }] },
+    {
+      heading: "Tracking",
+      items: [
+        { label: "Inventory", href: "/inventory" },
+        { label: "Employees", href: "/employees" },
+        { label: "Approvals", href: "/approvals", badge: "approvals" },
+        { label: "Audit log", href: "/audit" },
+      ],
+    },
+    {
+      heading: "People lifecycle",
+      items: [
+        { label: "Offboarding", href: "/offboarding" },
+        { label: "Equipment policies", href: "/admin/equipment-policies" },
+        { label: "Reservations", href: "/reservations" },
+      ],
+    },
+    {
+      heading: "Records & admin",
+      items: [
+        { label: "Asset categories", href: "/admin/asset-categories", roles: ["admin", "it_staff"] },
+        { label: "Asset types", href: "/admin/asset-types", roles: ["admin", "it_staff"] },
+        { label: "Departments", href: "/admin/departments", roles: ["admin", "it_staff"] },
+      ],
+    },
+    {
+      heading: "Activity logs",
+      items: [
+        { label: "Inventory activity", href: "/inventory/activity" },
+        { label: "Employee activity", href: "/employees/activity" },
+      ],
+    },
+  ],
+  purchasing: [
+    { heading: "Overview", items: [{ label: "Home", href: "/" }] },
+    {
+      heading: "Procurement",
+      items: [
+        { label: "All requests", href: "/purchases" },
+        { label: "Register purchase", href: "/purchases/new" },
+        { label: "Activity log", href: "/purchases/activity" },
+      ],
+    },
+    {
+      heading: "By status",
+      items: [
+        { label: "My drafts", href: "/purchases?state=DRAFT" },
+        { label: "Awaiting IT", href: "/purchases?state=SUBMITTED" },
+        { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED" },
+        { label: "Completed", href: "/purchases?state=COMPLETED" },
+      ],
+    },
+    { heading: "Reference", items: [{ label: "Inventory", href: "/inventory" }] },
+  ],
+  finance: [
+    { heading: "Overview", items: [{ label: "Home", href: "/" }] },
+    {
+      heading: "Capitalized assets",
+      items: [
+        { label: "Approved assets", href: "/finance/assets" },
+        { label: "Activity log", href: "/finance/activity" },
+      ],
+    },
+    { heading: "Approvals & spend", items: [{ label: "PR approvals", href: "/approvals" }] },
+    {
+      heading: "By status",
+      items: [
+        { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED" },
+        { label: "Approved", href: "/purchases?state=COMPLETED" },
+        { label: "Cancelled", href: "/purchases?state=CANCELLED" },
+        { label: "All purchases", href: "/purchases" },
+      ],
+    },
+  ],
+  admin: [
+    { heading: "Overview", items: [{ label: "Home", href: "/" }] },
+    { heading: "Identity & access", items: [{ label: "Users & roles", href: "/admin/users" }] },
+    {
+      heading: "Integrations & flags",
+      items: [
+        { label: "Webhooks", href: "/admin/webhooks" },
+        { label: "Feature flags", href: "/admin/flags" },
+      ],
+    },
+  ],
+};
+
+export function resolveWorkspace(role: Role, cookie: string | undefined): WorkspaceId {
+  const allowed = ROLE_WORKSPACES[role];
+  if (cookie && (allowed as string[]).includes(cookie)) return cookie as WorkspaceId;
+  return allowed[0];
+}
+
+/**
+ * Which workspaces may visit a path — the middleware's decision table.
+ * Shares per brief §7: purchasing references /inventory; finance shares
+ * /purchases and /approvals. Reference-data CRUD is additionally
+ * role-restricted (viewer is IT-workspace but excluded).
+ */
+const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[] }> = [
+  { test: /^\/admin\/(users|webhooks|flags)(\/|$)/, workspaces: ["admin"] },
+  {
+    test: /^\/admin\/(asset-categories|asset-types|departments)(\/|$)/,
+    workspaces: ["it"],
+    roles: ["admin", "it_staff"],
+  },
+  { test: /^\/admin\/equipment-policies(\/|$)/, workspaces: ["it"] },
+  { test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing"] },
+  { test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
+  { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance"] },
+  { test: /^\/purchases(\/|$)/, workspaces: ["purchasing", "finance"] },
+  { test: /^\/finance(\/|$)/, workspaces: ["finance"] },
+];
+
+export function pathAllowedForRole(pathname: string, role: Role): boolean {
+  const rule = PATH_RULES.find((r) => r.test.test(pathname));
+  if (!rule) return true; // "/", /dev, unknown → not workspace-gated
+  if (rule.roles && !rule.roles.includes(role)) return false;
+  const mine = ROLE_WORKSPACES[role];
+  return rule.workspaces.some((w) => mine.includes(w));
+}
+
+/**
+ * Saved-filter links (href carries a query) are active only when every one
+ * of their params matches the URL. A bare list link yields to an active
+ * sibling saved filter (state param present ⇒ the filter owns the highlight).
+ */
+export function navIsActive(href: string, pathname: string, search: URLSearchParams): boolean {
+  const [hrefPath, hrefQuery] = href.split("?");
+  if (pathname !== hrefPath) return false;
+  if (hrefQuery) {
+    const wanted = new URLSearchParams(hrefQuery);
+    for (const [k, v] of wanted) if (search.get(k) !== v) return false;
+    return true;
+  }
+  return !search.has("state");
+}
