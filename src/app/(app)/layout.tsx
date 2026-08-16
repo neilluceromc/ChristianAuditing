@@ -21,20 +21,24 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen">
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[100] focus:rounded-(--radius-btn) focus:bg-accent focus:px-3 focus:py-2 focus:text-[13px] focus:text-accent-fg"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[100] focus:rounded-(--radius-btn) focus:bg-accent focus:px-3 focus:py-2 focus:text-[13px] focus:text-accent-fg print:hidden"
       >
         Skip to content
       </a>
-      <Sidebar
-        user={user}
-        ws={ws}
-        sections={sections}
-        badge={badge}
-        allowed={ROLE_WORKSPACES[user.role]}
-      />
+      <div className="contents print:hidden">
+        <Sidebar
+          user={user}
+          ws={ws}
+          sections={sections}
+          badge={badge}
+          allowed={ROLE_WORKSPACES[user.role]}
+        />
+      </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar sections={sections} badge={badge} workspaceLabel={WORKSPACE_META[ws].label} />
-        <main id="main" tabIndex={-1} className="flex-1 p-6">
+        <div className="contents print:hidden">
+          <Topbar sections={sections} badge={badge} workspaceLabel={WORKSPACE_META[ws].label} />
+        </div>
+        <main id="main" tabIndex={-1} className="flex-1 p-6 print:p-0">
           {children}
         </main>
       </div>
