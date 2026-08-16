@@ -61,9 +61,10 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
     return { error: `Signup is limited to @${domain} addresses.` };
   }
 
-  const existing = await prisma.user.findFirst({
-    where: { email: { equals: email, mode: "insensitive" } },
-  });
+  // Exact lookup on the normalized email — NOT mode:"insensitive" (ILIKE),
+  // which treats %/_ in the input as wildcards: an unauthenticated enumeration
+  // oracle on this public form. Same fix as the login path (commit dc33830).
+  const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) return { error: "An account with that email already exists." };
 
   const passwordHash = await bcrypt.hash(password, 10);
