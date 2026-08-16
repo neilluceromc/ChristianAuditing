@@ -129,7 +129,7 @@ import type { Role } from "@prisma/client"; // type-only: erased at build, edge-
  */
 export const authConfigEdge = {
   trustHost: true, // self-hosted behind localhost/LAN, not Vercel
-  session: { strategy: "jwt" },
+  session: { strategy: "jwt", maxAge: 8 * 60 * 60 }, // cap a stale/terminated-user token at one workday
   pages: { signIn: "/login" },
   providers: [],
   callbacks: {
@@ -161,27 +161,38 @@ import { prisma } from "../db/client";
 import { normalizeEmail } from "@/lib/auth-shared";
 import { authConfigEdge } from "./config.edge";
 
+// A valid cost-10 bcrypt hash of a throwaway string, compared against when no
+// user row exists so authorize() always spends bcrypt time — closes the
+// timing oracle that would otherwise reveal whether an account exists/is disabled.
+const DUMMY_HASH = "$2b$10$<generate: node -e \"console.log(require('bcryptjs').hashSync('x',10))\">";
+
 const providers: NextAuthConfig["providers"] = [
   Credentials({
     credentials: { email: {}, password: {} },
     async authorize(credentials) {
-      const email = normalizeEmail(String(credentials?.email ?? ""));
+      // findUnique on the normalized (lowercased) email — NOT mode:"insensitive",
+      // which compiles to ILIKE and lets a "%" in the field match an arbitrary
+      // account (auth bypass). All write paths store lowercase (normalizeEmail).
+      const email = normalizeEmail(String(credentials?.email ?? "")).slice(0, 320);
       const password = String(credentials?.password ?? "");
       if (!email || !password) return null;
-      const user = await prisma.user.findFirst({
-        where: { email: { equals: email, mode: "insensitive" } },
-      });
-      if (!user?.passwordHash || user.disabled) return null;
-      const ok = await bcrypt.compare(password, user.passwordHash);
-      if (!ok) return null;
+      const user = await prisma.user.findUnique({ where: { email } });
+      const ok = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
+      if (!ok || !user?.passwordHash || user.disabled) return null;
       return { id: user.id, email: user.email, name: user.name, role: user.role };
     },
   }),
 ];
 
-// Registered only when Entra credentials exist in the environment; the
-// m365_sso DB flag additionally gates the login-page button (spec: flag-ready).
-if (process.env.AUTH_MICROSOFT_ENTRA_ID_ID) {
+// SSO is NOT functional yet: no signIn callback maps an Entra profile to a User
+// row, so an Entra login would carry no role. Register only when FULLY
+// configured (a bare _ID alone shows a broken button and defaults issuer to
+// "common" = any tenant). TODO(sso-phase): add the signIn callback.
+if (
+  process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
+  process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET &&
+  process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER
+) {
   providers.push(MicrosoftEntraID);
 }
 
@@ -690,6 +701,9 @@ export async function requireUser(): Promise<User> {
   if (!session?.user?.id) redirect("/login");
   const user = await prisma.user.findUnique({ where: { id: session.user.id } });
   if (!user || user.disabled) redirect("/login");
+  // The JWT freezes role at sign-in; if an admin has since changed it, force
+  // re-auth so middleware's (token-based) gating can't drift from the DB.
+  if (user.role !== session.user.role) redirect("/login");
   return user;
 }
 
@@ -2599,4 +2613,8 @@ git push -u origin phase-2-auth-shell
 - [ ] `docker compose --profile prod build` succeeds against the phase-2 tree
 - [ ] Merge via superpowers:finishing-a-development-branch
 
-**Non-goals of this phase:** real screens (inventory/purchases/etc — Phases 3+), rate limiting (Phase 3, with the RateEvent key question), Entra ID wiring (needs tenant credentials), employee status pills (Phase 3 with the EmploymentStatus map entries), G-then-P chords, Menu portaling.
+**Non-goals of this phase:** real screens (inventory/purchases/etc — Phases 3+), rate limiting (Phase 3, with the RateEvent key question), Entra ID wiring (needs tenant credentials AND a signIn callback mapping profile→User; do not enable until then), employee status pills (Phase 3 with the EmploymentStatus map entries), G-then-P chords, Menu portaling.
+
+**Security notes recorded from the Task 1 review (carry into deployment docs, Phase 8):**
+- Session cookies travel in cleartext over LAN HTTP — accepted for an internal tool; document it. Set `AUTH_URL=http://<deployment-host>:3000` in the prod `.env` to remove the `trustHost` header-trust question.
+- Middleware role gating reads the (up-to-8h-stale) JWT claim; `requireUser` forces re-auth on role drift, and `requireRole` re-checks per page/action — middleware is advisory, the guards are enforcement. Every server action must call a guard (layouts don't run for action POSTs).
