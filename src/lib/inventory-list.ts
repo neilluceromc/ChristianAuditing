@@ -5,6 +5,9 @@ export const ASSET_STATUSES = [
   "DEPLOYED", "SPARE", "DEFECTIVE", "DONATED", "TEMPORARY", "BUYOUT", "DISPOSE", "MISSING",
 ] as const satisfies readonly AssetStatus[];
 
+/** Bulk actions cap — shared by the server action and the selection bar UI. */
+export const BULK_MAX = 200;
+
 export const INVENTORY_LIST_CONFIG: ListConfig = {
   facets: ["status", "category", "type", "assignee"],
   sortable: ["tag", "model", "category", "status", "purchasedAt", "warrantyUntil"],

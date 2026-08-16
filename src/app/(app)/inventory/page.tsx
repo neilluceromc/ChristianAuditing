@@ -71,7 +71,11 @@ export default async function InventoryPage({
         <ChipFilterRow chips={chips} clearHref={href(clearFilters(state))} />
         {rows.length > 0 ? (
           <>
+            {/* key: any URL-state change remounts the island — selection must
+                never silently survive a page/filter/sort change (it would act
+                on rows the user can no longer see). */}
             <InventoryTable
+              key={serializeListState(state, INVENTORY_LIST_CONFIG)}
               rows={rows}
               state={state}
               visible={visibleColumns}

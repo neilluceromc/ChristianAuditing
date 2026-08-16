@@ -2360,6 +2360,15 @@ Controller live-check: as it@ select 2 rows → bulk drawer → request DISPOSE 
 
 *(Deviations recorded during execution: (1) `ToastProvider` was only mounted on the kitchen-sink page — `useToast()` would crash every consumer; the implementer wrapped `{children}` in `src/app/layout.tsx` with it, satisfying every later task's toast dependency. (2) The drawer copy's apostrophe is escaped as `&apos;` for `react/no-unescaped-entities`.)*
 
+> **Deviations from the Tasks 8+9 opus review (controller applied):**
+> 1. **Bulk action rewritten to batched queries inside the transaction** — reads (assets + open approvals) now happen IN the tx (closes the status TOCTOU), refNos come from one `generate_series` nextval call, approvals + audit rows use `createMany`. The old shape was ~800 sequential round trips at the 200 cap vs Prisma's 5s interactive budget.
+> 2. **New migration `20260817001000_approval_one_open_per_asset`**: partial unique index — one PENDING/CLAIMED/APPROVED approval per asset, DB-enforced; actions catch P2002 → conflict. **Tasks 14 and 20 implementers: your actions may hit P2002 from this index under races — catch it and return a conflict result.**
+> 3. **Bulk skips closed-family assets** (DONATED/BUYOUT/DISPOSE) — reviving off-the-books stock is a deliberate single-record action (product decision; single `requestStatusChange` in Task 14 stays unrestricted because it's human-deliberate and approval-gated).
+> 4. `BULK_MAX` moved to `src/lib/inventory-list.ts`; the selection bar only offers "Select all N matching" when N ≤ cap (otherwise says why).
+> 5. The table island gets `key={serializeListState(state, …)}` from the page — selection can never survive a page/filter/sort change and silently act on unseen rows.
+> 6. Bulk drawer: unclaimed validation errors (ids/filters/_form) surface in the banner; close resets error state; a successful batch clears the reason. Kitchen-sink's duplicate `ToastProvider` removed.
+> Recorded, deliberately NOT implemented: per-row rate-limit cost for bulk (one event per call; BULK_MAX + role guard bound the blast radius on this internal tool); `openApprovalForAsset` retained for single-asset actions; no unit tests for the action itself (e2e covers it in Task 24).
+
 ### Task 10: Column chooser (per-user `UserPreference`, NOT URL)
 
 **Files:**

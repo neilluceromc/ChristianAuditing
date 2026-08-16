@@ -7,15 +7,14 @@ import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
-import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
+import { createApproval, newSlaAt, OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
-import { ASSET_STATUSES, buildAssetWhere, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
+import { ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState } from "@/lib/url-state";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
-
-const BULK_MAX = 200;
+import { statusFamily } from "@/lib/status";
 
 const bulkSchema = z
   .object({
@@ -32,8 +31,10 @@ const bulkSchema = z
 
 /**
  * Bulk lifecycle change = one lifecycle.change-status approval PER asset —
- * never a direct write (spec: approvals gate lifecycle). Assets already in
- * the target status or with an open approval are skipped and counted.
+ * never a direct write (spec: approvals gate lifecycle). Skipped and counted:
+ * assets already in the target status, assets with an open approval, and
+ * closed-family stock (DONATED/BUYOUT/DISPOSE — reviving off-the-books assets
+ * is a deliberate single-record action, never a bulk one).
  */
 export async function bulkRequestStatusChange(
   input: unknown,
@@ -50,41 +51,71 @@ export async function bulkRequestStatusChange(
     ? { id: { in: ids } }
     : buildAssetWhere(parseListState(new URLSearchParams(filters), INVENTORY_LIST_CONFIG));
 
-  const assets = await prisma.asset.findMany({
-    where,
-    take: BULK_MAX + 1,
-    select: { id: true, status: true },
-  });
-  if (assets.length === 0) return conflict("Nothing matched the selection.");
-  if (assets.length > BULK_MAX) {
-    return conflict(`That selection exceeds the ${BULK_MAX}-asset bulk cap — narrow the filter and repeat.`);
-  }
-
   let created = 0;
   let skipped = 0;
-  await prisma.$transaction(async (tx) => {
-    for (const asset of assets) {
-      if (asset.status === to || (await openApprovalForAsset(tx, asset.id))) {
-        skipped += 1;
-        continue;
+  try {
+    const failure = await prisma.$transaction(async (tx) => {
+      // Reads happen INSIDE the transaction (statuses move between a pre-fetch
+      // and the writes), and writes are BATCHED — 4×N sequential round trips at
+      // the 200-asset cap would blow Prisma's 5s interactive-transaction budget.
+      const assets = await tx.asset.findMany({
+        where,
+        take: BULK_MAX + 1,
+        select: { id: true, status: true },
+      });
+      if (assets.length === 0) return conflict("Nothing matched the selection.");
+      if (assets.length > BULK_MAX) {
+        return conflict(`That selection exceeds the ${BULK_MAX}-asset bulk cap — narrow the filter and repeat.`);
       }
-      const approval = await createApproval(tx, {
-        type: "lifecycle_change_status",
-        payload: { from: { status: asset.status }, to: { status: to }, reason },
-        requestedById: user.id,
-        assetId: asset.id,
+
+      const open = await tx.approval.findMany({
+        where: { assetId: { in: assets.map((a) => a.id) }, state: { in: [...OPEN_APPROVAL_STATES] } },
+        select: { assetId: true },
       });
-      await writeAudit(tx, {
-        actorId: user.id,
-        actorLabel: user.name,
-        entityType: "asset",
-        entityId: asset.id,
-        action: "approval.requested",
-        diff: { approval: { from: null, to: approval.refNo } },
+      const blocked = new Set(open.map((o) => o.assetId));
+
+      const targets = assets.filter(
+        (a) => a.status !== to && !blocked.has(a.id) && statusFamily(a.status) !== "closed",
+      );
+      skipped = assets.length - targets.length;
+      if (targets.length === 0) return null;
+
+      const seq = await tx.$queryRaw<Array<{ nextval: bigint }>>`
+        SELECT nextval('approval_ref_seq') FROM generate_series(1, ${targets.length}::int)`;
+      const slaAt = newSlaAt();
+
+      await tx.approval.createMany({
+        data: targets.map((asset, i) => ({
+          refNo: `APR-${seq[i].nextval}`,
+          type: "lifecycle_change_status" as const,
+          payload: { from: { status: asset.status }, to: { status: to }, reason },
+          requestedById: user.id,
+          assetId: asset.id,
+          slaAt,
+        })),
       });
-      created += 1;
+      await tx.auditEntry.createMany({
+        data: targets.map((asset, i) => ({
+          actorId: user.id,
+          actorLabel: user.name,
+          entityType: "asset",
+          entityId: asset.id,
+          action: "approval.requested",
+          diff: { approval: { from: null, to: `APR-${seq[i].nextval}` } },
+        })),
+      });
+      created = targets.length;
+      return null;
+    });
+    if (failure) return failure;
+  } catch (err) {
+    // The partial unique index (one OPEN approval per asset) turns a
+    // concurrent-request race into a constraint violation.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return conflict("Someone else just requested a change on one of these assets — refresh and retry.");
     }
-  });
+    throw err;
+  }
 
   revalidatePath("/inventory");
   return ok({ created, skipped });

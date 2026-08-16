@@ -33,7 +33,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { Tabs } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { ToastProvider, useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/toast";
 import { Tooltip } from "@/components/ui/tooltip";
 
 const ALL_STATUSES = [
@@ -336,9 +336,7 @@ function Demos() {
 export default function KitchenSinkPage() {
   // Dev-only review surface — never served in production builds.
   if (process.env.NODE_ENV === "production") notFound();
-  return (
-    <ToastProvider>
-      <Demos />
-    </ToastProvider>
-  );
+  // ToastProvider now lives in the root layout — a second one here would
+  // double-announce via two aria-live regions.
+  return <Demos />;
 }

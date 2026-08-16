@@ -5,6 +5,10 @@ export const OPEN_APPROVAL_STATES = ["PENDING", "CLAIMED", "APPROVED"] as const;
 
 const DEFAULT_SLA_HOURS = 48;
 
+export function newSlaAt(): Date {
+  return new Date(Date.now() + DEFAULT_SLA_HOURS * 3_600_000);
+}
+
 /**
  * Phase 3 never mutates asset lifecycle directly — it creates Approval rows;
  * Phase 4's worker executes them. refNo continues the seeded APR-#### range
@@ -31,7 +35,7 @@ export async function createApproval(
       assetId: input.assetId,
       employeeId: input.employeeId,
       priority: input.priority ?? "NORMAL",
-      slaAt: new Date(Date.now() + DEFAULT_SLA_HOURS * 3_600_000),
+      slaAt: newSlaAt(),
     },
   });
 }

@@ -6,7 +6,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
+import { BULK_MAX, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { serializeListState, toggleSort, type ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
@@ -102,10 +102,16 @@ export function InventoryTable({
           <span className="font-mono text-[11px]">
             {allMatching ? `all ${total} matching selected` : `${selected.size} selected on this page`}
           </span>
-          {!allMatching && total > rows.length && (
+          {/* Never offer a selection the server will refuse: the bulk cap is BULK_MAX. */}
+          {!allMatching && total > rows.length && total <= BULK_MAX && (
             <button type="button" className="text-accent hover:underline" onClick={() => setAllMatching(true)}>
               Select all {total} matching
             </button>
+          )}
+          {!allMatching && total > BULK_MAX && (
+            <span className="font-mono text-[10px] text-fg-faint">
+              select-all capped at {BULK_MAX} — narrow the filter
+            </span>
           )}
           <span className="ml-auto flex gap-2">
             <Button size="sm" variant="ghost" onClick={clearSelection}>Clear</Button>

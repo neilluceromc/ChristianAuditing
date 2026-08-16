@@ -58,21 +58,33 @@ export function BulkDrawer({
             (res.data.skipped ? ` · ${res.data.skipped} skipped (already there or already requested)` : ""),
           "settled",
         );
+        setReason(""); // a fresh batch never inherits the last batch's reason
         onDone();
-        onClose();
+        handleClose();
         router.refresh();
       } else if (res.kind === "rate_limited") {
         setRetryAfter(res.retryAfterSec ?? 60);
       } else if (res.kind === "validation") {
         setFieldErrors(res.fieldErrors ?? {});
+        // Field errors no FormField below claims (ids/filters/_form) must not
+        // dead-end silently — surface them in the banner.
+        const unclaimed = res.fieldErrors?.ids ?? res.fieldErrors?.filters ?? res.fieldErrors?._form;
+        if (unclaimed) setError(unclaimed);
       } else {
         setError(res.message);
       }
     });
   }
 
+  function handleClose() {
+    setError(null);
+    setFieldErrors({});
+    setRetryAfter(null);
+    onClose();
+  }
+
   return (
-    <Drawer open={open} onClose={onClose} title="Bulk actions">
+    <Drawer open={open} onClose={handleClose} title="Bulk actions">
       <div className="flex flex-col gap-4">
         <p className="text-xs text-fg-muted">
           Acting on <span className="font-medium text-fg-secondary">{scope}</span>. Each asset gets its
@@ -116,7 +128,7 @@ export function BulkDrawer({
           )}
         </FormField>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
           <Button variant="primary" loading={pending} onClick={submit}>
             Request status change
           </Button>
