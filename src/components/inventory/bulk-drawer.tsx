@@ -79,6 +79,14 @@ export function BulkDrawer({
           own <span className="font-mono">lifecycle.change-status</span> approval — nothing changes until
           it&apos;s approved and executed.
         </p>
+        <a
+          href={allMatching || selectedIds.length === 0
+            ? `/inventory/export${filtersQS ? `?${filtersQS}` : ""}`
+            : `/inventory/export?ids=${selectedIds.join(",")}`}
+          className="text-xs text-accent hover:underline"
+        >
+          Export this selection as CSV
+        </a>
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title={error} />}
         <FormField label="Target status" required error={fieldErrors.to}>
