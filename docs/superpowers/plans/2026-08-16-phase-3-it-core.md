@@ -2769,7 +2769,7 @@ describe("warrantyProgress", () => {
   it("clamps at 100% and reports expiry age", () => {
     const p = warrantyProgress(new Date("2024-01-01T00:00:00Z"), new Date("2025-01-01T00:00:00Z"), now);
     expect(p?.pct).toBe(100);
-    expect(p?.label).toBe("expired 593 d ago");
+    expect(p?.label).toBe("expired 592 d ago"); // deviation: plan originally said 593 — the arithmetic says 592
   });
 });
 ```
