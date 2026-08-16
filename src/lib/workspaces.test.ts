@@ -36,6 +36,10 @@ describe("resolveWorkspace", () => {
   });
 });
 
+// NOTE: this is the coarse workspace gate. /secrets, /new, /edit and viewer
+// read-only enforcement still need page-level requireRole (Phase 3) — a viewer
+// passing the IT-workspace gate for /secrets is intentional; the page restricts
+// the actual reveal.
 describe("pathAllowedForRole", () => {
   const cases: Array<[string, string, boolean]> = [
     // IT workspace paths
@@ -69,6 +73,17 @@ describe("pathAllowedForRole", () => {
     // ungated
     ["/", "viewer", true],
     ["/dev/kitchen-sink", "viewer", true],
+    // secrets: IT-workspace only — purchasing (who references inventory) is excluded
+    ["/inventory/abc/secrets", "it_staff", true],
+    ["/inventory/abc/secrets", "purchasing_staff", false],
+    ["/inventory/abc/secrets", "viewer", true],
+    // default-deny: unenumerated routes are forbidden for everyone, admin included
+    ["/export/assets", "viewer", false],
+    ["/api/export/audit", "finance_staff", false],
+    ["/totally-unknown", "admin", false],
+    // unlisted /admin/* hits the backstop, not default-allow
+    ["/admin/future-thing", "viewer", false],
+    ["/admin/future-thing", "admin", true],
   ];
   it.each(cases)("%s for %s → %s", (path, role, allowed) => {
     expect(pathAllowedForRole(path, role as never)).toBe(allowed);
