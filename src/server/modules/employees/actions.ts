@@ -11,6 +11,7 @@ import { createApproval, openApprovalForAsset } from "@/server/modules/approvals
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
+import { diffOf } from "@/lib/audit-diff";
 
 const assignSchema = z.object({
   employeeId: z.string().min(1),
@@ -193,4 +194,52 @@ export async function requestAssignReserved(input: unknown): Promise<ActionResul
   if (created === 0) return conflict("No reserved spares were available to request.");
   revalidatePath(`/employees/${employeeId}`);
   return ok({ created });
+}
+
+const employeeSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(2, "Name the person").max(120),
+  title: z.string().trim().min(2, "Give a title").max(120),
+  departmentId: z.string().min(1, "Pick a department"),
+  employment: z.enum(["ACTIVE", "OFFBOARDING", "OFFBOARDED"]),
+  /** null = never synced ("no sync yet"); custom strings stored as-is → Neutral family */
+  m365Status: z.string().trim().max(60).nullable(),
+});
+
+export async function updateEmployee(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = employeeSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+
+  const employee = await prisma.employee.findUnique({ where: { id: d.id } });
+  if (!employee) return conflict("That employee no longer exists.");
+  if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) {
+    return validationError({ departmentId: "Unknown department" });
+  }
+
+  const data = {
+    name: d.name,
+    title: d.title,
+    departmentId: d.departmentId,
+    employment: d.employment,
+    m365Status: d.m365Status === "" ? null : d.m365Status,
+  };
+  const diff = diffOf(employee as unknown as Record<string, unknown>, data);
+  if (Object.keys(diff).length === 0) return ok({ id: employee.id });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.employee.update({ where: { id: employee.id }, data });
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name,
+      entityType: "employee", entityId: employee.id,
+      action: "update", diff,
+    });
+  });
+  revalidatePath(`/employees/${employee.id}`);
+  revalidatePath("/employees");
+  return ok({ id: employee.id });
 }
