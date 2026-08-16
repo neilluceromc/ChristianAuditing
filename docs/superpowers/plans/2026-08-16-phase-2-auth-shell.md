@@ -2643,6 +2643,15 @@ git push -u origin phase-2-auth-shell
 
 **Non-goals of this phase:** real screens (inventory/purchases/etc — Phases 3+), rate limiting (Phase 3, with the RateEvent key question), Entra ID wiring (needs tenant credentials AND a signIn callback mapping profile→User; do not enable until then), employee status pills (Phase 3 with the EmploymentStatus map entries), G-then-P chords, Menu portaling.
 
+## Phase 3 entry criteria (from the final whole-phase review)
+
+1. **Every Phase 3 server action must call `requireRole(...)` itself.** Path gating governs navigation, not writes — a `viewer` has *path* access to `/employees`, `/approvals`, `/audit`, `/inventory` etc. because those are workspace-gated with no role restriction. Nav filtering and `pathAllowedForRole` are NOT write protection. Mirror `switchWorkspace`/`paletteSearch`.
+2. **Fix the `EmploymentStatus` status-map gap before any employee status pill renders.** `ACTIVE` collides with Reservation's `ACTIVE` → renders *inflight* when it should read *settled*; `OFFBOARDING`/`OFFBOARDED` are absent → both fall through to *neutral* (should be *inflight* and *closed*). Either namespace the lookup per entity or give employment distinct values.
+3. **`paletteSearch` needs query-level gating + rate limiting.** It fetches top-5 per entity for any authenticated user then filters by href; an entity without a path mapping would slip through. The 150ms debounce is client-side only — calling the action directly bypasses it.
+4. **API routes need their own semantics.** The middleware matcher excludes only `api/auth`; a future `/api/foo` gets default-denied with a 302 redirect to the role landing — wrong for an API. Add explicit rules or matcher exclusions plus per-handler guards returning 401/403.
+5. **Rate limiting is still deferred** — `signInWithCredentials` and `signUp` are unthrottled (anti-enumeration is done; brute-force is not). Phase 3 ships the 60/min mutation cap; extend it to the auth endpoints.
+6. Minor, non-blocking: failed logins log a full `CredentialsSignin` stack trace (consider an Auth.js `logger.error` override); the seed's shared `ChangeMe123!` needs an operational guard against ever running in prod.
+
 **Security notes recorded from the Task 1 review (carry into deployment docs, Phase 8):**
 - Session cookies travel in cleartext over LAN HTTP — accepted for an internal tool; document it. Set `AUTH_URL=http://<deployment-host>:3000` in the prod `.env` to remove the `trustHost` header-trust question.
 - Middleware role gating reads the (up-to-8h-stale) JWT claim; `requireUser` forces re-auth on role drift, and `requireRole` re-checks per page/action — middleware is advisory, the guards are enforcement. Every server action must call a guard (layouts don't run for action POSTs).

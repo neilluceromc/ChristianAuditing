@@ -6,7 +6,9 @@ export default defineConfig({
   webServer: {
     command: "npm run dev",
     url: "http://localhost:3000",
-    reuseExistingServer: true,
+    // Reuse a local dev server for fast iteration, but never in CI — reusing
+    // whatever sits on :3000 can green the suite against stale/wrong-branch code.
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
 });
