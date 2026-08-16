@@ -7,7 +7,7 @@ import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
-import { createApproval, newSlaAt, OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
+import { createApproval, newSlaAt, OPEN_APPROVAL_STATES, openApprovalForAsset } from "@/server/modules/approvals/create";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -15,6 +15,7 @@ import { ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG } from
 import { parseListState } from "@/lib/url-state";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
+import { diffOf } from "@/lib/audit-diff";
 
 const bulkSchema = z
   .object({
@@ -231,4 +232,131 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
     if (target.includes("serial")) return validationError({ serial: "That serial is already registered" });
     throw err;
   }
+}
+
+const updateSchema = z.object({
+  id: z.string().min(1),
+  model: z.string().trim().min(2, "Name the model").max(120),
+  serial: z.string().trim().max(120).optional(),
+  categoryId: z.string().min(1, "Pick a category"),
+  typeId: z.string().optional(),
+  purchasedAt: dateStr.optional(),
+  cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000)]).optional(),
+  warrantyUntil: dateStr.optional(),
+  notes: z.string().trim().max(2000).optional(),
+  vendorId: z.string().optional(),
+  rmaRef: z.string().trim().max(60).optional(),
+  repairQuote: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000)]).optional(),
+});
+
+/**
+ * Direct-write surface: identity/procurement/repair fields ONLY (scope
+ * decision #3). tag is immutable; status/assignee move via approvals.
+ */
+export async function updateAsset(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = updateSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+
+  const asset = await prisma.asset.findUnique({ where: { id: d.id } });
+  if (!asset) return conflict("That asset no longer exists.");
+  if (d.typeId) {
+    const type = await prisma.assetType.findUnique({ where: { id: d.typeId } });
+    if (!type || type.categoryId !== d.categoryId) {
+      return validationError({ typeId: "That type doesn't belong to the chosen category" });
+    }
+  }
+  if (d.vendorId && !(await prisma.vendor.findUnique({ where: { id: d.vendorId } }))) {
+    return validationError({ vendorId: "Unknown vendor" });
+  }
+
+  const data = {
+    model: d.model,
+    serial: d.serial || null,
+    categoryId: d.categoryId,
+    typeId: d.typeId || null,
+    purchasedAt: toDate(d.purchasedAt),
+    cost: toCost(d.cost),
+    warrantyUntil: toDate(d.warrantyUntil),
+    notes: d.notes || null,
+    vendorId: d.vendorId || null,
+    rmaRef: d.rmaRef || null,
+    repairQuote: toCost(d.repairQuote),
+  };
+  const diff = diffOf(asset as unknown as Record<string, unknown>, data);
+  if (Object.keys(diff).length === 0) return ok({ id: asset.id }); // no audit noise for no-ops
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.asset.update({ where: { id: asset.id }, data });
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name,
+        entityType: "asset", entityId: asset.id,
+        action: "update", diff,
+      });
+    });
+  } catch (err) {
+    if (uniqueTarget(err).includes("serial")) return validationError({ serial: "That serial is already registered" });
+    throw err;
+  }
+  revalidatePath(`/inventory/${asset.id}`);
+  revalidatePath("/inventory");
+  return ok({ id: asset.id });
+}
+
+const statusChangeSchema = z.object({
+  assetId: z.string().min(1),
+  to: z.enum(ASSET_STATUSES),
+  reason: z.string().trim().min(3, "Give a reason (at least 3 characters)").max(500),
+});
+
+/** Lifecycle change = approval, never a direct write. */
+export async function requestStatusChange(input: unknown): Promise<ActionResult<{ refNo: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = statusChangeSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+
+  let refNo = "";
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
+      if (!asset) return conflict("That asset no longer exists.");
+      if (asset.status === d.to) return conflict(`Already ${d.to}.`);
+      if (await openApprovalForAsset(tx, asset.id)) {
+        return conflict("This asset already has an open request — resolve it first.");
+      }
+      const approval = await createApproval(tx, {
+        type: "lifecycle_change_status",
+        payload: { from: { status: asset.status }, to: { status: d.to }, reason: d.reason },
+        requestedById: user.id,
+        assetId: asset.id,
+      });
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name,
+        entityType: "asset", entityId: asset.id,
+        action: "approval.requested",
+        diff: { approval: { from: null, to: approval.refNo } },
+      });
+      refNo = approval.refNo;
+      return null;
+    });
+    if (result) return result;
+  } catch (err) {
+    // The partial unique index (one OPEN approval per asset) turns a
+    // concurrent-request race into a constraint violation.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return conflict("Someone else just requested a change on this asset — refresh and retry.");
+    }
+    throw err;
+  }
+  revalidatePath(`/inventory/${d.assetId}`);
+  return ok({ refNo });
 }
