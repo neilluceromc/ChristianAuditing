@@ -24,7 +24,7 @@ export default async function SignupPage() {
       </div>
       <p className="mt-4 text-[11px] text-fg-muted">
         Already have an account?{" "}
-        <Link href="/login" className="text-accent hover:text-accent-hover">Sign in</Link>
+        <Link href="/login" className="text-accent underline hover:text-accent-hover">Sign in</Link>
       </p>
     </div>
   );

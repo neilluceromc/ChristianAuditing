@@ -54,7 +54,7 @@ export default async function LoginPage({
         <LoginForm next={next} />
       </div>
       <p className="mt-4 text-[11px] leading-relaxed text-fg-muted">
-        New here? <Link href="/signup" className="text-accent hover:text-accent-hover">Create an account</Link>
+        New here? <Link href="/signup" className="text-accent underline hover:text-accent-hover">Create an account</Link>
         {domain ? " — signup is domain-restricted" : ""}, and your role decides where you land.
       </p>
     </div>
