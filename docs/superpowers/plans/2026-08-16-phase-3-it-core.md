@@ -2358,6 +2358,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 Controller live-check: as it@ select 2 rows → bulk drawer → request DISPOSE with a reason → toast "2 approvals created"; repeat immediately → "2 skipped". As viewer@: no checkboxes at all.
 
+*(Deviations recorded during execution: (1) `ToastProvider` was only mounted on the kitchen-sink page — `useToast()` would crash every consumer; the implementer wrapped `{children}` in `src/app/layout.tsx` with it, satisfying every later task's toast dependency. (2) The drawer copy's apostrophe is escaped as `&apos;` for `react/no-unescaped-entities`.)*
+
 ### Task 10: Column chooser (per-user `UserPreference`, NOT URL)
 
 **Files:**
