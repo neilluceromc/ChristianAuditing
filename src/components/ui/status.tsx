@@ -1,5 +1,5 @@
 import { cn } from "@/lib/cn";
-import { statusFamily, isSystemFailure } from "@/lib/status";
+import { statusFamily, isSystemFailure, type StatusNamespace } from "@/lib/status";
 
 /**
  * Dot = status as an attribute (dense tables): 7px dot, text elsewhere in the row.
@@ -7,8 +7,16 @@ import { statusFamily, isSystemFailure } from "@/lib/status";
  * Closed renders hollow; EXECUTION_FAILED renders a dashed-border diamond.
  */
 
-export function StatusDot({ value, className }: { value: string; className?: string }) {
-  const family = statusFamily(value);
+export function StatusDot({
+  value,
+  className,
+  ns,
+}: {
+  value: string;
+  className?: string;
+  ns?: StatusNamespace;
+}) {
+  const family = statusFamily(value, ns);
   if (isSystemFailure(value)) {
     return (
       <span
@@ -40,12 +48,14 @@ export function StatusPill({
   value,
   label,
   className,
+  ns,
 }: {
   value: string;
   label?: string;
   className?: string;
+  ns?: StatusNamespace;
 }) {
-  const family = statusFamily(value);
+  const family = statusFamily(value, ns);
   const failed = isSystemFailure(value);
   return (
     <span
@@ -62,7 +72,7 @@ export function StatusPill({
           : `1px solid var(--st-${family}-border)`,
       }}
     >
-      <StatusDot value={value} className="size-[6px]" />
+      <StatusDot value={value} className="size-[6px]" ns={ns} />
       {label ?? value}
     </span>
   );

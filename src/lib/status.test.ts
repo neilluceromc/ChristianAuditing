@@ -42,3 +42,19 @@ describe("statusFamily", () => {
     expect(STATUS_FAMILIES).toEqual(["neutral", "inflight", "settled", "attention", "fault", "closed"]);
   });
 });
+
+describe("employment namespace (entry criterion #2)", () => {
+  it("employment ACTIVE is settled — the person is in the right state", () => {
+    expect(statusFamily("ACTIVE", "employment")).toBe("settled");
+  });
+  it("reservation ACTIVE stays inflight (no namespace)", () => {
+    expect(statusFamily("ACTIVE")).toBe("inflight");
+  });
+  it("OFFBOARDING is inflight, OFFBOARDED is closed", () => {
+    expect(statusFamily("OFFBOARDING", "employment")).toBe("inflight");
+    expect(statusFamily("OFFBOARDED", "employment")).toBe("closed");
+  });
+  it("unknown employment values map to neutral, not the flat map", () => {
+    expect(statusFamily("SUBMITTED", "employment")).toBe("neutral");
+  });
+});

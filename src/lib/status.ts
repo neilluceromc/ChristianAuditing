@@ -29,7 +29,20 @@ const MAP: Record<string, StatusFamily> = {
   pending: "attention", active: "settled", offboarding: "inflight", inactive: "closed",
 };
 
-export function statusFamily(value: string): StatusFamily {
+/**
+ * Namespaced lookups override the flat map where enum values collide across
+ * entities. Employment ACTIVE is *settled* (person is in the right state);
+ * reservation ACTIVE is *inflight* (someone owes an action). Entry criterion
+ * #2 of the Phase 2 → 3 handoff.
+ */
+export type StatusNamespace = "employment";
+
+const NAMESPACED: Record<StatusNamespace, Record<string, StatusFamily>> = {
+  employment: { ACTIVE: "settled", OFFBOARDING: "inflight", OFFBOARDED: "closed" },
+};
+
+export function statusFamily(value: string, ns?: StatusNamespace): StatusFamily {
+  if (ns) return Object.hasOwn(NAMESPACED[ns], value) ? NAMESPACED[ns][value] : "neutral";
   // Object.hasOwn: a client-defined status named "constructor" or "toString"
   // must map to neutral, not walk the prototype chain into a Function.
   return Object.hasOwn(MAP, value) ? MAP[value] : "neutral";
