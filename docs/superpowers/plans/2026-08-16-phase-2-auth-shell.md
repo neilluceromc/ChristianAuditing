@@ -412,6 +412,16 @@ describe("pathAllowedForRole", () => {
     ["/admin/users", "it_staff", false],
     ["/admin/webhooks/deliveries", "admin", true],
     ["/admin/flags", "finance_staff", false],
+    // secrets: IT-workspace only — purchasing (references inventory) excluded
+    ["/inventory/abc/secrets", "it_staff", true],
+    ["/inventory/abc/secrets", "purchasing_staff", false],
+    ["/inventory/abc/secrets", "viewer", true],
+    // default-deny: unenumerated routes forbidden for everyone, admin included
+    ["/export/assets", "viewer", false],
+    ["/api/export/audit", "finance_staff", false],
+    ["/totally-unknown", "admin", false],
+    ["/admin/future-thing", "viewer", false],
+    ["/admin/future-thing", "admin", true],
     // ungated
     ["/", "viewer", true],
     ["/dev/kitchen-sink", "viewer", true],
@@ -614,11 +624,17 @@ export function resolveWorkspace(role: Role, cookie: string | undefined): Worksp
   return allowed[0];
 }
 
+// Paths intentionally NOT workspace-gated — reachable by any authenticated
+// user. Everything else MUST match a PATH_RULE or it is denied (default-deny).
+const UNGATED: RegExp[] = [/^\/$/, /^\/dev(\/|$)/];
+
 /**
  * Which workspaces may visit a path — the middleware's decision table.
- * Shares per brief §7: purchasing references /inventory; finance shares
- * /purchases and /approvals. Reference-data CRUD is additionally
- * role-restricted (viewer is IT-workspace but excluded).
+ * DEFAULT-DENY: an unenumerated route is forbidden, so forgetting to list a
+ * future sensitive route fails closed. Shares per brief §7: purchasing
+ * references /inventory; finance shares /purchases and /approvals.
+ * Reference-data CRUD is additionally role-restricted (viewer excluded).
+ * /secrets is IT-workspace-only (credential exposure, excludes purchasing).
  */
 const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[] }> = [
   { test: /^\/admin\/(users|webhooks|flags)(\/|$)/, workspaces: ["admin"] },
@@ -628,6 +644,11 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
     roles: ["admin", "it_staff"],
   },
   { test: /^\/admin\/equipment-policies(\/|$)/, workspaces: ["it"] },
+  // Backstop: any unlisted /admin/* route is admin-only, never default-allow.
+  { test: /^\/admin(\/|$)/, workspaces: ["admin"] },
+  // Credential exposure (SECRET_READ-audited GET) — IT workspace only. MUST
+  // precede the general /inventory rule (first-match-wins).
+  { test: /^\/inventory\/[^/]+\/secrets(\/|$)/, workspaces: ["it"] },
   { test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing"] },
   { test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
   { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance"] },
@@ -636,8 +657,9 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
 ];
 
 export function pathAllowedForRole(pathname: string, role: Role): boolean {
+  if (UNGATED.some((re) => re.test(pathname))) return true;
   const rule = PATH_RULES.find((r) => r.test.test(pathname));
-  if (!rule) return true; // "/", /dev, unknown → not workspace-gated
+  if (!rule) return false; // default-deny: an unenumerated route is forbidden
   if (rule.roles && !rule.roles.includes(role)) return false;
   const mine = ROLE_WORKSPACES[role];
   return rule.workspaces.some((w) => mine.includes(w));
