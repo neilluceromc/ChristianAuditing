@@ -177,7 +177,8 @@ async function main() {
   const a0181 = await asset("BR-LT-0181");
   await prisma.approval.createMany({
     data: [
-      { refNo: "APR-2041", type: "lifecycle_assign", state: "PENDING", priority: "NORMAL", slaAt: day(2), requestedById: itStaff.id, assetId: a0181.id, employeeId: emp("EMP-0097").id, payload: { to: { assignee: "EMP-0097", status: "DEPLOYED" } } },
+      // payload mirrors what requestAssign actually writes (assigneeId = row id, not employeeNo)
+      { refNo: "APR-2041", type: "lifecycle_assign", state: "PENDING", priority: "NORMAL", slaAt: day(2), requestedById: itStaff.id, assetId: a0181.id, employeeId: emp("EMP-0097").id, payload: { to: { assigneeId: emp("EMP-0097").id, status: "DEPLOYED" }, reason: "new hire setup" } },
       { refNo: "APR-2040", type: "lifecycle_return", state: "PENDING", priority: "URGENT", slaAt: day(-1), requestedById: itStaff.id, employeeId: emp("EMP-0090").id, payload: { reason: "offboarding" } },
       { refNo: "APR-2039", type: "lifecycle_change_status", state: "CLAIMED", priority: "NORMAL", slaAt: day(1), requestedById: itStaff.id, claimedById: admin.id, claimedAt: day(0), assetId: a0148.id, payload: { from: { status: "DEPLOYED" }, to: { status: "TEMPORARY" } } },
       { refNo: "APR-2035", type: "lifecycle_assign", state: "APPROVED", priority: "NORMAL", slaAt: day(1), requestedById: itStaff.id, claimedById: admin.id, claimedAt: day(-1), payload: { note: "queued for execution" } },
