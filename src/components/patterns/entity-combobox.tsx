@@ -3,6 +3,7 @@
 import { useId, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { fieldClasses } from "@/components/ui/input";
+import { useOverlayLayer } from "@/components/ui/use-focus-trap";
 
 export interface ComboOption {
   value: string;
@@ -33,6 +34,12 @@ export function EntityCombobox({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // ESC goes through the overlay stack — a local keydown handler would never
+  // see it once this combobox sits inside a Dialog/Drawer (the stack listens
+  // at document in the capture phase and stops propagation). Registering a
+  // layer means ESC dismisses the dropdown first, then the dialog.
+  useOverlayLayer(open, () => setOpen(false));
 
   const selected = options.find((o) => o.value === value) ?? null;
   const shown = query
@@ -67,7 +74,7 @@ export function EntityCombobox({
           if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setActive((i) => Math.min(i + 1, shown.length - 1)); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
           else if (e.key === "Enter" && open) { e.preventDefault(); if (shown[active]) pick(shown[active]); }
-          else if (e.key === "Escape" && open) { e.stopPropagation(); setOpen(false); }
+
         }}
       />
       {open && (

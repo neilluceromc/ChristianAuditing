@@ -36,7 +36,12 @@ export function RequestStatusChange({ assetId, currentStatus }: { assetId: strin
         setReason("");
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      else if (res.kind === "validation") setFieldErrors(res.fieldErrors ?? {});
+      else if (res.kind === "validation") {
+        const fe = res.fieldErrors ?? {};
+        setFieldErrors(fe);
+        const unclaimed = fe.assetId ?? fe._form;
+        if (unclaimed) setError(unclaimed);
+      }
       else setError(res.message);
     });
   }

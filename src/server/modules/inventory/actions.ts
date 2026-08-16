@@ -131,7 +131,7 @@ const createSchema = z.object({
   categoryId: z.string().min(1, "Pick a category"),
   typeId: z.string().optional(),
   purchasedAt: dateStr.optional(),
-  cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000)]).optional(),
+  cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000).multipleOf(0.01, "Whole centavos only")]).optional(),
   warrantyUntil: dateStr.optional(),
   notes: z.string().trim().max(2000).optional(),
   requestedStatus: z.enum(CREATABLE_STATUSES),
@@ -139,6 +139,11 @@ const createSchema = z.object({
   assignReason: z.string().trim().max(500).optional(),
 });
 
+/**
+ * P2002 meta.target is either a column array (["serial"]) or an index-name
+ * string ("Asset_serial_key") depending on constraint kind — .includes()
+ * happens to match correctly under BOTH shapes; keep it that way.
+ */
 function uniqueTarget(err: unknown): string[] {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
     ? ((err.meta?.target as string[] | undefined) ?? [])
@@ -227,6 +232,9 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
     revalidatePath("/inventory");
     return ok({ id: asset.id });
   } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
+      return conflict("A referenced record vanished mid-request — refresh and retry.");
+    }
     const target = uniqueTarget(err);
     if (target.includes("tag")) return validationError({ tag: "That tag is already registered" });
     if (target.includes("serial")) return validationError({ serial: "That serial is already registered" });
@@ -241,12 +249,12 @@ const updateSchema = z.object({
   categoryId: z.string().min(1, "Pick a category"),
   typeId: z.string().optional(),
   purchasedAt: dateStr.optional(),
-  cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000)]).optional(),
+  cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000).multipleOf(0.01, "Whole centavos only")]).optional(),
   warrantyUntil: dateStr.optional(),
   notes: z.string().trim().max(2000).optional(),
   vendorId: z.string().optional(),
   rmaRef: z.string().trim().max(60).optional(),
-  repairQuote: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000)]).optional(),
+  repairQuote: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000).multipleOf(0.01, "Whole centavos only")]).optional(),
 });
 
 /**
@@ -287,12 +295,20 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
     rmaRef: d.rmaRef || null,
     repairQuote: toCost(d.repairQuote),
   };
-  const diff = diffOf(asset as unknown as Record<string, unknown>, data);
+  // The form round-trips dates at DAY precision while seed/legacy rows carry
+  // time-of-day. Compare at day precision — otherwise every first edit of an
+  // old row writes phantom purchasedAt/warrantyUntil audit entries — and
+  // write ONLY the changed fields, so untouched columns keep their stored
+  // timestamps instead of being silently truncated to midnight.
+  const toDay = (dt: Date | null) => (dt ? new Date(`${dt.toISOString().slice(0, 10)}T00:00:00Z`) : null);
+  const before = { ...asset, purchasedAt: toDay(asset.purchasedAt), warrantyUntil: toDay(asset.warrantyUntil) };
+  const diff = diffOf(before as unknown as Record<string, unknown>, data);
   if (Object.keys(diff).length === 0) return ok({ id: asset.id }); // no audit noise for no-ops
+  const changed = Object.fromEntries(Object.entries(data).filter(([key]) => key in diff));
 
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.asset.update({ where: { id: asset.id }, data });
+      await tx.asset.update({ where: { id: asset.id }, data: changed });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name,
         entityType: "asset", entityId: asset.id,

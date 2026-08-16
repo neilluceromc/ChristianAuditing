@@ -3963,6 +3963,15 @@ Controller live-check: edit BR-LT-0181's model → Save morphs to ✓ Saved + "a
 
 ---
 
+> **Deviations from the Tasks 10–14 opus review (controller applied):**
+> 1. **`updateAsset` compares dates at day precision and writes only changed fields** — seed/legacy rows carry time-of-day while the form round-trips `YYYY-MM-DD`; without this, the first edit of every seeded asset wrote phantom `purchasedAt`/`warrantyUntil` audit rows and silently truncated stored timestamps (critical: fabricated entries in an append-only audit trail).
+> 2. **Money fields**: `step="0.01" min="0" inputMode="decimal"` on the form's number inputs (centavos were a native stepMismatch — records with fractional costs were unsavable) + `.multipleOf(0.01)` on the three money schemas (Postgres `Decimal(12,2)` rounds silently, so the audit diff could record a value that was never stored).
+> 3. **`EntityCombobox` registers `useOverlayLayer` for ESC** — the overlay stack listens at document-capture and stops propagation, so its local Escape handler would never fire inside Task 20's dialogs (ESC would have discarded the whole dialog instead of the dropdown).
+> 4. **Unclaimed validation errors surface** in AssetForm (`_form`/`id` → banner) and RequestStatusChange (`assetId`/`_form`), mirroring the bulk-drawer fix. ColumnChooser now toasts on a failed save instead of silently reverting.
+> 5. **CSV export prepends a UTF-8 BOM** — Excel ignores the charset header on .csv and decodes ANSI otherwise (em-dashes, ñ).
+> 6. `createAsset` catches P2003 (employee vanished mid-request) → conflict; `uniqueTarget`'s dual meta.target shapes documented.
+> Recorded, deferred: export buffers ≤10k rows in memory + >500 ids truncate silently (internal tool); focus drops to body on sort remount; combobox a11y niceties (listbox name, Home/End); bulk audit rows bypass `writeAudit` (batched createMany). **Phase 4 entry criterion (write into HANDOVER at close-out): the worker MUST re-validate `employment === "ACTIVE"` before executing `lifecycle_assign` — the request-time check can't hold across a 48h SLA window.**
+
 ### Task 15: History (one row per field), Timeline, Reservations tabs (TDD for history rows)
 
 **Files:**

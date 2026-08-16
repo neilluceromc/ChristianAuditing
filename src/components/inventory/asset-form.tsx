@@ -98,7 +98,13 @@ export function AssetForm({
           router.refresh();
         }
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      else if (res.kind === "validation") setErrors(res.fieldErrors ?? {});
+      else if (res.kind === "validation") {
+        const fe = res.fieldErrors ?? {};
+        setErrors(fe);
+        // errors no FormField claims (_form/id) must not dead-end silently
+        const unclaimed = fe._form ?? fe.id;
+        if (unclaimed) setConflictMsg(unclaimed);
+      }
       else setConflictMsg(res.message);
     });
   }
@@ -115,6 +121,10 @@ export function AssetForm({
           aria-describedby={p["aria-describedby"]}
           invalid={p.invalid}
           type={opts.type ?? "text"}
+          // every number field on this form is money — centavos must not stepMismatch
+          step={opts.type === "number" ? "0.01" : undefined}
+          min={opts.type === "number" ? "0" : undefined}
+          inputMode={opts.type === "number" ? "decimal" : undefined}
           disabled={opts.disabled}
           placeholder={opts.placeholder}
           value={form[key]}

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useOverlayLayer } from "@/components/ui/use-focus-trap";
+import { useToast } from "@/components/ui/toast";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { saveColumns } from "@/server/preferences";
 
@@ -14,6 +15,7 @@ const LABELS: Record<string, string> = {
 
 export function ColumnChooser({ visible }: { visible: string[] }) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Set<string>>(new Set(visible));
   const [pending, startTransition] = useTransition();
@@ -35,7 +37,12 @@ export function ColumnChooser({ visible }: { visible: string[] }) {
 
   function apply() {
     startTransition(async () => {
-      await saveColumns({ key: "columns:inventory", visible: [...draft] });
+      const res = await saveColumns({ key: "columns:inventory", visible: [...draft] });
+      if (!res.ok) {
+        // a silently reverting preference reads as a broken chooser
+        toast(res.message, "fault");
+        return;
+      }
       setOpen(false);
       focusTrigger();
       router.refresh();

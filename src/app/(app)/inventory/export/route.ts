@@ -43,7 +43,7 @@ export async function GET(req: Request) {
     ]),
   );
 
-  return new Response(csv, {
+  return new Response("﻿" + csv, {
     headers: {
       "content-type": "text/csv; charset=utf-8",
       "content-disposition": `attachment; filename="inventory-${new Date().toISOString().slice(0, 10)}.csv"`,
