@@ -7,7 +7,8 @@ import type { Role } from "@prisma/client"; // type-only: erased at build, edge-
  */
 export const authConfigEdge = {
   trustHost: true, // self-hosted behind localhost/LAN, not Vercel
-  session: { strategy: "jwt" },
+  session: { strategy: "jwt", maxAge: 8 * 60 * 60 }, // cap a stale/terminated-user token at one workday
+
   pages: { signIn: "/login" },
   providers: [],
   callbacks: {
