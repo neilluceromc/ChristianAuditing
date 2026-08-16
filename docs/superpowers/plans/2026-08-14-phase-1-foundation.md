@@ -3892,6 +3892,10 @@ Expected: 5 passed. If axe reports contrast violations from token values, fix th
 
 - [ ] **Step 5: Run the full check battery**
 
+WARNING: stop any running dev server before `npm run build` — dev and build
+share `.next`, and a production build clobbers a live dev server's chunks
+(it starts returning 500s and does not self-heal; restart it).
+
 ```bash
 npx tsc --noEmit
 npm run lint
@@ -3924,3 +3928,13 @@ git push -u origin phase-1-foundation
 - [ ] Merge `phase-1-foundation` (use superpowers:finishing-a-development-branch)
 
 **Non-goals of this phase (do not build):** screens, server actions, auth, middleware, the shell/sidebar, activity feeds, command palette. Those are Phases 2+, each with its own plan that builds on these primitives.
+
+## Phase 2 handoff notes (from the final whole-phase review)
+
+1. **`EmploymentStatus` must get explicit status-map entries before any employee list renders pills** — `ACTIVE` currently collides with the reservation key and would render *inflight* (wrong colour, passes axe silently); `OFFBOARDING`/`OFFBOARDED` fall to neutral.
+2. **Interactive table/form props require a client caller.** `Th onSort`, `Tr onClick`, and the form controls' handlers are fine from client components (the kitchen sink is one) but throw at runtime from server components. Extract client islands for sorting/selection when building `/inventory`.
+3. **The theme/density cookies (`br.theme`, `br.density`) are a contract** — Phase 2's server layout must read them and emit `data-theme`/`data-density`, or reloads discard the user's choice. Do not rename them.
+4. **Components inside overlays that need their own ESC** (combobox, typeahead, cell editor) must register `useOverlayLayer` — a local keydown handler never sees Escape.
+5. **Menu is not portaled** (recorded limitation) — build anchored portal positioning with the Phase 3 RowActionsMenu.
+6. **`NODE_ENV` guards keep dev routes out of responses, not bundles** — don't put sensitive fixtures in dev pages.
+7. Design-owner follow-ups: switch knob is pure white in dark theme (consider `surface-raised`); `fg-faint` demoted to placeholder/decorative use (AA); handover's §Typography faint-text treatments deviate accordingly.

@@ -36,12 +36,13 @@
   --st-attention-bg: #fffaeb; --st-attention-text: #b54708; --st-attention-border: #fedf89;
   --st-fault-bg: #fef3f2;     --st-fault-text: #b42318;     --st-fault-border: #fecdca;
   --st-closed-bg: transparent; --st-closed-text: #667085;   --st-closed-border: #d0d5dd;
-  --st-failed-border: #f97066; /* dashed, EXECUTION_FAILED only */
+  --st-failed-border: #f97066; /* dashed, EXECUTION_FAILED only — deliberately theme-invariant (border, not text) */
 
   /* tooltip is deliberately theme-invariant: always dark bubble, light text */
   --tooltip-bg: #101828;
 
-  /* form feedback */
+  /* form feedback (--error-border is deliberately theme-invariant: a light-red
+     border reads correctly on both surfaces and it's a border, not text) */
   --error-border: #fda29b;
   --error-shadow: rgba(217, 45, 32, 0.08);
   --required-mark: #d92d20;
@@ -210,6 +211,17 @@ body {
 }
 .checkbox-glyphs:indeterminate {
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='2' fill='white'%3E%3Crect width='8' height='2'/%3E%3C/svg%3E");
+}
+
+/* Select chevron follows the theme; the encoded hex lives here per token
+   discipline (%23667085 = light --text-muted, %239aa4b2 = dark). */
+.select-chevron {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23667085' stroke-width='1.4'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+[data-theme="dark"] .select-chevron {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%239aa4b2' stroke-width='1.4'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
 }
 
 /* ── Named keyframes (design_handover/README.md "Motion spec") ── */

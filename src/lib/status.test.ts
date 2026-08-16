@@ -27,6 +27,10 @@ describe("statusFamily", () => {
     expect(statusFamily("contractor")).toBe("neutral");
     expect(statusFamily("")).toBe("neutral");
     expect(statusFamily("SOMETHING_NEW")).toBe("neutral");
+    // prototype-chain keys must not leak Function values into CSS var names
+    expect(statusFamily("constructor")).toBe("neutral");
+    expect(statusFamily("toString")).toBe("neutral");
+    expect(statusFamily("__proto__")).toBe("neutral");
   });
 
   it("flags EXECUTION_FAILED as a system failure (dashed diamond treatment)", () => {

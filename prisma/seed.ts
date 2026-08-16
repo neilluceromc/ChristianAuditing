@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type AssetStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -91,7 +91,7 @@ async function main() {
     tag: string, model: string, cat: string, status: string, extra: Record<string, unknown> = {},
   ) => ({
     tag, model, categoryId: cats[cat].id, typeId: cats[cat].typeIds[0],
-    status: status as never,
+    status: status as AssetStatus,
     purchasedAt: day(-720), cost: 55_000, warrantyUntil: day(180), ...extra,
   });
 
@@ -224,6 +224,12 @@ async function main() {
       { actorId: admin.id, actorLabel: "System Admin", entityType: "asset", entityId: a0148.id, action: "SECRET_READ" },
     ],
   });
+
+  // Advance the ref-number sequences past the seeded values so the first
+  // allocated refNo continues the range instead of restarting at 0001.
+  await prisma.$executeRawUnsafe(
+    `SELECT setval('purchase_request_ref_seq', 201), setval('approval_ref_seq', 2041)`,
+  );
 
   console.log("Seed complete.");
 }

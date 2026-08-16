@@ -30,7 +30,9 @@ const MAP: Record<string, StatusFamily> = {
 };
 
 export function statusFamily(value: string): StatusFamily {
-  return MAP[value] ?? "neutral";
+  // Object.hasOwn: a client-defined status named "constructor" or "toString"
+  // must map to neutral, not walk the prototype chain into a Function.
+  return Object.hasOwn(MAP, value) ? MAP[value] : "neutral";
 }
 
 /** EXECUTION_FAILED must not look like REJECTED: dashed border + diamond mark. */
