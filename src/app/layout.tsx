@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,7 +18,9 @@ export default async function RootLayout({
   const density = jar.get("br.density")?.value === "compact" ? "compact" : "comfortable";
   return (
     <html lang="en" data-theme={theme} data-density={density} suppressHydrationWarning>
-      <body className="bg-canvas text-fg font-sans antialiased">{children}</body>
+      <body className="bg-canvas text-fg font-sans antialiased">
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

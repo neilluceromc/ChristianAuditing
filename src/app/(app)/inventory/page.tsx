@@ -68,7 +68,14 @@ export default async function InventoryPage({
         <ChipFilterRow chips={chips} clearHref={href(clearFilters(state))} />
         {rows.length > 0 ? (
           <>
-            <InventoryTable rows={rows} state={state} visible={[...COLUMN_PREF_KEYS["columns:inventory"]]} />
+            <InventoryTable
+              rows={rows}
+              state={state}
+              visible={[...COLUMN_PREF_KEYS["columns:inventory"]]}
+              canMutate={canMutate}
+              filtersQS={serializeListState(state, INVENTORY_LIST_CONFIG).replace(/^\?/, "")}
+              total={total}
+            />
             <div className="flex items-center justify-between pt-1">
               <span className="font-mono text-[11px] text-fg-muted">
                 page {state.page} of {pageCount}

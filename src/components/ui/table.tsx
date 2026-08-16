@@ -100,12 +100,8 @@ export function Td({
   align = "left",
   mono,
   children,
-}: {
-  className?: string;
-  align?: "left" | "right";
-  mono?: boolean;
-  children?: React.ReactNode;
-}) {
+  ...rest
+}: React.TdHTMLAttributes<HTMLTableCellElement> & { align?: "left" | "right"; mono?: boolean }) {
   return (
     <td
       className={cn(
@@ -114,6 +110,7 @@ export function Td({
         align === "right" ? "text-right" : "text-left",
         className,
       )}
+      {...rest}
     >
       {children}
     </td>

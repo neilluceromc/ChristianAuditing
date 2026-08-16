@@ -1,12 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { serializeListState, toggleSort, type ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
+import { BulkDrawer } from "./bulk-drawer";
 
 export interface ColumnDef {
   id: string;
@@ -33,12 +37,44 @@ export function InventoryTable({
   rows,
   state,
   visible,
+  canMutate,
+  filtersQS,
+  total,
 }: {
   rows: AssetRow[];
   state: ListState;
   visible: string[]; // hideable-column ids currently shown
+  canMutate: boolean;
+  filtersQS: string; // serialized current list state, no leading "?"
+  total: number;
 }) {
   const router = useRouter();
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [allMatching, setAllMatching] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const pageIds = rows.map((r) => r.id);
+  const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const someOnPage = pageIds.some((id) => selected.has(id));
+
+  function toggleAllOnPage() {
+    setAllMatching(false);
+    setSelected(allOnPage ? new Set() : new Set(pageIds));
+  }
+  function toggleRow(id: string) {
+    setAllMatching(false);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelected(new Set());
+    setAllMatching(false);
+  }
 
   const columns = INVENTORY_COLUMNS.filter(
     (c) => !(HIDEABLE_COLUMNS as readonly string[]).includes(c.id) || visible.includes(c.id),
@@ -60,9 +96,36 @@ export function InventoryTable({
   }
 
   return (
-    <Table>
+    <div className="flex flex-col gap-2">
+      {canMutate && selected.size > 0 && (
+        <div className="flex items-center gap-3 rounded-(--radius-card) border border-accent-soft-border bg-accent-tint px-3 py-2 text-xs text-fg-secondary">
+          <span className="font-mono text-[11px]">
+            {allMatching ? `all ${total} matching selected` : `${selected.size} selected on this page`}
+          </span>
+          {!allMatching && total > rows.length && (
+            <button type="button" className="text-accent hover:underline" onClick={() => setAllMatching(true)}>
+              Select all {total} matching
+            </button>
+          )}
+          <span className="ml-auto flex gap-2">
+            <Button size="sm" variant="ghost" onClick={clearSelection}>Clear</Button>
+            <Button size="sm" variant="primary" onClick={() => setDrawerOpen(true)}>Bulk actions…</Button>
+          </span>
+        </div>
+      )}
+      <Table>
       <THead>
         <Tr>
+          {canMutate && (
+            <Th width={30}>
+              <Checkbox
+                aria-label="Select all on this page"
+                checked={allOnPage}
+                indeterminate={!allOnPage && someOnPage}
+                onChange={toggleAllOnPage}
+              />
+            </Th>
+          )}
           <Th width={19}>
             <span className="sr-only">Status colour</span>
           </Th>
@@ -78,8 +141,18 @@ export function InventoryTable({
           <Tr
             key={row.id}
             className="cursor-pointer"
+            selected={selected.has(row.id)}
             onClick={() => router.push(`/inventory/${row.id}`)}
           >
+            {canMutate && (
+              <Td className="pr-0" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                <Checkbox
+                  aria-label={`Select ${row.tag}`}
+                  checked={selected.has(row.id)}
+                  onChange={() => toggleRow(row.id)}
+                />
+              </Td>
+            )}
             <Td className="pr-0">
               <StatusDot value={row.status} />
             </Td>
@@ -116,6 +189,18 @@ export function InventoryTable({
           </Tr>
         ))}
       </TBody>
-    </Table>
+      </Table>
+      {canMutate && (
+        <BulkDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          selectedIds={[...selected]}
+          allMatching={allMatching}
+          filtersQS={filtersQS}
+          total={total}
+          onDone={clearSelection}
+        />
+      )}
+    </div>
   );
 }
