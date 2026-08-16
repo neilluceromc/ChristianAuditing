@@ -68,13 +68,13 @@ e2e/approvals-audit.spec.ts             (create)
 **Files:**
 - Create: `src/lib/approval-flow.ts`, `src/lib/approval-flow.test.ts`
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 git checkout -b phase-4-approvals-audit
 ```
 
-- [ ] **Step 2: Write the failing tests** (`src/lib/approval-flow.test.ts`)
+- [x] **Step 2: Write the failing tests** (`src/lib/approval-flow.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -141,11 +141,11 @@ describe("escalatePriority", () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `npm run test -- src/lib/approval-flow.test.ts` — Expected: FAIL (module missing).
 
-- [ ] **Step 4: Implement `src/lib/approval-flow.ts`**
+- [x] **Step 4: Implement `src/lib/approval-flow.ts`**
 
 ```ts
 import type { ApprovalState, Priority } from "@prisma/client";
@@ -214,7 +214,7 @@ export function escalatePriority(priority: Priority): Priority {
 }
 ```
 
-- [ ] **Step 5: Run tests — green, then verify and commit**
+- [x] **Step 5: Run tests — green, then verify and commit**
 
 ```bash
 npm run test -- src/lib/approval-flow.test.ts && npx tsc --noEmit && npm run lint
@@ -231,7 +231,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `src/lib/approval-execution.ts`, `src/lib/approval-execution.test.ts`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/approval-execution.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/approval-execution.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -291,9 +291,9 @@ describe("summarizeApproval — the queue's two-line change cell", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure** — `npm run test -- src/lib/approval-execution.test.ts`.
+- [x] **Step 2: Run to verify failure** — `npm run test -- src/lib/approval-execution.test.ts`.
 
-- [ ] **Step 3: Implement `src/lib/approval-execution.ts`**
+- [x] **Step 3: Implement `src/lib/approval-execution.ts`**
 
 ```ts
 import type { ApprovalType, AssetStatus } from "@prisma/client";
@@ -384,7 +384,7 @@ export function summarizeApproval(
 }
 ```
 
-- [ ] **Step 4: Run tests — green, verify, commit**
+- [x] **Step 4: Run tests — green, verify, commit**
 
 ```bash
 npm run test -- src/lib/approval-execution.test.ts && npx tsc --noEmit && npm run lint
@@ -401,7 +401,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `src/lib/approvals-list.ts` (+ `.test.ts`), `src/lib/audit-list.ts` (+ `.test.ts`), `src/lib/activity.ts` (+ `.test.ts`)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `src/lib/approvals-list.test.ts`:
 
@@ -500,9 +500,9 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure** — all three test files.
+- [x] **Step 2: Run to verify failure** — all three test files.
 
-- [ ] **Step 3: Implement the three modules**
+- [x] **Step 3: Implement the three modules**
 
 `src/lib/approvals-list.ts`:
 
@@ -615,7 +615,7 @@ export function auditSentence(entry: ActivityEntryLike): string {
 }
 ```
 
-- [ ] **Step 4: Run all three — green, verify, commit**
+- [x] **Step 4: Run all three — green, verify, commit**
 
 ```bash
 npm run test && npx tsc --noEmit && npm run lint
@@ -630,7 +630,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `src/server/modules/approvals/queries.ts`
 
-- [ ] **Step 1: Create `src/server/modules/approvals/queries.ts`**
+- [x] **Step 1: Create `src/server/modules/approvals/queries.ts`**
 
 ```ts
 import { cache } from "react";
@@ -776,7 +776,7 @@ export async function systemChecks(
 }
 ```
 
-- [ ] **Step 2: Verify and commit**
+- [x] **Step 2: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -793,7 +793,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `src/server/modules/approvals/actions.ts`
 
-- [ ] **Step 1: Create `src/server/modules/approvals/actions.ts`**
+- [x] **Step 1: Create `src/server/modules/approvals/actions.ts`**
 
 Every action: `actionRole("admin","it_staff")` → `checkRate` → zod → transaction with a **state-guarded `updateMany`** (the read-then-check race resolves to `count === 0` → conflict) + audit in the same tx → `revalidatePath("/approvals")` + detail → typed result. Approve/retry enqueue the `EXECUTE_APPROVAL` Job in the same transaction.
 
@@ -953,7 +953,7 @@ export async function retryApproval(input: unknown): Promise<ActionResult<Acted>
 }
 ```
 
-- [ ] **Step 2: Verify and commit**
+- [x] **Step 2: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
@@ -968,7 +968,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `src/components/approvals/queue-table.tsx`, `src/app/(app)/approvals/page.tsx`, `src/app/(app)/approvals/loading.tsx`
 
-- [ ] **Step 1: Create `src/components/approvals/queue-table.tsx`** (client island)
+- [x] **Step 1: Create `src/components/approvals/queue-table.tsx`** (client island)
 
 ```tsx
 "use client";
@@ -1161,7 +1161,7 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
 }
 ```
 
-- [ ] **Step 2: Create `src/app/(app)/approvals/page.tsx`**
+- [x] **Step 2: Create `src/app/(app)/approvals/page.tsx`**
 
 ```tsx
 import Link from "next/link";
@@ -1228,7 +1228,7 @@ export default async function ApprovalsPage({
 }
 ```
 
-- [ ] **Step 3: Create `src/app/(app)/approvals/loading.tsx`** — header + tab-bar skeletons + 8× `SkeletonRow columns={7}` in a bordered card (mirror the inventory loading page's shape).
+- [x] **Step 3: Create `src/app/(app)/approvals/loading.tsx`** — header + tab-bar skeletons + 8× `SkeletonRow columns={7}` in a bordered card (mirror the inventory loading page's shape).
 
 ```tsx
 import { Skeleton, SkeletonRow } from "@/components/ui/skeleton";
@@ -1248,7 +1248,7 @@ export default function ApprovalsLoading() {
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
@@ -1267,7 +1267,7 @@ Controller live-check: `?tab=` contract, tab counts, finance@ sees no hint line 
 **Files:**
 - Create: `src/components/approvals/approval-actions.tsx`, `src/app/(app)/approvals/[id]/page.tsx`, `src/app/(app)/approvals/[id]/not-found.tsx`
 
-- [ ] **Step 1: Create `src/components/approvals/approval-actions.tsx`** (client)
+- [x] **Step 1: Create `src/components/approvals/approval-actions.tsx`** (client)
 
 Props: `{ id, refNo, state, mine, ownerName, canAct, isAdmin, workerError }`. Renders per state:
 - **PENDING** (canAct): Claim (primary) · Reject (danger, reason dialog) · Escalate (secondary).
@@ -1278,7 +1278,7 @@ Props: `{ id, refNo, state, mine, ownerName, canAct, isAdmin, workerError }`. Re
 - **REJECTED / EXECUTED**: nothing (the page shows the resolution line).
 All mutations via the Task 5 actions with the standard result handling (toast + `router.refresh()`, RateLimitNotice, fault Banner) and one shared reject dialog. Reuse the exact result-handling shape from `queue-table.tsx`.
 
-- [ ] **Step 2: Create `src/app/(app)/approvals/[id]/page.tsx`** (server)
+- [x] **Step 2: Create `src/app/(app)/approvals/[id]/page.tsx`** (server)
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -1398,9 +1398,9 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
 }
 ```
 
-- [ ] **Step 3: Create `src/app/(app)/approvals/[id]/not-found.tsx`** — EmptyState "Approval not found" + back ButtonLink to `/approvals`.
+- [x] **Step 3: Create `src/app/(app)/approvals/[id]/not-found.tsx`** — EmptyState "Approval not found" + back ButtonLink to `/approvals`.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1420,7 +1420,7 @@ Controller live-check: APR-2041 (PENDING) shows Claim/Reject/Escalate and NO App
 
 **CRITICAL: worker files use RELATIVE imports only** (`../server/db/client`, `../lib/approval-execution`, `../lib/labels`) — tsx may not resolve the `@/` tsconfig alias outside Next.
 
-- [ ] **Step 1: Create `src/worker/execute-approval.ts`**
+- [x] **Step 1: Create `src/worker/execute-approval.ts`**
 
 ```ts
 import { prisma } from "../server/db/client";
@@ -1548,7 +1548,7 @@ export async function executeApproval(approvalId: string): Promise<void> {
 }
 ```
 
-- [ ] **Step 2: Create `src/worker/index.ts`**
+- [x] **Step 2: Create `src/worker/index.ts`**
 
 ```ts
 import { prisma } from "../server/db/client";
@@ -1671,9 +1671,9 @@ main().catch((err) => {
 });
 ```
 
-- [ ] **Step 3: Add the script** to `package.json` scripts: `"worker:once": "tsx src/worker/index.ts --once"`.
+- [x] **Step 3: Add the script** to `package.json` scripts: `"worker:once": "tsx src/worker/index.ts --once"`.
 
-- [ ] **Step 4: Prove it against the seeded queue** (the seed enqueues one job for APR-2035, whose payload is deliberately malformed):
+- [x] **Step 4: Prove it against the seeded queue** (the seed enqueues one job for APR-2035, whose payload is deliberately malformed):
 
 ```bash
 npm run db:seed && npm run worker:once
@@ -1687,7 +1687,7 @@ docker exec inventory-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 
 
 Expected: `EXECUTION_FAILED` with the malformed-payload message.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
@@ -1705,7 +1705,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `src/server/modules/audit/queries.ts`, `src/app/(app)/audit/page.tsx`, `src/app/(app)/audit/loading.tsx`
 - Modify: `src/lib/format.ts` (+ test) — add `fmtDateTime`
 
-- [ ] **Step 1: Add `fmtDateTime` to `src/lib/format.ts`** (TDD — append test first):
+- [x] **Step 1: Add `fmtDateTime` to `src/lib/format.ts`** (TDD — append test first):
 
 ```ts
 // test (append to src/lib/format.test.ts):
@@ -1727,7 +1727,7 @@ export function fmtDateTime(value: Date | string | null | undefined): string {
 }
 ```
 
-- [ ] **Step 2: Create `src/server/modules/audit/queries.ts`**
+- [x] **Step 2: Create `src/server/modules/audit/queries.ts`**
 
 ```ts
 import { prisma } from "@/server/db/client";
@@ -1811,11 +1811,11 @@ export async function listAudit(state: ListState): Promise<{ rows: AuditRow[]; t
 }
 ```
 
-- [ ] **Step 3: Create `src/app/(app)/audit/page.tsx`** — server page: `requireUser`; parse state with `AUDIT_LIST_CONFIG`; entityType FacetDropdown (static options from `AUDIT_ENTITY_TYPES`, counts via one `groupBy(["entityType"])` without the entity filter) + a search input (small client toolbar mirroring the employees toolbar pattern, `q` on Enter) + ChipFilterRow + the 5-column table (When mono / Actor / Entity — `Pill` with the type + accent Link when `entityHref` / Action mono / Fields mono muted) + Pagination + the two empty states. **No checkboxes, no row menus, no hover actions, no row onClick — the absence is the design (README 3g).** The only interactive thing in a row is the entity link. Compose from existing pieces; a tiny `audit-toolbar.tsx` client component colocated under `src/components/patterns/` is acceptable if needed — or reuse `FacetDropdown` + a plain search input inline in a small client wrapper.
+- [x] **Step 3: Create `src/app/(app)/audit/page.tsx`** — server page: `requireUser`; parse state with `AUDIT_LIST_CONFIG`; entityType FacetDropdown (static options from `AUDIT_ENTITY_TYPES`, counts via one `groupBy(["entityType"])` without the entity filter) + a search input (small client toolbar mirroring the employees toolbar pattern, `q` on Enter) + ChipFilterRow + the 5-column table (When mono / Actor / Entity — `Pill` with the type + accent Link when `entityHref` / Action mono / Fields mono muted) + Pagination + the two empty states. **No checkboxes, no row menus, no hover actions, no row onClick — the absence is the design (README 3g).** The only interactive thing in a row is the entity link. Compose from existing pieces; a tiny `audit-toolbar.tsx` client component colocated under `src/components/patterns/` is acceptable if needed — or reuse `FacetDropdown` + a plain search input inline in a small client wrapper.
 
-- [ ] **Step 4: Create `src/app/(app)/audit/loading.tsx`** — header + toolbar skeletons + 10× `SkeletonRow columns={5}`.
+- [x] **Step 4: Create `src/app/(app)/audit/loading.tsx`** — header + toolbar skeletons + 10× `SkeletonRow columns={5}`.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 npm run test && npx tsc --noEmit && npm run lint
@@ -1833,7 +1833,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `src/components/patterns/activity-feed.tsx`
 - Modify: `src/app/(app)/inventory/activity/page.tsx`, `src/app/(app)/employees/activity/page.tsx` (replace placeholder bodies; KEEP the paths)
 
-- [ ] **Step 1: Create `src/components/patterns/activity-feed.tsx`** (server-safe)
+- [x] **Step 1: Create `src/components/patterns/activity-feed.tsx`** (server-safe)
 
 ```tsx
 import { Avatar } from "@/components/ui/avatar";
@@ -1879,9 +1879,9 @@ export function actionDot(action: string): string {
 }
 ```
 
-- [ ] **Step 2: Replace the two placeholder pages.** Each becomes a server page: `requireUser`; `page` param; `prisma.auditEntry.findMany` scoped by entityType (`asset` for inventory, `employee` for employees), newest first, `take 50 skip (page-1)*50` + count; enrich with `entityLabels` (from Task 9's audit queries module); rows → `ActivityItem` (`sentence: auditSentence({...entry, entityLabel})`, `when: fmtDateTime(...)`, `dotValue: actionDot(entry.action)`, NO domain — these are scoped feeds); PageHeader ("Inventory activity" / "Employee activity") + `ActivityFeed` + Pagination + an empty state ("Nothing has happened yet"). Placeholder imports (`Pill PLANNED`, EmptyState-only body) go away.
+- [x] **Step 2: Replace the two placeholder pages.** Each becomes a server page: `requireUser`; `page` param; `prisma.auditEntry.findMany` scoped by entityType (`asset` for inventory, `employee` for employees), newest first, `take 50 skip (page-1)*50` + count; enrich with `entityLabels` (from Task 9's audit queries module); rows → `ActivityItem` (`sentence: auditSentence({...entry, entityLabel})`, `when: fmtDateTime(...)`, `dotValue: actionDot(entry.action)`, NO domain — these are scoped feeds); PageHeader ("Inventory activity" / "Employee activity") + `ActivityFeed` + Pagination + an empty state ("Nothing has happened yet"). Placeholder imports (`Pill PLANNED`, EmptyState-only body) go away.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
@@ -1908,7 +1908,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `e2e/approvals-audit.spec.ts`
 - Modify: `docs/HANDOVER.md`, this plan
 
-- [ ] **Step 1: Create `e2e/approvals-audit.spec.ts`.** Reuse the `login`/`expectNoSeriousAxe` helpers (via `/logout` first, as in `it-core.spec.ts`). ONE serial describe for the lifecycle thread (state mutations depend on order); reseed assumptions: APR-2041 PENDING NORMAL, APR-2040 PENDING URGENT overdue, APR-2039 CLAIMED by admin, APR-2035 APPROVED w/ queued job + malformed payload, APR-2025 EXECUTION_FAILED. Cover:
+- [x] **Step 1: Create `e2e/approvals-audit.spec.ts`.** Reuse the `login`/`expectNoSeriousAxe` helpers (via `/logout` first, as in `it-core.spec.ts`). ONE serial describe for the lifecycle thread (state mutations depend on order); reseed assumptions: APR-2041 PENDING NORMAL, APR-2040 PENDING URGENT overdue, APR-2039 CLAIMED by admin, APR-2035 APPROVED w/ queued job + malformed payload, APR-2025 EXECUTION_FAILED. Cover:
 
 1. **Tabs + URL contract**: `?tab=` round-trips; counts render; Open=3, Unclaimed=2, Failed=1 on fresh seed.
 2. **Read-only**: finance@ sees the queue, no keyboard hint line, and the detail page for a PENDING item shows no Claim button.
@@ -1922,16 +1922,16 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 10. **Activity feeds**: `/inventory/activity` shows sentences (e.g. the worker's executed entry), `/employees/activity` renders; no domain pills on scoped feeds.
 11. **Axe**: `/approvals`, one detail page, `/audit`, `/inventory/activity`.
 
-- [ ] **Step 2: Full battery** (controller runs this — STOP the dev server before `npm run build`):
+- [x] **Step 2: Full battery** (controller runs this — STOP the dev server before `npm run build`):
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test && npm run build
 npm run db:seed && npx playwright test --workers=1
 ```
 
-- [ ] **Step 3: Docs.** Check off this plan + record deviations; update `docs/HANDOVER.md`: Phase 4 → DONE (what shipped + conventions: approvalTransition/executionPlan/worker lease pattern), write Phase 5 entry criteria (purchasing: `purchaseTransition` state machine TDD-first mirroring approval-flow; NoteEntry append-only thread — never an overwritable column; bounce-back banner is the design problem; `?state=` tab contract already in the nav; PR approvals vs lifecycle approvals distinction).
+- [x] **Step 3: Docs.** Check off this plan + record deviations; update `docs/HANDOVER.md`: Phase 4 → DONE (what shipped + conventions: approvalTransition/executionPlan/worker lease pattern), write Phase 5 entry criteria (purchasing: `purchaseTransition` state machine TDD-first mirroring approval-flow; NoteEntry append-only thread — never an overwritable column; bounce-back banner is the design problem; `?state=` tab contract already in the nav; PR approvals vs lifecycle approvals distinction).
 
-- [ ] **Step 4: Finish the branch** — merge `phase-4-approvals-audit` to main per the handover workflow (tests verified first), delete the branch, push.
+- [x] **Step 4: Finish the branch** — merge `phase-4-approvals-audit` to main per the handover workflow (tests verified first), delete the branch, push.
 
 ---
 
@@ -1943,3 +1943,11 @@ npm run db:seed && npx playwright test --workers=1
 
 
 
+
+---
+
+## Close-out (2026-08-17)
+
+**Battery:** `tsc --noEmit` ✓ · `eslint --max-warnings 0` ✓ · 185 unit tests ✓ · `next build` ✓ · 51 e2e across four spec files, `--workers=1`, each DB-dependent file reseeding in `beforeAll` (approvals-audit legitimately deploys BR-LT-0181 and drains the badge — file order must not leak) ✓.
+
+**Task 11 deviations:** per-file reseeds added to auth-shell/it-core/approvals-audit; the seed's APR-2041 payload was corrected mid-phase to mirror the real `requestAssign` shape (`to.assigneeId` row id — the old `to.assignee` employeeNo would have EXECUTION_FAILED the happy-path demo); a stray brace from the ringout-keyframe removal broke the prod build (caught by the battery, fixed).
