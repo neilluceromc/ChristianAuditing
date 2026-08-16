@@ -106,7 +106,10 @@ declare module "next-auth" {
   }
 }
 
-declare module "next-auth/jwt" {
+// NOTE (applied deviation): with next-auth 5.0.0-beta.32, "next-auth/jwt" is a
+// pure re-export of "@auth/core/jwt", so declaration merging must target the
+// canonical module or the jwt callback types stay unknown.
+declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
     role: Role;
