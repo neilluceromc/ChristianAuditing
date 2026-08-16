@@ -12,11 +12,14 @@ import { ROLE_LANDING } from "@/lib/workspaces";
 export async function requireUser(): Promise<User> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+  // Stale JWT (user deleted/disabled/role-changed) goes to /logout, which
+  // CLEARS the cookie — a bare /login redirect would loop: middleware sees a
+  // "signed-in" token on /login and bounces straight back to the landing.
   const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-  if (!user || user.disabled) redirect("/login");
+  if (!user || user.disabled) redirect("/logout");
   // The JWT freezes role at sign-in; if an admin has since changed it, force
   // re-auth so middleware's (token-based) gating can't drift from the DB.
-  if (user.role !== session.user.role) redirect("/login");
+  if (user.role !== session.user.role) redirect("/logout");
   return user;
 }
 

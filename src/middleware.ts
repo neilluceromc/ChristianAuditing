@@ -13,6 +13,11 @@ export default auth((req) => {
   // Dev-only review surfaces are outside the auth boundary (404 in prod anyway).
   if (pathname.startsWith("/dev")) return;
 
+  // Stale-session escape hatch: /logout clears the cookie for ANY bearer —
+  // a deleted/disabled user's JWT must be able to reach it or requireUser's
+  // redirect would loop through the signed-in /login bounce below.
+  if (pathname === "/logout") return;
+
   const user = req.auth?.user;
 
   if (!user) {
