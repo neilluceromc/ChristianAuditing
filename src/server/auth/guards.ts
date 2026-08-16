@@ -25,3 +25,21 @@ export async function requireRole(...roles: Role[]): Promise<User> {
   if (!roles.includes(user.role)) redirect(ROLE_LANDING[user.role]);
   return user;
 }
+
+/**
+ * Guards for server actions: same checks as requireUser/requireRole but they
+ * RETURN null instead of redirecting, so actions hand back the typed
+ * `forbidden` result (spec §5) rather than navigating mid-mutation.
+ */
+export async function actionUser(): Promise<User | null> {
+  const session = await auth();
+  if (!session?.user?.id) return null;
+  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+  if (!user || user.disabled || user.role !== session.user.role) return null;
+  return user;
+}
+
+export async function actionRole(...roles: Role[]): Promise<User | null> {
+  const user = await actionUser();
+  return user && roles.includes(user.role) ? user : null;
+}
