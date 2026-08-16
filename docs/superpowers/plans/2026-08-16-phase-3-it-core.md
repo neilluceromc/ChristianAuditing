@@ -965,6 +965,12 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+> **Deviations recorded after Task 4's opus review (fixes applied by the controller, commit follows the review):**
+> 1. **Crypto format is now v1: `base64(version || iv || tag || data)` with required AAD** — `encryptSecret(plaintext, aad)` / `decryptSecret(ciphertext, aad)`, AAD = `"assetId:label"`. Binds each ciphertext to its row (a value lifted into another row refuses to decrypt) and makes key rotation traceable. Task 17's code below was amended to pass the AAD. A format-pinning test (`1+12+16+len`) and AAD-mismatch/version tests were added.
+> 2. **`checkRate` now opportunistically prunes** this user's `RateEvent` rows older than the window after each allowed call — the table no longer grows forever.
+> 3. **`audit-diff` hardened**: `toNumber` duck-typing requires a callable; JSON objects/arrays compare structurally (JSON.stringify) instead of by reference.
+> Deferred as minor (recorded, not fixed): palette returns EMPTY when throttled (indistinguishable from no-results; 150ms debounce makes it rare); `recentByUser` map keys are never evicted (bounded ≤30 numbers/user); probe-path strings in palette.ts duplicated from href templates.
+
 ### Task 5: Format helpers (TDD) + approval creation helper
 
 **Files:**
@@ -4682,7 +4688,7 @@ export async function addSecret(input: unknown): Promise<ActionResult<{ id: stri
 
   const secret = await prisma.$transaction(async (tx) => {
     const created = await tx.assetSecret.create({
-      data: { assetId: d.assetId, label: d.label, ciphertext: encryptSecret(d.value) },
+      data: { assetId: d.assetId, label: d.label, ciphertext: encryptSecret(d.value, `${d.assetId}:${d.label}`) },
     });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
@@ -4728,7 +4734,7 @@ export async function revealSecret(
     diff: { label: { from: null, to: secret.label } },
   });
 
-  return ok({ value: decryptSecret(secret.ciphertext), label: secret.label });
+  return ok({ value: decryptSecret(secret.ciphertext, `${secret.assetId}:${secret.label}`), label: secret.label });
 }
 ```
 

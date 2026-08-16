@@ -15,6 +15,13 @@ export async function checkRate(userId: string, kind: RateKind = "mutation"): Pr
     select: { at: true },
   });
   const decision = rateDecision(recent.map((r) => r.at), kind, new Date());
-  if (decision.allowed) await prisma.rateEvent.create({ data: { userId, kind } });
+  if (decision.allowed) {
+    await prisma.rateEvent.create({ data: { userId, kind } });
+    // Opportunistic prune — without this the table grows one row per mutation
+    // forever. Indexed on [userId, kind, at], so it's a cheap ranged delete.
+    await prisma.rateEvent.deleteMany({
+      where: { userId, kind, at: { lt: new Date(Date.now() - windowMs) } },
+    });
+  }
   return decision;
 }

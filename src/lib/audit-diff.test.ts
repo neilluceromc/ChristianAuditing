@@ -21,4 +21,15 @@ describe("diffOf", () => {
   it("only inspects keys present in `after` (partial updates)", () => {
     expect(diffOf({ a: 1, b: 2 }, { b: 3 })).toEqual({ b: { from: 2, to: 3 } });
   });
+
+  it("ignores a non-callable toNumber property (not a Decimal)", () => {
+    const odd = { toNumber: "8GB" };
+    expect(diffOf({ specs: odd }, { specs: { toNumber: "8GB" } })).toEqual({});
+  });
+
+  it("compares JSON values structurally, not by reference", () => {
+    expect(diffOf({ specs: { ram: 16 } }, { specs: { ram: 16 } })).toEqual({});
+    expect(diffOf({ specs: { ram: 16 } }, { specs: { ram: 32 } }))
+      .toEqual({ specs: { from: { ram: 16 }, to: { ram: 32 } } });
+  });
 });

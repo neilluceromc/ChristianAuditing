@@ -256,7 +256,7 @@ model AssetSecret {
   assetId    String
   asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
   label      String
-  ciphertext String   // AES-256-GCM: base64(iv || tag || data), key from SECRET_ENCRYPTION_KEY
+  ciphertext String   // AES-256-GCM v1: base64(version || iv || tag || data), AAD = "assetId:label", key from SECRET_ENCRYPTION_KEY
   createdAt  DateTime @default(now())
   updatedAt  DateTime @default(now()) @updatedAt
 
