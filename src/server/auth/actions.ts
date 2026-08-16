@@ -2,9 +2,10 @@
 
 import { AuthError } from "next-auth";
 import { redirect } from "next/navigation";
+import bcrypt from "bcryptjs";
 import { signIn, signOut } from "./index";
 import { prisma } from "../db/client";
-import { normalizeEmail } from "@/lib/auth-shared";
+import { isAllowedDomain, normalizeEmail } from "@/lib/auth-shared";
 import { ROLE_LANDING } from "@/lib/workspaces";
 
 export interface AuthFormState {
@@ -42,4 +43,49 @@ export async function signInWithCredentials(
 
 export async function signOutAction() {
   await signOut({ redirectTo: "/login" });
+}
+
+export async function signUp(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
+  const name = String(formData.get("name") ?? "").trim();
+  const email = normalizeEmail(String(formData.get("email") ?? ""));
+  const password = String(formData.get("password") ?? "");
+
+  if (name.length < 2) return { error: "Enter your name." };
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Enter a valid email." };
+  if (password.length < 10) return { error: "Password must be at least 10 characters." };
+
+  const domainFlag = await prisma.featureFlag.findUnique({ where: { key: "allowed_domain" } });
+  const domain =
+    domainFlag?.enabled && typeof domainFlag.value === "string" ? domainFlag.value : null;
+  if (!isAllowedDomain(email, domain)) {
+    return { error: `Signup is limited to @${domain} addresses.` };
+  }
+
+  const existing = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: "insensitive" } },
+  });
+  if (existing) return { error: "An account with that email already exists." };
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await prisma.user.create({
+    // Least privilege: every signup is a viewer; admins promote via /admin/users.
+    data: { name, email, passwordHash, role: "viewer" },
+  });
+  await prisma.auditEntry.create({
+    data: {
+      actorId: user.id,
+      actorLabel: user.name,
+      entityType: "user",
+      entityId: user.id,
+      action: "signup",
+      diff: { role: { from: null, to: "viewer" } },
+    },
+  });
+
+  try {
+    await signIn("credentials", { email, password, redirect: false });
+  } catch {
+    redirect("/login"); // account exists; worst case they sign in manually
+  }
+  redirect(ROLE_LANDING.viewer);
 }
