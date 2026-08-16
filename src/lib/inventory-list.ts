@@ -1,0 +1,39 @@
+import type { AssetStatus, Prisma } from "@prisma/client";
+import type { ListConfig, ListState, SortKey } from "./url-state";
+
+export const ASSET_STATUSES = [
+  "DEPLOYED", "SPARE", "DEFECTIVE", "DONATED", "TEMPORARY", "BUYOUT", "DISPOSE", "MISSING",
+] as const satisfies readonly AssetStatus[];
+
+export const INVENTORY_LIST_CONFIG: ListConfig = {
+  facets: ["status", "category", "type", "assignee"],
+  sortable: ["tag", "model", "category", "status", "purchasedAt", "warrantyUntil"],
+  defaultSort: [{ key: "tag", dir: "asc" }],
+};
+
+export function buildAssetWhere(state: ListState): Prisma.AssetWhereInput {
+  const where: Prisma.AssetWhereInput = {};
+  if (state.q) {
+    // contains-search with insensitive mode is the sanctioned use; the
+    // ILIKE-wildcard hazard applies to identity/equals lookups only.
+    where.OR = [
+      { tag: { contains: state.q, mode: "insensitive" } },
+      { model: { contains: state.q, mode: "insensitive" } },
+      { serial: { contains: state.q, mode: "insensitive" } },
+    ];
+  }
+  const f = state.filters;
+  const statuses = (f.status ?? []).filter((s): s is AssetStatus =>
+    (ASSET_STATUSES as readonly string[]).includes(s));
+  if (statuses.length) where.status = { in: statuses };
+  if (f.category?.length) where.categoryId = { in: f.category };
+  if (f.type?.length) where.typeId = { in: f.type };
+  if (f.assignee?.length) where.assigneeId = { in: f.assignee };
+  return where;
+}
+
+export function buildAssetOrderBy(sort: SortKey[]): Prisma.AssetOrderByWithRelationInput[] {
+  const order = sort.length ? sort : INVENTORY_LIST_CONFIG.defaultSort;
+  return order.map(({ key, dir }): Prisma.AssetOrderByWithRelationInput =>
+    key === "category" ? { category: { name: dir } } : { [key]: dir });
+}
