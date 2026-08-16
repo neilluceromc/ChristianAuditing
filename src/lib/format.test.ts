@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtDate, fmtMoney, fmtRelativeDays } from "./format";
+import { fmtDate, fmtDateTime, fmtMoney, fmtRelativeDays } from "./format";
 
 describe("format", () => {
   it("fmtDate renders dd MMM yyyy in Asia/Manila and — for empty", () => {
@@ -17,5 +17,9 @@ describe("format", () => {
     expect(fmtRelativeDays(new Date("2026-08-16T09:00:00Z"), now)).toBe("today");
     expect(fmtRelativeDays(new Date("2026-08-13T12:00:00Z"), now)).toBe("3 d ago");
     expect(fmtRelativeDays(new Date("2026-08-19T12:00:00Z"), now)).toBe("in 3 d");
+  });
+  it("fmtDateTime includes the clock, Asia/Manila", () => {
+    expect(fmtDateTime(new Date("2026-08-16T01:41:00Z"))).toBe("16 Aug 2026 09:41");
+    expect(fmtDateTime(null)).toBe("—");
   });
 });

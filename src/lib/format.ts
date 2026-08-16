@@ -12,9 +12,20 @@ const moneyFmt = new Intl.NumberFormat("en-PH", {
   style: "currency", currency: "PHP", maximumFractionDigits: 0,
 });
 
+const dateTimeFmt = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit", month: "short", year: "numeric",
+  hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Manila",
+});
+
 export function fmtDate(value: Date | string | null | undefined): string {
   if (!value) return "—";
   return dateFmt.format(typeof value === "string" ? new Date(value) : value);
+}
+
+export function fmtDateTime(value: Date | string | null | undefined): string {
+  if (!value) return "—";
+  // en-GB renders "16 Aug 2026, 09:41" — the comma reads as table noise
+  return dateTimeFmt.format(typeof value === "string" ? new Date(value) : value).replace(",", "");
 }
 
 export function fmtMoney(value: number | string | null | undefined): string {
