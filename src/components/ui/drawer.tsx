@@ -2,6 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useEffect, useId, useState } from "react";
+import { cn } from "@/lib/cn";
 import { useFocusTrap } from "./use-focus-trap";
 
 export function Drawer({
@@ -9,12 +10,14 @@ export function Drawer({
   onClose,
   title,
   width = 376,
+  side = "right",
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   width?: number;
+  side?: "left" | "right";
   children: React.ReactNode;
 }) {
   // Initial focus goes to the panel itself, not the ✕ Close button — a
@@ -39,8 +42,15 @@ export function Drawer({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="absolute inset-y-0 right-0 flex max-w-full flex-col border-l border-border bg-surface-raised shadow-drawer"
-        style={{ width, animation: "sheet var(--dur-4) var(--ease-std)" }}
+        className={cn(
+          "absolute inset-y-0 flex max-w-full flex-col bg-surface-raised",
+          side === "right" ? "right-0 border-l shadow-drawer" : "left-0 border-r",
+          "border-border",
+        )}
+        style={{
+          width,
+          animation: `${side === "right" ? "sheet" : "sheetLeft"} var(--dur-4) var(--ease-std)`,
+        }}
       >
         <div className="flex items-center justify-between border-b border-border-faint px-4 py-3">
           <h2 id={titleId} className="text-[15px] font-semibold text-fg">{title}</h2>

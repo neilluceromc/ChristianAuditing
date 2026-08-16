@@ -261,6 +261,10 @@ body {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
 }
+@keyframes sheetLeft {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
 @keyframes veil {
   from { opacity: 0; }
   to { opacity: 1; }

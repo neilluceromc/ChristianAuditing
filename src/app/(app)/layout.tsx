@@ -3,9 +3,12 @@ import { requireUser } from "@/server/auth/guards";
 import {
   resolveWorkspace,
   ROLE_WORKSPACES,
+  WORKSPACE_META,
   WORKSPACE_NAV,
 } from "@/lib/workspaces";
 import { filterSectionsForRole, getApprovalsBadge, Sidebar } from "@/components/shell/sidebar";
+import { Topbar } from "@/components/shell/topbar";
+import { CommandPalette } from "@/components/shell/command-palette";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -30,10 +33,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         allowed={ROLE_WORKSPACES[user.role]}
       />
       <div className="flex min-w-0 flex-1 flex-col">
+        <Topbar sections={sections} badge={badge} workspaceLabel={WORKSPACE_META[ws].label} />
         <main id="main" tabIndex={-1} className="flex-1 p-6">
           {children}
         </main>
       </div>
+      <CommandPalette role={user.role} sections={sections} />
     </div>
   );
 }
