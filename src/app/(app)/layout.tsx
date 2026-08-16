@@ -1,7 +1,19 @@
+import { cookies } from "next/headers";
 import { requireUser } from "@/server/auth/guards";
+import {
+  resolveWorkspace,
+  ROLE_WORKSPACES,
+  WORKSPACE_NAV,
+} from "@/lib/workspaces";
+import { filterSectionsForRole, getApprovalsBadge, Sidebar } from "@/components/shell/sidebar";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  await requireUser(); // layer-2: catches disabled accounts middleware can't see
+  const user = await requireUser();
+  const jar = await cookies();
+  const ws = resolveWorkspace(user.role, jar.get("br.dept")?.value);
+  const sections = filterSectionsForRole(WORKSPACE_NAV[ws], user.role);
+  const badge = await getApprovalsBadge();
+
   return (
     <div className="flex min-h-screen">
       <a
@@ -10,7 +22,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       >
         Skip to content
       </a>
-      {/* Sidebar (Task 9) and Topbar (Task 11) mount here */}
+      <Sidebar
+        user={user}
+        ws={ws}
+        sections={sections}
+        badge={badge}
+        allowed={ROLE_WORKSPACES[user.role]}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <main id="main" tabIndex={-1} className="flex-1 p-6">
           {children}
