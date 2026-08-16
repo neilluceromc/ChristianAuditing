@@ -1483,6 +1483,8 @@ Every hex/duration/curve from `design_handover/README.md` becomes a custom prope
   --required-mark: #d92d20;
   --error-text: #b42318;
   --focus-shadow: rgba(37, 99, 168, 0.12);
+  --danger-bg: #d92d20;
+  --danger-fg: #ffffff;
 
   /* elevation */
   --elev-card: 0 1px 2px rgba(16, 24, 40, 0.05);
@@ -1989,7 +1991,7 @@ const VARIANT: Record<Variant, string> = {
     "bg-surface text-fg-secondary border border-border-strong hover:bg-surface-subtle",
   ghost: "bg-transparent text-fg-secondary border border-transparent hover:bg-surface-subtle",
   danger:
-    "bg-[var(--st-fault-dot)] text-white border border-[var(--st-fault-dot)] hover:opacity-90",
+    "bg-[var(--danger-bg)] text-[var(--danger-fg)] border border-[var(--danger-bg)] hover:opacity-90",
 };
 
 const SIZE: Record<Size, string> = {
@@ -2493,7 +2495,7 @@ export function DescriptionList({
 export function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
+      <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-fg-muted">
         {label}
       </span>
       <span className="font-mono text-lg font-semibold leading-tight text-fg">{value}</span>
@@ -3339,7 +3341,7 @@ export function Td({
     <td
       className={cn(
         "px-3 py-0 text-fg-secondary",
-        mono && "font-mono text-xs text-fg-faint",
+        mono && "font-mono text-xs text-fg-muted",
         align === "right" ? "text-right" : "text-left",
         className,
       )}
@@ -3396,7 +3398,7 @@ export function Pagination({
       {item(page - 1, "‹", page === 1)}
       {withGaps.map((p, i) =>
         p === "gap" ? (
-          <span key={`gap-${i}`} className="px-1 font-mono text-[11px] text-fg-faint">…</span>
+          <span key={`gap-${i}`} className="px-1 font-mono text-[11px] text-fg-muted">…</span>
         ) : (
           item(p)
         ),
@@ -3480,7 +3482,7 @@ const ICONS: IconName[] = [
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section aria-label={title} className="flex flex-col gap-3">
-      <h2 className="font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
+      <h2 className="font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-fg-muted">
         {title}
       </h2>
       {children}
@@ -3545,7 +3547,7 @@ function Demos() {
           {ICONS.map((name) => (
             <span key={name} className="inline-flex flex-col items-center gap-1">
               <Icon name={name} />
-              <span className="font-mono text-[8.5px] text-fg-faint">{name}</span>
+              <span className="font-mono text-[8.5px] text-fg-muted">{name}</span>
             </span>
           ))}
         </div>
@@ -3605,7 +3607,7 @@ function Demos() {
           <THead>
             <Tr>
               <Th width={36}><Checkbox aria-label="Select all" indeterminate readOnly checked={false} /></Th>
-              <Th width={20} />
+              <Th width={20}><span className="sr-only">Status dot</span></Th>
               <Th width={104} sort="desc" sortIndex={1} onSort={() => {}}>Tag</Th>
               <Th>Model</Th>
               <Th width={168}>Assigned</Th>
@@ -3796,6 +3798,8 @@ git commit -m "feat(ui): kitchen-sink review page for the primitive layer"
 
 **Files:**
 - Create: `playwright.config.ts`, `e2e/kitchen-sink.spec.ts`
+
+> **Post-review amendment (approved):** the first axe run failed both themes on `--text-faint` (#98A2B3 / #6B7480) used as small text — 2.4–4.0:1 vs the WCAG AA 4.5:1 bar. The brief's axe requirement is a hard constraint and outranks token fidelity, so **`fg-faint` is reserved for placeholders and decorative use only**; every small-text usage (table mono cells, stat labels, eyebrows, pagination ellipsis) moved to `fg-muted`. This deviates from the handover's own §"Typography" faint-text treatments — flag to the design owner. Darkening the token instead was rejected: an AA-passing faint (~#68707F on these surfaces) is visually indistinguishable from `--text-muted`, collapsing the two tiers. The dark axe run additionally surfaced two dark-token gaps, both fixed: the danger Button now has its own `--danger-bg`/`--danger-fg` pair (light `#D92D20`/white; dark `#EF6A5F`/`#2D1917`, same inverted polarity as `--accent-fg`) instead of borrowing the dot colour, and the form-feedback tokens (`--error-text` → `#F28B80`, `--required-mark` → `#EF6A5F`, error/focus shadows) are re-derived under `[data-theme="dark"]`.
 
 - [ ] **Step 1: Write `playwright.config.ts`**
 

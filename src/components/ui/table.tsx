@@ -110,7 +110,7 @@ export function Td({
     <td
       className={cn(
         "px-3 py-0 text-fg-secondary",
-        mono && "font-mono text-xs text-fg-faint",
+        mono && "font-mono text-xs text-fg-muted",
         align === "right" ? "text-right" : "text-left",
         className,
       )}

@@ -48,6 +48,11 @@
   --error-text: #b42318;
   --focus-shadow: rgba(37, 99, 168, 0.12);
 
+  /* danger buttons get their own pair — the status dot colour is tuned for
+     7px dots, not as a text background (dark dot fails AA under white text) */
+  --danger-bg: #d92d20;
+  --danger-fg: #ffffff;
+
   /* elevation */
   --elev-card: 0 1px 2px rgba(16, 24, 40, 0.05);
   --elev-pop: 0 12px 30px -10px rgba(16, 24, 40, 0.3);
@@ -113,6 +118,16 @@
   --st-attention-bg: #2d2214; --st-attention-text: #e7b168; --st-attention-border: #4a3a1d;
   --st-fault-bg: #2d1917;     --st-fault-text: #f28b80;     --st-fault-border: #4d2622;
   --st-closed-bg: transparent; --st-closed-text: #8b95a2;   --st-closed-border: #3a424e;
+
+  /* form feedback, re-derived for dark surfaces */
+  --error-text: #f28b80;
+  --required-mark: #ef6a5f;
+  --error-shadow: rgba(239, 106, 95, 0.15);
+  --focus-shadow: rgba(106, 169, 224, 0.18);
+
+  /* dark danger: light-red fill, near-black text — same polarity as accent-fg */
+  --danger-bg: #ef6a5f;
+  --danger-fg: #2d1917;
 
   --placeholder-stripes: repeating-linear-gradient(135deg, #1a1e25 0 6px, #1d2129 6px 12px);
 }

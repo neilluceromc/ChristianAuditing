@@ -52,7 +52,7 @@ const ICONS: IconName[] = [
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section aria-label={title} className="flex flex-col gap-3">
-      <h2 className="font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
+      <h2 className="font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-fg-muted">
         {title}
       </h2>
       {children}
@@ -117,7 +117,7 @@ function Demos() {
           {ICONS.map((name) => (
             <span key={name} className="inline-flex flex-col items-center gap-1">
               <Icon name={name} />
-              <span className="font-mono text-[8.5px] text-fg-faint">{name}</span>
+              <span className="font-mono text-[8.5px] text-fg-muted">{name}</span>
             </span>
           ))}
         </div>
@@ -177,7 +177,7 @@ function Demos() {
           <THead>
             <Tr>
               <Th width={36}><Checkbox aria-label="Select all" indeterminate readOnly checked={false} /></Th>
-              <Th width={20} />
+              <Th width={20}><span className="sr-only">Status dot</span></Th>
               <Th width={104} sort="desc" sortIndex={1} onSort={() => {}}>Tag</Th>
               <Th>Model</Th>
               <Th width={168}>Assigned</Th>

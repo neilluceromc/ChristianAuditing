@@ -41,7 +41,7 @@ export function Pagination({
       {item(page - 1, "‹", page === 1)}
       {withGaps.map((p, i) =>
         p === "gap" ? (
-          <span key={`gap-${i}`} className="px-1 font-mono text-[11px] text-fg-faint">…</span>
+          <span key={`gap-${i}`} className="px-1 font-mono text-[11px] text-fg-muted">…</span>
         ) : (
           item(p)
         ),
