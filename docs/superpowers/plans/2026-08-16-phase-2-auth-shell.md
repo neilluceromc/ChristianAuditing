@@ -26,7 +26,7 @@
 ## File structure created/modified in this phase
 
 ```
-middleware.ts                                  (create — edge gating)
+src/middleware.ts                              (create — edge gating; MUST be in src/ for a src/-dir project)
 src/server/auth/
   config.edge.ts                               (create — edge-safe NextAuth config, no Prisma)
   index.ts                                     (create — full NextAuth: Credentials + optional Entra)
@@ -702,7 +702,7 @@ git commit -m "feat(shell): workspace/role/nav truth module with exhaustive test
 ### Task 4: Guards + middleware (the two enforcement layers)
 
 **Files:**
-- Create: `src/server/auth/guards.ts`, `middleware.ts`
+- Create: `src/server/auth/guards.ts`, `src/middleware.ts`
 
 - [ ] **Step 1: Write `src/server/auth/guards.ts`**
 
@@ -736,7 +736,7 @@ export async function requireRole(...roles: Role[]): Promise<User> {
 }
 ```
 
-- [ ] **Step 2: Write `middleware.ts`** (repo root)
+- [ ] **Step 2: Write `src/middleware.ts`** (MUST live in `src/` — this project uses a `src/` directory, so a repo-root `middleware.ts` is silently ignored by Next and never registers)
 
 ```ts
 import NextAuth from "next-auth";
@@ -801,7 +801,7 @@ Expected: `307 http://localhost:3000/login?next=/inventory` · `200` (login not 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add middleware.ts src/server/auth/guards.ts
+git add src/middleware.ts src/server/auth/guards.ts
 git commit -m "feat(auth): edge middleware gating + DB-backed requireUser/requireRole guards"
 ```
 
