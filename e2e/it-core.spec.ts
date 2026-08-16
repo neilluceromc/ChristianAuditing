@@ -225,16 +225,15 @@ test.describe("employees & loadout", () => {
   // requires 4.5:1 for normal-size text. Repro: log in as it@thebackroomop.com,
   // open /employees/<Marites Bautista's id> (any employee with a policy works),
   // run an axe scan — violations list multiple color-contrast nodes inside
-  // the "Equipment slots" grid. Expected: 0 serious/critical violations,
-  // same bar every other page in this suite is held to. Actual: 6.
-  // Split out of the original combined test so the button-visible coverage
-  // above still runs; only this axe assertion is skipped pending a
-  // design-token fix (--text-faint needs a darker light-mode value, or these
-  // labels need to move to --text-muted).
-  test.fixme("loadout view passes axe", async ({ page }) => {
+  // the "Equipment slots" grid — tile microcopy moved from --text-faint to
+  // --text-muted (2.5:1 -> 4.7:1) after axe flagged 6 serious violations here.
+  test("loadout view passes axe", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees");
-    await page.getByRole("link", { name: /Marites Bautista/ }).click();
+    // hard-navigate like every other axe test: a client-side transition can be
+    // scanned mid-stream (missing <title>) and produce phantom violations
+    const href = await page.getByRole("link", { name: /Marites Bautista/ }).getAttribute("href");
+    await page.goto(href!);
     await expectNoSeriousAxe(page);
   });
 

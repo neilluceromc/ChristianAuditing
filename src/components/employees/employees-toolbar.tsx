@@ -61,7 +61,7 @@ export function EmployeesToolbar({
       />
       <Link
         href={href({ ...state, page: 1 }, !gapsOnly)}
-        aria-pressed={gapsOnly}
+        aria-current={gapsOnly ? "true" : undefined}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-(--radius-btn) border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors duration-(--dur-1)",
           gapsOnly

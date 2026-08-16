@@ -215,10 +215,10 @@ export function LoadoutView({
                         <span className="absolute right-1.5 top-1.5"><Pill tone="accent">PENDING</Pill></span>
                       )}
                     </span>
-                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-faint">{tile.name}</span>
-                    <span className={cn("text-[11.5px] font-medium text-fg", a.pendingRef && "opacity-60")}>{a.model}</span>
+                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-muted">{tile.name}</span>
+                    <span className={cn("text-[11.5px] font-medium", a.pendingRef ? "text-fg-muted" : "text-fg")}>{a.model}</span>
                     <span className="font-mono text-[11px] text-accent">{a.tag}</span>
-                    <span className="flex items-center justify-between font-mono text-[10px] text-fg-faint">
+                    <span className="flex items-center justify-between font-mono text-[10px] text-fg-muted">
                       {a.pendingRef ?? a.age}
                       {mayAct && !a.pendingRef && (
                         <span aria-hidden className="opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100">− return</span>
@@ -231,7 +231,7 @@ export function LoadoutView({
                       <span className="grid size-[30px] place-items-center rounded-full border border-border-strong text-fg-muted">+</span>
                     </span>
                     <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-secondary">{tile.name}</span>
-                    <span className="font-mono text-[10px] text-fg-faint">
+                    <span className="font-mono text-[10px] text-fg-muted">
                       {tile.typeName} · {tile.required ? "required" : "optional"}
                     </span>
                     {tile.required && (
@@ -296,11 +296,11 @@ export function LoadoutView({
             {holding.map((h) => (
               <div key={h.id} className="flex items-center gap-2 text-xs text-fg-secondary">
                 <StatusDot value={h.kind === "reserved" ? "ACTIVE" : "PENDING"} />
-                <Link href={`/inventory/${h.id}`} className={cn("font-mono text-accent hover:underline", h.kind === "queued" && "opacity-60")}>
+                <Link href={`/inventory/${h.id}`} className={cn("font-mono hover:underline", h.kind === "queued" ? "text-fg-muted" : "text-accent")}>
                   {h.tag}
                 </Link>
-                <span className={cn(h.kind === "queued" && "opacity-60")}>{h.model}</span>
-                <span className="ml-auto font-mono text-[10px] text-fg-faint">{h.note}</span>
+                <span className={cn(h.kind === "queued" && "text-fg-muted")}>{h.model}</span>
+                <span className="ml-auto font-mono text-[10px] text-fg-muted">{h.note}</span>
               </div>
             ))}
           </CardBody>
@@ -344,7 +344,7 @@ export function LoadoutView({
                   />
                   <span className="font-mono text-accent">{s.tag}</span>
                   <span className="text-fg-secondary">{s.model}</span>
-                  <span className="ml-auto font-mono text-[10px] text-fg-faint">
+                  <span className="ml-auto font-mono text-[10px] text-fg-muted">
                     {s.reservedForThis ? "reserved for them" : s.reservedFor ? `reserved for ${s.reservedFor}` : "spare"}
                   </span>
                 </label>

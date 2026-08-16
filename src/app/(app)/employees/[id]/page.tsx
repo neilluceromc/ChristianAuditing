@@ -110,10 +110,10 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
               <div>
                 <p className="text-[15px] font-semibold text-fg">{employee.name}</p>
                 <p className="text-xs text-fg-secondary">{employee.title} · {employee.department.name}</p>
-                <p className="pt-0.5 font-mono text-[10.5px] text-fg-faint">
+                <p className="pt-0.5 font-mono text-[10.5px] text-fg-muted">
                   {employee.employeeNo} · joined {fmtDate(employee.joinedAt)}
                 </p>
-                <p className="font-mono text-[10.5px] text-fg-faint">
+                <p className="font-mono text-[10.5px] text-fg-muted">
                   M365: {employee.m365Status ?? "no sync yet"}
                 </p>
               </div>
@@ -121,7 +121,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             {policy && (
               <div className="flex flex-col gap-1">
                 <div className="flex items-baseline justify-between">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">Loadout vs policy</span>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-fg-muted">Loadout vs policy</span>
                   <span className="font-mono text-xs text-fg">{loadout.filled} / {loadout.totalSlots}</span>
                 </div>
                 <ProgressBar value={loadout.filled} max={loadout.totalSlots} label="Loadout completeness" />
