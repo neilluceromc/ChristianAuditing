@@ -5,9 +5,10 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { signIn, signOut } from "./index";
+import { requireUser } from "./guards";
 import { prisma } from "../db/client";
 import { isAllowedDomain, normalizeEmail } from "@/lib/auth-shared";
-import { ROLE_LANDING } from "@/lib/workspaces";
+import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 
 export interface AuthFormState {
   error?: string;
@@ -145,4 +146,12 @@ export async function createBootstrapAdmin(
   const jar = await cookies();
   jar.set("br.dept", "it", { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
   redirect("/"); // "Create admin and open IT" — admin home with the IT workspace active
+}
+
+export async function switchWorkspace(ws: WorkspaceId) {
+  const user = await requireUser();
+  if (!ROLE_WORKSPACES[user.role].includes(ws)) redirect(ROLE_LANDING[user.role]);
+  const jar = await cookies();
+  jar.set("br.dept", ws, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
+  redirect(WORKSPACE_META[ws].landing);
 }
