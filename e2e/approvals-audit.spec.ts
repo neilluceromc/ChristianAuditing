@@ -40,6 +40,13 @@ async function pressInQueue(page: Page, ...keys: string[]) {
 // Rows never reference raw ids: the DB can be reseeded by a background
 // process between runs, and ids are cuids that change on every seed.
 
+// Spec files share one database and run in alphabetical order — each file
+// reseeds so no file inherits another's mutations (approvals-audit deploys
+// BR-LT-0181 and drains the badge, which broke auth-shell/it-core).
+test.beforeAll(() => {
+  execSync("npm run db:seed", { timeout: 120_000 });
+});
+
 test.describe("approvals — tabs & URL contract", () => {
   test("?tab= round-trips; fresh-seed counts render", async ({ page }) => {
     await login(page, "it@thebackroomop.com");

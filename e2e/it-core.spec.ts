@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 
 async function login(page: Page, email: string) {
@@ -19,6 +20,13 @@ async function expectNoSeriousAxe(page: Page) {
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
 }
+
+// Spec files share one database and run in alphabetical order — each file
+// reseeds so no file inherits another's mutations (approvals-audit deploys
+// BR-LT-0181 and drains the badge, which broke auth-shell/it-core).
+test.beforeAll(() => {
+  execSync("npm run db:seed", { timeout: 120_000 });
+});
 
 test.describe("inventory list", () => {
   test("axe passes", async ({ page }) => {
