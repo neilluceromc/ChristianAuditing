@@ -152,6 +152,8 @@ Verify: `git diff package-lock.json | grep -c wasm32` should show the `@tailwind
 node -e "console.log('SECRET_ENCRYPTION_KEY='+require('crypto').randomBytes(32).toString('base64'))" >> .env
 ```
 
+*(Deviation recorded during execution: `.env` already carried a `SECRET_ENCRYPTION_KEY=` placeholder, so the generated value replaced it in place instead of appending a duplicate line.)*
+
 - [ ] **Step 4: Create `src/server/action-result.ts`**
 
 ```ts
@@ -542,8 +544,13 @@ export function toggleSort(sort: SortKey[], key: string): SortKey[] {
     return secondary ? [secondary] : [];
   }
   if (secondary?.key === key) return [secondary, primary];
-  return [{ key, dir: "asc" }, ...(primary ? [primary] : [])].slice(0, MAX_SORT_KEYS);
+  return [{ key, dir: "asc" as const }, ...(primary ? [primary] : [])].slice(0, MAX_SORT_KEYS);
 }
+```
+
+*(Deviation recorded during execution: `as const` on that literal — `.slice()` breaks contextual typing, so strict tsc widened `dir` to `string` without it.)*
+
+```ts
 
 export function withFilter(state: ListState, facet: string, values: string[]): ListState {
   const filters = { ...state.filters };
