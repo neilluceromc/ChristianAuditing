@@ -129,13 +129,13 @@ Responsibilities: `src/lib` = pure, tested decision logic. `src/server/modules/*
 - Modify: `package.json`, `package-lock.json` (zod — lockfile regenerated in Linux), `.env` (local only), `src/server/auth/guards.ts`
 - Create: `src/server/action-result.ts`
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 git checkout -b phase-3-it-core
 ```
 
-- [ ] **Step 2: Install zod, then repair the lockfile for Linux**
+- [x] **Step 2: Install zod, then repair the lockfile for Linux**
 
 Installing on Windows drops the Linux optional-dep trees from the lockfile and breaks the Alpine prod `npm ci` (known gotcha). Install, then regenerate the lockfile inside Linux:
 
@@ -146,7 +146,7 @@ docker run --rm -v "$PWD:/app" -w /app node:22-alpine sh -c "npm i -g npm@11 && 
 
 Verify: `git diff package-lock.json | grep -c wasm32` should show the `@tailwindcss/oxide-wasm32-wasi` tree still present (no mass deletions of `@emnapi/*`).
 
-- [ ] **Step 3: Add the secret-encryption key to `.env` (LOCAL ONLY — the repo is public, `.env*` is gitignored; never commit it)**
+- [x] **Step 3: Add the secret-encryption key to `.env` (LOCAL ONLY — the repo is public, `.env*` is gitignored; never commit it)**
 
 ```bash
 node -e "console.log('SECRET_ENCRYPTION_KEY='+require('crypto').randomBytes(32).toString('base64'))" >> .env
@@ -154,7 +154,7 @@ node -e "console.log('SECRET_ENCRYPTION_KEY='+require('crypto').randomBytes(32).
 
 *(Deviation recorded during execution: `.env` already carried a `SECRET_ENCRYPTION_KEY=` placeholder, so the generated value replaced it in place instead of appending a duplicate line.)*
 
-- [ ] **Step 4: Create `src/server/action-result.ts`**
+- [x] **Step 4: Create `src/server/action-result.ts`**
 
 ```ts
 /**
@@ -216,7 +216,7 @@ export function zodFieldErrors(error: { issues: Array<{ path: PropertyKey[]; mes
 }
 ```
 
-- [ ] **Step 5: Add no-redirect guards to `src/server/auth/guards.ts`** (append at the end; keep `requireUser`/`requireRole` for pages)
+- [x] **Step 5: Add no-redirect guards to `src/server/auth/guards.ts`** (append at the end; keep `requireUser`/`requireRole` for pages)
 
 ```ts
 /**
@@ -238,7 +238,7 @@ export async function actionRole(...roles: Role[]): Promise<User | null> {
 }
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -257,7 +257,7 @@ Employment `ACTIVE` currently renders *inflight* (colliding with reservation `AC
 **Files:**
 - Modify: `src/lib/status.ts`, `src/lib/status.test.ts`, `src/components/ui/status.tsx`
 
-- [ ] **Step 1: Write the failing tests** (append to `src/lib/status.test.ts`)
+- [x] **Step 1: Write the failing tests** (append to `src/lib/status.test.ts`)
 
 ```ts
 describe("employment namespace (entry criterion #2)", () => {
@@ -279,12 +279,12 @@ describe("employment namespace (entry criterion #2)", () => {
 
 (Import `describe/it/expect` from `vitest` if the file's existing imports don't already cover them.)
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/status.test.ts`
 Expected: FAIL — `statusFamily` doesn't accept a second argument / wrong families.
 
-- [ ] **Step 3: Implement the namespace in `src/lib/status.ts`** (add below `MAP`, replace `statusFamily`)
+- [x] **Step 3: Implement the namespace in `src/lib/status.ts`** (add below `MAP`, replace `statusFamily`)
 
 ```ts
 /**
@@ -307,7 +307,7 @@ export function statusFamily(value: string, ns?: StatusNamespace): StatusFamily 
 }
 ```
 
-- [ ] **Step 4: Thread the namespace through `StatusDot`/`StatusPill`** in `src/components/ui/status.tsx`
+- [x] **Step 4: Thread the namespace through `StatusDot`/`StatusPill`** in `src/components/ui/status.tsx`
 
 Add an optional `ns` prop to both components and pass it to every `statusFamily(value)` call:
 
@@ -326,7 +326,7 @@ export function StatusPill({ value, ns, label, className }: { value: string; ns?
 }
 ```
 
-- [ ] **Step 5: Run tests, verify, commit**
+- [x] **Step 5: Run tests, verify, commit**
 
 ```bash
 npm run test -- src/lib/status.test.ts && npx tsc --noEmit && npm run lint
@@ -345,7 +345,7 @@ The fixed contract: filters/sort/page live in query params; sort is one param li
 **Files:**
 - Create: `src/lib/url-state.ts`, `src/lib/url-state.test.ts`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/url-state.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/url-state.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -448,12 +448,12 @@ describe("toSearchParams", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/url-state.test.ts`
 Expected: FAIL — module doesn't exist.
 
-- [ ] **Step 3: Implement `src/lib/url-state.ts`**
+- [x] **Step 3: Implement `src/lib/url-state.ts`**
 
 ```ts
 /**
@@ -578,12 +578,12 @@ export function toSearchParams(sp: Record<string, string | string[] | undefined>
 }
 ```
 
-- [ ] **Step 4: Run tests until green**
+- [x] **Step 4: Run tests until green**
 
 Run: `npm run test -- src/lib/url-state.test.ts`
 Expected: PASS (all).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -599,7 +599,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `src/lib/rate-limit.ts` (+ `.test.ts`), `src/lib/audit-diff.ts` (+ `.test.ts`), `src/server/rate-limit.ts`, `src/server/crypto.ts` (+ `.test.ts`), `src/server/audit.ts`
 - Modify: `src/server/palette.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `src/lib/rate-limit.test.ts`:
 
@@ -700,12 +700,12 @@ describe("secret crypto (AES-256-GCM)", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/rate-limit.test.ts src/lib/audit-diff.test.ts src/server/crypto.test.ts`
 Expected: FAIL — modules don't exist.
 
-- [ ] **Step 3: Implement `src/lib/rate-limit.ts`**
+- [x] **Step 3: Implement `src/lib/rate-limit.ts`**
 
 ```ts
 /** Brief §8: mutations 60/min per user, imports 10/min. */
@@ -732,7 +732,7 @@ export function rateDecision(recent: Date[], kind: RateKind, now: Date): RateDec
 }
 ```
 
-- [ ] **Step 4: Implement `src/lib/audit-diff.ts`**
+- [x] **Step 4: Implement `src/lib/audit-diff.ts`**
 
 ```ts
 export type AuditDiff = Record<string, { from: unknown; to: unknown }>;
@@ -765,7 +765,7 @@ export function diffOf(
 }
 ```
 
-- [ ] **Step 5: Implement `src/server/crypto.ts`**
+- [x] **Step 5: Implement `src/server/crypto.ts`**
 
 ```ts
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -800,12 +800,12 @@ export function decryptSecret(ciphertext: string): string {
 }
 ```
 
-- [ ] **Step 6: Run the three test files — all green**
+- [x] **Step 6: Run the three test files — all green**
 
 Run: `npm run test -- src/lib/rate-limit.test.ts src/lib/audit-diff.test.ts src/server/crypto.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Implement the Prisma wrappers**
+- [x] **Step 7: Implement the Prisma wrappers**
 
 `src/server/rate-limit.ts`:
 
@@ -865,7 +865,7 @@ export async function writeAudit(
 }
 ```
 
-- [ ] **Step 8: Harden `src/server/palette.ts` (entry criterion #5)**
+- [x] **Step 8: Harden `src/server/palette.ts` (entry criterion #5)**
 
 Replace the file body with query-level gating (skip queries whose target routes the role can't reach — don't fetch then filter) and an in-memory sliding window (decision 12):
 
@@ -952,7 +952,7 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
 }
 ```
 
-- [ ] **Step 9: Verify and commit**
+- [x] **Step 9: Verify and commit**
 
 ```bash
 npm run test && npx tsc --noEmit && npm run lint
@@ -976,7 +976,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `src/lib/format.ts` (+ `.test.ts`), `src/server/modules/approvals/create.ts`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/format.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/format.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -1002,11 +1002,11 @@ describe("format", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/format.test.ts` — Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement `src/lib/format.ts`**
+- [x] **Step 3: Implement `src/lib/format.ts`**
 
 ```ts
 /**
@@ -1043,11 +1043,11 @@ export function fmtRelativeDays(value: Date | string, now: Date = new Date()): s
 }
 ```
 
-- [ ] **Step 4: Run tests — green**
+- [x] **Step 4: Run tests — green**
 
 Run: `npm run test -- src/lib/format.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Implement `src/server/modules/approvals/create.ts`**
+- [x] **Step 5: Implement `src/server/modules/approvals/create.ts`**
 
 ```ts
 import type { ApprovalType, Priority, Prisma } from "@prisma/client";
@@ -1096,7 +1096,7 @@ export function openApprovalForAsset(tx: Prisma.TransactionClient, assetId: stri
 }
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1113,7 +1113,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `src/lib/inventory-list.ts` (+ `.test.ts`), `src/server/modules/inventory/queries.ts`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/inventory-list.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/inventory-list.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -1163,11 +1163,11 @@ it("ASSET_STATUSES covers all 8 enum values", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/inventory-list.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/lib/inventory-list.ts`**
+- [x] **Step 3: Implement `src/lib/inventory-list.ts`**
 
 ```ts
 import type { AssetStatus, Prisma } from "@prisma/client";
@@ -1211,11 +1211,11 @@ export function buildAssetOrderBy(sort: SortKey[]): Prisma.AssetOrderByWithRelat
 }
 ```
 
-- [ ] **Step 4: Run tests — green**
+- [x] **Step 4: Run tests — green**
 
 Run: `npm run test -- src/lib/inventory-list.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Implement `src/server/modules/inventory/queries.ts`**
+- [x] **Step 5: Implement `src/server/modules/inventory/queries.ts`**
 
 ```ts
 import { prisma } from "@/server/db/client";
@@ -1344,7 +1344,7 @@ export function getAsset(id: string) {
 }
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 npm run test && npx tsc --noEmit && npm run lint
@@ -1361,7 +1361,7 @@ Toolbar (search + result count), chip filter row, sortable server-rendered table
 **Files:**
 - Create: `src/components/ui/button-link.tsx`, `src/components/patterns/chip-filter-row.tsx`, `src/components/inventory/inventory-toolbar.tsx`, `src/components/inventory/inventory-table.tsx`, `src/app/(app)/inventory/page.tsx`, `src/app/(app)/inventory/loading.tsx`
 
-- [ ] **Step 1: Create `src/components/ui/button-link.tsx`** (Button-styled `Link` — nesting a `<button>` in `<a>` is invalid HTML; lists need link actions everywhere)
+- [x] **Step 1: Create `src/components/ui/button-link.tsx`** (Button-styled `Link` — nesting a `<button>` in `<a>` is invalid HTML; lists need link actions everywhere)
 
 ```tsx
 import Link from "next/link";
@@ -1407,7 +1407,7 @@ export function ButtonLink({
 }
 ```
 
-- [ ] **Step 2: Create `src/components/patterns/chip-filter-row.tsx`** (server-safe — chips are plain Links echoing the URL verbatim)
+- [x] **Step 2: Create `src/components/patterns/chip-filter-row.tsx`** (server-safe — chips are plain Links echoing the URL verbatim)
 
 ```tsx
 import Link from "next/link";
@@ -1440,7 +1440,7 @@ export function ChipFilterRow({ chips, clearHref }: { chips: FilterChip[]; clear
 }
 ```
 
-- [ ] **Step 3: Create `src/components/inventory/inventory-toolbar.tsx`** (client — search pushes URL state; facet slots filled in Task 8)
+- [x] **Step 3: Create `src/components/inventory/inventory-toolbar.tsx`** (client — search pushes URL state; facet slots filled in Task 8)
 
 ```tsx
 "use client";
@@ -1498,7 +1498,7 @@ export function InventoryToolbar({
 
 (`facets` is accepted now so Task 8 doesn't change the page↔toolbar contract; the lint rule tolerates unused props on destructured object params — if `eslint` complains, prefix with a void statement `void facets;` until Task 8 uses it.)
 
-- [ ] **Step 4: Create `src/components/inventory/inventory-table.tsx`** (client island — sort + row open; Task 9 adds selection)
+- [x] **Step 4: Create `src/components/inventory/inventory-table.tsx`** (client island — sort + row open; Task 9 adds selection)
 
 ```tsx
 "use client";
@@ -1621,7 +1621,7 @@ export function InventoryTable({
 }
 ```
 
-- [ ] **Step 5: Create `src/app/(app)/inventory/page.tsx`**
+- [x] **Step 5: Create `src/app/(app)/inventory/page.tsx`**
 
 ```tsx
 import { redirect } from "next/navigation";
@@ -1720,7 +1720,7 @@ export default async function InventoryPage({
 }
 ```
 
-- [ ] **Step 6: Create `src/app/(app)/inventory/loading.tsx`** (matches the final rhythm — same row height, roughly same column masses)
+- [x] **Step 6: Create `src/app/(app)/inventory/loading.tsx`** (matches the final rhythm — same row height, roughly same column masses)
 
 ```tsx
 import { Skeleton, SkeletonRow } from "@/components/ui/skeleton";
@@ -1747,7 +1747,7 @@ export default function InventoryLoading() {
 }
 ```
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1769,7 +1769,7 @@ Controller live-check after this task: `/inventory` as it@ (sort toggles rewrite
 - Create: `src/components/patterns/facet-dropdown.tsx`
 - Modify: `src/components/inventory/inventory-toolbar.tsx`, `src/app/(app)/inventory/page.tsx`
 
-- [ ] **Step 1: Create `src/components/patterns/facet-dropdown.tsx`**
+- [x] **Step 1: Create `src/components/patterns/facet-dropdown.tsx`**
 
 ```tsx
 "use client";
@@ -1916,7 +1916,7 @@ export function FacetDropdown({
 }
 ```
 
-- [ ] **Step 2: Mount the four facets in `src/components/inventory/inventory-toolbar.tsx`**
+- [x] **Step 2: Mount the four facets in `src/components/inventory/inventory-toolbar.tsx`**
 
 Replace the `{children}` slot usage for facets: add inside the toolbar, after the search input:
 
@@ -1941,7 +1941,7 @@ function applyFacet(facet: string, values: string[]) {
 ))}
 ```
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1961,7 +1961,7 @@ Controller live-check: pick two statuses → URL only changes on Apply; chips ec
 - Create: `src/components/inventory/bulk-drawer.tsx`, `src/components/patterns/rate-limit-notice.tsx`, `src/server/modules/inventory/actions.ts`
 - Modify: `src/components/inventory/inventory-table.tsx`, `src/app/(app)/inventory/page.tsx`
 
-- [ ] **Step 1: Create `src/components/patterns/rate-limit-notice.tsx`** (the designed rate-limited state — reused by every mutating form this phase)
+- [x] **Step 1: Create `src/components/patterns/rate-limit-notice.tsx`** (the designed rate-limited state — reused by every mutating form this phase)
 
 ```tsx
 "use client";
@@ -2008,7 +2008,7 @@ export function RateLimitNotice({
 }
 ```
 
-- [ ] **Step 2: Create `src/server/modules/inventory/actions.ts`** with the bulk action (createAsset/updateAsset/requestStatusChange join this file in Tasks 12/14)
+- [x] **Step 2: Create `src/server/modules/inventory/actions.ts`** with the bulk action (createAsset/updateAsset/requestStatusChange join this file in Tasks 12/14)
 
 ```ts
 "use server";
@@ -2102,7 +2102,7 @@ export async function bulkRequestStatusChange(
 }
 ```
 
-- [ ] **Step 3: Create `src/components/inventory/bulk-drawer.tsx`**
+- [x] **Step 3: Create `src/components/inventory/bulk-drawer.tsx`**
 
 ```tsx
 "use client";
@@ -2226,7 +2226,7 @@ export function BulkDrawer({
 }
 ```
 
-- [ ] **Step 4: Add selection to `src/components/inventory/inventory-table.tsx`**
+- [x] **Step 4: Add selection to `src/components/inventory/inventory-table.tsx`**
 
 Modify the island: new props `canMutate: boolean`, `filtersQS: string`, `total: number`. Add state and the selection bar; render a checkbox column only when `canMutate` (viewer/purchasing get NO checkboxes — read-only means absent, not disabled):
 
@@ -2332,7 +2332,7 @@ Mount the drawer after `</Table>`:
 
 Also add `selected={selected.has(row.id)}` to each `Tr` so selected rows tint.
 
-- [ ] **Step 5: Pass the new props from `src/app/(app)/inventory/page.tsx`**
+- [x] **Step 5: Pass the new props from `src/app/(app)/inventory/page.tsx`**
 
 ```tsx
 <InventoryTable
@@ -2345,7 +2345,7 @@ Also add `selected={selected.has(row.id)}` to each `Tr` so selected rows tint.
 />
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -2396,7 +2396,7 @@ export const HIDEABLE_COLUMNS = COLUMN_PREF_KEYS["columns:inventory"];
 
 (Adjust the `includes` cast accordingly: `!(HIDEABLE_COLUMNS as readonly string[]).includes(c.id)`.)
 
-- [ ] **Step 2: Create `src/server/preferences.ts`** (the save action)
+- [x] **Step 2: Create `src/server/preferences.ts`** (the save action)
 
 ```ts
 "use server";
@@ -2440,7 +2440,7 @@ export async function saveColumns(input: unknown): Promise<ActionResult<null>> {
 }
 ```
 
-- [ ] **Step 3: Add the read side to `src/server/modules/inventory/queries.ts`**
+- [x] **Step 3: Add the read side to `src/server/modules/inventory/queries.ts`**
 
 ```ts
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
@@ -2456,7 +2456,7 @@ export async function getInventoryColumns(userId: string): Promise<string[]> {
 }
 ```
 
-- [ ] **Step 4: Create `src/components/inventory/column-chooser.tsx`**
+- [x] **Step 4: Create `src/components/inventory/column-chooser.tsx`**
 
 ```tsx
 "use client";
@@ -2542,7 +2542,7 @@ export function ColumnChooser({ visible }: { visible: string[] }) {
 }
 ```
 
-- [ ] **Step 5: Wire into the page** (`src/app/(app)/inventory/page.tsx`)
+- [x] **Step 5: Wire into the page** (`src/app/(app)/inventory/page.tsx`)
 
 Fetch the preference alongside the list and pass it through; mount the chooser in the toolbar's `children` slot:
 
@@ -2563,7 +2563,7 @@ const [{ rows, total, pageCount }, facets, visibleColumns] = await Promise.all([
 <InventoryTable … visible={visibleColumns} … />
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -2582,7 +2582,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `src/lib/csv.ts` (+ `.test.ts`), `src/app/(app)/inventory/export/route.ts`
 - Modify: `src/components/inventory/bulk-drawer.tsx` (Export selection link)
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/csv.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/csv.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -2612,11 +2612,11 @@ it("toCsv joins with CRLF and ends with a newline", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/csv.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/lib/csv.ts`**
+- [x] **Step 3: Implement `src/lib/csv.ts`**
 
 ```ts
 /**
@@ -2636,11 +2636,11 @@ export function toCsv(header: string[], rows: unknown[][]): string {
 }
 ```
 
-- [ ] **Step 4: Run tests — green**
+- [x] **Step 4: Run tests — green**
 
 Run: `npm run test -- src/lib/csv.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Create `src/app/(app)/inventory/export/route.ts`**
+- [x] **Step 5: Create `src/app/(app)/inventory/export/route.ts`**
 
 The static `export` segment wins over `[id]`, and living under `/inventory` means middleware path rules already gate it (it + purchasing workspaces; read-only roles may export — it's a read).
 
@@ -2699,7 +2699,7 @@ export async function GET(req: Request) {
 }
 ```
 
-- [ ] **Step 6: Add "Export selection" to the bulk drawer** (`src/components/inventory/bulk-drawer.tsx`, below the scope paragraph)
+- [x] **Step 6: Add "Export selection" to the bulk drawer** (`src/components/inventory/bulk-drawer.tsx`, below the scope paragraph)
 
 ```tsx
 <a
@@ -2714,7 +2714,7 @@ export async function GET(req: Request) {
 
 (Plain `<a>`, not `Link` — a download route must not be prefetched.)
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify and commit**
 
 ```bash
 npm run test && npx tsc --noEmit && npm run lint
@@ -2732,7 +2732,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `src/lib/asset-rules.ts` (+ `.test.ts`), `src/components/patterns/entity-combobox.tsx`, `src/components/inventory/asset-form.tsx`, `src/app/(app)/inventory/new/page.tsx`
 - Modify: `src/server/modules/inventory/actions.ts`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/asset-rules.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/asset-rules.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -2774,11 +2774,11 @@ describe("warrantyProgress", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/asset-rules.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/lib/asset-rules.ts`**
+- [x] **Step 3: Implement `src/lib/asset-rules.ts`**
 
 ```ts
 /** Only these are offered on creation (README 3b). */
@@ -2818,11 +2818,11 @@ export function warrantyProgress(
 }
 ```
 
-- [ ] **Step 4: Run tests — green**
+- [x] **Step 4: Run tests — green**
 
 Run: `npm run test -- src/lib/asset-rules.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Add `createAsset` to `src/server/modules/inventory/actions.ts`**
+- [x] **Step 5: Add `createAsset` to `src/server/modules/inventory/actions.ts`**
 
 Add imports: `import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";`, `import { Prisma } from "@prisma/client";` and:
 
@@ -2940,7 +2940,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
 }
 ```
 
-- [ ] **Step 6: Create `src/components/patterns/entity-combobox.tsx`** (keyboard-first typeahead over preloaded options — team scale, no server round-trips)
+- [x] **Step 6: Create `src/components/patterns/entity-combobox.tsx`** (keyboard-first typeahead over preloaded options — team scale, no server round-trips)
 
 ```tsx
 "use client";
@@ -3048,7 +3048,7 @@ export function EntityCombobox({
 }
 ```
 
-- [ ] **Step 7: Create `src/components/inventory/asset-form.tsx`** (shared by new + edit; edit specifics land in Task 14)
+- [x] **Step 7: Create `src/components/inventory/asset-form.tsx`** (shared by new + edit; edit specifics land in Task 14)
 
 ```tsx
 "use client";
@@ -3316,7 +3316,7 @@ export function AssetForm({
 }
 ```
 
-- [ ] **Step 8: Create `src/app/(app)/inventory/new/page.tsx`**
+- [x] **Step 8: Create `src/app/(app)/inventory/new/page.tsx`**
 
 ```tsx
 import { requireRole } from "@/server/auth/guards";
@@ -3351,7 +3351,7 @@ export default async function NewAssetPage() {
 }
 ```
 
-- [ ] **Step 9: Verify and commit**
+- [x] **Step 9: Verify and commit**
 
 ```bash
 npm run test && npx tsc --noEmit && npm run lint
@@ -3370,7 +3370,7 @@ Controller live-check: register a SPARE asset (lands on the record once Task 13 
 - Create: `src/lib/labels.ts`, `src/components/inventory/record-tabs.tsx`, `src/app/(app)/inventory/[id]/layout.tsx`, `src/app/(app)/inventory/[id]/page.tsx`, `src/app/(app)/inventory/[id]/not-found.tsx`, `src/app/(app)/inventory/activity/page.tsx`, `src/app/(app)/employees/activity/page.tsx`
 - Modify: `src/server/modules/inventory/queries.ts` (wrap `getAsset` in React `cache`)
 
-- [ ] **Step 1: Create `src/lib/labels.ts`**
+- [x] **Step 1: Create `src/lib/labels.ts`**
 
 ```ts
 import type { ApprovalType } from "@prisma/client";
@@ -3385,7 +3385,7 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
 };
 ```
 
-- [ ] **Step 2: Dedupe `getAsset` between layout and pages** — in `src/server/modules/inventory/queries.ts`:
+- [x] **Step 2: Dedupe `getAsset` between layout and pages** — in `src/server/modules/inventory/queries.ts`:
 
 ```ts
 import { cache } from "react";
@@ -3408,7 +3408,7 @@ export const getAsset = cache((id: string) =>
 );
 ```
 
-- [ ] **Step 3: Create `src/components/inventory/record-tabs.tsx`**
+- [x] **Step 3: Create `src/components/inventory/record-tabs.tsx`**
 
 ```tsx
 "use client";
@@ -3439,7 +3439,7 @@ export function RecordTabs({ assetId }: { assetId: string }) {
 }
 ```
 
-- [ ] **Step 4: Create `src/app/(app)/inventory/[id]/layout.tsx`**
+- [x] **Step 4: Create `src/app/(app)/inventory/[id]/layout.tsx`**
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -3532,7 +3532,7 @@ export function RequestStatusChange({ assetId, currentStatus }: { assetId: strin
 }
 ```
 
-- [ ] **Step 5: Create `src/app/(app)/inventory/[id]/page.tsx`** (Overview)
+- [x] **Step 5: Create `src/app/(app)/inventory/[id]/page.tsx`** (Overview)
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -3608,7 +3608,7 @@ export default async function AssetOverviewPage({ params }: { params: Promise<{ 
 }
 ```
 
-- [ ] **Step 6: Create `src/app/(app)/inventory/[id]/not-found.tsx`**
+- [x] **Step 6: Create `src/app/(app)/inventory/[id]/not-found.tsx`**
 
 ```tsx
 import { EmptyState } from "@/components/ui/empty-state";
@@ -3625,7 +3625,7 @@ export default function AssetNotFound() {
 }
 ```
 
-- [ ] **Step 7: Create the two activity placeholders** (static segments beat `[id]` — without these, `/inventory/activity` would resolve to the record route and 404)
+- [x] **Step 7: Create the two activity placeholders** (static segments beat `[id]` — without these, `/inventory/activity` would resolve to the record route and 404)
 
 `src/app/(app)/inventory/activity/page.tsx`:
 
@@ -3651,7 +3651,7 @@ export default async function InventoryActivityPage() {
 
 `src/app/(app)/employees/activity/page.tsx`: identical shape with title "Employee activity" and path `/employees/activity`.
 
-- [ ] **Step 8: Verify and commit**
+- [x] **Step 8: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -3673,7 +3673,7 @@ Controller live-check: open BR-LT-0148 → header pill DEPLOYED, held-by link; B
 - Create: `src/app/(app)/inventory/[id]/edit/page.tsx`
 - Modify: `src/server/modules/inventory/actions.ts`, `src/components/inventory/request-status-change.tsx` (replace placeholder body)
 
-- [ ] **Step 1: Add `updateAsset` and `requestStatusChange` to `src/server/modules/inventory/actions.ts`**
+- [x] **Step 1: Add `updateAsset` and `requestStatusChange` to `src/server/modules/inventory/actions.ts`**
 
 Add import: `import { diffOf } from "@/lib/audit-diff";` and:
 
@@ -3797,7 +3797,7 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
 }
 ```
 
-- [ ] **Step 2: Replace the placeholder body of `src/components/inventory/request-status-change.tsx`**
+- [x] **Step 2: Replace the placeholder body of `src/components/inventory/request-status-change.tsx`**
 
 ```tsx
 "use client";
@@ -3883,7 +3883,7 @@ export function RequestStatusChange({ assetId, currentStatus }: { assetId: strin
 }
 ```
 
-- [ ] **Step 3: Create `src/app/(app)/inventory/[id]/edit/page.tsx`**
+- [x] **Step 3: Create `src/app/(app)/inventory/[id]/edit/page.tsx`**
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -3949,7 +3949,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -3977,7 +3977,7 @@ Controller live-check: edit BR-LT-0181's model → Save morphs to ✓ Saved + "a
 **Files:**
 - Create: `src/lib/history.ts` (+ `.test.ts`), `src/components/patterns/timeline-list.tsx`, `src/app/(app)/inventory/[id]/history/page.tsx`, `src/app/(app)/inventory/[id]/timeline/page.tsx`, `src/app/(app)/inventory/[id]/reservations/page.tsx`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/history.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/history.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -4009,11 +4009,11 @@ describe("historyRows — one row per FIELD, not per save (README 7c)", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/history.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/lib/history.ts`**
+- [x] **Step 3: Implement `src/lib/history.ts`**
 
 ```ts
 export interface AuditEntryLike {
@@ -4062,11 +4062,11 @@ export function historyRows(entries: AuditEntryLike[]): HistoryRow[] {
 }
 ```
 
-- [ ] **Step 4: Run tests — green**
+- [x] **Step 4: Run tests — green**
 
 Run: `npm run test -- src/lib/history.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Create `src/app/(app)/inventory/[id]/history/page.tsx`**
+- [x] **Step 5: Create `src/app/(app)/inventory/[id]/history/page.tsx`**
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -4124,7 +4124,7 @@ export default async function AssetHistoryPage({ params }: { params: Promise<{ i
 }
 ```
 
-- [ ] **Step 6: Create `src/components/patterns/timeline-list.tsx`** (server-safe — used by asset + employee timelines and later phases)
+- [x] **Step 6: Create `src/components/patterns/timeline-list.tsx`** (server-safe — used by asset + employee timelines and later phases)
 
 ```tsx
 import { StatusDot } from "@/components/ui/status";
@@ -4158,7 +4158,7 @@ export function TimelineList({ items }: { items: TimelineItem[] }) {
 }
 ```
 
-- [ ] **Step 7: Create `src/app/(app)/inventory/[id]/timeline/page.tsx`** (audit entries + approvals, merged chronologically)
+- [x] **Step 7: Create `src/app/(app)/inventory/[id]/timeline/page.tsx`** (audit entries + approvals, merged chronologically)
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -4216,7 +4216,7 @@ export default async function AssetTimelinePage({ params }: { params: Promise<{ 
 }
 ```
 
-- [ ] **Step 8: Create `src/app/(app)/inventory/[id]/reservations/page.tsx`**
+- [x] **Step 8: Create `src/app/(app)/inventory/[id]/reservations/page.tsx`**
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -4279,7 +4279,7 @@ export default async function AssetReservationsPage({ params }: { params: Promis
 }
 ```
 
-- [ ] **Step 9: Verify and commit**
+- [x] **Step 9: Verify and commit**
 
 ```bash
 npm run test && npx tsc --noEmit && npm run lint
@@ -4296,7 +4296,7 @@ Controller live-check: BR-LT-0148 history shows the seeded update as TWO rows (s
 **Files:**
 - Create: `src/server/modules/inventory/document-actions.ts`, `src/components/inventory/documents-panel.tsx`, `src/app/(app)/inventory/[id]/documents/page.tsx`, `src/app/(app)/inventory/[id]/documents/[docId]/download/route.ts`
 
-- [ ] **Step 1: Create `src/server/modules/inventory/document-actions.ts`**
+- [x] **Step 1: Create `src/server/modules/inventory/document-actions.ts`**
 
 ```ts
 "use server";
@@ -4403,7 +4403,7 @@ export async function markDocumentSigned(input: { docId: string }): Promise<Acti
 }
 ```
 
-- [ ] **Step 2: Create the download route** `src/app/(app)/inventory/[id]/documents/[docId]/download/route.ts` (nested under the record path so middleware's `/inventory` rules gate it)
+- [x] **Step 2: Create the download route** `src/app/(app)/inventory/[id]/documents/[docId]/download/route.ts` (nested under the record path so middleware's `/inventory` rules gate it)
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -4443,7 +4443,7 @@ export async function GET(
 }
 ```
 
-- [ ] **Step 3: Create `src/components/inventory/documents-panel.tsx`**
+- [x] **Step 3: Create `src/components/inventory/documents-panel.tsx`**
 
 ```tsx
 "use client";
@@ -4607,7 +4607,7 @@ export function DocumentsPanel({
 }
 ```
 
-- [ ] **Step 4: Create `src/app/(app)/inventory/[id]/documents/page.tsx`**
+- [x] **Step 4: Create `src/app/(app)/inventory/[id]/documents/page.tsx`**
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -4648,7 +4648,7 @@ export default async function AssetDocumentsPage({ params }: { params: Promise<{
 }
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -4667,7 +4667,7 @@ Controller live-check: upload a PNG → row appears + toast; a `.txt` → reject
 **Files:**
 - Create: `src/server/modules/inventory/secret-actions.ts`, `src/components/inventory/secrets-panel.tsx`, `src/app/(app)/inventory/[id]/secrets/page.tsx`
 
-- [ ] **Step 1: Create `src/server/modules/inventory/secret-actions.ts`**
+- [x] **Step 1: Create `src/server/modules/inventory/secret-actions.ts`**
 
 ```ts
 "use server";
@@ -4758,7 +4758,7 @@ export async function revealSecret(
 }
 ```
 
-- [ ] **Step 2: Create `src/components/inventory/secrets-panel.tsx`**
+- [x] **Step 2: Create `src/components/inventory/secrets-panel.tsx`**
 
 ```tsx
 "use client";
@@ -4925,7 +4925,7 @@ export function SecretsPanel({
 }
 ```
 
-- [ ] **Step 3: Create `src/app/(app)/inventory/[id]/secrets/page.tsx`**
+- [x] **Step 3: Create `src/app/(app)/inventory/[id]/secrets/page.tsx`**
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -4957,7 +4957,7 @@ export default async function AssetSecretsPage({ params }: { params: Promise<{ i
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -4976,7 +4976,7 @@ Controller live-check: add a secret to BR-LT-0148, reveal it → countdown ticks
 **Files:**
 - Create: `src/lib/loadout.ts` (+ `.test.ts`)
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/loadout.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/loadout.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -5037,11 +5037,11 @@ describe("computeLoadout", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/loadout.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/lib/loadout.ts`**
+- [x] **Step 3: Implement `src/lib/loadout.ts`**
 
 ```ts
 /**
@@ -5110,7 +5110,7 @@ export function computeLoadout<A extends HeldAssetLike>(slots: SlotLike[], held:
 }
 ```
 
-- [ ] **Step 4: Run tests — green, commit**
+- [x] **Step 4: Run tests — green, commit**
 
 ```bash
 npm run test -- src/lib/loadout.test.ts && npx tsc --noEmit && npm run lint
@@ -5125,7 +5125,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Create: `src/lib/employees-list.ts` (+ `.test.ts`), `src/server/modules/employees/queries.ts`, `src/components/employees/employees-toolbar.tsx`, `src/app/(app)/employees/page.tsx`, `src/app/(app)/employees/loading.tsx`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/employees-list.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/employees-list.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -5155,11 +5155,11 @@ describe("buildEmployeeWhere", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/employees-list.test.ts` — Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/lib/employees-list.ts`**
+- [x] **Step 3: Implement `src/lib/employees-list.ts`**
 
 ```ts
 import type { EmploymentStatus, Prisma } from "@prisma/client";
@@ -5190,11 +5190,11 @@ export function buildEmployeeWhere(state: ListState): Prisma.EmployeeWhereInput 
 }
 ```
 
-- [ ] **Step 4: Run tests — green**
+- [x] **Step 4: Run tests — green**
 
 Run: `npm run test -- src/lib/employees-list.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Create `src/server/modules/employees/queries.ts`**
+- [x] **Step 5: Create `src/server/modules/employees/queries.ts`**
 
 ```ts
 import { prisma } from "@/server/db/client";
@@ -5290,7 +5290,7 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
 }
 ```
 
-- [ ] **Step 6: Create `src/components/employees/employees-toolbar.tsx`**
+- [x] **Step 6: Create `src/components/employees/employees-toolbar.tsx`**
 
 ```tsx
 "use client";
@@ -5374,7 +5374,7 @@ export function EmployeesToolbar({
 }
 ```
 
-- [ ] **Step 7: Create `src/app/(app)/employees/page.tsx`** (rows are Links via a plain server-rendered table — no selection/bulk here, so no client island is needed beyond the toolbar)
+- [x] **Step 7: Create `src/app/(app)/employees/page.tsx`** (rows are Links via a plain server-rendered table — no selection/bulk here, so no client island is needed beyond the toolbar)
 
 ```tsx
 import Link from "next/link";
@@ -5501,7 +5501,7 @@ export default async function EmployeesPage({
 }
 ```
 
-- [ ] **Step 8: Create `src/app/(app)/employees/loading.tsx`**
+- [x] **Step 8: Create `src/app/(app)/employees/loading.tsx`**
 
 ```tsx
 import { Skeleton, SkeletonRow } from "@/components/ui/skeleton";
@@ -5528,7 +5528,7 @@ export default function EmployeesLoading() {
 }
 ```
 
-- [ ] **Step 9: Verify and commit**
+- [x] **Step 9: Verify and commit**
 
 ```bash
 npm run test && npx tsc --noEmit && npm run lint
@@ -5550,7 +5550,7 @@ The distinctive screen (README `1i`/`7a`/`7d`): left character panel, centre 4-c
 **Files:**
 - Create: `src/server/modules/employees/actions.ts`, `src/components/employees/loadout-view.tsx`, `src/app/(app)/employees/[id]/page.tsx`, `src/app/(app)/employees/[id]/not-found.tsx`
 
-- [ ] **Step 1: Create `src/server/modules/employees/actions.ts`**
+- [x] **Step 1: Create `src/server/modules/employees/actions.ts`**
 
 ```ts
 "use server";
@@ -5723,7 +5723,7 @@ export async function requestAssignReserved(input: unknown): Promise<ActionResul
 }
 ```
 
-- [ ] **Step 2: Create `src/components/employees/loadout-view.tsx`**
+- [x] **Step 2: Create `src/components/employees/loadout-view.tsx`**
 
 ```tsx
 "use client";
@@ -6118,7 +6118,7 @@ export function LoadoutView({
 }
 ```
 
-- [ ] **Step 3: Create `src/app/(app)/employees/[id]/page.tsx`**
+- [x] **Step 3: Create `src/app/(app)/employees/[id]/page.tsx`**
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -6281,7 +6281,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
 
 (`Stat`'s API is `{ label: string; value: React.ReactNode; hint?: string }` — the four usages above match it.)
 
-- [ ] **Step 4: Create `src/app/(app)/employees/[id]/not-found.tsx`**
+- [x] **Step 4: Create `src/app/(app)/employees/[id]/not-found.tsx`**
 
 ```tsx
 import { EmptyState } from "@/components/ui/empty-state";
@@ -6298,7 +6298,7 @@ export default function EmployeeNotFound() {
 }
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -6318,7 +6318,7 @@ Controller live-check (1280px viewport): Marites → 4 filled tiles + headset ga
 - Create: `src/components/employees/employee-form.tsx`, `src/app/(app)/employees/[id]/edit/page.tsx`
 - Modify: `src/server/modules/employees/actions.ts`
 
-- [ ] **Step 1: Add `updateEmployee` to `src/server/modules/employees/actions.ts`**
+- [x] **Step 1: Add `updateEmployee` to `src/server/modules/employees/actions.ts`**
 
 Add imports: `import { diffOf } from "@/lib/audit-diff";` and:
 
@@ -6382,7 +6382,7 @@ export const M365_CANONICAL = ["pending", "active", "offboarding", "inactive"] a
 
 …and have `actions.ts` import it from there (`import { M365_CANONICAL } from "@/lib/labels";`, drop the local const).
 
-- [ ] **Step 2: Create `src/components/employees/employee-form.tsx`**
+- [x] **Step 2: Create `src/components/employees/employee-form.tsx`**
 
 ```tsx
 "use client";
@@ -6519,7 +6519,7 @@ export function EmployeeForm({
 }
 ```
 
-- [ ] **Step 3: Create `src/app/(app)/employees/[id]/edit/page.tsx`**
+- [x] **Step 3: Create `src/app/(app)/employees/[id]/edit/page.tsx`**
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -6563,7 +6563,7 @@ export default async function EditEmployeePage({ params }: { params: Promise<{ i
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -6581,7 +6581,7 @@ Controller live-check: Leo Tan shows M365 select preloaded to custom… with "co
 - Create: `src/components/employees/print-button.tsx`, `src/app/(app)/employees/[id]/timeline/page.tsx`, `src/app/(app)/employees/[id]/form/page.tsx`
 - Modify: `src/app/(app)/layout.tsx` (hide shell chrome in print)
 
-- [ ] **Step 1: Create `src/app/(app)/employees/[id]/timeline/page.tsx`** (one person's story: audit + approvals + reservations, merged)
+- [x] **Step 1: Create `src/app/(app)/employees/[id]/timeline/page.tsx`** (one person's story: audit + approvals + reservations, merged)
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -6656,11 +6656,11 @@ export default async function EmployeeTimelinePage({ params }: { params: Promise
 }
 ```
 
-- [ ] **Step 2: Hide the shell in print** — in `src/app/(app)/layout.tsx`, wrap `Sidebar` in `<div className="contents print:hidden">…</div>`, add `print:hidden` to the Topbar's wrapper the same way (`<div className="contents print:hidden"><Topbar … /></div>`), add `print:hidden` to the skip link's class list, and change main's classes to `flex-1 p-6 print:p-0`.
+- [x] **Step 2: Hide the shell in print** — in `src/app/(app)/layout.tsx`, wrap `Sidebar` in `<div className="contents print:hidden">…</div>`, add `print:hidden` to the Topbar's wrapper the same way (`<div className="contents print:hidden"><Topbar … /></div>`), add `print:hidden` to the skip link's class list, and change main's classes to `flex-1 p-6 print:p-0`.
 
 (`display: contents` keeps the flex row identical on screen; print swaps it to `none`.)
 
-- [ ] **Step 3: Create `src/components/employees/print-button.tsx`**
+- [x] **Step 3: Create `src/components/employees/print-button.tsx`**
 
 ```tsx
 "use client";
@@ -6676,7 +6676,7 @@ export function PrintButton() {
 }
 ```
 
-- [ ] **Step 4: Create `src/app/(app)/employees/[id]/form/page.tsx`** (generated from live records, never typed; the signed scan uploads back into the asset's documents)
+- [x] **Step 4: Create `src/app/(app)/employees/[id]/form/page.tsx`** (generated from live records, never typed; the signed scan uploads back into the asset's documents)
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -6775,7 +6775,7 @@ export default async function AccountabilityFormPage({ params }: { params: Promi
 }
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -6794,7 +6794,7 @@ Controller live-check: Marites → Accountability form lists her 4 items; browse
 **Files:**
 - Create: `src/server/modules/admin/reference-actions.ts`, `src/components/admin/ref-table.tsx`, `src/app/(app)/admin/asset-categories/page.tsx`, `src/app/(app)/admin/asset-types/page.tsx`, `src/app/(app)/admin/departments/page.tsx`
 
-- [ ] **Step 1: Create `src/server/modules/admin/reference-actions.ts`**
+- [x] **Step 1: Create `src/server/modules/admin/reference-actions.ts`**
 
 ```ts
 "use server";
@@ -6968,7 +6968,7 @@ export async function deleteRefRow(input: unknown): Promise<ActionResult<null>> 
 }
 ```
 
-- [ ] **Step 2: Create `src/components/admin/ref-table.tsx`**
+- [x] **Step 2: Create `src/components/admin/ref-table.tsx`**
 
 ```tsx
 "use client";
@@ -7132,7 +7132,7 @@ export function RefTable({
 }
 ```
 
-- [ ] **Step 3: Create the three pages**
+- [x] **Step 3: Create the three pages**
 
 `src/app/(app)/admin/asset-categories/page.tsx`:
 
@@ -7225,7 +7225,7 @@ export default async function DepartmentsPage() {
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -7245,7 +7245,7 @@ Controller live-check: Uncategorised shows LOCKED with no menu; add "Tablet" inl
 - Create: `e2e/it-core.spec.ts`
 - Modify: `docs/HANDOVER.md`, this plan (check off tasks, record deviations)
 
-- [ ] **Step 1: Create `e2e/it-core.spec.ts`**
+- [x] **Step 1: Create `e2e/it-core.spec.ts`**
 
 ```ts
 import { test, expect, type Page } from "@playwright/test";
@@ -7471,7 +7471,7 @@ test.describe("reference data", () => {
 });
 ```
 
-- [ ] **Step 2: Run the full battery** (STOP the dev server before `npm run build` — shared `.next`)
+- [x] **Step 2: Run the full battery** (STOP the dev server before `npm run build` — shared `.next`)
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test && npm run build
@@ -7480,7 +7480,7 @@ npm run db:seed && npm run e2e
 
 Expected: all green. The e2e run mutates data (approvals, an asset, a secret, a document, a category) — reseed afterwards if you want a clean manual-review state: `npm run db:seed`.
 
-- [ ] **Step 3: Update the docs**
+- [x] **Step 3: Update the docs**
 
 - Check off every task in this plan; append a "Deviations" section listing anything that shipped differently (there will be some — record them, don't let the plan drift).
 - Update `docs/HANDOVER.md`: Phase 3 → DONE (one paragraph: what shipped, new conventions — ActionResult, checkRate, writeAudit, url-state contract), Phase 4 entry notes (worker executes the approvals Phase 3 now creates; activity-feed placeholders to replace; approvals queue reads `Approval` rows already being produced; `getApprovalsBadge` in the sidebar already counts them).
@@ -7492,7 +7492,7 @@ git commit -m "docs(plan): phase 3 checked off — deviations recorded, phase 4 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 4: Finish the branch**
+- [x] **Step 4: Finish the branch**
 
 Use `superpowers:finishing-a-development-branch`: merge `phase-3-it-core` to `main`, delete the branch, push.
 
@@ -7510,3 +7510,13 @@ Use `superpowers:finishing-a-development-branch`: merge `phase-3-it-core` to `ma
 
 
 
+
+---
+
+## Close-out (2026-08-17)
+
+**Battery:** `tsc --noEmit` ✓ · `eslint --max-warnings 0` ✓ · 150 unit tests ✓ · `next build` ✓ · seed + 39 e2e (auth-shell 15, it-core 19, kitchen-sink 5) ✓ — e2e runs `--workers=1`: the suites share one DB and auth-shell asserts the exact seeded badge count while it-core creates approvals.
+
+**Task 24 deviations:** e2e selectors reconciled against the real UI (scoped ambiguous "Status" locator, waitForURL after the exact-tag redirect, `/logout`-first login helper for mid-test user switches, unique per-run secret labels/filenames, bulk test uses SPARE assets because closed-family stock is deliberately skipped, hard navigation before axe scans). Two a11y defects the axe pass caught were FIXED in-app rather than skipped: loadout microcopy moved from `--text-faint`/opacity-dimming to muted tokens (2.5:1 → 4.7:1), and the gaps-filter link's `aria-pressed` became `aria-current`.
+
+**Unplanned fixes shipped during execution (all recorded inline above):** stale-JWT `/logout` escape hatch (deleted/disabled/role-changed sessions looped through the login bounce forever); `HIDEABLE_COLUMNS` moved to lib (client-module exports aren't values on the server); crypto v1 AAD+version format; RateEvent pruning; `Approval_one_open_per_asset` partial unique index (new migration); batched bulk transaction; day-precision date diffs in `updateAsset`; centavo-safe money inputs; combobox overlay-layer ESC; CSV BOM; ToastProvider root mount.

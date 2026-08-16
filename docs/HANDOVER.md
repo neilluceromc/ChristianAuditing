@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-16 · **main @ `22675ff`** · Phases 1–2 merged, Phases 3–8 remain.
+**Last updated:** 2026-08-17 · Phases 1–3 merged to main, Phases 4–8 remain.
 
 This is the pick-up doc for a fresh session. Read this, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover
@@ -42,33 +42,32 @@ One **plan per phase** under `docs/superpowers/plans/`, executed **subagent-driv
 - **Full battery:** `npx tsc --noEmit && npm run lint && npm run test && npm run build`, then `npm run db:seed && npm run e2e`.
 - **Seeded accounts** (all password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer) — all `@thebackroomop.com`. Seed has 22 assets (all 8 statuses), 7 approvals (all 6 states, 1 past SLA → badge shows "3, urgent"), 5 PRs (one per state, PR-0198 is a bounce-back thread), 4 reservations.
 
-## 4. What's DONE (Phases 1–2, on main)
+## 4. What's DONE (Phases 1–3, on main)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family status system (`src/lib/status.ts`, `MISSING` is the 8th AssetStatus → fault family); full Prisma schema (5 migrations incl. append-only triggers on AuditEntry/NoteEntry, partial uniques, refNo sequences); seed; ~34 UI primitives in `src/components/ui/`; `/dev/kitchen-sink` review page (404s in prod); 5 Playwright+axe tests.
 
 **Phase 2 — Auth + Shell:** Auth.js v5 (credentials; Entra registered only when fully configured, off by default); **three-layer authorization** — edge middleware (JWT-only) → DB-backed `requireUser`/`requireRole` (`src/server/auth/guards.ts`) → UI nav filtering, all from one truth module (`src/lib/workspaces.ts`, default-deny path gating); login/signup/bootstrap; four workspace sidebars + switcher (degrades to static label) + topbar + mobile left-drawer + ⌘K command palette; cookie-driven SSR theme/density/workspace. 80 unit + 20 e2e (axe on login and shell).
 
-## 5. What REMAINS (Phases 3–8)
+**Phase 3 — IT core** (plan: `docs/superpowers/plans/2026-08-16-phase-3-it-core.md`, incl. all recorded deviations): the full `/inventory` surface (list with facets/sort/chips/bulk-select→approval-creating bulk drawer/CSV export/column prefs, new, record with Overview/History/Timeline/Documents/Secrets/Reservations tabs, edit), the full `/employees` surface (list with Items+Loadout columns, the loadout view with slot grid + fill/return via approvals, edit with M365 canonical+custom, timeline, printable accountability form), and reference-data CRUD ×3. **New server conventions every later phase must follow:** `ActionResult` union + `actionRole`/`actionUser` no-redirect guards (`src/server/action-result.ts`, `guards.ts`) · `checkRate` (60/min RateEvent, self-pruning) · `writeAudit(tx, …)` + `diffOf` (day-precision date handling in updateAsset is the template) · `createApproval`/`openApprovalForAsset`/`newSlaAt` over `approval_ref_seq` · URL list state via `src/lib/url-state.ts` · secrets AES-256-GCM **v1: base64(version‖iv‖tag‖data), AAD = "assetId:label"** · `Approval_one_open_per_asset` partial unique index (catch P2002 → conflict). 150 unit + 39 e2e.
+
+## 5. What REMAINS (Phases 4–8)
 
 Each gets its own plan → subagent execution → review → merge. Scope from the spec §7 and brief §7.
 
-- **Phase 3 — IT core.** `/inventory` list (filter/facet/sort/paginate/density/bulk-select→bulk drawer/export), `/inventory/new`, `/inventory/[id]` (tabs + DescriptionList), `/inventory/[id]/edit`, and record sub-tabs `history` (one row per field), `timeline`, `documents`, `secrets` (AUDITED — reveal writes SECRET_READ, 30s auto-hide), `reservations`; `/employees` list, `/employees/[id]` (**the loadout view** — slot grid vs policy, the distinctive screen), `/employees/[id]/edit` (M365 status select), `/employees/[id]/timeline`, `/employees/[id]/form` (printable accountability form); reference-data CRUD `/admin/asset-categories|asset-types|departments` (one table design, inline add row, locked Uncategorised).
 - **Phase 4 — Approvals + audit.** `/approvals` queue (tabs Open/Mine/Unclaimed/Failed/Closed; keyboard J/K/C/A/R/E), `/approvals/[id]` (claim→approve; Approve only appears after claim; EXECUTION_FAILED gets its own card), the **worker process** (poll Job table `FOR UPDATE SKIP LOCKED`, set the lease `lockedAt` atomically, execute → EXECUTED/EXECUTION_FAILED), `/audit` (append-only, no row actions), activity feeds (one renderer, scoped variants).
 - **Phase 5 — Purchasing.** `/purchases` (tabs write `?state=`), `/purchases/new` (multi-unit rows), `/purchases/[id]` (**the bounce-back is the design problem** — red banner, 4-stop stepper with dashed return path, per-unit states, append-only notes thread, IT slot editor / Finance unit editor inline), `/purchases/[id]/edit`, `/purchases/activity`.
 - **Phase 6 — Finance + Home.** `/finance/assets`, `/finance/activity`; the role-aware Home dashboards (IT has NO KPI row — "Your shift", Fleet bar, Age histogram, Claimed-by-you, Warranty runway; Finance leads with money; Viewer minus mutating affordances) with **independently degrading sections** (Focus mode cookie).
 - **Phase 7 — Offboarding + repairs + policies.** `/offboarding` + `/offboarding/[employeeId]` (4-step wizard; per-item Returned/Defective/Buyout/**Missing** segmented control, each creating its own `lifecycle.return` approval), repairs saved view (`?status=DEFECTIVE` + vendor fields, no new enum), `/reservations`, `/admin/equipment-policies`.
 - **Phase 8 — Admin + import/export + polish.** `/admin/users` (locked permanent admin), `/admin/webhooks` + `/deliveries` (dead-letter replay), `/admin/flags`; import (3-step dry-run → commit, blocked rows grouped by cause), export (10,000-row cap, split-by-year), printable label sheet, USB-scanner behaviour, deployment README, full axe pass. **Entra SSO wiring** (needs tenant creds + a signIn callback mapping profile→User) also lands here or is explicitly deferred.
 
-## 6. Phase 3 entry criteria (READ BEFORE STARTING — these are load-bearing)
+## 6. Phase 4 entry criteria (READ BEFORE STARTING — these are load-bearing)
 
-Also recorded at the end of `docs/superpowers/plans/2026-08-16-phase-2-auth-shell.md`:
-
-1. **Path gating is navigation-only, NOT write protection.** A viewer has *path* access to `/employees`, `/approvals`, `/inventory` etc. **Every Phase 3 server action must call `requireRole(...)` itself** (mirror `switchWorkspace`/`paletteSearch`). This is the #1 thing to get right.
-2. **Fix the `EmploymentStatus` status-map collision before any employee status pill renders.** In `src/lib/status.ts`: `ACTIVE` collides with Reservation `ACTIVE` → renders *inflight* (should be *settled*); `OFFBOARDING`/`OFFBOARDED` are absent → fall through to *neutral* (should be *inflight*/*closed*). Namespace the lookup per entity, or give employment distinct values.
-3. **Every mutating server action follows the spec's shape:** auth guard → **rate limit** (60/min per user via the `RateEvent` table — deferred from P2, lands now) → zod validation → domain call in a transaction with the audit write in the same transaction → `revalidatePath` → typed result (`ok|forbidden|rate_limited|validation|conflict`).
-4. **Secrets:** `/inventory/[id]/secrets` is already gated to the IT workspace in path rules, but the reveal action needs its own `requireRole` + writes `SECRET_READ` audit + 30s auto-hide. Implement AES-256-GCM using `SECRET_ENCRYPTION_KEY` (env; add a real key to `.env`).
-5. **URL is the source of truth for list state** (filters/sort/page/tab in query params) — fixed contract, don't break it. Column visibility/order is per-user preference (`UserPreference` table), NOT URL. `paletteSearch` needs query-level gating + rate limiting.
-6. **Client-island rule:** `Table`'s `onSort`/`Tr onClick` and form-control handlers require a **client** caller — extract client islands for the inventory table's sorting/selection; the page/layout stays a server component.
+1. **The worker MUST re-validate before executing.** A `lifecycle_assign` approval can sit for its 48h SLA while the world changes: re-check `employee.employment === "ACTIVE"`, the asset still exists and is still assignable, inside the execution transaction. Store failures verbatim in `workerError` → `EXECUTION_FAILED` (the seed's APR-2025 shows the designed message shape). Request-time checks in Phase 3 actions are advisory only.
+2. **Phase 3 is already producing real Approval rows** (bulk + single status changes, assigns, returns). The queue page renders them; the worker executes them: assign → set assigneeId + status from payload; return → clear assignee + SPARE; change-status → set status. Every execution writes the asset diff to AuditEntry in the same transaction.
+3. **`Approval_one_open_per_asset`** (partial unique index, migration `20260817001000`): one PENDING/CLAIMED/APPROVED approval per asset, DB-enforced. Approve/reject/execute transitions never violate it, but any NEW approval-creating action must catch P2002 → typed conflict.
+4. **Queue actions follow the Phase 3 action shape** (`actionRole` → `checkRate` → zod → tx+audit → revalidate → `ActionResult`) and the state machine from the brief §6.2 — claim only from PENDING, approve only by the claim owner, reject needs a reason, escalate changes priority not state. Build `approvalTransition(state, action, ctx)` as a pure TDD'd function first.
+5. **Activity feeds replace the two placeholder pages** (`/inventory/activity`, `/employees/activity` — real static pages exist so the `[id]` routes don't swallow them; replace their bodies, keep the paths). One ActivityFeed renderer; the domain pill is the only difference between scoped and cross-domain feeds.
+6. **The sidebar badge already counts PENDING/CLAIMED + past-SLA** (`getApprovalsBadge`); approving must decrement it only after the row leaves — revalidate the shell path.
 
 ## 7. Recurring gotchas that have cost real time
 
@@ -79,6 +78,10 @@ Also recorded at the end of `docs/superpowers/plans/2026-08-16-phase-2-auth-shel
 - **Browser-pane quirks:** synthetic `computer key Return`/`.click()` sometimes don't reach React handlers; use `form.requestSubmit()` / dispatch a real `KeyboardEvent`, or rely on Playwright (real trusted events). Screenshot clicks use the **screenshot's** coordinate frame; ref coordinates can be stale after a resize — re-read the page. The sidebar only renders at `lg:` width — set a 1280px viewport to see it.
 - **Reviewers may stop the controller's dev server.** After a review round, `preview_list` and restart if needed before the next live check.
 - **`design_handover/` is git-ignored from lint/build** and must stay untouched — it's the source of truth, not code.
+- **Non-component exports from a `"use client"` module are NOT values on the server** — a server page importing an array from a client file gets a reference proxy and crashes at runtime (tsc/lint don't catch it). Shared constants live in `src/lib/`.
+- **Reseeding invalidates every session** (new user ids). Stale JWTs escape via `GET /logout` (clears the cookie) — `requireUser` redirects there; without it the login bounce loops forever.
+- **Playwright must run `--workers=1`**: the spec files share one DB; auth-shell asserts the exact seeded badge count while it-core creates approvals.
+- **Prisma interactive transactions default to a 5s budget** — batch per-row loops (`createMany`, one `generate_series` nextval call) instead of N sequential round trips.
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
 
