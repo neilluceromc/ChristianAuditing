@@ -17,7 +17,8 @@
     "e2e": "playwright test",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "worker": "tsx src/worker/index.ts"
+    "worker": "tsx src/worker/index.ts",
+    "worker:once": "tsx src/worker/index.ts --once"
   },
   "dependencies": {
     "@prisma/client": "^6.13.0",
