@@ -2,6 +2,7 @@
 
 import { AuthError } from "next-auth";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { signIn, signOut } from "./index";
 import { prisma } from "../db/client";
@@ -89,4 +90,59 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
     redirect("/login"); // account exists; worst case they sign in manually
   }
   redirect(ROLE_LANDING.viewer);
+}
+
+export async function createBootstrapAdmin(
+  _prev: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const name = String(formData.get("name") ?? "").trim();
+  const email = normalizeEmail(String(formData.get("email") ?? ""));
+  const password = String(formData.get("password") ?? "");
+  const domain = String(formData.get("domain") ?? "").trim().toLowerCase();
+
+  if (name.length < 2) return { error: "Enter your name." };
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Enter a valid email." };
+  if (password.length < 10) return { error: "Password must be at least 10 characters." };
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  try {
+    await prisma.$transaction(async (tx) => {
+      const count = await tx.user.count();
+      if (count > 0) throw new Error("BOOTSTRAP_CLOSED");
+      const admin = await tx.user.create({
+        data: { name, email, passwordHash, role: "admin", isPermanentAdmin: true },
+      });
+      await tx.featureFlag.upsert({
+        where: { key: "allowed_domain" },
+        update: { enabled: !!domain, value: domain || undefined },
+        create: {
+          key: "allowed_domain",
+          enabled: !!domain,
+          value: domain || undefined,
+          description: "Signup domain restriction",
+        },
+      });
+      await tx.auditEntry.create({
+        data: {
+          actorId: admin.id,
+          actorLabel: admin.name,
+          entityType: "user",
+          entityId: admin.id,
+          action: "bootstrap",
+          diff: { role: { from: null, to: "admin" }, allowedDomain: { from: null, to: domain || null } },
+        },
+      });
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === "BOOTSTRAP_CLOSED") {
+      return { error: "Setup is already complete." };
+    }
+    throw err;
+  }
+
+  await signIn("credentials", { email, password, redirect: false });
+  const jar = await cookies();
+  jar.set("br.dept", "it", { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
+  redirect("/"); // "Create admin and open IT" — admin home with the IT workspace active
 }
