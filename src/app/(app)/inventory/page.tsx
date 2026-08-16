@@ -4,7 +4,7 @@ import {
   clearFilters, parseListState, serializeListState, toSearchParams, withFilter,
 } from "@/lib/url-state";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
-import { exactTagMatch, facetOptions, listAssets } from "@/server/modules/inventory/queries";
+import { exactTagMatch, facetOptions, getInventoryColumns, listAssets } from "@/server/modules/inventory/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
@@ -12,7 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ButtonLink } from "@/components/ui/button-link";
 import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filter-row";
 import { InventoryTable } from "@/components/inventory/inventory-table";
-import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
+import { ColumnChooser } from "@/components/inventory/column-chooser";
 import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
 
 export default async function InventoryPage({
@@ -30,9 +30,10 @@ export default async function InventoryPage({
     if (hit) redirect(`/inventory/${hit.id}`);
   }
 
-  const [{ rows, total, pageCount }, facets] = await Promise.all([
+  const [{ rows, total, pageCount }, facets, visibleColumns] = await Promise.all([
     listAssets(state),
     facetOptions(state),
+    getInventoryColumns(user.id),
   ]);
 
   const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0;
@@ -64,14 +65,16 @@ export default async function InventoryPage({
         }
       />
       <div className="flex flex-col gap-2">
-        <InventoryToolbar state={state} total={total} facets={facets} />
+        <InventoryToolbar state={state} total={total} facets={facets}>
+          <ColumnChooser visible={visibleColumns} />
+        </InventoryToolbar>
         <ChipFilterRow chips={chips} clearHref={href(clearFilters(state))} />
         {rows.length > 0 ? (
           <>
             <InventoryTable
               rows={rows}
               state={state}
-              visible={[...COLUMN_PREF_KEYS["columns:inventory"]]}
+              visible={visibleColumns}
               canMutate={canMutate}
               filtersQS={serializeListState(state, INVENTORY_LIST_CONFIG).replace(/^\?/, "")}
               total={total}

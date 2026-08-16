@@ -5,6 +5,7 @@ import {
   ASSET_STATUSES, buildAssetOrderBy, buildAssetWhere,
 } from "@/lib/inventory-list";
 import type { ListState } from "@/lib/url-state";
+import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 
 export const PAGE_SIZE = 25;
 
@@ -50,6 +51,16 @@ export async function listAssets(state: ListState): Promise<{
       warranty: fmtDate(a.warrantyUntil),
     })),
   };
+}
+
+/** Visible hideable columns for this user; default = all. */
+export async function getInventoryColumns(userId: string): Promise<string[]> {
+  const allowed = COLUMN_PREF_KEYS["columns:inventory"] as readonly string[];
+  const pref = await prisma.userPreference.findUnique({
+    where: { userId_key: { userId, key: "columns:inventory" } },
+  });
+  if (!pref || !Array.isArray(pref.value)) return [...allowed];
+  return (pref.value as string[]).filter((c) => allowed.includes(c));
 }
 
 export interface FacetOption {
