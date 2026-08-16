@@ -3,8 +3,9 @@
 import { usePathname, useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
+import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
-import { serializeListState, withSearch, type ListState } from "@/lib/url-state";
+import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 
 export function InventoryToolbar({
@@ -20,10 +21,13 @@ export function InventoryToolbar({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  void facets; // consumed from Task 8 (facet dropdowns)
 
   function submitSearch(q: string) {
     router.push(pathname + serializeListState(withSearch(state, q), INVENTORY_LIST_CONFIG));
+  }
+
+  function applyFacet(facet: string, values: string[]) {
+    router.push(pathname + serializeListState(withFilter(state, facet, values), INVENTORY_LIST_CONFIG));
   }
 
   return (
@@ -43,6 +47,15 @@ export function InventoryToolbar({
           }}
         />
       </div>
+      {(["status", "category", "type", "assignee"] as const).map((facet) => (
+        <FacetDropdown
+          key={facet}
+          label={facet === "assignee" ? "Assigned" : facet[0].toUpperCase() + facet.slice(1)}
+          options={facets[facet] ?? []}
+          selected={state.filters[facet] ?? []}
+          onApply={(values) => applyFacet(facet, values)}
+        />
+      ))}
       {children}
       <span className="ml-auto font-mono text-[11px] text-fg-muted" aria-live="polite">
         {total} asset{total === 1 ? "" : "s"}
