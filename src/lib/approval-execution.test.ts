@@ -24,6 +24,11 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
     expect(plan.ok).toBe(false);
     if (!plan.ok) expect(plan.error.length).toBeGreaterThan(10);
   });
+  it("change-status: refuses out-of-enum targets instead of casting blindly", () => {
+    const plan = executionPlan("lifecycle_change_status", { from: { status: "SPARE" }, to: { status: "BANANAS" } });
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.error).toMatch(/not a valid asset status/);
+  });
   it("unsupported types fail honestly", () => {
     const plan = executionPlan("lifecycle_transfer", { from: "EMP-0042", to: "EMP-0051" });
     expect(plan.ok).toBe(false);

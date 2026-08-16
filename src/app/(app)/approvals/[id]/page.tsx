@@ -26,7 +26,6 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
     assetTag: approval.asset?.tag,
     employeeName: approval.employee?.name,
   });
-  const payload = (approval.payload ?? {}) as Record<string, Record<string, unknown>>;
 
   return (
     <>
@@ -84,8 +83,6 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
                     </Link>
                   ) : ("—"),
                 },
-                { label: "From", value: JSON.stringify(payload.from ?? {}), mono: true },
-                { label: "To", value: JSON.stringify(payload.to ?? {}), mono: true },
                 ...(approval.resolutionReason
                   ? [{ label: "Resolution", value: approval.resolutionReason }]
                   : []),

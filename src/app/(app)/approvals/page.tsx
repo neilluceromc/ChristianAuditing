@@ -51,6 +51,11 @@ export default async function ApprovalsPage({
             description={tab === "open" ? "New lifecycle requests land here the moment they're made." : undefined}
           />
         )}
+        {rows.length > 0 && counts[tab] > rows.length && (
+          <p className="font-mono text-[10px] text-fg-muted">
+            showing {rows.length} of {counts[tab]} — ordered by SLA, what breaks first
+          </p>
+        )}
         {canAct && rows.length > 0 && (
           <p className="font-mono text-[10px] text-fg-muted">
             J/K move · Enter opens · C claim · A approve · R reject · E escalate

@@ -1893,6 +1893,15 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+> **Deviations from the Tasks 1–10 opus review (controller applied):**
+> 1. **No silent third outcome for executions** (critical): `executeApproval` now catches unexpected throws (tx timeout, driver error) and terminalizes the approval as EXECUTION_FAILED with `Execution error: …` — previously the tx rolled back everything and the approval sat "queued for execution" forever with no recovery surface. The planner also validates change-status targets against `ASSET_STATUSES` instead of casting blindly (an out-of-enum value threw inside the tx).
+> 2. **Worker writes are state-guarded** (`updateMany where state=APPROVED`, claimed BEFORE the asset write): a second worker after stale-lease recovery, or an operator racing the execution, makes it a no-op — never a double-apply or duplicate audit rows.
+> 3. **Held assets refuse non-holder statuses at execution**: change-status to anything but DEPLOYED/TEMPORARY on an assigned asset fails verbatim ("request a lifecycle.return first") — disposing an asset must not silently strand its holder.
+> 4. **`transition()` catches P2002** from `Job_one_live_execute_per_approval` (a **Phase 1** integrity index this plan's architecture note missed — and the note wrongly said `Approval_one_open_per_asset` "never blocks transitions"; that index exists and is creation-only as designed, but the JOB index is the one retry can trip) → typed conflict instead of a 500.
+> 5. **Queue a11y**: a polite live region announces the J/K selection (refNo, change, state, owner, position) — the visual highlight said nothing to screen readers; approve pre-checks `mine` client-side; actions are inert while a row is animating out; the orphaned `ringout` keyframe twin was removed.
+> 6. Minor batch: escalate's guard includes priority (racing escalates step NORMAL→HIGH→URGENT instead of both writing HIGH); detail page no longer renders raw payload JSON (cuids); queue shows "showing N of M" past the 50-row page; /audit + both activity feeds clamp `?page=` to the real page count; `systemChecks` reuses `getApproval`'s included asset instead of refetching; seed comments APR-2040's deliberately incomplete shape.
+> Recorded, deferred: `QUEUE_PAGE_SIZE` pagination (M3 hint shipped instead); the recoverStale wall-clock lease heuristic (mitigated by the state-guarded writes); a Job admin surface (Phase 8's deliveries page is the natural home).
+
 ### Task 11: E2E, full battery, docs, finish the branch
 
 **Files:**

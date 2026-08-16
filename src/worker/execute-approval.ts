@@ -11,8 +11,27 @@ type Diff = Record<string, { from: unknown; to: unknown }>;
  * store the error VERBATIM (the retry UI shows exactly this text) and the
  * approval becomes EXECUTION_FAILED. The Job itself still completes — job
  * failure is reserved for infrastructure errors.
+ *
+ * Every terminal write is a state-guarded updateMany: a second worker (or an
+ * operator rejecting mid-flight) makes this execution a no-op, never a
+ * double-apply. And there is NO silent third outcome — an unexpected throw
+ * (tx timeout, driver error) is caught and terminalized as EXECUTION_FAILED
+ * so an approval can never sit "queued for execution" forever.
  */
 export async function executeApproval(approvalId: string): Promise<void> {
+  try {
+    await runExecution(approvalId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // If even this write fails, let it throw — the job layer backs off/retries.
+    await prisma.approval.updateMany({
+      where: { id: approvalId, state: "APPROVED" },
+      data: { state: "EXECUTION_FAILED", workerError: `Execution error: ${message}` },
+    });
+  }
+}
+
+async function runExecution(approvalId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const approval = await tx.approval.findUnique({
       where: { id: approvalId },
@@ -22,10 +41,11 @@ export async function executeApproval(approvalId: string): Promise<void> {
     if (approval.state !== "APPROVED") return; // rejected/executed meanwhile — stale job
 
     const fail = async (error: string) => {
-      await tx.approval.update({
-        where: { id: approval.id },
+      const marked = await tx.approval.updateMany({
+        where: { id: approval.id, state: "APPROVED" },
         data: { state: "EXECUTION_FAILED", workerError: error },
       });
+      if (marked.count === 0) return; // raced by a concurrent transition — theirs wins
       await tx.auditEntry.create({
         data: {
           actorLabel: "worker",
@@ -77,7 +97,22 @@ export async function executeApproval(approvalId: string): Promise<void> {
       if (expectedFrom && asset.status !== expectedFrom) {
         return fail(`Execution guard: ${asset.tag} reads ${asset.status}, payload expected ${expectedFrom} — refused`);
       }
+      // A held asset can't be status-changed out from under its holder — that
+      // would strand the assignment invisibly. Returns go through
+      // lifecycle.return; only holder-compatible statuses may apply here.
+      const keepsHolder = plan.updates.status === "DEPLOYED" || plan.updates.status === "TEMPORARY";
+      if (asset.assigneeId && !keepsHolder) {
+        return fail(`Execution guard: ${asset.tag} is still assigned — request a lifecycle.return first, then change its status`);
+      }
     }
+
+    // Claim the approval row FIRST (state-guarded): if a concurrent transition
+    // got there, no asset write happens at all.
+    const claimed = await tx.approval.updateMany({
+      where: { id: approval.id, state: "APPROVED" },
+      data: { state: "EXECUTED", resolvedAt: new Date(), workerError: null },
+    });
+    if (claimed.count === 0) return;
 
     // Apply + audit the ASSET diff in the same transaction (entry criterion #2).
     await tx.asset.update({ where: { id: asset.id }, data: plan.updates });
@@ -107,10 +142,6 @@ export async function executeApproval(approvalId: string): Promise<void> {
       });
     }
 
-    await tx.approval.update({
-      where: { id: approval.id },
-      data: { state: "EXECUTED", resolvedAt: new Date(), workerError: null },
-    });
     await tx.auditEntry.create({
       data: {
         actorLabel: "worker",

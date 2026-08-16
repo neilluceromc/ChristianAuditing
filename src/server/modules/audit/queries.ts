@@ -49,15 +49,15 @@ export async function entityLabels(
 
 export async function listAudit(state: ListState): Promise<{ rows: AuditRow[]; total: number; pageCount: number }> {
   const where = buildAuditWhere(state);
-  const [total, entries] = await Promise.all([
-    prisma.auditEntry.count({ where }),
-    prisma.auditEntry.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      skip: (state.page - 1) * AUDIT_PAGE_SIZE,
-      take: AUDIT_PAGE_SIZE,
-    }),
-  ]);
+  const total = await prisma.auditEntry.count({ where });
+  const pageCap = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE));
+  const page = Math.min(state.page, pageCap); // unbounded ?page= must not become a huge OFFSET
+  const entries = await prisma.auditEntry.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    skip: (page - 1) * AUDIT_PAGE_SIZE,
+    take: AUDIT_PAGE_SIZE,
+  });
   const labels = await entityLabels(entries);
   return {
     total,

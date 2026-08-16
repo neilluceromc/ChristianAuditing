@@ -1,5 +1,6 @@
 import type { ApprovalType, AssetStatus } from "@prisma/client";
 import { APPROVAL_TYPE_LABEL } from "./labels";
+import { ASSET_STATUSES } from "./inventory-list";
 
 /**
  * Pure payload → planned asset update. The worker re-validates LIVE state
@@ -44,6 +45,11 @@ export function executionPlan(type: ApprovalType, payload: unknown): ExecutionPl
       const status = to ? str(to.status) : null;
       if (!status) {
         return { ok: false, error: `Malformed lifecycle.change-status payload: expected to.status, got ${JSON.stringify(payload)}` };
+      }
+      if (!(ASSET_STATUSES as readonly string[]).includes(status)) {
+        // A blind cast here once let an out-of-enum value throw INSIDE the
+        // execution transaction — stranding the approval in APPROVED.
+        return { ok: false, error: `lifecycle.change-status target ${status} is not a valid asset status` };
       }
       return { ok: true, updates: { status: status as AssetStatus } };
     }

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -45,7 +45,9 @@ async function transition(
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
   let acted: Acted | null = null;
-  const failure = await prisma.$transaction(async (tx) => {
+  let failure;
+  try {
+    failure = await prisma.$transaction(async (tx) => {
     const approval = await tx.approval.findUnique({
       where: { id },
       select: { id: true, refNo: true, state: true, priority: true, claimedById: true },
@@ -73,6 +75,15 @@ async function transition(
     acted = { refNo: approval.refNo, state: String(data.state ?? approval.state) };
     return null;
   });
+  } catch (err) {
+    // Job_one_live_execute_per_approval (Phase 1 integrity index): one live
+    // EXECUTE_APPROVAL job per approval. A retry racing a still-live job hits
+    // this — a typed conflict, not a 500.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return conflict("Execution for this item is already queued or running — the worker settles it first, then retry becomes available.");
+    }
+    throw err;
+  }
   if (failure) return failure;
 
   revalidatePath("/approvals");
@@ -132,7 +143,9 @@ export async function escalateApproval(input: unknown): Promise<ActionResult<Act
   return transition("escalate", parsed.data.id, (a) => {
     const next = escalatePriority(a.priority as never);
     return {
-      guardWhere: { state: a.state as never },
+      // priority in the guard: two racing escalates step NORMAL->HIGH->URGENT
+      // instead of both writing HIGH (the loser conflicts and can re-fire)
+      guardWhere: { state: a.state as never, priority: a.priority as never },
       data: { priority: next },
       auditAction: "escalate",
       diff: { priority: { from: a.priority, to: next } },

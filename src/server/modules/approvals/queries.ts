@@ -55,7 +55,7 @@ export async function tabCounts(userId: string): Promise<Record<QueueTab, number
 export const getApproval = cache((id: string) =>
   prisma.approval.findUnique({
     where: { id },
-    include: { asset: true, employee: true, requestedBy: true, claimedBy: true },
+    include: { asset: { include: { assignee: true } }, employee: true, requestedBy: true, claimedBy: true },
   }),
 );
 
@@ -80,9 +80,7 @@ export async function systemChecks(
   const payload = obj(approval.payload) ?? {};
   const to = obj(payload.to);
   const from = obj(payload.from);
-  const asset = approval.assetId
-    ? await prisma.asset.findUnique({ where: { id: approval.assetId }, include: { assignee: true } })
-    : null;
+  const asset = approval.asset; // already loaded (with assignee) by getApproval
 
   const assetCheck: SystemCheck = approval.assetId
     ? asset

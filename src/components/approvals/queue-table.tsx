@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
@@ -38,7 +38,9 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
   const [ringing, setRinging] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<string | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  // Screen-reader feedback for the J/K selection — the visual highlight alone
+  // says nothing about which row C/A/R/E will act on.
+  const [announce, setAnnounce] = useState("");
 
   function handle(res: ActionResult<{ refNo: string; state: string }>, verb: string, rowId: string) {
     if (res.ok) {
@@ -58,6 +60,11 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
   }
 
   function act(action: "claim" | "approve" | "escalate", row: ApprovalRow) {
+    if (leaving) return; // a row is animating out — don't double-fire into stale state
+    if (action === "approve" && !row.mine) {
+      setError("Claim it first — approval requires ownership.");
+      return;
+    }
     setError(null);
     startTransition(async () => {
       if (action === "claim") handle(await claimApproval({ id: row.id }), "claimed", row.id);
@@ -85,8 +92,12 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
     if (rows.length === 0) return;
     const key = e.key.toLowerCase();
     const row = rows[focused];
-    if (key === "j" || e.key === "ArrowDown") { e.preventDefault(); setFocused((i) => Math.min(i + 1, rows.length - 1)); }
-    else if (key === "k" || e.key === "ArrowUp") { e.preventDefault(); setFocused((i) => Math.max(i - 1, 0)); }
+    const announceRow = (i: number) => {
+      const r = rows[i];
+      setAnnounce(`${r.refNo} — ${r.line1}, ${r.state}${r.owner ? `, owned by ${r.owner}` : ""}. Row ${i + 1} of ${rows.length}.`);
+    };
+    if (key === "j" || e.key === "ArrowDown") { e.preventDefault(); setFocused((i) => { const n = Math.min(i + 1, rows.length - 1); announceRow(n); return n; }); }
+    else if (key === "k" || e.key === "ArrowUp") { e.preventDefault(); setFocused((i) => { const n = Math.max(i - 1, 0); announceRow(n); return n; }); }
     else if (e.key === "Enter" && row) { e.preventDefault(); router.push(`/approvals/${row.id}`); }
     else if (!canAct || pending || !row) return;
     else if (key === "c") { e.preventDefault(); act("claim", row); }
@@ -99,8 +110,8 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
     <div className="flex flex-col gap-2">
       {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
       {error && <Banner tone="fault" title={error} />}
+      <p aria-live="polite" className="sr-only">{announce}</p>
       <div
-        ref={wrapRef}
         tabIndex={0}
         role="group"
         aria-label="Approval queue — J/K move, Enter opens, C claim, A approve, R reject, E escalate"

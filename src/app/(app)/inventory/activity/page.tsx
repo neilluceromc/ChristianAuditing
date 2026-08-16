@@ -17,19 +17,18 @@ export default async function InventoryActivityPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireUser();
-  const page = Math.max(1, Number.parseInt(toSearchParams(await searchParams).get("page") ?? "1", 10) || 1);
+  const rawPage = Math.max(1, Number.parseInt(toSearchParams(await searchParams).get("page") ?? "1", 10) || 1);
 
-  const [total, entries] = await Promise.all([
-    prisma.auditEntry.count({ where: { entityType: "asset" } }),
-    prisma.auditEntry.findMany({
-      where: { entityType: "asset" },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    }),
-  ]);
-  const labels = await entityLabels(entries);
+  const total = await prisma.auditEntry.count({ where: { entityType: "asset" } });
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(rawPage, pageCount); // unbounded ?page= must not become a huge OFFSET
+  const entries = await prisma.auditEntry.findMany({
+    where: { entityType: "asset" },
+    orderBy: { createdAt: "desc" },
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
+  });
+  const labels = await entityLabels(entries);
 
   const items: ActivityItem[] = entries.map((e) => {
     const entityLabel = labels.get(`${e.entityType}:${e.entityId}`)!.label;
