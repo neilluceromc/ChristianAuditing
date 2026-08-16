@@ -1982,6 +1982,7 @@ export function MobileNav({
 - [ ] **Step 4: Write `src/components/shell/topbar.tsx`**
 
 ```tsx
+import Link from "next/link";
 import { DensityToggle } from "@/components/ui/density-toggle";
 import { Icon } from "@/components/ui/icon";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -2006,13 +2007,13 @@ export function Topbar({
       <div className="ml-auto flex items-center gap-2">
         <DensityToggle />
         <ThemeToggle />
-        <a
+        <Link
           href="/dev/kitchen-sink"
           aria-label="Help"
           className="grid size-[34px] place-items-center rounded-(--radius-btn) text-fg-secondary hover:bg-surface-subtle"
         >
           <Icon name="alert" size={16} />
-        </a>
+        </Link>
       </div>
     </header>
   );
