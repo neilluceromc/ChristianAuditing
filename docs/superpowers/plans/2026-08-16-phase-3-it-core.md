@@ -2364,7 +2364,7 @@ Controller live-check: as it@ select 2 rows → bulk drawer → request DISPOSE 
 - Create: `src/lib/column-prefs.ts`, `src/server/preferences.ts`, `src/components/inventory/column-chooser.tsx`
 - Modify: `src/components/inventory/inventory-table.tsx` (import the hideable list from lib), `src/server/modules/inventory/queries.ts` (getInventoryColumns), `src/app/(app)/inventory/page.tsx`
 
-- [ ] **Step 1: Create `src/lib/column-prefs.ts`** (the whitelist lives in lib — a `"use server"` file may only export async functions)
+- [x] **Step 1: Create `src/lib/column-prefs.ts`** — **ALREADY DONE during Task 7's live check** (commit after 458d1ac): the server page importing `HIDEABLE_COLUMNS` from the `"use client"` table module crashed at runtime (non-component exports across the client boundary are reference proxies, not values). `src/lib/column-prefs.ts` exists, `inventory-table.tsx` imports/re-exports from it, and `page.tsx` reads `COLUMN_PREF_KEYS["columns:inventory"]` directly. Task 10's implementer: SKIP this step and the table/page import changes; start at Step 2.
 
 ```ts
 /** Column visibility is a per-user preference (UserPreference table), NOT URL state — a shared link shows YOUR columns, not theirs. */

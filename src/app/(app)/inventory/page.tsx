@@ -11,7 +11,8 @@ import { Pill } from "@/components/ui/pill";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ButtonLink } from "@/components/ui/button-link";
 import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filter-row";
-import { InventoryTable, HIDEABLE_COLUMNS } from "@/components/inventory/inventory-table";
+import { InventoryTable } from "@/components/inventory/inventory-table";
+import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
 
 export default async function InventoryPage({
@@ -67,7 +68,7 @@ export default async function InventoryPage({
         <ChipFilterRow chips={chips} clearHref={href(clearFilters(state))} />
         {rows.length > 0 ? (
           <>
-            <InventoryTable rows={rows} state={state} visible={[...HIDEABLE_COLUMNS]} />
+            <InventoryTable rows={rows} state={state} visible={[...COLUMN_PREF_KEYS["columns:inventory"]]} />
             <div className="flex items-center justify-between pt-1">
               <span className="font-mono text-[11px] text-fg-muted">
                 page {state.page} of {pageCount}

@@ -6,6 +6,7 @@ import { StatusDot } from "@/components/ui/status";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { serializeListState, toggleSort, type ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
+import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 
 export interface ColumnDef {
   id: string;
@@ -26,7 +27,7 @@ export const INVENTORY_COLUMNS: ColumnDef[] = [
 ];
 
 /** Columns the chooser may hide (Task 10). tag/model/status always render. */
-export const HIDEABLE_COLUMNS = ["category", "assigned", "purchased", "warranty"] as const;
+export const HIDEABLE_COLUMNS = COLUMN_PREF_KEYS["columns:inventory"];
 
 export function InventoryTable({
   rows,
