@@ -27,6 +27,22 @@ export function auditSentence(entry: ActivityEntryLike): string {
       const ref = diff?.approval?.to;
       return `${entry.actorLabel} requested ${String(ref ?? "an approval")} on ${entry.entityLabel}`;
     }
+    case "submit":
+      return `${entry.actorLabel} submitted ${entry.entityLabel} for IT review`;
+    case "it-review":
+      return `${entry.actorLabel} marked ${entry.entityLabel} IT-reviewed`;
+    case "it-reject":
+      return `${entry.actorLabel} sent ${entry.entityLabel} back to purchasing`;
+    case "request-info":
+      return `${entry.actorLabel} sent ${entry.entityLabel} back for more information`;
+    case "cancel":
+      return `${entry.actorLabel} cancelled ${entry.entityLabel}`;
+    case "complete":
+      return `${entry.actorLabel} completed ${entry.entityLabel}`;
+    case "comment":
+      return `${entry.actorLabel} commented on ${entry.entityLabel}`;
+    case "unit-update":
+      return `${entry.actorLabel} updated a unit on ${entry.entityLabel}`;
     default:
       return `${entry.actorLabel} ${entry.action} ${entry.entityLabel}`;
   }
