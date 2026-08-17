@@ -95,6 +95,10 @@ describe("purchaseTransition — brief §6.1, exact", () => {
       ok: false,
       error: "A SUBMITTED request can't be sent back for more information — it must be IT_REVIEWED.",
     });
+    expect(purchaseTransition("SUBMITTED", "it-review", "purchasing_staff")).toEqual({
+      ok: false,
+      error: "Only IT (or an admin) can mark a request IT-reviewed.",
+    });
   });
 
   it("failures carry a human reason naming the role or the state", () => {

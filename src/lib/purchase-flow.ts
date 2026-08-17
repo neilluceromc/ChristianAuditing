@@ -57,12 +57,12 @@ export const CANONICAL_NOTE: Record<PurchaseAction, string> = {
  * suffix form at all.
  */
 const VERB: Record<PurchaseAction, { present: string; past: string }> = {
-  submit: { present: "submit", past: "submitted" },
-  "it-review": { present: "mark IT-reviewed", past: "marked IT-reviewed" },
-  "it-reject": { present: "send back", past: "sent back" },
-  "request-info": { present: "send back for more information", past: "sent back for more information" },
-  cancel: { present: "cancel", past: "cancelled" },
-  complete: { present: "complete", past: "completed" },
+  submit: { present: "submit a request", past: "submitted" },
+  "it-review": { present: "mark a request IT-reviewed", past: "marked IT-reviewed" },
+  "it-reject": { present: "send a request back to purchasing", past: "sent back" },
+  "request-info": { present: "send a request back for more information", past: "sent back for more information" },
+  cancel: { present: "cancel a request", past: "cancelled" },
+  complete: { present: "complete a request", past: "completed" },
 };
 
 const RULES: Record<PurchaseAction, { from: PurchaseRequestState[]; to: PurchaseRequestState; party: string }> = {
@@ -81,7 +81,7 @@ export function purchaseTransition(
 ): PurchaseTransitionResult {
   const rule = RULES[action];
   if (!PURCHASE_ACTION_ROLES[action].includes(role)) {
-    return { ok: false, error: `Only ${rule.party} (or an admin) can ${VERB[action].present} a request.` };
+    return { ok: false, error: `Only ${rule.party} (or an admin) can ${VERB[action].present}.` };
   }
   if (!rule.from.includes(state)) {
     return {
