@@ -38,6 +38,15 @@ export const PURCHASE_NOTE_KIND: Record<PurchaseAction, NoteKind> = {
   complete: "COMPLETE",
 };
 
+/**
+ * Drafting isn't a transition — it has no from-state — but it still needs an
+ * owner, and that owner must live in the pure, tested layer rather than in one
+ * page's prose. `/purchases/new` and the draft actions both read this: every
+ * workspace can now reach /purchases (IT has to review there), so the path
+ * gate no longer says anything about who may create.
+ */
+export const DRAFT_ROLES: Role[] = ["purchasing_staff", "admin"];
+
 /** Bounce-backs and withdrawals must say why; the rest may. */
 export const REASON_REQUIRED: readonly PurchaseAction[] = ["it-reject", "request-info", "cancel"];
 

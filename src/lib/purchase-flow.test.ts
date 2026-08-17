@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CANONICAL_NOTE, PURCHASE_ACTION_ROLES, PURCHASE_NOTE_KIND, REASON_REQUIRED, canAct,
+  CANONICAL_NOTE, DRAFT_ROLES, PURCHASE_ACTION_ROLES, PURCHASE_NOTE_KIND, REASON_REQUIRED, canAct,
   purchaseTransition, unitEditorMode, type PurchaseAction,
 } from "./purchase-flow";
 
@@ -144,6 +144,22 @@ describe("unitEditorMode", () => {
     }
     // the one a sampled test misses: IT keeps no editor once finance owns it
     expect(unitEditorMode("IT_REVIEWED", "it_staff")).toBeNull();
+  });
+});
+
+describe("DRAFT_ROLES — creating a request has an owner too", () => {
+  it("is purchasing and admin only", () => {
+    expect(DRAFT_ROLES).toEqual(["purchasing_staff", "admin"]);
+  });
+
+  it("excludes the roles that can only review or pay", () => {
+    for (const role of ["it_staff", "finance_staff", "viewer"] as const) {
+      expect(DRAFT_ROLES).not.toContain(role);
+    }
+  });
+
+  it("matches who may submit — you cannot draft what you cannot send", () => {
+    expect([...DRAFT_ROLES].sort()).toEqual([...PURCHASE_ACTION_ROLES.submit].sort());
   });
 });
 

@@ -143,6 +143,18 @@ describe("IT workspace nav", () => {
     const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking")!;
     expect(tracking.items.map((i) => i.href)).toContain("/purchases?state=SUBMITTED");
   });
+
+  /**
+   * The `roles` key is the ONLY thing keeping this link out of a viewer's
+   * sidebar — every IT-workspace role now passes the path gate, so deleting it
+   * would hand viewers a working link to a reviewer's surface. Pin it.
+   */
+  it("restricts Purchase reviews to reviewers, not every IT-workspace role", () => {
+    const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking")!;
+    const item = tracking.items.find((i) => i.href === "/purchases?state=SUBMITTED")!;
+    expect(item.roles).toEqual(["admin", "it_staff"]);
+    expect(item.roles).not.toContain("viewer");
+  });
   it("highlights it only when the state param matches", () => {
     expect(navIsActive("/purchases?state=SUBMITTED", "/purchases", new URLSearchParams("state=SUBMITTED"))).toBe(true);
     expect(navIsActive("/purchases?state=SUBMITTED", "/purchases", new URLSearchParams("state=DRAFT"))).toBe(false);
