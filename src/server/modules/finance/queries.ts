@@ -1,4 +1,4 @@
-import type { AssetStatus, Prisma } from "@prisma/client";
+import { Prisma, type AssetStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { ASSET_STATUSES } from "@/lib/inventory-list";
@@ -69,3 +69,17 @@ export async function financeAssets(
     })),
   };
 }
+
+/**
+ * The money trail: everything that happened to a purchase request, plus any
+ * asset edit that touched `cost`. The JSON path filter is what makes the second
+ * half possible without a new column — if it turns out unsupported, fall back
+ * to purchase-request-only and SAY SO rather than shipping a feed that claims
+ * to show cost changes it can't see.
+ */
+export const financeActivityWhere: Prisma.AuditEntryWhereInput = {
+  OR: [
+    { entityType: "purchase-request" },
+    { entityType: "asset", diff: { path: ["cost"], not: Prisma.DbNull } },
+  ],
+};
