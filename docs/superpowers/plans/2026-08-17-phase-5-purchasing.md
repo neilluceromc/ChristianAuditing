@@ -161,6 +161,30 @@ describe("purchaseTransition — brief §6.1, exact", () => {
     expect(purchaseTransition("DRAFT", "cancel", "admin").ok).toBe(true);
   });
 
+  it("every refusal message is real English — no 'completeed', no 'request infoed'", () => {
+    for (const action of ALL_ACTIONS) {
+      for (const state of ALL_STATES) {
+        const r = purchaseTransition(state, action, "viewer"); // viewer fails the role check
+        if (!r.ok) expect(r.error).not.toMatch(/eed\b|infoed|canceled/);
+      }
+      const wrongState = purchaseTransition("COMPLETED", action, "admin");
+      expect(wrongState.ok).toBe(false);
+      if (!wrongState.ok) expect(wrongState.error).not.toMatch(/eed\b|infoed|canceled/);
+    }
+    expect(purchaseTransition("DRAFT", "complete", "admin")).toEqual({
+      ok: false,
+      error: "A DRAFT request can't be completed — it must be IT_REVIEWED.",
+    });
+    expect(purchaseTransition("SUBMITTED", "request-info", "admin")).toEqual({
+      ok: false,
+      error: "A SUBMITTED request can't be sent back for more information — it must be IT_REVIEWED.",
+    });
+    expect(purchaseTransition("SUBMITTED", "it-review", "purchasing_staff")).toEqual({
+      ok: false,
+      error: "Only IT (or an admin) can mark a request IT-reviewed.",
+    });
+  });
+
   it("failures carry a human reason naming the role or the state", () => {
     const wrongRole = purchaseTransition("SUBMITTED", "it-review", "purchasing_staff");
     expect(wrongRole.ok).toBe(false);
@@ -272,6 +296,20 @@ export const CANONICAL_NOTE: Record<PurchaseAction, string> = {
   complete: "Approved and completed.",
 };
 
+/**
+ * These land in a conflict banner, so they are written out rather than
+ * derived: "complete" + "ed" is "completeed", and "request-info" has no
+ * suffix form at all.
+ */
+const VERB: Record<PurchaseAction, { present: string; past: string }> = {
+  submit: { present: "submit a request", past: "submitted" },
+  "it-review": { present: "mark a request IT-reviewed", past: "marked IT-reviewed" },
+  "it-reject": { present: "send a request back to purchasing", past: "sent back" },
+  "request-info": { present: "send a request back for more information", past: "sent back for more information" },
+  cancel: { present: "cancel a request", past: "cancelled" },
+  complete: { present: "complete a request", past: "completed" },
+};
+
 const RULES: Record<PurchaseAction, { from: PurchaseRequestState[]; to: PurchaseRequestState; party: string }> = {
   submit: { from: ["DRAFT"], to: "SUBMITTED", party: "Purchasing" },
   "it-review": { from: ["SUBMITTED"], to: "IT_REVIEWED", party: "IT" },
@@ -288,12 +326,12 @@ export function purchaseTransition(
 ): PurchaseTransitionResult {
   const rule = RULES[action];
   if (!PURCHASE_ACTION_ROLES[action].includes(role)) {
-    return { ok: false, error: `Only ${rule.party} (or an admin) can ${action.replace("-", " ")} a request.` };
+    return { ok: false, error: `Only ${rule.party} (or an admin) can ${VERB[action].present}.` };
   }
   if (!rule.from.includes(state)) {
     return {
       ok: false,
-      error: `A ${state} request can't be ${action === "submit" ? "submitted" : action.replace("-", " ") + "ed"} — it must be ${rule.from.join(" or ")}.`,
+      error: `A ${state} request can't be ${VERB[action].past} — it must be ${rule.from.join(" or ")}.`,
     };
   }
   return { ok: true, next: rule.to };
