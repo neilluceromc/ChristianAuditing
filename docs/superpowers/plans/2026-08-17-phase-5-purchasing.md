@@ -1648,6 +1648,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { diffOf } from "@/lib/audit-diff";
+import { DRAFT_ROLES } from "@/lib/purchase-flow";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -1696,7 +1697,7 @@ export async function createDraft(input: unknown): Promise<ActionResult<DraftSav
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { units } = parsed.data;
 
-  const user = await actionRole("purchasing_staff", "admin");
+  const user = await actionRole(...DRAFT_ROLES);
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -1748,7 +1749,7 @@ export async function saveDraft(input: unknown): Promise<ActionResult<DraftSaved
   const { id, units } = parsed.data;
   if (!id) return validationError({ _form: "Missing draft id." });
 
-  const user = await actionRole("purchasing_staff", "admin");
+  const user = await actionRole(...DRAFT_ROLES);
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -2342,12 +2343,13 @@ export function DraftForm({
 
 ```tsx
 import { requireRole } from "@/server/auth/guards";
+import { DRAFT_ROLES } from "@/lib/purchase-flow";
 import { policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { DraftForm } from "@/components/purchases/draft-form";
 
 export default async function NewPurchasePage() {
-  await requireRole("purchasing_staff", "admin");
+  await requireRole(...DRAFT_ROLES);
   const loadouts = await policyLoadouts();
 
   return (
@@ -3009,12 +3011,13 @@ git commit -m "feat(purchases): detail page — bounce-back banner, stepper loop
 ```tsx
 import { notFound, redirect } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
+import { DRAFT_ROLES } from "@/lib/purchase-flow";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { DraftForm, type UnitDraft } from "@/components/purchases/draft-form";
 
 export default async function EditPurchasePage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireRole("purchasing_staff", "admin");
+  const user = await requireRole(...DRAFT_ROLES);
   const { id } = await params;
   const [request, loadouts] = await Promise.all([getPurchase(id), policyLoadouts()]);
   if (!request) notFound();
