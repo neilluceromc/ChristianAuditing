@@ -50,7 +50,11 @@ describe("pathAllowedForRole", () => {
     ["/audit", "it_staff", true],
     // inventory is shared with purchasing (Reference nav)
     ["/inventory", "purchasing_staff", true],
-    ["/inventory", "finance_staff", false],
+    // finance reads the asset record because /finance/assets is a register of
+    // exactly these rows — but NOT the credentials on it (asserted below)
+    ["/inventory", "finance_staff", true],
+    ["/inventory/abc", "finance_staff", true],
+    ["/inventory/abc/secrets", "finance_staff", false],
     // approvals shared IT + finance
     ["/approvals", "finance_staff", true],
     ["/approvals", "purchasing_staff", false],

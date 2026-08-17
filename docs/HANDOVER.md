@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-17 · **main @ phase-5 merge** · **Phases 1–5 merged, 6–8 remain.**
+**Last updated:** 2026-08-17 · **main @ phase-6 merge** · **Phases 1–6 merged, 7–8 remain.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,11 +13,11 @@ exist today.
 ## 0. Start here (next session, in order)
 
 1. `docker compose up -d db` → `npm run db:seed` → open the preview (`preview_start` name `app-dev`).
-2. Read §6 (Phase 6 entry criteria) — they are load-bearing and were written while the reasoning was fresh.
-3. Write the Phase 6 plan with `superpowers:writing-plans` → `docs/superpowers/plans/2026-08-1X-phase-6-finance-home.md`.
-4. Execute it with `superpowers:subagent-driven-development` on branch `phase-6-finance-home`.
+2. Read §6 (Phase 7 entry criteria) — they are load-bearing and were written while the reasoning was fresh.
+3. Write the Phase 7 plan with `superpowers:writing-plans` → `docs/superpowers/plans/2026-08-1X-phase-7-offboarding.md`.
+4. Execute it with `superpowers:subagent-driven-development` on branch `phase-7-offboarding`.
 
-Nothing is half-finished. main is green: `tsc` · `lint` · **255 unit** · `next build` · **63 e2e**.
+Nothing is half-finished. main is green: `tsc` · `lint` · **284 unit** · `next build` · **75 e2e**.
 
 ---
 
@@ -66,7 +66,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations.
 
-## 4. What's DONE (Phases 1–5, on main)
+## 4. What's DONE (Phases 1–6, on main)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -103,6 +103,16 @@ is a dashed "← sent back" connector, `NOW · 2nd time`, per-unit states, the I
 inline), and `/purchases/activity`. **IT gained access to `/purchases`** — brief §6.1 makes IT the second party, and
 `it-review`/`it-reject` were otherwise unreachable for `it_staff` (see §7).
 
+**Phase 6 — Finance + Home** (`docs/superpowers/plans/2026-08-17-phase-6-finance-home.md`): the role-aware
+dashboards. Every section loads through `safeSection` and renders through `SectionCard`, so one failing query
+shows the designed FAILED card while the rest of the page renders. IT Home has **no KPI row** — "Your shift"
+(5 rows ordered by what breaks first, each clearable for the rest of the day via a `UserPreference`), Claimed-by-you
+above the pool, the Fleet bar with its coverage line, the 5-bucket Age histogram, and the Warranty runway that
+marks two identical laptops expiring the same week. Purchasing Home leads with a to-do list and spend; **Finance
+Home leads with money and age**; Viewer gets the same layout minus the queue. Focus mode is the `br.focus` cookie.
+Plus `/finance/assets` (the capitalized register with value columns) and `/finance/activity` (the one cross-domain
+scoped feed, so the only one showing the domain pill).
+
 ### Conventions every later phase must follow
 
 | Concern | Where |
@@ -116,24 +126,25 @@ inline), and `/purchases/activity`. **IT gained access to `/purchases`** — bri
 | Secrets | AES-256-GCM **v1: base64(version‖iv‖tag‖data), AAD = `"assetId:label"`** |
 | Purchase transitions | `runTransition` in `src/server/modules/purchases/actions.ts` — pure check → state-guarded `updateMany` → **NoteEntry append** → `writeAudit`, all in one tx; `asActionResult` maps P2028 → conflict |
 | Partial updates | Write **only the fields the caller sent**, and put each written field's before-value in the `updateMany` guard — filling untouched fields from the row you read loses concurrent edits silently (Phase 5's `saveUnit`) |
+| Dashboard sections | `safeSection(label, run)` → `SectionCard` — a failing query becomes a typed failure and the designed FAILED card, never a blank page |
+| Per-user, per-day UI state | a `UserPreference` row (`home:dismissed`), reset by a date change — not an audited domain event |
 | DB invariants to catch (P2002 → typed conflict) | `Approval_one_open_per_asset` (one open approval per asset) · `Job_one_live_execute_per_approval` (one live execute-job per approval) · `Reservation_one_active_hold_per_asset` |
 
-## 5. What REMAINS (Phases 6–8)
+## 5. What REMAINS (Phases 7–8)
 
-- **Phase 6 — Finance + Home.** `/finance/assets`, `/finance/activity`; role-aware Home dashboards (IT has **no KPI row** — "Your shift", Fleet bar, Age histogram, Claimed-by-you, Warranty runway; Finance leads with money; Viewer minus mutating affordances) with **independently degrading sections** + Focus mode cookie.
 - **Phase 7 — Offboarding + repairs + policies.** `/offboarding` + the 4-step wizard (per-item Returned/Defective/Buyout/**Missing**, each creating its own `lifecycle.return` approval — the Phase 4 pipeline already executes these), repairs saved view (`?status=DEFECTIVE` + vendor fields, no new enum), `/reservations`, `/admin/equipment-policies`.
 - **Phase 8 — Admin + import/export + polish.** `/admin/users` (locked permanent admin), `/admin/webhooks` + `/deliveries` (dead-letter replay — **the worker currently dead-letters DELIVER_WEBHOOK jobs with "ships in Phase 8"**), `/admin/flags`; import (3-step dry-run → commit, blocked rows grouped by cause), export upgrade (real Excel + split-by-year chips), printable label sheet, USB-scanner polish, deployment README, full axe pass. Entra SSO wiring lands here or is explicitly deferred.
 
-## 6. Phase 6 entry criteria (READ BEFORE STARTING — load-bearing)
+## 6. Phase 7 entry criteria (READ BEFORE STARTING — load-bearing)
 
-1. **Every Home section degrades independently** (brief §7, README `1d`/`5d`) — one failing query must not blank the page. Wrap each section in its own boundary and design the FAILED state: a card with a `FAILED` pill, a plain explanation, and "Retry this section", while everything else renders. Build the degraded state first, not last; it is the requirement that shapes the composition.
-2. **IT Home has NO KPI tile row** — deliberate (README): "742 deployed" is a number nobody acts on, and it was occupying the most valuable strip. IT Home is: **Your shift** (5 rows ordered by *what breaks first*, each with a 52px kind chip `SLA`/`EXEC`/`HIRE`/`LEAVE`/`DATA` and the one action that clears it) · **Claimed by you** *above* the pool (a forgotten claim is worse than an unclaimed item) · Fleet stacked bar over all 8 statuses + the line that matters ("spare pool covers 4 of the 5 slots the incoming hires need") · Age histogram where only the `4y+` bar changes colour · Warranty runway (next 90 days) · Jump-to links.
-3. **Finance Home leads with money and age**, not counts — "₱208k waiting, oldest 2 days". Purchasing Home leads with a to-do list + spend. **Viewer Home is the same layout minus every mutating affordance and minus Needs-attention** (it is an action queue; a viewer has no actions).
-4. **Focus mode is a cookie** (`br.focus`, alongside `br.dept`/theme/density in `src/app/(app)/layout.tsx`) — it collapses Home to the queue and your claims. Cookie, never URL: it is a personal working mode, not a shareable view.
-5. **The current `/` is a Phase-2 placeholder** (`src/app/(app)/page.tsx` — a "Jump to" card built from `WORKSPACE_NAV`). Phase 6 replaces it wholesale; keep the role-aware nav-derived quick links, drop the rest.
-6. **`/finance/assets` is the `1f` table pattern with value columns** (capitalized/approved assets), and `/finance/activity` is the same `ActivityFeed` renderer scoped to finance — the fifth and last consumer of it. `/finance(\/|$)` is already gated to the finance workspace in `PATH_RULES`; the nav entries already exist.
-7. **Money is `Decimal` everywhere it appears** — convert to `number`/preformatted string in the query layer. A `Prisma.Decimal` crossing into a `"use client"` component throws at runtime and tsc will not catch it (Phase 5, `queries.ts`).
-8. **Reuse, don't rebuild:** `ActivityFeed` + `actionDot` + `auditSentence` (Phase 4), `StatusDot`/`StatusPill` and the six-family map, `dwellLine` (Phase 5) for "how long has this been waiting", and `slaLabel` (Phase 4) for overdue text. Home is a composition phase; a new primitive here is a smell.
+1. **Each per-item decision creates its own `lifecycle.return` approval IMMEDIATELY** (README `3e`) — that is what makes a half-finished offboarding still N correct records rather than a lost session. Do NOT batch the wizard into one submit at the end. The Phase 4 pipeline already executes `lifecycle.return`; the wizard is a producer, never a direct asset write.
+2. **`Missing` is a first-class outcome.** The per-item control is a 4-way segmented control — Returned / Defective / Buyout / **Missing** — because "pretending everything comes back is why spreadsheets drift". `MISSING` is already the 8th `AssetStatus` and maps to the **fault** family. **A reason is required for anything other than Returned**, and **Continue is blocked while any item is undecided** — undecided is not the same as Returned.
+3. **The wizard is 4 steps** — Review holdings → Collect items → Accounts & M365 → Farewell report. Step 4 is a receipt naming outcomes and value recovered, exportable and emailable to HR. Step 3 is where the M365 status moves (the canonical four plus custom values, per `4f`).
+4. **Repairs is a SAVED VIEW, not a new enum** (`7b`): `?status=DEFECTIVE&sort=-updatedAt` over the existing inventory list, with the vendor/RMA/quote fields that already exist on `Asset`. Stage chips (`TO ASSESS` / `AT VENDOR` / `RETURNED OK` / `BEYOND REPAIR`) are derived from those fields. **The `Down` column (days) is what changes behaviour** — and warn when a quote exceeds a sensible share of a new unit.
+5. **`/reservations`:** reserved stock **still reads `SPARE`** in inventory with a hold marker — "pretending it's gone creates phantom spares". `EXPIRED` (clock) and `RELEASED` (person) both sit in Closed but must stay distinguishable. Note Phase 6's fleet coverage already excludes assets under an ACTIVE hold, so the two views must agree.
+6. **`/admin/equipment-policies`:** solid chips = required (an unfilled one is the policy gap that lights up on the loadout view and in Home's `HIRE` rows), grey = optional. Role policy beats department policy — `resolvePolicy` in `src/lib/loadout.ts` already encodes that. **Editing never touches existing assignments** — it changes what counts as complete from that moment, which is why the audit entry records BOTH slot lists.
+7. **Reuse the Phase 3 loadout brain.** `computeLoadout`/`resolvePolicy` already drive the employee loadout view and Home's hire rows; the offboarding wizard's "review holdings" step is the same data read the other way. A second implementation of slot-filling would drift.
+8. **The offboarding wizard is the first multi-step form in the app.** Step state belongs in the URL (`?step=`) so a refresh doesn't lose the operator's place, while per-item decisions are already persisted as approvals — there is no draft to lose.
 
 ## 7. Recurring gotchas that have cost real time
 
@@ -153,11 +164,14 @@ inline), and `/purchases/activity`. **IT gained access to `/purchases`** — bri
 - **Prisma throws; it doesn't return.** Without a `try`/`catch` a P2028 (transaction couldn't get a connection — reachable with just two concurrent transactions) escapes as a 500 instead of the designed conflict banner. Every actions module needs the mapping.
 - **Widening a path rule can leave an operation ungoverned.** Granting `/purchases` to the IT workspace made every role pass the path gate, so "who may create a request" stopped being answered by any layer until `DRAFT_ROLES` was added. When you widen a gate, ask which rule it was silently carrying.
 - **A client-side navigation currently leaves the previous page's DOM in the document** (a second `<table>` outside `<main>`). Reproducible between two Phase-3 pages, so it predates Phase 5; observed in dev only, not investigated.
+- **A long-lived dev server degrades the e2e suite into phantom failures.** After several full runs its resident memory climbed ~8.5GB → ~12.2GB and a different set of pre-existing specs failed each time, always as "clicked a link, the heading never arrived" — every one passing in isolation. Restart the preview before a confirmation run; the suite went 75/75 immediately afterwards.
+- **A seeded fixture that doesn't exercise its own design is a silent gap.** Phase 6 found two: every asset shared one purchase date (so the five-bucket age histogram was one bar and the 4y+ amber could never render) and nothing expired inside the 90-day warranty window (so the clustered pair the design is about never appeared). When a screen's designed state can't occur against the seed, fix the seed — that is what it is for.
 - **`design_handover/` is excluded from lint/build** and must stay untouched — it's the source of truth, not code.
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
 
 - **Phase 4 leftovers:** `/approvals` shows the first 50 rows of a tab with a "showing N of M" hint but no pagination; no admin surface reads the `Job` table (Phase 8's deliveries page is the natural home); the worker's stale-lease recovery uses a 5-minute wall-clock heuristic (safe now because every terminal write is state-guarded).
 - **Phase 5 leftovers:** the draft autosave churns unit rows (`createDraft`/`saveDraft` return only request-level fields, so `/purchases/new` never learns the unit ids it just created and every later autosave deletes and recreates the set — `/purchases/[id]/edit` does pass real ids and updates in place); `/purchases` has no sortable headers or column chooser; the ⌘K palette now returns purchase requests to `it_staff` and `viewer`, and the detail page shows money and finance notes to anyone who can reach it (no field-level restriction was specified); `addComment` deliberately still accepts comments on COMPLETED/CANCELLED requests.
+- **Phase 6 leftovers:** the Admin workspace has no Home of its own (`ws === "admin"` falls through to the IT layout, so an admin sees SLA breaches and fleet composition under a Users/Webhooks/Flags sidebar); "Retry this section" refreshes the whole route because RSC has no per-section refetch; section degradation is loader-level, so a render-time bug inside a section still escapes to the route error boundary; `/finance/assets` has no search, no sortable headers and no book-value column (depreciation is a policy nobody has stated); Home's `DATA` rows key on `DATA:<assetId>`, which is unambiguous only while an asset can't be both MISSING and DEPLOYED-without-a-holder.
 - **Phase 3 leftovers:** CSV export buffers up to 10k rows in memory and silently truncates `?ids=` beyond 500; sort remount drops keyboard focus to `<body>`; `EntityCombobox` lacks a listbox accessible name and Home/End.
 - Entra SSO real wiring (needs tenant creds). Real product photography, brand mark, barcode generation (striped placeholders today). Off-device backups (nightly `pg_dump` to a local volume ships; copying elsewhere is the user's call). HR review of the accountability-form acknowledgement copy. `WebhookEndpoint.secret` encryption (Phase 8). CI workflow + jsdom component tests (declined in Phase 1, revisitable).

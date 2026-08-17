@@ -161,7 +161,11 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // purchasing user who can reference the inventory list can't reach /secrets.
   // MUST precede the general /inventory rule (first-match-wins).
   { test: /^\/inventory\/[^/]+\/secrets(\/|$)/, workspaces: ["it"] },
-  { test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing"] },
+  // Finance joins IT and purchasing here because /finance/assets is a register
+  // of these very records — a capitalized-asset row whose tag leads nowhere is
+  // a dead end on the page built for that role. The secrets rule above still
+  // precedes this one, so finance gains the record, never the credentials.
+  { test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing", "finance"] },
   { test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
   { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance"] },
   // Brief §6.1 is a three-party handoff: purchasing drafts, IT specs it,
