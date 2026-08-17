@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db/client";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtMoney } from "@/lib/format";
 import { slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
@@ -302,4 +302,133 @@ export async function warrantyRunway(now: Date = new Date()): Promise<WarrantyRo
       days: warrantyDaysLeft(a.warrantyUntil!, now),
     })),
   );
+}
+
+export interface TodoRow {
+  id: string;
+  refNo: string;
+  what: string;
+  meta: string;
+  href: string;
+  action: string;
+}
+
+export interface PurchasingHome {
+  todo: TodoRow[];
+  draftCount: number;
+  awaitingIT: number;
+  awaitingFinance: number;
+  /** completed this calendar month, preformatted */
+  spendThisMonth: string;
+}
+
+const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
+  units.reduce((sum, u) => sum + u.qty * (u.unitPrice === null || u.unitPrice === undefined ? 0 : Number(u.unitPrice)), 0);
+
+/**
+ * Purchasing Home leads with what this person still has to do: drafts nobody
+ * has sent, and anything that came back to them.
+ */
+export async function purchasingHome(userId: string, now: Date = new Date()): Promise<PurchasingHome> {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const [mine, counts, completed] = await Promise.all([
+    prisma.purchaseRequest.findMany({
+      where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
+      orderBy: { updatedAt: "asc" },
+      take: 8,
+      select: {
+        id: true, refNo: true, state: true, updatedAt: true,
+        units: { select: { qty: true, unitPrice: true } },
+        notes: {
+          where: { kind: { not: "COMMENT" } },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { kind: true, author: { select: { name: true } } },
+        },
+      },
+    }),
+    prisma.purchaseRequest.groupBy({ by: ["state"], _count: { _all: true } }),
+    prisma.purchaseRequest.findMany({
+      where: { state: "COMPLETED", completedAt: { gte: monthStart } },
+      select: { units: { select: { qty: true, unitPrice: true } } },
+    }),
+  ]);
+
+  const count = (state: string) => counts.find((c) => c.state === state)?._count._all ?? 0;
+
+  const todo: TodoRow[] = mine.map((r) => {
+    const last = r.notes[0];
+    const bounced = (r.state === "DRAFT" && last?.kind === "IT_REJECT") || (r.state === "SUBMITTED" && last?.kind === "REQUEST_INFO");
+    return {
+      id: r.id,
+      refNo: r.refNo,
+      what: bounced ? `came back from ${last?.author.name ?? "review"}` : r.state === "DRAFT" ? "still a draft" : "waiting on IT",
+      meta: `${fmtMoney(unitsValue(r.units))} · ${daysSince(r.updatedAt, now)} d`,
+      href: `/purchases/${r.id}`,
+      action: bounced ? "Fix and resubmit" : r.state === "DRAFT" ? "Submit" : "Open",
+    };
+  });
+
+  return {
+    todo,
+    draftCount: count("DRAFT"),
+    awaitingIT: count("SUBMITTED"),
+    awaitingFinance: count("IT_REVIEWED"),
+    spendThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
+  };
+}
+
+export interface FinanceHome {
+  /** the headline: money sitting on finance's desk */
+  waiting: string;
+  waitingCount: number;
+  /** "oldest 2 days" — null when nothing is waiting */
+  oldestDays: number | null;
+  approvedThisMonth: string;
+  capitalized: string;
+  capitalizedCount: number;
+  queue: TodoRow[];
+}
+
+/**
+ * README 5d: Finance Home leads with MONEY AND AGE, not counts — "₱208k
+ * waiting, oldest 2 days". The count is the supporting detail, not the headline.
+ */
+export async function financeHome(now: Date = new Date()): Promise<FinanceHome> {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const [waiting, completed, capitalized] = await Promise.all([
+    prisma.purchaseRequest.findMany({
+      where: { state: "IT_REVIEWED" },
+      orderBy: { reviewedAt: "asc" },
+      select: {
+        id: true, refNo: true, reviewedAt: true, updatedAt: true,
+        requestedBy: { select: { name: true } },
+        units: { select: { qty: true, unitPrice: true } },
+      },
+    }),
+    prisma.purchaseRequest.findMany({
+      where: { state: "COMPLETED", completedAt: { gte: monthStart } },
+      select: { units: { select: { qty: true, unitPrice: true } } },
+    }),
+    prisma.asset.aggregate({ where: { cost: { not: null } }, _sum: { cost: true }, _count: { _all: true } }),
+  ]);
+
+  const oldest = waiting[0];
+  return {
+    waiting: fmtMoney(waiting.reduce((sum, r) => sum + unitsValue(r.units), 0)),
+    waitingCount: waiting.length,
+    oldestDays: oldest ? daysSince(oldest.reviewedAt ?? oldest.updatedAt, now) : null,
+    approvedThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
+    // Prisma returns Decimal | null from _sum — Number() before it ever leaves here
+    capitalized: fmtMoney(capitalized._sum.cost === null ? 0 : Number(capitalized._sum.cost)),
+    capitalizedCount: capitalized._count._all,
+    queue: waiting.slice(0, 8).map((r) => ({
+      id: r.id,
+      refNo: r.refNo,
+      what: `from ${r.requestedBy.name}`,
+      meta: `${fmtMoney(unitsValue(r.units))} · waiting ${daysSince(r.reviewedAt ?? r.updatedAt, now)} d`,
+      href: `/purchases/${r.id}`,
+      action: "Review",
+    })),
+  };
 }
