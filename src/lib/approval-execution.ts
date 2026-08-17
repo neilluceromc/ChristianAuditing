@@ -18,6 +18,9 @@ const obj = (v: unknown): Payload | null =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Payload) : null;
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
+/** The four outcomes an item can come back in (README 3e). */
+export const RETURN_STATUSES = ["SPARE", "DEFECTIVE", "BUYOUT", "MISSING"] as const satisfies readonly AssetStatus[];
+
 export function executionPlan(type: ApprovalType, payload: unknown): ExecutionPlan {
   const p = obj(payload) ?? {};
   switch (type) {
@@ -35,10 +38,19 @@ export function executionPlan(type: ApprovalType, payload: unknown): ExecutionPl
     }
     case "lifecycle_return": {
       const to = obj(p.to);
-      if (!to || to.status !== "SPARE") {
-        return { ok: false, error: `Malformed lifecycle.return payload: expected to.status SPARE, got ${JSON.stringify(payload)}` };
+      const status = to ? str(to.status) : null;
+      // A return is the item coming back from a person; WHAT STATE it comes
+      // back in is exactly what the offboarding wizard asks (README 3e:
+      // Returned / Defective / Buyout / Missing, with Missing first-class).
+      // The holder is cleared either way — the person has left, and who it
+      // came from survives in from.assigneeId and in the audit diff.
+      if (!status || !(RETURN_STATUSES as readonly string[]).includes(status)) {
+        return {
+          ok: false,
+          error: `Malformed lifecycle.return payload: to.status must be one of ${RETURN_STATUSES.join(", ")}, got ${JSON.stringify(payload)}`,
+        };
       }
-      return { ok: true, updates: { assigneeId: null, status: "SPARE" } };
+      return { ok: true, updates: { assigneeId: null, status: status as AssetStatus } };
     }
     case "lifecycle_change_status": {
       const to = obj(p.to);
@@ -79,7 +91,10 @@ export function summarizeApproval(
     }
     case "lifecycle_return": {
       const who = names.employeeName ? `${names.employeeName} ` : "";
-      return { line1, line2: withReason(`${who}→ SPARE`) };
+      // Four outcomes now, so a hard-coded "→ SPARE" would make the queue's
+      // change cell lie about three of them.
+      const status = (to ? str(to.status) : null) ?? "SPARE";
+      return { line1, line2: withReason(`${who}→ ${status}`) };
     }
     case "lifecycle_change_status": {
       const f = from ? str(from.status) : null;

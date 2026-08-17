@@ -34,6 +34,33 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
     expect(plan.ok).toBe(false);
     if (!plan.ok) expect(plan.error).toMatch(/transfer/i);
   });
+  it("return: accepts every offboarding outcome, always clearing the holder", () => {
+    const cases = [
+      ["SPARE", "SPARE"],
+      ["DEFECTIVE", "DEFECTIVE"],
+      ["BUYOUT", "BUYOUT"],
+      ["MISSING", "MISSING"],
+    ] as const;
+    for (const [target, expected] of cases) {
+      expect(
+        executionPlan("lifecycle_return", { from: { assigneeId: "emp1" }, to: { assigneeId: null, status: target } }),
+      ).toEqual({ ok: true, updates: { assigneeId: null, status: expected } });
+    }
+  });
+
+  it("return: refuses a target that isn't an offboarding outcome", () => {
+    for (const bad of ["DEPLOYED", "TEMPORARY", "DONATED", "DISPOSE"]) {
+      const plan = executionPlan("lifecycle_return", { from: { assigneeId: "e" }, to: { assigneeId: null, status: bad } });
+      expect(plan.ok).toBe(false);
+      if (!plan.ok) expect(plan.error).toMatch(new RegExp(bad));
+    }
+  });
+
+  it("return: still refuses a payload with no target status at all", () => {
+    const plan = executionPlan("lifecycle_return", { from: { assigneeId: "e" } });
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.error).toMatch(/lifecycle\.return/);
+  });
 });
 
 describe("summarizeApproval — the queue's two-line change cell", () => {
@@ -56,5 +83,14 @@ describe("summarizeApproval — the queue's two-line change cell", () => {
     const s = summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "DEPLOYED" } }, {});
     expect(s.line1).toBe("lifecycle.assign");
     expect(s.line2).toBe("→ DEPLOYED");
+  });
+  it("return: the summary names the outcome the payload actually asks for", () => {
+    const s = summarizeApproval(
+      "lifecycle_return",
+      { from: { assigneeId: "e" }, to: { assigneeId: null, status: "MISSING" }, reason: "not returned at offboarding" },
+      { assetTag: "BR-PH-0301", employeeName: "D. Ong" },
+    );
+    expect(s.line1).toBe("lifecycle.return · BR-PH-0301");
+    expect(s.line2).toBe("D. Ong → MISSING — not returned at offboarding");
   });
 });
