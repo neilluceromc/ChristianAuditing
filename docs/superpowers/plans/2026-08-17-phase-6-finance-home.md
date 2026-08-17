@@ -1,6 +1,6 @@
 # Inventory v2 — Phase 6: Finance + Home Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** The role-aware Home dashboards and the Finance workspace — IT Home built around **"Your shift"** (5 rows ordered by what breaks first, no KPI tile row), Purchasing Home leading with a to-do list and spend, Finance Home leading with **money and age**, Viewer Home the same minus every mutating affordance — with **every section degrading independently**, a Focus-mode cookie, plus `/finance/assets` (the `1f` table with value columns) and `/finance/activity`.
 
@@ -69,13 +69,13 @@ e2e/home-finance.spec.ts            (create)
 **Files:**
 - Create: `src/lib/home.ts`, `src/lib/home.test.ts`
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 git checkout -b phase-6-finance-home
 ```
 
-- [ ] **Step 2: Write the failing tests** (`src/lib/home.test.ts`)
+- [x] **Step 2: Write the failing tests** (`src/lib/home.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -200,11 +200,11 @@ describe("dismissals — cleared items leave for the rest of the day", () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `npm run test -- src/lib/home.test.ts` — Expected: FAIL (module missing).
 
-- [ ] **Step 4: Implement `src/lib/home.ts`**
+- [x] **Step 4: Implement `src/lib/home.ts`**
 
 ```ts
 /**
@@ -323,11 +323,11 @@ export function todayStamp(now: Date = new Date()): string {
 }
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `npm run test -- src/lib/home.test.ts` — Expected: PASS.
 
-- [ ] **Step 6: Typecheck, lint, commit**
+- [x] **Step 6: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -345,7 +345,7 @@ Entry criterion #1. The design (`1d`) shows the failed-section state as a first-
 - Create: `src/lib/section.ts`, `src/lib/section.test.ts`
 - Create: `src/components/home/section-card.tsx`, `src/components/home/retry-section.tsx`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/section.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/section.test.ts`)
 
 ```ts
 import { describe, expect, it, vi } from "vitest";
@@ -398,11 +398,11 @@ describe("safeSection — one failing query must not blank the page", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/section.test.ts` — Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement `src/lib/section.ts`**
+- [x] **Step 3: Implement `src/lib/section.ts`**
 
 ```ts
 /**
@@ -431,11 +431,11 @@ export async function safeSection<T>(
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `npm run test -- src/lib/section.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: The retry island** (`src/components/home/retry-section.tsx`)
+- [x] **Step 5: The retry island** (`src/components/home/retry-section.tsx`)
 
 ```tsx
 "use client";
@@ -465,7 +465,7 @@ export function RetrySection({ label }: { label: string }) {
 }
 ```
 
-- [ ] **Step 6: The section card** (`src/components/home/section-card.tsx`)
+- [x] **Step 6: The section card** (`src/components/home/section-card.tsx`)
 
 ```tsx
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -513,13 +513,13 @@ export function SectionCard<T>({
 }
 ```
 
-- [ ] **Step 7: Typecheck + lint**
+- [x] **Step 7: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean.
 
 `Card` currently takes only `className` and `children`. If it does not accept `style`, add the prop to `src/components/ui/card.tsx` (`style?: React.CSSProperties`, spread onto the div) rather than hard-coding a colour class here — and say so in your report.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/section.ts src/lib/section.test.ts src/components/home
@@ -536,7 +536,7 @@ Everything "Your shift" needs comes from rows that already exist — breached ap
 - Create: `src/server/modules/home/queries.ts`
 - Modify: `src/lib/home.ts`, `src/lib/home.test.ts` (add `warrantyClusters`)
 
-- [ ] **Step 1: Write the failing test for the warranty cluster helper** (append to `src/lib/home.test.ts`)
+- [x] **Step 1: Write the failing test for the warranty cluster helper** (append to `src/lib/home.test.ts`)
 
 ```ts
 describe("warrantyClusters — two identical laptops expiring the same week is the point", () => {
@@ -570,11 +570,11 @@ describe("warrantyClusters — two identical laptops expiring the same week is t
 
 Add `warrantyClusters` to that file's import list.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/home.test.ts` — Expected: FAIL (`warrantyClusters` is not exported).
 
-- [ ] **Step 3: Implement it** (append to `src/lib/home.ts`)
+- [x] **Step 3: Implement it** (append to `src/lib/home.ts`)
 
 ```ts
 export interface WarrantyLike {
@@ -597,11 +597,11 @@ export function warrantyClusters<T extends WarrantyLike>(rows: T[]): Array<T & {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `npm run test -- src/lib/home.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Write the query module** (`src/server/modules/home/queries.ts`)
+- [x] **Step 5: Write the query module** (`src/server/modules/home/queries.ts`)
 
 ```ts
 import { prisma } from "@/server/db/client";
@@ -906,7 +906,7 @@ export async function warrantyRunway(now: Date = new Date()): Promise<WarrantyRo
 }
 ```
 
-- [ ] **Step 6: Verify against the real database**
+- [x] **Step 6: Verify against the real database**
 
 There is no unit test for this module (it is I/O). Prove it with a throwaway script in the scratchpad (`.../scratchpad/check-home.ts`, run with `npx tsx`, DELETE it afterwards; `npm run db:seed` first).
 
@@ -919,7 +919,7 @@ Print and check, against the seeded data:
 
 Report the printed output for 1, 3 and 5.
 
-- [ ] **Step 7: Typecheck, lint, commit**
+- [x] **Step 7: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -938,7 +938,7 @@ Entry criterion #3: **Finance Home leads with money and age** ("₱208k waiting,
 **Files:**
 - Modify: `src/server/modules/home/queries.ts` (append)
 
-- [ ] **Step 1: Append the two role queries**
+- [x] **Step 1: Append the two role queries**
 
 First widen the file's format import — Task 3 deliberately left `fmtMoney` out because nothing used it yet and lint runs at `--max-warnings 0`:
 
@@ -1079,7 +1079,7 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
 }
 ```
 
-- [ ] **Step 2: Verify against the real database**
+- [x] **Step 2: Verify against the real database**
 
 Extend your throwaway scratchpad script (delete it after; reseed first):
 1. `financeHome()` — the seed has PR-0195 `IT_REVIEWED` at ₱45,000, so expect `waiting` ≈ `₱45,000`, `waitingCount` 1, and a non-null `oldestDays`. `capitalized` should be the sum of all 22 assets' costs, and `capitalizedCount` the number with a cost.
@@ -1088,7 +1088,7 @@ Extend your throwaway scratchpad script (delete it after; reseed first):
 
 Report the printed output for 1 and 2.
 
-- [ ] **Step 3: Typecheck, lint, commit**
+- [x] **Step 3: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1106,7 +1106,7 @@ Entry criteria #4 and the README's "cleared items leave for the rest of the day 
 - Create: `src/server/modules/home/actions.ts`
 - Create: `src/components/home/focus-toggle.tsx`, `src/components/home/dismiss-button.tsx`
 
-- [ ] **Step 1: The dismiss action** (`src/server/modules/home/actions.ts`)
+- [x] **Step 1: The dismiss action** (`src/server/modules/home/actions.ts`)
 
 ```ts
 "use server";
@@ -1154,7 +1154,7 @@ export async function dismissShiftRow(input: unknown): Promise<ActionResult<null
 }
 ```
 
-- [ ] **Step 2: The dismiss island** (`src/components/home/dismiss-button.tsx`)
+- [x] **Step 2: The dismiss island** (`src/components/home/dismiss-button.tsx`)
 
 ```tsx
 "use client";
@@ -1185,7 +1185,7 @@ export function DismissButton({ shiftKey, title }: { shiftKey: string; title: st
 }
 ```
 
-- [ ] **Step 3: The focus toggle** (`src/components/home/focus-toggle.tsx`)
+- [x] **Step 3: The focus toggle** (`src/components/home/focus-toggle.tsx`)
 
 ```tsx
 "use client";
@@ -1219,7 +1219,7 @@ export function FocusToggle({ on }: { on: boolean }) {
 }
 ```
 
-- [ ] **Step 4: Typecheck, lint, commit**
+- [x] **Step 4: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1238,7 +1238,7 @@ Entry criterion #2. **No KPI tile row** — the most valuable strip on the page 
 **Files:**
 - Create: `src/components/home/your-shift.tsx`, `fleet-bar.tsx`, `age-histogram.tsx`, `warranty-runway.tsx`, `jump-to.tsx`
 
-- [ ] **Step 1: Your shift** (`src/components/home/your-shift.tsx`)
+- [x] **Step 1: Your shift** (`src/components/home/your-shift.tsx`)
 
 ```tsx
 import Link from "next/link";
@@ -1294,7 +1294,7 @@ export function YourShift({ rows, canAct }: { rows: ShiftRow[]; canAct: boolean 
 }
 ```
 
-- [ ] **Step 2: The fleet bar** (`src/components/home/fleet-bar.tsx`)
+- [x] **Step 2: The fleet bar** (`src/components/home/fleet-bar.tsx`)
 
 ```tsx
 import { StatusDot } from "@/components/ui/status";
@@ -1343,7 +1343,7 @@ export function FleetBar({ fleet }: { fleet: Fleet }) {
 }
 ```
 
-- [ ] **Step 3: The age histogram** (`src/components/home/age-histogram.tsx`)
+- [x] **Step 3: The age histogram** (`src/components/home/age-histogram.tsx`)
 
 ```tsx
 import type { AgeBar } from "@/server/modules/home/queries";
@@ -1375,7 +1375,7 @@ export function AgeHistogram({ bars }: { bars: AgeBar[] }) {
 }
 ```
 
-- [ ] **Step 4: The warranty runway** (`src/components/home/warranty-runway.tsx`)
+- [x] **Step 4: The warranty runway** (`src/components/home/warranty-runway.tsx`)
 
 ```tsx
 import Link from "next/link";
@@ -1409,7 +1409,7 @@ export function WarrantyRunway({ rows }: { rows: WarrantyRow[] }) {
 }
 ```
 
-- [ ] **Step 5: Jump to** (`src/components/home/jump-to.tsx`) — the one thing kept from the Phase-2 placeholder
+- [x] **Step 5: Jump to** (`src/components/home/jump-to.tsx`) — the one thing kept from the Phase-2 placeholder
 
 ```tsx
 import Link from "next/link";
@@ -1433,7 +1433,7 @@ export function JumpTo({ sections }: { sections: NavSection[] }) {
 }
 ```
 
-- [ ] **Step 6: Typecheck, lint, commit**
+- [x] **Step 6: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1452,7 +1452,7 @@ Entry criteria #2, #3, #4, #5. This replaces the Phase-2 placeholder wholesale.
 **Files:**
 - Replace: `src/app/(app)/page.tsx`
 
-- [ ] **Step 1: Write the page**
+- [x] **Step 1: Write the page**
 
 ```tsx
 import { cookies } from "next/headers";
@@ -1656,11 +1656,11 @@ export default async function Home() {
 }
 ```
 
-- [ ] **Step 2: Typecheck + lint**
+- [x] **Step 2: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean. Lint runs at `--max-warnings 0`, so an import you end up not using is a build failure, not a warning — the import list above is exactly what this page uses.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add "src/app/(app)/page.tsx"
@@ -1681,7 +1681,7 @@ git commit -m "feat(home): role-aware dashboards with independently degrading se
 - Create: `src/server/modules/finance/queries.ts`
 - Create: `src/app/(app)/finance/assets/page.tsx`
 
-- [ ] **Step 1: The query** (`src/server/modules/finance/queries.ts`)
+- [x] **Step 1: The query** (`src/server/modules/finance/queries.ts`)
 
 ```ts
 import type { AssetStatus, Prisma } from "@prisma/client";
@@ -1757,7 +1757,7 @@ export async function financeAssets(
 }
 ```
 
-- [ ] **Step 2: The page** (`src/app/(app)/finance/assets/page.tsx`)
+- [x] **Step 2: The page** (`src/app/(app)/finance/assets/page.tsx`)
 
 ```tsx
 import Link from "next/link";
@@ -1887,7 +1887,7 @@ export default async function FinanceAssetsPage({
 }
 ```
 
-- [ ] **Step 3: Typecheck, lint, commit**
+- [x] **Step 3: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1907,7 +1907,7 @@ Entry criterion #6 and scope decision #9. Finance's log is the money trail: purc
 - Create: `src/app/(app)/finance/activity/page.tsx`
 - Modify: `src/server/modules/finance/queries.ts` (append the where-builder)
 
-- [ ] **Step 1: Append the where-builder** (`src/server/modules/finance/queries.ts`)
+- [x] **Step 1: Append the where-builder** (`src/server/modules/finance/queries.ts`)
 
 ```ts
 /**
@@ -1927,7 +1927,7 @@ export const financeActivityWhere: Prisma.AuditEntryWhereInput = {
 
 Add `Prisma` to the value imports at the top of the file (it currently imports `Prisma` as a type only — you need the runtime object for `Prisma.DbNull`): `import { Prisma, type AssetStatus } from "@prisma/client";`
 
-- [ ] **Step 2: Verify the JSON filter against the real database FIRST**
+- [x] **Step 2: Verify the JSON filter against the real database FIRST**
 
 Before writing the page, prove the filter works. Throwaway scratchpad script (delete it; reseed after):
 
@@ -1946,7 +1946,7 @@ To have an asset-cost entry to find, first make one: update any asset's `cost` t
 
 `viaFilter` must equal `manual`. **If it does not, stop**: fall back to `{ entityType: "purchase-request" }`, drop the domain pill, and report the discrepancy prominently.
 
-- [ ] **Step 3: The page** (`src/app/(app)/finance/activity/page.tsx`)
+- [x] **Step 3: The page** (`src/app/(app)/finance/activity/page.tsx`)
 
 ```tsx
 import { requireUser } from "@/server/auth/guards";
@@ -2023,7 +2023,7 @@ export default async function FinanceActivityPage({
 }
 ```
 
-- [ ] **Step 4: Typecheck, lint, commit**
+- [x] **Step 4: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -2039,7 +2039,7 @@ git commit -m "feat(finance): the money trail — purchases plus asset cost chan
 - Create: `e2e/home-finance.spec.ts`
 - Modify: this plan (check the boxes, add a close-out), `docs/HANDOVER.md`
 
-- [ ] **Step 1: Write the spec** (`e2e/home-finance.spec.ts`)
+- [x] **Step 1: Write the spec** (`e2e/home-finance.spec.ts`)
 
 Follow `e2e/purchases.spec.ts` for the house helpers (`login`, `expectNoSeriousAxe`, the `beforeAll` reseed, a 1280px viewport for the sidebar). Cover:
 
@@ -2055,7 +2055,7 @@ Follow `e2e/purchases.spec.ts` for the house helpers (`login`, `expectNoSeriousA
 10. **`/finance/activity`** — renders entries with a domain pill.
 11. **axe** on `/` (as IT, as viewer, and in Focus mode), `/finance/assets`, `/finance/activity`.
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 ```bash
 npm run db:seed && npx playwright test e2e/home-finance.spec.ts --workers=1
@@ -2063,7 +2063,7 @@ npm run db:seed && npx playwright test e2e/home-finance.spec.ts --workers=1
 
 Iterate until green. When a test fails, decide whether the test or the app is wrong before changing either, and say which you concluded. Never loosen an assertion about the absent KPI row, the viewer's missing shift card, the money-first Finance headline, or the Focus cookie surviving a reload — those ARE the requirements.
 
-- [ ] **Step 3: The full suite**
+- [x] **Step 3: The full suite**
 
 ```bash
 npm run db:seed && npx playwright test --workers=1
@@ -2071,29 +2071,29 @@ npm run db:seed && npx playwright test --workers=1
 
 Expected: the 63 pre-existing tests plus yours, all green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/home-finance.spec.ts
 git commit -m "test(e2e): home dashboards, focus mode, dismissals, finance register and activity"
 ```
 
-- [ ] **Step 5: The full battery** (controller runs this with the dev server stopped)
+- [x] **Step 5: The full battery** (controller runs this with the dev server stopped)
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test && npm run build
 ```
 
-- [ ] **Step 6: Check off this plan and write the close-out**
+- [x] **Step 6: Check off this plan and write the close-out**
 
-Mark every `- [ ]` as `- [x]` and append a **Close-out** section recording: the battery numbers, what the reviews caught, deviations from the plan, and anything deferred.
+Mark every `- [x]` as `- [x]` and append a **Close-out** section recording: the battery numbers, what the reviews caught, deviations from the plan, and anything deferred.
 
 ```bash
 git add docs/superpowers/plans/2026-08-17-phase-6-finance-home.md
 git commit -m "docs(plan): phase 6 checked off + close-out"
 ```
 
-- [ ] **Step 7: Advance the handover** (`docs/HANDOVER.md`)
+- [x] **Step 7: Advance the handover** (`docs/HANDOVER.md`)
 
 Update the header line and §0 to point at **Phase 7 (Offboarding + repairs + policies)**; add a Phase 6 paragraph to §4; drop the Phase 6 bullet from §5; replace §6 with **Phase 7 entry criteria** (the 4-step wizard where each per-item decision creates its own `lifecycle.return` approval immediately, so a half-finished offboarding is still N correct records; `Missing` is first-class and a reason is required for anything other than Returned; Continue is blocked while any item is undecided; the repairs view is a saved filter over `?status=DEFECTIVE` with vendor fields and a **Down** column — no new enum; `/reservations`; `/admin/equipment-policies` where editing never touches existing assignments, which is why the audit entry records both slot lists); add any new gotcha to §7 and anything deferred to §8.
 
@@ -2102,7 +2102,7 @@ git add docs/HANDOVER.md
 git commit -m "docs: handover advanced — phase 6 done, phase 7 entry criteria"
 ```
 
-- [ ] **Step 8: Finish the branch**
+- [x] **Step 8: Finish the branch**
 
 Use `superpowers:finishing-a-development-branch`: merge `phase-6-finance-home` into `main`, delete the branch, push.
 
@@ -2110,8 +2110,39 @@ Use `superpowers:finishing-a-development-branch`: merge `phase-6-finance-home` i
 
 ## Self-review checklist (run before declaring the phase done)
 
-- [ ] Every entry criterion has a task: #1 → Task 2 (and every section uses it) · #2 → Tasks 3, 6, 7 · #3 → Tasks 4, 7 · #4 → Tasks 5, 7 · #5 → Task 7 · #6 → Tasks 8, 9 · #7 → grep for `Decimal` reaching a client component: `grep -rn "cost\|unitPrice" src/components` should return nothing that isn't a preformatted string · #8 → no new primitive was added to `src/components/ui/` (a `style` prop on `Card` is the one sanctioned exception).
-- [ ] `grep -rn "safeSection" src/app` — every Home section loads through it.
-- [ ] Viewer: no `Your shift`, no dismiss button, no action links that mutate.
-- [ ] Focus mode survives a reload (cookie, not state) and never appears in the URL.
-- [ ] The IT Home has **no KPI tile row** — if a `Stat` grid appeared at the top of the IT variant, it is wrong.
+- [x] Every entry criterion has a task: #1 → Task 2 (and every section uses it) · #2 → Tasks 3, 6, 7 · #3 → Tasks 4, 7 · #4 → Tasks 5, 7 · #5 → Task 7 · #6 → Tasks 8, 9 · #7 → grep for `Decimal` reaching a client component: `grep -rn "cost\|unitPrice" src/components` should return nothing that isn't a preformatted string · #8 → no new primitive was added to `src/components/ui/` (a `style` prop on `Card` is the one sanctioned exception).
+- [x] `grep -rn "safeSection" src/app` — every Home section loads through it.
+- [x] Viewer: no `Your shift`, no dismiss button, no action links that mutate.
+- [x] Focus mode survives a reload (cookie, not state) and never appears in the URL.
+- [x] The IT Home has **no KPI tile row** — if a `Stat` grid appeared at the top of the IT variant, it is wrong.
+
+---
+
+## Close-out (2026-08-17)
+
+**Battery on merge:** `tsc` clean · `lint` clean · **284 unit tests** (was 255; +29 across `home` and `section`) · `next build` clean, both `/finance/*` routes emitted · **75 e2e** (was 63; +12 in `e2e/home-finance.spec.ts`), full suite green at `--workers=1` on a freshly started server.
+
+### What the reviews and live checks caught
+
+- **The plan's own `warrantyClusters` failed the test the plan wrote for it.** Fixed-width `Math.floor(days/7)` buckets put a pair 2 days apart (12 d and 14 d) either side of a boundary, so the very case the design is about — *two identical laptops expiring the same week* — didn't cluster. Replaced with pairwise "same model, within 7 days of each other" clustering, which also handles the already-expired (negative-days) case the bucket form got wrong.
+- **The warranty runway looked backwards.** With no lower bound, a card titled "next 90 days" filled with kit that came off warranty up to 300 days ago. The window is now `[now, now+90d]`.
+- **Two seeded fixtures didn't exercise their own design**, and were fixed rather than worked around: every asset shared one purchase date, so the five-bucket age histogram was a single bar and the `4y+` amber — the only bar that changes colour — could never render; and nothing at all expired inside the 90-day window, so the clustered pair never appeared. Purchase dates now span all five buckets, and two Dell Latitude 5420s expire 3 days apart.
+- **The finance register's asset tags were dead ends.** `/finance/assets` is a register of asset records, but `/inventory` was gated to IT and purchasing, so every tag on the page redirected the one role the page exists for. Finance now reaches the record — and only the record: the IT-only `/secrets` rule still precedes it, which the tests now pin.
+- **A leaver with nothing outstanding rendered "0 items still out · Collect equipment"** — true, and useless as a call to action. When the kit is already back the row now names the half of offboarding that remains.
+- **The full e2e suite failed intermittently — and it wasn't the code.** A different set of pre-existing tests failed on each run, always as "clicked a link, heading never arrived", while the dev server's resident memory climbed from ~8.5GB to ~12.2GB. Every one passed in isolation, and the whole suite passed 75/75 once the server was restarted. Worth knowing before anyone debugs a phantom.
+
+### Deviations from the plan as written
+
+1. `warrantyClusters` uses pairwise proximity, not fixed buckets (above).
+2. `Card` gained an optional `style` prop so the FAILED card's red border comes from the `--st-fault-border` token rather than a hard-coded class — the one sanctioned addition to the primitive layer this phase.
+3. `dismissShiftRow` needed `as unknown as Prisma.InputJsonObject` to satisfy Prisma's `Json` input type from a typed interface; documented inline.
+4. The e2e adds explicit 15s timeouts to assertions that immediately follow a click-driven navigation — locators and expected values unchanged.
+5. `/finance/activity` needed one real purchase transition in its test before it has anything to show: the seed writes `asset` audit rows directly but `purchase-request` rows only ever come from real actions.
+
+### Deferred (carried into the handover)
+
+- **The Admin workspace has no Home of its own** — `ws === "admin"` falls through to the IT layout, so an admin sees SLA breaches and fleet composition under a Users/Webhooks/Flags sidebar. Defensible (an admin can act on all of it) but not purpose-built.
+- **"Retry this section" refreshes the whole route**, not just its section — RSC has no per-section refetch. The effect the label promises is what happens; the cost is that the other sections re-run too.
+- **Degradation is loader-level**, so a render-time bug inside a section still escapes to the route-level error boundary. A React error boundary per section would close that gap.
+- `/finance/assets` has no free-text search or sortable headers (the inventory list has both), and no book-value column — depreciation is a policy nobody has stated.
+- The shift's `DATA` rows key on `DATA:<assetId>`, which is unambiguous today only because an asset can't be both MISSING and DEPLOYED-without-a-holder. A third asset-keyed finding would need the key to encode the finding type.
