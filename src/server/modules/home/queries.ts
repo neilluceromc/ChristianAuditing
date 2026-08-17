@@ -283,7 +283,12 @@ export interface WarrantyRow {
 export async function warrantyRunway(now: Date = new Date()): Promise<WarrantyRow[]> {
   const horizon = new Date(now.getTime() + WARRANTY_WINDOW_DAYS * DAY_MS);
   const assets = await prisma.asset.findMany({
-    where: { warrantyUntil: { not: null, lte: horizon }, status: { notIn: ["DISPOSE", "DONATED", "BUYOUT"] } },
+    // a runway looks FORWARD: without the floor this card fills with kit that
+    // came off warranty a year ago, which is a different problem entirely
+    where: {
+      warrantyUntil: { gte: now, lte: horizon },
+      status: { notIn: ["DISPOSE", "DONATED", "BUYOUT"] },
+    },
     orderBy: { warrantyUntil: "asc" },
     take: 8,
     select: { id: true, tag: true, model: true, warrantyUntil: true },

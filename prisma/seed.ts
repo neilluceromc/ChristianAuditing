@@ -97,9 +97,12 @@ async function main() {
 
   await prisma.asset.createMany({
     data: [
-      mk("BR-LT-0148", "Dell Latitude 5420", "Laptop", "DEPLOYED", { assigneeId: emp("EMP-0042").id }),
+      // this pair is the warranty-runway fixture: same model, expiring 3 days
+      // apart inside the 90-day window, so Home can show the thing the design
+      // is about — two identical laptops coming off warranty the same week
+      mk("BR-LT-0148", "Dell Latitude 5420", "Laptop", "DEPLOYED", { assigneeId: emp("EMP-0042").id, warrantyUntil: day(38) }),
       mk("BR-LT-0181", "ThinkPad T14 Gen 4", "Laptop", "SPARE", { warrantyUntil: day(600) }),
-      mk("BR-LT-0122", "Dell Latitude 5420", "Laptop", "DEFECTIVE", { defectiveSince: day(-12), notes: "No POST after power surge" }),
+      mk("BR-LT-0122", "Dell Latitude 5420", "Laptop", "DEFECTIVE", { defectiveSince: day(-12), warrantyUntil: day(41), notes: "No POST after power surge" }),
       mk("BR-LT-0118", "ThinkPad T14 Gen 3", "Laptop", "DEFECTIVE", { defectiveSince: day(-21), vendorId: vendors[1].id, rmaRef: "RMA-8802", notes: "Battery swelling" }),
       mk("BR-LT-0090", "Dell Latitude 5410", "Laptop", "DEFECTIVE", { defectiveSince: day(-44), repairQuote: 18_400, notes: "Board failure, out of warranty", warrantyUntil: day(-200) }),
       mk("BR-LT-0201", "MacBook Air M3", "Laptop", "DEPLOYED", { assigneeId: emp("EMP-0099").id, warrantyUntil: day(700) }),
