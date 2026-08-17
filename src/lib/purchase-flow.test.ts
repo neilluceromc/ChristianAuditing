@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  PURCHASE_ACTION_ROLES, PURCHASE_NOTE_KIND, REASON_REQUIRED, canAct, purchaseTransition,
-  unitEditorMode, type PurchaseAction,
+  CANONICAL_NOTE, PURCHASE_ACTION_ROLES, PURCHASE_NOTE_KIND, REASON_REQUIRED, canAct,
+  purchaseTransition, unitEditorMode, type PurchaseAction,
 } from "./purchase-flow";
 
 const ALL_STATES = ["DRAFT", "SUBMITTED", "IT_REVIEWED", "COMPLETED", "CANCELLED"] as const;
@@ -130,6 +130,42 @@ describe("unitEditorMode", () => {
     expect(unitEditorMode("DRAFT", "admin")).toBeNull();
     expect(unitEditorMode("COMPLETED", "finance_staff")).toBeNull();
     expect(unitEditorMode("SUBMITTED", "viewer")).toBeNull();
+  });
+
+  it("gives nobody an editor in any other state × role combination", () => {
+    const ROLES = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"] as const;
+    const ALLOWED = new Set(["SUBMITTED:it_staff", "SUBMITTED:admin", "IT_REVIEWED:finance_staff", "IT_REVIEWED:admin"]);
+    for (const state of ALL_STATES) {
+      for (const role of ROLES) {
+        const mode = unitEditorMode(state, role);
+        if (ALLOWED.has(`${state}:${role}`)) expect(mode).not.toBeNull();
+        else expect(mode).toBeNull();
+      }
+    }
+    // the one a sampled test misses: IT keeps no editor once finance owns it
+    expect(unitEditorMode("IT_REVIEWED", "it_staff")).toBeNull();
+  });
+});
+
+describe("CANONICAL_NOTE — the thread never has a hole", () => {
+  it("gives the optional-reason transitions their fallback sentence", () => {
+    expect(CANONICAL_NOTE.submit).toBe("Submitted for IT review.");
+    expect(CANONICAL_NOTE["it-review"]).toBe("Specs reviewed — passed to finance.");
+    expect(CANONICAL_NOTE.complete).toBe("Approved and completed.");
+  });
+
+  it("leaves the reason-required transitions empty — their text is the typed reason", () => {
+    for (const action of REASON_REQUIRED) {
+      expect(CANONICAL_NOTE[action]).toBe("");
+    }
+  });
+
+  it("covers every action, so no transition can append an undefined note", () => {
+    for (const action of ALL_ACTIONS) {
+      expect(typeof CANONICAL_NOTE[action]).toBe("string");
+      // an optional-reason action with no fallback would write an empty note
+      if (!REASON_REQUIRED.includes(action)) expect(CANONICAL_NOTE[action].length).toBeGreaterThan(0);
+    }
   });
 });
 
