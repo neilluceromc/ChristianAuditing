@@ -51,6 +51,20 @@ export const CANONICAL_NOTE: Record<PurchaseAction, string> = {
   complete: "Approved and completed.",
 };
 
+/**
+ * These land in a conflict banner, so they are written out rather than
+ * derived: "complete" + "ed" is "completeed", and "request-info" has no
+ * suffix form at all.
+ */
+const VERB: Record<PurchaseAction, { present: string; past: string }> = {
+  submit: { present: "submit", past: "submitted" },
+  "it-review": { present: "mark IT-reviewed", past: "marked IT-reviewed" },
+  "it-reject": { present: "send back", past: "sent back" },
+  "request-info": { present: "send back for more information", past: "sent back for more information" },
+  cancel: { present: "cancel", past: "cancelled" },
+  complete: { present: "complete", past: "completed" },
+};
+
 const RULES: Record<PurchaseAction, { from: PurchaseRequestState[]; to: PurchaseRequestState; party: string }> = {
   submit: { from: ["DRAFT"], to: "SUBMITTED", party: "Purchasing" },
   "it-review": { from: ["SUBMITTED"], to: "IT_REVIEWED", party: "IT" },
@@ -67,12 +81,12 @@ export function purchaseTransition(
 ): PurchaseTransitionResult {
   const rule = RULES[action];
   if (!PURCHASE_ACTION_ROLES[action].includes(role)) {
-    return { ok: false, error: `Only ${rule.party} (or an admin) can ${action.replace("-", " ")} a request.` };
+    return { ok: false, error: `Only ${rule.party} (or an admin) can ${VERB[action].present} a request.` };
   }
   if (!rule.from.includes(state)) {
     return {
       ok: false,
-      error: `A ${state} request can't be ${action === "submit" ? "submitted" : action.replace("-", " ") + "ed"} — it must be ${rule.from.join(" or ")}.`,
+      error: `A ${state} request can't be ${VERB[action].past} — it must be ${rule.from.join(" or ")}.`,
     };
   }
   return { ok: true, next: rule.to };

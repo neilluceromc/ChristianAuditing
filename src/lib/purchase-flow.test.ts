@@ -77,6 +77,26 @@ describe("purchaseTransition — brief §6.1, exact", () => {
     expect(purchaseTransition("DRAFT", "cancel", "admin").ok).toBe(true);
   });
 
+  it("every refusal message is real English — no 'completeed', no 'request infoed'", () => {
+    for (const action of ALL_ACTIONS) {
+      for (const state of ALL_STATES) {
+        const r = purchaseTransition(state, action, "viewer"); // viewer fails the role check
+        if (!r.ok) expect(r.error).not.toMatch(/eed\b|infoed|canceled/);
+      }
+      const wrongState = purchaseTransition("COMPLETED", action, "admin");
+      expect(wrongState.ok).toBe(false);
+      if (!wrongState.ok) expect(wrongState.error).not.toMatch(/eed\b|infoed|canceled/);
+    }
+    expect(purchaseTransition("DRAFT", "complete", "admin")).toEqual({
+      ok: false,
+      error: "A DRAFT request can't be completed — it must be IT_REVIEWED.",
+    });
+    expect(purchaseTransition("SUBMITTED", "request-info", "admin")).toEqual({
+      ok: false,
+      error: "A SUBMITTED request can't be sent back for more information — it must be IT_REVIEWED.",
+    });
+  });
+
   it("failures carry a human reason naming the role or the state", () => {
     const wrongRole = purchaseTransition("SUBMITTED", "it-review", "purchasing_staff");
     expect(wrongRole.ok).toBe(false);
