@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -35,6 +36,22 @@ const draftSchema = z.object({
   units: z.array(unitSchema).min(1, "A request needs at least one unit").max(50),
 });
 
+/**
+ * Same contract as actions.ts: a transaction that can't get a connection in
+ * time (P2028) is contention, not a crash, so it becomes a typed conflict the
+ * autosave UI can show. Everything else rethrows.
+ */
+async function asActionResult<T>(run: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2028") {
+      return conflict("The database is busy right now — nothing was written. Your input is still here; try again.");
+    }
+    throw err;
+  }
+}
+
 export interface DraftSaved {
   id: string;
   refNo: string;
@@ -52,6 +69,10 @@ const summarize = (units: Array<{ qty: number; unitPrice: number | null }>) => (
  * seeded PR-#### range via purchase_request_ref_seq (the seed leaves it at 201).
  */
 export async function createDraft(input: unknown): Promise<ActionResult<DraftSaved>> {
+  return asActionResult(() => createDraftImpl(input));
+}
+
+async function createDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>> {
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { units } = parsed.data;
@@ -92,6 +113,7 @@ export async function createDraft(input: unknown): Promise<ActionResult<DraftSav
 
   revalidatePath("/purchases");
   revalidatePath("/purchases/activity");
+  revalidatePath("/audit"); // the create writes an AuditEntry too
   return ok({ id: created.id, refNo: created.refNo, savedAt: new Date().toISOString() });
 }
 
@@ -103,6 +125,10 @@ export async function createDraft(input: unknown): Promise<ActionResult<DraftSav
  * Audits only when something actually changed (scope decision #5).
  */
 export async function saveDraft(input: unknown): Promise<ActionResult<DraftSaved>> {
+  return asActionResult(() => saveDraftImpl(input));
+}
+
+async function saveDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>> {
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { id, units } = parsed.data;

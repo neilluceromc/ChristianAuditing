@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { Prisma, Role } from "@prisma/client";
+import { Prisma, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -31,8 +31,28 @@ const transitionSchema = z.object({
 function revalidate(id: string) {
   revalidatePath("/purchases");
   revalidatePath(`/purchases/${id}`);
+  // submit, it-reject and cancel all change whether the edit page may render
+  // an editor at all, so its cache entry has to go too
+  revalidatePath(`/purchases/${id}/edit`);
   revalidatePath("/purchases/activity");
   revalidatePath("/audit");
+}
+
+/**
+ * Prisma throws rather than returning, and an interactive transaction that
+ * can't get a connection inside `maxWait` raises P2028 — under contention that
+ * is a plain "someone else is working on this", not a 500. Everything else
+ * rethrows: an unexpected error must not be laundered into a friendly banner.
+ */
+async function asActionResult<T>(run: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2028") {
+      return conflict("The database is busy right now — nothing was written. Try that again.");
+    }
+    throw err;
+  }
 }
 
 /**
@@ -60,12 +80,21 @@ async function runTransition(action: PurchaseAction, input: unknown): Promise<Ac
   const failure = await prisma.$transaction(async (tx) => {
     const req = await tx.purchaseRequest.findUnique({
       where: { id },
-      select: { id: true, refNo: true, state: true },
+      select: { id: true, refNo: true, state: true, requestedById: true },
     });
     if (!req) return conflict("That request no longer exists.");
 
     const t = purchaseTransition(req.state, action, user.role);
     if (!t.ok) return conflict(t.error);
+
+    // Submitting and cancelling are the REQUESTER's own acts (scope decision
+    // #2: cancel is a withdrawal). The party check above only proves someone
+    // is purchasing staff — without this, any colleague could irreversibly
+    // cancel a request finance had already worked, and draft-actions.ts
+    // already refuses to let them so much as edit it.
+    if ((action === "submit" || action === "cancel") && req.requestedById !== user.id && user.role !== "admin") {
+      return forbidden();
+    }
 
     // README 3f: vague specs are exactly what IT review is for. Missing prices
     // are not — finance can't approve a number nobody wrote down.
@@ -149,22 +178,22 @@ async function runTransition(action: PurchaseAction, input: unknown): Promise<Ac
 }
 
 export async function submitRequest(input: unknown): Promise<ActionResult<Acted>> {
-  return runTransition("submit", input);
+  return asActionResult(() => runTransition("submit", input));
 }
 export async function itReviewRequest(input: unknown): Promise<ActionResult<Acted>> {
-  return runTransition("it-review", input);
+  return asActionResult(() => runTransition("it-review", input));
 }
 export async function itRejectRequest(input: unknown): Promise<ActionResult<Acted>> {
-  return runTransition("it-reject", input);
+  return asActionResult(() => runTransition("it-reject", input));
 }
 export async function requestMoreInfo(input: unknown): Promise<ActionResult<Acted>> {
-  return runTransition("request-info", input);
+  return asActionResult(() => runTransition("request-info", input));
 }
 export async function cancelRequest(input: unknown): Promise<ActionResult<Acted>> {
-  return runTransition("cancel", input);
+  return asActionResult(() => runTransition("cancel", input));
 }
 export async function completeRequest(input: unknown): Promise<ActionResult<Acted>> {
-  return runTransition("complete", input);
+  return asActionResult(() => runTransition("complete", input));
 }
 
 const commentSchema = z.object({
@@ -172,8 +201,17 @@ const commentSchema = z.object({
   text: z.string().trim().min(2, "Say something").max(2000),
 });
 
-/** A free comment in the three-party thread — never a state change. */
+/**
+ * A free comment in the three-party thread — never a state change, and
+ * deliberately still allowed on a COMPLETED or CANCELLED request: the thread
+ * IS the record of a purchase, and "why did we buy this" gets asked after the
+ * fact. Comments never move the stepper (bounceBack ignores COMMENT notes).
+ */
 export async function addComment(input: unknown): Promise<ActionResult<null>> {
+  return asActionResult(() => addCommentImpl(input));
+}
+
+async function addCommentImpl(input: unknown): Promise<ActionResult<null>> {
   const parsed = commentSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { id, text } = parsed.data;
@@ -214,6 +252,10 @@ const unitSaveSchema = z.object({
  * touches PurchaseRequest.state.
  */
 export async function saveUnit(input: unknown): Promise<ActionResult<null>> {
+  return asActionResult(() => saveUnitImpl(input));
+}
+
+async function saveUnitImpl(input: unknown): Promise<ActionResult<null>> {
   const parsed = unitSaveSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { unitId, specs, itSlotNotes, financeNotes, state } = parsed.data;
@@ -241,19 +283,42 @@ export async function saveUnit(input: unknown): Promise<ActionResult<null>> {
     }
     if (unit.state === "CANCELLED") return conflict("A cancelled unit is read-only.");
 
-    const after =
-      mode === "it"
-        ? { specs: specs ?? unit.specs, itSlotNotes: itSlotNotes ?? unit.itSlotNotes }
-        : { financeNotes: financeNotes ?? unit.financeNotes, state: state ?? unit.state };
+    /**
+     * Write ONLY the fields this caller actually sent. Filling the untouched
+     * ones from the row we just read would rewrite them with a value that is
+     * already stale under READ COMMITTED: two people saving different fields
+     * of the same line would each clobber the other's, and `diffOf` — reading
+     * the same stale row — wouldn't even record the loss.
+     *
+     * Empty string normalizes to null, matching what draft-actions.ts stores,
+     * so a cleared field reads as absent everywhere rather than as "".
+     */
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    const write = (key: "specs" | "itSlotNotes" | "financeNotes", value: string | undefined) => {
+      if (value === undefined) return;
+      before[key] = unit[key];
+      after[key] = value || null;
+    };
+    if (mode === "it") {
+      write("specs", specs);
+      write("itSlotNotes", itSlotNotes);
+    } else {
+      write("financeNotes", financeNotes);
+      if (state !== undefined) {
+        before.state = unit.state;
+        after.state = state;
+      }
+    }
+    if (Object.keys(after).length === 0) return null; // the caller sent nothing to write
 
-    const diff = diffOf(
-      { specs: unit.specs, itSlotNotes: unit.itSlotNotes, financeNotes: unit.financeNotes, state: unit.state },
-      after,
-    );
+    const diff = diffOf(before, after);
     if (Object.keys(diff).length === 0) return null; // nothing changed — no write, no audit row
 
     const updated = await tx.purchaseUnit.updateMany({
-      where: { id: unitId, state: unit.state, request: { state: unit.request.state } },
+      // every field being written is also in the guard, so a concurrent edit
+      // to the same field loses and conflicts instead of vanishing
+      where: { id: unitId, state: unit.state, request: { state: unit.request.state }, ...before },
       data: after,
     });
     if (updated.count === 0) {

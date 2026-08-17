@@ -16,7 +16,7 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
           <Th width={26} />
           <Th width={104}>Ref</Th>
           <Th>Request</Th>
-          <Th width={78} align="right">Units</Th>
+          <Th width={78} align="right">Items</Th>
           <Th width={124} align="right">Value</Th>
           <Th width={150}>Requested by</Th>
           <Th width={168}>State</Th>
@@ -32,9 +32,10 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
               </Link>
             </Td>
             <Td className="text-fg">
-              {row.unitCount === 1 ? "1 line" : `${row.unitCount} lines`} · {row.totalQty} item{row.totalQty === 1 ? "" : "s"}
+              {/* what is being bought, not how many rows it took to say it */}
+              {row.summary}
             </Td>
-            <Td align="right" mono>{row.unitCount}</Td>
+            <Td align="right" mono>{row.totalQty}</Td>
             <Td align="right" mono>{row.total}</Td>
             <Td>{row.requester}</Td>
             <Td>

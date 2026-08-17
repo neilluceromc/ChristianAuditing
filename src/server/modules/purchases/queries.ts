@@ -9,6 +9,8 @@ export interface PurchaseListRow {
   refNo: string;
   state: PurchaseRequestState;
   requester: string;
+  /** what is actually being bought: the first line, plus a count of the rest */
+  summary: string;
   unitCount: number;
   totalQty: number;
   total: string;
@@ -72,7 +74,7 @@ export async function listPurchases(
       id: true, refNo: true, state: true, updatedAt: true, submittedAt: true,
       reviewedAt: true, completedAt: true, cancelledAt: true,
       requestedBy: { select: { name: true } },
-      units: { select: { qty: true, unitPrice: true } },
+      units: { select: { qty: true, unitPrice: true, description: true }, orderBy: { createdAt: "asc" } },
       // the newest state-carrying note decides "did this come back?" —
       // bounceBack() reads the last non-COMMENT note, so one row is enough
       notes: {
@@ -99,6 +101,12 @@ export async function listPurchases(
         refNo: r.refNo,
         state: r.state,
         requester: r.requestedBy.name,
+        summary:
+          r.units.length === 0
+            ? "no lines yet"
+            : r.units.length === 1
+              ? r.units[0].description
+              : `${r.units[0].description} +${r.units.length - 1} more`,
         unitCount: r.units.length,
         totalQty: r.units.reduce((sum, u) => sum + u.qty, 0),
         total: fmtMoney(value),
