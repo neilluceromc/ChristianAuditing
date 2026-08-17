@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-17 · **main @ phase-6 merge** · **Phases 1–6 merged, 7–8 remain.**
+**Last updated:** 2026-08-17 · **main @ phase-6 merge + a Phase 7 plan DRAFT** · **Phases 1–6 merged, 7–8 remain.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -14,10 +14,15 @@ exist today.
 
 1. `docker compose up -d db` → `npm run db:seed` → open the preview (`preview_start` name `app-dev`).
 2. Read §6 (Phase 7 entry criteria) — they are load-bearing and were written while the reasoning was fresh.
-3. Write the Phase 7 plan with `superpowers:writing-plans` → `docs/superpowers/plans/2026-08-1X-phase-7-offboarding.md`.
-4. Execute it with `superpowers:subagent-driven-development` on branch `phase-7-offboarding`.
+3. **Finish the Phase 7 plan.** `docs/superpowers/plans/2026-08-17-phase-7-offboarding.md` exists but is a
+   **DRAFT**: its header, recorded scope decisions, file map and **Tasks 1–3 are complete and ready**;
+   **Tasks 4–11 still need writing**. The draft's own banner lists exactly what remains. Write them with
+   `superpowers:writing-plans` (bite-sized steps, full verbatim code, no placeholders), re-reading
+   `design_handover/README.md` cards `3e` / `5b` / `7b` / `5c` / `4a` first.
+4. Execute it with `superpowers:subagent-driven-development` on branch `phase-7-offboarding`
+   (Task 1 Step 1 creates the branch — nothing has been branched or implemented yet).
 
-Nothing is half-finished. main is green: `tsc` · `lint` · **284 unit** · `next build` · **75 e2e**.
+Nothing is half-finished in the CODE — the only work-in-progress is the Phase 7 plan document described above. main is green: `tsc` · `lint` · **284 unit** · `next build` · **75 e2e**.
 
 ---
 
@@ -145,6 +150,21 @@ scoped feed, so the only one showing the domain pill).
 6. **`/admin/equipment-policies`:** solid chips = required (an unfilled one is the policy gap that lights up on the loadout view and in Home's `HIRE` rows), grey = optional. Role policy beats department policy — `resolvePolicy` in `src/lib/loadout.ts` already encodes that. **Editing never touches existing assignments** — it changes what counts as complete from that moment, which is why the audit entry records BOTH slot lists.
 7. **Reuse the Phase 3 loadout brain.** `computeLoadout`/`resolvePolicy` already drive the employee loadout view and Home's hire rows; the offboarding wizard's "review holdings" step is the same data read the other way. A second implementation of slot-filling would drift.
 8. **The offboarding wizard is the first multi-step form in the app.** Step state belongs in the URL (`?step=`) so a refresh doesn't lose the operator's place, while per-item decisions are already persisted as approvals — there is no draft to lose.
+
+### Two findings already banked for Phase 7 (they shaped the draft's scope decisions)
+
+- **`lifecycle.return` only executes to `SPARE` today.** `executionPlan` (`src/lib/approval-execution.ts`)
+  hard-requires `to.status === "SPARE"`, so the wizard's Defective / Buyout / **Missing** decisions would
+  each land as `EXECUTION_FAILED` with "Malformed lifecycle.return payload". **Draft Task 1 fixes this
+  first**, widening it to `SPARE | DEFECTIVE | BUYOUT | MISSING` and always clearing the holder. The
+  worker's own return guard (still-held-by-the-expected-employee) is correct for all four and needs no
+  change.
+- **Dennis Ong (EMP-0090), the only OFFBOARDING employee, holds nothing** — so the wizard's own fixture
+  can't exercise it. Draft Task 3 assigns him three items (a clean return, a defective laptop, a phone to
+  go missing) and then fixes the count assertions this moves across the existing specs: Home's fleet
+  label (22 → 23 assets), the age histogram, the coverage line, and Home's `LEAVE` row, which changes
+  from "equipment returned" back to "3 items still out". This is the third time a seeded fixture couldn't
+  show its own screen — check the fixture before writing the assertion.
 
 ## 7. Recurring gotchas that have cost real time
 
