@@ -110,9 +110,13 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
       key: `LEAVE:${e.id}`,
       kind: "LEAVE",
       title: `${e.name} is leaving`,
-      meta: `${e.employeeNo} · ${e._count.assets} item${e._count.assets === 1 ? "" : "s"} still out`,
+      // "0 items still out" is true but useless as a call to action — when the
+      // kit is already back, what's left is the accounts half of offboarding
+      meta: e._count.assets > 0
+        ? `${e.employeeNo} · ${e._count.assets} item${e._count.assets === 1 ? "" : "s"} still out`
+        : `${e.employeeNo} · equipment returned · accounts still to close`,
       href: `/employees/${e.id}`,
-      action: "Collect equipment",
+      action: e._count.assets > 0 ? "Collect equipment" : "Close accounts",
       severity: daysSince(e.updatedAt, now),
     });
   }
