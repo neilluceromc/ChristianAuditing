@@ -105,6 +105,23 @@ describe("stepperModel", () => {
     expect(m.sentBack).toBe("finance");
   });
 
+  // The ordinal suffix table is only reachable through this note, so drive it
+  // past the 2nd-time case the happy path covers — 3rd, 11th and 21st are
+  // where a naive `n % 10` table goes wrong.
+  it.each([
+    [3, "NOW · 3rd time"],
+    [4, "NOW · 4th time"],
+    [11, "NOW · 11th time"],
+    [12, "NOW · 12th time"],
+    [13, "NOW · 13th time"],
+    [21, "NOW · 21st time"],
+  ])("marks visit %i as %s", (visits, expected) => {
+    // alternate SUBMIT / REQUEST_INFO so the last note is a genuine arrival
+    const thread = Array.from({ length: visits }, (_, i) =>
+      note(i % 2 === 0 ? "SUBMIT" : "REQUEST_INFO", "P", "x", i));
+    expect(stepperModel("SUBMITTED", thread).stops[1].note).toBe(expected);
+  });
+
   it("labels an IT rejection's return path", () => {
     const m = stepperModel("DRAFT", [note("SUBMIT", "P", "x", 0), note("IT_REJECT", "J", "y", 1)]);
     expect(m.sentBack).toBe("it");

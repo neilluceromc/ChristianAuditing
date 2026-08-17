@@ -29,6 +29,21 @@ describe("PURCHASE_TABS", () => {
     ]);
     expect(PURCHASE_TABS.find((t) => t.id === "IT_REVIEWED")!.href).toBe("/purchases?state=IT_REVIEWED");
   });
+
+  // Every href is pinned: the sidebar's "By status" links target these exact
+  // URLs and navIsActive compares them verbatim, so a typo in any one of them
+  // silently stops highlighting that nav item.
+  it("pins every tab's href and label", () => {
+    expect(PURCHASE_TABS).toEqual([
+      { id: "ALL", label: "All", href: "/purchases" },
+      { id: "DRAFT", label: "Drafts", href: "/purchases?state=DRAFT" },
+      { id: "SUBMITTED", label: "Awaiting IT", href: "/purchases?state=SUBMITTED" },
+      { id: "IT_REVIEWED", label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED" },
+      { id: "COMPLETED", label: "Completed", href: "/purchases?state=COMPLETED" },
+      { id: "CANCELLED", label: "Cancelled", href: "/purchases?state=CANCELLED" },
+    ]);
+  });
+
   it("labels the middle states by who is waiting, matching the sidebar", () => {
     const label = (id: string) => PURCHASE_TABS.find((t) => t.id === id)!.label;
     expect(label("SUBMITTED")).toBe("Awaiting IT");
