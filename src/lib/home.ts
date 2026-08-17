@@ -112,3 +112,37 @@ export function withDismissal(value: unknown, today: string, key: string): Dismi
 export function todayStamp(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(now);
 }
+
+export interface WarrantyLike {
+  id: string;
+  model: string;
+  days: number;
+}
+
+/**
+ * README: the runway's job is to surface that *two identical laptops expire the
+ * same week* — one row is a diary note, two is a purchase order. "Same week"
+ * is relative, not aligned to a fixed calendar boundary: two same-model rows
+ * cluster when they're within 7 days of each other, so a pair 2 days apart
+ * clusters and a pair 2 months apart doesn't, regardless of where the 7-day
+ * window would land if it were pinned to day zero.
+ */
+export function warrantyClusters<T extends WarrantyLike>(rows: T[]): Array<T & { clustered: boolean }> {
+  const clustered = new Set<number>();
+  const byModel = new Map<string, number[]>();
+  rows.forEach((r, i) => {
+    const indices = byModel.get(r.model) ?? [];
+    indices.push(i);
+    byModel.set(r.model, indices);
+  });
+  for (const indices of byModel.values()) {
+    const sorted = [...indices].sort((a, b) => rows[a].days - rows[b].days);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (Math.abs(rows[sorted[i + 1]].days - rows[sorted[i]].days) < 7) {
+        clustered.add(sorted[i]);
+        clustered.add(sorted[i + 1]);
+      }
+    }
+  }
+  return rows.map((r, i) => ({ ...r, clustered: clustered.has(i) }));
+}

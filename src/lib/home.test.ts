@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGE_BUCKETS, KIND_RANK, activeDismissals, ageBucket, coverageLine, shiftOrder,
-  warrantyDaysLeft, withDismissal, type ShiftRow,
+  warrantyClusters, warrantyDaysLeft, withDismissal, type ShiftRow,
 } from "./home";
 
 const NOW = new Date("2026-08-17T09:00:00+08:00");
@@ -116,5 +116,33 @@ describe("dismissals — cleared items leave for the rest of the day", () => {
       .toEqual({ date: "2026-08-17", keys: ["SLA:a"] });
     expect(withDismissal({ date: "2026-08-16", keys: ["SLA:a"] }, "2026-08-17", "DATA:b"))
       .toEqual({ date: "2026-08-17", keys: ["DATA:b"] });
+  });
+});
+
+describe("warrantyClusters — two identical laptops expiring the same week is the point", () => {
+  it("marks rows that share a model and an expiry week", () => {
+    const rows = [
+      { id: "a", model: "ThinkPad T14", days: 12 },
+      { id: "b", model: "ThinkPad T14", days: 14 },
+      { id: "c", model: "Dell P2419H", days: 40 },
+    ];
+    const marked = warrantyClusters(rows);
+    expect(marked.find((r) => r.id === "a")!.clustered).toBe(true);
+    expect(marked.find((r) => r.id === "b")!.clustered).toBe(true);
+    expect(marked.find((r) => r.id === "c")!.clustered).toBe(false);
+  });
+  it("does not cluster the same model in different weeks", () => {
+    const marked = warrantyClusters([
+      { id: "a", model: "ThinkPad T14", days: 3 },
+      { id: "b", model: "ThinkPad T14", days: 60 },
+    ]);
+    expect(marked.every((r) => !r.clustered)).toBe(true);
+  });
+  it("clusters an already-expired pair too (negative days)", () => {
+    const marked = warrantyClusters([
+      { id: "a", model: "X", days: -2 },
+      { id: "b", model: "X", days: -4 },
+    ]);
+    expect(marked.every((r) => r.clustered)).toBe(true);
   });
 });
