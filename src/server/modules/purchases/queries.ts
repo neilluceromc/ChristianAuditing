@@ -74,7 +74,10 @@ export async function listPurchases(
       id: true, refNo: true, state: true, updatedAt: true, submittedAt: true,
       reviewedAt: true, completedAt: true, cancelledAt: true,
       requestedBy: { select: { name: true } },
-      units: { select: { qty: true, unitPrice: true, description: true }, orderBy: { createdAt: "asc" } },
+      // id is a tiebreaker, not the sort key: units created in the same
+      // batch (every seed row, every draft save) share one createdAt
+      // millisecond, and createdAt alone is not a stable order across reads.
+      units: { select: { qty: true, unitPrice: true, description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       // the newest state-carrying note decides "did this come back?" —
       // bounceBack() reads the last non-COMMENT note, so one row is enough
       notes: {
@@ -144,7 +147,10 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       completedAt: true, cancelledAt: true, cancelReason: true, requestedById: true,
       requestedBy: { select: { name: true } },
       reviewedBy: { select: { name: true } },
-      units: { orderBy: { createdAt: "asc" } },
+      // See the identical comment in listPurchases: units created in the
+      // same batch tie on createdAt, so `unit.index` (unit-N anchors, the
+      // bounce-back's "Jump to unit 02") needs a stable tiebreaker.
+      units: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       notes: {
         orderBy: { createdAt: "asc" },
         select: { id: true, kind: true, text: true, createdAt: true, author: { select: { name: true } } },
