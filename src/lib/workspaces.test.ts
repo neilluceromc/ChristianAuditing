@@ -55,9 +55,14 @@ describe("pathAllowedForRole", () => {
     ["/approvals", "finance_staff", true],
     ["/approvals", "purchasing_staff", false],
     ["/approvals/xyz", "viewer", true],
-    // purchases shared purchasing + finance
+    // purchases: purchasing + finance own it; IT joins because brief §6.1 makes
+    // IT the second party (it-review / it-reject). Page-level requireRole still
+    // keeps it_staff out of the purchasing-only create form.
     ["/purchases", "finance_staff", true],
-    ["/purchases/new", "it_staff", false],
+    ["/purchases", "it_staff", true],
+    ["/purchases/new", "it_staff", true],
+    ["/purchases", "viewer", true],
+    ["/purchases/abc", "it_staff", true],
     // finance-only
     ["/finance/assets", "finance_staff", true],
     ["/finance/assets", "it_staff", false],
@@ -130,5 +135,28 @@ describe("WORKSPACE_NAV shape", () => {
     for (const item of records?.items ?? []) {
       expect(item.roles).toEqual(["admin", "it_staff"]);
     }
+  });
+});
+
+describe("IT workspace nav", () => {
+  it("carries a Purchase reviews entry pointing at the awaiting-IT filter", () => {
+    const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking")!;
+    expect(tracking.items.map((i) => i.href)).toContain("/purchases?state=SUBMITTED");
+  });
+
+  /**
+   * The `roles` key is the ONLY thing keeping this link out of a viewer's
+   * sidebar — every IT-workspace role now passes the path gate, so deleting it
+   * would hand viewers a working link to a reviewer's surface. Pin it.
+   */
+  it("restricts Purchase reviews to reviewers, not every IT-workspace role", () => {
+    const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking")!;
+    const item = tracking.items.find((i) => i.href === "/purchases?state=SUBMITTED")!;
+    expect(item.roles).toEqual(["admin", "it_staff"]);
+    expect(item.roles).not.toContain("viewer");
+  });
+  it("highlights it only when the state param matches", () => {
+    expect(navIsActive("/purchases?state=SUBMITTED", "/purchases", new URLSearchParams("state=SUBMITTED"))).toBe(true);
+    expect(navIsActive("/purchases?state=SUBMITTED", "/purchases", new URLSearchParams("state=DRAFT"))).toBe(false);
   });
 });

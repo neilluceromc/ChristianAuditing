@@ -12,7 +12,9 @@ export default async function Home() {
   const links = WORKSPACE_NAV[ws]
     .flatMap((s) => s.items)
     .filter((i) => i.href !== "/" && (!i.roles || i.roles.includes(user.role)))
-    .slice(0, 8);
+    // 10, not 8: the IT workspace gained "Purchase reviews" and an 8-item cap
+    // silently dropped the last real nav item off the end of the grid
+    .slice(0, 10);
   return (
     <>
       <PageHeader title={`Hello, ${user.name.split(" ")[0]}`} />

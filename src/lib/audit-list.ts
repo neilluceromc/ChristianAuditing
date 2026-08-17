@@ -2,7 +2,8 @@ import type { Prisma } from "@prisma/client";
 import type { ListConfig, ListState } from "./url-state";
 
 export const AUDIT_ENTITY_TYPES = [
-  "asset", "employee", "approval", "user", "asset-category", "asset-type", "department",
+  "asset", "employee", "approval", "purchase-request", "user",
+  "asset-category", "asset-type", "department",
 ] as const;
 
 export const AUDIT_LIST_CONFIG: ListConfig = {

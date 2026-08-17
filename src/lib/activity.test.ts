@@ -22,4 +22,15 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
   it("unknown actions degrade to actor — action — entity", () => {
     expect(auditSentence({ ...base, action: "document.signed" })).toBe("J. Sarmiento document.signed BR-LT-0148");
   });
+  it("names the purchase transitions in the language of the handoff", () => {
+    const pr = { ...base, actorLabel: "P. Reyes", entityLabel: "PR-0198", diff: null as unknown };
+    expect(auditSentence({ ...pr, action: "submit" })).toBe("P. Reyes submitted PR-0198 for IT review");
+    expect(auditSentence({ ...pr, action: "it-review" })).toBe("P. Reyes marked PR-0198 IT-reviewed");
+    expect(auditSentence({ ...pr, action: "it-reject" })).toBe("P. Reyes sent PR-0198 back to purchasing");
+    expect(auditSentence({ ...pr, action: "request-info" })).toBe("P. Reyes sent PR-0198 back for more information");
+    expect(auditSentence({ ...pr, action: "cancel" })).toBe("P. Reyes cancelled PR-0198");
+    expect(auditSentence({ ...pr, action: "complete" })).toBe("P. Reyes completed PR-0198");
+    expect(auditSentence({ ...pr, action: "comment" })).toBe("P. Reyes commented on PR-0198");
+    expect(auditSentence({ ...pr, action: "unit-update" })).toBe("P. Reyes updated a unit on PR-0198");
+  });
 });

@@ -49,6 +49,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         { label: "Inventory", href: "/inventory" },
         { label: "Employees", href: "/employees" },
         { label: "Approvals", href: "/approvals", badge: "approvals" },
+        { label: "Purchase reviews", href: "/purchases?state=SUBMITTED", roles: ["admin", "it_staff"] },
         { label: "Audit log", href: "/audit" },
       ],
     },
@@ -163,7 +164,11 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   { test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing"] },
   { test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
   { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance"] },
-  { test: /^\/purchases(\/|$)/, workspaces: ["purchasing", "finance"] },
+  // Brief §6.1 is a three-party handoff: purchasing drafts, IT specs it,
+  // finance approves the money. IT therefore needs the path its own
+  // it-review/it-reject actions live on; page-level requireRole keeps
+  // it_staff out of /purchases/new, and viewer sees it read-only.
+  { test: /^\/purchases(\/|$)/, workspaces: ["purchasing", "finance", "it"] },
   { test: /^\/finance(\/|$)/, workspaces: ["finance"] },
 ];
 

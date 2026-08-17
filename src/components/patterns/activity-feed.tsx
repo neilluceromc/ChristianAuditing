@@ -34,6 +34,10 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
 /** Status-dot family for a feed row, derived from the action. */
 export function actionDot(action: string): string {
   if (action === "SECRET_READ") return "TEMPORARY"; // attention
+  if (action === "it-reject" || action === "request-info") return "PENDING"; // attention: it came back
+  if (action === "cancel") return "CANCELLED"; // closed
+  if (action === "complete") return "COMPLETED"; // settled
+  if (action === "submit" || action === "it-review") return "SUBMITTED"; // inflight
   if (action.includes("failed") || action === "delete") return "DEFECTIVE"; // fault
   if (action === "create" || action.includes("executed")) return "DEPLOYED"; // settled
   if (action.includes("requested") || action === "claim") return "SUBMITTED"; // inflight

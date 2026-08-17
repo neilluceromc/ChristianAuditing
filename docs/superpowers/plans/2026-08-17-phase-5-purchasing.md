@@ -1,6 +1,6 @@
 # Inventory v2 — Phase 5: Purchasing Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** The purchase-request lifecycle becomes real — `/purchases` (tabs write `?state=`), `/purchases/new` (multi-unit editable rows with an autosaved DRAFT), `/purchases/[id]` (the bounce-back banner + 4-stop stepper + append-only note thread + the IT slot editor and Finance unit editor inline), `/purchases/[id]/edit`, and `/purchases/activity` — a three-party handoff (Purchasing drafts → IT specs → Finance approves the money) where rejection is a visible loop, not a dead end.
 
@@ -73,13 +73,13 @@ e2e/purchases.spec.ts                (create)
 **Files:**
 - Create: `src/lib/purchase-flow.ts`, `src/lib/purchase-flow.test.ts`
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 git checkout -b phase-5-purchasing
 ```
 
-- [ ] **Step 2: Write the failing tests** (`src/lib/purchase-flow.test.ts`)
+- [x] **Step 2: Write the failing tests** (`src/lib/purchase-flow.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -161,6 +161,30 @@ describe("purchaseTransition — brief §6.1, exact", () => {
     expect(purchaseTransition("DRAFT", "cancel", "admin").ok).toBe(true);
   });
 
+  it("every refusal message is real English — no 'completeed', no 'request infoed'", () => {
+    for (const action of ALL_ACTIONS) {
+      for (const state of ALL_STATES) {
+        const r = purchaseTransition(state, action, "viewer"); // viewer fails the role check
+        if (!r.ok) expect(r.error).not.toMatch(/eed\b|infoed|canceled/);
+      }
+      const wrongState = purchaseTransition("COMPLETED", action, "admin");
+      expect(wrongState.ok).toBe(false);
+      if (!wrongState.ok) expect(wrongState.error).not.toMatch(/eed\b|infoed|canceled/);
+    }
+    expect(purchaseTransition("DRAFT", "complete", "admin")).toEqual({
+      ok: false,
+      error: "A DRAFT request can't be completed — it must be IT_REVIEWED.",
+    });
+    expect(purchaseTransition("SUBMITTED", "request-info", "admin")).toEqual({
+      ok: false,
+      error: "A SUBMITTED request can't be sent back for more information — it must be IT_REVIEWED.",
+    });
+    expect(purchaseTransition("SUBMITTED", "it-review", "purchasing_staff")).toEqual({
+      ok: false,
+      error: "Only IT (or an admin) can mark a request IT-reviewed.",
+    });
+  });
+
   it("failures carry a human reason naming the role or the state", () => {
     const wrongRole = purchaseTransition("SUBMITTED", "it-review", "purchasing_staff");
     expect(wrongRole.ok).toBe(false);
@@ -212,11 +236,11 @@ describe("action metadata", () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `npm run test -- src/lib/purchase-flow.test.ts` — Expected: FAIL ("Failed to resolve import ./purchase-flow").
 
-- [ ] **Step 4: Implement `src/lib/purchase-flow.ts`**
+- [x] **Step 4: Implement `src/lib/purchase-flow.ts`**
 
 ```ts
 import type { NoteKind, PurchaseRequestState, Role } from "@prisma/client";
@@ -272,6 +296,20 @@ export const CANONICAL_NOTE: Record<PurchaseAction, string> = {
   complete: "Approved and completed.",
 };
 
+/**
+ * These land in a conflict banner, so they are written out rather than
+ * derived: "complete" + "ed" is "completeed", and "request-info" has no
+ * suffix form at all.
+ */
+const VERB: Record<PurchaseAction, { present: string; past: string }> = {
+  submit: { present: "submit a request", past: "submitted" },
+  "it-review": { present: "mark a request IT-reviewed", past: "marked IT-reviewed" },
+  "it-reject": { present: "send a request back to purchasing", past: "sent back" },
+  "request-info": { present: "send a request back for more information", past: "sent back for more information" },
+  cancel: { present: "cancel a request", past: "cancelled" },
+  complete: { present: "complete a request", past: "completed" },
+};
+
 const RULES: Record<PurchaseAction, { from: PurchaseRequestState[]; to: PurchaseRequestState; party: string }> = {
   submit: { from: ["DRAFT"], to: "SUBMITTED", party: "Purchasing" },
   "it-review": { from: ["SUBMITTED"], to: "IT_REVIEWED", party: "IT" },
@@ -288,12 +326,12 @@ export function purchaseTransition(
 ): PurchaseTransitionResult {
   const rule = RULES[action];
   if (!PURCHASE_ACTION_ROLES[action].includes(role)) {
-    return { ok: false, error: `Only ${rule.party} (or an admin) can ${action.replace("-", " ")} a request.` };
+    return { ok: false, error: `Only ${rule.party} (or an admin) can ${VERB[action].present}.` };
   }
   if (!rule.from.includes(state)) {
     return {
       ok: false,
-      error: `A ${state} request can't be ${action === "submit" ? "submitted" : action.replace("-", " ") + "ed"} — it must be ${rule.from.join(" or ")}.`,
+      error: `A ${state} request can't be ${VERB[action].past} — it must be ${rule.from.join(" or ")}.`,
     };
   }
   return { ok: true, next: rule.to };
@@ -317,15 +355,15 @@ export function unitEditorMode(state: PurchaseRequestState, role: Role): "it" | 
 }
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `npm run test -- src/lib/purchase-flow.test.ts` — Expected: PASS (all assertions).
 
-- [ ] **Step 6: Typecheck + lint**
+- [x] **Step 6: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/lib/purchase-flow.ts src/lib/purchase-flow.test.ts
@@ -341,7 +379,7 @@ git commit -m "feat(purchases): purchaseTransition — brief §6.1 state machine
 **Files:**
 - Create: `src/lib/purchases-list.ts`, `src/lib/purchases-list.test.ts`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/purchases-list.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/purchases-list.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -445,11 +483,11 @@ describe("dwellLine — how long it's been there, not derivable from the enum", 
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/purchases-list.test.ts` — Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement `src/lib/purchases-list.ts`**
+- [x] **Step 3: Implement `src/lib/purchases-list.ts`**
 
 ```ts
 import type { Prisma, PurchaseRequestState } from "@prisma/client";
@@ -552,11 +590,11 @@ export function dwellLine(row: DwellRow, now: Date = new Date()): string {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `npm run test -- src/lib/purchases-list.test.ts` — Expected: PASS (all 12 assertions, including `never says 'today ago'`).
 
-- [ ] **Step 5: Typecheck + lint + commit**
+- [x] **Step 5: Typecheck + lint + commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -573,7 +611,7 @@ This is the design problem (README `1j`) reduced to pure functions: the banner's
 **Files:**
 - Create: `src/lib/purchase-thread.ts`, `src/lib/purchase-thread.test.ts`
 
-- [ ] **Step 1: Write the failing tests** (`src/lib/purchase-thread.test.ts`)
+- [x] **Step 1: Write the failing tests** (`src/lib/purchase-thread.test.ts`)
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -702,11 +740,11 @@ describe("stepperModel", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/purchase-thread.test.ts` — Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement `src/lib/purchase-thread.ts`**
+- [x] **Step 3: Implement `src/lib/purchase-thread.ts`**
 
 ```ts
 import type { NoteKind, PurchaseRequestState } from "@prisma/client";
@@ -840,15 +878,15 @@ export function stepperModel(state: PurchaseRequestState, notes: ThreadNote[]): 
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `npm run test -- src/lib/purchase-thread.test.ts` — Expected: PASS.
 
-- [ ] **Step 5: Run the whole unit suite** (nothing above may regress the 185 existing tests)
+- [x] **Step 5: Run the whole unit suite** (nothing above may regress the 185 existing tests)
 
 Run: `npm run test` — Expected: PASS.
 
-- [ ] **Step 6: Typecheck + lint + commit**
+- [x] **Step 6: Typecheck + lint + commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -868,7 +906,7 @@ Entry criterion #7: write purchase audit rows with `entityType: "purchase-reques
 - Modify: `src/server/modules/audit/queries.ts:29-42`
 - Modify: `src/components/patterns/activity-feed.tsx:35-41`
 
-- [ ] **Step 1: Add the entity type** (`src/lib/audit-list.ts`)
+- [x] **Step 1: Add the entity type** (`src/lib/audit-list.ts`)
 
 Replace the `AUDIT_ENTITY_TYPES` constant with:
 
@@ -879,7 +917,7 @@ export const AUDIT_ENTITY_TYPES = [
 ] as const;
 ```
 
-- [ ] **Step 2: Write the failing sentence tests** (append inside the existing `describe` in `src/lib/activity.test.ts`)
+- [x] **Step 2: Write the failing sentence tests** (append inside the existing `describe` in `src/lib/activity.test.ts`)
 
 ```ts
   it("names the purchase transitions in the language of the handoff", () => {
@@ -895,11 +933,11 @@ export const AUDIT_ENTITY_TYPES = [
   });
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `npm run test -- src/lib/activity.test.ts` — Expected: FAIL (the default branch renders "P. Reyes submit PR-0198").
 
-- [ ] **Step 4: Implement the sentences** (`src/lib/activity.ts`)
+- [x] **Step 4: Implement the sentences** (`src/lib/activity.ts`)
 
 Add these cases to the `switch` in `auditSentence`, immediately before `default:`:
 
@@ -922,7 +960,7 @@ Add these cases to the `switch` in `auditSentence`, immediately before `default:
       return `${entry.actorLabel} updated a unit on ${entry.entityLabel}`;
 ```
 
-- [ ] **Step 5: Resolve refNo labels and links** (`src/server/modules/audit/queries.ts`)
+- [x] **Step 5: Resolve refNo labels and links** (`src/server/modules/audit/queries.ts`)
 
 In `entityLabels`, replace the `const [assets, employees, approvals] = await Promise.all([…]);` block **and** the three `for` loops that follow it with:
 
@@ -950,7 +988,7 @@ In `entityLabels`, replace the `const [assets, employees, approvals] = await Pro
   for (const p of purchases) map.set(`purchase-request:${p.id}`, { label: p.refNo, href: `/purchases/${p.id}` });
 ```
 
-- [ ] **Step 6: Give the new actions honest status dots** (`src/components/patterns/activity-feed.tsx`)
+- [x] **Step 6: Give the new actions honest status dots** (`src/components/patterns/activity-feed.tsx`)
 
 Replace the body of `actionDot` with:
 
@@ -968,11 +1006,11 @@ export function actionDot(action: string): string {
 }
 ```
 
-- [ ] **Step 7: Run the tests, typecheck, lint**
+- [x] **Step 7: Run the tests, typecheck, lint**
 
 Run: `npm run test -- src/lib/activity.test.ts src/lib/audit-list.test.ts && npx tsc --noEmit && npm run lint` — Expected: PASS, clean.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/audit-list.ts src/lib/activity.ts src/lib/activity.test.ts src/server/modules/audit/queries.ts src/components/patterns/activity-feed.tsx
@@ -989,7 +1027,7 @@ Scope decision #1. Without this, `it-review`/`it-reject` — the actions `it_sta
 - Modify: `src/lib/workspaces.ts` (IT nav section + the `/purchases` PATH_RULES entry)
 - Modify: `src/lib/workspaces.test.ts`
 
-- [ ] **Step 1: Update the test expectations** (`src/lib/workspaces.test.ts`)
+- [x] **Step 1: Update the test expectations** (`src/lib/workspaces.test.ts`)
 
 In the `pathAllowedForRole` `cases` array, replace the two lines under the `// purchases shared purchasing + finance` comment with:
 
@@ -1019,11 +1057,11 @@ describe("IT workspace nav", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `npm run test -- src/lib/workspaces.test.ts` — Expected: FAIL (`/purchases` for `it_staff` is false; the nav item doesn't exist).
 
-- [ ] **Step 3: Widen the path rule** (`src/lib/workspaces.ts`)
+- [x] **Step 3: Widen the path rule** (`src/lib/workspaces.ts`)
 
 Replace the `/purchases` entry inside `PATH_RULES` with:
 
@@ -1035,7 +1073,7 @@ Replace the `/purchases` entry inside `PATH_RULES` with:
   { test: /^\/purchases(\/|$)/, workspaces: ["purchasing", "finance", "it"] },
 ```
 
-- [ ] **Step 4: Add the IT nav item** (`src/lib/workspaces.ts`)
+- [x] **Step 4: Add the IT nav item** (`src/lib/workspaces.ts`)
 
 In `WORKSPACE_NAV.it`, replace the whole "Tracking" section with:
 
@@ -1052,11 +1090,11 @@ In `WORKSPACE_NAV.it`, replace the whole "Tracking" section with:
     },
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `npm run test -- src/lib/workspaces.test.ts` — Expected: PASS.
 
-- [ ] **Step 6: Typecheck, lint, commit**
+- [x] **Step 6: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -1071,7 +1109,7 @@ git commit -m "feat(shell): IT workspace reaches /purchases — the review step 
 **Files:**
 - Create: `src/server/modules/purchases/queries.ts`
 
-- [ ] **Step 1: Write the module**
+- [x] **Step 1: Write the module**
 
 ```ts
 import type { PurchaseRequestState, PurchaseUnitState } from "@prisma/client";
@@ -1287,11 +1325,11 @@ export async function policyLoadouts(): Promise<PolicyLoadout[]> {
 }
 ```
 
-- [ ] **Step 2: Typecheck + lint**
+- [x] **Step 2: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/server/modules/purchases/queries.ts
@@ -1307,7 +1345,7 @@ Entry criteria #1, #2, #5, #6. Every transition: `actionRole` (per operation) �
 **Files:**
 - Create: `src/server/modules/purchases/actions.ts`
 
-- [ ] **Step 1: Write the module**
+- [x] **Step 1: Write the module**
 
 ```ts
 "use server";
@@ -1578,11 +1616,11 @@ export async function saveUnit(input: unknown): Promise<ActionResult<null>> {
 }
 ```
 
-- [ ] **Step 2: Typecheck + lint**
+- [x] **Step 2: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean. If `tsc` objects to `data.reviewedById`, confirm you copied the intersection type `& { reviewedById?: string }` — `PurchaseRequestUpdateManyMutationInput` omits relation FKs on its own.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/server/modules/purchases/actions.ts
@@ -1598,7 +1636,7 @@ Scope decisions #4 and #5. `/purchases/new` holds rows in client state until the
 **Files:**
 - Create: `src/server/modules/purchases/draft-actions.ts`
 
-- [ ] **Step 1: Write the module**
+- [x] **Step 1: Write the module**
 
 ```ts
 "use server";
@@ -1610,6 +1648,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { diffOf } from "@/lib/audit-diff";
+import { DRAFT_ROLES } from "@/lib/purchase-flow";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -1658,7 +1697,7 @@ export async function createDraft(input: unknown): Promise<ActionResult<DraftSav
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { units } = parsed.data;
 
-  const user = await actionRole("purchasing_staff", "admin");
+  const user = await actionRole(...DRAFT_ROLES);
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -1710,7 +1749,7 @@ export async function saveDraft(input: unknown): Promise<ActionResult<DraftSaved
   const { id, units } = parsed.data;
   if (!id) return validationError({ _form: "Missing draft id." });
 
-  const user = await actionRole("purchasing_staff", "admin");
+  const user = await actionRole(...DRAFT_ROLES);
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -1785,11 +1824,11 @@ export async function saveDraft(input: unknown): Promise<ActionResult<DraftSaved
 }
 ```
 
-- [ ] **Step 2: Typecheck + lint**
+- [x] **Step 2: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/server/modules/purchases/draft-actions.ts
@@ -1806,7 +1845,7 @@ Entry criterion #4: the tabs write `?state=` and the sidebar's "By status" links
 - Create: `src/components/purchases/purchases-table.tsx`
 - Create: `src/app/(app)/purchases/page.tsx`, `src/app/(app)/purchases/loading.tsx`
 
-- [ ] **Step 1: Write the table** (`src/components/purchases/purchases-table.tsx`)
+- [x] **Step 1: Write the table** (`src/components/purchases/purchases-table.tsx`)
 
 ```tsx
 import Link from "next/link";
@@ -1862,7 +1901,7 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
 }
 ```
 
-- [ ] **Step 2: Write the page** (`src/app/(app)/purchases/page.tsx`)
+- [x] **Step 2: Write the page** (`src/app/(app)/purchases/page.tsx`)
 
 ```tsx
 import { requireUser } from "@/server/auth/guards";
@@ -1975,7 +2014,7 @@ export default async function PurchasesPage({
 }
 ```
 
-- [ ] **Step 3: Write the skeleton** (`src/app/(app)/purchases/loading.tsx`)
+- [x] **Step 3: Write the skeleton** (`src/app/(app)/purchases/loading.tsx`)
 
 ```tsx
 import { Skeleton, SkeletonRow } from "@/components/ui/skeleton";
@@ -1995,11 +2034,11 @@ export default function PurchasesLoading() {
 }
 ```
 
-- [ ] **Step 4: Typecheck + lint**
+- [x] **Step 4: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean. (`ButtonLink` and `Pagination` already exist from Phase 1/3 — check `src/components/ui/button-link.tsx` and `src/components/ui/pagination.tsx` for their exact props if tsc complains.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/purchases/purchases-table.tsx "src/app/(app)/purchases/page.tsx" "src/app/(app)/purchases/loading.tsx"
@@ -2017,7 +2056,7 @@ README 3f: units are **editable rows, not a repeated form**; an autosaved DRAFT 
 - Create: `src/app/(app)/purchases/new/page.tsx`
 - Modify: `src/server/modules/purchases/actions.ts` (the submit price guard)
 
-- [ ] **Step 1: Add the price guard to `submit`** (`src/server/modules/purchases/actions.ts`)
+- [x] **Step 1: Add the price guard to `submit`** (`src/server/modules/purchases/actions.ts`)
 
 Inside `runTransition`, immediately after `if (!t.ok) return conflict(t.error);`, insert:
 
@@ -2034,7 +2073,7 @@ Inside `runTransition`, immediately after `if (!t.ok) return conflict(t.error);`
     }
 ```
 
-- [ ] **Step 2: Write the form** (`src/components/purchases/draft-form.tsx`)
+- [x] **Step 2: Write the form** (`src/components/purchases/draft-form.tsx`)
 
 ```tsx
 "use client";
@@ -2300,16 +2339,17 @@ export function DraftForm({
 }
 ```
 
-- [ ] **Step 3: Write the page** (`src/app/(app)/purchases/new/page.tsx`)
+- [x] **Step 3: Write the page** (`src/app/(app)/purchases/new/page.tsx`)
 
 ```tsx
 import { requireRole } from "@/server/auth/guards";
+import { DRAFT_ROLES } from "@/lib/purchase-flow";
 import { policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { DraftForm } from "@/components/purchases/draft-form";
 
 export default async function NewPurchasePage() {
-  await requireRole("purchasing_staff", "admin");
+  await requireRole(...DRAFT_ROLES);
   const loadouts = await policyLoadouts();
 
   return (
@@ -2324,11 +2364,11 @@ export default async function NewPurchasePage() {
 }
 ```
 
-- [ ] **Step 4: Typecheck + lint**
+- [x] **Step 4: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean. (`IconButton` ships from the same module as `Button`, which is why they share one import line above.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/purchases/draft-form.tsx "src/app/(app)/purchases/new/page.tsx" src/server/modules/purchases/actions.ts
@@ -2345,7 +2385,7 @@ This is the design problem (README `1j`, entry criteria #3 and #5). The banner n
 - Create: `src/components/purchases/bounce-back-banner.tsx`, `src/components/purchases/purchase-stepper.tsx`, `src/components/purchases/note-thread.tsx`, `src/components/purchases/unit-editor.tsx`, `src/components/purchases/request-actions.tsx`
 - Create: `src/app/(app)/purchases/[id]/page.tsx`, `src/app/(app)/purchases/[id]/not-found.tsx`
 
-- [ ] **Step 1: The banner** (`src/components/purchases/bounce-back-banner.tsx`)
+- [x] **Step 1: The banner** (`src/components/purchases/bounce-back-banner.tsx`)
 
 ```tsx
 import { Banner } from "@/components/ui/banner";
@@ -2378,7 +2418,7 @@ export function BounceBackBanner({ bounce }: { bounce: BounceBack }) {
 }
 ```
 
-- [ ] **Step 2: The stepper** (`src/components/purchases/purchase-stepper.tsx`)
+- [x] **Step 2: The stepper** (`src/components/purchases/purchase-stepper.tsx`)
 
 ```tsx
 import { cn } from "@/lib/cn";
@@ -2462,7 +2502,7 @@ export function PurchaseStepper({ model }: { model: Stepper }) {
 }
 ```
 
-- [ ] **Step 3: The thread** (`src/components/purchases/note-thread.tsx`)
+- [x] **Step 3: The thread** (`src/components/purchases/note-thread.tsx`)
 
 ```tsx
 "use client";
@@ -2554,7 +2594,7 @@ export function NoteThread({
 }
 ```
 
-- [ ] **Step 4: The per-unit editors** (`src/components/purchases/unit-editor.tsx`)
+- [x] **Step 4: The per-unit editors** (`src/components/purchases/unit-editor.tsx`)
 
 ```tsx
 "use client";
@@ -2644,7 +2684,7 @@ export function UnitEditor({ unit, mode }: { unit: PurchaseUnitView; mode: "it" 
 }
 ```
 
-- [ ] **Step 5: The action panel** (`src/components/purchases/request-actions.tsx`)
+- [x] **Step 5: The action panel** (`src/components/purchases/request-actions.tsx`)
 
 ```tsx
 "use client";
@@ -2788,7 +2828,7 @@ export function RequestActions({
 }
 ```
 
-- [ ] **Step 6: The page** (`src/app/(app)/purchases/[id]/page.tsx`)
+- [x] **Step 6: The page** (`src/app/(app)/purchases/[id]/page.tsx`)
 
 ```tsx
 import { notFound } from "next/navigation";
@@ -2927,7 +2967,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
 }
 ```
 
-- [ ] **Step 7: The not-found** (`src/app/(app)/purchases/[id]/not-found.tsx`)
+- [x] **Step 7: The not-found** (`src/app/(app)/purchases/[id]/not-found.tsx`)
 
 ```tsx
 import { EmptyState } from "@/components/ui/empty-state";
@@ -2944,15 +2984,15 @@ export default function PurchaseNotFound() {
 }
 ```
 
-- [ ] **Step 8: Typecheck + lint**
+- [x] **Step 8: Typecheck + lint**
 
 Run: `npx tsc --noEmit && npm run lint` — Expected: clean. `Tr` accepts the `id` prop because it spreads `React.HTMLAttributes<HTMLTableRowElement>`; `unitEditorMode` comes from `@/lib/purchase-flow` (Task 1), never from the `"use server"` module.
 
-- [ ] **Step 9: Run the unit suite**
+- [x] **Step 9: Run the unit suite**
 
 Run: `npm run test` — Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/components/purchases "src/app/(app)/purchases/[id]" src/lib/purchase-flow.ts src/lib/purchase-flow.test.ts src/server/modules/purchases/actions.ts
@@ -2966,17 +3006,18 @@ git commit -m "feat(purchases): detail page — bounce-back banner, stepper loop
 **Files:**
 - Create: `src/app/(app)/purchases/[id]/edit/page.tsx`
 
-- [ ] **Step 1: Write the page**
+- [x] **Step 1: Write the page**
 
 ```tsx
 import { notFound, redirect } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
+import { DRAFT_ROLES } from "@/lib/purchase-flow";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { DraftForm, type UnitDraft } from "@/components/purchases/draft-form";
 
 export default async function EditPurchasePage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireRole("purchasing_staff", "admin");
+  const user = await requireRole(...DRAFT_ROLES);
   const { id } = await params;
   const [request, loadouts] = await Promise.all([getPurchase(id), policyLoadouts()]);
   if (!request) notFound();
@@ -3009,7 +3050,7 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
 }
 ```
 
-- [ ] **Step 2: Typecheck + lint + commit**
+- [x] **Step 2: Typecheck + lint + commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -3026,7 +3067,7 @@ Entry criterion #7 — the same `ActivityFeed` renderer as Phase 4, scoped to `e
 **Files:**
 - Create: `src/app/(app)/purchases/activity/page.tsx`
 
-- [ ] **Step 1: Write the page**
+- [x] **Step 1: Write the page**
 
 ```tsx
 import { requireUser } from "@/server/auth/guards";
@@ -3096,7 +3137,7 @@ export default async function PurchasingActivityPage({
 }
 ```
 
-- [ ] **Step 2: Typecheck + lint + commit**
+- [x] **Step 2: Typecheck + lint + commit**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -3112,7 +3153,7 @@ git commit -m "feat(purchases): activity log reuses the Phase 4 feed renderer"
 - Create: `e2e/purchases.spec.ts`
 - Modify: `docs/superpowers/plans/2026-08-17-phase-5-purchasing.md` (check the boxes), `docs/HANDOVER.md`
 
-- [ ] **Step 1: Write the spec** (`e2e/purchases.spec.ts`)
+- [x] **Step 1: Write the spec** (`e2e/purchases.spec.ts`)
 
 ```ts
 import { test, expect, type Page } from "@playwright/test";
@@ -3322,7 +3363,7 @@ test.describe("read-only and the audit trail", () => {
 });
 ```
 
-- [ ] **Step 2: Reseed and run the new spec alone**
+- [x] **Step 2: Reseed and run the new spec alone**
 
 ```bash
 npm run db:seed && npx playwright test e2e/purchases.spec.ts --workers=1
@@ -3330,7 +3371,7 @@ npm run db:seed && npx playwright test e2e/purchases.spec.ts --workers=1
 
 Expected: PASS. If a locator is ambiguous, fix the locator (or add the missing accessible name to the component) — never loosen an assertion about the bounce-back copy, the transition line, or the unchanged header state; those are the entry criteria.
 
-- [ ] **Step 3: The full battery**
+- [x] **Step 3: The full battery**
 
 Stop any dev server first (`npm run build` and `next dev` share `.next`).
 
@@ -3346,23 +3387,23 @@ npm run db:seed && npx playwright test --workers=1
 
 Expected: PASS — the 51 existing e2e plus the new purchases spec.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/purchases.spec.ts
 git commit -m "test(e2e): purchasing — tab contract, bounce-back, three-party handoff, read-only, audit"
 ```
 
-- [ ] **Step 5: Check off this plan**
+- [x] **Step 5: Check off this plan**
 
-Mark every `- [ ]` in this document as `- [x]`, and append a **Close-out** section at the end recording: anything that deviated from the plan, anything deferred, and the final battery numbers (unit test count, e2e test count).
+Mark every `- [x]` in this document as `- [x]`, and append a **Close-out** section at the end recording: anything that deviated from the plan, anything deferred, and the final battery numbers (unit test count, e2e test count).
 
 ```bash
 git add docs/superpowers/plans/2026-08-17-phase-5-purchasing.md
 git commit -m "docs(plan): phase 5 checked off + close-out"
 ```
 
-- [ ] **Step 6: Advance the handover** (`docs/HANDOVER.md`)
+- [x] **Step 6: Advance the handover** (`docs/HANDOVER.md`)
 
 Update, at minimum:
 - the header line (commit, phase status: "Phases 1–5 merged, 6–8 remain");
@@ -3379,7 +3420,7 @@ git add docs/HANDOVER.md
 git commit -m "docs: handover advanced — phase 5 done, phase 6 entry criteria"
 ```
 
-- [ ] **Step 7: Finish the branch**
+- [x] **Step 7: Finish the branch**
 
 Use `superpowers:finishing-a-development-branch`: merge `phase-5-purchasing` into `main`, delete the branch, push.
 
@@ -3387,8 +3428,41 @@ Use `superpowers:finishing-a-development-branch`: merge `phase-5-purchasing` int
 
 ## Self-review checklist (run before declaring the phase done)
 
-- [ ] Every HANDOVER §6 entry criterion has a task: #1 → Task 1 + 7 · #2 → Task 7 · #3 → Tasks 3 + 11 · #4 → Tasks 2 + 9 · #5 → Tasks 7 + 11 · #6 → nothing in this phase writes an `Approval` or a `Job` (grep to confirm: `grep -rn "createApproval\|tx.job.create" src/server/modules/purchases` returns nothing) · #7 → Tasks 4 + 13 · #8 → Tasks 8 + 10.
-- [ ] `grep -rn "state:" src/server/modules/purchases/actions.ts` — every request-state write goes through `runTransition`'s guarded `updateMany`.
-- [ ] `NoteEntry` is only ever created, never updated or deleted (the DB trigger would raise anyway).
-- [ ] No `Prisma.Decimal` reaches a `"use client"` module — `queries.ts` converts with `Number()`.
-- [ ] The seeded PR-0198 thread still reads correctly after the phase (reseed and open it).
+- [x] Every HANDOVER §6 entry criterion has a task: #1 → Task 1 + 7 · #2 → Task 7 · #3 → Tasks 3 + 11 · #4 → Tasks 2 + 9 · #5 → Tasks 7 + 11 · #6 → nothing in this phase writes an `Approval` or a `Job` (grep to confirm: `grep -rn "createApproval\|tx.job.create" src/server/modules/purchases` returns nothing) · #7 → Tasks 4 + 13 · #8 → Tasks 8 + 10.
+- [x] `grep -rn "state:" src/server/modules/purchases/actions.ts` — every request-state write goes through `runTransition`'s guarded `updateMany`.
+- [x] `NoteEntry` is only ever created, never updated or deleted (the DB trigger would raise anyway).
+- [x] No `Prisma.Decimal` reaches a `"use client"` module — `queries.ts` converts with `Number()`.
+- [x] The seeded PR-0198 thread still reads correctly after the phase (reseed and open it).
+
+---
+
+## Close-out (2026-08-17)
+
+**Battery on merge:** `tsc` clean · `lint` clean · **255 unit tests** (was 185; +70 across `purchase-flow`, `purchases-list`, `purchase-thread`, `activity`, `workspaces`) · `next build` clean, all five `/purchases*` routes emitted · **63 e2e** (was 51; +12 in `e2e/purchases.spec.ts`), full suite green at `--workers=1`.
+
+### What the reviews caught (the reason this workflow exists)
+
+- **A lost update in `saveUnit`, proven, with no audit trace.** `specs ?? unit.specs` rewrote untouched fields from a row read earlier in the same transaction, so two people editing *different* fields of one line each silently clobbered the other — and `diffOf`, reading the same stale row, recorded nothing. Now only the keys the caller actually sent are written, each guarded on its own before-value: independent edits both land, same-field edits conflict. Verified with two concurrent Prisma clients.
+- **No error mapping at all.** Neither actions module had a `try`/`catch`, so a P2028 (transaction couldn't get a connection — reproduced with just two concurrent transactions) escaped as a 500 instead of the designed conflict banner. Both modules now map it and rethrow everything else.
+- **`submit` and `cancel` had no ownership check.** Any `purchasing_staff` could irreversibly cancel a colleague's request that finance had already worked, while `draft-actions.ts` refused to let them so much as *edit* it. Both now require the requester or an admin.
+- **Widening `/purchases` to the IT workspace left "who may create" unowned by any layer** — the path gate no longer says anything, and `PURCHASE_ACTION_ROLES` has no `create`. `DRAFT_ROLES` now carries it in the pure, tested module that the page and the draft actions both read.
+- **Unstable unit ordering.** Units created in one batch share a `createdAt` millisecond, so `orderBy: { createdAt: "asc" }` alone let Postgres return them in either order between reads — which flips which row is "unit 1", corrupting the `unit-N` anchors and the bounce-back's "Jump to unit 02". Fixed with an `id` tiebreaker in both query functions.
+- **A double-create window in the autosave.** Two edits ~`AUTOSAVE_MS` apart while one create was still in flight would mint two `PR-####` rows for one draft; clicking Submit during that window did the same. A single `persist()` chokepoint with an in-flight ref means at most one `createDraft` per draft.
+- Refusal messages read `"completeed"` and `"request infoed"` — user-visible in a conflict banner, now written out in a `VERB` map with a test that fails on any regression.
+
+### Deviations from the plan as written
+
+1. **`unitEditorMode` lives in `src/lib/purchase-flow.ts`**, not in `actions.ts` — a `"use server"` module may only export async functions.
+2. **`DRAFT_ROLES` was added** to `purchase-flow.ts` (not in the original plan) and is what `/purchases/new`, `/purchases/[id]/edit`, `createDraft` and `saveDraft` all read.
+3. **The autosave never navigates.** The plan's `router.replace` to `/purchases/<id>/edit` would remount the form mid-typing and steal focus; the draft is created in place and the chip links to it instead.
+4. **The list's Request column names what is being bought** (`27-inch monitors +1 more`) instead of repeating the line count the Items column already carries; `PurchaseListRow.summary` was added for it.
+5. **`UnitEditor` sends only changed fields**, and the action-panel buttons track which action is firing so every non-dialog action shows progress (the plan's `loading` expression only ever spun for `submit`).
+6. Tasks 12 and 13 were implemented by one subagent rather than two — single-file tasks with no shared surface.
+
+### Deferred (carried into the handover)
+
+- **Draft autosave churns unit rows.** `createDraft`/`saveDraft` return only request-level fields, so `/purchases/new` never learns the unit ids it just created and every subsequent autosave deletes and recreates the whole unit set. Harmless today (nothing references a draft's unit ids, and `/purchases/[id]/edit` *does* pass real ids so it updates in place), but returning unit ids would make it an update path throughout.
+- **A stray duplicate of the previous page's DOM survives a client-side navigation** — a second `<table>` outside `<main>`, reproducible between two *Phase 3* pages, so it predates Phase 5. Dev-mode only as far as observed; not investigated.
+- `/purchases` has no sortable headers and no column chooser (the inventory list has both).
+- The command palette now returns purchase requests to `it_staff` and `viewer` — coarse path-level access. The detail page shows every field to anyone who can reach it; no field-level restriction was specified by the brief, but money and finance notes are visible to viewers.
+- `addComment` deliberately still accepts comments on COMPLETED/CANCELLED requests: the thread is the record, and "why did we buy this" gets asked after the fact.
