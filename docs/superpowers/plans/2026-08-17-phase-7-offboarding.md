@@ -49,7 +49,7 @@
 9. **The farewell report is a printable page**, mirroring `/employees/[id]/form` (light-theme sheet + `PrintButton`). "Emailable to HR" and a real Excel export are Phase 8's export work — the receipt itself ships here.
 10. **`/reservations` is read-only this phase.** Creating and releasing holds already exist on the asset record (Phase 3); this is the cross-asset view the sidebar has been linking to, plus the hold marker the inventory list is missing.
 11. **Equipment-policy edits never touch existing assignments** — the audit entry records **both** slot lists (`before.slots` and `after.slots`) so the change to "what counts as complete" is legible after the fact. A slot must name an asset type: `computeLoadout` matches on type, so a typeless slot could never be filled and would be a permanent policy gap. A policy must target exactly one of a role title or a department, because role beats department and a policy targeting both would hide which rule won.
-12. **An offboarding cannot be completed while the M365 account is still live.** `completeOffboarding` refuses unless `m365Status` reads `inactive` or `null` (never synced — there was no account to close). This is not in the brief; it is what makes step 3 load-bearing rather than decorative, and the refusal names the current value so the operator knows where to go. A client-defined custom status therefore has to be set to `inactive` before completion.
+12. **An offboarding cannot be completed while the M365 account is still live.** `completeOffboarding` refuses unless `m365Status` reads `inactive` or `null` (never synced — there was no account to close). This is not in the brief; it is what makes step 3 load-bearing rather than decorative, and the refusal names the current value so the operator knows where to go. A client-defined custom status therefore has to be set to `inactive` before completion. **Amended after the Task 8 review: `null` passes only as the ABSENCE of a status, never as the erasure of one.** `closeAccounts` maps `""` → `null`, so the panel's own "no sync yet" option — and, silently, a "custom…" selection left empty — could turn a live `active` into a gate-passing `null` and complete the offboarding on an open mailbox, stamping `m365Status: { from: null, to: null }` on the immutable completion audit. `closeAccounts` now refuses `next === null` when the stored value is non-null (correcting a genuinely wrong value back to unknown stays available on the employee record), and the panel refuses an empty custom value before it is ever sent.
 13. **Repairs is reached by a named URL, not a new nav item.** Brief §2's IT sidebar is verbatim and has no Repairs entry, and the README calls saved views named URLs — so a **Repairs** button sits in the inventory toolbar pointing at `?status=DEFECTIVE&sort=defectiveSince`. The sort deviates from the README's `-updatedAt`: `updatedAt` is not in the list's sortable contract, and the design's own point is that **Down** is the column that changes behaviour, so the saved view sorts by `defectiveSince` (longest down first) and the Down header is sortable.
 14. **The wizard's step-2 control needs an "undecided" state.** `SegmentedControl` parks its sliding indicator under option 1 when nothing matches, which would make undecided read as Returned — the exact drift entry criterion #2 forbids. Task 8 teaches the primitive to draw no indicator when the value matches no option; every existing caller passes a real value, so nothing else changes.
 
@@ -1490,7 +1490,9 @@ const accountsSchema = z.object({
  * the updateMany guard — filling untouched fields from the row we just read is
  * how two people editing one employee silently clobber each other.
  */
-export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365Status: string | null }>> {
+export async function closeAccounts(
+  input: unknown,
+): Promise<ActionResult<{ m365Status: string | null; changed: boolean }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -1511,6 +1513,19 @@ export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365
         employee.employment === "OFFBOARDED"
           ? `${employee.name} is already offboarded — accounts are closed.`
           : `${employee.name} reads ${employee.employment}, not OFFBOARDING — account changes belong on the employee record.`,
+      );
+    }
+    // Scope decision #12 lets `null` PASS the completion gate, because null
+    // means "never synced — there was no account to close". That reading only
+    // holds while null is the absence of a status, never the erasure of one:
+    // blanking a live `active` here would complete the offboarding on an open
+    // mailbox, and would leave the immutable completion audit stamping
+    // `m365Status: { from: null, to: null }` over a status that did exist.
+    // Correcting a genuinely wrong value back to unknown stays available on
+    // the employee record, which is not the surface that closes accounts.
+    if (next === null && employee.m365Status !== null) {
+      return conflict(
+        `${employee.name}'s account reads ${employee.m365Status} — set it to inactive rather than clearing it. "No sync yet" describes someone who never had an account.`,
       );
     }
     if (employee.m365Status === next) {
@@ -1535,7 +1550,11 @@ export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365
   if (failure) return failure;
   // nothing was written, so nothing is stale — updateEmployee skips the same way
   if (!noop) revalidate(employeeId);
-  return ok({ m365Status: next });
+  // `changed` so the panel can stop claiming "audit entry written" on a save
+  // that wrote nothing — the noop path skips writeAudit, and AuditEntry is the
+  // one immutable artifact here, so asserting an entry that doesn't exist is
+  // the wrong thing to be wrong about.
+  return ok({ m365Status: next, changed: !noop });
 }
 
 const completeSchema = z.object({ employeeId: z.string().min(1) });
@@ -1930,7 +1949,12 @@ export function WizardSteps({
       {WIZARD_STEPS.map((step, i) => {
         const reachable = i <= 1 || unlocked;
         const isCurrent = i === currentIdx;
-        const done = i < currentIdx;
+        // A step can be BEHIND the operator and locked again at the same time:
+        // reject one return in Approvals while they stand on Accounts and the
+        // item re-opens, `unlocked` flips false, and step 3 becomes an
+        // unreachable current step. Painting it "done" would claim they had
+        // finished a step they can no longer enter.
+        const done = i < currentIdx && reachable;
         const inner = (
           <>
             <span
@@ -1967,10 +1991,19 @@ export function WizardSteps({
               </Link>
             ) : (
               <span
+                // the current step can be locked (see `done` above), so
+                // aria-current belongs on this branch too — otherwise the bar
+                // tells a screen reader the operator is nowhere at all
+                aria-current={isCurrent ? "step" : undefined}
                 className={cn(shared, "border-dashed border-border-strong text-fg-faint")}
-                title="Decide every item first — undecided is not the same as returned."
               >
                 {inner}
+                {/* `title` on a non-focusable span never reaches a keyboard
+                    user and is exposed inconsistently, so the reason the step
+                    is locked is real text instead */}
+                <span className="sr-only">
+                  — locked until every item is decided; undecided is not the same as returned.
+                </span>
               </span>
             )}
           </li>
@@ -2043,8 +2076,14 @@ export function ItemDecision({
         toast(`${res.data.refNo} created — ${tag} → ${OUTCOME_STATUS[picked]}`, "settled");
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      else if (res.kind === "validation") setFieldErrors(res.fieldErrors ?? {});
-      else setError(res.message);
+      else if (res.kind === "validation") {
+        const fe = res.fieldErrors ?? {};
+        setFieldErrors(fe);
+        // only `outcome` and `reason` are rendered below; an employeeId/assetId
+        // failure would otherwise stop the spinner and say nothing at all
+        const unclaimed = Object.entries(fe).filter(([k]) => k !== "outcome" && k !== "reason");
+        if (unclaimed.length > 0) setError(unclaimed.map(([, v]) => v).join(" "));
+      } else setError(res.message);
     });
   }
 
@@ -2116,6 +2155,9 @@ import { closeAccounts } from "@/server/modules/offboarding/actions";
 
 const CUSTOM = "__custom";
 
+/** the server bound (accountsSchema), mirrored so the field stops you first */
+const MAX_STATUS = 60;
+
 /**
  * Step 3 is where the M365 status actually moves (README 4f): the canonical
  * four plus a custom value stored as-is. A never-synced account keeps reading
@@ -2135,22 +2177,41 @@ export function AccountsPanel({
   const [select, setSelect] = useState(m365Status === null ? "" : isCustom ? CUSTOM : m365Status);
   const [custom, setCustom] = useState(isCustom ? m365Status : "");
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<"written" | "unchanged" | null>(null);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    const next = select === CUSTOM ? custom.trim() : select;
+    // An empty custom value trims to "", which the action reads as null — i.e.
+    // "this person never had an account". Picking "custom…" and typing nothing
+    // would therefore erase a real status by accident, with a toast that reads
+    // like a success. Refuse it here, where the operator's intent actually is.
+    if (select === CUSTOM && next === "") {
+      setFieldErrors({ custom: "Type the status, or pick one from the list above." });
+      return;
+    }
     setError(null);
+    setFieldErrors({});
     startTransition(async () => {
-      const next = select === CUSTOM ? custom.trim() : select;
       const res = await closeAccounts({ employeeId, m365Status: next });
       if (res.ok) {
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
+        setSaved(res.data.changed ? "written" : "unchanged");
+        setTimeout(() => setSaved(null), 3000);
         toast(`Account status is now ${res.data.m365Status ?? "no sync yet"}`, "settled");
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      else setError(res.message);
+      // a too-long custom value is a real refusal: without this branch the
+      // operator gets "Fix the highlighted fields." with no field highlighted
+      else if (res.kind === "validation") {
+        const fe = res.fieldErrors ?? {};
+        setFieldErrors({ custom: fe.m365Status ?? fe.custom ?? "" });
+        // keys no field on this form claims must not dead-end silently
+        const unclaimed = Object.entries(fe).filter(([k]) => k !== "m365Status" && k !== "custom");
+        if (unclaimed.length > 0) setError(unclaimed.map(([, v]) => v).join(" "));
+        else if (!fe.m365Status && !fe.custom) setError(res.message);
+      } else setError(res.message);
     });
   }
 
@@ -2178,11 +2239,18 @@ export function AccountsPanel({
         )}
       </FormField>
       {select === CUSTOM && (
-        <FormField label="Custom value" hint="Stored verbatim; unknown values render in the Neutral family.">
+        <FormField
+          label="Custom value"
+          required
+          hint="Stored verbatim; unknown values render in the Neutral family."
+          error={fieldErrors.custom}
+        >
           {(p) => (
             <Input
               id={p.id}
               aria-describedby={p["aria-describedby"]}
+              invalid={p.invalid}
+              maxLength={MAX_STATUS}
               value={custom}
               onChange={(e) => setCustom(e.target.value)}
             />
@@ -2196,7 +2264,7 @@ export function AccountsPanel({
         </Button>
         {saved && (
           <span className="font-mono text-[10.5px]" style={{ color: "var(--st-settled-text)" }}>
-            audit entry written
+            {saved === "written" ? "audit entry written" : "already set — nothing to change"}
           </span>
         )}
       </div>
@@ -2256,8 +2324,6 @@ export function CompleteButton({
 
   return (
     <>
-      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
-      {error && <Banner tone="fault" title={error} />}
       <Button variant="primary" onClick={() => setOpen(true)}>Complete offboarding</Button>
       <Dialog
         open={open}
@@ -2271,6 +2337,18 @@ export function CompleteButton({
         }
       >
         <div className="flex flex-col gap-2">
+          {/*
+            Refusal is the DESIGNED outcome of all three completion gates
+            (undecided items, a return sitting EXECUTION_FAILED, a live M365
+            account), so the message has to land somewhere the operator is
+            looking. It must also live INSIDE the dialog: Dialog portals to
+            document.body and the focus trap marks every other body child
+            `inert`, which drops an outside banner out of the accessibility
+            tree entirely and parks it behind the veil. The operator would see
+            the spinner stop and nothing else, then click Complete again.
+          */}
+          {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+          {error && <Banner tone="fault" title={error} />}
           <p>
             {name} flips to <span className="font-mono">OFFBOARDED</span>. The{" "}
             {itemCount} equipment decision{itemCount === 1 ? "" : "s"} already exist as their own
