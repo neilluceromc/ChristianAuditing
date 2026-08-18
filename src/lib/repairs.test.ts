@@ -43,6 +43,17 @@ describe("the four stages are derived, not stored", () => {
     expect(repairStage(asset({ status: "SPARE", defectiveSince: null }))).toBeNull();
   });
 
+  it("is inclusive on the CENTAVO grid, not just on whole pesos", () => {
+    // Asset.cost is Decimal(12,2) and the forms accept centavos, so the
+    // boundary has to hold here too — `quote >= cost * 0.6` does not, because
+    // 10000.95 * 0.6 is 6000.570000000001 in binary floating point.
+    expect(beyondRepair(6_000.57, 10_000.95)).toBe(true); // exactly 60%
+    expect(beyondRepair(614.79, 1_024.65)).toBe(true); // exactly 60%
+    expect(beyondRepair(3.09, 5.15)).toBe(true); // exactly 60%
+    expect(beyondRepair(6_000.56, 10_000.95)).toBe(false); // one centavo under
+    expect(repairStage(asset({ repairQuote: 6_000.57, cost: 10_000.95 }))).toBe("beyond-repair");
+  });
+
   it("beyondRepair needs both numbers and refuses to divide by a zero cost", () => {
     expect(beyondRepair(34_000, 55_000)).toBe(true);
     expect(beyondRepair(null, 55_000)).toBe(false);

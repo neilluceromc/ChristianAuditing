@@ -43,7 +43,12 @@ export function buildAssetWhere(state: ListState): Prisma.AssetWhereInput {
   // final cut in listAssets: one source of truth, correct counts.
   // AND coexists with the q-driven OR above; Prisma ands them together.
   if ((f.stage ?? []).some(isRepairStage)) {
-    where.AND = [{ OR: [{ status: "DEFECTIVE" }, { defectiveSince: { not: null } }] }];
+    // append, not assign: nothing else sets AND today, but an assignment here
+    // is one new facet away from silently dropping someone else's clause.
+    // Prisma types AND as object-or-array, so normalise before appending.
+    const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+    and.push({ OR: [{ status: "DEFECTIVE" }, { defectiveSince: { not: null } }] });
+    where.AND = and;
   }
   return where;
 }

@@ -127,6 +127,15 @@ async function runExecution(approvalId: string): Promise<void> {
     await tx.asset.update({ where: { id: asset.id }, data: updates });
     const diff: Diff = {};
     if (plan.updates.status !== asset.status) diff.status = { from: asset.status, to: plan.updates.status };
+    // The diff is built from plan.updates, so a defectiveSince stamped just
+    // above would otherwise change the field that drives the Down column and
+    // three of the four stage chips with no AuditEntry at all — and the asset
+    // history pane is the only place anyone could look for when that clock
+    // started. It also matters on a second breakage: the stamp overwrites the
+    // first repair's start date, and this is the only record that it moved.
+    if (updates.defectiveSince !== undefined) {
+      diff.defectiveSince = { from: asset.defectiveSince, to: updates.defectiveSince as Date };
+    }
     if (plan.updates.assigneeId !== undefined && plan.updates.assigneeId !== asset.assigneeId) {
       diff.assignee = {
         from: assigneeLabelFrom ?? asset.assigneeId,

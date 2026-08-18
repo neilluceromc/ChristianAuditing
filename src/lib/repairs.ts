@@ -43,7 +43,13 @@ export function isRepairStage(value: string): value is RepairStage {
 
 export function beyondRepair(quote: number | null, cost: number | null): boolean {
   if (quote === null || cost === null || cost <= 0) return false;
-  return quote >= cost * REPAIR_WRITE_OFF_SHARE;
+  // Compared in whole centavos, which is exact for the Decimal(12,2) these
+  // come from. `quote >= cost * 0.6` is NOT inclusive on the centavo grid:
+  // 10000.95 * 0.6 is 6000.570000000001 in IEEE-754, so a ₱6,000.57 quote on a
+  // ₱10,000.95 unit — exactly the 60% the copy calls "at or above" — fell to
+  // the wrong side and dropped the write-off warning entirely. Whole-peso
+  // costs never hit it, which is why the seed and the first test did not.
+  return Math.round(quote * 100) >= Math.round(cost * REPAIR_WRITE_OFF_SHARE * 100);
 }
 
 /**
