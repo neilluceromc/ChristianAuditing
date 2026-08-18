@@ -5,6 +5,7 @@ import { getWizard } from "@/server/modules/offboarding/queries";
 import { canContinue, OUTCOME_LABEL, OUTCOME_STATUS, parseStep } from "@/lib/offboarding";
 import { fmtMoney } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
+import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -39,7 +40,11 @@ export default async function OffboardingWizardPage({
   const canDecide = canMutate && active;
   const unlocked = canContinue("collect", { undecided });
   const href = (s: string) => `/offboarding/${employeeId}?step=${s}`;
-  const decided = items.filter((i) => i.decision);
+  // flatMap rather than filter so `decision` is structurally non-null on the
+  // rows the report renders — the same reason decisionOf carries the outcome on
+  // the surviving row instead of asserting it later
+  const decided = items.flatMap((i) => (i.decision ? [{ ...i, decision: i.decision }] : []));
+  const heldItems = items.filter((i) => i.held);
 
   return (
     <>
@@ -94,12 +99,18 @@ export default async function OffboardingWizardPage({
       {step === "review" && (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Items out" value={String(items.filter((i) => i.held).length)} />
+            <Stat label="Items out" value={String(heldItems.length)} />
             <Stat label="Decided" value={`${decided.length} / ${items.length}`} />
-            <Stat label="Book value out" value={fmtMoney(items.reduce((s, i) => s + (i.cost ?? 0), 0))} />
+            {/* the same set as "Items out" beside it: `items` is held UNION
+                already-returned, so reducing over all of it bills equipment the
+                worker has already put back to the money still in their hands */}
+            <Stat label="Book value out" value={fmtMoney(heldItems.reduce((s, i) => s + (i.cost ?? 0), 0))} />
             <Stat label="M365" value={employee.m365Status ?? "no sync yet"} />
           </div>
-          {data.slots.length > 0 ? (
+          {/* keyed on the POLICY, not the slot count: resolvePolicy matches on
+              title/department regardless of how many slots the policy defines,
+              so a policy with none would otherwise report itself as absent */}
+          {data.policyName !== null && data.slots.length > 0 ? (
             <Card>
               <CardHeader
                 title="Against their policy"
@@ -139,9 +150,19 @@ export default async function OffboardingWizardPage({
               </CardBody>
             </Card>
           ) : (
-            <Banner tone="neutral" title="No equipment policy applies to this person">
-              {employee.title} · {employee.department} has no policy, so there are no slots to check
-              against — the holdings below are the whole picture.
+            <Banner
+              tone="neutral"
+              title={
+                data.policyName === null
+                  ? "No equipment policy applies to this person"
+                  : `${data.policyName} defines no slots`
+              }
+            >
+              {employee.title} · {employee.department}{" "}
+              {data.policyName === null
+                ? "has no policy, so there are no slots to check against"
+                : "matches a policy that lists no equipment, so there is nothing to check against"}{" "}
+              — the holdings below are the whole picture.
             </Banner>
           )}
 
@@ -150,7 +171,11 @@ export default async function OffboardingWizardPage({
             {items.length === 0 ? (
               <CardBody>
                 <p className="text-xs text-fg-muted">
-                  They hold nothing and nothing was ever returned — go straight to Accounts &amp; M365.
+                  {/* "in this offboarding", not "ever": the item set is windowed by
+                      offboardingAt, so a return from a previous holding is
+                      correctly absent here and was not nothing */}
+                  They hold nothing, and no return has been recorded in this offboarding — go
+                  straight to Accounts &amp; M365.
                 </p>
               </CardBody>
             ) : (
@@ -257,13 +282,25 @@ export default async function OffboardingWizardPage({
                         <Link href="/approvals" className="font-mono text-accent hover:underline">
                           {i.blockedBy.refNo}
                         </Link>{" "}
-                        ({i.blockedBy.type}) — resolve that request first, then decide this item.
+                        {/* the same label decideItem's refusal uses — one block
+                            explained two different ways is two bugs waiting */}
+                        ({APPROVAL_TYPE_LABEL[i.blockedBy.type]}) — resolve that request
+                        first, then decide this item.
                       </p>
                     ) : canDecide ? (
                       <ItemDecision employeeId={employeeId} assetId={i.assetId} tag={i.tag} />
                     ) : (
                       <p className="text-xs text-fg-muted">
-                        {active ? "Read-only — collecting equipment is an IT action." : "This offboarding is closed."}
+                        {/* `active` is OFFBOARDING only, so its else covers
+                            ACTIVE too — and telling someone the offboarding is
+                            "closed" for a person who never started one points
+                            the opposite way from the banner at the top of this
+                            same page, which tells them to set the employment */}
+                        {active
+                          ? "Read-only — collecting equipment is an IT action."
+                          : employee.employment === "OFFBOARDED"
+                            ? "This offboarding is closed."
+                            : "Not offboarding yet — set their employment first, then decisions can be recorded."}
                       </p>
                     )}
                   </CardBody>
@@ -292,8 +329,25 @@ export default async function OffboardingWizardPage({
             <CardHeader title="Accounts & M365" />
             <CardBody className="flex flex-col gap-3">
               <p className="text-xs text-fg-secondary">
-                Equipment is settled: {decided.length} decision{decided.length === 1 ? "" : "s"} recorded.
-                What is left is the account itself.
+                {/* not unconditional: rejecting one return in Approvals while the
+                    operator stands here re-opens that item and WizardSteps
+                    re-locks this step — this sentence must not go on saying the
+                    kit is settled while the bar beside it says otherwise */}
+                {unlocked ? (
+                  <>
+                    Equipment is settled: {decided.length} decision{decided.length === 1 ? "" : "s"} recorded.
+                    What is left is the account itself.
+                  </>
+                ) : (
+                  <>
+                    {/* "still undecided", not "went back to": this step is reachable
+                        both by a rejection re-opening a decided item AND by the
+                        ?step= URL before anything was decided at all */}
+                    {undecided} item{undecided === 1 ? "" : "s"} still undecided — go back to{" "}
+                    <Link href={href("collect")} className="text-accent hover:underline">Collect items</Link>{" "}
+                    before finishing. You can still close the account here.
+                  </>
+                )}
               </p>
               {canDecide ? (
                 <AccountsPanel employeeId={employeeId} m365Status={employee.m365Status} />
@@ -313,10 +367,15 @@ export default async function OffboardingWizardPage({
       {step === "report" && (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Recovered" value={fmtMoney(totals.recovered)} hint="returned + defective — back in the fleet" />
-            <Stat label="Bought out" value={fmtMoney(totals.boughtOut)} hint="the employee paid for it" />
-            <Stat label="Value lost" value={fmtMoney(totals.lost)} hint="missing — custody lost" />
-            <Stat label="Items" value={`${decided.length} / ${items.length}`} hint="decided of held" />
+            {/* these total DECISIONS, not movements: decisionOf counts PENDING
+                and EXECUTION_FAILED alongside EXECUTED, and the collect step's
+                own banner promises "nothing moves until the approval executes".
+                The hints say decided so the tiles stop claiming a recovery the
+                completion gate would refuse to believe. */}
+            <Stat label="Recovered" value={fmtMoney(totals.recovered)} hint="decided returned + defective — back in the fleet as each executes" />
+            <Stat label="Bought out" value={fmtMoney(totals.boughtOut)} hint="decided buyout — the employee pays for it" />
+            <Stat label="Value lost" value={fmtMoney(totals.lost)} hint="decided missing — custody lost" />
+            <Stat label="Items" value={`${decided.length} / ${items.length}`} hint="decided of this offboarding" />
           </div>
 
           <Card>
@@ -350,14 +409,20 @@ export default async function OffboardingWizardPage({
                       <Td>{i.model}</Td>
                       <Td>
                         <StatusPill
-                          value={OUTCOME_STATUS[i.decision!.outcome]}
-                          label={OUTCOME_LABEL[i.decision!.outcome]}
+                          value={OUTCOME_STATUS[i.decision.outcome]}
+                          label={OUTCOME_LABEL[i.decision.outcome]}
                         />
                       </Td>
-                      <Td mono className="text-[10.5px]">{OUTCOME_STATUS[i.decision!.outcome]}</Td>
-                      <Td>{i.decision!.reason ?? "—"}</Td>
+                      <Td mono className="text-[10.5px]">{OUTCOME_STATUS[i.decision.outcome]}</Td>
+                      <Td>{i.decision.reason ?? "—"}</Td>
                       <Td align="right" mono>{i.costLabel}</Td>
-                      <Td mono className="text-[10.5px]">{i.decision!.refNo} · {i.decision!.state}</Td>
+                      {/* linked like the collect step's copy of the same refNo —
+                          the report is where you most want the jump */}
+                      <Td mono className="text-[10.5px]">
+                        <Link href="/approvals" className="text-accent hover:underline">{i.decision.refNo}</Link>
+                        {" · "}
+                        {i.decision.state}
+                      </Td>
                     </Tr>
                   ))}
                 </TBody>

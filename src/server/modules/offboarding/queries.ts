@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { ApprovalType, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
@@ -150,7 +150,10 @@ export interface WizardItem {
    * makes this item undecidable until it clears — and without naming it, the
    * operator gets a refusal that points nowhere.
    */
-  blockedBy: { refNo: string; type: string } | null;
+  // ApprovalType, not string: it comes straight off the Approval row, and the
+  // wizard renders it through APPROVAL_TYPE_LABEL the same way decideItem's
+  // refusal does
+  blockedBy: { refNo: string; type: ApprovalType } | null;
 }
 
 export interface WizardSlot {
@@ -236,7 +239,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   const returns = since ? allReturns.filter((r) => r.createdAt >= since) : [];
   const byAsset = candidatesFor(employee, allReturns);
   const openByAsset = new Map(
-    blockers.filter((b) => b.assetId).map((b) => [b.assetId!, { refNo: b.refNo, type: b.type as string }]),
+    blockers.filter((b) => b.assetId).map((b) => [b.assetId!, { refNo: b.refNo, type: b.type }]),
   );
 
   /**
