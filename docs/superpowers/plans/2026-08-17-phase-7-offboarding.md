@@ -675,6 +675,24 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     }
   });
 
+  it("a stale EXECUTION_FAILED from a previous holding does not decide this one", () => {
+    // R1 failed transiently and nobody retried or rejected it; R2 was requested
+    // later and executed, ending that holding; the asset came back afterwards.
+    // Only what was created after the newest EXECUTED return belongs here.
+    expect(decisionOf([
+      cand({ id: "r1", refNo: "APR-2100", state: "EXECUTION_FAILED", createdAt: at(1_000) }),
+      cand({ id: "r2", refNo: "APR-2101", state: "EXECUTED", createdAt: at(2_000) }),
+    ], { held: true })).toBeNull();
+  });
+
+  it("a decision made after the last EXECUTED return is this holding's", () => {
+    // the boundary must not eat the decision the operator just made
+    expect(decisionOf([
+      cand({ id: "r2", refNo: "APR-2101", state: "EXECUTED", createdAt: at(2_000) }),
+      cand({ id: "r3", refNo: "APR-2102", state: "PENDING", toStatus: "MISSING", createdAt: at(3_000) }),
+    ], { held: true })).toMatchObject({ refNo: "APR-2102", outcome: "MISSING" });
+  });
+
   it("ignores a REJECTED return — that item is open for a new decision", () => {
     expect(decisionOf([cand({ state: "REJECTED" })], { held: true })).toBeNull();
   });
@@ -775,22 +793,32 @@ export interface Decision {
  * `held` says whether the employee holds that asset RIGHT NOW, and it is what
  * stops one offboarding inheriting an older one's answer. An EXECUTED return
  * cleared the holder by construction — `executionPlan` hard-codes
- * `assigneeId: null` — so if they hold the thing now, that return decided an
- * EARLIER holding and the item came back to them afterwards. Without this, a
+ * `assigneeId: null` — so if they hold the thing now, the asset came back to
+ * them AFTER that return, and everything up to and including it decided the
+ * holding that ended there. Hence the boundary below rather than a bare "skip
+ * EXECUTED": a stale EXECUTION_FAILED left behind by an abandoned earlier
+ * return would otherwise still answer for this holding. Without any of this, a
  * laptop returned once and later reassigned to the same person reads "decided"
  * forever, and the wizard completes leaving it assigned to someone who no
  * longer works here — the dangling assignment scope decision #2 exists to
- * prevent. EXECUTION_FAILED is deliberately NOT excluded: that return never
- * moved the asset, so it is still the live (retryable) decision.
+ * prevent. An EXECUTION_FAILED *after* the boundary is deliberately kept: that
+ * return never moved the asset, so it is still this holding's live, retryable
+ * decision.
  */
 export function decisionOf(
   candidates: DecisionCandidate[],
   { held }: { held: boolean },
 ): Decision | null {
+  const boundary = held
+    ? candidates.reduce(
+        (t, c) => (c.state === "EXECUTED" ? Math.max(t, c.createdAt.getTime()) : t),
+        -Infinity,
+      )
+    : -Infinity;
   const live = candidates
     .flatMap((c) => {
       if (c.state === "REJECTED") return [];
-      if (held && c.state === "EXECUTED") return [];
+      if (c.createdAt.getTime() <= boundary) return [];
       const outcome = outcomeOfStatus(c.toStatus);
       // carrying the outcome on the surviving row makes the winner's
       // non-null-ness structural, instead of an assertion sitting several
@@ -1084,9 +1112,12 @@ queries in one `Promise.all`, which is not a consistent snapshot: if the worker 
 between them, the page sees `held: true` alongside an `EXECUTED` return and — under the Task 4 rule —
 renders that item as undecided for one render. Clicking an outcome then hits `decideItem`'s
 "isn't held by … any more — refresh the wizard" conflict, which is the designed path, and a refresh
-clears it. Wrapping both reads in a `RepeatableRead` transaction would close the window at the cost of
-a transaction per page render; the failure mode is transient, self-correcting and clearly messaged, so
-it is accepted rather than engineered around. Do NOT "fix" it by reverting the Task 4 rule — the bug
+clears it. Closing it needs `RepeatableRead` specifically — Prisma's array-form `$transaction` runs at the
+database default, and under Postgres READ COMMITTED each statement takes its own snapshot, so batching
+the two reads buys nothing. `$transaction([...], { isolationLevel: "RepeatableRead" })` would do it, at
+the cost of a transaction per page render plus handling serialization failures on a read-only screen.
+The failure mode is transient, self-correcting and clearly messaged, so it is accepted rather than
+engineered around. Do NOT "fix" it by reverting the Task 4 rule — the bug
 that rule prevents is permanent, and this one lasts one render.
 
 - [ ] **Step 2: Typecheck and lint**
@@ -1306,7 +1337,10 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
         assets: { select: { id: true } },
         approvals: {
           where: { type: "lifecycle_return", assetId: { not: null } },
-          select: { assetId: true, state: true, payload: true },
+          // the full ApprovalLike shape — groupCandidates needs id/refNo/createdAt
+          // too, and createdAt is not a formality: without it every candidate
+          // sorts on undefined and the comparator falls through to the id term
+          select: { id: true, refNo: true, state: true, payload: true, createdAt: true, assetId: true },
         },
       },
     });
@@ -2518,6 +2552,15 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
   );
 }
 ```
+
+**One honesty check while you are in this file.** Every decided item contributes to the totals,
+including decisions that have not executed yet — which is correct, since an offboarding may legitimately
+complete with returns still queued. But an `EXECUTION_FAILED` decision is one the system KNOWS did not
+apply, and the row already prints its state, so the totals must not silently imply otherwise. The
+`Request` column carries `refNo · state`; that is the honest signal, and it is enough. Do NOT change
+`reportTotals` — just confirm a failed row is visibly distinguishable from an executed one on the sheet,
+and if it is not, make the state text stand out rather than touching the arithmetic. (Raised by the
+Task 4 review: on the not-held path an item whose only decision is `EXECUTION_FAILED` can appear here.)
 
 - [ ] **Step 2: Typecheck, lint, look at it**
 

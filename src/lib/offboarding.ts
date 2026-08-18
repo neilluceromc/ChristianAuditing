@@ -127,22 +127,32 @@ export interface Decision {
  * `held` says whether the employee holds that asset RIGHT NOW, and it is what
  * stops one offboarding inheriting an older one's answer. An EXECUTED return
  * cleared the holder by construction — `executionPlan` hard-codes
- * `assigneeId: null` — so if they hold the thing now, that return decided an
- * EARLIER holding and the item came back to them afterwards. Without this, a
+ * `assigneeId: null` — so if they hold the thing now, the asset came back to
+ * them AFTER that return, and everything up to and including it decided the
+ * holding that ended there. Hence the boundary below rather than a bare "skip
+ * EXECUTED": a stale EXECUTION_FAILED left behind by an abandoned earlier
+ * return would otherwise still answer for this holding. Without any of this, a
  * laptop returned once and later reassigned to the same person reads "decided"
  * forever, and the wizard completes leaving it assigned to someone who no
  * longer works here — the dangling assignment scope decision #2 exists to
- * prevent. EXECUTION_FAILED is deliberately NOT excluded: that return never
- * moved the asset, so it is still the live (retryable) decision.
+ * prevent. An EXECUTION_FAILED *after* the boundary is deliberately kept: that
+ * return never moved the asset, so it is still this holding's live, retryable
+ * decision.
  */
 export function decisionOf(
   candidates: DecisionCandidate[],
   { held }: { held: boolean },
 ): Decision | null {
+  const boundary = held
+    ? candidates.reduce(
+        (t, c) => (c.state === "EXECUTED" ? Math.max(t, c.createdAt.getTime()) : t),
+        -Infinity,
+      )
+    : -Infinity;
   const live = candidates
     .flatMap((c) => {
       if (c.state === "REJECTED") return [];
-      if (held && c.state === "EXECUTED") return [];
+      if (c.createdAt.getTime() <= boundary) return [];
       const outcome = outcomeOfStatus(c.toStatus);
       // carrying the outcome on the surviving row makes the winner's
       // non-null-ness structural, instead of an assertion sitting several

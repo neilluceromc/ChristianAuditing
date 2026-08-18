@@ -151,6 +151,24 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     }
   });
 
+  it("a stale EXECUTION_FAILED from a previous holding does not decide this one", () => {
+    // R1 failed transiently and nobody retried or rejected it; R2 was requested
+    // later and executed, ending that holding; the asset came back afterwards.
+    // Only what was created after the newest EXECUTED return belongs here.
+    expect(decisionOf([
+      cand({ id: "r1", refNo: "APR-2100", state: "EXECUTION_FAILED", createdAt: at(1_000) }),
+      cand({ id: "r2", refNo: "APR-2101", state: "EXECUTED", createdAt: at(2_000) }),
+    ], { held: true })).toBeNull();
+  });
+
+  it("a decision made after the last EXECUTED return is this holding's", () => {
+    // the boundary must not eat the decision the operator just made
+    expect(decisionOf([
+      cand({ id: "r2", refNo: "APR-2101", state: "EXECUTED", createdAt: at(2_000) }),
+      cand({ id: "r3", refNo: "APR-2102", state: "PENDING", toStatus: "MISSING", createdAt: at(3_000) }),
+    ], { held: true })).toMatchObject({ refNo: "APR-2102", outcome: "MISSING" });
+  });
+
   it("ignores a REJECTED return — that item is open for a new decision", () => {
     expect(decisionOf([cand({ state: "REJECTED" })], { held: true })).toBeNull();
   });
