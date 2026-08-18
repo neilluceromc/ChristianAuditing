@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-18 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding` — unmerged, ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–9 of 15 done; Phase 8 remains.**
+**Last updated:** 2026-08-18 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding` — unmerged, ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–10 of 15 done; Phase 8 remains.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -19,21 +19,23 @@ exist today.
 3. Read **§6** — the Phase 7 plan is complete and being executed task-by-task, and §6 carries both the
    progress marker and the invariants the finished tasks established. Later tasks break if you don't
    know them.
-4. **Resume at Task 10** (the printable farewell report) of
+4. **Resume at Task 11** (the repairs brain — pure rules + TDD, then the `stage` facet, two seed
+   fixtures and the worker's `defectiveSince` stamp) of
    `docs/superpowers/plans/2026-08-17-phase-7-offboarding.md` with
-   `superpowers:subagent-driven-development`. Tasks 1–9 are committed; 10–15 remain. The plan is
+   `superpowers:subagent-driven-development`. Tasks 1–10 are committed; 11–15 remain. The plan is
    **15 tasks and has been amended after every review**, so it matches the shipped code — trust it over
    any memory of what it used to say, and keep amending it (`docs(plan): …`) whenever code deviates.
 
-The branch is green as of Task 9 on a **full battery**: `tsc` · `lint` · **319 unit** (25 files) ·
-`next build` · **75 e2e** (7.0m, all run at Task 9). Nothing is half-finished.
+The branch is green: `tsc` · `lint` · **319 unit** (25 files) · `next build` (re-run at Task 10) ·
+**75 e2e** (7.0m, last full run at Task 9 — only Task 10's new route has landed since). Nothing is
+half-finished.
 
-**Before Task 10, decide one thing:** `reportTotals` counts a decision the moment it exists, so
-`totals.recovered` includes returns still `PENDING` — and an `EXECUTION_FAILED` one, which
-`completeOffboarding` refuses to treat as finished. Task 9's tiles were reworded to say *decided*
-rather than *recovered in fact*. **Task 10's printable report inherits the same `totals`**, and it is
-the document the brief calls signable, so either it carries the same "decided" framing or
-`reportTotals` has to learn approval state (a `src/lib/offboarding.ts` rule change, not a page fix).
+**Settled at Task 10 — `reportTotals` counts DECISIONS, and that is deliberate.** An offboarding may
+legitimately complete with returns still queued, so the arithmetic stays as it is; what had to change
+was the copy claiming movement. Both the wizard's tiles and the printable sheet now say *decided*,
+the sheet prints any non-`EXECUTED` state in bold (weight, not colour, so it survives a grayscale
+print), and a line under the acknowledgement discloses what the `Request` state means. Do not
+"fix" `reportTotals` to filter on approval state — that was considered and rejected.
 
 **Nothing is half-finished in the code.** Every task ended on a green commit. The next unit of work is a
 whole task, not a fragment.
@@ -168,6 +170,11 @@ scoped feed, so the only one showing the domain pill).
 - **`SegmentedControl` can hold no value** — the `Math.max(0, …)` clamp is gone and the indicator is
   not rendered at `-1`, so an undecided item cannot read as "Returned". Verified in the DOM (no radio
   checked, no indicator) and at the three pre-existing call sites, which all still slide normally.
+- **`/offboarding/[employeeId]/report`** — the printable farewell sheet (scope decision #9): light-only
+  hardcoded hex so it prints the same in dark mode, `PrintButton`, the decided-items table, the three
+  totals, acknowledgement, signature blocks. A MISSING item with no cost on record adds ₱0 to
+  `totals.lost` while still counting in `counts.MISSING`, so the sheet says that loss is unknown
+  rather than zero.
 - **`Th` forwards `aria-label`.** It destructured a fixed prop set and never spread, so the prop four
   call sites passed was silently dropped — and the compiler stayed quiet because every prop in the
   type is optional, making it a *weak type* and relaxing the excess-property check. Three of those
@@ -197,8 +204,8 @@ scoped feed, so the only one showing the domain pill).
 
 ## 5. What REMAINS
 
-- **Phase 7 — tasks 10–15 of the plan** (in order; each is fully written with verbatim code):
-  **10** the printable farewell report · **11** the repairs brain (`src/lib/repairs.ts`, the `stage`
+- **Phase 7 — tasks 11–15 of the plan** (in order; each is fully written with verbatim code):
+  **11** the repairs brain (`src/lib/repairs.ts`, the `stage`
   facet, two seed fixtures, and the worker's `defectiveSince` stamp) · **12** repair mode on the
   inventory list (stage chips, Down column, quote warning, the `HOLD` marker) · **13** `/reservations` ·
   **14** `/admin/equipment-policies` · **15** the e2e spec, cleanup, full battery, close-out.
