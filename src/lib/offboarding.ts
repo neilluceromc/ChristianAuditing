@@ -85,3 +85,58 @@ export function reportTotals(items: ReportItem[]): ReportTotals {
   }
   return { ...money, total: items.length, counts };
 }
+
+/** Reverse of OUTCOME_STATUS: what a stored payload's target status meant. */
+export function outcomeOfStatus(status: string | null | undefined): Outcome | null {
+  return OUTCOMES.find((o) => OUTCOME_STATUS[o] === status) ?? null;
+}
+
+/** `to.status` out of an approval payload, trusting nothing about its shape. */
+export function returnTargetStatus(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const to = (payload as { to?: unknown }).to;
+  if (!to || typeof to !== "object" || Array.isArray(to)) return null;
+  const status = (to as { status?: unknown }).status;
+  return typeof status === "string" && status.length > 0 ? status : null;
+}
+
+export interface DecisionCandidate {
+  id: string;
+  refNo: string;
+  state: string;
+  /** payload.to.status, already extracted by returnTargetStatus */
+  toStatus: string | null;
+  reason: string | null;
+  createdAt: Date;
+}
+
+export interface Decision {
+  refNo: string;
+  outcome: Outcome;
+  state: string;
+  reason: string | null;
+}
+
+/**
+ * "Decided" is DERIVED from the approvals that exist (scope decision #3) —
+ * no wizard-state table, which is exactly what makes a half-finished
+ * offboarding N correct records instead of a lost session. Every non-rejected
+ * state counts, EXECUTION_FAILED included: the decision WAS made, and the
+ * operator must not be asked for it twice. A REJECTED return re-opens the item.
+ */
+export function decisionOf(candidates: DecisionCandidate[]): Decision | null {
+  const live = candidates
+    .filter((c) => c.state !== "REJECTED" && outcomeOfStatus(c.toStatus) !== null)
+    // Rows created in one transaction share a createdAt millisecond, so the id
+    // tiebreaker is what makes two reads of the same data agree (Phase 5 shipped
+    // a bug where exactly this flipped which row was "unit 1").
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
+  const winner = live[0];
+  if (!winner) return null;
+  return {
+    refNo: winner.refNo,
+    outcome: outcomeOfStatus(winner.toStatus)!,
+    state: winner.state,
+    reason: winner.reason,
+  };
+}
