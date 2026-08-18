@@ -200,6 +200,10 @@ model Employee {
   department   Department       @relation(fields: [departmentId], references: [id])
   m365Status   String?          // canonical: pending|active|offboarding|inactive; custom stored as-is; null = never synced
   employment   EmploymentStatus @default(ACTIVE)
+  /// stamped when employment becomes OFFBOARDING; bounds "this offboarding" so a
+  /// routine return from years ago can't land on a farewell report. Cleared if
+  /// they go back to ACTIVE; kept once OFFBOARDED so the report stays readable.
+  offboardingAt DateTime?
   joinedAt     DateTime
   assets       Asset[]
   reservations Reservation[]

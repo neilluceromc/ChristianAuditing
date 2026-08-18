@@ -80,6 +80,10 @@ async function main() {
           employeeNo: no, name, title,
           departmentId: depts[dept].id,
           m365Status: m365, employment, joinedAt: day(joined),
+          // bounds "this offboarding": decisions made now fall inside the window,
+          // and without it a reseed leaves the anchor null, so an executed
+          // return would vanish from the farewell report
+          offboardingAt: employment === "ACTIVE" ? null : day(-3),
         },
       }),
     ),

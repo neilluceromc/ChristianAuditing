@@ -25,7 +25,7 @@
 
 **Tech Stack:** Existing Phase 1–6 conventions (`ActionResult`, `actionRole`, `checkRate`, `writeAudit` + `diffOf`, `createApproval`, url-state, `safeSection`) · Prisma 6 · Vitest · Playwright + axe.
 
-**Conventions for every task:** branch `phase-7-offboarding` (Task 1 creates it); `npx tsc --noEmit && npm run lint` before each commit (lint runs `--max-warnings 0`, so an unused import is a build failure); NEVER `npm run build` while a dev server runs; **no schema changes** — every field this phase needs already exists (`Asset.vendorId/rmaRef/repairQuote/defectiveSince`, `Employee.employment/m365Status`, `Reservation`, `EquipmentPolicy`/`PolicySlot`). DB via `docker compose up -d db`, seed via `npm run db:seed`. Subagents don't start dev servers — the controller owns the preview. **Restart the preview before any full-suite confirmation run** (Phase 6 gotcha).
+**Conventions for every task:** branch `phase-7-offboarding` (Task 1 creates it); `npx tsc --noEmit && npm run lint` before each commit (lint runs `--max-warnings 0`, so an unused import is a build failure); NEVER `npm run build` while a dev server runs; **one schema change only** — `Employee.offboardingAt` (Task 5, added after a review found the wizard billing years-old returns to a farewell report); everything else this phase needs already exists (`Asset.vendorId/rmaRef/repairQuote/defectiveSince`, `Employee.employment/m365Status`, `Reservation`, `EquipmentPolicy`/`PolicySlot`). DB via `docker compose up -d db`, seed via `npm run db:seed`. Subagents don't start dev servers — the controller owns the preview. **Restart the preview before any full-suite confirmation run** (Phase 6 gotcha).
 
 **Seed facts this phase leans on:** **Dennis Ong EMP-0090** is `OFFBOARDING` — the wizard's fixture — though he currently holds **nothing**, so Task 3 gives him three new assets (see scope decision #8) · **APR-2040** is a `lifecycle_return` PENDING approval for Dennis with **no asset and no target status**, so it decides nothing and every reader must ignore it · 6 `DEFECTIVE` assets: **BR-LT-0122** and **BR-KB-0402** (no vendor, no RMA → `to-assess`), **BR-LT-0118** + **BR-MN-0731** + **BR-DK-0033** (vendor + RMA → `at-vendor`), **BR-LT-0090** (₱18,400 quote against a ₱55,000 cost = 33%, so it reads `to-assess` today — **Task 11 raises the quote to ₱34,000 so a `beyond-repair` row exists at all**) · nothing reaches `returned-ok` until Task 11 gives **BR-MN-0911** a `defectiveSince` · 4 reservations, one per state (ACTIVE on BR-MN-0910 for Nina EMP-0097) · one `EquipmentPolicy` "Finance standard" with 6 slots, 5 required.
 
@@ -77,6 +77,7 @@ src/server/
   modules/employees/queries.ts         (modify — stable policy order)
   modules/home/queries.ts              (modify — stable policy order; LEAVE row opens the wizard)
 src/worker/execute-approval.ts         (modify — start defectiveSince when an item becomes DEFECTIVE)
+prisma/migrations/20260818090000_employee_offboarding_anchor/  (create — Employee.offboardingAt + backfill)
 src/components/
   ui/segmented-control.tsx             (modify — no indicator when nothing is chosen)
   offboarding/wizard-steps.tsx         (create — server: the 4-stop step bar)
@@ -863,12 +864,83 @@ decided" has exactly one definition. Query modules carry no unit tests in this c
 they call do) — `tsc` plus the Task 15 e2e spec are their verification.
 
 **Files:**
-- Create: `src/server/modules/offboarding/queries.ts`
+- Create: `prisma/migrations/20260818090000_employee_offboarding_anchor/migration.sql`,
+  `src/server/modules/offboarding/queries.ts`
+- Modify: `prisma/schema.prisma`, `prisma/seed.ts`, `src/server/modules/employees/actions.ts`
+
+- [ ] **Step 0: The offboarding anchor**
+
+"This offboarding" has to be a real window. The `−` button on the employee record creates a
+`lifecycle.return` on every routine laptop swap, so a read scoped only by `employeeId` bills equipment
+handed back years ago to this farewell report — and folds its cost into the value recovered on a signed
+document. One nullable column fixes it.
+
+`prisma/migrations/20260818090000_employee_offboarding_anchor/migration.sql`:
+
+```sql
+-- "This offboarding" has to be a real, queryable window rather than "all of
+-- this person's history". The − button on the employee record creates a
+-- lifecycle.return on every routine laptop swap, so without an anchor the
+-- offboarding wizard bills equipment somebody handed back years ago to their
+-- farewell report — a signed financial document — and folds its cost into the
+-- value-recovered total.
+ALTER TABLE "Employee" ADD COLUMN "offboardingAt" TIMESTAMP(3);
+
+-- Backfill anyone already past the ACTIVE stage. updatedAt is the closest
+-- record we have of when they were marked, and it is strictly better than
+-- NULL: a NULL anchor means "no window", so their report would show only
+-- what they still hold.
+UPDATE "Employee"
+   SET "offboardingAt" = "updatedAt"
+ WHERE employment IN ('OFFBOARDING', 'OFFBOARDED');
+```
+
+In `prisma/schema.prisma`, add to `model Employee` directly after `employment`:
+
+```prisma
+  /// stamped when employment becomes OFFBOARDING; bounds "this offboarding" so a
+  /// routine return from years ago can't land on a farewell report. Cleared if
+  /// they go back to ACTIVE; kept once OFFBOARDED so the report stays readable.
+  offboardingAt DateTime?
+```
+
+Apply it and regenerate: `npx prisma migrate deploy && npx prisma generate`.
+
+A reseed TRUNCATEs, so the backfill will not run again — the seed has to set the anchor itself. In
+`prisma/seed.ts`, inside the `prisma.employee.create` data, after `joinedAt`:
+
+```ts
+          // bounds "this offboarding": decisions made now fall inside the window,
+          // and without it a reseed leaves the anchor null, so an executed
+          // return would vanish from the farewell report
+          offboardingAt: employment === "ACTIVE" ? null : day(-3),
+```
+
+And the transition has to stamp it. In `src/server/modules/employees/actions.ts`'s `updateEmployee`,
+extend the `data` object with:
+
+```ts
+    // The offboarding wizard reads "this offboarding" as everything decided
+    // since this moment, so entering OFFBOARDING is what starts the window —
+    // otherwise a routine return from years ago lands on a farewell report.
+    // Re-entering ACTIVE clears it; OFFBOARDED keeps it, so the report of what
+    // happened stays readable afterwards.
+    offboardingAt:
+      d.employment === "OFFBOARDING"
+        ? employee.offboardingAt ?? new Date()
+        : d.employment === "ACTIVE"
+          ? null
+          : employee.offboardingAt,
+```
+
+`diffOf` picks the change up automatically, so the audit trail records when an offboarding started.
 
 - [ ] **Step 1: Write the module**
 
 ```ts
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import {
@@ -886,7 +958,10 @@ export interface OffboardingRow {
   m365: string | null;
   /** still physically held by them */
   itemsOut: number;
+  /** decided items, INCLUDING ones whose return already executed and left */
   decided: number;
+  /** items of this offboarding: still-out plus already-returned */
+  total: number;
   undecided: number;
   joined: string;
 }
@@ -930,6 +1005,12 @@ export function groupCandidates(approvals: ApprovalLike[]): Map<string, Decision
   return byAsset;
 }
 
+/** ids of what this person holds right now — the only assets a decision can name */
+async function heldIds(employeeId: string): Promise<string[]> {
+  const rows = await prisma.asset.findMany({ where: { assigneeId: employeeId }, select: { id: true } });
+  return rows.map((r) => r.id);
+}
+
 export async function listOffboarding(): Promise<OffboardingRow[]> {
   const employees = await prisma.employee.findMany({
     where: { employment: "OFFBOARDING" },
@@ -941,14 +1022,30 @@ export async function listOffboarding(): Promise<OffboardingRow[]> {
         select: { id: true, refNo: true, state: true, payload: true, createdAt: true, assetId: true },
       },
     },
-    orderBy: [{ name: "asc" }],
+    // name is not unique — two people sharing one must not swap rows between reads
+    orderBy: [{ name: "asc" }, { employeeNo: "asc" }],
   });
 
   return employees.map((e) => {
-    const byAsset = groupCandidates(e.approvals);
+    // the same window getWizard uses — see the comment there
+    const since = e.offboardingAt;
+    const byAsset = groupCandidates(
+      since ? e.approvals.filter((a) => a.createdAt >= since) : [],
+    );
+    const heldIdSet = new Set(e.assets.map((a) => a.id));
     // every asset in e.assets is held by them right now, hence held: true —
     // which is what makes an EXECUTED return from an EARLIER holding not count
-    const decided = e.assets.filter((a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }) !== null).length;
+    const decidedHeld = e.assets.filter(
+      (a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }) !== null,
+    ).length;
+    // Items whose return already executed have LEFT e.assets. Counting only the
+    // held ones made this numerator run backwards as work progressed ("1 of 3"
+    // becoming "0 of 2" when the worker ran) and disagree with the wizard's own
+    // fraction. Both now count the same union.
+    const decidedGone = [...byAsset].filter(
+      ([assetId, candidates]) =>
+        !heldIdSet.has(assetId) && decisionOf(candidates, { held: false }) !== null,
+    ).length;
     return {
       id: e.id,
       name: e.name,
@@ -956,9 +1053,10 @@ export async function listOffboarding(): Promise<OffboardingRow[]> {
       title: e.title,
       department: e.department.name,
       m365: e.m365Status,
-      itemsOut: e.assets.length,
-      decided,
-      undecided: e.assets.length - decided,
+      itemsOut: heldIdSet.size,
+      decided: decidedHeld + decidedGone,
+      total: heldIdSet.size + decidedGone,
+      undecided: heldIdSet.size - decidedHeld,
       joined: fmtDate(e.joinedAt),
     };
   });
@@ -975,6 +1073,13 @@ export interface WizardItem {
   /** false once the return EXECUTED and the asset left their name */
   held: boolean;
   decision: Decision | null;
+  /**
+   * An OPEN approval of some OTHER type on this asset. The one-open-per-asset
+   * index is per asset, not per type, so a pending lifecycle.change-status
+   * makes this item undecidable until it clears — and without naming it, the
+   * operator gets a refusal that points nowhere.
+   */
+  blockedBy: { refNo: string; type: string } | null;
 }
 
 export interface WizardSlot {
@@ -1017,7 +1122,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   });
   if (!employee) return null;
 
-  const [held, returns, policies] = await Promise.all([
+  const [held, allReturns, blockers, policies] = await Promise.all([
     prisma.asset.findMany({
       where: { assigneeId: employeeId },
       include: { category: true },
@@ -1035,26 +1140,68 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
         },
       },
     }),
+    // Any OPEN approval that is NOT a return holds the one-per-asset slot, so
+    // decideItem would be refused for a reason the operator can't see.
+    prisma.approval.findMany({
+      where: {
+        assetId: { in: (await heldIds(employeeId)) },
+        type: { not: "lifecycle_return" },
+        state: { in: [...OPEN_APPROVAL_STATES] },
+      },
+      select: { refNo: true, type: true, assetId: true },
+    }),
     prisma.equipmentPolicy.findMany({
-      include: { slots: { include: { assetType: true } } },
+      include: { slots: { include: { assetType: true }, orderBy: [{ name: "asc" }, { id: "asc" }] } },
       orderBy: [{ name: "asc" }],
     }),
   ]);
 
+  /**
+   * "This offboarding" is a WINDOW, not all of history. The `−` button on the
+   * employee record creates a `lifecycle.return` on every routine laptop swap,
+   * so without the anchor a farewell report — a signed financial document —
+   * lists equipment the person handed back years ago and folds its cost into
+   * the value-recovered total. A null anchor means they are not mid-offboarding,
+   * so nothing historical belongs to this one.
+   *
+   * Filtered here rather than in SQL to keep one query shape at team scale.
+   */
+  const since = employee.offboardingAt;
+  const returns = since ? allReturns.filter((r) => r.createdAt >= since) : [];
+
   const byAsset = groupCandidates(returns);
-  const money = (cost: unknown) => (cost === null || cost === undefined ? null : Number(cost));
+  const blockedBy = new Map(
+    blockers.filter((b) => b.assetId).map((b) => [b.assetId!, { refNo: b.refNo, type: b.type as string }]),
+  );
+
+  const money = (cost: Prisma.Decimal | null) => (cost === null ? null : Number(cost));
+
+  const toItem = (
+    a: {
+      id: string; tag: string; model: string; status: string;
+      cost: Prisma.Decimal | null; category: { name: string };
+    },
+    held: boolean,
+    decision: Decision | null,
+  ): WizardItem => ({
+    assetId: a.id,
+    tag: a.tag,
+    model: a.model,
+    category: a.category.name,
+    status: a.status,
+    cost: money(a.cost),
+    costLabel: fmtMoney(money(a.cost)),
+    held,
+    decision,
+    blockedBy: blockedBy.get(a.id) ?? null,
+  });
 
   // The item set is what they hold UNION what a return already moved out of
   // their name: an EXECUTED return clears assigneeId, and a decided item must
   // not vanish from the wizard the moment the worker runs.
   const items = new Map<string, WizardItem>();
   for (const a of held) {
-    items.set(a.id, {
-      assetId: a.id, tag: a.tag, model: a.model, category: a.category.name, status: a.status,
-      cost: money(a.cost), costLabel: fmtMoney(money(a.cost)),
-      held: true,
-      decision: decisionOf(byAsset.get(a.id) ?? [], { held: true }),
-    });
+    items.set(a.id, toItem(a, true, decisionOf(byAsset.get(a.id) ?? [], { held: true })));
   }
   for (const r of returns) {
     const a = r.asset;
@@ -1063,15 +1210,12 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     // an EXECUTED return counts here and is skipped in the loop above
     const decision = decisionOf(byAsset.get(a.id) ?? [], { held: false });
     if (!decision) continue; // a rejected-only history is not an item of this offboarding
-    items.set(a.id, {
-      assetId: a.id, tag: a.tag, model: a.model, category: a.category.name, status: a.status,
-      cost: money(a.cost), costLabel: fmtMoney(money(a.cost)),
-      held: false,
-      decision,
-    });
+    items.set(a.id, toItem(a, false, decision));
   }
 
-  const rows = [...items.values()].sort((x, y) => x.tag.localeCompare(y.tag));
+  // plain comparison, not localeCompare: deterministic beats locale-aware, and
+  // src/lib/offboarding.ts's tiebreaker makes the same choice for the same reason
+  const rows = [...items.values()].sort((x, y) => (x.tag < y.tag ? -1 : x.tag > y.tag ? 1 : 0));
   const policy = resolvePolicy(employee, policies);
   const loadout = computeLoadout(policy?.slots ?? [], held);
   // computeLoadout is generic over assets, not slots, so the slot it hands back
@@ -1118,7 +1262,8 @@ the two reads buys nothing. `$transaction([...], { isolationLevel: "RepeatableRe
 the cost of a transaction per page render plus handling serialization failures on a read-only screen.
 The failure mode is transient, self-correcting and clearly messaged, so it is accepted rather than
 engineered around. Do NOT "fix" it by reverting the Task 4 rule — the bug
-that rule prevents is permanent, and this one lasts one render.
+that rule prevents is permanent, and this one lasts one render. `listOffboarding` has the same skew for
+the same reason and is even more benign: it is read-only with no action attached.
 
 - [ ] **Step 2: Typecheck and lint**
 
@@ -1160,6 +1305,7 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
 import { OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, decisionOf, reasonRequired } from "@/lib/offboarding";
+import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { groupCandidates } from "@/server/modules/offboarding/queries";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
@@ -1221,8 +1367,16 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
       if (asset.assigneeId !== d.employeeId) {
         return conflict(`${asset.tag} isn't held by ${employee.name} any more — refresh the wizard.`);
       }
-      if (await openApprovalForAsset(tx, asset.id)) {
-        return conflict(`${asset.tag} already has an open request — that decision is already recorded.`);
+      // The one-open-per-asset index is per ASSET, not per approval type: a
+      // pending lifecycle.change-status refuses this decision too, and
+      // "that decision is already recorded" would be a lie pointing nowhere.
+      const open = await openApprovalForAsset(tx, asset.id);
+      if (open) {
+        return conflict(
+          open.type === "lifecycle_return"
+            ? `${asset.tag} already has an open request — that decision is already recorded.`
+            : `${asset.tag} is held by ${open.refNo} (${APPROVAL_TYPE_LABEL[open.type]}) — resolve that in Approvals first, then decide this item.`,
+        );
       }
       const approval = await createApproval(tx, {
         type: "lifecycle_return",
@@ -1472,11 +1626,14 @@ export default async function OffboardingPage() {
                   <Td>{r.department}</Td>
                   <Td mono>{r.itemsOut}</Td>
                   <Td mono className="text-[10.5px]">
-                    {r.itemsOut === 0 ? (
+                    {r.total === 0 ? (
                       "nothing to collect"
                     ) : (
                       <>
-                        {r.decided} of {r.itemsOut}
+                        {/* of the WHOLE offboarding, including items whose return
+                            already executed — counting only what is still out made
+                            this numerator run backwards as work progressed */}
+                        {r.decided} of {r.total}
                         {r.undecided > 0 && (
                           <span className="pl-1 font-medium" style={{ color: "var(--st-attention-text)" }}>
                             · {r.undecided} to go
@@ -2139,8 +2296,12 @@ export default async function OffboardingWizardPage({
                         </span>
                       </>
                     ) : (
+                      // "not held" rather than "nothing to collect": an item that
+                      // left their name without a return (a manual reassignment, a
+                      // transfer) is the drift this screen exists to catch, and it
+                      // must not read as reassurance
                       <span className="font-mono text-[10px] text-fg-muted">
-                        nothing to collect · {s.typeName} · {s.required ? "required" : "optional"}
+                        not held · {s.typeName} · {s.required ? "required" : "optional"}
                       </span>
                     )}
                   </div>
@@ -2258,6 +2419,16 @@ export default async function OffboardingWizardPage({
                           </span>
                         )}
                       </div>
+                    ) : i.blockedBy ? (
+                      // one asset, one open request: a pending change-status would
+                      // otherwise refuse the decision with no way to see why
+                      <p className="text-xs" style={{ color: "var(--st-attention-text)" }}>
+                        {i.tag} is held by{" "}
+                        <Link href="/approvals" className="font-mono text-accent hover:underline">
+                          {i.blockedBy.refNo}
+                        </Link>{" "}
+                        ({i.blockedBy.type}) — resolve that request first, then decide this item.
+                      </p>
                     ) : canDecide ? (
                       <ItemDecision employeeId={employeeId} assetId={i.assetId} tag={i.tag} />
                     ) : (
@@ -2521,6 +2692,14 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
             <dt className="font-mono text-[9.5px] uppercase tracking-[0.09em] text-[#667085]">Value lost</dt>
             <dd className="font-mono text-[15px] font-semibold">{fmtMoney(totals.lost)}</dd>
             <dd className="text-[10.5px] text-[#667085]">{totals.counts.MISSING} item(s) missing — custody lost</dd>
+            {/* "₱0 · 1 item missing" would invite the reading that the loss was
+                zero; an item with no cost on record has an unknown loss, not none */}
+            {decided.some((i) => i.decision!.outcome === "MISSING" && i.cost === null) && (
+              <dd className="text-[10.5px] text-[#667085]">
+                {decided.filter((i) => i.decision!.outcome === "MISSING" && i.cost === null).length} of them
+                {" "}have no cost on record — that loss is unknown, not zero
+              </dd>
+            )}
           </div>
         </dl>
 
