@@ -115,7 +115,9 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
       meta: e._count.assets > 0
         ? `${e.employeeNo} · ${e._count.assets} item${e._count.assets === 1 ? "" : "s"} still out`
         : `${e.employeeNo} · equipment returned · accounts still to close`,
-      href: `/employees/${e.id}`,
+      // Phase 7: both halves of offboarding (kit and accounts) live in the
+      // wizard now, so the one action that clears this row opens it.
+      href: `/offboarding/${e.id}`,
       action: e._count.assets > 0 ? "Collect equipment" : "Close accounts",
       severity: daysSince(e.updatedAt, now),
     });
