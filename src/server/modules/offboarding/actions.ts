@@ -212,7 +212,7 @@ export async function closeAccounts(
     // the employee record, which is not the surface that closes accounts.
     if (next === null && employee.m365Status !== null) {
       return conflict(
-        `${employee.name}'s account reads ${employee.m365Status} — set it to inactive rather than clearing it. "No sync yet" describes someone who never had an account.`,
+        `"No sync yet" describes someone who never had an account — it can't be used to clear the ${employee.m365Status} already recorded against ${employee.name}.`,
       );
     }
     if (employee.m365Status === next) {
