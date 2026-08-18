@@ -462,19 +462,28 @@ export interface ReportTotals {
   counts: Record<Outcome, number>;
 }
 
+/**
+ * Which total each outcome feeds. A table rather than an if/else chain because
+ * `Record<Outcome, …>` is exhaustive by construction: a fifth outcome is a
+ * compile error here, instead of silently landing in `lost` and reporting a
+ * financial loss on somebody's farewell receipt.
+ */
+const OUTCOME_BUCKET: Record<Outcome, "recovered" | "boughtOut" | "lost"> = {
+  RETURNED: "recovered",
+  DEFECTIVE: "recovered",
+  BUYOUT: "boughtOut",
+  MISSING: "lost",
+};
+
 export function reportTotals(items: ReportItem[]): ReportTotals {
   const counts: Record<Outcome, number> = { RETURNED: 0, DEFECTIVE: 0, BUYOUT: 0, MISSING: 0 };
-  let recovered = 0;
-  let boughtOut = 0;
-  let lost = 0;
+  const money = { recovered: 0, boughtOut: 0, lost: 0 };
   for (const item of items) {
+    // an unknown cost still counts as an item — it just adds no money
     counts[item.outcome] += 1;
-    const value = item.cost ?? 0;
-    if (item.outcome === "RETURNED" || item.outcome === "DEFECTIVE") recovered += value;
-    else if (item.outcome === "BUYOUT") boughtOut += value;
-    else lost += value;
+    money[OUTCOME_BUCKET[item.outcome]] += item.cost ?? 0;
   }
-  return { recovered, boughtOut, lost, total: items.length, counts };
+  return { ...money, total: items.length, counts };
 }
 ```
 
