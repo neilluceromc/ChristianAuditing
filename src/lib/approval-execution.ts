@@ -44,10 +44,15 @@ export function executionPlan(type: ApprovalType, payload: unknown): ExecutionPl
       // Returned / Defective / Buyout / Missing, with Missing first-class).
       // The holder is cleared either way — the person has left, and who it
       // came from survives in from.assigneeId and in the audit diff.
-      if (!status || !(RETURN_STATUSES as readonly string[]).includes(status)) {
+      if (!status) {
+        return { ok: false, error: `Malformed lifecycle.return payload: expected to.status, got ${JSON.stringify(payload)}` };
+      }
+      // A disallowed target is not a malformed payload, and the operator reading
+      // this in the retry UI needs the offending value, not a JSON blob.
+      if (!(RETURN_STATUSES as readonly string[]).includes(status)) {
         return {
           ok: false,
-          error: `Malformed lifecycle.return payload: to.status must be one of ${RETURN_STATUSES.join(", ")}, got ${JSON.stringify(payload)}`,
+          error: `lifecycle.return target status must be one of ${RETURN_STATUSES.join(", ")}, got ${status}`,
         };
       }
       return { ok: true, updates: { assigneeId: null, status: status as AssetStatus } };
@@ -92,8 +97,11 @@ export function summarizeApproval(
     case "lifecycle_return": {
       const who = names.employeeName ? `${names.employeeName} ` : "";
       // Four outcomes now, so a hard-coded "→ SPARE" would make the queue's
-      // change cell lie about three of them.
-      const status = (to ? str(to.status) : null) ?? "SPARE";
+      // change cell lie about three of them. And a return with no target at all
+      // (seeded APR-2040) gets "?", not an invented SPARE: the detail page shows
+      // this line beside a system check that says the target is missing, and the
+      // two panes must not contradict each other.
+      const status = (to ? str(to.status) : null) ?? "?";
       return { line1, line2: withReason(`${who}→ ${status}`) };
     }
     case "lifecycle_change_status": {

@@ -107,6 +107,8 @@ export async function systemChecks(
     }
     case "lifecycle_return": {
       const expected = from?.assigneeId ? String(from.assigneeId) : null;
+      // Four outcomes (README 3e), so this can't be pinned to SPARE either.
+      const target = to && typeof to.status === "string" ? to.status : null;
       return [
         assetCheck,
         asset
@@ -116,15 +118,11 @@ export async function systemChecks(
               detail: asset.assignee ? `held by ${asset.assignee.name}` : "held by nobody",
             }
           : { label: "Still held by the returner", pass: false, detail: "—" },
-        (() => {
-          // Four outcomes (README 3e), so this can't be pinned to SPARE either.
-          const target = to && typeof to.status === "string" ? to.status : null;
-          return {
-            label: "Return target",
-            pass: target !== null && (RETURN_STATUSES as readonly string[]).includes(target),
-            detail: target ? `returns as ${target}` : "no target status in the payload",
-          };
-        })(),
+        {
+          label: "Return target",
+          pass: target !== null && (RETURN_STATUSES as readonly string[]).includes(target),
+          detail: target ? `returns as ${target}` : "no target status in the payload",
+        },
       ];
     }
     case "lifecycle_change_status": {

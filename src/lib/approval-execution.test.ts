@@ -48,11 +48,13 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
     }
   });
 
-  it("return: refuses a target that isn't an offboarding outcome", () => {
+  it("return: refuses a target that isn't an offboarding outcome, naming it", () => {
     for (const bad of ["DEPLOYED", "TEMPORARY", "DONATED", "DISPOSE"]) {
       const plan = executionPlan("lifecycle_return", { from: { assigneeId: "e" }, to: { assigneeId: null, status: bad } });
       expect(plan.ok).toBe(false);
-      if (!plan.ok) expect(plan.error).toMatch(new RegExp(bad));
+      // the offending value must END the message, not merely appear inside a
+      // JSON dump of the whole payload — this is copy an operator reads verbatim
+      if (!plan.ok) expect(plan.error).toMatch(new RegExp(`got ${bad}$`));
     }
   });
 
@@ -92,5 +94,11 @@ describe("summarizeApproval — the queue's two-line change cell", () => {
     );
     expect(s.line1).toBe("lifecycle.return · BR-PH-0301");
     expect(s.line2).toBe("D. Ong → MISSING — not returned at offboarding");
+  });
+  it("return: a payload with no target renders '?', not an invented SPARE (seeded APR-2040 shape)", () => {
+    // The detail page shows this line beside a system check reading "no target
+    // status in the payload" — the two panes must not contradict each other.
+    const s = summarizeApproval("lifecycle_return", { reason: "offboarding" }, { employeeName: "D. Ong" });
+    expect(s.line2).toBe("D. Ong → ? — offboarding");
   });
 });
