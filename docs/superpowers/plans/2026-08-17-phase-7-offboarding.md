@@ -135,11 +135,13 @@ git checkout -b phase-7-offboarding
     }
   });
 
-  it("return: refuses a target that isn't an offboarding outcome", () => {
+  it("return: refuses a target that isn't an offboarding outcome, naming it", () => {
     for (const bad of ["DEPLOYED", "TEMPORARY", "DONATED", "DISPOSE"]) {
       const plan = executionPlan("lifecycle_return", { from: { assigneeId: "e" }, to: { assigneeId: null, status: bad } });
       expect(plan.ok).toBe(false);
-      if (!plan.ok) expect(plan.error).toMatch(new RegExp(bad));
+      // the offending value must END the message, not merely appear inside a
+      // JSON dump of the whole payload — this is copy an operator reads verbatim
+      if (!plan.ok) expect(plan.error).toMatch(new RegExp(`got ${bad}$`));
     }
   });
 
@@ -163,6 +165,12 @@ cell reads the same payload, and it currently hard-codes SPARE:
     expect(s.line1).toBe("lifecycle.return · BR-PH-0301");
     expect(s.line2).toBe("D. Ong → MISSING — not returned at offboarding");
   });
+  it("return: a payload with no target renders '?', not an invented SPARE (seeded APR-2040 shape)", () => {
+    // The detail page shows this line beside a system check reading "no target
+    // status in the payload" — the two panes must not contradict each other.
+    const s = summarizeApproval("lifecycle_return", { reason: "offboarding" }, { employeeName: "D. Ong" });
+    expect(s.line2).toBe("D. Ong → ? — offboarding");
+  });
 ```
 
 - [ ] **Step 3: Run to verify failure**
@@ -180,10 +188,15 @@ Run: `npm run test -- src/lib/approval-execution.test.ts` — Expected: FAIL (DE
       // Returned / Defective / Buyout / Missing, with Missing first-class).
       // The holder is cleared either way — the person has left, and who it
       // came from survives in from.assigneeId and in the audit diff.
-      if (!status || !(RETURN_STATUSES as readonly string[]).includes(status)) {
+      if (!status) {
+        return { ok: false, error: `Malformed lifecycle.return payload: expected to.status, got ${JSON.stringify(payload)}` };
+      }
+      // A disallowed target is not a malformed payload, and the operator reading
+      // this in the retry UI needs the offending value, not a JSON blob.
+      if (!(RETURN_STATUSES as readonly string[]).includes(status)) {
         return {
           ok: false,
-          error: `Malformed lifecycle.return payload: to.status must be one of ${RETURN_STATUSES.join(", ")}, got ${JSON.stringify(payload)}`,
+          error: `lifecycle.return target status must be one of ${RETURN_STATUSES.join(", ")}, got ${status}`,
         };
       }
       return { ok: true, updates: { assigneeId: null, status: status as AssetStatus } };
@@ -215,8 +228,11 @@ with:
     case "lifecycle_return": {
       const who = names.employeeName ? `${names.employeeName} ` : "";
       // Four outcomes now, so a hard-coded "→ SPARE" would make the queue's
-      // change cell lie about three of them.
-      const status = (to ? str(to.status) : null) ?? "SPARE";
+      // change cell lie about three of them. And a return with no target at all
+      // (seeded APR-2040) gets "?", not an invented SPARE: the detail page shows
+      // this line beside a system check that says the target is missing, and the
+      // two panes must not contradict each other.
+      const status = (to ? str(to.status) : null) ?? "?";
       return { line1, line2: withReason(`${who}→ ${status}`) };
     }
 ```
@@ -234,15 +250,19 @@ would render as a red cross. Replace:
 with:
 
 ```ts
-        (() => {
-          // Four outcomes (README 3e), so this can't be pinned to SPARE either.
-          const target = to && typeof to.status === "string" ? to.status : null;
-          return {
-            label: "Return target",
-            pass: target !== null && (RETURN_STATUSES as readonly string[]).includes(target),
-            detail: target ? `returns as ${target}` : "no target status in the payload",
-          };
-        })(),
+        {
+          label: "Return target",
+          pass: target !== null && (RETURN_STATUSES as readonly string[]).includes(target),
+          detail: target ? `returns as ${target}` : "no target status in the payload",
+        },
+```
+
+hoisting `target` beside the `expected` const at the top of that same `case` block:
+
+```ts
+      const expected = from?.assigneeId ? String(from.assigneeId) : null;
+      // Four outcomes (README 3e), so this can't be pinned to SPARE either.
+      const target = to && typeof to.status === "string" ? to.status : null;
 ```
 
 and extend that file's `@/lib/approval-execution` import to:
@@ -279,6 +299,7 @@ git commit -m "feat(approvals): a return can come back SPARE, DEFECTIVE, BUYOUT 
 
 ```ts
 import { describe, expect, it } from "vitest";
+import { RETURN_STATUSES } from "./approval-execution";
 import {
   OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, WIZARD_STEPS, canContinue, parseStep,
   reasonRequired, reportTotals, type Outcome,
@@ -294,6 +315,14 @@ describe("outcomes — Missing is first-class", () => {
     expect(OUTCOME_STATUS).toEqual({
       RETURNED: "SPARE", DEFECTIVE: "DEFECTIVE", BUYOUT: "BUYOUT", MISSING: "MISSING",
     });
+  });
+
+  it("agrees with the executor about what a return may become", () => {
+    // Two copies of one truth: this map is what the wizard WRITES, RETURN_STATUSES
+    // is what executionPlan will ACCEPT. If they ever drift, every decision of the
+    // orphaned outcome becomes EXECUTION_FAILED — which is the exact bug Task 1
+    // existed to fix. (Raised by the Task 1 code review.)
+    expect(new Set(Object.values(OUTCOME_STATUS))).toEqual(new Set(RETURN_STATUSES));
   });
 
   it("requires a reason for everything except a clean return", () => {
