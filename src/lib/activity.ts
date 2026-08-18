@@ -39,6 +39,11 @@ export function auditSentence(entry: ActivityEntryLike): string {
       return `${entry.actorLabel} cancelled ${entry.entityLabel}`;
     case "complete":
       return `${entry.actorLabel} completed ${entry.entityLabel}`;
+    case "offboarding.completed": {
+      const items = diff?.decisions?.to;
+      const n = Array.isArray(items) ? items.length : 0;
+      return `${entry.actorLabel} completed offboarding for ${entry.entityLabel}${n ? ` · ${n} item${n === 1 ? "" : "s"} settled` : ""}`;
+    }
     case "comment":
       return `${entry.actorLabel} commented on ${entry.entityLabel}`;
     case "unit-update":

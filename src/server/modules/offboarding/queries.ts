@@ -43,11 +43,26 @@ function payloadReason(payload: unknown): string | null {
 }
 
 /**
- * Every return approval this person has, bucketed by the asset it moves.
- * EXPORTED because `completeOffboarding` re-derives "is everything decided?"
- * server-side, and a second definition there would be a second answer.
+ * The candidates of THIS offboarding: the window, then the grouping.
+ *
+ * "Decided" has three parts — the window, the grouping, and `decisionOf` — and
+ * every reader must apply all three. Sharing only the last two is what let the
+ * completion gate disagree with the wizard: it saw a `lifecycle.return` created
+ * BEFORE the person was marked offboarding (a routine `−` on the employee
+ * record) and called the item decided, while the wizard, which windows, showed
+ * it as still needing a decision. A null anchor means no window, so nothing
+ * historical is decided — the safe direction, and the same answer both give.
  */
-export function groupCandidates(approvals: ApprovalLike[]): Map<string, DecisionCandidate[]> {
+export function candidatesFor(
+  employee: { offboardingAt: Date | null },
+  approvals: ApprovalLike[],
+): Map<string, DecisionCandidate[]> {
+  const since = employee.offboardingAt;
+  return groupCandidates(since ? approvals.filter((a) => a.createdAt >= since) : []);
+}
+
+/** Bucket return approvals by the asset they move. Prefer `candidatesFor`. */
+function groupCandidates(approvals: ApprovalLike[]): Map<string, DecisionCandidate[]> {
   const byAsset = new Map<string, DecisionCandidate[]>();
   for (const a of approvals) {
     if (!a.assetId) continue; // the seeded APR-2040 has no asset — it decides nothing
@@ -87,11 +102,7 @@ export async function listOffboarding(): Promise<OffboardingRow[]> {
   });
 
   return employees.map((e) => {
-    // the same window getWizard uses — see the comment there
-    const since = e.offboardingAt;
-    const byAsset = groupCandidates(
-      since ? e.approvals.filter((a) => a.createdAt >= since) : [],
-    );
+    const byAsset = candidatesFor(e, e.approvals);
     const heldIdSet = new Set(e.assets.map((a) => a.id));
     // every asset in e.assets is held by them right now, hence held: true —
     // which is what makes an EXECUTED return from an EARLIER holding not count
@@ -200,12 +211,15 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
         },
       },
     }),
-    // Any OPEN approval that is NOT a return holds the one-per-asset slot, so
-    // decideItem would be refused for a reason the operator can't see.
+    // ANY open approval holds the one-per-asset slot, so decideItem would refuse
+    // for a reason the operator can't see. Returns are included deliberately: a
+    // return created BEFORE this offboarding began is outside the window, so it
+    // is not this item's decision, yet it still owns the slot — and telling the
+    // operator "that decision is already recorded" while showing the item as
+    // undecided would deadlock them.
     prisma.approval.findMany({
       where: {
-        assetId: { in: (await heldIds(employeeId)) },
-        type: { not: "lifecycle_return" },
+        assetId: { in: await heldIds(employeeId) },
         state: { in: [...OPEN_APPROVAL_STATES] },
       },
       select: { refNo: true, type: true, assetId: true },
@@ -216,23 +230,25 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     }),
   ]);
 
-  /**
-   * "This offboarding" is a WINDOW, not all of history. The `−` button on the
-   * employee record creates a `lifecycle.return` on every routine laptop swap,
-   * so without the anchor a farewell report — a signed financial document —
-   * lists equipment the person handed back years ago and folds its cost into
-   * the value-recovered total. A null anchor means they are not mid-offboarding,
-   * so nothing historical belongs to this one.
-   *
-   * Filtered here rather than in SQL to keep one query shape at team scale.
-   */
+  // The window lives in candidatesFor — see its comment. Applied to the row list
+  // too, because the item set is built from these same rows.
   const since = employee.offboardingAt;
   const returns = since ? allReturns.filter((r) => r.createdAt >= since) : [];
-
-  const byAsset = groupCandidates(returns);
-  const blockedBy = new Map(
+  const byAsset = candidatesFor(employee, allReturns);
+  const openByAsset = new Map(
     blockers.filter((b) => b.assetId).map((b) => [b.assetId!, { refNo: b.refNo, type: b.type as string }]),
   );
+
+  /**
+   * An open approval only BLOCKS this item if it isn't the item's own decision.
+   * Comparing refNos is what separates "your decision is pending" from "someone
+   * else's request owns this asset" — including a pre-window return, which is a
+   * real request the operator has to clear even though it decides nothing here.
+   */
+  const blockerFor = (assetId: string, decision: Decision | null) => {
+    const open = openByAsset.get(assetId);
+    return open && open.refNo !== decision?.refNo ? open : null;
+  };
 
   const money = (cost: Prisma.Decimal | null) => (cost === null ? null : Number(cost));
 
@@ -253,7 +269,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     costLabel: fmtMoney(money(a.cost)),
     held,
     decision,
-    blockedBy: blockedBy.get(a.id) ?? null,
+    blockedBy: blockerFor(a.id, decision),
   });
 
   // The item set is what they hold UNION what a return already moved out of

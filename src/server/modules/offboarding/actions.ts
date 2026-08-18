@@ -10,14 +10,14 @@ import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
 import { OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, decisionOf, reasonRequired } from "@/lib/offboarding";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
-import { groupCandidates } from "@/server/modules/offboarding/queries";
+import { candidatesFor } from "@/server/modules/offboarding/queries";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 
 // Module-local, deliberately NOT exported: every runtime export of a
 // "use server" module must be an async function.
-function revalidate(employeeId: string) {
+function revalidate(employeeId: string, assetId?: string) {
   revalidatePath("/offboarding");
   revalidatePath(`/offboarding/${employeeId}`);
   revalidatePath(`/offboarding/${employeeId}/report`);
@@ -25,7 +25,40 @@ function revalidate(employeeId: string) {
   revalidatePath("/employees");
   revalidatePath("/approvals");
   revalidatePath("/audit");
+  revalidatePath("/employees/activity");
   revalidatePath("/");
+  if (assetId) {
+    // requestReturn writes the identical approval + asset audit entry and
+    // revalidates these; without them the inventory list keeps serving stale
+    // open-request state for an asset that was just decided.
+    revalidatePath("/inventory");
+    revalidatePath("/inventory/activity");
+    revalidatePath(`/inventory/${assetId}`);
+    revalidatePath(`/inventory/${assetId}/history`);
+  }
+}
+
+/**
+ * Prisma throws rather than returning, and a transaction that can't get a
+ * connection inside maxWait raises P2028 — reachable with two concurrent
+ * transactions, and the one code where "nothing was written" is guaranteed
+ * true. Everything else rethrows: an unexpected error must not be laundered
+ * into a designed banner.
+ *
+ * NOTE for anyone editing the callbacks below: RETURNING a failure from a
+ * $transaction callback COMMITS the transaction — only a throw rolls it back.
+ * That is safe here because every `return conflict(...)` precedes every write.
+ * Add a write before one of them and it will commit silently.
+ */
+async function asActionResult<T>(run: () => Promise<T>): Promise<T | ActionResult<never>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2028") {
+      return conflict("The database is busy right now — nothing was written. Try that again.");
+    }
+    throw err;
+  }
 }
 
 const decideSchema = z.object({
@@ -76,8 +109,14 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
       // "that decision is already recorded" would be a lie pointing nowhere.
       const open = await openApprovalForAsset(tx, asset.id);
       if (open) {
+        // A return created BEFORE this offboarding began owns the asset's one
+        // open slot but decides nothing here, so claiming "already recorded"
+        // would point the operator at a decision the wizard doesn't show —
+        // and leave the item permanently undecidable.
+        const inWindow =
+          employee.offboardingAt !== null && open.createdAt >= employee.offboardingAt;
         return conflict(
-          open.type === "lifecycle_return"
+          open.type === "lifecycle_return" && inWindow
             ? `${asset.tag} already has an open request — that decision is already recorded.`
             : `${asset.tag} is held by ${open.refNo} (${APPROVAL_TYPE_LABEL[open.type]}) — resolve that in Approvals first, then decide this item.`,
         );
@@ -87,7 +126,10 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
         payload: {
           from: { assigneeId: d.employeeId },
           to: { assigneeId: null, status: OUTCOME_STATUS[d.outcome] },
-          reason: reason || "offboarding · returned",
+          // keyed on the outcome rather than on emptiness: reasonRequired
+          // guarantees a reason for the other three, and this sentinel would be
+          // a lie stamped on a MISSING item if that ever changed
+          reason: d.outcome === "RETURNED" ? reason || "offboarding · returned" : reason,
         },
         requestedById: user.id,
         assetId: asset.id,
@@ -110,7 +152,7 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
     // double-click — or a colleague on the same wizard — into a constraint
     // violation rather than two returns for one item.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      return conflict("That item was just decided by someone else — refresh the wizard.");
+      return conflict("Another request just took this asset's open slot — refresh the wizard.");
     }
     // Prisma throws rather than returning: without this a P2028 (no connection
     // inside maxWait, reachable with two concurrent transactions) escapes as a
@@ -120,7 +162,7 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
     }
     throw err;
   }
-  revalidate(d.employeeId);
+  revalidate(d.employeeId, d.assetId);
   return ok({ refNo });
 }
 
@@ -145,13 +187,23 @@ export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365
   const { employeeId } = parsed.data;
   const next = parsed.data.m365Status === "" ? null : parsed.data.m365Status;
 
-  const failure = await prisma.$transaction(async (tx) => {
+  let noop = false;
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const employee = await tx.employee.findUnique({ where: { id: employeeId } });
     if (!employee) return conflict("That employee no longer exists.");
-    if (employee.employment === "OFFBOARDED") {
-      return conflict(`${employee.name} is already offboarded — accounts are closed.`);
+    // Same gate as its siblings: step 3 of a wizard should not double as a
+    // general-purpose "set anyone's account status to anything" mutation.
+    if (employee.employment !== "OFFBOARDING") {
+      return conflict(
+        employee.employment === "OFFBOARDED"
+          ? `${employee.name} is already offboarded — accounts are closed.`
+          : `${employee.name} reads ${employee.employment}, not OFFBOARDING — account changes belong on the employee record.`,
+      );
     }
-    if (employee.m365Status === next) return null;
+    if (employee.m365Status === next) {
+      noop = true;
+      return null;
+    }
     const written = await tx.employee.updateMany({
       where: { id: employeeId, m365Status: employee.m365Status },
       data: { m365Status: next },
@@ -166,9 +218,10 @@ export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365
       diff: { m365Status: { from: employee.m365Status, to: next } },
     });
     return null;
-  });
+  }));
   if (failure) return failure;
-  revalidate(employeeId);
+  // nothing was written, so nothing is stale — updateEmployee skips the same way
+  if (!noop) revalidate(employeeId);
   return ok({ m365Status: next });
 }
 
@@ -188,7 +241,7 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { employeeId } = parsed.data;
 
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const employee = await tx.employee.findUnique({
       where: { id: employeeId },
       include: {
@@ -212,17 +265,31 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
     // SAME groupCandidates + decisionOf the wizard reads with, because a second
     // definition of "decided" here would be a second answer: the Task 4 review
     // found the looser version counting an item the wizard still showed as open.
-    const byAsset = groupCandidates(employee.approvals);
-    const undecided = employee.assets.filter(
-      (a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }) === null,
-    ).length;
+    const byAsset = candidatesFor(employee, employee.approvals);
+    const decisions = employee.assets.map((a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }));
+    const undecided = decisions.filter((d) => d === null).length;
     if (undecided > 0) {
       return conflict(
         `${undecided} item${undecided === 1 ? "" : "s"} still ${undecided === 1 ? "has" : "have"} no decision — go back to Collect items.`,
       );
     }
+    // `decisionOf` answers "must the operator be asked again?" — for which
+    // EXECUTION_FAILED is correctly a yes-it-was-decided. Completion asks a
+    // different question, "is this finished?", and a failed return never moved
+    // the asset: the item is still assigned, and the person is about to drop out
+    // of the /offboarding queue where anyone would notice.
+    const failed = decisions.filter((d) => d?.state === "EXECUTION_FAILED");
+    if (failed.length > 0) {
+      return conflict(
+        `${failed.map((d) => d!.refNo).join(", ")} failed to execute, so ${failed.length === 1 ? "that item is" : "those items are"} still assigned — retry or reject ${failed.length === 1 ? "it" : "them"} in Approvals first.`,
+      );
+    }
     // Scope decision #12: an offboarding cannot finish with a live account.
-    if (employee.m365Status !== null && employee.m365Status !== "inactive") {
+    // Case-folded: README 4f stores client-defined values as-is, so a tenant
+    // using "Inactive" must not be refused forever. This is a display status,
+    // not an identity field — the ILIKE hazard doesn't apply.
+    const m365 = employee.m365Status?.trim().toLowerCase() ?? null;
+    if (m365 !== null && m365 !== "inactive") {
       return conflict(`The M365 account still reads ${employee.m365Status} — close it on Accounts & M365 first.`);
     }
 
@@ -231,14 +298,28 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
       data: { employment: "OFFBOARDED" },
     });
     if (written.count === 0) return conflict("Someone else just completed this offboarding.");
+    // AuditEntry is the only immutable artifact in the system, so the moment
+    // worth snapshotting is this one. Everything else about a completed
+    // offboarding is derived from mutable rows: reject one of these returns
+    // afterwards and decisionOf re-opens that item, silently dropping it — and
+    // its value — from a farewell report already treated as a signed record.
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
       entityType: "employee", entityId: employeeId,
       action: "offboarding.completed",
-      diff: { employment: { from: "OFFBOARDING", to: "OFFBOARDED" } },
+      diff: {
+        employment: { from: "OFFBOARDING", to: "OFFBOARDED" },
+        m365Status: { from: employee.m365Status, to: employee.m365Status },
+        decisions: {
+          from: null,
+          to: decisions
+            .filter((d) => d !== null)
+            .map((d) => `${d!.refNo} · ${d!.outcome} · ${d!.state}`),
+        },
+      },
     });
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidate(employeeId);
   return ok({ employment: "OFFBOARDED" });

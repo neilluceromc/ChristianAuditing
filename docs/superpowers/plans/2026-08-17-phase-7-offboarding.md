@@ -983,11 +983,26 @@ function payloadReason(payload: unknown): string | null {
 }
 
 /**
- * Every return approval this person has, bucketed by the asset it moves.
- * EXPORTED because `completeOffboarding` re-derives "is everything decided?"
- * server-side, and a second definition there would be a second answer.
+ * The candidates of THIS offboarding: the window, then the grouping.
+ *
+ * "Decided" has three parts — the window, the grouping, and `decisionOf` — and
+ * every reader must apply all three. Sharing only the last two is what let the
+ * completion gate disagree with the wizard: it saw a `lifecycle.return` created
+ * BEFORE the person was marked offboarding (a routine `−` on the employee
+ * record) and called the item decided, while the wizard, which windows, showed
+ * it as still needing a decision. A null anchor means no window, so nothing
+ * historical is decided — the safe direction, and the same answer both give.
  */
-export function groupCandidates(approvals: ApprovalLike[]): Map<string, DecisionCandidate[]> {
+export function candidatesFor(
+  employee: { offboardingAt: Date | null },
+  approvals: ApprovalLike[],
+): Map<string, DecisionCandidate[]> {
+  const since = employee.offboardingAt;
+  return groupCandidates(since ? approvals.filter((a) => a.createdAt >= since) : []);
+}
+
+/** Bucket return approvals by the asset they move. Prefer `candidatesFor`. */
+function groupCandidates(approvals: ApprovalLike[]): Map<string, DecisionCandidate[]> {
   const byAsset = new Map<string, DecisionCandidate[]>();
   for (const a of approvals) {
     if (!a.assetId) continue; // the seeded APR-2040 has no asset — it decides nothing
@@ -1027,11 +1042,7 @@ export async function listOffboarding(): Promise<OffboardingRow[]> {
   });
 
   return employees.map((e) => {
-    // the same window getWizard uses — see the comment there
-    const since = e.offboardingAt;
-    const byAsset = groupCandidates(
-      since ? e.approvals.filter((a) => a.createdAt >= since) : [],
-    );
+    const byAsset = candidatesFor(e, e.approvals);
     const heldIdSet = new Set(e.assets.map((a) => a.id));
     // every asset in e.assets is held by them right now, hence held: true —
     // which is what makes an EXECUTED return from an EARLIER holding not count
@@ -1140,12 +1151,15 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
         },
       },
     }),
-    // Any OPEN approval that is NOT a return holds the one-per-asset slot, so
-    // decideItem would be refused for a reason the operator can't see.
+    // ANY open approval holds the one-per-asset slot, so decideItem would refuse
+    // for a reason the operator can't see. Returns are included deliberately: a
+    // return created BEFORE this offboarding began is outside the window, so it
+    // is not this item's decision, yet it still owns the slot — and telling the
+    // operator "that decision is already recorded" while showing the item as
+    // undecided would deadlock them.
     prisma.approval.findMany({
       where: {
-        assetId: { in: (await heldIds(employeeId)) },
-        type: { not: "lifecycle_return" },
+        assetId: { in: await heldIds(employeeId) },
         state: { in: [...OPEN_APPROVAL_STATES] },
       },
       select: { refNo: true, type: true, assetId: true },
@@ -1156,23 +1170,25 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     }),
   ]);
 
-  /**
-   * "This offboarding" is a WINDOW, not all of history. The `−` button on the
-   * employee record creates a `lifecycle.return` on every routine laptop swap,
-   * so without the anchor a farewell report — a signed financial document —
-   * lists equipment the person handed back years ago and folds its cost into
-   * the value-recovered total. A null anchor means they are not mid-offboarding,
-   * so nothing historical belongs to this one.
-   *
-   * Filtered here rather than in SQL to keep one query shape at team scale.
-   */
+  // The window lives in candidatesFor — see its comment. Applied to the row list
+  // too, because the item set is built from these same rows.
   const since = employee.offboardingAt;
   const returns = since ? allReturns.filter((r) => r.createdAt >= since) : [];
-
-  const byAsset = groupCandidates(returns);
-  const blockedBy = new Map(
+  const byAsset = candidatesFor(employee, allReturns);
+  const openByAsset = new Map(
     blockers.filter((b) => b.assetId).map((b) => [b.assetId!, { refNo: b.refNo, type: b.type as string }]),
   );
+
+  /**
+   * An open approval only BLOCKS this item if it isn't the item's own decision.
+   * Comparing refNos is what separates "your decision is pending" from "someone
+   * else's request owns this asset" — including a pre-window return, which is a
+   * real request the operator has to clear even though it decides nothing here.
+   */
+  const blockerFor = (assetId: string, decision: Decision | null) => {
+    const open = openByAsset.get(assetId);
+    return open && open.refNo !== decision?.refNo ? open : null;
+  };
 
   const money = (cost: Prisma.Decimal | null) => (cost === null ? null : Number(cost));
 
@@ -1193,7 +1209,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     costLabel: fmtMoney(money(a.cost)),
     held,
     decision,
-    blockedBy: blockedBy.get(a.id) ?? null,
+    blockedBy: blockerFor(a.id, decision),
   });
 
   // The item set is what they hold UNION what a return already moved out of
@@ -1290,6 +1306,7 @@ is made**. This module never writes an asset — the Phase 4 worker does that.
 
 **Files:**
 - Create: `src/server/modules/offboarding/actions.ts`
+- Modify: `src/lib/activity.ts`, `src/lib/activity.test.ts`, `src/components/patterns/activity-feed.tsx`
 
 - [ ] **Step 1: Write the module**
 
@@ -1306,14 +1323,14 @@ import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
 import { OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, decisionOf, reasonRequired } from "@/lib/offboarding";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
-import { groupCandidates } from "@/server/modules/offboarding/queries";
+import { candidatesFor } from "@/server/modules/offboarding/queries";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 
 // Module-local, deliberately NOT exported: every runtime export of a
 // "use server" module must be an async function.
-function revalidate(employeeId: string) {
+function revalidate(employeeId: string, assetId?: string) {
   revalidatePath("/offboarding");
   revalidatePath(`/offboarding/${employeeId}`);
   revalidatePath(`/offboarding/${employeeId}/report`);
@@ -1321,7 +1338,40 @@ function revalidate(employeeId: string) {
   revalidatePath("/employees");
   revalidatePath("/approvals");
   revalidatePath("/audit");
+  revalidatePath("/employees/activity");
   revalidatePath("/");
+  if (assetId) {
+    // requestReturn writes the identical approval + asset audit entry and
+    // revalidates these; without them the inventory list keeps serving stale
+    // open-request state for an asset that was just decided.
+    revalidatePath("/inventory");
+    revalidatePath("/inventory/activity");
+    revalidatePath(`/inventory/${assetId}`);
+    revalidatePath(`/inventory/${assetId}/history`);
+  }
+}
+
+/**
+ * Prisma throws rather than returning, and a transaction that can't get a
+ * connection inside maxWait raises P2028 — reachable with two concurrent
+ * transactions, and the one code where "nothing was written" is guaranteed
+ * true. Everything else rethrows: an unexpected error must not be laundered
+ * into a designed banner.
+ *
+ * NOTE for anyone editing the callbacks below: RETURNING a failure from a
+ * $transaction callback COMMITS the transaction — only a throw rolls it back.
+ * That is safe here because every `return conflict(...)` precedes every write.
+ * Add a write before one of them and it will commit silently.
+ */
+async function asActionResult<T>(run: () => Promise<T>): Promise<T | ActionResult<never>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2028") {
+      return conflict("The database is busy right now — nothing was written. Try that again.");
+    }
+    throw err;
+  }
 }
 
 const decideSchema = z.object({
@@ -1372,8 +1422,14 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
       // "that decision is already recorded" would be a lie pointing nowhere.
       const open = await openApprovalForAsset(tx, asset.id);
       if (open) {
+        // A return created BEFORE this offboarding began owns the asset's one
+        // open slot but decides nothing here, so claiming "already recorded"
+        // would point the operator at a decision the wizard doesn't show —
+        // and leave the item permanently undecidable.
+        const inWindow =
+          employee.offboardingAt !== null && open.createdAt >= employee.offboardingAt;
         return conflict(
-          open.type === "lifecycle_return"
+          open.type === "lifecycle_return" && inWindow
             ? `${asset.tag} already has an open request — that decision is already recorded.`
             : `${asset.tag} is held by ${open.refNo} (${APPROVAL_TYPE_LABEL[open.type]}) — resolve that in Approvals first, then decide this item.`,
         );
@@ -1383,7 +1439,10 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
         payload: {
           from: { assigneeId: d.employeeId },
           to: { assigneeId: null, status: OUTCOME_STATUS[d.outcome] },
-          reason: reason || "offboarding · returned",
+          // keyed on the outcome rather than on emptiness: reasonRequired
+          // guarantees a reason for the other three, and this sentinel would be
+          // a lie stamped on a MISSING item if that ever changed
+          reason: d.outcome === "RETURNED" ? reason || "offboarding · returned" : reason,
         },
         requestedById: user.id,
         assetId: asset.id,
@@ -1406,7 +1465,7 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
     // double-click — or a colleague on the same wizard — into a constraint
     // violation rather than two returns for one item.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      return conflict("That item was just decided by someone else — refresh the wizard.");
+      return conflict("Another request just took this asset's open slot — refresh the wizard.");
     }
     // Prisma throws rather than returning: without this a P2028 (no connection
     // inside maxWait, reachable with two concurrent transactions) escapes as a
@@ -1416,7 +1475,7 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
     }
     throw err;
   }
-  revalidate(d.employeeId);
+  revalidate(d.employeeId, d.assetId);
   return ok({ refNo });
 }
 
@@ -1441,13 +1500,23 @@ export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365
   const { employeeId } = parsed.data;
   const next = parsed.data.m365Status === "" ? null : parsed.data.m365Status;
 
-  const failure = await prisma.$transaction(async (tx) => {
+  let noop = false;
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const employee = await tx.employee.findUnique({ where: { id: employeeId } });
     if (!employee) return conflict("That employee no longer exists.");
-    if (employee.employment === "OFFBOARDED") {
-      return conflict(`${employee.name} is already offboarded — accounts are closed.`);
+    // Same gate as its siblings: step 3 of a wizard should not double as a
+    // general-purpose "set anyone's account status to anything" mutation.
+    if (employee.employment !== "OFFBOARDING") {
+      return conflict(
+        employee.employment === "OFFBOARDED"
+          ? `${employee.name} is already offboarded — accounts are closed.`
+          : `${employee.name} reads ${employee.employment}, not OFFBOARDING — account changes belong on the employee record.`,
+      );
     }
-    if (employee.m365Status === next) return null;
+    if (employee.m365Status === next) {
+      noop = true;
+      return null;
+    }
     const written = await tx.employee.updateMany({
       where: { id: employeeId, m365Status: employee.m365Status },
       data: { m365Status: next },
@@ -1462,9 +1531,10 @@ export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365
       diff: { m365Status: { from: employee.m365Status, to: next } },
     });
     return null;
-  });
+  }));
   if (failure) return failure;
-  revalidate(employeeId);
+  // nothing was written, so nothing is stale — updateEmployee skips the same way
+  if (!noop) revalidate(employeeId);
   return ok({ m365Status: next });
 }
 
@@ -1484,7 +1554,7 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { employeeId } = parsed.data;
 
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const employee = await tx.employee.findUnique({
       where: { id: employeeId },
       include: {
@@ -1508,17 +1578,31 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
     // SAME groupCandidates + decisionOf the wizard reads with, because a second
     // definition of "decided" here would be a second answer: the Task 4 review
     // found the looser version counting an item the wizard still showed as open.
-    const byAsset = groupCandidates(employee.approvals);
-    const undecided = employee.assets.filter(
-      (a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }) === null,
-    ).length;
+    const byAsset = candidatesFor(employee, employee.approvals);
+    const decisions = employee.assets.map((a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }));
+    const undecided = decisions.filter((d) => d === null).length;
     if (undecided > 0) {
       return conflict(
         `${undecided} item${undecided === 1 ? "" : "s"} still ${undecided === 1 ? "has" : "have"} no decision — go back to Collect items.`,
       );
     }
+    // `decisionOf` answers "must the operator be asked again?" — for which
+    // EXECUTION_FAILED is correctly a yes-it-was-decided. Completion asks a
+    // different question, "is this finished?", and a failed return never moved
+    // the asset: the item is still assigned, and the person is about to drop out
+    // of the /offboarding queue where anyone would notice.
+    const failed = decisions.filter((d) => d?.state === "EXECUTION_FAILED");
+    if (failed.length > 0) {
+      return conflict(
+        `${failed.map((d) => d!.refNo).join(", ")} failed to execute, so ${failed.length === 1 ? "that item is" : "those items are"} still assigned — retry or reject ${failed.length === 1 ? "it" : "them"} in Approvals first.`,
+      );
+    }
     // Scope decision #12: an offboarding cannot finish with a live account.
-    if (employee.m365Status !== null && employee.m365Status !== "inactive") {
+    // Case-folded: README 4f stores client-defined values as-is, so a tenant
+    // using "Inactive" must not be refused forever. This is a display status,
+    // not an identity field — the ILIKE hazard doesn't apply.
+    const m365 = employee.m365Status?.trim().toLowerCase() ?? null;
+    if (m365 !== null && m365 !== "inactive") {
       return conflict(`The M365 account still reads ${employee.m365Status} — close it on Accounts & M365 first.`);
     }
 
@@ -1527,33 +1611,90 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
       data: { employment: "OFFBOARDED" },
     });
     if (written.count === 0) return conflict("Someone else just completed this offboarding.");
+    // AuditEntry is the only immutable artifact in the system, so the moment
+    // worth snapshotting is this one. Everything else about a completed
+    // offboarding is derived from mutable rows: reject one of these returns
+    // afterwards and decisionOf re-opens that item, silently dropping it — and
+    // its value — from a farewell report already treated as a signed record.
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
       entityType: "employee", entityId: employeeId,
       action: "offboarding.completed",
-      diff: { employment: { from: "OFFBOARDING", to: "OFFBOARDED" } },
+      diff: {
+        employment: { from: "OFFBOARDING", to: "OFFBOARDED" },
+        m365Status: { from: employee.m365Status, to: employee.m365Status },
+        decisions: {
+          from: null,
+          to: decisions
+            .filter((d) => d !== null)
+            .map((d) => `${d!.refNo} · ${d!.outcome} · ${d!.state}`),
+        },
+      },
     });
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidate(employeeId);
   return ok({ employment: "OFFBOARDED" });
 }
 ```
 
-- [ ] **Step 2: Typecheck and lint**
+- [ ] **Step 2: Teach the activity feed the new audit action**
 
-```bash
-npx tsc --noEmit && npm run lint
+`offboarding.completed` is a new action name, and the feed renderer falls through to a raw default for
+anything it doesn't know — `/employees/activity` would print "J. Sarmiento offboarding.completed Dennis
+Ong". In `src/lib/activity.ts`, add this case to `auditSentence` just before `case "comment":`
+
+```ts
+    case "offboarding.completed": {
+      const items = diff?.decisions?.to;
+      const n = Array.isArray(items) ? items.length : 0;
+      return `${entry.actorLabel} completed offboarding for ${entry.entityLabel}${n ? ` · ${n} item${n === 1 ? "" : "s"} settled` : ""}`;
+    }
 ```
 
-Expected: clean. If lint reports that a `"use server"` module may only export async functions, check
-that `revalidate` was left unexported.
+and in `src/components/patterns/activity-feed.tsx`, extend the settled case so the row gets a settled
+dot rather than the neutral fallback:
 
-- [ ] **Step 3: Commit**
+```tsx
+  if (action === "complete" || action === "offboarding.completed") return "COMPLETED"; // settled
+```
+
+Then pin it — append to `src/lib/activity.test.ts`:
+
+```ts
+describe("offboarding.completed", () => {
+  it("reads as a sentence and counts what was settled, not as a raw action name", () => {
+    expect(auditSentence({
+      actorLabel: "J. Sarmiento",
+      action: "offboarding.completed",
+      diff: { decisions: { from: null, to: ["APR-2043 · RETURNED · EXECUTED", "APR-2044 · MISSING · PENDING"] } },
+      entityLabel: "Dennis Ong",
+    })).toBe("J. Sarmiento completed offboarding for Dennis Ong · 2 items settled");
+  });
+
+  it("degrades without a decision list", () => {
+    expect(auditSentence({
+      actorLabel: "J. Sarmiento", action: "offboarding.completed", diff: null, entityLabel: "Dennis Ong",
+    })).toBe("J. Sarmiento completed offboarding for Dennis Ong");
+  });
+});
+```
+
+- [ ] **Step 3: Typecheck, lint and test**
 
 ```bash
-git add src/server/modules/offboarding/actions.ts
+npx tsc --noEmit && npm run lint && npm run test
+```
+
+Expected: clean, and 2 more unit tests than you started with. If lint reports that a `"use server"`
+module may only export async functions, check that `revalidate` and `asActionResult` were left
+unexported.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/server/modules/offboarding/actions.ts src/lib/activity.ts src/lib/activity.test.ts src/components/patterns/activity-feed.tsx
 git commit -m "feat(offboarding): one approval per decision, guarded account close and completion"
 ```
 
@@ -2549,6 +2690,13 @@ export default async function OffboardingWizardPage({
   );
 }
 ```
+
+**On `requireUser` rather than `requireRole`.** A `viewer` is in the IT workspace and the Offboarding nav
+item carries no role restriction, so a viewer reaches this page — deliberately. The design's read-only
+rule (README, "Every screen's states") is that mutating affordances are **absent, not disabled**, with
+one `READ-ONLY · VIEWER` badge explaining why; redirecting them away instead would be a dead end on a
+screen they are allowed to read. `canDecide` gates every control, and all three server actions refuse
+them independently, so there is no write path. Do NOT "harden" this into `requireRole`.
 
 - [ ] **Step 2: Typecheck and lint**
 
@@ -4724,6 +4872,39 @@ test.describe.serial("the 4-step wizard", () => {
   });
 });
 
+test.describe("offboarding — the server gate does not trust the wizard", () => {
+  test("a return filed BEFORE the offboarding began blocks the item and refuses completion", async ({ page }) => {
+    // The regression: that approval owns the asset's one open slot but decides
+    // nothing in this window, so the wizard must show the item as blocked (not
+    // decided, not silently skipped) and completion must refuse. An earlier
+    // version counted it as decided server-side and let the offboarding finish
+    // with the item still assigned to the departed employee.
+    await login(page, "it@thebackroomop.com");
+
+    // file a routine return on a held item while the employee is still ACTIVE-ish,
+    // by using the employee record's − affordance BEFORE touching the wizard
+    await page.goto("/employees?q=Marites");
+    await page.getByRole("link", { name: /Marites Bautista/ }).click();
+    await page.getByRole("button", { name: /laptop slot/ }).click();
+    await page.getByLabel(/Reason/).fill("routine swap, pre-offboarding");
+    await page.getByRole("button", { name: "Request return" }).click();
+    await expect(page.getByText(/APR-\d+ created/)).toBeVisible();
+
+    // now mark her offboarding — the anchor lands AFTER that approval
+    await page.getByRole("link", { name: "Edit" }).click();
+    await page.getByLabel(/Employment/).selectOption("OFFBOARDING");
+    await page.getByRole("button", { name: /Save/ }).click();
+
+    await page.goto("/offboarding");
+    await page.getByRole("row", { name: /Marites Bautista/ }).getByRole("link", { name: "Open wizard" }).click();
+    await gotoStep(page, /Collect items/);
+
+    // the item names its blocker instead of offering a control or claiming a decision
+    await expect(page.getByText(/is held by APR-\d+/)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Continue to Accounts/ })).toBeDisabled();
+  });
+});
+
 test.describe("repairs — a saved view, not an enum", () => {
   test("the named URL adds Stage and Down; chips move between stages, including the one outside DEFECTIVE", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
@@ -4872,7 +5053,11 @@ place — sections 1, 2, 3 and 7 stay largely as they are. Specifically:
    unencrypted; the permanent admin must read as a `LOCKED` row rather than a failed save; import is a
    dry run that writes nothing, partial import is the default, blocked rows group by cause; export
    refuses at 10,000 rows rather than truncating; `/admin` has no Home of its own.
-7. **§8 Deferred** — add Phase 7's leftovers: four separate copies of "read a string field off a
+7. **§8 Deferred** — add Phase 7's leftovers: a 3-character reason minimum accepts invisible
+   characters (`trim()` strips Unicode Zs but not U+200B/U+2060), so a MISSING item can be justified
+   with a blank-looking string — shared by `decideItem`, `requestReturn` and `rejectApproval`, so the
+   fix is one zod refinement wherever the shared helpers live, not a per-action patch; four separate
+   copies of "read a string field off a
    `Prisma.JsonValue`" now exist (`obj`/`str` in `src/lib/approval-execution.ts`,
    `returnTargetStatus` and `payloadReason` in the offboarding modules, and the `target` hoist in
    `src/server/modules/approvals/queries.ts`) — they agree today, and one exported pair would make it
