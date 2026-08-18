@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-18 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding`, 13 commits ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–6 of 15 done; Phase 8 remains.**
+**Last updated:** 2026-08-18 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding` — unmerged, ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–6 of 15 done; Phase 8 remains.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -12,8 +12,8 @@ exist today.
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-7-offboarding`** — do NOT start from main. The branch is 13 commits ahead and
-   nothing is merged yet. `git status` should be clean.
+1. **`git checkout phase-7-offboarding`** — do NOT start from main. Nothing on this branch is merged;
+   `git log --oneline main..HEAD` shows the phase so far. `git status` should be clean.
 2. `docker compose up -d db` → **`npx prisma migrate deploy`** (this branch adds a 7th migration) →
    `npm run db:seed` → open the preview (`preview_start` name `app-dev`).
 3. Read **§6** — the Phase 7 plan is complete and being executed task-by-task, and §6 carries both the
