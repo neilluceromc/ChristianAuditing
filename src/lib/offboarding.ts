@@ -123,19 +123,43 @@ export interface Decision {
  * offboarding N correct records instead of a lost session. Every non-rejected
  * state counts, EXECUTION_FAILED included: the decision WAS made, and the
  * operator must not be asked for it twice. A REJECTED return re-opens the item.
+ *
+ * `held` says whether the employee holds that asset RIGHT NOW, and it is what
+ * stops one offboarding inheriting an older one's answer. An EXECUTED return
+ * cleared the holder by construction — `executionPlan` hard-codes
+ * `assigneeId: null` — so if they hold the thing now, that return decided an
+ * EARLIER holding and the item came back to them afterwards. Without this, a
+ * laptop returned once and later reassigned to the same person reads "decided"
+ * forever, and the wizard completes leaving it assigned to someone who no
+ * longer works here — the dangling assignment scope decision #2 exists to
+ * prevent. EXECUTION_FAILED is deliberately NOT excluded: that return never
+ * moved the asset, so it is still the live (retryable) decision.
  */
-export function decisionOf(candidates: DecisionCandidate[]): Decision | null {
+export function decisionOf(
+  candidates: DecisionCandidate[],
+  { held }: { held: boolean },
+): Decision | null {
   const live = candidates
-    .filter((c) => c.state !== "REJECTED" && outcomeOfStatus(c.toStatus) !== null)
-    // Rows created in one transaction share a createdAt millisecond, so the id
-    // tiebreaker is what makes two reads of the same data agree (Phase 5 shipped
-    // a bug where exactly this flipped which row was "unit 1").
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
+    .flatMap((c) => {
+      if (c.state === "REJECTED") return [];
+      if (held && c.state === "EXECUTED") return [];
+      const outcome = outcomeOfStatus(c.toStatus);
+      // carrying the outcome on the surviving row makes the winner's
+      // non-null-ness structural, instead of an assertion sitting several
+      // lines away from the filter that proves it
+      return outcome ? [{ ...c, outcome }] : [];
+    })
+    // Two reads of the same rows must agree. createdAt alone is not a stable
+    // order — a worker commit and an operator's decision can land in the same
+    // millisecond — so id breaks the tie. Plain comparison rather than
+    // localeCompare: this needs to be deterministic, not locale-aware.
+    .sort((a, b) =>
+      b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
   const winner = live[0];
   if (!winner) return null;
   return {
     refNo: winner.refNo,
-    outcome: outcomeOfStatus(winner.toStatus)!,
+    outcome: winner.outcome,
     state: winner.state,
     reason: winner.reason,
   };

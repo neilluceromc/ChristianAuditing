@@ -124,34 +124,72 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
   });
 
   it("is null when nothing has been decided", () => {
-    expect(decisionOf([])).toBeNull();
+    expect(decisionOf([], { held: true })).toBeNull();
   });
 
   it("reports the outcome, ref, state and reason of a live decision", () => {
-    expect(decisionOf([cand({ toStatus: "MISSING", state: "CLAIMED", reason: "never handed back" })])).toEqual({
+    expect(decisionOf([cand({ toStatus: "MISSING", state: "CLAIMED", reason: "never handed back" })], { held: true })).toEqual({
       refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back",
     });
   });
 
-  it("counts every non-rejected state as decided — EXECUTION_FAILED included", () => {
+  it("counts every non-rejected state as decided once the item has left their name", () => {
     for (const state of ["PENDING", "CLAIMED", "APPROVED", "EXECUTED", "EXECUTION_FAILED"]) {
-      expect(decisionOf([cand({ state })])?.state).toBe(state);
+      expect(decisionOf([cand({ state })], { held: false })?.state).toBe(state);
+    }
+  });
+
+  it("ignores an EXECUTED return on an item they hold again — that one decided an earlier holding", () => {
+    // executionPlan always clears the holder, so an EXECUTED return means the
+    // asset left their name; holding it now means it came back afterwards. Left
+    // in, a laptop returned once and later reassigned would read "decided"
+    // forever and the wizard would complete with it still assigned.
+    expect(decisionOf([cand({ state: "EXECUTED" })], { held: true })).toBeNull();
+    // EXECUTION_FAILED never moved the asset, so while held it still decides
+    for (const state of ["PENDING", "CLAIMED", "APPROVED", "EXECUTION_FAILED"]) {
+      expect(decisionOf([cand({ state })], { held: true })?.state).toBe(state);
     }
   });
 
   it("ignores a REJECTED return — that item is open for a new decision", () => {
-    expect(decisionOf([cand({ state: "REJECTED" })])).toBeNull();
+    expect(decisionOf([cand({ state: "REJECTED" })], { held: true })).toBeNull();
+  });
+
+  it("ignores a live return whose target is a real asset status but not an outcome", () => {
+    expect(decisionOf([cand({ toStatus: "DEPLOYED" })], { held: true })).toBeNull();
   });
 
   it("after a rejection, the newer decision wins", () => {
     expect(decisionOf([
       cand({ id: "old", refNo: "APR-2100", state: "REJECTED", createdAt: at(0) }),
       cand({ id: "new", refNo: "APR-2101", state: "PENDING", toStatus: "BUYOUT", createdAt: at(5_000) }),
-    ])).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null });
+    ], { held: true })).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null });
+  });
+
+  it("the newest decision wins even when the older one is also live", () => {
+    // the rejection case above cannot pin the sort direction — its older row is
+    // filtered out either way. This one has two survivors to order.
+    expect(decisionOf([
+      cand({ id: "old", refNo: "APR-2100", state: "EXECUTION_FAILED", toStatus: "SPARE", createdAt: at(0) }),
+      cand({ id: "new", refNo: "APR-2101", state: "PENDING", toStatus: "MISSING", createdAt: at(5_000) }),
+    ], { held: true })).toMatchObject({ refNo: "APR-2101", outcome: "MISSING" });
+  });
+
+  it("a newer REJECTED row does not re-open an item whose older decision is still live", () => {
+    // Deliberate: a rejection re-opens the item, EXCEPT where an earlier
+    // retryable decision survives — that one can still be retried into effect.
+    expect(decisionOf([
+      cand({ id: "old", refNo: "APR-2100", state: "EXECUTION_FAILED", createdAt: at(0) }),
+      cand({ id: "new", refNo: "APR-2101", state: "REJECTED", createdAt: at(5_000) }),
+    ], { held: true })?.refNo).toBe("APR-2100");
   });
 
   it("ignores an approval whose payload names no outcome (the seeded APR-2040 shape)", () => {
-    expect(decisionOf([cand({ toStatus: null })])).toBeNull();
+    expect(decisionOf([cand({ toStatus: null })], { held: true })).toBeNull();
+  });
+
+  it("a REJECTED row with no target trips both filters and still decides nothing", () => {
+    expect(decisionOf([cand({ state: "REJECTED", toStatus: null })], { held: true })).toBeNull();
   });
 
   it("breaks a same-millisecond tie by id, so two reads never disagree", () => {
@@ -159,7 +197,7 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
       cand({ id: "aaa", refNo: "APR-2100", toStatus: "SPARE", createdAt: at(0) }),
       cand({ id: "zzz", refNo: "APR-2101", toStatus: "MISSING", createdAt: at(0) }),
     ];
-    expect(decisionOf(rows)?.refNo).toBe("APR-2101");
-    expect(decisionOf([...rows].reverse())?.refNo).toBe("APR-2101");
+    expect(decisionOf(rows, { held: true })?.refNo).toBe("APR-2101");
+    expect(decisionOf([...rows].reverse(), { held: true })?.refNo).toBe("APR-2101");
   });
 });

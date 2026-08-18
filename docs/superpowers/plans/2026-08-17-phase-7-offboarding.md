@@ -648,34 +648,72 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
   });
 
   it("is null when nothing has been decided", () => {
-    expect(decisionOf([])).toBeNull();
+    expect(decisionOf([], { held: true })).toBeNull();
   });
 
   it("reports the outcome, ref, state and reason of a live decision", () => {
-    expect(decisionOf([cand({ toStatus: "MISSING", state: "CLAIMED", reason: "never handed back" })])).toEqual({
+    expect(decisionOf([cand({ toStatus: "MISSING", state: "CLAIMED", reason: "never handed back" })], { held: true })).toEqual({
       refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back",
     });
   });
 
-  it("counts every non-rejected state as decided — EXECUTION_FAILED included", () => {
+  it("counts every non-rejected state as decided once the item has left their name", () => {
     for (const state of ["PENDING", "CLAIMED", "APPROVED", "EXECUTED", "EXECUTION_FAILED"]) {
-      expect(decisionOf([cand({ state })])?.state).toBe(state);
+      expect(decisionOf([cand({ state })], { held: false })?.state).toBe(state);
+    }
+  });
+
+  it("ignores an EXECUTED return on an item they hold again — that one decided an earlier holding", () => {
+    // executionPlan always clears the holder, so an EXECUTED return means the
+    // asset left their name; holding it now means it came back afterwards. Left
+    // in, a laptop returned once and later reassigned would read "decided"
+    // forever and the wizard would complete with it still assigned.
+    expect(decisionOf([cand({ state: "EXECUTED" })], { held: true })).toBeNull();
+    // EXECUTION_FAILED never moved the asset, so while held it still decides
+    for (const state of ["PENDING", "CLAIMED", "APPROVED", "EXECUTION_FAILED"]) {
+      expect(decisionOf([cand({ state })], { held: true })?.state).toBe(state);
     }
   });
 
   it("ignores a REJECTED return — that item is open for a new decision", () => {
-    expect(decisionOf([cand({ state: "REJECTED" })])).toBeNull();
+    expect(decisionOf([cand({ state: "REJECTED" })], { held: true })).toBeNull();
+  });
+
+  it("ignores a live return whose target is a real asset status but not an outcome", () => {
+    expect(decisionOf([cand({ toStatus: "DEPLOYED" })], { held: true })).toBeNull();
   });
 
   it("after a rejection, the newer decision wins", () => {
     expect(decisionOf([
       cand({ id: "old", refNo: "APR-2100", state: "REJECTED", createdAt: at(0) }),
       cand({ id: "new", refNo: "APR-2101", state: "PENDING", toStatus: "BUYOUT", createdAt: at(5_000) }),
-    ])).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null });
+    ], { held: true })).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null });
+  });
+
+  it("the newest decision wins even when the older one is also live", () => {
+    // the rejection case above cannot pin the sort direction — its older row is
+    // filtered out either way. This one has two survivors to order.
+    expect(decisionOf([
+      cand({ id: "old", refNo: "APR-2100", state: "EXECUTION_FAILED", toStatus: "SPARE", createdAt: at(0) }),
+      cand({ id: "new", refNo: "APR-2101", state: "PENDING", toStatus: "MISSING", createdAt: at(5_000) }),
+    ], { held: true })).toMatchObject({ refNo: "APR-2101", outcome: "MISSING" });
+  });
+
+  it("a newer REJECTED row does not re-open an item whose older decision is still live", () => {
+    // Deliberate: a rejection re-opens the item, EXCEPT where an earlier
+    // retryable decision survives — that one can still be retried into effect.
+    expect(decisionOf([
+      cand({ id: "old", refNo: "APR-2100", state: "EXECUTION_FAILED", createdAt: at(0) }),
+      cand({ id: "new", refNo: "APR-2101", state: "REJECTED", createdAt: at(5_000) }),
+    ], { held: true })?.refNo).toBe("APR-2100");
   });
 
   it("ignores an approval whose payload names no outcome (the seeded APR-2040 shape)", () => {
-    expect(decisionOf([cand({ toStatus: null })])).toBeNull();
+    expect(decisionOf([cand({ toStatus: null })], { held: true })).toBeNull();
+  });
+
+  it("a REJECTED row with no target trips both filters and still decides nothing", () => {
+    expect(decisionOf([cand({ state: "REJECTED", toStatus: null })], { held: true })).toBeNull();
   });
 
   it("breaks a same-millisecond tie by id, so two reads never disagree", () => {
@@ -683,8 +721,8 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
       cand({ id: "aaa", refNo: "APR-2100", toStatus: "SPARE", createdAt: at(0) }),
       cand({ id: "zzz", refNo: "APR-2101", toStatus: "MISSING", createdAt: at(0) }),
     ];
-    expect(decisionOf(rows)?.refNo).toBe("APR-2101");
-    expect(decisionOf([...rows].reverse())?.refNo).toBe("APR-2101");
+    expect(decisionOf(rows, { held: true })?.refNo).toBe("APR-2101");
+    expect(decisionOf([...rows].reverse(), { held: true })?.refNo).toBe("APR-2101");
   });
 });
 ```
@@ -733,19 +771,43 @@ export interface Decision {
  * offboarding N correct records instead of a lost session. Every non-rejected
  * state counts, EXECUTION_FAILED included: the decision WAS made, and the
  * operator must not be asked for it twice. A REJECTED return re-opens the item.
+ *
+ * `held` says whether the employee holds that asset RIGHT NOW, and it is what
+ * stops one offboarding inheriting an older one's answer. An EXECUTED return
+ * cleared the holder by construction — `executionPlan` hard-codes
+ * `assigneeId: null` — so if they hold the thing now, that return decided an
+ * EARLIER holding and the item came back to them afterwards. Without this, a
+ * laptop returned once and later reassigned to the same person reads "decided"
+ * forever, and the wizard completes leaving it assigned to someone who no
+ * longer works here — the dangling assignment scope decision #2 exists to
+ * prevent. EXECUTION_FAILED is deliberately NOT excluded: that return never
+ * moved the asset, so it is still the live (retryable) decision.
  */
-export function decisionOf(candidates: DecisionCandidate[]): Decision | null {
+export function decisionOf(
+  candidates: DecisionCandidate[],
+  { held }: { held: boolean },
+): Decision | null {
   const live = candidates
-    .filter((c) => c.state !== "REJECTED" && outcomeOfStatus(c.toStatus) !== null)
-    // Rows created in one transaction share a createdAt millisecond, so the id
-    // tiebreaker is what makes two reads of the same data agree (Phase 5 shipped
-    // a bug where exactly this flipped which row was "unit 1").
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
+    .flatMap((c) => {
+      if (c.state === "REJECTED") return [];
+      if (held && c.state === "EXECUTED") return [];
+      const outcome = outcomeOfStatus(c.toStatus);
+      // carrying the outcome on the surviving row makes the winner's
+      // non-null-ness structural, instead of an assertion sitting several
+      // lines away from the filter that proves it
+      return outcome ? [{ ...c, outcome }] : [];
+    })
+    // Two reads of the same rows must agree. createdAt alone is not a stable
+    // order — a worker commit and an operator's decision can land in the same
+    // millisecond — so id breaks the tie. Plain comparison rather than
+    // localeCompare: this needs to be deterministic, not locale-aware.
+    .sort((a, b) =>
+      b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
   const winner = live[0];
   if (!winner) return null;
   return {
     refNo: winner.refNo,
-    outcome: outcomeOfStatus(winner.toStatus)!,
+    outcome: winner.outcome,
     state: winner.state,
     reason: winner.reason,
   };
@@ -801,7 +863,7 @@ export interface OffboardingRow {
   joined: string;
 }
 
-interface ApprovalLike {
+export interface ApprovalLike {
   id: string;
   refNo: string;
   state: string;
@@ -817,8 +879,12 @@ function payloadReason(payload: unknown): string | null {
   return typeof reason === "string" && reason.length > 0 ? reason : null;
 }
 
-/** Every return approval this person has, bucketed by the asset it moves. */
-function groupCandidates(approvals: ApprovalLike[]): Map<string, DecisionCandidate[]> {
+/**
+ * Every return approval this person has, bucketed by the asset it moves.
+ * EXPORTED because `completeOffboarding` re-derives "is everything decided?"
+ * server-side, and a second definition there would be a second answer.
+ */
+export function groupCandidates(approvals: ApprovalLike[]): Map<string, DecisionCandidate[]> {
   const byAsset = new Map<string, DecisionCandidate[]>();
   for (const a of approvals) {
     if (!a.assetId) continue; // the seeded APR-2040 has no asset — it decides nothing
@@ -852,7 +918,9 @@ export async function listOffboarding(): Promise<OffboardingRow[]> {
 
   return employees.map((e) => {
     const byAsset = groupCandidates(e.approvals);
-    const decided = e.assets.filter((a) => decisionOf(byAsset.get(a.id) ?? []) !== null).length;
+    // every asset in e.assets is held by them right now, hence held: true —
+    // which is what makes an EXECUTED return from an EARLIER holding not count
+    const decided = e.assets.filter((a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }) !== null).length;
     return {
       id: e.id,
       name: e.name,
@@ -957,13 +1025,15 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
       assetId: a.id, tag: a.tag, model: a.model, category: a.category.name, status: a.status,
       cost: money(a.cost), costLabel: fmtMoney(money(a.cost)),
       held: true,
-      decision: decisionOf(byAsset.get(a.id) ?? []),
+      decision: decisionOf(byAsset.get(a.id) ?? [], { held: true }),
     });
   }
   for (const r of returns) {
     const a = r.asset;
     if (!a || items.has(a.id)) continue;
-    const decision = decisionOf(byAsset.get(a.id) ?? []);
+    // held: false — the asset already left their name, which is precisely why
+    // an EXECUTED return counts here and is skipped in the loop above
+    const decision = decisionOf(byAsset.get(a.id) ?? [], { held: false });
     if (!decision) continue; // a rejected-only history is not an item of this offboarding
     items.set(a.id, {
       assetId: a.id, tag: a.tag, model: a.model, category: a.category.name, status: a.status,
@@ -1009,6 +1079,16 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
 }
 ```
 
+**A known, accepted window.** `getWizard` reads the held assets and the return approvals as two
+queries in one `Promise.all`, which is not a consistent snapshot: if the worker commits a return
+between them, the page sees `held: true` alongside an `EXECUTED` return and — under the Task 4 rule —
+renders that item as undecided for one render. Clicking an outcome then hits `decideItem`'s
+"isn't held by … any more — refresh the wizard" conflict, which is the designed path, and a refresh
+clears it. Wrapping both reads in a `RepeatableRead` transaction would close the window at the cost of
+a transaction per page render; the failure mode is transient, self-correcting and clearly messaged, so
+it is accepted rather than engineered around. Do NOT "fix" it by reverting the Task 4 rule — the bug
+that rule prevents is permanent, and this one lasts one render.
+
 - [ ] **Step 2: Typecheck and lint**
 
 ```bash
@@ -1048,9 +1128,8 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
-import {
-  OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, reasonRequired, returnTargetStatus,
-} from "@/lib/offboarding";
+import { OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, decisionOf, reasonRequired } from "@/lib/offboarding";
+import { groupCandidates } from "@/server/modules/offboarding/queries";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -1237,13 +1316,14 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
     }
 
     // Undecided is not the same as returned (entry criterion #2) — the server
-    // says so too, not only the disabled Continue button.
-    const decidedAssets = new Set(
-      employee.approvals
-        .filter((a) => a.state !== "REJECTED" && returnTargetStatus(a.payload) !== null)
-        .map((a) => a.assetId!),
-    );
-    const undecided = employee.assets.filter((a) => !decidedAssets.has(a.id)).length;
+    // says so too, not only the disabled Continue button. This goes through the
+    // SAME groupCandidates + decisionOf the wizard reads with, because a second
+    // definition of "decided" here would be a second answer: the Task 4 review
+    // found the looser version counting an item the wizard still showed as open.
+    const byAsset = groupCandidates(employee.approvals);
+    const undecided = employee.assets.filter(
+      (a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }) === null,
+    ).length;
     if (undecided > 0) {
       return conflict(
         `${undecided} item${undecided === 1 ? "" : "s"} still ${undecided === 1 ? "has" : "have"} no decision — go back to Collect items.`,
@@ -4570,7 +4650,11 @@ place — sections 1, 2, 3 and 7 stay largely as they are. Specifically:
    unencrypted; the permanent admin must read as a `LOCKED` row rather than a failed save; import is a
    dry run that writes nothing, partial import is the default, blocked rows group by cause; export
    refuses at 10,000 rows rather than truncating; `/admin` has no Home of its own.
-7. **§8 Deferred** — add Phase 7's leftovers: `/offboarding` and `/reservations` have no pagination,
+7. **§8 Deferred** — add Phase 7's leftovers: four separate copies of "read a string field off a
+   `Prisma.JsonValue`" now exist (`obj`/`str` in `src/lib/approval-execution.ts`,
+   `returnTargetStatus` and `payloadReason` in the offboarding modules, and the `target` hoist in
+   `src/server/modules/approvals/queries.ts`) — they agree today, and one exported pair would make it
+   one truth; `/offboarding` and `/reservations` have no pagination,
    sortable headers or facets (team-scale lists, unbounded); a scan does not yet tick the matching
    wizard row (Phase 8's scanner polish); the farewell report is printable but neither emailable nor
    an Excel export (the brief's `farewell-report` export route is Phase 8); `RETURNED OK` shows `—` in
