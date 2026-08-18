@@ -110,7 +110,10 @@ async function main() {
       mk("BR-LT-0181", "ThinkPad T14 Gen 4", "Laptop", "SPARE", { warrantyUntil: day(600), purchasedAt: day(-120) }),
       mk("BR-LT-0122", "Dell Latitude 5420", "Laptop", "DEFECTIVE", { defectiveSince: day(-12), warrantyUntil: day(41), notes: "No POST after power surge" }),
       mk("BR-LT-0118", "ThinkPad T14 Gen 3", "Laptop", "DEFECTIVE", { defectiveSince: day(-21), vendorId: vendors[1].id, rmaRef: "RMA-8802", notes: "Battery swelling" }),
-      mk("BR-LT-0090", "Dell Latitude 5410", "Laptop", "DEFECTIVE", { defectiveSince: day(-44), repairQuote: 18_400, notes: "Board failure, out of warranty", warrantyUntil: day(-200), purchasedAt: day(-1250) }),
+      // the BEYOND REPAIR fixture: ₱34,000 to fix a ₱55,000 machine is 62%,
+      // over the 60% write-off line, so the repairs view can show the warning
+      // the design is about
+      mk("BR-LT-0090", "Dell Latitude 5410", "Laptop", "DEFECTIVE", { defectiveSince: day(-44), repairQuote: 34_000, notes: "Board failure, out of warranty — vendor quote is most of a new unit", warrantyUntil: day(-200), purchasedAt: day(-1250) }),
       mk("BR-LT-0201", "MacBook Air M3", "Laptop", "DEPLOYED", { assigneeId: emp("EMP-0099").id, warrantyUntil: day(700), purchasedAt: day(-60) }),
       mk("BR-LT-0075", "Dell Latitude 5400", "Laptop", "DONATED", { warrantyUntil: day(-400), purchasedAt: day(-1500) }),
       mk("BR-LT-0060", "ThinkPad E14", "Laptop", "BUYOUT", { warrantyUntil: day(-500), purchasedAt: day(-1700) }),
@@ -128,7 +131,10 @@ async function main() {
       mk("BR-MN-0902", "Dell P2422H", "Monitor", "DEPLOYED", { assigneeId: emp("EMP-0042").id, cost: 9_500 }),
       mk("BR-MN-0731", "Dell P2419H", "Monitor", "DEFECTIVE", { defectiveSince: day(-9), vendorId: vendors[1].id, rmaRef: "RMA-8841", cost: 8_000, notes: "Backlight flicker" }),
       mk("BR-MN-0910", "LG 27UL500", "Monitor", "SPARE", { cost: 12_000, purchasedAt: day(-950) }),
-      mk("BR-MN-0911", "LG 27UL500", "Monitor", "SPARE", { cost: 12_000, purchasedAt: day(-200) }),
+      // the RETURNED OK fixture: back from the vendor and usable again, but it
+      // KEEPS its defectiveSince — "was defective, isn't now" is what that
+      // stage means, and clearing the date would erase the repair history
+      mk("BR-MN-0911", "LG 27UL500", "Monitor", "SPARE", { cost: 12_000, purchasedAt: day(-200), defectiveSince: day(-70), notes: "Reflowed by Octagon Repairs — back in the spare pool" }),
       mk("BR-PH-0287", "iPhone 12", "Phone", "TEMPORARY", { assigneeId: emp("EMP-0042").id, cost: 30_000, warrantyUntil: day(-100), purchasedAt: day(-1100) }),
       mk("BR-PH-0301", "Samsung A54", "Phone", "SPARE", { cost: 18_000 }),
       mk("BR-DK-0071", "WD19S Dock", "Dock", "DEPLOYED", { assigneeId: emp("EMP-0042").id, cost: 11_000 }),

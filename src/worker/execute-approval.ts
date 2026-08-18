@@ -115,7 +115,16 @@ async function runExecution(approvalId: string): Promise<void> {
     if (claimed.count === 0) return;
 
     // Apply + audit the ASSET diff in the same transaction (entry criterion #2).
-    await tx.asset.update({ where: { id: asset.id }, data: plan.updates });
+    // The repairs view derives its Down clock and its stage chips from
+    // defectiveSince, so an item ENTERING defective has to start that clock —
+    // the offboarding wizard's Defective outcome arrives right here. It is
+    // never cleared: "has a defectiveSince but no longer reads DEFECTIVE" is
+    // precisely what the RETURNED OK stage means.
+    const updates: Prisma.AssetUpdateInput = { ...plan.updates };
+    if (plan.updates.status === "DEFECTIVE" && asset.status !== "DEFECTIVE") {
+      updates.defectiveSince = new Date();
+    }
+    await tx.asset.update({ where: { id: asset.id }, data: updates });
     const diff: Diff = {};
     if (plan.updates.status !== asset.status) diff.status = { from: asset.status, to: plan.updates.status };
     if (plan.updates.assigneeId !== undefined && plan.updates.assigneeId !== asset.assigneeId) {
