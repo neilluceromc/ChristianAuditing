@@ -136,10 +136,13 @@ describe("repairs is a saved view, so the URL decides", () => {
     expect(isRepairView(next)).toBe(true);
   });
 
-  it("clearing the stage also leaves status cleared, so the chips stay togglable", () => {
+  it("un-picking a chip returns to ALL DEFECTIVE and STAYS in repair mode", () => {
+    // clearing both facets instead would make isRepairView false, so the Stage
+    // and Down columns would disappear on the way back from a stage chip
     const next = withRepairStage(state({ stage: ["at-vendor"] }), null);
     expect(next.filters.stage).toBeUndefined();
-    expect(next.filters.status).toBeUndefined();
+    expect(next.filters.status).toEqual(["DEFECTIVE"]);
+    expect(isRepairView(next)).toBe(true);
   });
 
   it("resets to page 1 — a stage swap is a new result set", () => {

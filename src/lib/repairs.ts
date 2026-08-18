@@ -97,11 +97,15 @@ export function quoteWarning(quote: number | null, cost: number | null): string 
  * here, beside the rule, rather than in the chip component, so that a second
  * chip somewhere else cannot reintroduce the contradiction.
  *
- * Clearing the stage (`null`) leaves `status` cleared too: returning the pin
- * would make the chips untogglable from `returned-ok`.
+ * Clearing the stage (`null`) restores the `status=DEFECTIVE` pin rather than
+ * clearing both: un-picking a chip means "show me all defective again", and
+ * leaving both empty would drop the list out of repair mode altogether —
+ * `isRepairView` would go false and the Stage and Down columns would vanish.
  */
 export function withRepairStage(state: ListState, stage: RepairStage | null): ListState {
-  return withFilter(withFilter(state, "stage", stage ? [stage] : []), "status", []);
+  return stage
+    ? withFilter(withFilter(state, "stage", [stage]), "status", [])
+    : withFilter(withFilter(state, "stage", []), "status", ["DEFECTIVE"]);
 }
 
 /** The inventory list switches into repair mode when the URL says so. */
