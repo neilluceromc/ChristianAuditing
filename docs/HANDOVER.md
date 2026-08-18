@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-18 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding` — unmerged, ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–6 of 15 done; Phase 8 remains.**
+**Last updated:** 2026-08-18 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding` — unmerged, ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–9 of 15 done; Phase 8 remains.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -19,14 +19,21 @@ exist today.
 3. Read **§6** — the Phase 7 plan is complete and being executed task-by-task, and §6 carries both the
    progress marker and the invariants the finished tasks established. Later tasks break if you don't
    know them.
-4. **Resume at Task 7** of `docs/superpowers/plans/2026-08-17-phase-7-offboarding.md` with
-   `superpowers:subagent-driven-development`. Tasks 1–6 are committed; 7–15 remain. The plan is
+4. **Resume at Task 10** (the printable farewell report) of
+   `docs/superpowers/plans/2026-08-17-phase-7-offboarding.md` with
+   `superpowers:subagent-driven-development`. Tasks 1–9 are committed; 10–15 remain. The plan is
    **15 tasks and has been amended after every review**, so it matches the shipped code — trust it over
    any memory of what it used to say, and keep amending it (`docs(plan): …`) whenever code deviates.
 
-The branch is green as of Task 6: `tsc` · `lint` · **319 unit** (25 files) · **75 e2e** (last full run at
-Task 3). `next build` has not been run since Task 3 — run it before the first commit of the next session
-if a dev server isn't up, since CSS errors only surface there.
+The branch is green as of Task 9 on a **full battery**: `tsc` · `lint` · **319 unit** (25 files) ·
+`next build` · **75 e2e** (7.0m, all run at Task 9). Nothing is half-finished.
+
+**Before Task 10, decide one thing:** `reportTotals` counts a decision the moment it exists, so
+`totals.recovered` includes returns still `PENDING` — and an `EXECUTION_FAILED` one, which
+`completeOffboarding` refuses to treat as finished. Task 9's tiles were reworded to say *decided*
+rather than *recovered in fact*. **Task 10's printable report inherits the same `totals`**, and it is
+the document the brief calls signable, so either it carries the same "decided" framing or
+`reportTotals` has to learn approval state (a `src/lib/offboarding.ts` rule change, not a page fix).
 
 **Nothing is half-finished in the code.** Every task ended on a green commit. The next unit of work is a
 whole task, not a fragment.
@@ -153,6 +160,18 @@ scoped feed, so the only one showing the domain pill).
   the M365 account is still live).
 - The seed's offboarding fixture **holds equipment**: Dennis Ong EMP-0090 now has `BR-LT-0166` (₱48,000),
   `BR-PH-0312` (₱18,000) and `BR-HS-0510` (₱5,500). Fleet 22 → 25, which moved two Home assertions.
+- **`/offboarding`** (the queue) and **`/offboarding/[employeeId]`** (the 4-step wizard), plus the four
+  components they render and Home's `LEAVE` row pointing at the wizard. Walked end to end against the
+  seed: a reasonless MISSING is refused inline by the server, three decisions produce `APR-2042/3/4`,
+  the report totals ₱53,500 / ₱18,000 / ₱0, and completion writes an `offboarding.completed` audit
+  entry carrying the decision set.
+- **`SegmentedControl` can hold no value** — the `Math.max(0, …)` clamp is gone and the indicator is
+  not rendered at `-1`, so an undecided item cannot read as "Returned". Verified in the DOM (no radio
+  checked, no indicator) and at the three pre-existing call sites, which all still slide normally.
+- **`Th` forwards `aria-label`.** It destructured a fixed prop set and never spread, so the prop four
+  call sites passed was silently dropped — and the compiler stayed quiet because every prop in the
+  type is optional, making it a *weak type* and relaxing the excess-property check. Three of those
+  four call sites predate Phase 7.
 
 ### Conventions every later phase must follow
 
@@ -178,10 +197,7 @@ scoped feed, so the only one showing the domain pill).
 
 ## 5. What REMAINS
 
-- **Phase 7 — tasks 7–15 of the plan** (in order; each is fully written with verbatim code):
-  **7** `/offboarding` queue page (+ Home's `LEAVE` row opens the wizard) · **8** the wizard's four
-  components (step bar, the 4-way decision control, accounts panel, complete dialog — plus one change to
-  `SegmentedControl` so "undecided" doesn't render as "Returned") · **9** the 4-step wizard page ·
+- **Phase 7 — tasks 10–15 of the plan** (in order; each is fully written with verbatim code):
   **10** the printable farewell report · **11** the repairs brain (`src/lib/repairs.ts`, the `stage`
   facet, two seed fixtures, and the worker's `defectiveSince` stamp) · **12** repair mode on the
   inventory list (stage chips, Down column, quote warning, the `HOLD` marker) · **13** `/reservations` ·
@@ -233,6 +249,23 @@ later task can silently break, all of them discovered by review rather than by t
 9. **Viewer reaches these pages deliberately** and must see them read-only with the `READ-ONLY · VIEWER`
    badge — mutating affordances absent, not disabled. Do not "harden" the pages into `requireRole`; the
    actions already refuse a viewer independently.
+10. **`null` m365Status is the ABSENCE of an account, never the erasure of a status.** Scope decision
+    #12 lets null pass the completion gate because "there was no account to close"; `closeAccounts`
+    maps `""` → null, so without a guard the wizard's own "no sync yet" option — and, silently, an
+    empty "custom…" value — would complete an offboarding on a live mailbox and stamp
+    `m365Status: { from: null, to: null }` on the immutable completion audit. The action refuses null
+    over a non-null value; the panel refuses an empty custom value first.
+11. **A refusal must render where the operator is looking.** `Dialog` portals to `document.body` and
+    the focus trap marks every *other* body child `inert`, which removes it from the accessibility
+    tree and parks it behind the veil. An error banner rendered outside the dialog it belongs to is
+    invisible — and conflict is the *designed* outcome of all three completion gates, so every one of
+    them reported to nobody. Error UI goes inside the `Dialog` children.
+12. **A total that counts decisions must not claim movement.** `decisionOf` counts `PENDING` and
+    `EXECUTION_FAILED` alongside `EXECUTED`, so `reportTotals.recovered` is "decided returned +
+    defective", not "back in the fleet" — the completion gate itself refuses to treat an
+    `EXECUTION_FAILED` return as finished. Same discipline for sets: `items` is held ∪
+    already-returned, so any tile beside "Items out" must reduce over the **held** subset or the two
+    describe different things the moment the worker runs.
 
 ### What the three review findings should teach the next session
 
@@ -271,6 +304,8 @@ see whether anything fails — caught two tests that passed for the wrong reason
 - **A new audit `action` string is invisible to the display layer until you teach it.** `auditSentence` falls through to a raw default and `actionDot` matches exact strings, so `offboarding.completed` rendered as "X offboarding.completed Y" with a neutral dot until both were extended.
 - **Returning a failure from a `$transaction` callback COMMITS it** — only a throw rolls back. Every `return conflict(...)` in the offboarding actions precedes every write, which is what makes them safe; adding a write before one would commit silently.
 - **Mutation-test a new pure rule before trusting its tests.** Reversing a comparator and weakening a filter both left Phase 7's `decisionOf` suite fully green; the weakened version silently produced a `Decision` with `outcome: null` and a receipt with `undefined` money keys. Five targeted rows now kill five distinct mutations.
+- **A "weak type" swallows props silently.** A component whose prop type has *every* field optional turns off TypeScript's excess-property check, so passing a prop it doesn't declare compiles and is then dropped at runtime. `Th` ate `aria-label` at four call sites this way. When a component doesn't spread rest props, the prop has to be declared and forwarded.
+- **Copy that is true in one state is a bug in another.** Three of the Task 9 findings were sentences the plan wrote assuming the only way to arrive: "Equipment is settled" on a step reachable while items are undecided, "This offboarding is closed" for someone who never started one, "nothing was ever returned" on a windowed item set. When you write a sentence about state, enumerate the states that reach it — `?step=` and a rejected approval both get there.
 - **`design_handover/` is excluded from lint/build** and must stay untouched — it's the source of truth, not code.
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
