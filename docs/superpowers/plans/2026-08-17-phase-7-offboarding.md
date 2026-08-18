@@ -2902,7 +2902,10 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
   const data = await getWizard(employeeId);
   if (!data) notFound();
   const { employee, totals } = data;
-  const decided = data.items.filter((i) => i.decision);
+  // flatMap rather than filter so `decision` is structurally non-null on the
+  // rows this sheet prints, instead of six assertions sitting far from the
+  // filter that proves them
+  const decided = data.items.flatMap((i) => (i.decision ? [{ ...i, decision: i.decision }] : []));
 
   return (
     <div className="mx-auto max-w-[760px]">
@@ -2952,12 +2955,21 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
                 <td className="py-1.5 pr-3 font-mono">{i.tag}</td>
                 <td className="py-1.5 pr-3">{i.model}</td>
                 <td className="py-1.5 pr-3">
-                  {OUTCOME_LABEL[i.decision!.outcome]}
-                  <span className="pl-1 font-mono text-[9.5px] text-[#667085]">{OUTCOME_STATUS[i.decision!.outcome]}</span>
+                  {OUTCOME_LABEL[i.decision.outcome]}
+                  <span className="pl-1 font-mono text-[9.5px] text-[#667085]">{OUTCOME_STATUS[i.decision.outcome]}</span>
                 </td>
-                <td className="py-1.5 pr-3">{i.decision!.reason ?? "—"}</td>
+                <td className="py-1.5 pr-3">{i.decision.reason ?? "—"}</td>
                 <td className="py-1.5 pr-3 text-right font-mono">{i.costLabel}</td>
-                <td className="py-1.5 font-mono text-[10px]">{i.decision!.refNo} · {i.decision!.state}</td>
+                <td className="py-1.5 font-mono text-[10px]">
+                  {i.decision.refNo} ·{" "}
+                  {/* EXECUTED and PENDING/EXECUTION_FAILED share this column's
+                      one muted weight otherwise, and a state this small must not
+                      rely on the reader parsing the word under it — the sheet
+                      must not read as "returned" when the return has not moved */}
+                  <span className={i.decision.state === "EXECUTED" ? undefined : "font-semibold"}>
+                    {i.decision.state}
+                  </span>
+                </td>
               </tr>
             ))}
             {decided.length === 0 && (
@@ -2966,18 +2978,23 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
           </tbody>
         </table>
 
+        {/* These three totals count DECIDED items, not completed movements —
+            a PENDING or EXECUTION_FAILED return is already in `recovered`
+            because the decision was made, not because equipment moved. The
+            Request column's state is what discloses whether one has actually
+            executed; do not read these figures as a settled ledger. */}
         <dl className="grid grid-cols-3 gap-6 border-t border-[#D0D5DD] pt-4 text-[12px]">
           <div>
             <dt className="font-mono text-[9.5px] uppercase tracking-[0.09em] text-[#667085]">Recovered</dt>
             <dd className="font-mono text-[15px] font-semibold">{fmtMoney(totals.recovered)}</dd>
             <dd className="text-[10.5px] text-[#667085]">
-              {totals.counts.RETURNED} returned · {totals.counts.DEFECTIVE} defective — back in the fleet
+              {totals.counts.RETURNED} returned · {totals.counts.DEFECTIVE} defective — back in the fleet as each request executes
             </dd>
           </div>
           <div>
             <dt className="font-mono text-[9.5px] uppercase tracking-[0.09em] text-[#667085]">Bought out</dt>
             <dd className="font-mono text-[15px] font-semibold">{fmtMoney(totals.boughtOut)}</dd>
-            <dd className="text-[10.5px] text-[#667085]">{totals.counts.BUYOUT} item(s) the employee paid for</dd>
+            <dd className="text-[10.5px] text-[#667085]">{totals.counts.BUYOUT} item(s) the employee pays for</dd>
           </div>
           <div>
             <dt className="font-mono text-[9.5px] uppercase tracking-[0.09em] text-[#667085]">Value lost</dt>
@@ -2985,9 +3002,9 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
             <dd className="text-[10.5px] text-[#667085]">{totals.counts.MISSING} item(s) missing — custody lost</dd>
             {/* "₱0 · 1 item missing" would invite the reading that the loss was
                 zero; an item with no cost on record has an unknown loss, not none */}
-            {decided.some((i) => i.decision!.outcome === "MISSING" && i.cost === null) && (
+            {decided.some((i) => i.decision.outcome === "MISSING" && i.cost === null) && (
               <dd className="text-[10.5px] text-[#667085]">
-                {decided.filter((i) => i.decision!.outcome === "MISSING" && i.cost === null).length} of them
+                {decided.filter((i) => i.decision.outcome === "MISSING" && i.cost === null).length} of them
                 {" "}have no cost on record — that loss is unknown, not zero
               </dd>
             )}
@@ -3001,6 +3018,17 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
           custody; items marked buyout were purchased by the employee; items marked missing remain
           unaccounted for and stay open for investigation. Replacement cost for unreturned or
           negligently damaged items may be recovered as permitted by law and company policy.
+        </p>
+
+        {/* The sentence above speaks in the present tense about custody, but a
+            decision and a movement are not the same event — the totals count
+            the former. Rather than rewrite copy that is pending HR review, the
+            distinction is disclosed here, next to the column that carries it. */}
+        <p className="text-[11px] leading-relaxed text-[#667085]">
+          Each row&apos;s <span className="font-mono">Request</span> column carries the approval that
+          records the decision and its state. A request that has not reached{" "}
+          <span className="font-mono">EXECUTED</span> has been decided but has not yet moved the
+          asset, and its state is shown in bold above.
         </p>
 
         <div className="grid grid-cols-2 gap-10 pt-6">

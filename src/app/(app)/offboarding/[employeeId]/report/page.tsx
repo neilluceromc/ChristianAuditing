@@ -131,6 +131,17 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
           negligently damaged items may be recovered as permitted by law and company policy.
         </p>
 
+        {/* The sentence above speaks in the present tense about custody, but a
+            decision and a movement are not the same event — the totals count
+            the former. Rather than rewrite copy that is pending HR review, the
+            distinction is disclosed here, next to the column that carries it. */}
+        <p className="text-[11px] leading-relaxed text-[#667085]">
+          Each row&apos;s <span className="font-mono">Request</span> column carries the approval that
+          records the decision and its state. A request that has not reached{" "}
+          <span className="font-mono">EXECUTED</span> has been decided but has not yet moved the
+          asset, and its state is shown in bold above.
+        </p>
+
         <div className="grid grid-cols-2 gap-10 pt-6">
           <div className="border-t border-[#101828] pt-1.5">
             <p className="text-[11px] font-medium">{employee.name}</p>
