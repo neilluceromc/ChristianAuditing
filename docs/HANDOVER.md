@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-17 · **main @ phase-6 merge + a Phase 7 plan DRAFT** · **Phases 1–6 merged, 7–8 remain.**
+**Last updated:** 2026-08-18 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding`, 13 commits ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–6 of 15 done; Phase 8 remains.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -12,17 +12,24 @@ exist today.
 
 ## 0. Start here (next session, in order)
 
-1. `docker compose up -d db` → `npm run db:seed` → open the preview (`preview_start` name `app-dev`).
-2. Read §6 (Phase 7 entry criteria) — they are load-bearing and were written while the reasoning was fresh.
-3. **Finish the Phase 7 plan.** `docs/superpowers/plans/2026-08-17-phase-7-offboarding.md` exists but is a
-   **DRAFT**: its header, recorded scope decisions, file map and **Tasks 1–3 are complete and ready**;
-   **Tasks 4–11 still need writing**. The draft's own banner lists exactly what remains. Write them with
-   `superpowers:writing-plans` (bite-sized steps, full verbatim code, no placeholders), re-reading
-   `design_handover/README.md` cards `3e` / `5b` / `7b` / `5c` / `4a` first.
-4. Execute it with `superpowers:subagent-driven-development` on branch `phase-7-offboarding`
-   (Task 1 Step 1 creates the branch — nothing has been branched or implemented yet).
+1. **`git checkout phase-7-offboarding`** — do NOT start from main. The branch is 13 commits ahead and
+   nothing is merged yet. `git status` should be clean.
+2. `docker compose up -d db` → **`npx prisma migrate deploy`** (this branch adds a 7th migration) →
+   `npm run db:seed` → open the preview (`preview_start` name `app-dev`).
+3. Read **§6** — the Phase 7 plan is complete and being executed task-by-task, and §6 carries both the
+   progress marker and the invariants the finished tasks established. Later tasks break if you don't
+   know them.
+4. **Resume at Task 7** of `docs/superpowers/plans/2026-08-17-phase-7-offboarding.md` with
+   `superpowers:subagent-driven-development`. Tasks 1–6 are committed; 7–15 remain. The plan is
+   **15 tasks and has been amended after every review**, so it matches the shipped code — trust it over
+   any memory of what it used to say, and keep amending it (`docs(plan): …`) whenever code deviates.
 
-Nothing is half-finished in the CODE — the only work-in-progress is the Phase 7 plan document described above. main is green: `tsc` · `lint` · **284 unit** · `next build` · **75 e2e**.
+The branch is green as of Task 6: `tsc` · `lint` · **319 unit** (25 files) · **75 e2e** (last full run at
+Task 3). `next build` has not been run since Task 3 — run it before the first commit of the next session
+if a dev server isn't up, since CSS errors only surface there.
+
+**Nothing is half-finished in the code.** Every task ended on a green commit. The next unit of work is a
+whole task, not a fragment.
 
 ---
 
@@ -50,11 +57,17 @@ One **plan per phase** under `docs/superpowers/plans/`, executed **subagent-driv
 
 **Models:** sonnet implementers and spec reviewers; opus for quality reviews of anything that moves
 data or gates access. **Verbatim implementers transfer plan defects wholesale — the reviews are where
-correctness actually comes from.** Across four phases they caught: a working auth bypass (`a%` in the
+correctness actually comes from.** Across five phases they caught: a working auth bypass (`a%` in the
 email field logging in as admin), a fail-open authorization default, a signup enumeration oracle, a
 focus trap that never installed, a bulk transaction that would time out at its own documented cap,
 phantom audit entries on every first edit of a seeded asset, ciphertext that wasn't bound to its row,
 and an execution path that could strand an approval in APPROVED forever.
+
+Phase 7 added three more, and all three were defects in the **plan** rather than the implementation —
+which is the argument for reviewing the rule and not just the diff: a decision from a previous holding
+that hid an item still needing collection; a wizard billing years-old returns to a farewell report; and
+a completion gate that shared two thirds of the definition of "decided" while its comment claimed all of
+it. See §6.
 
 **Recorded deviation from the skills:** work happens **in-place on a `phase-N-<name>` branch**, not a
 git worktree — the repo root IS the app root and this is a single workstream. Commit style
@@ -63,15 +76,15 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 
 ## 3. Environment / how to run
 
-- **DB:** `docker compose up -d db`. Seed: `npm run db:seed` (TRUNCATE + reseed — the sanctioned reset; **`prisma migrate reset` is blocked by the harness classifier and unnecessary**). 6 migrations; add new ones as hand-written SQL dirs + `prisma migrate dev`.
+- **DB:** `docker compose up -d db`. Seed: `npm run db:seed` (TRUNCATE + reseed — the sanctioned reset; **`prisma migrate reset` is blocked by the harness classifier and unnecessary**). **7 migrations** as of the Phase 7 branch; add new ones as hand-written SQL dirs, then `npx prisma migrate deploy && npx prisma generate` (`migrate dev` also works but invents a name). **A reseed TRUNCATEs, so a migration's backfill does not survive it** — anything the app depends on has to be set by `prisma/seed.ts` too (`Employee.offboardingAt` is set both ways for exactly this reason).
 - **Dev app:** never via Bash — use the Browser-pane preview (`preview_start` name `app-dev`, port 3000). The controller owns this server; subagents must not start one.
 - **Worker:** `npm run worker` (poll loop) or `npm run worker:once` (drain and exit — what e2e uses). In prod it's the compose `worker` service.
 - **NEVER run `npm run build` while a dev server is running** — they share `.next` and it bricks the dev server.
-- **Full battery:** `npx tsc --noEmit && npm run lint && npm run test && npm run build`, then `npm run db:seed && npx playwright test --workers=1`.
+- **Full battery:** `npx tsc --noEmit && npm run lint && npm run test && npm run build`, then `npm run db:seed && npx playwright test --workers=1`. The e2e run takes ~5 minutes; **run it in the foreground with a long timeout.** A backgrounded Playwright run that is never reaped keeps its own `beforeAll` reseed racing yours, which produces FK/unique errors and a cascade of unrelated timeouts in specs that pass in isolation — diagnose by listing live `node.exe` command lines, not by editing assertions.
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
-- **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations.
+- **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–6, on main)
+## 4. What's DONE (Phases 1–6 on main; Phase 7 tasks 1–6 on the branch)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -118,6 +131,29 @@ Home leads with money and age**; Viewer gets the same layout minus the queue. Fo
 Plus `/finance/assets` (the capitalized register with value columns) and `/finance/activity` (the one cross-domain
 scoped feed, so the only one showing the domain pill).
 
+**Phase 7 — offboarding + repairs + policies (IN PROGRESS, tasks 1–6 of 15 committed on
+`phase-7-offboarding`).** Everything below is done and reviewed:
+
+- **`lifecycle.return` learned four outcomes** (`SPARE | DEFECTIVE | BUYOUT | MISSING`, always clearing
+  the holder) so the wizard's Defective / Buyout / Missing decisions execute instead of dying as
+  `EXECUTION_FAILED`. Widening the producer meant fixing its two READERS as well: the queue's change-cell
+  summary and the approval detail's "Return target" check both had `SPARE` hard-coded.
+- **`src/lib/offboarding.ts`** — the phase's vocabulary and rules, pure and TDD'd: `OUTCOMES` /
+  `OUTCOME_STATUS` / `reasonRequired`, the four `WIZARD_STEPS` + `parseStep`, `canContinue`,
+  `reportTotals`, and the derivation trio `outcomeOfStatus` / `returnTargetStatus` / `decisionOf`.
+- **`Employee.offboardingAt`** (migration `20260818090000_employee_offboarding_anchor`) — the anchor that
+  makes "this offboarding" a real window. Stamped by `updateEmployee` when employment enters
+  `OFFBOARDING`, cleared on a return to `ACTIVE`, kept once `OFFBOARDED` so the report stays readable.
+- **`src/server/modules/offboarding/queries.ts`** — `listOffboarding` (the queue) and `getWizard`
+  (everything one wizard needs, including the policy slots via the Phase 3 `computeLoadout`), sharing one
+  windowed derivation through the exported `candidatesFor`.
+- **`src/server/modules/offboarding/actions.ts`** — `decideItem` (one approval per decision,
+  immediately), `closeAccounts` (guarded partial update of `m365Status`), `completeOffboarding`
+  (person-only; refuses while anything is undecided, while any return sits `EXECUTION_FAILED`, or while
+  the M365 account is still live).
+- The seed's offboarding fixture **holds equipment**: Dennis Ong EMP-0090 now has `BR-LT-0166` (₱48,000),
+  `BR-PH-0312` (₱18,000) and `BR-HS-0510` (₱5,500). Fleet 22 → 25, which moved two Home assertions.
+
 ### Conventions every later phase must follow
 
 | Concern | Where |
@@ -134,37 +170,81 @@ scoped feed, so the only one showing the domain pill).
 | Dashboard sections | `safeSection(label, run)` → `SectionCard` — a failing query becomes a typed failure and the designed FAILED card, never a blank page |
 | Per-user, per-day UI state | a `UserPreference` row (`home:dismissed`), reset by a date change — not an audited domain event |
 | DB invariants to catch (P2002 → typed conflict) | `Approval_one_open_per_asset` (one open approval per asset) · `Job_one_live_execute_per_approval` (one live execute-job per approval) · `Reservation_one_active_hold_per_asset` |
+| Derived state beats stored state | "Decided" is read out of the approvals that exist (`decisionOf`), not kept in a wizard table — which is what makes a half-finished offboarding N correct records instead of a lost session |
+| A derived predicate is only shared if ALL of it is shared | Phase 7 extracted `groupCandidates` but left the *window* duplicated, and the server gate promptly disagreed with the UI. `candidatesFor` now owns window + grouping together, and all three call sites use it |
+| A facet SQL can't express | narrow to a candidate set in the `where`, then make the final cut in memory with the same pure function that renders it (`repairStage`, Task 11) — never two rules for one concept |
 
-## 5. What REMAINS (Phases 7–8)
+---
 
-- **Phase 7 — Offboarding + repairs + policies.** `/offboarding` + the 4-step wizard (per-item Returned/Defective/Buyout/**Missing**, each creating its own `lifecycle.return` approval — the Phase 4 pipeline already executes these), repairs saved view (`?status=DEFECTIVE` + vendor fields, no new enum), `/reservations`, `/admin/equipment-policies`.
-- **Phase 8 — Admin + import/export + polish.** `/admin/users` (locked permanent admin), `/admin/webhooks` + `/deliveries` (dead-letter replay — **the worker currently dead-letters DELIVER_WEBHOOK jobs with "ships in Phase 8"**), `/admin/flags`; import (3-step dry-run → commit, blocked rows grouped by cause), export upgrade (real Excel + split-by-year chips), printable label sheet, USB-scanner polish, deployment README, full axe pass. Entra SSO wiring lands here or is explicitly deferred.
+## 5. What REMAINS
 
-## 6. Phase 7 entry criteria (READ BEFORE STARTING — load-bearing)
+- **Phase 7 — tasks 7–15 of the plan** (in order; each is fully written with verbatim code):
+  **7** `/offboarding` queue page (+ Home's `LEAVE` row opens the wizard) · **8** the wizard's four
+  components (step bar, the 4-way decision control, accounts panel, complete dialog — plus one change to
+  `SegmentedControl` so "undecided" doesn't render as "Returned") · **9** the 4-step wizard page ·
+  **10** the printable farewell report · **11** the repairs brain (`src/lib/repairs.ts`, the `stage`
+  facet, two seed fixtures, and the worker's `defectiveSince` stamp) · **12** repair mode on the
+  inventory list (stage chips, Down column, quote warning, the `HOLD` marker) · **13** `/reservations` ·
+  **14** `/admin/equipment-policies` · **15** the e2e spec, cleanup, full battery, close-out.
+- **Phase 8 — Admin + import/export + polish.** `/admin/users` (locked permanent admin),
+  `/admin/webhooks` + `/deliveries` (dead-letter replay — **the worker currently dead-letters
+  DELIVER_WEBHOOK jobs with "ships in Phase 8"**), `/admin/flags`; import (3-step dry-run → commit,
+  blocked rows grouped by cause), export upgrade (real Excel + split-by-year chips, including the
+  brief's `farewell-report` export route), printable label sheet, USB-scanner polish (a scan should tick
+  the matching wizard row), deployment README, full axe pass. Entra SSO wiring lands here or is
+  explicitly deferred.
 
-1. **Each per-item decision creates its own `lifecycle.return` approval IMMEDIATELY** (README `3e`) — that is what makes a half-finished offboarding still N correct records rather than a lost session. Do NOT batch the wizard into one submit at the end. The Phase 4 pipeline already executes `lifecycle.return`; the wizard is a producer, never a direct asset write.
-2. **`Missing` is a first-class outcome.** The per-item control is a 4-way segmented control — Returned / Defective / Buyout / **Missing** — because "pretending everything comes back is why spreadsheets drift". `MISSING` is already the 8th `AssetStatus` and maps to the **fault** family. **A reason is required for anything other than Returned**, and **Continue is blocked while any item is undecided** — undecided is not the same as Returned.
-3. **The wizard is 4 steps** — Review holdings → Collect items → Accounts & M365 → Farewell report. Step 4 is a receipt naming outcomes and value recovered, exportable and emailable to HR. Step 3 is where the M365 status moves (the canonical four plus custom values, per `4f`).
-4. **Repairs is a SAVED VIEW, not a new enum** (`7b`): `?status=DEFECTIVE&sort=-updatedAt` over the existing inventory list, with the vendor/RMA/quote fields that already exist on `Asset`. Stage chips (`TO ASSESS` / `AT VENDOR` / `RETURNED OK` / `BEYOND REPAIR`) are derived from those fields. **The `Down` column (days) is what changes behaviour** — and warn when a quote exceeds a sensible share of a new unit.
-5. **`/reservations`:** reserved stock **still reads `SPARE`** in inventory with a hold marker — "pretending it's gone creates phantom spares". `EXPIRED` (clock) and `RELEASED` (person) both sit in Closed but must stay distinguishable. Note Phase 6's fleet coverage already excludes assets under an ACTIVE hold, so the two views must agree.
-6. **`/admin/equipment-policies`:** solid chips = required (an unfilled one is the policy gap that lights up on the loadout view and in Home's `HIRE` rows), grey = optional. Role policy beats department policy — `resolvePolicy` in `src/lib/loadout.ts` already encodes that. **Editing never touches existing assignments** — it changes what counts as complete from that moment, which is why the audit entry records BOTH slot lists.
-7. **Reuse the Phase 3 loadout brain.** `computeLoadout`/`resolvePolicy` already drive the employee loadout view and Home's hire rows; the offboarding wizard's "review holdings" step is the same data read the other way. A second implementation of slot-filling would drift.
-8. **The offboarding wizard is the first multi-step form in the app.** Step state belongs in the URL (`?step=`) so a refresh doesn't lose the operator's place, while per-item decisions are already persisted as approvals — there is no draft to lose.
+---
 
-### Two findings already banked for Phase 7 (they shaped the draft's scope decisions)
+## 6. Phase 7 mid-flight: the rules tasks 1–6 established (READ BEFORE TASK 7)
 
-- **`lifecycle.return` only executes to `SPARE` today.** `executionPlan` (`src/lib/approval-execution.ts`)
-  hard-requires `to.status === "SPARE"`, so the wizard's Defective / Buyout / **Missing** decisions would
-  each land as `EXECUTION_FAILED` with "Malformed lifecycle.return payload". **Draft Task 1 fixes this
-  first**, widening it to `SPARE | DEFECTIVE | BUYOUT | MISSING` and always clearing the holder. The
-  worker's own return guard (still-held-by-the-expected-employee) is correct for all four and needs no
-  change.
-- **Dennis Ong (EMP-0090), the only OFFBOARDING employee, holds nothing** — so the wizard's own fixture
-  can't exercise it. Draft Task 3 assigns him three items (a clean return, a defective laptop, a phone to
-  go missing) and then fixes the count assertions this moves across the existing specs: Home's fleet
-  label (22 → 23 assets), the age histogram, the coverage line, and Home's `LEAVE` row, which changes
-  from "equipment returned" back to "3 items still out". This is the third time a seeded fixture couldn't
-  show its own screen — check the fixture before writing the assertion.
+The plan's own **Recorded scope decisions** section is the full list (15 of them). These are the ones a
+later task can silently break, all of them discovered by review rather than by tests:
+
+1. **`Employee.offboardingAt` bounds "this offboarding".** The `−` button on an employee record creates a
+   `lifecycle.return` on every routine laptop swap, so a read scoped only by `employeeId` bills equipment
+   handed back years ago to a farewell report — a signed financial document — and folds its cost into the
+   value recovered. Never query return approvals for a wizard without the window.
+2. **`candidatesFor(employee, approvals)` owns the window AND the grouping.** "Decided" is three things:
+   the window, the grouping, and `decisionOf`. Sharing two of them is how the completion gate came to
+   disagree with the wizard. Every reader — the queue, the wizard, the completion gate — goes through
+   this one function. A null anchor means no window, so nothing historical is decided; that is the safe
+   direction and both sides agree on it.
+3. **`decisionOf(candidates, { held })` treats the newest EXECUTED return as a BOUNDARY.** `executionPlan`
+   hard-codes `assigneeId: null`, so an EXECUTED return provably means the asset left that person's name.
+   If they hold it now, that return — and everything older — decided an EARLIER holding. An
+   `EXECUTION_FAILED` *after* the boundary is deliberately kept: it never moved the asset, so it is still
+   this holding's live, retryable decision.
+4. **An open approval only BLOCKS an item if it isn't that item's own decision** (`blockedBy`, compared by
+   refNo). The one-open-approval-per-asset index is per **asset, not per type**, so a pending
+   `lifecycle.change-status` — or a pre-window return — owns the slot and makes the item undecidable.
+   Both the wizard row and `decideItem`'s refusal must NAME that request; "that decision is already
+   recorded" is a lie when the wizard shows the item as open.
+5. **`completeOffboarding` gates on three things**: nothing undecided (via rule 2), no return sitting in
+   `EXECUTION_FAILED` (a failed return never moved the asset, and the person is about to drop out of the
+   queue where anyone would notice), and the M365 account closed (case-folded — README 4f stores
+   client-defined values as-is). It writes the decision set into the audit diff, because `AuditEntry` is
+   the only immutable table and a later rejection would otherwise silently rewrite the report.
+6. **`Missing` is first-class and undecided is not Returned.** A reason is required for anything but
+   Returned; Continue is blocked while any item is undecided; and `SegmentedControl` draws no indicator
+   when nothing is chosen, so an undecided row cannot read as "Returned".
+7. **The wizard produces approvals and never writes an asset.** Completion touches the person only.
+8. **Reuse the Phase 3 loadout brain** (`computeLoadout` / `resolvePolicy`) — `getWizard` already does.
+9. **Viewer reaches these pages deliberately** and must see them read-only with the `READ-ONLY · VIEWER`
+   badge — mutating affordances absent, not disabled. Do not "harden" the pages into `requireRole`; the
+   actions already refuse a viewer independently.
+
+### What the three review findings should teach the next session
+
+None of the three bugs above (rules 1, 2, 3) could have been caught by the unit suite or by seed-based
+e2e, because **no fixture had a prior return**. Each was found by an opus reviewer asked "is the RULE
+right?" rather than "does this match the plan?". Two of them were defects in the plan, not the
+implementation. So: keep the two-stage review, and when a task is logic-critical, point the reviewer at
+the *rule* and give it the domain facts (the unique index, what `executionPlan` guarantees, what the
+seed does and doesn't contain). Mutation-testing the new tests — reverse a comparator, weaken a filter,
+see whether anything fails — caught two tests that passed for the wrong reason.
+
+---
 
 ## 7. Recurring gotchas that have cost real time
 
@@ -186,6 +266,11 @@ scoped feed, so the only one showing the domain pill).
 - **A client-side navigation currently leaves the previous page's DOM in the document** (a second `<table>` outside `<main>`). Reproducible between two Phase-3 pages, so it predates Phase 5; observed in dev only, not investigated.
 - **A long-lived dev server degrades the e2e suite into phantom failures.** After several full runs its resident memory climbed ~8.5GB → ~12.2GB and a different set of pre-existing specs failed each time, always as "clicked a link, the heading never arrived" — every one passing in isolation. Restart the preview before a confirmation run; the suite went 75/75 immediately afterwards.
 - **A seeded fixture that doesn't exercise its own design is a silent gap.** Phase 6 found two: every asset shared one purchase date (so the five-bucket age histogram was one bar and the 4y+ amber could never render) and nothing expired inside the 90-day warranty window (so the clustered pair the design is about never appeared). When a screen's designed state can't occur against the seed, fix the seed — that is what it is for.
+- **A Prisma filter cannot compare two columns.** A derived facet whose rule spans fields (repairs' `beyond-repair` = quote ≥ 60% of cost) either changes shape or narrows to a candidate set in SQL and gets its final cut in memory from the same pure function that renders it. Two rules for one concept is the failure mode.
+- **Widening one end of a pipeline means auditing its readers.** Teaching `lifecycle.return` four outcomes also required fixing `summarizeApproval` and the "Return target" system check, both of which had `SPARE` hard-coded — and a third reader (`summarizeApproval`'s `?? "SPARE"` fallback) that invented a target for the one payload with none, contradicting the check rendered one card away.
+- **A new audit `action` string is invisible to the display layer until you teach it.** `auditSentence` falls through to a raw default and `actionDot` matches exact strings, so `offboarding.completed` rendered as "X offboarding.completed Y" with a neutral dot until both were extended.
+- **Returning a failure from a `$transaction` callback COMMITS it** — only a throw rolls back. Every `return conflict(...)` in the offboarding actions precedes every write, which is what makes them safe; adding a write before one would commit silently.
+- **Mutation-test a new pure rule before trusting its tests.** Reversing a comparator and weakening a filter both left Phase 7's `decisionOf` suite fully green; the weakened version silently produced a `Decision` with `outcome: null` and a receipt with `undefined` money keys. Five targeted rows now kill five distinct mutations.
 - **`design_handover/` is excluded from lint/build** and must stay untouched — it's the source of truth, not code.
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
@@ -195,4 +280,5 @@ scoped feed, so the only one showing the domain pill).
 - **Settled 2026-08-17 — "Admin" means system administration, and the procurement department is just Purchasing.** No renaming is pending: the `Admin` workspace (Users & roles / Webhooks / Feature flags) is software settings, the `admin` role is the superuser, and the procurement workspace is `Purchasing` as built. Recorded only so nobody re-opens it.
 - **Phase 6 leftovers:** the Admin workspace has no Home of its own (`ws === "admin"` falls through to the IT layout, so an admin sees SLA breaches and fleet composition under a Users/Webhooks/Flags sidebar); "Retry this section" refreshes the whole route because RSC has no per-section refetch; section degradation is loader-level, so a render-time bug inside a section still escapes to the route error boundary; `/finance/assets` has no search, no sortable headers and no book-value column (depreciation is a policy nobody has stated); Home's `DATA` rows key on `DATA:<assetId>`, which is unambiguous only while an asset can't be both MISSING and DEPLOYED-without-a-holder.
 - **Phase 3 leftovers:** CSV export buffers up to 10k rows in memory and silently truncates `?ids=` beyond 500; sort remount drops keyboard focus to `<body>`; `EntityCombobox` lacks a listbox accessible name and Home/End.
+- **Phase 7 so far:** a 3-character reason minimum accepts invisible characters (`trim()` strips Unicode `Zs` but not U+200B/U+2060), so a MISSING item can carry a blank-looking justification — shared with `requestReturn` and `rejectApproval`, so the fix is one zod refinement in a shared helper, not a per-action patch; four separate copies of "read a string field off a `Prisma.JsonValue`" (`obj`/`str` in `approval-execution.ts`, `returnTargetStatus`, `payloadReason`, and the `target` hoist in `approvals/queries.ts`) agree today and could be one exported pair; `getWizard` reads assets and approvals as two statements, so a worker commit between them shows an item as undecided for one render (self-correcting, and `decideItem` refuses with its designed conflict — closing it needs `RepeatableRead`, i.e. a transaction per render, which was declined deliberately); an empty policy slot on a leaver reads "not held" but does not yet distinguish "already returned" from "left their name with no return at all".
 - Entra SSO real wiring (needs tenant creds). Real product photography, brand mark, barcode generation (striped placeholders today). Off-device backups (nightly `pg_dump` to a local volume ships; copying elsewhere is the user's call). HR review of the accountability-form acknowledgement copy. `WebhookEndpoint.secret` encryption (Phase 8). CI workflow + jsdom component tests (declined in Phase 1, revisitable).
