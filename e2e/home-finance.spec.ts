@@ -22,7 +22,7 @@ async function expectNoSeriousAxe(page: Page) {
 // @thebackroomop.com / ChangeMe123!:
 //   admin@ (admin, holds APR-2039 CLAIMED) · it@ (J. Sarmiento, it_staff) ·
 //   purchasing@ (A. Reyes) · finance@ (L. Domingo) · viewer@ (viewer)
-//   22 assets total; BR-LT-0148 & BR-LT-0122 (both Dell Latitude 5420) are the
+//   25 assets total; BR-LT-0148 & BR-LT-0122 (both Dell Latitude 5420) are the
 //   warranty-runway cluster (38 d / 41 d); BR-LT-0027 is MISSING (the DATA
 //   candidate that must not outrank a HIRE row for a shift-queue slot).
 //   APR-2040 breached SLA, APR-2025 EXECUTION_FAILED, Dennis Ong offboarding,
@@ -156,12 +156,12 @@ test.describe("home — fleet coverage, age distribution and warranty runway", (
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
-    await expect(page.getByRole("img", { name: "Fleet of 22 assets by status" })).toBeVisible();
+    await expect(page.getByRole("img", { name: "Fleet of 25 assets by status" })).toBeVisible();
     await expect(page.getByText("spare pool covers 4 of the 10 slots the incoming hires need")).toBeVisible();
 
     // Note the EN DASH (–) in the bucket labels, not a hyphen.
     await expect(
-      page.getByRole("img", { name: "<1y: 3, 1–2y: 12, 2–3y: 1, 3–4y: 2, 4y+: 4" }),
+      page.getByRole("img", { name: "<1y: 3, 1–2y: 14, 2–3y: 1, 3–4y: 3, 4y+: 4" }),
     ).toBeVisible();
 
     const row0148 = page.locator("li").filter({ hasText: "BR-LT-0148" });

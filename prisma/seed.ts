@@ -113,6 +113,14 @@ async function main() {
       mk("BR-LT-0031", "Acer Aspire 5", "Laptop", "DISPOSE", { warrantyUntil: day(-900), purchasedAt: day(-2100) }),
       mk("BR-LT-0027", "HP ProBook 440", "Laptop", "MISSING", { notes: "Not returned at offboarding — investigation open", warrantyUntil: day(-300), purchasedAt: day(-1600) }),
       mk("BR-LT-0210", "ThinkPad T14 Gen 4", "Laptop", "TEMPORARY", { assigneeId: emp("EMP-0095").id }),
+      // Dennis (EMP-0090) is the OFFBOARDING fixture — the wizard needs him to
+      // actually hold things, one per interesting outcome: a clean return, a
+      // machine that comes back broken, and the phone nobody can find. New
+      // assets rather than reassigned spares, so the spare pool (and the two
+      // specs that lean on it) stay exactly as they were.
+      mk("BR-LT-0166", "ThinkPad T14 Gen 2", "Laptop", "DEPLOYED", { assigneeId: emp("EMP-0090").id, cost: 48_000, purchasedAt: day(-1150), warrantyUntil: day(-60) }),
+      mk("BR-PH-0312", "Samsung A54", "Phone", "DEPLOYED", { assigneeId: emp("EMP-0090").id, cost: 18_000 }),
+      mk("BR-HS-0510", "Jabra Evolve2 40", "Headset", "DEPLOYED", { assigneeId: emp("EMP-0090").id, cost: 5_500 }),
       mk("BR-MN-0902", "Dell P2422H", "Monitor", "DEPLOYED", { assigneeId: emp("EMP-0042").id, cost: 9_500 }),
       mk("BR-MN-0731", "Dell P2419H", "Monitor", "DEFECTIVE", { defectiveSince: day(-9), vendorId: vendors[1].id, rmaRef: "RMA-8841", cost: 8_000, notes: "Backlight flicker" }),
       mk("BR-MN-0910", "LG 27UL500", "Monitor", "SPARE", { cost: 12_000, purchasedAt: day(-950) }),
