@@ -1,5 +1,5 @@
 import { fmtMoney } from "./format";
-import type { ListState } from "./url-state";
+import { withFilter, type ListState } from "./url-state";
 
 /**
  * Repairs is a SAVED VIEW over the inventory list, not a route and not an enum
@@ -82,6 +82,26 @@ export function quoteWarning(quote: number | null, cost: number | null): string 
   if (!beyondRepair(quote, cost)) return null;
   const share = Math.round((quote! / cost!) * 100);
   return `The ${fmtMoney(quote)} quote is ${share}% of the ${fmtMoney(cost)} this unit cost — at or above the ${Math.round(REPAIR_WRITE_OFF_SHARE * 100)}% write-off line. Replace rather than repair.`;
+}
+
+/**
+ * What a stage chip writes. A stage and a status are two answers to the same
+ * question, and one stage — `returned-ok` — is DEFINED as "not DEFECTIVE", so
+ * writing a stage always clears `status`.
+ *
+ * Without this, a chip clicked from REPAIRS_SAVED_VIEW keeps that view's
+ * `status=DEFECTIVE` pin (`withFilter` replaces only the facet it is handed)
+ * and composes to `status IN (DEFECTIVE) AND (status = DEFECTIVE OR
+ * defectiveSince IS NOT NULL)` — which matches nothing, for every possible
+ * dataset, while the chip row still shows both filters as active. It lives
+ * here, beside the rule, rather than in the chip component, so that a second
+ * chip somewhere else cannot reintroduce the contradiction.
+ *
+ * Clearing the stage (`null`) leaves `status` cleared too: returning the pin
+ * would make the chips untogglable from `returned-ok`.
+ */
+export function withRepairStage(state: ListState, stage: RepairStage | null): ListState {
+  return withFilter(withFilter(state, "stage", stage ? [stage] : []), "status", []);
 }
 
 /** The inventory list switches into repair mode when the URL says so. */

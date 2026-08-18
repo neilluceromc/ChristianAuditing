@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ListState } from "./url-state";
 import {
   REPAIRS_SAVED_VIEW, REPAIR_STAGES, REPAIR_STAGE_LABEL, REPAIR_WRITE_OFF_SHARE,
-  beyondRepair, downDays, isRepairStage, isRepairView, quoteWarning, repairStage,
+  beyondRepair, downDays, isRepairStage, isRepairView, quoteWarning, repairStage, withRepairStage,
   type RepairLike,
 } from "./repairs";
 
@@ -117,5 +117,33 @@ describe("repairs is a saved view, so the URL decides", () => {
   it("any stage facet is repair mode, even the one that isn't DEFECTIVE", () => {
     expect(isRepairView(state({ stage: ["returned-ok"] }))).toBe(true);
     expect(isRepairView(state({ stage: ["nonsense"] }))).toBe(false);
+  });
+
+  it("picking a stage CLEARS status, or the saved view's pin makes returned-ok impossible", () => {
+    // The saved view is ?status=DEFECTIVE&sort=defectiveSince. withFilter
+    // replaces only the facet it is given, so without this a RETURNED OK chip
+    // composes to `status IN (DEFECTIVE) AND (status = DEFECTIVE OR
+    // defectiveSince IS NOT NULL)` — zero rows for every possible dataset.
+    const savedView = state({ status: ["DEFECTIVE"] });
+    expect(withRepairStage(savedView, "returned-ok").filters).toEqual({ stage: ["returned-ok"] });
+    expect(withRepairStage(savedView, "at-vendor").filters).toEqual({ stage: ["at-vendor"] });
+  });
+
+  it("keeps the view in repair mode, and keeps facets that are not status", () => {
+    const withCategory = state({ status: ["DEFECTIVE"], category: ["laptop"] });
+    const next = withRepairStage(withCategory, "beyond-repair");
+    expect(next.filters.category).toEqual(["laptop"]);
+    expect(isRepairView(next)).toBe(true);
+  });
+
+  it("clearing the stage also leaves status cleared, so the chips stay togglable", () => {
+    const next = withRepairStage(state({ stage: ["at-vendor"] }), null);
+    expect(next.filters.stage).toBeUndefined();
+    expect(next.filters.status).toBeUndefined();
+  });
+
+  it("resets to page 1 — a stage swap is a new result set", () => {
+    const paged: ListState = { q: "", page: 4, sort: [], filters: { status: ["DEFECTIVE"] } };
+    expect(withRepairStage(paged, "to-assess").page).toBe(1);
   });
 });

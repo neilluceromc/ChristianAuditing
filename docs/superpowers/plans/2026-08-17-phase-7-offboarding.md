@@ -3458,6 +3458,26 @@ git commit -m "feat(repairs): derived stages, the down clock, and fixtures that 
 
 ### Task 12: Repair mode on the inventory list — and the hold marker
 
+> **Two requirements from the Task 11 review — read before writing any of this.**
+>
+> **1. The in-memory `repairStage()` cut must be applied to EVERY consumer of `buildAssetWhere`, not
+> just `listAssets`.** There are four: `listAssets`, `facetOptions` (its four `groupBy` counts), the
+> CSV export route (`src/app/(app)/inventory/export/route.ts`), and — the dangerous one —
+> `bulkRequestStatusChange` (`src/server/modules/inventory/actions.ts`), which acts on **all matching**
+> when the drawer's "all matching" path is used. `stage` is a configured facet, so it survives
+> `serializeListState` and reaches all four. Add the cut to `listAssets` alone and this happens: the
+> operator opens `?stage=beyond-repair`, the table says **1 asset**, the bulk drawer says "acting on
+> all 1 matching", they pick DISPOSE — and **7 approvals are created**, including a healthy SPARE
+> monitor. The CSV has 7 rows for the same reason, and the Status dropdown's counts read 6/1 on a page
+> showing 1 row. The narrowing in SQL is a *candidate set*, and a candidate set is not safe to act on.
+> Either resolve `stage` to explicit ids before the bulk/export paths run, or refuse the `filters` path
+> when `state.filters.stage` is set.
+>
+> **2. Stage chips must write their URL with `withRepairStage(state, stage)` from `src/lib/repairs.ts`,
+> never `withFilter(state, "stage", …)`.** `REPAIRS_SAVED_VIEW` pins `status=DEFECTIVE`, and
+> `returned-ok` is *defined* as "not DEFECTIVE", so a chip that keeps the pin composes to a query
+> matching nothing for every possible dataset. `withRepairStage` clears `status` and is tested for it.
+
 The saved view is a named URL; what makes it *repairs* is the stage chips, the **Down** column, and
 the warning on the record. The `HOLD` marker rides along in the same query because both facts come
 from the same read: reserved stock **still reads SPARE** (README 5c) and pretending otherwise creates
