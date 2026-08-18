@@ -44,8 +44,6 @@ export function CompleteButton({
 
   return (
     <>
-      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
-      {error && <Banner tone="fault" title={error} />}
       <Button variant="primary" onClick={() => setOpen(true)}>Complete offboarding</Button>
       <Dialog
         open={open}
@@ -59,6 +57,18 @@ export function CompleteButton({
         }
       >
         <div className="flex flex-col gap-2">
+          {/*
+            Refusal is the DESIGNED outcome of all three completion gates
+            (undecided items, a return sitting EXECUTION_FAILED, a live M365
+            account), so the message has to land somewhere the operator is
+            looking. It must also live INSIDE the dialog: Dialog portals to
+            document.body and the focus trap marks every other body child
+            `inert`, which drops an outside banner out of the accessibility
+            tree entirely and parks it behind the veil. The operator would see
+            the spinner stop and nothing else, then click Complete again.
+          */}
+          {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+          {error && <Banner tone="fault" title={error} />}
           <p>
             {name} flips to <span className="font-mono">OFFBOARDED</span>. The{" "}
             {itemCount} equipment decision{itemCount === 1 ? "" : "s"} already exist as their own

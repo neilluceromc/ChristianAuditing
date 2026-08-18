@@ -177,7 +177,9 @@ const accountsSchema = z.object({
  * the updateMany guard — filling untouched fields from the row we just read is
  * how two people editing one employee silently clobber each other.
  */
-export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365Status: string | null }>> {
+export async function closeAccounts(
+  input: unknown,
+): Promise<ActionResult<{ m365Status: string | null; changed: boolean }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -198,6 +200,19 @@ export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365
         employee.employment === "OFFBOARDED"
           ? `${employee.name} is already offboarded — accounts are closed.`
           : `${employee.name} reads ${employee.employment}, not OFFBOARDING — account changes belong on the employee record.`,
+      );
+    }
+    // Scope decision #12 lets `null` PASS the completion gate, because null
+    // means "never synced — there was no account to close". That reading only
+    // holds while null is the absence of a status, never the erasure of one:
+    // blanking a live `active` here would complete the offboarding on an open
+    // mailbox, and would leave the immutable completion audit stamping
+    // `m365Status: { from: null, to: null }` over a status that did exist.
+    // Correcting a genuinely wrong value back to unknown stays available on
+    // the employee record, which is not the surface that closes accounts.
+    if (next === null && employee.m365Status !== null) {
+      return conflict(
+        `${employee.name}'s account reads ${employee.m365Status} — set it to inactive rather than clearing it. "No sync yet" describes someone who never had an account.`,
       );
     }
     if (employee.m365Status === next) {
@@ -222,7 +237,11 @@ export async function closeAccounts(input: unknown): Promise<ActionResult<{ m365
   if (failure) return failure;
   // nothing was written, so nothing is stale — updateEmployee skips the same way
   if (!noop) revalidate(employeeId);
-  return ok({ m365Status: next });
+  // `changed` so the panel can stop claiming "audit entry written" on a save
+  // that wrote nothing — the noop path skips writeAudit, and AuditEntry is the
+  // one immutable artifact here, so asserting an entry that doesn't exist is
+  // the wrong thing to be wrong about.
+  return ok({ m365Status: next, changed: !noop });
 }
 
 const completeSchema = z.object({ employeeId: z.string().min(1) });

@@ -55,8 +55,14 @@ export function ItemDecision({
         toast(`${res.data.refNo} created — ${tag} → ${OUTCOME_STATUS[picked]}`, "settled");
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      else if (res.kind === "validation") setFieldErrors(res.fieldErrors ?? {});
-      else setError(res.message);
+      else if (res.kind === "validation") {
+        const fe = res.fieldErrors ?? {};
+        setFieldErrors(fe);
+        // only `outcome` and `reason` are rendered below; an employeeId/assetId
+        // failure would otherwise stop the spinner and say nothing at all
+        const unclaimed = Object.entries(fe).filter(([k]) => k !== "outcome" && k !== "reason");
+        if (unclaimed.length > 0) setError(unclaimed.map(([, v]) => v).join(" "));
+      } else setError(res.message);
     });
   }
 

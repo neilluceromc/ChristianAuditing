@@ -23,7 +23,12 @@ export function WizardSteps({
       {WIZARD_STEPS.map((step, i) => {
         const reachable = i <= 1 || unlocked;
         const isCurrent = i === currentIdx;
-        const done = i < currentIdx;
+        // A step can be BEHIND the operator and locked again at the same time:
+        // reject one return in Approvals while they stand on Accounts and the
+        // item re-opens, `unlocked` flips false, and step 3 becomes an
+        // unreachable current step. Painting it "done" would claim they had
+        // finished a step they can no longer enter.
+        const done = i < currentIdx && reachable;
         const inner = (
           <>
             <span
@@ -60,10 +65,19 @@ export function WizardSteps({
               </Link>
             ) : (
               <span
+                // the current step can be locked (see `done` above), so
+                // aria-current belongs on this branch too — otherwise the bar
+                // tells a screen reader the operator is nowhere at all
+                aria-current={isCurrent ? "step" : undefined}
                 className={cn(shared, "border-dashed border-border-strong text-fg-faint")}
-                title="Decide every item first — undecided is not the same as returned."
               >
                 {inner}
+                {/* `title` on a non-focusable span never reaches a keyboard
+                    user and is exposed inconsistently, so the reason the step
+                    is locked is real text instead */}
+                <span className="sr-only">
+                  — locked until every item is decided; undecided is not the same as returned.
+                </span>
               </span>
             )}
           </li>
