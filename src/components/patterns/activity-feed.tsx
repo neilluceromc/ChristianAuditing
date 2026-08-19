@@ -38,6 +38,10 @@ export function actionDot(action: string): string {
   if (action === "cancel") return "CANCELLED"; // closed
   if (action === "complete" || action === "offboarding.completed") return "COMPLETED"; // settled
   if (action === "submit" || action === "it-review") return "SUBMITTED"; // inflight
+  // "disable" (entityType "user") is unreachable today: every actionDot caller
+  // scopes to employee/asset/purchase-request, and /audit — the one page that
+  // renders "user" entries — never calls this. Pre-wired for a user-scoped
+  // feed Task 11 may add; not dead by mistake.
   if (action.includes("failed") || action === "delete" || action === "disable") return "DEFECTIVE"; // fault
   if (action === "create" || action.includes("executed")) return "DEPLOYED"; // settled
   if (action.includes("requested") || action === "claim") return "SUBMITTED"; // inflight

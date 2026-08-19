@@ -78,3 +78,20 @@ export function disableChange(target: TargetUser, next: boolean, actorId: string
   }
   return { allowed: true };
 }
+
+/**
+ * `lockReason`'s sibling: one string, two surfaces. The JWT freezes role at
+ * sign-in, so `requireUser` compares it to the DB on every request and bounces
+ * a mismatch to `/logout` — meaning an admin who changes their OWN role (to
+ * ANY other role, not only a demotion) gets signed out on their very next
+ * request, mid-session, with no warning. This is a WARNING, not a refusal:
+ * scope decision #3 permits self-demotion on purpose, and this doesn't touch
+ * that — it only makes the consequence visible before the click, the way
+ * `lockReason` makes the permanent-admin lock visible before the click. Task
+ * 3's page prints this text pre-click; the action returns the same flag so
+ * the page can also render the post-click state truthfully.
+ */
+export function selfRoleChangeWarning(target: TargetUser, next: Role, actorId: string): string | null {
+  if (target.id !== actorId || next === target.role) return null;
+  return `You're changing your own role — you'll be signed out and will need to sign back in as ${ROLE_LABELS[next]}.`;
+}

@@ -8,10 +8,12 @@ import { conflict, type ActionResult } from "@/server/action-result";
  * here, not 500s. Everything else rethrows: an unexpected error must never be
  * laundered into a friendly banner.
  *
- * NOTE for anyone editing the callbacks below: RETURNING a failure from a
- * $transaction callback COMMITS the transaction — only a throw rolls it back.
- * That is safe here because every `return conflict(...)` precedes every write.
- * Add a write before one of them and it will commit silently.
+ * PRECONDITION FOR CALLERS: `run` is expected to wrap a `prisma.$transaction`
+ * callback. RETURNING a failure from that callback COMMITS the transaction —
+ * only a throw rolls it back. So every `return conflict(...)` inside your
+ * callback must precede every write in it; this helper has no way to check
+ * that for you, and can't see your callback's body at all. Verify the
+ * ordering holds at each call site, in a comment there — not here.
  */
 export async function asActionResult<T>(
   run: () => Promise<T>,

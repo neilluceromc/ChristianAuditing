@@ -1,14 +1,24 @@
+import { Role } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
-  ROLE_LABELS, ROLE_OPTIONS, disableChange, lockReason, roleChange, type TargetUser,
+  ROLE_LABELS, ROLE_OPTIONS, disableChange, lockReason, roleChange, selfRoleChangeWarning, type TargetUser,
 } from "./admin-users";
 
 const ordinary: TargetUser = { id: "u-1", role: "it_staff", isPermanentAdmin: false, disabled: false };
 const permanent: TargetUser = { id: "u-0", role: "admin", isPermanentAdmin: true, disabled: false };
 
 describe("ROLE_OPTIONS", () => {
-  it("covers every Role in the schema, admin first", () => {
-    expect(ROLE_OPTIONS).toEqual(["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"]);
+  // Reads the schema's enum rather than a hardcoded copy of ROLE_OPTIONS, so
+  // this actually fails if the schema grows a role this list forgets.
+  it("covers every Role in the schema", () => {
+    expect(new Set(ROLE_OPTIONS)).toEqual(new Set(Object.values(Role)));
+  });
+
+  // A separate assertion from the one above: this is an ordering claim (card
+  // 3h wants the select to read as a privilege ladder), not a coverage one,
+  // so a failure here says which of the two broke.
+  it("puts admin first", () => {
+    expect(ROLE_OPTIONS[0]).toBe("admin");
   });
 
   it("labels every option, so a select can never render a raw enum", () => {
@@ -88,5 +98,28 @@ describe("disableChange", () => {
   it("allows re-enabling yourself, which is unreachable but harmless", () => {
     const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: true };
     expect(disableChange(self, false, "actor-9")).toEqual({ allowed: true });
+  });
+});
+
+describe("selfRoleChangeWarning", () => {
+  it("is null for another user's row", () => {
+    expect(selfRoleChangeWarning(ordinary, "viewer", "actor-9")).toBeNull();
+  });
+
+  it("is null when the role isn't actually changing", () => {
+    const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: false };
+    expect(selfRoleChangeWarning(self, "admin", "actor-9")).toBeNull();
+  });
+
+  it("warns when the actor is changing their own role", () => {
+    const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: false };
+    expect(selfRoleChangeWarning(self, "viewer", "actor-9")).toMatch(/signed out/i);
+  });
+
+  // The tautology trap: a warning that's merely truthy could be any string.
+  // This asserts it actually names the role you're about to land as.
+  it("names the incoming role's label, not a raw enum", () => {
+    const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: false };
+    expect(selfRoleChangeWarning(self, "viewer", "actor-9")).toMatch(/viewer/i);
   });
 });

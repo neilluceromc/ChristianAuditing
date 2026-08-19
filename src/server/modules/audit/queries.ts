@@ -51,7 +51,7 @@ export async function entityLabels(
     byType.has("user")
       ? prisma.user.findMany({
           where: { id: { in: [...byType.get("user")!] } },
-          select: { id: true, name: true },
+          select: { id: true, name: true, email: true },
         })
       : [],
   ]);
@@ -62,7 +62,9 @@ export async function entityLabels(
   // A deleted policy has no row to resolve — it correctly keeps the truncated-id
   // fallback below; auditSentence's "delete" case reads the name from the diff instead.
   for (const p of policies) map.set(`equipment-policy:${p.id}`, { label: p.name, href: "/admin/equipment-policies" });
-  for (const u of users) map.set(`user:${u.id}`, { label: u.name, href: "/admin/users" });
+  // `User.name` isn't unique (only `email` is) — the label carries both so it
+  // reads as an identity, not just a display name two people might share.
+  for (const u of users) map.set(`user:${u.id}`, { label: `${u.name} · ${u.email}`, href: "/admin/users" });
   for (const e of entries) {
     const key = `${e.entityType}:${e.entityId}`;
     if (!map.has(key)) map.set(key, { label: e.entityId.slice(0, 10) + "…", href: null });
