@@ -30,6 +30,33 @@ export interface AssetRow {
   down: number | null;
 }
 
+/**
+ * The one place a Prisma Asset row becomes a repair stage. The list row, the
+ * bulk/export cut and the record page all derive the same answer from it —
+ * three hand-written copies of this marshalling is how the list and the thing
+ * you act on come to disagree. Typed with real `Prisma.Decimal | null` rather
+ * than `unknown`: a `select` that later drops `cost` would otherwise make
+ * `Number(undefined)` NaN, which silently reads as "not beyond repair" with no
+ * type error and no failing test.
+ */
+export function stageOf(a: {
+  status: string;
+  vendorId: string | null;
+  rmaRef: string | null;
+  cost: Prisma.Decimal | null;
+  repairQuote: Prisma.Decimal | null;
+  defectiveSince: Date | null;
+}): RepairStage | null {
+  return repairStage({
+    status: a.status,
+    vendorId: a.vendorId,
+    rmaRef: a.rmaRef,
+    repairQuote: a.repairQuote === null ? null : Number(a.repairQuote),
+    cost: a.cost === null ? null : Number(a.cost),
+    defectiveSince: a.defectiveSince,
+  });
+}
+
 const LIST_INCLUDE = {
   category: true,
   assignee: true,
@@ -46,20 +73,13 @@ function toRow(a: {
   defectiveSince: Date | null;
   vendorId: string | null;
   rmaRef: string | null;
-  cost: unknown;
-  repairQuote: unknown;
+  cost: Prisma.Decimal | null;
+  repairQuote: Prisma.Decimal | null;
   category: { name: string };
   assignee: { name: string } | null;
   reservations: Array<{ employee: { name: string } }>;
 }): AssetRow {
-  const stage = repairStage({
-    status: a.status,
-    vendorId: a.vendorId,
-    rmaRef: a.rmaRef,
-    repairQuote: a.repairQuote === null ? null : Number(a.repairQuote),
-    cost: a.cost === null ? null : Number(a.cost),
-    defectiveSince: a.defectiveSince,
-  });
+  const stage = stageOf(a);
   return {
     id: a.id,
     tag: a.tag,
@@ -99,14 +119,7 @@ export async function repairStageIds(state: ListState): Promise<string[] | null>
   });
   return candidates
     .filter((a) => {
-      const stage = repairStage({
-        status: a.status,
-        vendorId: a.vendorId,
-        rmaRef: a.rmaRef,
-        repairQuote: a.repairQuote === null ? null : Number(a.repairQuote),
-        cost: a.cost === null ? null : Number(a.cost),
-        defectiveSince: a.defectiveSince,
-      });
+      const stage = stageOf(a);
       return stage !== null && stages.includes(stage);
     })
     .map((a) => a.id);

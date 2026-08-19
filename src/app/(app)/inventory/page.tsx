@@ -44,6 +44,15 @@ export default async function InventoryPage({
 
   const chips: FilterChip[] = [];
   for (const [facet, values] of Object.entries(state.filters)) {
+    // In repair mode the RepairChips row above already renders the stage, and
+    // renders it with the right semantics. Emitting it here too would show the
+    // same filter twice with two different removal outcomes: this generic
+    // remove is `withFilter(state, "stage", [])`, which clears the stage
+    // WITHOUT restoring the status pin — isRepairView goes false and the user
+    // is dumped out of repair mode onto the whole fleet, losing the Stage and
+    // Down columns. withRepairStage exists to make that unrepresentable; this
+    // loop was the second call site it did not know about.
+    if (facet === "stage" && repairMode) continue;
     for (const value of values) {
       const label =
         facet === "stage" && isRepairStage(value)
