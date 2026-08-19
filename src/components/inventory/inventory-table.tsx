@@ -6,6 +6,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { Pill } from "@/components/ui/pill";
 import { BULK_MAX, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { serializeListState, toggleSort, type ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
@@ -26,9 +27,15 @@ export const INVENTORY_COLUMNS: ColumnDef[] = [
   { id: "category", label: "Category", width: 84, sortKey: "category" },
   { id: "assigned", label: "Assigned", width: 168 },
   { id: "status", label: "Status", width: 88, sortKey: "status" },
+  // repairs saved view only (README 7b)
+  { id: "stage", label: "Stage", width: 108 },
+  { id: "down", label: "Down", width: 68, sortKey: "defectiveSince" },
   { id: "purchased", label: "Purchased", width: 104, sortKey: "purchasedAt" },
   { id: "warranty", label: "Warranty", width: 72, sortKey: "warrantyUntil" },
 ];
+
+/** Columns that only exist in repair mode — never offered to the column chooser. */
+export const REPAIR_ONLY_COLUMNS = ["stage", "down"] as const;
 
 /** Columns the chooser may hide (Task 10). tag/model/status always render. */
 export const HIDEABLE_COLUMNS = COLUMN_PREF_KEYS["columns:inventory"];
@@ -40,6 +47,7 @@ export function InventoryTable({
   canMutate,
   filtersQS,
   total,
+  repairMode = false,
 }: {
   rows: AssetRow[];
   state: ListState;
@@ -47,6 +55,8 @@ export function InventoryTable({
   canMutate: boolean;
   filtersQS: string; // serialized current list state, no leading "?"
   total: number;
+  /** the repairs saved view: adds Stage + Down (README 7b) */
+  repairMode?: boolean;
 }) {
   const router = useRouter();
 
@@ -76,9 +86,10 @@ export function InventoryTable({
     setAllMatching(false);
   }
 
-  const columns = INVENTORY_COLUMNS.filter(
-    (c) => !(HIDEABLE_COLUMNS as readonly string[]).includes(c.id) || visible.includes(c.id),
-  );
+  const columns = INVENTORY_COLUMNS.filter((c) => {
+    if ((REPAIR_ONLY_COLUMNS as readonly string[]).includes(c.id)) return repairMode;
+    return !(HIDEABLE_COLUMNS as readonly string[]).includes(c.id) || visible.includes(c.id);
+  });
 
   function onSort(sortKey: string) {
     const next = { ...state, sort: toggleSort(state.sort, sortKey), page: 1 };
@@ -181,9 +192,30 @@ export function InventoryTable({
                 case "category":
                   return <Td key={col.id}>{row.category}</Td>;
                 case "assigned":
-                  return <Td key={col.id}>{row.assignee ?? <span className="text-fg-faint">—</span>}</Td>;
+                  return (
+                    <Td key={col.id}>
+                      {row.assignee ?? (row.hold ? (
+                        // README 5c: a hold never changes the status — the asset
+                        // still reads SPARE, and the marker says who wants it.
+                        <span className="inline-flex items-center gap-1.5">
+                          <Pill tone="accent">HOLD</Pill>
+                          <span className="text-[11px] text-fg-muted">for {row.hold}</span>
+                        </span>
+                      ) : (
+                        <span className="text-fg-faint">—</span>
+                      ))}
+                    </Td>
+                  );
                 case "status":
                   return <Td key={col.id} mono className="text-[10.5px]">{row.status}</Td>;
+                case "stage":
+                  return <Td key={col.id} mono className="text-[10.5px]">{row.stageLabel ?? "—"}</Td>;
+                case "down":
+                  return (
+                    <Td key={col.id} mono>
+                      {row.down === null ? <span className="text-fg-faint">—</span> : `${row.down} d`}
+                    </Td>
+                  );
                 case "purchased":
                   return <Td key={col.id} mono>{row.purchased}</Td>;
                 case "warranty":

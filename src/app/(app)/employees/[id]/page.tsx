@@ -27,7 +27,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       where: { employeeId: id, state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
       include: { asset: true },
     }),
-    prisma.equipmentPolicy.findMany({ include: { slots: { include: { assetType: true } } } }),
+    prisma.equipmentPolicy.findMany({ include: { slots: { include: { assetType: true } } }, orderBy: [{ name: "asc" }] }),
     prisma.asset.findMany({
       where: { status: "SPARE" },
       include: { reservations: { where: { state: "ACTIVE" }, include: { employee: true } } },

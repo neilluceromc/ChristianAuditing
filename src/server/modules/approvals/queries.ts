@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { prisma } from "@/server/db/client";
-import { summarizeApproval } from "@/lib/approval-execution";
+import { RETURN_STATUSES, summarizeApproval } from "@/lib/approval-execution";
 import { slaLabel, tabWhere, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
 
 export const QUEUE_PAGE_SIZE = 50;
@@ -107,6 +107,8 @@ export async function systemChecks(
     }
     case "lifecycle_return": {
       const expected = from?.assigneeId ? String(from.assigneeId) : null;
+      // Four outcomes (README 3e), so this can't be pinned to SPARE either.
+      const target = to && typeof to.status === "string" ? to.status : null;
       return [
         assetCheck,
         asset
@@ -116,7 +118,11 @@ export async function systemChecks(
               detail: asset.assignee ? `held by ${asset.assignee.name}` : "held by nobody",
             }
           : { label: "Still held by the returner", pass: false, detail: "—" },
-        { label: "Return target", pass: to?.status === "SPARE", detail: "returns to SPARE" },
+        {
+          label: "Return target",
+          pass: target !== null && (RETURN_STATUSES as readonly string[]).includes(target),
+          detail: target ? `returns as ${target}` : "no target status in the payload",
+        },
       ];
     }
     case "lifecycle_change_status": {

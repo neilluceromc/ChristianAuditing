@@ -131,7 +131,16 @@ test.describe("asset record", () => {
     await page.getByRole("link", { name: "Edit" }).click();
     await page.getByLabel(/Model/).fill("LG 27UL500-W");
     await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible();
+    // The save confirmation is a 3-second self-clearing flash (setSaved(true)
+    // plus a 3000ms timer, src/components/inventory/asset-form.tsx:96), so the
+    // default 5s budget has to cover the WHOLE server-action round trip before
+    // the flash even starts — while the round trip runs, this button reads
+    // "Loading" and disabled. A dev server several minutes into the full suite
+    // occasionally spends longer than 5s on it, which failed this line once in
+    // three full runs with the button still mid-flight and no error banner.
+    // Reproduced exactly by delaying updateAsset 7s. Same headroom as the cold
+    // compile above; the flash lasts 3s, which no polling interval can miss.
+    await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible({ timeout: 20_000 });
     await page.goto(page.url().replace(/\/edit$/, "/history"));
     await expect(page.getByRole("row", { name: /model/ }).first()).toContainText("LG 27UL500-W");
   });

@@ -227,6 +227,17 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
     departmentId: d.departmentId,
     employment: d.employment,
     m365Status: d.m365Status === "" ? null : d.m365Status,
+    // The offboarding wizard reads "this offboarding" as everything decided
+    // since this moment, so entering OFFBOARDING is what starts the window —
+    // otherwise a routine return from years ago lands on a farewell report.
+    // Re-entering ACTIVE clears it; OFFBOARDED keeps it, so the report of what
+    // happened stays readable afterwards.
+    offboardingAt:
+      d.employment === "OFFBOARDING"
+        ? employee.offboardingAt ?? new Date()
+        : d.employment === "ACTIVE"
+          ? null
+          : employee.offboardingAt,
   };
   const diff = diffOf(employee as unknown as Record<string, unknown>, data);
   if (Object.keys(diff).length === 0) return ok({ id: employee.id });

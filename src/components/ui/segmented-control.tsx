@@ -17,7 +17,10 @@ export function SegmentedControl({
   className?: string;
 }) {
   const id = useId();
-  const idx = Math.max(0, options.findIndex((o) => o.value === value));
+  // -1 = nothing chosen. The sliding indicator is then NOT rendered: parking it
+  // under option 1 would make "undecided" read as "Returned", which is exactly
+  // the drift the offboarding wizard exists to prevent.
+  const idx = options.findIndex((o) => o.value === value);
   return (
     <div
       role="radiogroup"
@@ -27,15 +30,17 @@ export function SegmentedControl({
         className,
       )}
     >
-      <span
-        aria-hidden
-        className="absolute top-0.5 bottom-0.5 rounded-[5px] bg-surface shadow-card"
-        style={{
-          width: `calc((100% - 4px) / ${options.length})`,
-          left: `calc(2px + (100% - 4px) / ${options.length} * ${idx})`,
-          transition: "left 220ms var(--ease-seg)",
-        }}
-      />
+      {idx >= 0 && (
+        <span
+          aria-hidden
+          className="absolute top-0.5 bottom-0.5 rounded-[5px] bg-surface shadow-card"
+          style={{
+            width: `calc((100% - 4px) / ${options.length})`,
+            left: `calc(2px + (100% - 4px) / ${options.length} * ${idx})`,
+            transition: "left 220ms var(--ease-seg)",
+          }}
+        />
+      )}
       {options.map((opt) => (
         <label
           key={opt.value}

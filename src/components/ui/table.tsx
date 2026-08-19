@@ -20,6 +20,7 @@ export function Th({
   sort,
   sortIndex,
   onSort,
+  "aria-label": ariaLabel,
 }: {
   className?: string;
   align?: "left" | "right";
@@ -30,6 +31,14 @@ export function Th({
   /** 1-based position in a multi-sort (max 2 keys) — renders the numbered badge */
   sortIndex?: number;
   onSort?: () => void;
+  /**
+   * A column whose header renders nothing visible (a status dot, a row-action
+   * cell) still owes screen readers a name. Declared explicitly because this
+   * component does not spread rest props — an undeclared aria-label passes the
+   * compiler (every prop here is optional, so the excess-property check is
+   * relaxed) and is then silently dropped.
+   */
+  "aria-label"?: string;
 }) {
   const content = (
     <span className="inline-flex items-center gap-1">
@@ -50,6 +59,7 @@ export function Th({
   return (
     <th
       scope="col"
+      aria-label={ariaLabel}
       style={{ width }}
       aria-sort={sort ? (sort === "asc" ? "ascending" : "descending") : undefined}
       className={cn(

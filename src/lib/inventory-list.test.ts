@@ -43,3 +43,30 @@ it("ASSET_STATUSES covers all 8 enum values", () => {
   expect(ASSET_STATUSES).toHaveLength(8);
   expect(ASSET_STATUSES).toContain("MISSING");
 });
+
+describe("the stage facet narrows to the repair candidate set", () => {
+  it("any known stage adds the candidate clause — the final cut is repairStage's", () => {
+    expect(buildAssetWhere(parse("stage=beyond-repair")).AND).toEqual([
+      { OR: [{ status: "DEFECTIVE" }, { defectiveSince: { not: null } }] },
+    ]);
+  });
+
+  it("an unknown stage narrows nothing", () => {
+    expect(buildAssetWhere(parse("stage=sort-of-broken")).AND).toBeUndefined();
+  });
+
+  it("stage rides alongside q without eating its OR", () => {
+    const where = buildAssetWhere(parse("q=dell&stage=at-vendor"));
+    expect(where.OR).toHaveLength(3);
+    expect(where.AND).toHaveLength(1);
+  });
+
+  it("stage is a configured facet, so the URL round-trips it", () => {
+    expect(parse("stage=at-vendor").filters.stage).toEqual(["at-vendor"]);
+  });
+
+  it("defectiveSince is sortable — the Down column is a real header", () => {
+    expect(INVENTORY_LIST_CONFIG.sortable).toContain("defectiveSince");
+    expect(parse("sort=defectiveSince").sort).toEqual([{ key: "defectiveSince", dir: "asc" }]);
+  });
+});

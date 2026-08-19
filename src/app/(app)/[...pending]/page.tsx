@@ -9,7 +9,6 @@ const PHASE_BY_PREFIX: Array<[RegExp, number]> = [
   [/^(inventory|employees|admin\/(asset-categories|asset-types|departments))(\/|$)/, 3],
   [/^purchases(\/|$)/, 5],
   [/^finance(\/|$)/, 6],
-  [/^(offboarding|reservations|admin\/equipment-policies)(\/|$)/, 7],
   [/^admin(\/|$)/, 8],
 ];
 

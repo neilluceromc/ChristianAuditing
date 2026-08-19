@@ -1,17 +1,27 @@
 import { notFound } from "next/navigation";
-import { getAsset } from "@/server/modules/inventory/queries";
+import { getAsset, stageOf } from "@/server/modules/inventory/queries";
 import { warrantyProgress } from "@/lib/asset-rules";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { StatusPill } from "@/components/ui/status";
+import { Banner } from "@/components/ui/banner";
+import { Pill } from "@/components/ui/pill";
+import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
 
 export default async function AssetOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const asset = await getAsset(id);
   if (!asset) notFound();
   const warranty = warrantyProgress(asset.purchasedAt, asset.warrantyUntil);
+  const cost = asset.cost === null ? null : Number(asset.cost);
+  const quote = asset.repairQuote === null ? null : Number(asset.repairQuote);
+  // the same mapper the list and the bulk/export cut use, so a record can
+  // never disagree with the row that led to it
+  const stage = stageOf(asset);
+  const warning = quoteWarning(quote, cost);
+  const down = downDays(asset);
 
   return (
     <div className="grid max-w-[860px] grid-cols-1 gap-4 lg:grid-cols-2">
@@ -54,18 +64,56 @@ export default async function AssetOverviewPage({ params }: { params: Promise<{ 
                   </span>
                 ) : ("—"),
               },
-              ...(asset.vendor || asset.rmaRef || asset.repairQuote
-                ? [
-                    { label: "Vendor", value: asset.vendor?.name ?? "—" },
-                    { label: "RMA", value: asset.rmaRef ?? "—", mono: true },
-                    { label: "Quote", value: fmtMoney(asset.repairQuote === null ? null : Number(asset.repairQuote)), mono: true },
-                  ]
-                : []),
               { label: "Notes", value: asset.notes ?? "—" },
             ]}
           />
         </CardBody>
       </Card>
+      {/*
+        Gated on having repair DATA, not on having a stage. Approvals gate the
+        status change, so the normal order is to record the vendor's quote first
+        and request DEFECTIVE second — and an asset with a quote but no stage
+        yet would otherwise hide the quote and the write-off banner from the
+        record, precisely while someone is deciding replace-versus-repair. That
+        is what this page showed before repair mode existed.
+      */}
+      {(stage !== null || asset.vendor || asset.rmaRef || quote !== null) && (
+        <Card className="lg:col-span-2">
+          <CardHeader
+            title="Repair"
+            actions={
+              stage && <Pill tone={stage === "returned-ok" ? "neutral" : "accent"}>{REPAIR_STAGE_LABEL[stage]}</Pill>
+            }
+          />
+          <CardBody className="flex flex-col gap-3">
+            {warning && <Banner tone="attention" title="Repairing costs too much of a new unit">{warning}</Banner>}
+            <DescriptionList
+              items={[
+                // the clock rows belong to a stage; the vendor rows belong to the data
+                ...(stage !== null
+                  ? [
+                      {
+                        label: "Down",
+                        // null means two different things and only one is "stopped"
+                        value:
+                          down !== null
+                            ? `${down} d out of service`
+                            : asset.status === "DEFECTIVE"
+                              ? "start date unknown"
+                              : "clock stopped",
+                        mono: true,
+                      },
+                      { label: "Defective since", value: fmtDate(asset.defectiveSince), mono: true },
+                    ]
+                  : []),
+                { label: "Vendor", value: asset.vendor?.name ?? "—" },
+                { label: "RMA", value: asset.rmaRef ?? "—", mono: true },
+                { label: "Quote", value: fmtMoney(quote), mono: true },
+              ]}
+            />
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }

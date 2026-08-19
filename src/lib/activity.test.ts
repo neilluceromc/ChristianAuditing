@@ -34,3 +34,20 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     expect(auditSentence({ ...pr, action: "unit-update" })).toBe("P. Reyes updated a unit on PR-0198");
   });
 });
+
+describe("offboarding.completed", () => {
+  it("reads as a sentence and counts what was settled, not as a raw action name", () => {
+    expect(auditSentence({
+      actorLabel: "J. Sarmiento",
+      action: "offboarding.completed",
+      diff: { decisions: { from: null, to: ["APR-2043 · RETURNED · EXECUTED", "APR-2044 · MISSING · PENDING"] } },
+      entityLabel: "Dennis Ong",
+    })).toBe("J. Sarmiento completed offboarding for Dennis Ong · 2 items settled");
+  });
+
+  it("degrades without a decision list", () => {
+    expect(auditSentence({
+      actorLabel: "J. Sarmiento", action: "offboarding.completed", diff: null, entityLabel: "Dennis Ong",
+    })).toBe("J. Sarmiento completed offboarding for Dennis Ong");
+  });
+});

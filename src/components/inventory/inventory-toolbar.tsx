@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
 import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
+import { isRepairStage } from "@/lib/repairs";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 
@@ -30,6 +31,8 @@ export function InventoryToolbar({
     router.push(pathname + serializeListState(withFilter(state, facet, values), INVENTORY_LIST_CONFIG));
   }
 
+  const stageActive = (state.filters.stage ?? []).some(isRepairStage);
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative w-[260px]">
@@ -47,7 +50,17 @@ export function InventoryToolbar({
           }}
         />
       </div>
-      {(["status", "category", "type", "assignee"] as const).map((facet) => (
+      {/*
+        A stage already constrains status — `returned-ok` MEANS "not
+        DEFECTIVE" — so offering the Status facet on top of one advertises
+        combinations that can never return a row: from ?stage=returned-ok the
+        dropdown counted "DEFECTIVE 6" (the candidate set) and applying it gave
+        the empty state. The stage chips are the status control in repair mode.
+      */}
+      {(stageActive
+        ? (["category", "type", "assignee"] as const)
+        : (["status", "category", "type", "assignee"] as const)
+      ).map((facet) => (
         <FacetDropdown
           key={facet}
           label={facet === "assignee" ? "Assigned" : facet[0].toUpperCase() + facet.slice(1)}
