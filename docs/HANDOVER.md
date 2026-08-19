@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 are all merged to `main` and pushed — `main` and `origin/main` are in sync, and `phase-7-offboarding` has been deleted** · **Phase 8 (admin + import/export + polish) is next and has no code yet; §6 carries its entry criteria.**
+**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — task 1 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 3 ahead of that.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,23 +13,30 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **Phase 7 is merged and pushed — work on `main`.** It was merged on 2026-08-19 with a `--no-ff`
-   commit (matching phases 5 and 6), `phase-7-offboarding` was deleted, and `main` was pushed to
-   `origin`. The full battery was re-run on the merged result before the branch was removed: 345 unit
-   + 89 e2e, green. `git status` should be clean and `main` should be level with `origin/main`. The
-   repo is public, so the usual rule still holds — never commit `.env` or any real secret.
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: task 1 of 14
+   is committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
+   so far (3 commits); `git status` should be clean.
+
+   **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
+   2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
+   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 3 ahead of `main`.
+   Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
+   decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
+   public — never commit `.env` or any real secret.
 2. `docker compose up -d db` → **`npx prisma migrate deploy`** (Phase 7 added a 7th migration) →
    `npm run db:seed` → open the preview (`preview_start` name `app-dev`).
 3. Read **§6** — it now carries Phase 8's entry criteria: the things the new admin/import/export
    surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
    permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
    Phase 8's plan, not after.
-4. **Phase 8's plan is already written** — `docs/superpowers/plans/2026-08-19-phase-8-admin.md`, 14
-   tasks covering the Admin workspace only (§5 explains the split from the old combined Phase 8).
-   Execute it with `superpowers:subagent-driven-development`, same as every phase before it (§2):
-   Task 1 creates the `phase-8-admin` branch. Read its **Recorded scope decisions** first — the
-   permanent-admin lock covering `disabled`, the `m365_sso` refusal, and "the Job is the retry engine,
-   `WebhookDelivery` is the ledger" are the three a later task can silently break.
+4. **Resume at Task 2** (user actions) of `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with
+   `superpowers:subagent-driven-development`. Task 1 is committed; 2–14 remain. Read the plan's
+   **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the `m365_sso`
+   refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a later
+   task can silently break — then **§6a**, which carries what Task 1 actually established.
+   The plan has been amended to the shipped code (`docs(plan): …`), so trust it over any memory of
+   what it used to say, and keep amending it whenever code deviates.
+
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
 
@@ -117,7 +124,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–6 on main; Phase 7 complete on the unmerged branch)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 task 1 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -272,8 +279,10 @@ scoped feed, so the only one showing the domain pill).
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. The plan is written and ready to execute:**
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 2–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
+  **Task 1 (the user rules) is done** — see §6a. Task 2 is next, and is the first code anywhere in
+  this repo to write `User.role` or `User.disabled`, which matters more than it sounds (§6a rule 2).
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -293,12 +302,12 @@ pending-route table, so the split falls on a seam that already existed.
 
 ---
 
-## 6. Phase 8 entry criteria (READ BEFORE WRITING THE PLAN)
+## 6. Phase 8 entry criteria (the plan implements these — §6a is what's been built)
 
-Phase 8 has no code on this repo yet, so none of this is an invariant a task can silently break —
-it's what the design brief and the current state of the codebase already commit the plan to before
-the first task is written. Map each of these to the task that has to satisfy it, the way every prior
-phase's plan mapped scope decisions to tasks (§2).
+These are what the design brief and the state of the codebase committed the plan to. **The plan now
+exists and maps each of them to a task**, so this section is here as the *why* behind those tasks
+rather than as something to act on directly — read it when a task's reasoning looks arbitrary. What
+has actually been built, and the invariants it established, is §6a.
 
 1. **The worker already has an opinion about webhooks, and it isn't "not implemented."**
    `src/worker/index.ts` dead-letters every `DELIVER_WEBHOOK` job on purpose: `status: "DEAD"`,
@@ -341,6 +350,35 @@ phase's plan mapped scope decisions to tasks (§2).
 
 ---
 
+## 6a. Phase 8 mid-flight: what Task 1 established (READ BEFORE TASK 2)
+
+The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
+sharpened, and the ones a later task can silently break.
+
+1. **The permanent admin is locked against `role` AND `disabled`, and the UI says so before the click.**
+   `authorize()` returns `null` for a disabled user, so disabling that account locks every human out as
+   thoroughly as demoting it would. Card `3h` names only the role select; the guard is deliberately
+   wider. `lockReason()` returns the *sentence*, which both the page (as static text beside a `LOCKED`
+   chip) and the action (as a conflict message) print — one string, two surfaces.
+2. **There is no "last admin" guard, and the property it would protect holds on four facts, not one.**
+   (a) exactly one permanent admin per database, from **two** producers — `prisma/seed.ts` and
+   `createBootstrapAdmin` (`src/server/auth/actions.ts:115`), mutually exclusive because bootstrap is
+   gated on `tx.user.count() === 0`; (b) **no writer of `User.role` or `User.disabled` anywhere outside
+   `src/lib/admin-users.ts`'s callers** — **Task 2 becomes the first**; (c) no user-deletion path;
+   (d) no email or password change flow. Break any of those and this decision needs revisiting, not
+   just the `isPermanentAdmin` flag becoming editable.
+3. **An admin may demote themselves; they may not disable themselves.** Demotion is recoverable — any
+   admin can restore it. Self-disable ends your own session with no way back for you specifically. The
+   refusal names **any other admin**, deliberately not the permanent one: nothing forbids one ordinary
+   admin disabling another, so pointing at the permanent account would send someone to bother one
+   named individual for something a colleague can do.
+4. **The two refusals `disableChange` can return must stay textually disjoint.** The self-disable
+   string must not contain "permanent admin", and the lock string must not contain "your own account";
+   the tests assert both directions. This is not styling — see the §7 gotcha about assertions that
+   cannot tell two branches apart.
+
+---
+
 ## 7. Recurring gotchas that have cost real time
 
 - **Prisma `mode: "insensitive"` on an identity/`equals` field compiles to ILIKE**, making `%`/`_` wildcards — caused an auth bypass AND an enumeration oracle. Use `findUnique` on a normalized value. `contains`-search is the sanctioned use.
@@ -371,6 +409,14 @@ phase's plan mapped scope decisions to tasks (§2).
 - **Centralising a rule only helps if every call site actually goes through it.** `withRepairStage` was extracted so a stage chip could not leave the contradictory `status` pin in place — and the generic `ChipFilterRow` on the same page rendered a *second* stage chip that bypassed it entirely, with the opposite removal semantics. When you extract a rule, grep for every other place that writes the same thing.
 - **A SQL "candidate set" is not safe to act on.** When a derived facet narrows in SQL and makes its final cut in memory, every consumer of that `where` needs the cut — not just the one that renders the list. `buildAssetWhere` has four (list, facet counts, CSV export, and `bulkRequestStatusChange`, which acts on *all matching*), so a cut applied only to `listAssets` would let a screen showing 1 row create 7 approvals. See Task 12's preamble.
 - **Floating point is not inclusive on a money grid.** `quote >= cost * 0.6` looks like the 60% line the copy promises, and is — on whole pesos. `Asset.cost` is `Decimal(12,2)` and the forms take centavos, where ~2.6% of exact-60% points fall the wrong way (₱6,000.57 of ₱10,000.95 is exactly 60% and failed). Compare in whole centavos. A test that uses round numbers proves one lucky pair, not the boundary.
+- **An assertion satisfied by BOTH branches of a function cannot tell them apart — and mutation testing
+  will not catch it.** Task 1's self-disable test asserted its refusal matched `/permanent admin/i`, and
+  the self-disable sentence happened to contain "the permanent admin". Swapping the two branches of
+  `disableChange` left the suite fully green, because `allowed` is `false` either way, so every
+  boolean-level mutation still failed the same tests. The fix is to assert the *distinguishing* clause
+  plus a **negative** assertion on the other branch's wording, which keeps the two strings disjoint as
+  they get edited. Whenever one function returns two different refusals, ask what the test would do if
+  they were swapped.
 - **`design_handover/` is excluded from lint/build** and must stay untouched — it's the source of truth, not code.
 - **A UI confirmation that clears itself on a timer needs headroom on the assertion, not just on the timer.** `/inventory/[id]/edit`'s "✓ Saved" is a 3-second self-clearing flash (`setSaved(true)` plus a 3000ms timeout in `src/components/inventory/asset-form.tsx`), so the default 5s Playwright budget has to cover the whole server-action round trip *before* the flash even starts. A dev server minutes into a full e2e run occasionally takes long enough that it doesn't, and the failure looks like "element(s) not found" with the button still reading `"Loading" [disabled]` — nothing points at a timing race. It failed once in three full runs and was reproduced byte-for-byte by delaying `updateAsset` 7s. Fixed with a 20s assertion, not a weaker one.
 - **A new audit `action` string needs a reader that will actually see it — check that BEFORE teaching the display layer, not after.** Phase 7 initially taught `auditSentence` four new cases and then reverted all four: the app's activity feeds each scope to one `entityType` (`employee` / `asset` / `purchase-request`), and `/audit` itself renders `listAudit`'s raw `action` string plus the diff's **key names** — it never calls `auditSentence` at all. So the four new cases were unreachable by any page in the app, and their tests were exercising dead code. Before adding a case for a new `entityType`, trace which surface would actually route it through the function you're editing.
@@ -386,4 +432,30 @@ phase's plan mapped scope decisions to tasks (§2).
 - **Phase 7, Task 15 — close-out leftovers:** `/offboarding` and `/reservations` have no pagination, sortable headers or facets — team-scale lists, currently unbounded; the offboarding wizard doesn't yet tick a matching row when a USB scanner hits it (Phase 8's scanner polish, §6); the farewell report is printable but neither emailable nor an Excel export (the brief's `farewell-report` export route is Phase 8); `RETURNED OK` shows `—` in the Down column because `downDays` returns `null` for anything not `status === "DEFECTIVE"`, and nothing records when a repair actually ended; `/reservations` is read-only by design (scope decision #10), so holds are still created and released from the asset record, not from this page; and the repairs stage facet pages in memory, which scope decision 5b judged correct at team scale but would need a generated column at fleet scale.
 - **Phase 7, Task 13:** `RESERVATION_TABS` / `parseReservationTab` live in `src/server/modules/reservations/queries.ts` alongside the Prisma call, where every sibling list (`inventory-list.ts`, `approvals-list.ts`, `purchases-list.ts`, `audit-list.ts`, `employees-list.ts`) puts its pure tab/parse logic in `src/lib/*.ts` with a unit-test file. Bundled with the query, it cannot be unit-tested without pulling in the DB client — which is why it is the one list parser with no test. Worth normalising if that module gains any more logic.
 - **Phase 7 so far:** a 3-character reason minimum accepts invisible characters (`trim()` strips Unicode `Zs` but not U+200B/U+2060), so a MISSING item can carry a blank-looking justification — shared with `requestReturn` and `rejectApproval`, so the fix is one zod refinement in a shared helper, not a per-action patch; four separate copies of "read a string field off a `Prisma.JsonValue`" (`obj`/`str` in `approval-execution.ts`, `returnTargetStatus`, `payloadReason`, and the `target` hoist in `approvals/queries.ts`) agree today and could be one exported pair; `getWizard` reads assets and approvals as two statements, so a worker commit between them shows an item as undecided for one render (self-correcting, and `decideItem` refuses with its designed conflict — closing it needs `RepeatableRead`, i.e. a transaction per render, which was declined deliberately); an empty policy slot on a leaver reads "not held" but does not yet distinguish "already returned" from "left their name with no return at all"; **`SegmentedControl` exposes no `aria-describedby`/`aria-invalid`**, so `ItemDecision`'s "pick an outcome" `FormError` is announced but not associated with the radiogroup that caused it — and now that "no value" is a meaningful, refusable state for that control (Task 8), the props are worth adding; **all four offboarding components hand-roll the `ok / rate_limited / validation / conflict` ladder** that `loadout-view.tsx` already abstracted into a local `handle<T>()` and `asset-form.tsx` extended — the duplication is what produced two of the Task 8 review's defects (a missing `validation` branch and a dropped unclaimed-key fallback), so a shared `useActionResult` in `src/components/patterns/` would be a real fix rather than tidying; **`beyondRepair` answers `false` for an asset with no recorded `cost`**, so an asset registered without one (the forms allow it; every seeded asset has one only because `mk()` defaults it) can be quoted any amount and still read TO ASSESS with no write-off warning — it is a three-state question (yes/no/unknown) being answered as a boolean, and Task 12's record view is where "no acquisition cost recorded" should surface; **nothing has ever written `defectiveSince` except the seed and, as of Task 11, the worker** — every asset that reached DEFECTIVE before this sits at `null`, which reads as `to-assess` with a permanently blank Down column, and `updateSchema` deliberately excludes the field so there is no way to correct it but to bounce the asset out of DEFECTIVE and back in (destroying the original date); that untested `status === "DEFECTIVE" && defectiveSince === null` branch wants a backfill (`UPDATE "Asset" SET "defectiveSince" = "updatedAt" WHERE status = 'DEFECTIVE' AND "defectiveSince" IS NULL`) and an editable field before this ships to anyone with real data; **`downDays` counts elapsed 24h periods, not `Asia/Manila` calendar days**, unlike the rest of the app; and **`beyond-repair` outranks `at-vendor` in `repairStage`**, so an item physically sitting at a vendor with a high quote loses its at-vendor-ness in the chip — a decision attribute hiding a location attribute, which matters if the screen is used to chase equipment. **From Task 12's review, all judged worth recording rather than fixing now:** `facetOptions` still counts the repair *candidate* set, so Category/Type/Assigned counts read slightly high in repair mode (the Status facet, the one case that offered an unsatisfiable combination, is now hidden instead); the CSV export's 10k guard runs *after* `repairStageIds` has materialised the candidate set, so that path can exceed the bind-parameter limit before the friendly 413 (unreachable at team scale); `repairStageIds` resolves outside the transaction, a deliberate exception to `bulkRequestStatusChange`'s "reads happen INSIDE the transaction" — the alternative makes `BULK_MAX` count candidates instead of the cut; the `HOLD` marker is hidden whenever an assignee is present and never discloses expiry, and **nothing anywhere sweeps `ACTIVE → EXPIRED` at `expiresAt`**, so a long-expired hold still renders as live; and `Reservation_one_active_hold_per_asset` — which `reservations[0]` now depends on for correctness — exists only in raw migration SQL, not in `schema.prisma`.
+- **Phase 8, Task 1 (recorded by review, judged not worth fixing now):** the permanent-admin lock is
+  **direction-blind** — `disableChange` refuses *re-enabling* the permanent admin as well as disabling
+  it, so if that account were ever disabled out of band the one transition that repairs the lockout is
+  the one the module forbids, leaving a manual DB edit as the only recovery (unreachable today, since
+  nothing writes `User.disabled` until Task 2; the correct rule would refuse only transitions that
+  *reduce* its access, and the fix is not one line because `lockReason` must still report the row as
+  LOCKED for the UI while `disableChange` diverges — the two surfaces that share one string today would
+  have to stop sharing it); **`ROLE_OPTIONS` is not exhaustiveness-checked** (`Role[]` accepts a subset
+  and its test compares against a hardcoded literal, so a sixth role would silently vanish from every
+  role select — `ROLE_LABELS: Record<Role, string>` would fail to compile, but that can be fixed
+  without touching `ROLE_OPTIONS`; `Role` is a runtime value from `@prisma/client`, so the test could
+  assert set-equality against the generated enum); **`TargetUser.disabled` is declared but never read**
+  by any of the three rules, despite the type's comment promising it holds only what they read; and the
+  **self-disable guard fails open on an id-space mismatch** — `target.id === actorId` is the only
+  identity-keyed rule and `TargetUser` is unbranded primitives, so a caller sourcing `actorId` from the
+  `Employee` id space instead of `User` would silently turn a refusal into an allow.
+- **`/bootstrap`'s copy under-states the lock**: `src/app/(auth)/bootstrap/page.tsx` promises the
+  permanent admin's *role* can never be changed, but Phase 8 widened that to access as well. Worth
+  aligning when Task 3 lands. The corollary belongs here too — a bootstrapped permanent admin's account
+  **can never be revoked in-app** if the holder departs or the credentials leak. That is the accepted
+  cost of the lock, not an oversight.
+- **Phase 1 gap, found during Phase 8's Task 1 review:** `/signup` is not gated on user count, while
+  `/bootstrap` permanently 404s once any `User` row exists. On an empty database, whoever reaches
+  `/signup` first creates a `viewer`, closes bootstrap forever, and the system has **zero admins with
+  no in-app recovery**. A last-admin guard would not have prevented it — that prevents removing the
+  last admin, it cannot conjure one.
 - Entra SSO real wiring (needs tenant creds). Real product photography, brand mark, barcode generation (striped placeholders today). Off-device backups (nightly `pg_dump` to a local volume ships; copying elsewhere is the user's call). HR review of the accountability-form acknowledgement copy. `WebhookEndpoint.secret` encryption (Phase 8). CI workflow + jsdom component tests (declined in Phase 1, revisitable).
