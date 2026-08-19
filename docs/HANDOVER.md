@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-18 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding` — unmerged, ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–12 of 15 done; Phase 8 remains.**
+**Last updated:** 2026-08-19 · **Phase 7 is MID-FLIGHT on branch `phase-7-offboarding` — unmerged, ahead of main** · **Phases 1–6 merged; Phase 7 tasks 1–13 of 15 done; Phase 8 remains.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -19,16 +19,27 @@ exist today.
 3. Read **§6** — the Phase 7 plan is complete and being executed task-by-task, and §6 carries both the
    progress marker and the invariants the finished tasks established. Later tasks break if you don't
    know them.
-4. **Resume at Task 13** (`/reservations` — read-only this phase, scope decision #10) of
+4. **Resume at Task 14** (`/admin/equipment-policies`) of
    `docs/superpowers/plans/2026-08-17-phase-7-offboarding.md` with
-   `superpowers:subagent-driven-development`. Tasks 1–12 are committed; 13–15 remain. The plan is
+   `superpowers:subagent-driven-development`. Tasks 1–13 are committed; 14–15 remain. The plan is
    **15 tasks and has been amended after every review**, so it matches the shipped code — trust it over
    any memory of what it used to say, and keep amending it (`docs(plan): …`) whenever code deviates.
 
-The branch is green: `tsc` · `lint` · **345 unit** (26 files) · `next build` (re-run at Task 12).
-**The e2e suite has NOT run since Task 9** — tasks 10–12 added `/offboarding/[employeeId]/report`,
-the repairs brain and all of repair mode since then, so the next full run is overdue and is the
-riskiest outstanding step. Nothing is half-finished.
+The branch is green: `tsc` · `lint` · **345 unit** (26 files) · `next build` (re-run at Task 12; Task
+13 added no route, only a page and a query module).
+
+**⚠ The e2e suite has NOT run since Task 9, and five feature commits have landed since** — the
+printable farewell report, the repairs brain, all of repair mode, and `/reservations`. This is the
+single riskiest outstanding item on the branch. **Task 15 writes the offboarding/repairs spec and runs
+the full battery; consider running the existing suite BEFORE starting Task 14**, so a regression from
+tasks 10–13 is attributed to the task that caused it rather than surfacing inside Task 15's own work:
+
+```
+npm run db:seed && npx playwright test --workers=1
+```
+
+(~7 min, foreground, long timeout. Restart the preview first — a long-lived dev server degrades the
+suite into phantom failures; see §7.)
 
 **Two things the browser pane could not verify, so Task 15's e2e matters more than usual.** The pane
 intermittently fails to resolve this app's Suspense boundaries — `main` renders as a skeleton while
@@ -47,6 +58,13 @@ print), and a line under the acknowledgement discloses what the `Request` state 
 
 **Nothing is half-finished in the code.** Every task ended on a green commit. The next unit of work is a
 whole task, not a fragment.
+
+**State this session left behind:** working tree clean, no dev server running, `inventory-db-1` up and
+**freshly seeded** (the fixture is intact — Dennis Ong EMP-0090 back to OFFBOARDING holding his three
+items, no wizard decisions outstanding). Two temporary probe scripts were written to the repo root to
+reproduce states the seed cannot express — an asset unassigned mid-offboarding, and repair data on an
+asset with no stage — and both were deleted; if a `*.tmp.mjs` ever shows up at the root it is mine and
+is safe to remove.
 
 ---
 
@@ -187,6 +205,21 @@ scoped feed, so the only one showing the domain pill).
   call sites passed was silently dropped — and the compiler stayed quiet because every prop in the
   type is optional, making it a *weak type* and relaxing the excess-property check. Three of those
   four call sites predate Phase 7.
+- **The repairs brain** (`src/lib/repairs.ts`, TDD, 21 tests): four stages derived from fields that
+  already existed — `to-assess` / `at-vendor` / `returned-ok` / `beyond-repair` — plus `downDays`,
+  `quoteWarning`, `isRepairView`, and `withRepairStage` (a stage chip clears the `status` pin it
+  cannot coexist with). `beyondRepair` compares **whole centavos**, not floats. The `stage` facet
+  narrows SQL to the repair candidate set; `repairStage()` makes the final cut in memory. Two seed
+  fixtures were added so `beyond-repair` and `returned-ok` are reachable at all, and the worker now
+  stamps `defectiveSince` when an asset **enters** DEFECTIVE (audited).
+- **Repair mode on `/inventory`**: Stage + Down columns (repair-only, never offered to the column
+  chooser), the stage chip row, the write-off warning on the record, and the `HOLD` marker for
+  reserved-but-SPARE stock. `repairStageIds()` gives the bulk action and the CSV export the **same**
+  cut the screen shows — a SQL candidate set is not safe to act on. One exported `stageOf()` owns the
+  row→stage marshalling for all three call sites.
+- **`/reservations`** — the read-only cross-asset hold list (scope decision #10): three tabs writing
+  `?state=`, a "Reads" column proving a hold never moved the asset's status, and EXPIRED (the clock)
+  kept visibly distinct from RELEASED (a person), each with its own date.
 
 ### Conventions every later phase must follow
 
@@ -207,16 +240,19 @@ scoped feed, so the only one showing the domain pill).
 | Derived state beats stored state | "Decided" is read out of the approvals that exist (`decisionOf`), not kept in a wizard table — which is what makes a half-finished offboarding N correct records instead of a lost session |
 | A derived predicate is only shared if ALL of it is shared | Phase 7 extracted `groupCandidates` but left the *window* duplicated, and the server gate promptly disagreed with the UI. `candidatesFor` now owns window + grouping together, and all three call sites use it |
 | A facet SQL can't express | narrow to a candidate set in the `where`, then make the final cut in memory with the same pure function that renders it (`repairStage`, Task 11) — never two rules for one concept |
+| …and that cut belongs to EVERY consumer of the `where` | `buildAssetWhere` feeds the list, the facet counts, the CSV export and `bulkRequestStatusChange` (which acts on *all matching*). Cutting only in `listAssets` would let a screen showing 1 asset create 7 approvals. `repairStageIds()` is the shared resolver |
+| Money compared on a threshold | in **whole centavos**, never floats — `Decimal(12,2)` plus `quote >= cost * 0.6` is not inclusive at exactly 60% (₱6,000.57 of ₱10,000.95 failed). A test with round numbers proves one lucky pair |
+| Extracting a rule | grep for every other place that writes the same thing. `withRepairStage` was extracted to stop a chip leaving a contradictory filter, and the generic `ChipFilterRow` on the same page was a second chip that bypassed it |
 
 ---
 
 ## 5. What REMAINS
 
-- **Phase 7 — tasks 13–15 of the plan** (in order; each is fully written with verbatim code):
-  **11** the repairs brain (`src/lib/repairs.ts`, the `stage`
-  facet, two seed fixtures, and the worker's `defectiveSince` stamp) · **12** repair mode on the
-  inventory list (stage chips, Down column, quote warning, the `HOLD` marker) · **13** `/reservations` ·
+- **Phase 7 — tasks 14–15 of the plan** (in order; each is fully written with verbatim code):
   **14** `/admin/equipment-policies` · **15** the e2e spec, cleanup, full battery, close-out.
+  **Task 15 is doing more work than its position suggests** — it is the only thing that will exercise
+  repair mode and the offboarding wizard in a real browser (see the pane limitation in §0), and it
+  carries the branch's first full e2e run since Task 9.
 - **Phase 8 — Admin + import/export + polish.** `/admin/users` (locked permanent admin),
   `/admin/webhooks` + `/deliveries` (dead-letter replay — **the worker currently dead-letters
   DELIVER_WEBHOOK jobs with "ships in Phase 8"**), `/admin/flags`; import (3-step dry-run → commit,
