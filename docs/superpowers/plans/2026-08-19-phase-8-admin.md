@@ -1,6 +1,6 @@
 # Inventory v2 — Phase 8: Admin workspace Implementation Plan
 
-> ## Draft — 14 tasks. Architecture and scope decisions settled; task bodies land next.
+> ## Complete — 14 tasks, ready to execute.
 >
 > Written 2026-08-19 from `design_handover/README.md` card `3h` and `design_handover/original-brief.md`
 > §7 (Admin workspace). Four things found while scoping it are worth knowing before you start,
@@ -42,7 +42,7 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
 
 **Entry criteria this plan implements (HANDOVER §6):** #1 the worker's `DELIVER_WEBHOOK` dead-letter placeholder is replaced by real delivery, so "Replay" means something (Tasks 9, 10, 13) · #2 `WebhookEndpoint.secret` stops being a plaintext column (Task 7) · #3 `User.isPermanentAdmin` gets the `LOCKED` chip stated before the click (Tasks 2, 3) · #6 `/admin` stops falling through to the IT Home (Task 11) · Entra SSO is **explicitly deferred** by scope decision #7, which is criterion #8's "decide, don't discover". Criteria #4, #5 and #7 (import, export, the scanner) belong to Phase 9 and are deliberately absent here.
 
-**Task map:** 1 branch + the user-role rules (TDD) · 2 user actions · 3 `/admin/users` · 4 the flag rules (TDD) · 5 flag actions + `/admin/flags` · 6 the webhook secret + endpoint rules (TDD) · 7 endpoint actions (encrypted secret, show-once) · 8 `/admin/webhooks` · 9 the emitter + the migration · 10 the worker delivers for real · 11 Admin Home · 12 the seed fixtures the deliveries page needs · 13 `/admin/webhooks/deliveries` + replay · 14 e2e, full battery, close-out.
+**Task map:** 1 branch + the user-role rules (TDD) · 2 user actions · 3 `/admin/users` · 4 the flag rules (TDD) · 5 flag actions + `/admin/flags` · 6 the webhook vocabulary, the signature, and `DeliveryStatus` in the family map (TDD) · 7 endpoint actions (encrypted secret, show-once) · 8 `/admin/webhooks` · 9 the emitter + the migration · 10 the worker delivers for real · 11 Admin Home · 12 the seed fixtures the deliveries page needs · 13 `/admin/webhooks/deliveries` + replay · 14 e2e, full battery, close-out.
 
 ---
 
@@ -100,11 +100,15 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
    `src/server/auth/actions.ts` already upserts it during bootstrap. Editing it changes who may sign
    up, so it is a value edit rather than a switch, and its audit entry records both values.
 
-9. **Which events emit is a deliberately short list, chosen because each has an external consumer that
-   is obvious.** `approval.executed`, `asset.status_changed` and `offboarding.completed`. Every one is
-   already a moment the code passes through with a transaction open, so the emitter is a call, not a
-   new hook. Growing this list is a one-line change per event *and a decision about what an outside
-   system is entitled to know* — which is why the list is short rather than "every audit action".
+9. **Which events emit is a deliberately short list, and the three are chosen to not overlap.**
+   `approval.executed`, `offboarding.completed`, `purchase_request.completed`. Every one is already a
+   moment the code passes through with a transaction open, so the emitter is a call rather than a new
+   hook, and each answers a different outside system: asset lifecycle, HR/IT departure, procurement.
+   **`asset.status_changed` was considered and rejected as redundant** — the conventions table forbids
+   a direct asset write, so every status change arrives through an approval and would already have
+   fired `approval.executed`. Two events for one fact is how consumers end up double-processing.
+   Growing this list is one line here *and a decision about what an outside system is entitled to
+   know* — which is why it is short rather than "every audit action".
 
 10. **`emitWebhook` never performs I/O and never throws into its caller's transaction.** It writes
     rows. An endpoint being unreachable must never roll back the domain change that emitted it — a
@@ -141,11 +145,15 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
 - `admin-users.ts` + `admin-users.test.ts` — `ROLE_OPTIONS`, `roleChange()` / `disableChange()`
   returning a typed refusal or an allowance, and `lockReason()` for the UI. The permanent-admin and
   self-disable rules live here so the page and the action cannot disagree.
-- `admin-flags.ts` + `admin-flags.test.ts` — `FLAG_SPECS` (key → label, description, kind, and
-  `unavailable` reason), `flagChange()`, and `isValueFlag()`.
-- `webhooks.ts` + `webhooks.test.ts` — `WEBHOOK_EVENTS`, `parseEvents()`, `signPayload()`,
-  `deliveryStage()` (the `DEAD · 5/5` / `RETRYING · 2/5` / `DELIVERED` chip text), and
-  `webhookEnvelope()`.
+- `admin-flags.ts` + `admin-flags.test.ts` — `FLAG_SPECS` (key → label, description, `hasValue`,
+  and an `unavailable` reason), plus `specFor()`, `flagChange()` and `domainValue()`. It is an
+  **allowlist**: `FeatureFlag` is key-value, so without it the flags page writes arbitrary config.
+- `webhooks.ts` + `webhooks.test.ts` — `WEBHOOK_EVENTS`, `EVENT_LABELS`, `parseEvents()`,
+  `webhookEnvelope()`, and `deliveryStage()` (the `DEAD · 5/5` / `RETRYING · 2/5` / `DELIVERED` chip
+  **label** — colour is not its business). **No `node:` imports**: a `"use client"` table calls
+  `deliveryStage`, so signing lives server-side instead (below).
+- `status.ts` — gains the three `DeliveryStatus` values. It is the one app enum the six-family map has
+  never covered, so a `DEAD` delivery would otherwise render the same grey as a spare laptop.
 
 **Server — `src/server/`**
 - `modules/admin/user-actions.ts` — `setUserRole`, `setUserDisabled`.
@@ -154,6 +162,10 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
   `updateEndpoint`, `deleteEndpoint`, `replayDelivery`, `replayAllDead`.
 - `modules/admin/queries.ts` — `listUsers`, `listFlags`, `listEndpoints`, `listDeliveries`, `adminHome`.
 - `webhooks/emit.ts` — `emitWebhook(tx, event, data)`, the only producer of `DELIVER_WEBHOOK` jobs.
+  Imported by **both** the worker and Next server actions, so it uses relative imports.
+- `webhooks/sign.ts` — `signPayload()`, `SIGNATURE_HEADER` and `secretAad()`. A plain module on
+  purpose: `webhook-actions.ts` carries `"use server"`, which would make every export a server action
+  and put it out of reach of the worker — a bare `tsx` script outside Next.
 
 **Worker — `src/worker/`**
 - `deliver-webhook.ts` — the real delivery: sign, POST, mirror the outcome onto the ledger.
@@ -1491,12 +1503,12 @@ import { describe, expect, it } from "vitest";
 import {
   EVENT_LABELS, WEBHOOK_EVENTS, deliveryStage, parseEvents, webhookEnvelope,
 } from "./webhooks";
-import { STATUS_FAMILIES } from "./status";
+import { statusFamily } from "./status";
 
 describe("WEBHOOK_EVENTS", () => {
   it("is the short, deliberate list from scope decision #9", () => {
     expect(WEBHOOK_EVENTS).toEqual([
-      "approval.executed", "asset.status_changed", "offboarding.completed",
+      "approval.executed", "offboarding.completed", "purchase_request.completed",
     ]);
   });
 
@@ -1543,35 +1555,36 @@ describe("webhookEnvelope", () => {
 
 describe("deliveryStage", () => {
   it("reads DELIVERED without a counter — the count stops mattering once it lands", () => {
-    expect(deliveryStage("DELIVERED", 2, 5)).toEqual({ label: "DELIVERED", tone: "settled" });
+    expect(deliveryStage("DELIVERED", 2, 5)).toBe("DELIVERED");
   });
 
   it("reads DEAD with the full ratio, which is the design's DEAD · 5/5", () => {
-    expect(deliveryStage("DEAD", 5, 5)).toEqual({ label: "DEAD · 5/5", tone: "fault" });
+    expect(deliveryStage("DEAD", 5, 5)).toBe("DEAD · 5/5");
   });
 
   it("reads RETRYING with progress through the budget", () => {
-    expect(deliveryStage("RETRYING", 2, 5)).toEqual({ label: "RETRYING · 2/5", tone: "attention" });
+    expect(deliveryStage("RETRYING", 2, 5)).toBe("RETRYING · 2/5");
   });
 
   it("reads a never-attempted row as QUEUED, not as 0/5", () => {
-    expect(deliveryStage("PENDING", 0, 5)).toEqual({ label: "QUEUED", tone: "inflight" });
+    expect(deliveryStage("PENDING", 0, 5)).toBe("QUEUED");
   });
 
   it("reads a re-queued row with its attempts so far", () => {
-    expect(deliveryStage("PENDING", 1, 5)).toEqual({ label: "QUEUED · 1/5", tone: "inflight" });
+    expect(deliveryStage("PENDING", 1, 5)).toBe("QUEUED · 1/5");
   });
+});
 
-  // Every tone must be one of the six families, or Pill/StatusDot render nothing
-  // recognisable. "pending" is NOT one of them — the family for "failing but not
-  // finished" is "attention".
-  it("only ever returns a real status family", () => {
-    const cases: Array<[string, number]> = [
-      ["DELIVERED", 1], ["DEAD", 5], ["RETRYING", 2], ["PENDING", 0], ["PENDING", 1],
-    ];
-    for (const [status, attempts] of cases) {
-      expect(STATUS_FAMILIES).toContain(deliveryStage(status, attempts, 5).tone);
-    }
+// `deliveryStage` returns a LABEL and nothing else. Colour is not its business:
+// src/lib/status.ts owns "every enum value in the app maps into exactly one
+// family; nothing gets a bespoke colour", and StatusPill derives the family from
+// the raw status value. DeliveryStatus was simply the one app enum that map had
+// never been taught — Step 3b fixes that, and these are the tests for it.
+describe("DeliveryStatus is in the six-family system", () => {
+  it("colours a dead delivery as a fault and a landed one as settled", () => {
+    expect(statusFamily("DELIVERED")).toBe("settled");
+    expect(statusFamily("DEAD")).toBe("fault");
+    expect(statusFamily("RETRYING")).toBe("attention");
   });
 });
 ```
@@ -1589,27 +1602,29 @@ Expected: FAIL — `Failed to resolve import "./webhooks"`.
 Create `src/lib/webhooks.ts`. **No `node:` imports in this file** — see the rule at the top of this task. `./status` is fine: it is pure and already imported by client components.
 
 ```ts
-import type { StatusFamily } from "./status";
-
 /**
- * Scope decision #9: a short, deliberate list. Every entry is a moment the code
- * already passes through with a transaction open, so emitting is a call rather
- * than a new hook — and every entry is something an outside system has an
- * obvious reason to know. Growing this list is one line here plus one
- * `emitWebhook` call, and a decision about what outsiders are entitled to see.
+ * Scope decision #9: a short, deliberate list, chosen so the three do not
+ * overlap — asset lifecycle, HR/IT departure, procurement. Every entry is a
+ * moment the code already passes through with a transaction open, so emitting
+ * is a call rather than a new hook.
+ *
+ * `asset.status_changed` is deliberately absent: a lifecycle change is never a
+ * direct asset write in this codebase, so it always arrives through an approval
+ * and would already have fired `approval.executed`. Two events for one fact is
+ * how a consumer ends up processing it twice.
  */
 export const WEBHOOK_EVENTS = [
   "approval.executed",
-  "asset.status_changed",
   "offboarding.completed",
+  "purchase_request.completed",
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 export const EVENT_LABELS: Record<WebhookEvent, string> = {
   "approval.executed": "An approval finished executing",
-  "asset.status_changed": "An asset changed status",
   "offboarding.completed": "An offboarding was completed",
+  "purchase_request.completed": "A purchase request was completed",
 };
 
 /**
@@ -1649,27 +1664,47 @@ export function webhookEnvelope(
 }
 
 /**
- * The chip on /admin/webhooks/deliveries. The ratio is the point: card 3h shows
- * `DEAD · 5/5`, which is only meaningful because the denominator is the worker's
- * MAX_ATTEMPTS. Scope decision #6 is what keeps this number honest — the
+ * The chip's LABEL on /admin/webhooks/deliveries — colour is not this
+ * function's business (see Step 3b). The ratio is the point: card 3h shows
+ * `DEAD · 5/5`, which is only meaningful because the denominator is the
+ * worker's MAX_ATTEMPTS. Scope decision #6 is what keeps this number honest — the
  * delivery row's `attempts` is mirrored from the job rather than counted twice.
  */
-export function deliveryStage(
-  status: string,
-  attempts: number,
-  maxAttempts: number,
-): { label: string; tone: StatusFamily } {
-  if (status === "DELIVERED") return { label: "DELIVERED", tone: "settled" };
-  if (status === "DEAD") return { label: `DEAD · ${attempts}/${maxAttempts}`, tone: "fault" };
-  if (status === "RETRYING") return { label: `RETRYING · ${attempts}/${maxAttempts}`, tone: "attention" };
+export function deliveryStage(status: string, attempts: number, maxAttempts: number): string {
+  if (status === "DELIVERED") return "DELIVERED";
+  if (status === "DEAD") return `DEAD · ${attempts}/${maxAttempts}`;
+  if (status === "RETRYING") return `RETRYING · ${attempts}/${maxAttempts}`;
   // PENDING with no attempt yet has no ratio worth printing: "0/5" reads as a
   // failure that hasn't happened. Once it has been tried, the count is news.
-  return {
-    label: attempts > 0 ? `QUEUED · ${attempts}/${maxAttempts}` : "QUEUED",
-    tone: "inflight",
-  };
+  return attempts > 0 ? `QUEUED · ${attempts}/${maxAttempts}` : "QUEUED";
 }
 ```
+
+- [ ] **Step 3b: Teach the six-family system about `DeliveryStatus`**
+
+`src/lib/status.ts` states the rule: *every enum value in the app maps into exactly one family; nothing
+gets a bespoke colour*, and unknown values fall through to neutral. `DeliveryStatus` is the one app enum
+that map has never covered, so a `DEAD` delivery would render neutral — the same grey as a spare laptop
+— which is precisely the drift the six-family system exists to prevent.
+
+In the `MAP` in `src/lib/status.ts`, the line that currently reads:
+
+```ts
+  PENDING: "attention", APPROVED: "settled", REJECTED: "fault",
+```
+
+gains the DeliveryStatus values it doesn't already carry (`PENDING` is there, and `attention` is right
+for a queued delivery too):
+
+```ts
+  PENDING: "attention", APPROVED: "settled", REJECTED: "fault",
+  // DeliveryStatus (Phase 8): DELIVERED landed, DEAD spent its budget,
+  // RETRYING is failing but not finished.
+  DELIVERED: "settled", DEAD: "fault", RETRYING: "attention",
+```
+
+Check the whole `MAP` for an existing `DELIVERED` or `DEAD` key first — if either is already claimed by
+another namespace, use `StatusPill`'s `ns` parameter rather than overwriting it.
 
 - [ ] **Step 4: Write the failing test for the signing half**
 
@@ -1732,7 +1767,7 @@ export function signPayload(body: string, secret: string): string {
 npx vitest run src/lib/webhooks.test.ts src/server/webhooks/sign.test.ts
 ```
 
-Expected: PASS, 18 tests.
+Expected: PASS, 17 tests.
 
 - [ ] **Step 7: Mutation-test them**
 
@@ -1746,8 +1781,2175 @@ Expected: PASS, 18 tests.
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
-git add src/lib/webhooks.ts src/lib/webhooks.test.ts src/server/webhooks/sign.ts src/server/webhooks/sign.test.ts
+git add src/lib/webhooks.ts src/lib/webhooks.test.ts src/lib/status.ts src/server/webhooks/sign.ts src/server/webhooks/sign.test.ts
 git commit -m "feat(webhooks): the event list, the envelope, the chip, and the signature"
 ```
+
+---
+
+### Task 7: Endpoint actions — the secret is encrypted, and shown once
+
+Scope decisions #4 and #5. The signing secret is generated server-side, returned to the caller
+**exactly once**, and stored as ciphertext bound to its own row. Nothing ever reads it back for
+display; the only reader is the worker, when it signs.
+
+**Files:**
+- Create: `src/server/modules/admin/webhook-actions.ts`
+- Modify: `src/server/modules/admin/queries.ts`
+
+**Before you start:** `secretAad` belongs in `src/server/webhooks/sign.ts`, not here. This file carries
+`"use server"`, which makes every export a server action — and Task 10's worker, a plain `tsx` script
+outside Next, has to call the same function to decrypt. Add it to `sign.ts` (created in Task 6) now:
+
+```ts
+/** AAD binds ciphertext to its endpoint row — a secret lifted into another row refuses to decrypt. */
+export function secretAad(endpointId: string): string {
+  return `webhook:${endpointId}`;
+}
+```
+
+- [ ] **Step 1: Write the actions**
+
+Create `src/server/modules/admin/webhook-actions.ts`:
+
+```ts
+"use server";
+
+import { randomBytes } from "node:crypto";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { prisma } from "@/server/db/client";
+import { actionRole } from "@/server/auth/guards";
+import { checkRate } from "@/server/rate-limit";
+import { writeAudit } from "@/server/audit";
+import { encryptSecret } from "@/server/crypto";
+import { secretAad } from "@/server/webhooks/sign";
+import { WEBHOOK_EVENTS, parseEvents } from "@/lib/webhooks";
+import { asActionResult } from "@/server/modules/admin/user-actions";
+import {
+  conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
+} from "@/server/action-result";
+
+const PATHS = ["/admin/webhooks", "/admin/webhooks/deliveries"] as const;
+
+function revalidateAll() {
+  for (const path of PATHS) revalidatePath(path);
+}
+
+function newSecret(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+/**
+ * The URL an endpoint POSTs to. http is allowed because this deploys to a single
+ * machine where a receiver may legitimately be another container on the same
+ * host — but the payload is signed either way, which is what makes that safe.
+ */
+const urlSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter the URL to POST to")
+  .max(500)
+  .refine((v) => /^https?:\/\//i.test(v), "Must start with http:// or https://")
+  .refine((v) => {
+    try {
+      new URL(v);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "That isn't a valid URL");
+
+const eventsSchema = z
+  .array(z.enum(WEBHOOK_EVENTS as unknown as [string, ...string[]]))
+  .min(1, "Pick at least one event — an endpoint with none would never fire");
+
+const createSchema = z.object({ url: urlSchema, events: eventsSchema });
+
+/**
+ * The ONLY moment the plaintext secret exists outside the worker. Scope decision
+ * #5: it is returned once, here, and never readable again — a decrypt-and-display
+ * path would need its own SECRET_READ audit trail, reveal countdown and role gate,
+ * all to re-show a value the operator already pasted into the receiving system.
+ * `rotateSecret` answers "I lost it" without any of that.
+ */
+export async function createEndpoint(
+  input: unknown,
+): Promise<ActionResult<{ id: string; secret: string }>> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = createSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  const secret = newSecret();
+  const result = await asActionResult(async () =>
+    prisma.$transaction(async (tx) => {
+      // Two statements rather than one: the AAD needs the row's id, which only
+      // exists after the insert. The placeholder never leaves this transaction.
+      const endpoint = await tx.webhookEndpoint.create({
+        data: { url: parsed.data.url, events: parseEvents(parsed.data.events), secret: "", active: true },
+      });
+      await tx.webhookEndpoint.update({
+        where: { id: endpoint.id },
+        data: { secret: encryptSecret(secret, secretAad(endpoint.id)) },
+      });
+      await writeAudit(tx, {
+        actorId: actor.id,
+        actorLabel: actor.name,
+        entityType: "webhook-endpoint",
+        entityId: endpoint.id,
+        action: "create",
+        // The secret is never in the diff — AuditEntry is append-only, so a
+        // secret written there would be unremovable by construction.
+        diff: {
+          url: { from: null, to: endpoint.url },
+          events: { from: null, to: parseEvents(parsed.data.events) },
+        },
+      });
+      return endpoint.id;
+    }),
+  );
+  if (typeof result !== "string") return result;
+  revalidateAll();
+  return ok({ id: result, secret });
+}
+
+const idSchema = z.object({ id: z.string().min(1) });
+
+export async function rotateSecret(input: unknown): Promise<ActionResult<{ secret: string }>> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  const secret = newSecret();
+  const failure = await asActionResult(
+    async () =>
+      prisma.$transaction(async (tx) => {
+        const endpoint = await tx.webhookEndpoint.findUnique({ where: { id: parsed.data.id } });
+        if (!endpoint) return conflict("That endpoint no longer exists.");
+        await tx.webhookEndpoint.update({
+          where: { id: endpoint.id },
+          data: { secret: encryptSecret(secret, secretAad(endpoint.id)) },
+        });
+        await writeAudit(tx, {
+          actorId: actor.id,
+          actorLabel: actor.name,
+          entityType: "webhook-endpoint",
+          entityId: endpoint.id,
+          action: "rotate-secret",
+          // No values, only the fact and the URL it belongs to: a rotation is
+          // worth recording precisely because deliveries will start failing at
+          // the far end until someone updates the receiver.
+          diff: { url: { from: endpoint.url, to: endpoint.url } },
+        });
+        return null;
+      }),
+    { goneMessage: "That endpoint no longer exists." },
+  );
+  if (failure) return failure;
+  revalidateAll();
+  return ok({ secret });
+}
+
+const updateSchema = z.object({ id: z.string().min(1), url: urlSchema, events: eventsSchema });
+
+export async function updateEndpoint(input: unknown): Promise<ActionResult<null>> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = updateSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const events = parseEvents(parsed.data.events);
+
+  const failure = await asActionResult(
+    async () =>
+      prisma.$transaction(async (tx) => {
+        const endpoint = await tx.webhookEndpoint.findUnique({ where: { id: parsed.data.id } });
+        if (!endpoint) return conflict("That endpoint no longer exists.");
+        const before = parseEvents(endpoint.events);
+        if (endpoint.url === parsed.data.url && before.join(",") === events.join(",")) return null;
+
+        // Guarded on the URL's before-value. `events` is a String[] and cannot
+        // be compared in a Prisma where, so the URL carries the guard — which is
+        // enough, because the editor saves both fields together.
+        const written = await tx.webhookEndpoint.updateMany({
+          where: { id: endpoint.id, url: endpoint.url },
+          data: { url: parsed.data.url, events },
+        });
+        if (written.count === 0) return conflict("Someone else just changed that endpoint — refresh.");
+
+        await writeAudit(tx, {
+          actorId: actor.id,
+          actorLabel: actor.name,
+          entityType: "webhook-endpoint",
+          entityId: endpoint.id,
+          action: "update",
+          diff: {
+            url: { from: endpoint.url, to: parsed.data.url },
+            events: { from: before, to: events },
+          },
+        });
+        return null;
+      }),
+    { goneMessage: "That endpoint no longer exists." },
+  );
+  if (failure) return failure;
+  revalidateAll();
+  return ok(null);
+}
+
+const activeSchema = z.object({ id: z.string().min(1), active: z.boolean() });
+
+export async function setEndpointActive(input: unknown): Promise<ActionResult<null>> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = activeSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const next = parsed.data.active;
+
+  const failure = await asActionResult(
+    async () =>
+      prisma.$transaction(async (tx) => {
+        const endpoint = await tx.webhookEndpoint.findUnique({ where: { id: parsed.data.id } });
+        if (!endpoint) return conflict("That endpoint no longer exists.");
+        if (endpoint.active === next) return null;
+        const written = await tx.webhookEndpoint.updateMany({
+          where: { id: endpoint.id, active: endpoint.active },
+          data: { active: next },
+        });
+        if (written.count === 0) return conflict("Someone else just changed that endpoint — refresh.");
+        await writeAudit(tx, {
+          actorId: actor.id,
+          actorLabel: actor.name,
+          entityType: "webhook-endpoint",
+          entityId: endpoint.id,
+          action: next ? "enable" : "disable",
+          diff: { url: { from: endpoint.url, to: endpoint.url }, active: { from: endpoint.active, to: next } },
+        });
+        return null;
+      }),
+    { goneMessage: "That endpoint no longer exists." },
+  );
+  if (failure) return failure;
+  revalidateAll();
+  return ok(null);
+}
+
+export async function deleteEndpoint(input: unknown): Promise<ActionResult<null>> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  const failure = await asActionResult(
+    async () =>
+      prisma.$transaction(async (tx) => {
+        const endpoint = await tx.webhookEndpoint.findUnique({ where: { id: parsed.data.id } });
+        if (!endpoint) return conflict("That endpoint no longer exists.");
+        // WebhookDelivery.endpointId is onDelete: Restrict, so an endpoint with
+        // history cannot be deleted — and shouldn't be: the deliveries page is a
+        // record of what was sent, and deleting the endpoint would orphan it.
+        const history = await tx.webhookDelivery.count({ where: { endpointId: endpoint.id } });
+        if (history > 0) {
+          return conflict(
+            `That endpoint has ${history} delivery ${history === 1 ? "attempt" : "attempts"} on record. Disable it instead — deleting it would erase the history of what was sent.`,
+          );
+        }
+        await tx.webhookEndpoint.delete({ where: { id: endpoint.id } });
+        await writeAudit(tx, {
+          actorId: actor.id,
+          actorLabel: actor.name,
+          entityType: "webhook-endpoint",
+          entityId: endpoint.id,
+          action: "delete",
+          // The URL is the only thing that can name a deleted endpoint later —
+          // entityLabels cannot resolve a row that is gone.
+          diff: { url: { from: endpoint.url, to: null } },
+        });
+        return null;
+      }),
+    { goneMessage: "That endpoint no longer exists." },
+  );
+  if (failure) return failure;
+  revalidateAll();
+  return ok(null);
+}
+```
+
+- [ ] **Step 2: Add the endpoint query**
+
+Append to `src/server/modules/admin/queries.ts`:
+
+```ts
+import { parseEvents, type WebhookEvent } from "@/lib/webhooks";
+
+export interface EndpointRow {
+  id: string;
+  url: string;
+  events: WebhookEvent[];
+  active: boolean;
+  /** how many attempts this endpoint has on record, and how many died */
+  attempts: number;
+  dead: number;
+}
+
+export async function listEndpoints(): Promise<EndpointRow[]> {
+  const rows = await prisma.webhookEndpoint.findMany({ orderBy: [{ url: "asc" }] });
+  // Two grouped counts rather than N per-row queries.
+  const [all, dead] = await Promise.all([
+    prisma.webhookDelivery.groupBy({ by: ["endpointId"], _count: { _all: true } }),
+    prisma.webhookDelivery.groupBy({
+      by: ["endpointId"],
+      where: { status: "DEAD" },
+      _count: { _all: true },
+    }),
+  ]);
+  const allBy = new Map(all.map((g) => [g.endpointId, g._count._all]));
+  const deadBy = new Map(dead.map((g) => [g.endpointId, g._count._all]));
+  // The secret is never selected out of this function — nothing above the
+  // worker has a reason to hold ciphertext, let alone plaintext.
+  return rows.map((r) => ({
+    id: r.id,
+    url: r.url,
+    events: parseEvents(r.events),
+    active: r.active,
+    attempts: allBy.get(r.id) ?? 0,
+    dead: deadBy.get(r.id) ?? 0,
+  }));
+}
+```
+
+- [ ] **Step 3: Teach `entityLabels` about endpoints**
+
+In `src/server/modules/audit/queries.ts`, add `webhook-endpoint` alongside the types added in Task 2,
+following the same `Promise.all` + `byType.has(...)` shape:
+
+```ts
+    byType.has("webhook-endpoint")
+      ? prisma.webhookEndpoint.findMany({
+          where: { id: { in: [...byType.get("webhook-endpoint")!] } },
+          select: { id: true, url: true },
+        })
+      : [],
+```
+
+and beside the other `map.set` lines:
+
+```ts
+  for (const e of endpoints) map.set(`webhook-endpoint:${e.id}`, { label: e.url, href: "/admin/webhooks" });
+```
+
+Also add `"feature-flag"` and `"webhook-endpoint"` to `AUDIT_ENTITY_TYPES` in `src/lib/audit-list.ts`,
+so `/audit`'s Entity facet can filter to them. A deleted endpoint keeps the truncated-id fallback,
+which is why `deleteEndpoint` puts the URL in its diff.
+
+- [ ] **Step 4: Typecheck, lint, commit**
+
+```bash
+npx tsc --noEmit && npm run lint && npm run test
+git add src/server/modules/admin/webhook-actions.ts src/server/modules/admin/queries.ts src/server/modules/audit/queries.ts src/lib/audit-list.ts
+git commit -m "feat(webhooks): endpoints, with the signing secret encrypted and shown once"
+```
+
+---
+### Task 8: `/admin/webhooks`
+
+The endpoint list and its editor. The one screen in this phase with a genuinely unusual obligation:
+**the secret is visible exactly once**, in the response to create or rotate, and there is no way back
+to it. The UI has to make that obvious *before* the operator clicks away.
+
+**Files:**
+- Create: `src/components/admin/endpoint-editor.tsx`, `src/app/(app)/admin/webhooks/page.tsx`
+
+- [ ] **Step 1: Write the editor component**
+
+Create `src/components/admin/endpoint-editor.tsx`:
+
+```tsx
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Banner } from "@/components/ui/banner";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { FormError } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
+import { Menu } from "@/components/ui/menu";
+import { Pill } from "@/components/ui/pill";
+import { useToast } from "@/components/ui/toast";
+import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { EVENT_LABELS, WEBHOOK_EVENTS, type WebhookEvent } from "@/lib/webhooks";
+import {
+  createEndpoint, deleteEndpoint, rotateSecret, setEndpointActive, updateEndpoint,
+} from "@/server/modules/admin/webhook-actions";
+import type { EndpointRow } from "@/server/modules/admin/queries";
+import type { ActionResult } from "@/server/action-result";
+
+/**
+ * Scope decision #5: this is the only moment the plaintext secret exists outside
+ * the worker. It is deliberately loud and deliberately NOT dismissible by a
+ * refresh — the operator has to acknowledge it, because there is no second copy.
+ */
+function SecretOnce({ secret, onDone }: { secret: string; onDone: () => void }) {
+  return (
+    <Banner tone="attention" title="Copy this signing secret now — it is not shown again">
+      <span className="flex flex-col gap-2">
+        <code className="select-all break-all rounded-(--radius-ctl) border border-border bg-canvas px-2 py-1.5 font-mono text-[11px] text-fg">
+          {secret}
+        </code>
+        <span className="text-[11px] text-fg-muted">
+          Paste it into the receiving system as the shared secret for the{" "}
+          <code className="font-mono">x-backroom-signature</code> header. If you lose it, rotate — the
+          value can&apos;t be read back out of the database.
+        </span>
+        <span>
+          <Button size="sm" variant="secondary" onClick={onDone}>
+            I&apos;ve copied it
+          </Button>
+        </span>
+      </span>
+    </Banner>
+  );
+}
+
+/** Shared plumbing: same ActionResult ladder as every other admin screen. */
+function useRunner(claimedFieldKeys: string[] = []) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+
+  function run<T>(fn: () => Promise<ActionResult<T>>, okMsg: string, onOk?: (data: T) => void) {
+    setError(null);
+    setFieldErrors({});
+    startTransition(async () => {
+      const res = await fn();
+      if (res.ok) {
+        toast(okMsg, "settled");
+        onOk?.(res.data);
+        router.refresh();
+      } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
+      else if (res.kind === "validation") {
+        const errs = res.fieldErrors ?? {};
+        setFieldErrors(errs);
+        // A key no FormError claims must not dead-end silently (the Phase 7
+        // lesson): fall it back into the banner.
+        const unclaimed = Object.keys(errs).find((k) => !claimedFieldKeys.includes(k));
+        if (unclaimed) setError(errs[unclaimed]);
+      } else setError(res.message);
+    });
+  }
+
+  return { pending, error, fieldErrors, retryAfter, setRetryAfter, run };
+}
+
+function EventChecks({
+  selected,
+  disabled,
+  onToggle,
+  namePrefix,
+}: {
+  selected: WebhookEvent[];
+  disabled: boolean;
+  onToggle: (event: WebhookEvent, on: boolean) => void;
+  namePrefix: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      {WEBHOOK_EVENTS.map((event) => (
+        <label key={event} className="flex items-center gap-2 text-[11.5px] text-fg-secondary">
+          <Checkbox
+            checked={selected.includes(event)}
+            disabled={disabled}
+            aria-label={`${namePrefix}: ${EVENT_LABELS[event]}`}
+            onChange={(e) => onToggle(event, e.target.checked)}
+          />
+          <span>{EVENT_LABELS[event]}</span>
+          <span className="font-mono text-[10px] text-fg-faint">{event}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+export function EndpointCard({ endpoint }: { endpoint: EndpointRow }) {
+  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner(["url"]);
+  const [url, setUrl] = useState(endpoint.url);
+  const [events, setEvents] = useState<WebhookEvent[]>(endpoint.events);
+  const [freshSecret, setFreshSecret] = useState<string | null>(null);
+
+  const dirty = url !== endpoint.url || events.join(",") !== endpoint.events.join(",");
+
+  return (
+    <Card>
+      <CardHeader
+        title={<span className="font-mono text-[12.5px]">{endpoint.url}</span>}
+        actions={
+          <span className="flex items-center gap-2">
+            {!endpoint.active && <Pill>DISABLED</Pill>}
+            {endpoint.dead > 0 && (
+              <Link
+                href="/admin/webhooks/deliveries?state=DEAD"
+                className="font-mono text-[10.5px] text-accent hover:underline"
+              >
+                {endpoint.dead} dead
+              </Link>
+            )}
+            <span className="font-mono text-[10.5px] text-fg-muted">
+              {endpoint.attempts} {endpoint.attempts === 1 ? "attempt" : "attempts"}
+            </span>
+            <Menu
+              trigger={(props) => (
+                <button
+                  type="button"
+                  {...props}
+                  aria-label={`Actions for ${endpoint.url}`}
+                  className="rounded-(--radius-ctl) px-2 py-0.5 text-fg-muted hover:bg-surface-subtle"
+                >
+                  ⋯
+                </button>
+              )}
+              items={[
+                {
+                  label: endpoint.active ? "Disable endpoint" : "Enable endpoint",
+                  onSelect: () =>
+                    run(
+                      () => setEndpointActive({ id: endpoint.id, active: !endpoint.active }),
+                      endpoint.active ? "Endpoint disabled" : "Endpoint enabled",
+                    ),
+                },
+                {
+                  label: "Rotate signing secret",
+                  onSelect: () =>
+                    run(
+                      () => rotateSecret({ id: endpoint.id }),
+                      "Secret rotated — copy the new one",
+                      (data) => setFreshSecret(data.secret),
+                    ),
+                },
+                {
+                  label: "Delete endpoint",
+                  danger: true,
+                  onSelect: () => run(() => deleteEndpoint({ id: endpoint.id }), "Endpoint deleted"),
+                },
+              ]}
+            />
+          </span>
+        }
+      />
+      <CardBody className="flex flex-col gap-3">
+        {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+        {error && <Banner tone="fault" title={error} />}
+        {freshSecret && <SecretOnce secret={freshSecret} onDone={() => setFreshSecret(null)} />}
+
+        <div className="flex flex-col gap-1">
+          <Input
+            aria-label={`URL for ${endpoint.url}`}
+            value={url}
+            invalid={!!fieldErrors.url}
+            className="w-full max-w-[420px] py-1.5 font-mono text-xs"
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <FormError>{fieldErrors.url}</FormError>
+        </div>
+
+        <EventChecks
+          selected={events}
+          disabled={pending}
+          namePrefix={endpoint.url}
+          onToggle={(event, on) =>
+            setEvents((prev) =>
+              on ? [...prev, event] : prev.filter((e) => e !== event),
+            )
+          }
+        />
+
+        {dirty && (
+          <span>
+            <Button
+              size="sm"
+              variant="primary"
+              loading={pending}
+              onClick={() => run(() => updateEndpoint({ id: endpoint.id, url, events }), "Endpoint saved")}
+            >
+              Save changes
+            </Button>
+          </span>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+export function NewEndpointCard() {
+  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner(["url"]);
+  const [url, setUrl] = useState("");
+  const [events, setEvents] = useState<WebhookEvent[]>([]);
+  const [freshSecret, setFreshSecret] = useState<string | null>(null);
+
+  return (
+    <Card>
+      <CardHeader title="New endpoint" />
+      <CardBody className="flex flex-col gap-3">
+        {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+        {error && <Banner tone="fault" title={error} />}
+        {freshSecret && <SecretOnce secret={freshSecret} onDone={() => setFreshSecret(null)} />}
+
+        <div className="flex flex-col gap-1">
+          <Input
+            aria-label="New endpoint URL"
+            placeholder="https://example.com/hooks/backroom"
+            value={url}
+            invalid={!!fieldErrors.url}
+            className="w-full max-w-[420px] py-1.5 font-mono text-xs"
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <FormError>{fieldErrors.url}</FormError>
+        </div>
+
+        <EventChecks
+          selected={events}
+          disabled={pending}
+          namePrefix="New endpoint"
+          onToggle={(event, on) =>
+            setEvents((prev) => (on ? [...prev, event] : prev.filter((e) => e !== event)))
+          }
+        />
+        <FormError>{fieldErrors.events}</FormError>
+
+        <span>
+          <Button
+            size="sm"
+            variant="primary"
+            loading={pending}
+            onClick={() =>
+              run(
+                () => createEndpoint({ url, events }),
+                "Endpoint created — copy its secret",
+                (data) => {
+                  setFreshSecret(data.secret);
+                  setUrl("");
+                  setEvents([]);
+                },
+              )
+            }
+          >
+            Create endpoint
+          </Button>
+        </span>
+      </CardBody>
+    </Card>
+  );
+}
+```
+
+`fieldErrors.events` gets its own `FormError` below the checkboxes, so the "pick at least one event"
+refusal lands where the operator is looking rather than in the banner.
+
+- [ ] **Step 2: Write the page**
+
+Create `src/app/(app)/admin/webhooks/page.tsx`:
+
+```tsx
+import Link from "next/link";
+import { requireRole } from "@/server/auth/guards";
+import { PageHeader } from "@/components/ui/page-header";
+import { Banner } from "@/components/ui/banner";
+import { EndpointCard, NewEndpointCard } from "@/components/admin/endpoint-editor";
+import { listEndpoints } from "@/server/modules/admin/queries";
+
+export default async function WebhooksPage() {
+  await requireRole("admin");
+  const endpoints = await listEndpoints();
+
+  return (
+    <>
+      <PageHeader
+        title="Webhooks"
+        actions={
+          <Link href="/admin/webhooks/deliveries" className="text-[12px] font-medium text-accent hover:underline">
+            Delivery attempts →
+          </Link>
+        }
+      />
+      <div className="flex max-w-[720px] flex-col gap-3">
+        <Banner tone="neutral" title="Every POST is signed, and every attempt is recorded">
+          The signing secret is shown once when you create or rotate it and is stored encrypted, so it
+          can never be read back — only replaced. A failed delivery retries five times with a widening
+          gap before it dead-letters, and a dead one can be replayed.
+        </Banner>
+
+        {endpoints.length === 0 && (
+          <p className="text-xs text-fg-muted">
+            No endpoints yet — nothing is being notified when approvals execute, offboardings complete
+            or purchases are approved.
+          </p>
+        )}
+
+        {endpoints.map((endpoint) => (
+          <EndpointCard key={endpoint.id} endpoint={endpoint} />
+        ))}
+
+        <NewEndpointCard />
+      </div>
+    </>
+  );
+}
+```
+
+- [ ] **Step 3: Typecheck, lint, look at it**
+
+```bash
+npx tsc --noEmit && npm run lint
+```
+
+In the preview as `admin@thebackroomop.com`, `/admin/webhooks`:
+
+1. Empty state, then create an endpoint at `http://localhost:4999/hook` with **An approval finished
+   executing** ticked. The `attention`-toned banner appears with a `select-all` secret and an "I've
+   copied it" button.
+2. Reload the page — **the secret is gone and there is no way to see it again.** That is the design.
+3. Try creating one with no events ticked → the refusal renders under the checkboxes, not in the banner.
+4. Try `not-a-url` → refused under the URL field.
+5. Rotate the secret from the ⋯ menu → a new value, again once.
+6. Delete the endpoint → it goes (it has no deliveries yet). Then re-create it and run Task 10's Step 4
+   end-to-end check against it, so the next step has a real delivery to look at.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/components/admin/endpoint-editor.tsx "src/app/(app)/admin/webhooks/page.tsx"
+git commit -m "feat(webhooks): endpoints, and a secret you get exactly one look at"
+```
+
+---
+
+### Task 9: The emitter, and the index that stops a double-click
+
+The producer that has never existed. `emitWebhook` writes rows and performs **no I/O** — scope
+decision #10 — because an unreachable endpoint must never roll back the inventory change that
+mentioned it.
+
+**Files:**
+- Create: `prisma/migrations/20260819090000_job_one_live_deliver_per_delivery/migration.sql`,
+  `src/server/webhooks/emit.ts`
+- Modify: `src/worker/execute-approval.ts`, `src/server/modules/offboarding/actions.ts`,
+  `src/server/modules/purchases/actions.ts`
+
+- [ ] **Step 1: Write the migration**
+
+Create `prisma/migrations/20260819090000_job_one_live_deliver_per_delivery/migration.sql`:
+
+```sql
+-- At most one live delivery job per WebhookDelivery row. The mirror of
+-- Job_one_live_execute_per_approval (20260814090100_integrity_constraints):
+-- Task 13's Replay re-enqueues, and a double-click would otherwise put two
+-- workers on one delivery and POST the same envelope twice.
+CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
+  ON "Job" ((payload->>'deliveryId'))
+  WHERE "status" IN ('PENDING', 'RUNNING') AND "type" = 'DELIVER_WEBHOOK';
+```
+
+Apply it and regenerate the client:
+
+```bash
+npx prisma migrate deploy && npx prisma generate
+```
+
+Expected: `1 migration found` … `Applied`. This is a raw-SQL index with no `schema.prisma` counterpart,
+exactly like the three integrity constraints before it — `prisma db pull` would not reproduce it, which
+is why HANDOVER §8 tracks that gap rather than pretending it doesn't exist.
+
+- [ ] **Step 2: Write the emitter**
+
+Create `src/server/webhooks/emit.ts`:
+
+```ts
+import type { Prisma } from "@prisma/client";
+// Relative, not "@/": src/worker runs under tsx and every worker-side module
+// in this repo imports relatively (see execute-approval.ts). emit.ts is imported
+// from BOTH the worker and Next server actions, so it has to use the style that
+// works in both.
+import { parseEvents, type WebhookEvent } from "../../lib/webhooks";
+
+/**
+ * The only producer of DELIVER_WEBHOOK jobs. Called from INSIDE the transaction
+ * that writes the domain change, so a webhook is never emitted for something
+ * that then rolled back.
+ *
+ * Scope decision #10: this function performs NO I/O and must never learn to.
+ * An endpoint being unreachable is a delivery problem; rolling back an asset
+ * lifecycle change because someone's server is down would be an inventory
+ * problem, and a much worse one. All it does is write rows.
+ *
+ * Scope decision #6: one WebhookDelivery (the ledger the page reads) plus one
+ * Job (the retry engine) per subscribed endpoint, created together so they
+ * cannot disagree about whether a delivery exists.
+ */
+export async function emitWebhook(
+  tx: Prisma.TransactionClient,
+  event: WebhookEvent,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const endpoints = await tx.webhookEndpoint.findMany({
+    where: { active: true, events: { has: event } },
+    select: { id: true, events: true },
+  });
+
+  for (const endpoint of endpoints) {
+    // `events` is a raw String[]; the SQL `has` above matched the stored text,
+    // and parseEvents is the same normalisation the editor and worker apply, so
+    // a renamed event can't be resurrected by a stale row.
+    if (!parseEvents(endpoint.events).includes(event)) continue;
+
+    const delivery = await tx.webhookDelivery.create({
+      data: {
+        endpointId: endpoint.id,
+        event,
+        payload: data as Prisma.InputJsonObject,
+        status: "PENDING",
+      },
+    });
+    await tx.job.create({
+      data: { type: "DELIVER_WEBHOOK", payload: { deliveryId: delivery.id } },
+    });
+  }
+}
+```
+
+`data` is the envelope's `data` only — `webhookEnvelope` wraps it at delivery time (Task 10), so the
+stored payload stays the facts and the envelope stays a presentation concern.
+
+- [ ] **Step 3: Emit on `approval.executed`**
+
+In `src/worker/execute-approval.ts`, the execution transaction ends by writing the approval's audit
+entry. Add the import at the top:
+
+```ts
+import { emitWebhook } from "../server/webhooks/emit";
+```
+
+Relative, matching every other import in that file — the worker runs under `tsx`, not Next.
+
+and emit immediately after that `tx.auditEntry.create({ … action: "executed" … })` call, still inside
+the same `tx`:
+
+```ts
+    await emitWebhook(tx, "approval.executed", {
+      approvalId: approval.id,
+      refNo: approval.refNo,
+      type: approval.type,
+      assetId: approval.assetId,
+      assetTag: asset?.tag ?? null,
+    });
+```
+
+Scope decision #14 — ids and refNos, never whole rows. Use whatever local the surrounding code already
+holds for the asset; if it is not in scope at that point, pass `assetTag: null` rather than adding a
+query, because the consumer has `assetId`.
+
+- [ ] **Step 4: Emit on `offboarding.completed`**
+
+Import it as `@/server/webhooks/emit` here — this file is a Next module, unlike the worker.
+
+In `src/server/modules/offboarding/actions.ts`, `completeOffboarding` writes an audit entry with
+`action: "offboarding.completed"` carrying the decision set. Add the import and emit inside the same
+transaction, directly after that `writeAudit` call:
+
+```ts
+    await emitWebhook(tx, "offboarding.completed", {
+      employeeId: employee.id,
+      employeeNo: employee.employeeNo,
+      decisions: decisions.length,
+    });
+```
+
+Use the same `decisions` local the audit diff already uses. If its name differs in the shipped code,
+match the shipped name rather than renaming it — this is the one number the event is worth sending.
+
+- [ ] **Step 5: Emit on `purchase_request.completed`**
+
+In `src/server/modules/purchases/actions.ts`, `runTransition` handles every purchase transition inside
+one transaction and sets `data.completedAt = now` when `action === "complete"`. Emit inside that same
+transaction, after the NoteEntry and `writeAudit` calls, guarded on the action:
+
+```ts
+    if (action === "complete") {
+      await emitWebhook(tx, "purchase_request.completed", {
+        purchaseRequestId: request.id,
+        refNo: request.refNo,
+      });
+    }
+```
+
+Match the local names `runTransition` actually uses for the request row.
+
+- [ ] **Step 6: Prove the emitter writes nothing when nobody is listening**
+
+There are no endpoints in the seed until Task 12, which makes this the cheapest possible check that
+the emitter is inert by default:
+
+```bash
+npm run db:seed
+npm run worker:once
+docker exec inventory-db-1 psql -U inventory -d inventory -c "SELECT count(*) FROM \"WebhookDelivery\";"
+```
+
+Expected: `0`. The seed's `APR-2035` demo job still runs and still fails the way it always has —
+emitting is additive and must not have changed it.
+
+- [ ] **Step 7: Typecheck, lint, full unit suite, commit**
+
+```bash
+npx tsc --noEmit && npm run lint && npm run test
+git add prisma/migrations/20260819090000_job_one_live_deliver_per_delivery src/server/webhooks/emit.ts src/worker/execute-approval.ts src/server/modules/offboarding/actions.ts src/server/modules/purchases/actions.ts
+git commit -m "feat(webhooks): the producer that never existed, and the index that stops a double-send"
+```
+
+---
+
+### Task 10: The worker delivers for real
+
+`src/worker/index.ts` currently answers every `DELIVER_WEBHOOK` job with
+`status: "DEAD", lastError: "webhook delivery ships in Phase 8"`. This is that phase.
+
+The delivery handler owns one subtle obligation: **the `WebhookDelivery` row is a mirror of the job,
+not a second retry loop** (scope decision #6). The worker's existing `catch` already does backoff and
+dead-letters at `MAX_ATTEMPTS`; the handler's job is to make the ledger say the same thing.
+
+**Files:**
+- Create: `src/worker/deliver-webhook.ts`
+- Modify: `src/worker/index.ts`
+
+- [ ] **Step 1: Write the delivery handler**
+
+Create `src/worker/deliver-webhook.ts`:
+
+```ts
+import { prisma } from "../server/db/client";
+import { decryptSecret } from "../server/crypto";
+// secretAad and the signer both live in sign.ts precisely so the worker never
+// has to import webhook-actions.ts, which carries "use server".
+import { SIGNATURE_HEADER, secretAad, signPayload } from "../server/webhooks/sign";
+import { webhookEnvelope } from "../lib/webhooks";
+
+const TIMEOUT_MS = 10_000;
+
+/** A delivery that can never succeed — dead-letter it now instead of burning five attempts. */
+class Permanent extends Error {}
+
+/**
+ * One attempt. Throwing hands control back to the worker's existing catch, which
+ * owns backoff and the dead-letter at MAX_ATTEMPTS — so this function must NOT
+ * implement its own retry. What it does own is keeping WebhookDelivery in step
+ * with the job, which is what makes the page's `DEAD · 5/5` chip honest.
+ *
+ * `attempts` is the job's own count, passed in, so the two can never diverge.
+ */
+export async function deliverWebhook(deliveryId: string, attempts: number): Promise<void> {
+  const delivery = await prisma.webhookDelivery.findUnique({
+    where: { id: deliveryId },
+    include: { endpoint: true },
+  });
+  // A delivery whose row is gone is not a failure to retry — nothing to send.
+  if (!delivery) throw new Permanent(`WebhookDelivery ${deliveryId} no longer exists`);
+  if (delivery.status === "DELIVERED") return;
+  if (!delivery.endpoint.active) {
+    throw new Permanent(`Endpoint ${delivery.endpoint.url} is disabled`);
+  }
+
+  const body = JSON.stringify(
+    webhookEnvelope(
+      delivery.id,
+      delivery.event,
+      delivery.createdAt,
+      (delivery.payload ?? {}) as Record<string, unknown>,
+    ),
+  );
+  // Sign the exact bytes we send. Re-serialising on either side is how
+  // signatures start disagreeing over key order.
+  const secret = decryptSecret(delivery.endpoint.secret, secretAad(delivery.endpoint.id));
+  const signature = signPayload(body, secret);
+
+  let response: Response;
+  try {
+    response = await fetch(delivery.endpoint.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [SIGNATURE_HEADER]: signature,
+        "user-agent": "backroom-inventory/1",
+      },
+      body,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    // Connection refused, DNS failure, timeout — all worth retrying.
+    await mark(delivery.id, "RETRYING", attempts, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+
+  if (!response.ok) {
+    const detail = `${response.status} ${response.statusText}`.trim();
+    // 4xx (except 408/429) means the receiver understood and refused. Retrying
+    // a 404 or a 401 five times just delays the same answer.
+    const permanent = response.status >= 400 && response.status < 500
+      && response.status !== 408 && response.status !== 429;
+    await mark(delivery.id, permanent ? "DEAD" : "RETRYING", attempts, detail);
+    if (permanent) throw new Permanent(detail);
+    throw new Error(detail);
+  }
+
+  await prisma.webhookDelivery.update({
+    where: { id: delivery.id },
+    data: { status: "DELIVERED", attempts, lastError: null, deliveredAt: new Date(), nextAttemptAt: null },
+  });
+}
+
+async function mark(
+  id: string,
+  status: "RETRYING" | "DEAD",
+  attempts: number,
+  lastError: string,
+): Promise<void> {
+  await prisma.webhookDelivery.update({
+    where: { id },
+    data: { status, attempts, lastError: lastError.slice(0, 1000) },
+  });
+}
+
+export { Permanent as PermanentDeliveryError };
+```
+
+`nextAttemptAt` is deliberately left alone on a failure: the job's `runAt` is the real schedule, and a
+second copy of it on the delivery row is exactly the drift scope decision #6 exists to prevent. Task 13
+reads the job when it wants to show "next attempt".
+
+- [ ] **Step 2: Replace the dead-letter branch**
+
+In `src/worker/index.ts`, add the import:
+
+```ts
+import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";
+```
+
+Replace the whole `if (job.type === "DELIVER_WEBHOOK") { … }` block in `handle()` with:
+
+```ts
+  if (job.type === "DELIVER_WEBHOOK") {
+    const deliveryId = String((job.payload as { deliveryId?: unknown } | null)?.deliveryId ?? "");
+    if (!deliveryId) throw new Error("DELIVER_WEBHOOK job has no deliveryId");
+    await deliverWebhook(deliveryId, job.attempts);
+    return;
+  }
+```
+
+- [ ] **Step 3: Let a permanent failure skip the retry budget**
+
+`tick()`'s catch currently dead-letters only when `job.attempts >= MAX_ATTEMPTS`. A `PermanentDeliveryError`
+should not wait for five attempts. In that `catch`, change:
+
+```ts
+    const dead = job.attempts >= MAX_ATTEMPTS;
+```
+
+to:
+
+```ts
+    // A 404, a disabled endpoint or a vanished delivery row cannot succeed on
+    // attempt five either — dead-letter it now rather than spending the budget
+    // to reach the same answer four failures later.
+    const dead = job.attempts >= MAX_ATTEMPTS || err instanceof PermanentDeliveryError;
+```
+
+The delivery row is already `DEAD` in that case (the handler marked it before throwing), so the ledger
+and the job agree without a second write.
+
+- [ ] **Step 4: Prove it end to end against a real receiver**
+
+The point of this step is that nothing else in the suite POSTs anywhere. Run a throwaway listener,
+create an endpoint through the UI in Task 8, then:
+
+```bash
+node -e "require('node:http').createServer((q,s)=>{let b='';q.on('data',c=>b+=c);q.on('end',()=>{console.log(q.headers['x-backroom-signature']);console.log(b);s.writeHead(200);s.end('ok')})}).listen(4999,()=>console.log('listening on 4999'))"
+```
+
+In a second shell, cause an `approval.executed` (approve any pending approval in `/approvals`), then:
+
+```bash
+npm run worker:once
+```
+
+Expected: the listener prints an `sha256=…` signature and a single-line envelope with `id`, `event`,
+`occurredAt` and `data` — and nothing else. Then confirm the ledger agrees:
+
+```bash
+docker exec inventory-db-1 psql -U inventory -d inventory -c "SELECT status, attempts, \"deliveredAt\" IS NOT NULL AS landed FROM \"WebhookDelivery\";"
+```
+
+Expected: `DELIVERED | 1 | t`.
+
+Now point the endpoint at `http://localhost:4999/nope` with the listener stopped and repeat: the job
+retries, the delivery reads `RETRYING`, and `attempts` on the row matches the job's.
+
+- [ ] **Step 5: Typecheck, lint, commit**
+
+```bash
+npx tsc --noEmit && npm run lint && npm run test
+git add src/worker/deliver-webhook.ts src/worker/index.ts
+git commit -m "feat(webhooks): the worker actually delivers, and the ledger mirrors the job"
+```
+
+---
+
+### Task 11: Admin gets its own Home
+
+Scope decision #13, and HANDOVER §6 criterion #6. Today `resolveWorkspace` can return `"admin"` but
+`src/app/(app)/page.tsx` only branches on `purchasing` and `finance` — so an admin lands on the IT
+Home and reads SLA breaches and fleet composition under a Users / Webhooks / Feature-flags sidebar.
+The sidebar and the body describe different jobs.
+
+The Admin Home answers the three questions its own sidebar raises: **who can get in, what is switched
+on, and are the integrations healthy.**
+
+**Files:**
+- Create: `src/components/home/admin-home.tsx`
+- Modify: `src/server/modules/admin/queries.ts`, `src/app/(app)/page.tsx`
+
+- [ ] **Step 1: Add the query**
+
+Append to `src/server/modules/admin/queries.ts`. It needs `specFor`, so extend the existing
+`@/lib/admin-flags` import to `import { FLAG_SPECS, specFor } from "@/lib/admin-flags";`.
+
+```ts
+export interface AdminHome {
+  users: { total: number; disabled: number; byRole: Array<{ role: Role; count: number }> };
+  flags: Array<{ key: string; label: string; enabled: boolean; unavailable: boolean }>;
+  webhooks: { endpoints: number; inactive: number; dead: number; delivered: number };
+}
+
+export async function adminHome(): Promise<AdminHome> {
+  const [byRole, disabled, flagRows, endpoints, inactive, dead, delivered] = await Promise.all([
+    prisma.user.groupBy({ by: ["role"], _count: { _all: true } }),
+    prisma.user.count({ where: { disabled: true } }),
+    prisma.featureFlag.findMany(),
+    prisma.webhookEndpoint.count(),
+    prisma.webhookEndpoint.count({ where: { active: false } }),
+    prisma.webhookDelivery.count({ where: { status: "DEAD" } }),
+    prisma.webhookDelivery.count({ where: { status: "DELIVERED" } }),
+  ]);
+
+  const enabledBy = new Map(flagRows.map((f) => [f.key, f.enabled]));
+  return {
+    users: {
+      total: byRole.reduce((sum, g) => sum + g._count._all, 0),
+      disabled,
+      // Driven by ROLE_OPTIONS so a role nobody holds still shows as 0 rather
+      // than vanishing — "no admins" is exactly the kind of thing a zero row
+      // is for.
+      byRole: ROLE_OPTIONS.map((role) => ({
+        role,
+        count: byRole.find((g) => g.role === role)?._count._all ?? 0,
+      })),
+    },
+    // FLAG_SPECS-driven for the same reason as listFlags: a hand-inserted row
+    // is not something this page should report as configuration.
+    flags: FLAG_SPECS.map((spec) => ({
+      key: spec.key,
+      label: spec.label,
+      enabled: enabledBy.get(spec.key) ?? false,
+      unavailable: !!specFor(spec.key)?.unavailable,
+    })),
+    webhooks: { endpoints, inactive, dead, delivered },
+  };
+}
+```
+
+Extend the file's existing imports with `ROLE_OPTIONS` from `@/lib/admin-users` (it already imports
+`lockReason` and `TargetUser` from there).
+
+- [ ] **Step 2: Write the component**
+
+Create `src/components/home/admin-home.tsx`:
+
+```tsx
+import Link from "next/link";
+import { Stat } from "@/components/ui/stat";
+import { StatusDot } from "@/components/ui/status";
+import { ROLE_LABELS } from "@/lib/admin-users";
+import type { AdminHome as AdminHomeData } from "@/server/modules/admin/queries";
+
+export function AdminHomeBody({ data }: { data: AdminHomeData }) {
+  const { users, flags, webhooks } = data;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-3">
+        <Stat label="Accounts" value={String(users.total)} />
+        <Stat
+          label="Disabled"
+          value={String(users.disabled)}
+          hint={users.disabled === 0 ? "everyone can sign in" : "blocked from signing in"}
+        />
+        <Stat label="Endpoints" value={String(webhooks.endpoints)} />
+        <Stat
+          label="Dead deliveries"
+          value={String(webhooks.dead)}
+          hint={webhooks.dead === 0 ? "nothing to replay" : "waiting on a replay"}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-fg-muted">
+          Who can get in
+        </span>
+        <ul className="flex flex-col">
+          {users.byRole.map((r) => (
+            <li
+              key={r.role}
+              className="flex items-center justify-between border-b border-border-faint py-1.5 last:border-b-0"
+            >
+              <span className="text-[12.5px] text-fg">{ROLE_LABELS[r.role]}</span>
+              <span className="font-mono text-[11px] text-fg-muted">{r.count}</span>
+            </li>
+          ))}
+        </ul>
+        <Link href="/admin/users" className="text-[12px] font-medium text-accent hover:underline">
+          Manage users &amp; roles →
+        </Link>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-fg-muted">
+          What is switched on
+        </span>
+        <ul className="flex flex-col">
+          {flags.map((f) => (
+            <li
+              key={f.key}
+              className="flex items-center justify-between border-b border-border-faint py-1.5 last:border-b-0"
+            >
+              <span className="flex items-center gap-2">
+                <StatusDot value={f.enabled ? "EXECUTED" : "SPARE"} />
+                <span className="text-[12.5px] text-fg">{f.label}</span>
+              </span>
+              <span className="font-mono text-[10.5px] text-fg-muted">
+                {f.unavailable ? "unavailable" : f.enabled ? "on" : "off"}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <Link href="/admin/flags" className="text-[12px] font-medium text-accent hover:underline">
+          Feature flags →
+        </Link>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-fg-muted">
+          Integrations
+        </span>
+        <p className="text-[12.5px] text-fg-secondary">
+          {webhooks.endpoints === 0
+            ? "No endpoints configured — nothing outside this system is being told when approvals execute."
+            : `${webhooks.delivered} delivered, ${webhooks.dead} dead${
+                webhooks.inactive > 0 ? `, ${webhooks.inactive} endpoint disabled` : ""
+              }.`}
+        </p>
+        <Link href="/admin/webhooks" className="text-[12px] font-medium text-accent hover:underline">
+          Webhooks →
+        </Link>
+      </div>
+    </div>
+  );
+}
+```
+
+`Stat` takes `{ label, value, hint }` and `StatusDot` takes `value` (not `status`) — both verified
+against the shipped components.
+
+- [ ] **Step 3: Branch the Home route**
+
+In `src/app/(app)/page.tsx`, the route already computes `ws` and returns early for `purchasing` and
+`finance`. Add the same shape for `admin`, **above** those two so the ordering reads as a list of
+workspaces rather than a fall-through, and import what it needs:
+
+```tsx
+import { adminHome } from "@/server/modules/admin/queries";
+import { AdminHomeBody } from "@/components/home/admin-home";
+```
+
+```tsx
+  if (ws === "admin") {
+    const admin = await safeSection("Admin overview", () => adminHome());
+    return (
+      <>
+        {header}
+        <SectionCard title="System" result={admin}>
+          {(data) => <AdminHomeBody data={data} />}
+        </SectionCard>
+      </>
+    );
+  }
+```
+
+Use whatever local the file already binds for the page header — the existing `purchasing` and
+`finance` branches show the exact shape; copy theirs rather than inventing a second one. Everything
+loads through `safeSection` and renders through `SectionCard`, so a failing query gives the designed
+FAILED card instead of a blank page, exactly like every other Home.
+
+- [ ] **Step 4: Typecheck, lint, look at it**
+
+```bash
+npx tsc --noEmit && npm run lint
+```
+
+In the preview as `admin@thebackroomop.com`, switch the workspace to **Admin** and open `/`:
+
+1. Four stat tiles, then the three lists. No SLA breaches, no fleet bar, no age histogram — the body
+   now matches its own sidebar.
+2. The role list shows all five roles including any with a count of 0.
+3. `Microsoft 365 sign-in` reads `unavailable`, not `off`.
+4. Switch back to the IT workspace and confirm the IT Home is untouched.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/components/home/admin-home.tsx src/server/modules/admin/queries.ts "src/app/(app)/page.tsx"
+git commit -m "feat(admin): a Home whose body matches its own sidebar"
+```
+
+---
+
+### Task 12: The fixtures the deliveries page needs
+
+`prisma/seed.ts` has never created a `WebhookEndpoint`, so every state the deliveries page is designed
+around — `DELIVERED`, `RETRYING`, and the `DEAD · 5/5` row with its "Replay" control — is unreachable
+against a fresh database. This is the Phase 6 lesson: *a seeded fixture that doesn't exercise its own
+design is a silent gap.*
+
+**Files:**
+- Modify: `prisma/seed.ts`
+
+- [ ] **Step 1: Seed two endpoints and a spread of deliveries**
+
+`TRUNCATE` in `prisma/seed.ts` already covers `WebhookEndpoint`, `WebhookDelivery` and `Job`, so this
+is purely additive. Add near the end of the seed, after the approvals block:
+
+```ts
+  // Webhooks. Two endpoints so "disabled" is a real state on the list, and a
+  // spread of deliveries so every chip deliveryStage() can produce is reachable
+  // against a fresh database — including the DEAD · 5/5 row the design's
+  // "Replay 4 dead-lettered" control exists for.
+  // A fixture value, not a real secret — it signs nothing that leaves this machine.
+  const HOOK_SECRET = "seed-signing-secret-not-a-real-one";
+  const [liveHook, offHook] = await Promise.all([
+    prisma.webhookEndpoint.create({
+      data: {
+        url: "https://hooks.thebackroomop.com/inventory",
+        events: ["approval.executed", "offboarding.completed"],
+        active: true,
+        secret: "",
+      },
+    }),
+    prisma.webhookEndpoint.create({
+      data: {
+        url: "https://legacy.thebackroomop.com/erp-bridge",
+        events: ["purchase_request.completed"],
+        active: false,
+        secret: "",
+      },
+    }),
+  ]);
+  // The AAD binds ciphertext to the row id, which only exists after the insert.
+  await Promise.all([
+    prisma.webhookEndpoint.update({
+      where: { id: liveHook.id },
+      data: { secret: encryptSecret(HOOK_SECRET, secretAad(liveHook.id)) },
+    }),
+    prisma.webhookEndpoint.update({
+      where: { id: offHook.id },
+      data: { secret: encryptSecret(HOOK_SECRET, secretAad(offHook.id)) },
+    }),
+  ]);
+
+  await prisma.webhookDelivery.createMany({
+    data: [
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2031", type: "lifecycle.assign" },
+        status: "DELIVERED",
+        attempts: 1,
+        deliveredAt: day(-2),
+      },
+      {
+        endpointId: liveHook.id,
+        event: "offboarding.completed",
+        payload: { employeeId: "seed", employeeNo: "EMP-0093", decisions: 2 },
+        status: "DELIVERED",
+        attempts: 2,
+        lastError: null,
+        deliveredAt: day(-1),
+      },
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2035", type: "lifecycle.change-status" },
+        status: "RETRYING",
+        attempts: 2,
+        lastError: "connect ETIMEDOUT 10.0.0.9:443",
+      },
+      // The row the design is about: five attempts spent, dead-lettered, replayable.
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2040", type: "lifecycle.return" },
+        status: "DEAD",
+        attempts: 5,
+        lastError: "500 Internal Server Error",
+      },
+      {
+        endpointId: offHook.id,
+        event: "purchase_request.completed",
+        payload: { purchaseRequestId: "seed", refNo: "PR-0198" },
+        status: "DEAD",
+        attempts: 5,
+        lastError: "404 Not Found",
+      },
+    ],
+  });
+```
+
+Import `encryptSecret` from `../src/server/crypto` and `secretAad` from `../src/server/webhooks/sign`
+at the top of the seed. `day(offset)` is the seed's existing date helper (`prisma/seed.ts:6`), so the
+dates above need no new code.
+
+Note the two-step insert-then-update, for the same reason `createEndpoint` does it: the AAD binds the
+ciphertext to the row id, and the id only exists after the insert.
+
+**No `Job` rows are seeded for these.** A `PENDING` job would make `npm run worker:once` immediately
+try to POST to a hostname that doesn't resolve, turning every seeded run into a slow, noisy failure.
+The deliveries are history; the queue is empty.
+
+- [ ] **Step 2: Reseed and check every chip is reachable**
+
+```bash
+npm run db:seed
+docker exec inventory-db-1 psql -U inventory -d inventory -c "SELECT status, attempts, count(*) FROM \"WebhookDelivery\" GROUP BY 1,2 ORDER BY 1;"
+```
+
+Expected: `DEAD | 5 | 2`, `DELIVERED | 1 | 1`, `DELIVERED | 2 | 1`, `RETRYING | 2 | 1`.
+
+Then confirm the worker is still quiet — the seeded deliveries must not have created work:
+
+```bash
+npm run worker:once
+```
+
+Expected: the usual `APR-2035` demo failure and nothing webhook-shaped.
+
+- [ ] **Step 3: Confirm the numbers the earlier tasks assert**
+
+Two Phase 8 screens now read these fixtures. Check them before the e2e spec depends on them:
+
+- `/admin/webhooks` — two cards, the second carrying a `DISABLED` pill; the first shows `4 attempts`
+  and a `1 dead` link, the second `1 attempt` and `1 dead`.
+- Admin Home — `Endpoints 2`, `Dead deliveries 2`, and the integrations line reading
+  `2 delivered, 2 dead, 1 endpoint disabled.`
+
+If a number disagrees, fix the fixture rather than the assertion — these are the values Task 14's spec
+will pin.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add prisma/seed.ts
+git commit -m "feat(seed): endpoints and deliveries, so every delivery chip is reachable"
+```
+
+---
+
+### Task 13: `/admin/webhooks/deliveries` + replay
+
+Card `3h`: delivery attempts with `DEAD · 5/5` rows and a **"Replay 4 dead-lettered"** control. Scope
+decision #11 settles what replay means — a decision to try again, not to resume — and scope decision
+#12 settles that this list has no pagination, matching `/approvals`.
+
+**Files:**
+- Create: `src/components/admin/delivery-table.tsx`,
+  `src/app/(app)/admin/webhooks/deliveries/page.tsx`
+- Modify: `src/server/modules/admin/webhook-actions.ts`, `src/server/modules/admin/queries.ts`
+
+- [ ] **Step 1: Add the replay actions**
+
+Append to `src/server/modules/admin/webhook-actions.ts`. Note the P2002 handling: the partial unique
+index from Task 9 is what makes a double-click safe, and its refusal is a *designed* answer, not a bug.
+
+```ts
+/**
+ * Scope decision #11: replay is a decision to try again, so the attempt cycle
+ * RESETS rather than resuming. `lastError` is deliberately kept until the next
+ * attempt overwrites it — while the row sits queued, why it died last time is
+ * still the most useful thing on the screen.
+ *
+ * Job_one_live_deliver_per_delivery (Task 9) is what stops a double-click
+ * producing two live jobs for one delivery; P2002 here means "already queued",
+ * which is a conflict the operator can act on rather than an error.
+ */
+export async function replayDelivery(input: unknown): Promise<ActionResult<null>> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  try {
+    const failure = await asActionResult(
+      async () =>
+        prisma.$transaction(async (tx) => {
+          const delivery = await tx.webhookDelivery.findUnique({
+            where: { id: parsed.data.id },
+            include: { endpoint: true },
+          });
+          if (!delivery) return conflict("That delivery no longer exists.");
+          if (delivery.status === "DELIVERED") {
+            return conflict("That one already landed — there's nothing to replay.");
+          }
+          if (!delivery.endpoint.active) {
+            return conflict(
+              `${delivery.endpoint.url} is disabled — enable the endpoint first, or the replay will just die again.`,
+            );
+          }
+          await tx.webhookDelivery.updateMany({
+            where: { id: delivery.id, status: delivery.status },
+            data: { status: "PENDING", attempts: 0, deliveredAt: null },
+          });
+          await tx.job.create({
+            data: { type: "DELIVER_WEBHOOK", payload: { deliveryId: delivery.id } },
+          });
+          await writeAudit(tx, {
+            actorId: actor.id,
+            actorLabel: actor.name,
+            entityType: "webhook-endpoint",
+            entityId: delivery.endpointId,
+            action: "replay",
+            diff: {
+              delivery: { from: delivery.status, to: "PENDING" },
+              event: { from: delivery.event, to: delivery.event },
+            },
+          });
+          return null;
+        }),
+      { goneMessage: "That delivery no longer exists." },
+    );
+    if (failure) return failure;
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return conflict("That delivery is already queued for another attempt.");
+    }
+    throw err;
+  }
+  revalidateAll();
+  return ok(null);
+}
+
+/** The design's "Replay 4 dead-lettered" — one decision, not four clicks. */
+export async function replayAllDead(): Promise<ActionResult<{ queued: number }>> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  // Only endpoints that are actually live: replaying into a disabled endpoint
+  // spends five attempts to reach the answer the operator already has.
+  const dead = await prisma.webhookDelivery.findMany({
+    where: { status: "DEAD", endpoint: { active: true } },
+    select: { id: true },
+  });
+
+  let queued = 0;
+  for (const row of dead) {
+    // One transaction per row, and a P2002 skips rather than aborting the batch:
+    // one already-queued delivery must not stop the other three.
+    try {
+      const res = await replayDelivery({ id: row.id });
+      if (res.ok) queued += 1;
+    } catch {
+      // replayDelivery already maps the errors it expects; anything escaping
+      // here is one row's problem, not the batch's.
+    }
+  }
+  revalidateAll();
+  return ok({ queued });
+}
+```
+
+`replayAllDead` calls `replayDelivery`, which re-checks the guard and re-audits per row — deliberately,
+so a batch replay leaves exactly the same trail as four individual ones. It also means the batch is
+rate-limited per row, which at seed scale is invisible and at real scale is the correct behaviour.
+
+- [ ] **Step 2: Add the query**
+
+Append to `src/server/modules/admin/queries.ts`:
+
+```ts
+import { deliveryStage } from "@/lib/webhooks";
+
+/** The worker's MAX_ATTEMPTS. Named here so the chip's denominator has one source. */
+export const MAX_DELIVERY_ATTEMPTS = 5;
+
+export const DELIVERY_TABS = ["ALL", "DEAD", "PENDING", "DELIVERED"] as const;
+export type DeliveryTab = (typeof DELIVERY_TABS)[number];
+
+export function parseDeliveryTab(raw: string | undefined): DeliveryTab {
+  return (DELIVERY_TABS as readonly string[]).includes(raw ?? "") ? (raw as DeliveryTab) : "ALL";
+}
+
+export interface DeliveryRow {
+  id: string;
+  endpointUrl: string;
+  event: string;
+  when: string;
+  attempts: number;
+  lastError: string | null;
+  /** raw DeliveryStatus — StatusPill derives the colour from it (Task 6, Step 3b) */
+  status: string;
+  /** the label only: "DEAD · 5/5" */
+  stageLabel: string;
+  replayable: boolean;
+}
+
+const PAGE = 50;
+
+export async function listDeliveries(
+  tab: DeliveryTab,
+): Promise<{ rows: DeliveryRow[]; total: number; deadReplayable: number }> {
+  const where =
+    tab === "ALL"
+      ? {}
+      : tab === "PENDING"
+        ? { status: { in: ["PENDING", "RETRYING"] as const } }
+        : { status: tab };
+
+  const [rows, total, deadReplayable] = await Promise.all([
+    prisma.webhookDelivery.findMany({
+      where,
+      include: { endpoint: true },
+      // createdAt alone is not a stable order — rows written in one transaction
+      // share a millisecond (HANDOVER §7). The id tiebreaker is mandatory.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: PAGE,
+    }),
+    prisma.webhookDelivery.count({ where }),
+    prisma.webhookDelivery.count({ where: { status: "DEAD", endpoint: { active: true } } }),
+  ]);
+
+  return {
+    total,
+    deadReplayable,
+    rows: rows.map((r) => ({
+      id: r.id,
+      endpointUrl: r.endpoint.url,
+      event: r.event,
+      when: fmtDateTime(r.createdAt),
+      attempts: r.attempts,
+      lastError: r.lastError,
+      status: r.status,
+      stageLabel: deliveryStage(r.status, r.attempts, MAX_DELIVERY_ATTEMPTS),
+      replayable: r.status !== "DELIVERED" && r.endpoint.active,
+    })),
+  };
+}
+```
+
+Import `fmtDateTime` from wherever `src/server/modules/audit/queries.ts` imports it — reuse that helper
+rather than formatting dates a second way.
+
+- [ ] **Step 3: Write the table**
+
+Create `src/components/admin/delivery-table.tsx`:
+
+```tsx
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Banner } from "@/components/ui/banner";
+import { Button } from "@/components/ui/button";
+import { StatusPill } from "@/components/ui/status";
+import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+import { useToast } from "@/components/ui/toast";
+import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { replayAllDead, replayDelivery } from "@/server/modules/admin/webhook-actions";
+import type { DeliveryRow } from "@/server/modules/admin/queries";
+
+export function DeliveryTable({
+  rows,
+  total,
+  deadReplayable,
+}: {
+  rows: DeliveryRow[];
+  total: number;
+  deadReplayable: number;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+
+  function run(fn: () => Promise<{ ok: boolean } & Record<string, unknown>>, okMsg: string) {
+    setError(null);
+    startTransition(async () => {
+      const res = (await fn()) as Awaited<ReturnType<typeof replayDelivery>>;
+      if (res.ok) {
+        toast(okMsg, "settled");
+        router.refresh();
+      } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
+      else setError(res.message);
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+      {error && <Banner tone="fault" title={error} />}
+
+      {deadReplayable > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-(--radius-card) border border-border bg-surface-subtle px-3 py-2">
+          <span className="text-[12px] text-fg-secondary">
+            {deadReplayable} dead-lettered{" "}
+            {deadReplayable === 1 ? "delivery is" : "deliveries are"} waiting on a live endpoint.
+          </span>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={pending}
+            onClick={() =>
+              run(() => replayAllDead(), `Replaying ${deadReplayable} dead-lettered`)
+            }
+          >
+            Replay {deadReplayable} dead-lettered
+          </Button>
+        </div>
+      )}
+
+      <Table>
+        <THead>
+          <Tr>
+            <Th width={150}>When</Th>
+            <Th>Endpoint</Th>
+            <Th width={210}>Event</Th>
+            <Th width={140}>Status</Th>
+            <Th width={90} aria-label="Row actions" />
+          </Tr>
+        </THead>
+        <TBody>
+          {rows.map((row) => (
+            <Tr key={row.id}>
+              <Td mono>{row.when}</Td>
+              <Td>
+                <span className="block truncate font-mono text-[11px] text-fg">{row.endpointUrl}</span>
+                {row.lastError && (
+                  // The reason it died is the most useful thing on the row while
+                  // it waits — keep it visible rather than behind a disclosure.
+                  <span className="block truncate text-[10.5px] text-fg-muted" title={row.lastError}>
+                    {row.lastError}
+                  </span>
+                )}
+              </Td>
+              <Td mono>{row.event}</Td>
+              <Td>
+                {/* StatusPill derives the family from the raw status, which is
+                    why Task 6 taught src/lib/status.ts about DeliveryStatus:
+                    colour is the design system's job, not deliveryStage's. */}
+                <StatusPill value={row.status} label={row.stageLabel} />
+              </Td>
+              <Td>
+                {row.replayable && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={pending}
+                    onClick={() => run(() => replayDelivery({ id: row.id }), "Queued for another attempt")}
+                  >
+                    Replay
+                  </Button>
+                )}
+              </Td>
+            </Tr>
+          ))}
+        </TBody>
+      </Table>
+
+      {total > rows.length && (
+        <p className="text-[11px] text-fg-muted">
+          Showing {rows.length} of {total}. Older attempts aren&apos;t paged through yet.
+        </p>
+      )}
+      {total === 0 && <p className="text-xs text-fg-muted">No delivery attempts in this view.</p>}
+    </div>
+  );
+}
+```
+
+`StatusPill({ value, label })` is the right component here, not `Pill` — `Pill` only knows
+`neutral | accent`, whereas `StatusPill` looks the value up in the six-family map and paints the
+`DEAD` row as a fault. That is why Task 6 Step 3b had to teach the map about `DeliveryStatus` first.
+
+- [ ] **Step 4: Write the page**
+
+Create `src/app/(app)/admin/webhooks/deliveries/page.tsx`:
+
+```tsx
+import Link from "next/link";
+import { requireRole } from "@/server/auth/guards";
+import { cn } from "@/lib/cn";
+import { PageHeader } from "@/components/ui/page-header";
+import { DeliveryTable } from "@/components/admin/delivery-table";
+import { DELIVERY_TABS, listDeliveries, parseDeliveryTab } from "@/server/modules/admin/queries";
+
+const TAB_LABELS: Record<string, string> = {
+  ALL: "All",
+  DEAD: "Dead-lettered",
+  PENDING: "In flight",
+  DELIVERED: "Delivered",
+};
+
+export default async function DeliveriesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ state?: string }>;
+}) {
+  await requireRole("admin");
+  const { state } = await searchParams;
+  const tab = parseDeliveryTab(state);
+  const { rows, total, deadReplayable } = await listDeliveries(tab);
+
+  return (
+    <>
+      <PageHeader
+        title="Delivery attempts"
+        breadcrumb={[{ label: "Webhooks", href: "/admin/webhooks" }, { label: "Delivery attempts" }]}
+      />
+      <div className="flex flex-col gap-3">
+        {/* Tabs write ?state=, the same contract /purchases and /reservations use. */}
+        <nav className="flex gap-1" aria-label="Delivery status">
+          {DELIVERY_TABS.map((value) => (
+            <Link
+              key={value}
+              href={value === "ALL" ? "/admin/webhooks/deliveries" : `/admin/webhooks/deliveries?state=${value}`}
+              aria-current={tab === value ? "page" : undefined}
+              className={cn(
+                "rounded-(--radius-ctl) px-2.5 py-1 text-[12px] font-medium",
+                tab === value ? "bg-surface-subtle text-fg" : "text-fg-muted hover:text-fg-secondary",
+              )}
+            >
+              {TAB_LABELS[value]}
+            </Link>
+          ))}
+        </nav>
+        <DeliveryTable rows={rows} total={total} deadReplayable={deadReplayable} />
+      </div>
+    </>
+  );
+}
+```
+
+- [ ] **Step 5: Typecheck, lint, look at it**
+
+```bash
+npx tsc --noEmit && npm run lint
+```
+
+In the preview as `admin@thebackroomop.com`, `/admin/webhooks/deliveries` (after Task 12's seed):
+
+1. Five rows. One reads `DEAD · 5/5` against `hooks.thebackroomop.com/inventory` with
+   `500 Internal Server Error` under the URL; one reads `RETRYING · 2/5`; two read `DELIVERED`.
+2. The banner offers **Replay 1 dead-lettered** — one, not two: the second dead row belongs to the
+   *disabled* `erp-bridge` endpoint, and replaying into it would just die again.
+3. The `Dead-lettered` tab writes `?state=DEAD` and shows both dead rows; the one on the disabled
+   endpoint has no Replay button.
+4. Click Replay on the live one → it becomes `QUEUED`, and clicking again is refused with "already
+   queued for another attempt" rather than creating a second job.
+5. `npm run worker:once` → it attempts delivery to a hostname that doesn't resolve and comes back
+   `RETRYING · 1/5`. That is the correct outcome, and it proves the ledger mirrors the job.
+6. Reseed afterwards so the fixture is unchanged for the e2e run.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/components/admin/delivery-table.tsx "src/app/(app)/admin/webhooks/deliveries/page.tsx" src/server/modules/admin/webhook-actions.ts src/server/modules/admin/queries.ts
+git commit -m "feat(webhooks): delivery attempts, and a replay that means try again"
+```
+
+---
+
+### Task 14: E2E, full battery, close-out
+
+**Files:**
+- Create: `e2e/admin.spec.ts`
+- Modify: `docs/HANDOVER.md`
+
+- [ ] **Step 1: Write the e2e spec**
+
+Create `e2e/admin.spec.ts`. It sorts first alphabetically, so it runs before every other spec file —
+which is exactly why it reseeds in `beforeAll` like all the others.
+
+```ts
+import { test, expect, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { execSync } from "node:child_process";
+
+async function login(page: Page, email: string) {
+  await page.goto("/logout");
+  await page.getByLabel(/Email/).fill(email);
+  await page.getByLabel(/Password/).fill("ChangeMe123!");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+}
+
+async function expectNoSeriousAxe(page: Page) {
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
+}
+
+// Spec files share one database and run alphabetically — each reseeds so no file
+// inherits another's mutations.
+test.beforeAll(() => {
+  execSync("npm run db:seed", { timeout: 120_000 });
+});
+
+test.describe("users & roles", () => {
+  test("the permanent admin is locked before the click, not on save", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/users");
+    // First hit of this route in the suite — give the cold JIT compile headroom.
+    await expect(page.getByRole("heading", { name: "Users & roles" })).toBeVisible({ timeout: 20_000 });
+    await expectNoSeriousAxe(page);
+
+    const permanent = page.getByRole("row", { name: /System Admin/ });
+    await expect(permanent).toContainText("LOCKED");
+    await expect(permanent).toContainText("permanent admin");
+    // The affordance is ABSENT, which is the whole point of the card.
+    await expect(permanent.getByRole("combobox")).toHaveCount(0);
+    await expect(permanent.getByRole("button", { name: /Disable/ })).toHaveCount(0);
+  });
+
+  test("an ordinary role change is audited by name", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/users");
+    await page.getByRole("combobox", { name: "Role for V. Cruz" }).selectOption("it_staff");
+    await expect(page.getByText(/V. Cruz is now IT staff/)).toBeVisible({ timeout: 20_000 });
+
+    await page.goto("/audit");
+    const row = page.getByRole("row", { name: /role-change/ }).first();
+    // entityLabels must resolve a user id to a NAME, not a truncated cuid.
+    await expect(row).toContainText("V. Cruz");
+  });
+
+  test("disabling a user blocks sign-in", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/users");
+    await page.getByRole("row", { name: /V. Cruz/ }).getByRole("button", { name: "Disable" }).click();
+    await expect(page.getByText(/V. Cruz is disabled/)).toBeVisible({ timeout: 20_000 });
+
+    await page.goto("/logout");
+    await page.getByLabel(/Email/).fill("viewer@thebackroomop.com");
+    await page.getByLabel(/Password/).fill("ChangeMe123!");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    // Still on /login: authorize() refuses a disabled user.
+    await expect(page).toHaveURL(/\/login/);
+  });
+});
+
+test.describe("feature flags", () => {
+  test("the SSO flag cannot be switched on, and says why", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/flags");
+    await expect(page.getByRole("heading", { name: "Feature flags" })).toBeVisible({ timeout: 20_000 });
+    await expectNoSeriousAxe(page);
+
+    await expect(page.getByText("UNAVAILABLE")).toBeVisible();
+    await expect(page.getByText(/no role attached/)).toBeVisible();
+    await expect(page.getByRole("switch", { name: /Microsoft 365 sign-in/ })).toBeDisabled();
+  });
+
+  test("the domain value is normalised and refuses an address", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/flags");
+    const field = page.getByRole("textbox", { name: /Value for Signup domain restriction/ });
+
+    await field.fill("someone@thebackroomop.com");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText(/Just the domain, not a full address/)).toBeVisible({ timeout: 20_000 });
+
+    await field.fill("TheBackroomOp.COM");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText(/Signup domain restriction updated/)).toBeVisible({ timeout: 20_000 });
+    await page.reload();
+    await expect(field).toHaveValue("thebackroomop.com");
+  });
+});
+
+test.describe("webhooks", () => {
+  test("a new endpoint shows its secret exactly once", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/webhooks");
+    await expect(page.getByRole("heading", { name: "Webhooks" })).toBeVisible({ timeout: 20_000 });
+    await expectNoSeriousAxe(page);
+
+    await page.getByRole("textbox", { name: "New endpoint URL" }).fill("https://example.test/hook");
+    await page.getByRole("checkbox", { name: /New endpoint: An approval finished executing/ }).check();
+    await page.getByRole("button", { name: "Create endpoint" }).click();
+
+    await expect(page.getByText(/Copy this signing secret now/)).toBeVisible({ timeout: 20_000 });
+    // Reload: the secret is gone for good, which is the design.
+    await page.reload();
+    await expect(page.getByText(/Copy this signing secret now/)).toHaveCount(0);
+  });
+
+  test("an endpoint with no events is refused where the operator is looking", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/webhooks");
+    await page.getByRole("textbox", { name: "New endpoint URL" }).fill("https://example.test/none");
+    await page.getByRole("button", { name: "Create endpoint" }).click();
+    await expect(page.getByText(/Pick at least one event/)).toBeVisible({ timeout: 20_000 });
+  });
+});
+
+test.describe("delivery attempts", () => {
+  test("every chip the seed can produce renders, and replay only offers live endpoints", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/webhooks/deliveries");
+    await expect(page.getByRole("heading", { name: "Delivery attempts" })).toBeVisible({ timeout: 20_000 });
+    await expectNoSeriousAxe(page);
+
+    await expect(page.getByText("DEAD · 5/5").first()).toBeVisible();
+    await expect(page.getByText("RETRYING · 2/5")).toBeVisible();
+    await expect(page.getByText("DELIVERED").first()).toBeVisible();
+    await expect(page.getByText("500 Internal Server Error")).toBeVisible();
+
+    // One, not two: the other dead row belongs to the DISABLED endpoint.
+    await expect(page.getByRole("button", { name: /Replay 1 dead-lettered/ })).toBeVisible();
+
+    await page.getByRole("link", { name: "Dead-lettered" }).click();
+    await expect(page).toHaveURL(/state=DEAD/);
+    await expect(page.getByRole("row", { name: /erp-bridge/ }).getByRole("button", { name: "Replay" }))
+      .toHaveCount(0);
+  });
+
+  test("replaying twice is refused rather than queued twice", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/webhooks/deliveries?state=DEAD");
+    const live = page.getByRole("row", { name: /hooks\.thebackroomop\.com/ }).first();
+    await live.getByRole("button", { name: "Replay" }).click();
+    await expect(page.getByText(/Queued for another attempt/)).toBeVisible({ timeout: 20_000 });
+
+    // The partial unique index is what makes the second click safe.
+    await page.goto("/admin/webhooks/deliveries?state=PENDING");
+    const queued = page.getByRole("row", { name: /hooks\.thebackroomop\.com/ }).first();
+    await queued.getByRole("button", { name: "Replay" }).click();
+    await expect(page.getByText(/already queued/)).toBeVisible({ timeout: 20_000 });
+  });
+});
+
+test.describe("admin home", () => {
+  test("the body matches its own sidebar", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    // The admin role holds four workspaces; br.dept selects which one Home renders.
+    await page.context().addCookies([
+      { name: "br.dept", value: "admin", url: "http://localhost:3000" },
+    ]);
+    await page.goto("/");
+    await expect(page.getByText("Who can get in")).toBeVisible({ timeout: 20_000 });
+    await expectNoSeriousAxe(page);
+
+    await expect(page.getByText("What is switched on")).toBeVisible();
+    await expect(page.getByText("unavailable")).toBeVisible();
+    // The IT Home's sections must NOT be here — that was the bug.
+    await expect(page.getByText("Your shift")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Fleet", level: 3 })).toHaveCount(0);
+  });
+});
+```
+
+If a locator disagrees with what shipped, **check the page before changing the assertion** — several of
+these encode a rule rather than a label.
+
+- [ ] **Step 2: Get the spec green**
+
+```bash
+npm run db:seed && npx playwright test e2e/admin.spec.ts --workers=1
+```
+
+Run it in the **foreground** with a long timeout. Never background a Playwright run: an unreaped run's
+own `beforeAll` reseed races the next one and produces a cascade of unrelated failures.
+
+- [ ] **Step 3: Run the whole battery**
+
+```bash
+npx tsc --noEmit && npm run lint && npm run test && npm run build
+npm run db:seed && npx playwright test --workers=1
+```
+
+**Restart the preview first** — a long-lived dev server degrades the suite into phantom failures
+(HANDOVER §7). Expect the e2e count to rise from 89 by however many tests Step 1 added.
+
+- [ ] **Step 4: Update the handover for Phase 9**
+
+Rewrite `docs/HANDOVER.md` so a fresh session can start Phase 9 cold. Keep the structure; §§1, 2, 3
+and 7 stay largely as they are.
+
+1. **Header** — Phases 1–8 merged, the real battery numbers from Step 3, and whether it has been
+   pushed (the user decides that separately; write what is actually true).
+2. **§0** — point at Phase 9's plan-writing: import (3-step dry-run → commit, blocked rows grouped by
+   cause), the Excel export upgrade + split-by-year chips + the brief's `farewell-report` route, the
+   printable label sheet, USB-scanner polish (a scan ticks the matching wizard row), the deployment
+   README, and the full axe pass. Re-read README cards `5a, 1m, 7g`.
+3. **§4** — add a Phase 8 paragraph: the admin surfaces, the permanent-admin lock covering `disabled`
+   as well as `role`, the flag allowlist, and the webhook pipeline (emitter → job → ledger).
+4. **§4 conventions table** — add: *a retry engine and its ledger are written in the same handler*
+   (scope decision #6), and *a `"use server"` module is not importable by the worker* (which is why
+   `secretAad` lives in `sign.ts`).
+5. **§5** — Phase 8 out, Phase 9 only.
+6. **§6** — replace Phase 8's entry criteria with **Phase 9's**, including: export already refuses at
+   10,000 rows with a 413 and must keep doing so; `?ids=` silently slices to 500 and should be fixed
+   in the same pass; import is new from zero and partial import is the default; a scan must tick the
+   matching offboarding wizard row.
+7. **§8** — add Phase 8's leftovers: `/admin/webhooks/deliveries` has no pagination (scope decision
+   #12); `replayAllDead` is rate-limited per row because it calls `replayDelivery`; nothing prunes
+   `WebhookDelivery`, so the table grows without bound; the delivery `nextAttemptAt` column is never
+   written (the job's `runAt` is the real schedule — scope decision #6); and `Job_one_live_deliver_per_delivery`
+   exists only in raw migration SQL, not in `schema.prisma`, alongside the three constraints already
+   tracked there.
+8. **§7** — add: *a `"use server"` module makes every export a server action, so the worker cannot
+   import one*; and *a `src/lib/` module imported by a client component must not reach `node:`* —
+   which is why the webhook signature lives in `src/server/webhooks/sign.ts`.
+
+```bash
+git add docs/HANDOVER.md
+git commit -m "docs: handover advanced — phase 8 done, phase 9 entry criteria"
+```
+
+- [ ] **Step 5: Finish the branch**
+
+Use `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions** —
+present the options and wait rather than doing either unprompted. This repo is public.
 
 ---
