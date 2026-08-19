@@ -74,10 +74,52 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
    removing the last admin, it cannot conjure one — so this is a Phase 1 gap recorded in HANDOVER §8,
    not an argument against this decision.
 
+   **Re-verified after Task 2, which is the first code to exercise fact (b): all four still hold.**
+   The only writes to an existing `User` row anywhere in `src/` are `user-actions.ts`'s two
+   `updateMany` calls; `auth/actions.ts` and `prisma/seed.ts` set `role` at **create** time, so they
+   are fact (a)'s producers rather than mutators. There is no writer of `isPermanentAdmin`,
+   `passwordHash` or `email` at all, and no `user.delete` anywhere. Task 2 additionally made the lock a
+   **database predicate** (`isPermanentAdmin: false` in both guarded `where` clauses) rather than
+   leaving it enforced only in application code, since this decision stakes everything on it holding.
+
+   **The one change most likely to falsify (a) and (b) at once is the deferred SSO work** (scope
+   decision #7). A `signIn` callback mapping an Entra profile to a `User` row becomes a **third
+   producer** of `User.role`, and SSO mappings conventionally *refresh* role from group claims on every
+   login — which makes it a writer of `User.role` **on existing rows, outside this module's callers,
+   unaware of the permanent-admin lock**. When that callback is written, this decision must be
+   re-litigated, not re-cited.
+
+   One pre-existing caveat found while re-verifying, **not** introduced by this phase and not a threat
+   to the property: `createBootstrapAdmin`'s `tx.user.count() === 0` gate is a check-then-act at
+   ReadCommitted, so two concurrent bootstrap POSTs with different emails could both pass and create
+   two permanent admins. That is a wider lock, not a lockout.
+
 3. **An admin may change their own role, and may not disable themselves.** Demoting yourself is
-   recoverable — the permanent admin can restore it. Disabling yourself ends your own session with no
-   way back in for you specifically, and reads as an accident rather than an intent. The refusal names
-   the permanent admin as the way back.
+   recoverable — any admin can restore it. Disabling yourself ends your own session with no
+   way back in for you specifically, and reads as an accident rather than an intent.
+
+   **Amended twice against shipped code — the original text was wrong on both halves.**
+
+   *The refusal's wording (Task 1 review, commit `d29ce9b`).* This decision first said the refusal
+   "names the permanent admin as the way back." It doesn't, deliberately: nothing forbids one ordinary
+   admin disabling another, so pointing at the permanent account would send someone to bother one named
+   individual for something any colleague can do. `disableChange` names **any other admin**. That also
+   keeps the string free of the words "permanent admin", which is what lets
+   `admin-users.test.ts` tell this branch apart from the lock branch — the two refusals must stay
+   textually disjoint, and the suite asserts both directions.
+
+   *The consequence of self-demotion (Task 2 review, commit `4b112cd`).* "Recoverable" was true and
+   also not the whole story. `requireUser` (`src/server/auth/guards.ts:22`) compares the JWT's role to
+   the DB's on every request and redirects a mismatch to `/logout`, because the JWT freezes role at
+   sign-in. So **any** self role change — not only a demotion — signs the actor out on their very next
+   request, and `revalidatePath("/admin/users")` triggers exactly that inside the action's own
+   response. Shipping only "it's recoverable" would have meant an admin gets no warning before the
+   click and no explanation after: precisely the failure `lockReason` exists to prevent, in the one
+   action in the file that can cause it. So `src/lib/admin-users.ts` gained
+   **`selfRoleChangeWarning(target, next, actorId)`** — `lockReason`'s sibling, one string on two
+   surfaces, a **warning and not a refusal** (this decision still permits self-demotion). Task 3's
+   page must print it **before** the click, and `setUserRole` returns `signsOutActor` derived from the
+   same rule so the two surfaces cannot disagree about when it applies.
 
 4. **`WebhookEndpoint.secret` is encrypted at rest with the existing v1 scheme**, AAD `webhook:${id}`,
    reusing `src/server/crypto.ts` unchanged. It is a signing key sitting in a table an admin page
@@ -156,8 +198,9 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
 
 **Pure rules (TDD, no DB) — `src/lib/`**
 - `admin-users.ts` + `admin-users.test.ts` — `ROLE_OPTIONS`, `roleChange()` / `disableChange()`
-  returning a typed refusal or an allowance, and `lockReason()` for the UI. The permanent-admin and
-  self-disable rules live here so the page and the action cannot disagree.
+  returning a typed refusal or an allowance, `lockReason()` for the UI, and — added by the Task 2
+  review — `selfRoleChangeWarning()`, the warning (not a refusal) that a self role change signs you
+  out. The permanent-admin and self-disable rules live here so the page and the action cannot disagree.
 - `admin-flags.ts` + `admin-flags.test.ts` — `FLAG_SPECS` (key → label, description, `hasValue`,
   and an `unavailable` reason), plus `specFor()`, `flagChange()` and `domainValue()`. It is an
   **allowlist**: `FeatureFlag` is key-value, so without it the flags page writes arbitrary config.
@@ -169,6 +212,15 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
   never covered, so a `DEAD` delivery would otherwise render the same grey as a spare laptop.
 
 **Server — `src/server/`**
+- `prisma-errors.ts` — `asActionResult`, the phase's shared Prisma-error mapper (P2028/P2025 → typed
+  conflict, everything else rethrown). **A plain module, for the same reason `webhooks/sign.ts` is one:**
+  the plan originally exported it from `user-actions.ts`, but that file carries `"use server"`, so every
+  export becomes a network-reachable server action — and `asActionResult`'s first parameter is a
+  function, which is not serializable across that boundary anyway. Tasks 5, 7 and 13 import it from
+  here. Four private copies predate it (`modules/admin/policy-actions.ts`,
+  `modules/offboarding/actions.ts`, `modules/purchases/actions.ts`, `modules/purchases/draft-actions.ts`);
+  consolidating them is a recorded follow-up, deliberately not this phase's work — `policy-actions.ts`'s
+  copy carries an extra P2003 branch this one does not.
 - `modules/admin/user-actions.ts` — `setUserRole`, `setUserDisabled`.
 - `modules/admin/flag-actions.ts` — `setFlag`, `setFlagValue`.
 - `modules/admin/webhook-actions.ts` — `createEndpoint`, `rotateSecret`, `setEndpointActive`,
@@ -232,8 +284,17 @@ const ordinary: TargetUser = { id: "u-1", role: "it_staff", isPermanentAdmin: fa
 const permanent: TargetUser = { id: "u-0", role: "admin", isPermanentAdmin: true, disabled: false };
 
 describe("ROLE_OPTIONS", () => {
-  it("covers every Role in the schema, admin first", () => {
-    expect(ROLE_OPTIONS).toEqual(["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"]);
+  // AMENDED in 4b112cd — as originally written, this test compared ROLE_OPTIONS
+  // against a hardcoded copy of itself, so it could never fail for the reason
+  // its name claimed. It now reads the schema (`import { Role } from
+  // "@prisma/client"` — Prisma exports it as a runtime value), and the ordering
+  // claim is a separate `it` so a failure says which of the two broke.
+  it("covers every Role in the schema", () => {
+    expect(new Set(ROLE_OPTIONS)).toEqual(new Set(Object.values(Role)));
+  });
+
+  it("puts admin first", () => {
+    expect(ROLE_OPTIONS[0]).toBe("admin");
   });
 
   it("labels every option, so a select can never render a raw enum", () => {
@@ -445,35 +506,64 @@ git add src/lib/admin-users.ts src/lib/admin-users.test.ts
 git commit -m "feat(admin): the user rules, with the permanent admin locked against disable too"
 ```
 
+**Task 2's review reached back into both of these files** (commit `4b112cd`), so this module is larger
+than this task left it. It gained **`selfRoleChangeWarning(target, next, actorId)`** — `lockReason`'s
+sibling, a warning rather than a refusal, returning the sentence when the actor is changing their **own**
+role to any different role, because `requireUser` bounces a JWT/DB role mismatch to `/logout` and the
+actor is signed out mid-session. See the amended scope decision #3 and Task 2's preamble. Task 3 must
+print it before the click.
+
 ---
 
 ### Task 2: User actions
 
 Two mutations, both guarded by Task 1's rules and both state-guarded on the value they are replacing.
-This is also where the phase's `asActionResult` helper is written; Tasks 5, 7 and 13 import it, so get
+This is also where the phase's shared `asActionResult` helper lands; Tasks 5, 7 and 13 import it, so get
 the shape right here.
 
+**AMENDED to the shipped code (commits `28e21ba` + `4b112cd`).** Three things below differ from what this
+task originally said, and each one is a defect the reviews caught rather than a preference:
+
+1. **`asActionResult` lives in its own plain module, `src/server/prisma-errors.ts`** — not exported from
+   `user-actions.ts`. That file carries `"use server"`, so every export of it becomes a network-reachable
+   server action, and this helper's first parameter is a function, which is not serializable across that
+   boundary. This plan already applies the same reasoning to `webhooks/sign.ts` (Task 6); it simply
+   failed to apply it here.
+2. **Neither action returns `ok(null)`.** `setUserRole` returns
+   `ActionResult<{ changed: boolean; signsOutActor: boolean }>` and `setUserDisabled` returns
+   `ActionResult<{ changed: boolean }>`, and `revalidatePath` fires **only when `changed`**. Without
+   `changed`, a no-op save is indistinguishable from a real one, so Task 3 would report "audit entry
+   written" for a save that wrote nothing — the exact bug `src/server/modules/offboarding/actions.ts:239`
+   already fixed one phase earlier, with a comment saying why. `signsOutActor` carries scope decision
+   #3's amended consequence. **Because the callbacks now return objects, the old `if (failure)` check is
+   a trap** — `{ changed: false }` is truthy, so a no-op would propagate as a failure. Both callbacks
+   therefore return a full `ActionResult` on **every** path and the caller discriminates on `.ok`, which
+   is structural rather than something a later edit can weaken back into a truthiness test.
+3. **The disable audit diff carries `disabled` only.** The original block added
+   `email: { from: X, to: X }` so the row would say who it was about. But `/audit` renders the diff's
+   **key names** (`Object.keys(diff).join(", ")`), so that row read `Fields: disabled, email` —
+   telling a later auditor the email changed, in an append-only table that can never be corrected. The
+   justification was also already false: Step 3 below puts the user's identity on the audit row itself.
+   Identity moved there (`name · email`, since `User.name` is not unique) and out of the diff.
+
+Two smaller amendments: both `updateMany` guards gained `isPermanentAdmin: false`, so the lock scope
+decision #2 rests on is a database predicate and not only application code; and `z.enum(ROLE_OPTIONS)`
+needs neither of the two casts the original block used (zod 4 accepts a plain `Role[]` and preserves the
+element type — the `as [string, ...string[]]` was what erased `Role` and forced the second cast).
+
 **Files:**
+- Create: `src/server/prisma-errors.ts`
 - Create: `src/server/modules/admin/user-actions.ts`
 
-- [ ] **Step 1: Write the actions**
+- [ ] **Step 0: The shared Prisma-error mapper**
 
-Create `src/server/modules/admin/user-actions.ts`:
+Create `src/server/prisma-errors.ts`. Note the doc comment is addressed to **callers**: this helper
+cannot see a caller's callback body, so it states the ordering rule as a precondition and each call site
+verifies it in a comment of its own.
 
 ```ts
-"use server";
-
-import { revalidatePath } from "next/cache";
-import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/server/db/client";
-import { actionRole } from "@/server/auth/guards";
-import { checkRate } from "@/server/rate-limit";
-import { writeAudit } from "@/server/audit";
-import { ROLE_OPTIONS, disableChange, roleChange, type TargetUser } from "@/lib/admin-users";
-import {
-  conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
-} from "@/server/action-result";
+import { conflict, type ActionResult } from "@/server/action-result";
 
 /**
  * Prisma throws rather than returning. P2028 (the transaction couldn't get a
@@ -482,10 +572,12 @@ import {
  * here, not 500s. Everything else rethrows: an unexpected error must never be
  * laundered into a friendly banner.
  *
- * NOTE for anyone editing the callbacks below: RETURNING a failure from a
- * $transaction callback COMMITS the transaction — only a throw rolls it back.
- * That is safe here because every `return conflict(...)` precedes every write.
- * Add a write before one of them and it will commit silently.
+ * PRECONDITION FOR CALLERS: `run` is expected to wrap a `prisma.$transaction`
+ * callback. RETURNING a failure from that callback COMMITS the transaction —
+ * only a throw rolls it back. So every `return conflict(...)` inside your
+ * callback must precede every write in it; this helper has no way to check
+ * that for you, and can't see your callback's body at all. Verify the
+ * ordering holds at each call site, in a comment there — not here.
  */
 export async function asActionResult<T>(
   run: () => Promise<T>,
@@ -505,30 +597,63 @@ export async function asActionResult<T>(
     throw err;
   }
 }
+```
+
+- [ ] **Step 1: Write the actions**
+
+Create `src/server/modules/admin/user-actions.ts`:
+
+```ts
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { prisma } from "@/server/db/client";
+import { actionRole } from "@/server/auth/guards";
+import { checkRate } from "@/server/rate-limit";
+import { writeAudit } from "@/server/audit";
+import { asActionResult } from "@/server/prisma-errors";
+import { ROLE_OPTIONS, disableChange, roleChange, selfRoleChangeWarning } from "@/lib/admin-users";
+import {
+  conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
+} from "@/server/action-result";
 
 /** The narrow select every rule in `@/lib/admin-users` reads. */
 const TARGET_SELECT = { id: true, role: true, isPermanentAdmin: true, disabled: true } as const;
 
 const roleSchema = z.object({
   userId: z.string().min(1),
-  role: z.enum(ROLE_OPTIONS as [string, ...string[]]),
+  // zod 4 accepts ROLE_OPTIONS's plain `Role[]` directly and preserves the
+  // element type, so `parsed.data.role` below is already `Role` — no cast.
+  role: z.enum(ROLE_OPTIONS),
 });
 
-export async function setUserRole(input: unknown): Promise<ActionResult<null>> {
+export async function setUserRole(
+  input: unknown,
+): Promise<ActionResult<{ changed: boolean; signsOutActor: boolean }>> {
   const actor = await actionRole("admin");
   if (!actor) return forbidden();
   const rate = await checkRate(actor.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = roleSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const nextRole = parsed.data.role as TargetUser["role"];
+  const nextRole = parsed.data.role;
 
-  const failure = await asActionResult(
+  // The callback below always returns an ActionResult — `conflict(...)` on
+  // every failure path, `ok({...})` on both the no-op and the written path —
+  // so the check after `asActionResult` can discriminate on `.ok` instead of
+  // truthiness. A bare `{ changed: false }` is truthy; `if (result)` would
+  // have silently treated a no-op as a failure to propagate.
+  //
+  // Every `return conflict(...)` below precedes every write in this callback
+  // (see prisma-errors.ts's precondition): the two lookups and both rule
+  // checks return before `updateMany` is ever reached.
+  const result = await asActionResult(
     async () =>
       prisma.$transaction(async (tx) => {
         const target = await tx.user.findUnique({
           where: { id: parsed.data.userId },
-          select: { ...TARGET_SELECT, name: true, email: true },
+          select: TARGET_SELECT,
         });
         if (!target) return conflict("That user no longer exists.");
 
@@ -537,12 +662,28 @@ export async function setUserRole(input: unknown): Promise<ActionResult<null>> {
         // never came from that page.
         const verdict = roleChange(target, nextRole, actor.id);
         if (!verdict.allowed) return conflict(verdict.reason);
-        if (target.role === nextRole) return null; // no-op: don't pollute the trail
 
-        // Guarded on the before-value: two admins changing one row must not
-        // silently agree on whichever write landed last.
+        // lockReason's sibling flag, not a refusal: an admin changing their OWN
+        // role gets signed out on the very next request (the JWT freezes role
+        // at sign-in — see selfRoleChangeWarning's doc comment in admin-users.ts).
+        // Derived from the same rule the page will use, so the two surfaces can
+        // never disagree about when this applies.
+        const signsOutActor = selfRoleChangeWarning(target, nextRole, actor.id) !== null;
+
+        if (target.role === nextRole) return ok({ changed: false, signsOutActor }); // no-op: don't pollute the trail
+
+        // Guarded on the before-value, so two admins changing one row can't
+        // silently agree on whichever write landed last. `isPermanentAdmin:
+        // false` restates the lock the verdict check above already enforces —
+        // unreachable today, but scope decision #2 stakes the "no last-admin
+        // guard needed" call entirely on this lock holding, so it shouldn't
+        // hold only in application code. If this predicate ever DID fire,
+        // `count === 0` below would read as an ordinary "someone else changed
+        // it" conflict, which would be the wrong message for what actually
+        // happened — the honest one is the lock message `roleChange` already
+        // returned above.
         const written = await tx.user.updateMany({
-          where: { id: target.id, role: target.role },
+          where: { id: target.id, role: target.role, isPermanentAdmin: false },
           data: { role: nextRole },
         });
         if (written.count === 0) {
@@ -556,13 +697,15 @@ export async function setUserRole(input: unknown): Promise<ActionResult<null>> {
           action: "role-change",
           diff: { role: { from: target.role, to: nextRole } },
         });
-        return null;
+        return ok({ changed: true, signsOutActor });
       }),
     { goneMessage: "That user no longer exists." },
   );
-  if (failure) return failure;
-  revalidatePath("/admin/users");
-  return ok(null);
+  if (!result.ok) return result;
+  // A no-op cache bust is what this guard exists to avoid — see offboarding's
+  // m365 action, which the same fix is modeled on.
+  if (result.data.changed) revalidatePath("/admin/users");
+  return result;
 }
 
 const disableSchema = z.object({
@@ -570,7 +713,7 @@ const disableSchema = z.object({
   disabled: z.boolean(),
 });
 
-export async function setUserDisabled(input: unknown): Promise<ActionResult<null>> {
+export async function setUserDisabled(input: unknown): Promise<ActionResult<{ changed: boolean }>> {
   const actor = await actionRole("admin");
   if (!actor) return forbidden();
   const rate = await checkRate(actor.id);
@@ -579,21 +722,27 @@ export async function setUserDisabled(input: unknown): Promise<ActionResult<null
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const next = parsed.data.disabled;
 
-  const failure = await asActionResult(
+  // Same discriminated-on-.ok shape as setUserRole above, and the same
+  // precondition holds: every `return conflict(...)` below precedes the write.
+  const result = await asActionResult(
     async () =>
       prisma.$transaction(async (tx) => {
         const target = await tx.user.findUnique({
           where: { id: parsed.data.userId },
-          select: { ...TARGET_SELECT, name: true, email: true },
+          select: TARGET_SELECT,
         });
         if (!target) return conflict("That user no longer exists.");
 
+        // No `signsOutActor` flag here: self-disable is refused outright by
+        // this rule, so the actor can never be the target of a written change.
         const verdict = disableChange(target, next, actor.id);
         if (!verdict.allowed) return conflict(verdict.reason);
-        if (target.disabled === next) return null;
+        if (target.disabled === next) return ok({ changed: false });
 
+        // `isPermanentAdmin: false` restates the lock enforced above — see the
+        // matching comment in setUserRole.
         const written = await tx.user.updateMany({
-          where: { id: target.id, disabled: target.disabled },
+          where: { id: target.id, disabled: target.disabled, isPermanentAdmin: false },
           data: { disabled: next },
         });
         if (written.count === 0) {
@@ -605,20 +754,15 @@ export async function setUserDisabled(input: unknown): Promise<ActionResult<null
           entityType: "user",
           entityId: target.id,
           action: next ? "disable" : "enable",
-          // The email is in the diff because a disabled user drops out of every
-          // list that would otherwise say who this row was.
-          diff: {
-            disabled: { from: target.disabled, to: next },
-            email: { from: target.email, to: target.email },
-          },
+          diff: { disabled: { from: target.disabled, to: next } },
         });
-        return null;
+        return ok({ changed: true });
       }),
     { goneMessage: "That user no longer exists." },
   );
-  if (failure) return failure;
-  revalidatePath("/admin/users");
-  return ok(null);
+  if (!result.ok) return result;
+  if (result.data.changed) revalidatePath("/admin/users");
+  return result;
 }
 ```
 
@@ -635,8 +779,20 @@ line, which currently reads:
 so that it becomes:
 
 ```ts
+  // "disable" (entityType "user") is unreachable today: every actionDot caller
+  // scopes to employee/asset/purchase-request, and /audit — the one page that
+  // renders "user" entries — never calls this. Pre-wired for a user-scoped
+  // feed Task 11 may add; not dead by mistake.
   if (action.includes("failed") || action === "delete" || action === "disable") return "DEFECTIVE"; // fault
 ```
+
+**The comment is not decoration — it is the amendment.** The Task 2 review verified this plan's
+`auditSentence` claim (below) and found it proves rather more than intended: all four `actionDot` callers
+filter `entityType` to `employee` / `asset` / `purchase-request`, and `/audit` never imports `actionDot`
+at all, so **this line is unreachable today**. It is kept because Task 11 may add an admin activity feed,
+and commented so the next reader doesn't take it for live code. If Task 11 does light it up, revisit
+whether `DEFECTIVE` — the *fault* family — is the right reading for a deliberate administrative action;
+`enable` is correctly left neutral, since a restoration is not an incident.
 
 **Do not touch `auditSentence`.** Phase 7 learned this the hard way: the four activity feeds scope to
 `entityType` `employee` / `asset` / `purchase-request`, and `/audit` renders `listAudit`'s raw `action`
@@ -658,7 +814,7 @@ In `src/server/modules/audit/queries.ts`, `entityLabels` resolves ids to labels 
     byType.has("user")
       ? prisma.user.findMany({
           where: { id: { in: [...byType.get("user")!] } },
-          select: { id: true, name: true },
+          select: { id: true, name: true, email: true },
         })
       : [],
 ```
@@ -666,19 +822,37 @@ In `src/server/modules/audit/queries.ts`, `entityLabels` resolves ids to labels 
 and beside the other `map.set` lines:
 
 ```ts
-  for (const u of users) map.set(`user:${u.id}`, { label: u.name, href: "/admin/users" });
+  // `User.name` isn't unique (only `email` is) — the label carries both so it
+  // reads as an identity, not just a display name two people might share.
+  for (const u of users) map.set(`user:${u.id}`, { label: `${u.name} · ${u.email}`, href: "/admin/users" });
 ```
 
 naming the new binding `users` in the destructuring. Without this, every role change in the audit log
 reads as a truncated cuid.
 
+**Amended:** the label carries `name · email` rather than `name` alone, and the select therefore takes
+`email`. This is the other half of amendment #3 at the top of this task — it is *because* the row now
+names the user that the false `email: { from: X, to: X }` diff key could be deleted. `User.name` has no
+unique constraint, so a bare name would have left two colleagues sharing one audit identity.
+
 - [ ] **Step 4: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
-git add src/server/modules/admin/user-actions.ts src/components/patterns/activity-feed.tsx src/server/modules/audit/queries.ts
+git add src/server/prisma-errors.ts src/server/modules/admin/user-actions.ts src/components/patterns/activity-feed.tsx src/server/modules/audit/queries.ts
 git commit -m "feat(admin): role and access changes, guarded and audited by name"
 ```
+
+**As shipped this became two commits, deliberately left unsquashed** so the review verdict stays legible
+in history: `28e21ba` is the task as written above, and `4b112cd`
+(`fix(admin): honest results for a self role change and a no-op save`) is the review fix — the
+`changed` / `signsOutActor` returns, `selfRoleChangeWarning` and its tests, the deleted `email` diff key,
+the `isPermanentAdmin: false` predicates, the removed casts, and the `ROLE_OPTIONS` test that now reads
+`Object.values(Role)` instead of a hardcoded copy of itself. `4b112cd` also touches
+`src/lib/admin-users.ts` and `src/lib/admin-users.test.ts`, which Task 1 created.
+
+Verified green at `4b112cd`: `npx tsc --noEmit` · `npm run lint` · **363 tests across 27 files** ·
+`npm run build`.
 
 ---
 
@@ -686,6 +860,47 @@ git commit -m "feat(admin): role and access changes, guarded and audited by name
 
 Card `3h`: role selects per row, **except the permanent admin**, which shows a `LOCKED` chip and static
 text and is tinted one step back. The constraint is stated before the click.
+
+> ### ⚠ REQUIRED AMENDMENT — read before implementing. The code blocks in this task predate `4b112cd`.
+>
+> Task 2's review changed the contract this page consumes, in two ways the blocks below do **not** yet
+> reflect. Both are the *stated, never discovered* principle this task's own first paragraph invokes, so
+> neither is optional.
+>
+> **1. The action results are no longer `ActionResult<null>`.** `setUserRole` now returns
+> `ActionResult<{ changed: boolean; signsOutActor: boolean }>` and `setUserDisabled` returns
+> `ActionResult<{ changed: boolean }>`. Step 2's `run()` helper must stop announcing success
+> unconditionally: **when `res.data.changed === false` nothing was written**, so the toast must not claim
+> a change and `router.refresh()` is a pointless round trip. Say something honest instead (the role was
+> already that) or stay silent. The existing
+> `const res = (await fn()) as Awaited<ReturnType<typeof setUserRole>>` cast is also now actively unsafe
+> — the two actions no longer share a data shape, so that cast lets `setUserDisabled`'s result be read as
+> if it carried `signsOutActor`. Give `run()` a real generic, or split it into two callers.
+>
+> **2. A self role change signs the actor out, and this page is the surface that has to say so.** Per the
+> amended scope decision #3, `requireUser` bounces a JWT/DB role mismatch to `/logout`, so an admin
+> changing their **own** role — to any different role, not only a demotion — is signed out on their very
+> next request, and `revalidatePath` triggers it inside the action's own response. Without this, the admin
+> gets no warning before the click and no explanation after: exactly the failure `lockReason` exists to
+> prevent, in the one control on this screen that can cause it.
+>
+> Use `selfRoleChangeWarning` from `@/lib/admin-users` (a pure module with no `node:` imports, so a
+> `"use client"` table may import it, exactly as it already imports `ROLE_LABELS`). It needs the **actor's
+> id**, which `listUsers` does not have — the page does, from `requireRole("admin")`. Thread it through as
+> a prop rather than widening `UserRow`, since it is a property of *who is looking*, not of the row.
+>
+> Gate the change behind a confirm rather than a static hint: the warning names the role you are about to
+> land as, so it can only be written once a role has been picked, and it is still stated before anything
+> is written. `src/components/offboarding/complete-button.tsx` is the precedent to follow — `Dialog` plus
+> a comment noting the README reserves dialogs for decisions of exactly this weight. Call
+> `selfRoleChangeWarning(target, picked, actorId)` in the select's `onChange`; if it returns a string,
+> open the dialog with that string as the body and run the mutation only on confirm; if it returns
+> `null`, run it directly as the block below already does. Reset the select on cancel so the UI doesn't
+> keep showing a role that was never saved. `signsOutActor` on the result is the belt-and-braces half —
+> use it to tell the actor what just happened before the redirect takes them, not as the primary warning.
+>
+> Don't restate the rule inline (`row.id === actorId`) anywhere. Both surfaces call the one function, so
+> they cannot disagree about when it applies — the same discipline `lockReason` already follows.
 
 **Files:**
 - Create: `src/server/modules/admin/queries.ts`, `src/components/admin/user-table.tsx`,
@@ -1168,7 +1383,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { domainValue, flagChange, specFor } from "@/lib/admin-flags";
-import { asActionResult } from "@/server/modules/admin/user-actions";
+import { asActionResult } from "@/server/prisma-errors";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -1858,7 +2073,7 @@ import { writeAudit } from "@/server/audit";
 import { encryptSecret } from "@/server/crypto";
 import { secretAad } from "@/server/webhooks/sign";
 import { WEBHOOK_EVENTS, parseEvents } from "@/lib/webhooks";
-import { asActionResult } from "@/server/modules/admin/user-actions";
+import { asActionResult } from "@/server/prisma-errors";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -3734,6 +3949,20 @@ git commit -m "feat(webhooks): delivery attempts, and a replay that means try ag
 ---
 
 ### Task 14: E2E, full battery, close-out
+
+**Added by Task 2's review — two behaviors only e2e can protect.** Neither has a unit test, by design
+(the pure rules are covered in `src/lib/admin-users.test.ts`; the actions are thin wiring over them), so
+if this spec doesn't assert them, nothing does:
+
+- **The no-op save writes no audit entry.** Re-select a user's existing role and assert the
+  `AuditEntry` count for that user is unchanged. `changed: false` is a claim about the action, and a
+  regression here reappears as a UI that reports an immutable audit entry which does not exist.
+- **A self role change is warned about before it happens, and signs the actor out.** Sign in as an
+  ordinary (non-permanent) admin, change your own role, assert the confirm dialog names the incoming
+  role, then assert you land signed-out and can sign back in with the new role. This is the one path in
+  the phase where a mutation ends the actor's own session; it cannot be exercised by the seeded
+  `admin@` account, which is the permanent admin and locked. **Create the second admin in the spec** —
+  or promote `it@` first, which is itself a `setUserRole` call worth asserting.
 
 **Files:**
 - Create: `e2e/admin.spec.ts`
