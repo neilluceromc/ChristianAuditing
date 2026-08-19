@@ -51,3 +51,71 @@ describe("offboarding.completed", () => {
     })).toBe("J. Sarmiento completed offboarding for Dennis Ong");
   });
 });
+
+describe("equipment policies — entry criterion #6 (both slot lists in the diff)", () => {
+  const finance = { actorLabel: "Neil Lucero", entityLabel: "Finance standard" };
+
+  it("delete reads the policy name out of the diff, not a lookup (the row is gone by then)", () => {
+    expect(auditSentence({
+      ...finance,
+      action: "delete",
+      diff: {
+        name: { from: "Finance standard", to: null },
+        slots: { from: ["laptop · Laptop · required"], to: null },
+      },
+    })).toBe("Neil Lucero deleted Finance standard");
+  });
+
+  it("delete degrades to the entity label if the diff carries no name", () => {
+    expect(auditSentence({ ...finance, action: "delete", diff: null }))
+      .toBe("Neil Lucero deleted Finance standard");
+  });
+
+  it("policy.slot.added names the slot that appeared", () => {
+    expect(auditSentence({
+      ...finance,
+      action: "policy.slot.added",
+      diff: {
+        slots: {
+          from: ["laptop · Laptop · required"],
+          to: ["laptop · Laptop · required", "webcam · Webcam · required"],
+        },
+      },
+    })).toBe('Neil Lucero added the "webcam" slot to Finance standard');
+  });
+
+  it("policy.slot.removed names the slot that disappeared", () => {
+    expect(auditSentence({
+      ...finance,
+      action: "policy.slot.removed",
+      diff: {
+        slots: {
+          from: ["laptop · Laptop · required", "webcam · Webcam · required"],
+          to: ["laptop · Laptop · required"],
+        },
+      },
+    })).toBe('Neil Lucero removed the "webcam" slot from Finance standard');
+  });
+
+  it("policy.slot.changed names the slot whose required flag flipped", () => {
+    expect(auditSentence({
+      ...finance,
+      action: "policy.slot.changed",
+      diff: {
+        slots: {
+          from: ["second monitor · Monitor · optional"],
+          to: ["second monitor · Monitor · required"],
+        },
+      },
+    })).toBe('Neil Lucero changed the "second monitor" slot on Finance standard');
+  });
+
+  it("slot actions degrade without a usable diff", () => {
+    expect(auditSentence({ ...finance, action: "policy.slot.added", diff: null }))
+      .toBe("Neil Lucero added a slot to Finance standard");
+    expect(auditSentence({ ...finance, action: "policy.slot.removed", diff: null }))
+      .toBe("Neil Lucero removed a slot from Finance standard");
+    expect(auditSentence({ ...finance, action: "policy.slot.changed", diff: null }))
+      .toBe("Neil Lucero changed a slot on Finance standard");
+  });
+});

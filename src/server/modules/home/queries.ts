@@ -74,6 +74,7 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
           id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
           slots: { select: { id: true, name: true, assetTypeId: true, required: true } },
         },
+        orderBy: [{ name: "asc" }],
       })
     : [];
 
@@ -245,6 +246,7 @@ export async function fleet(now: Date = new Date()): Promise<Fleet> {
         id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
         slots: { select: { id: true, name: true, assetTypeId: true, required: true } },
       },
+      orderBy: [{ name: "asc" }],
     });
     for (const e of hires) {
       const policy = resolvePolicy({ title: e.title, departmentId: e.departmentId }, policies);

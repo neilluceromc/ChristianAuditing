@@ -42,7 +42,7 @@ export async function listEmployees(state: ListState, gapsOnly: boolean): Promis
       },
       orderBy: { [orderKey]: orderDir },
     }),
-    prisma.equipmentPolicy.findMany({ include: { slots: true } }),
+    prisma.equipmentPolicy.findMany({ include: { slots: true }, orderBy: [{ name: "asc" }] }),
   ]);
 
   const all = employees.map((e): EmployeeListRow => {
