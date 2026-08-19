@@ -6,12 +6,27 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { StatusPill } from "@/components/ui/status";
+import { Banner } from "@/components/ui/banner";
+import { Pill } from "@/components/ui/pill";
+import { REPAIR_STAGE_LABEL, downDays, quoteWarning, repairStage } from "@/lib/repairs";
 
 export default async function AssetOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const asset = await getAsset(id);
   if (!asset) notFound();
   const warranty = warrantyProgress(asset.purchasedAt, asset.warrantyUntil);
+  const cost = asset.cost === null ? null : Number(asset.cost);
+  const quote = asset.repairQuote === null ? null : Number(asset.repairQuote);
+  const stage = repairStage({
+    status: asset.status,
+    vendorId: asset.vendorId,
+    rmaRef: asset.rmaRef,
+    repairQuote: quote,
+    cost,
+    defectiveSince: asset.defectiveSince,
+  });
+  const warning = quoteWarning(quote, cost);
+  const down = downDays(asset);
 
   return (
     <div className="grid max-w-[860px] grid-cols-1 gap-4 lg:grid-cols-2">
@@ -54,18 +69,31 @@ export default async function AssetOverviewPage({ params }: { params: Promise<{ 
                   </span>
                 ) : ("—"),
               },
-              ...(asset.vendor || asset.rmaRef || asset.repairQuote
-                ? [
-                    { label: "Vendor", value: asset.vendor?.name ?? "—" },
-                    { label: "RMA", value: asset.rmaRef ?? "—", mono: true },
-                    { label: "Quote", value: fmtMoney(asset.repairQuote === null ? null : Number(asset.repairQuote)), mono: true },
-                  ]
-                : []),
               { label: "Notes", value: asset.notes ?? "—" },
             ]}
           />
         </CardBody>
       </Card>
+      {stage !== null && (
+        <Card className="lg:col-span-2">
+          <CardHeader
+            title="Repair"
+            actions={<Pill tone={stage === "returned-ok" ? "neutral" : "accent"}>{REPAIR_STAGE_LABEL[stage]}</Pill>}
+          />
+          <CardBody className="flex flex-col gap-3">
+            {warning && <Banner tone="attention" title="Repairing costs too much of a new unit">{warning}</Banner>}
+            <DescriptionList
+              items={[
+                { label: "Down", value: down === null ? "clock stopped" : `${down} d out of service`, mono: true },
+                { label: "Defective since", value: fmtDate(asset.defectiveSince), mono: true },
+                { label: "Vendor", value: asset.vendor?.name ?? "—" },
+                { label: "RMA", value: asset.rmaRef ?? "—", mono: true },
+                { label: "Quote", value: fmtMoney(quote), mono: true },
+              ]}
+            />
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }

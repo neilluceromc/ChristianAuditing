@@ -12,7 +12,8 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
-import { parseListState } from "@/lib/url-state";
+import { parseListState, type ListState } from "@/lib/url-state";
+import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
 import { diffOf } from "@/lib/audit-diff";
@@ -48,9 +49,19 @@ export async function bulkRequestStatusChange(
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { ids, filters, to, reason } = parsed.data;
 
-  const where = ids?.length
-    ? { id: { in: ids } }
-    : buildAssetWhere(parseListState(new URLSearchParams(filters), INVENTORY_LIST_CONFIG));
+  let where: Prisma.AssetWhereInput;
+  if (ids?.length) {
+    where = { id: { in: ids } };
+  } else {
+    const state: ListState = parseListState(new URLSearchParams(filters), INVENTORY_LIST_CONFIG);
+    // `stage` is a derived facet — buildAssetWhere only narrows to the repair
+    // CANDIDATE set in SQL (beyond-repair compares repairQuote against cost,
+    // which no Prisma filter can express). Acting on that candidate set
+    // directly would mean the drawer's "all N matching" acts on more rows
+    // than the screen shows. Resolve to the exact cut ids first.
+    const cutIds = await repairStageIds(state);
+    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state);
+  }
 
   let created = 0;
   let skipped = 0;

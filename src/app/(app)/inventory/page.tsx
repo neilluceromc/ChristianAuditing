@@ -14,6 +14,8 @@ import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filte
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { ColumnChooser } from "@/components/inventory/column-chooser";
 import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
+import { REPAIRS_SAVED_VIEW, REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
+import { RepairChips } from "@/components/inventory/repair-chips";
 
 export default async function InventoryPage({
   searchParams,
@@ -38,11 +40,15 @@ export default async function InventoryPage({
 
   const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0;
   const href = (s: typeof state) => "/inventory" + serializeListState(s, INVENTORY_LIST_CONFIG);
+  const repairMode = isRepairView(state);
 
   const chips: FilterChip[] = [];
   for (const [facet, values] of Object.entries(state.filters)) {
     for (const value of values) {
-      const label = facets[facet]?.find((o) => o.value === value)?.label ?? value;
+      const label =
+        facet === "stage" && isRepairStage(value)
+          ? REPAIR_STAGE_LABEL[value]
+          : facets[facet]?.find((o) => o.value === value)?.label ?? value;
       chips.push({
         label: `${facet}: ${label}`,
         removeHref: href(withFilter(state, facet, values.filter((v) => v !== value))),
@@ -67,7 +73,10 @@ export default async function InventoryPage({
       <div className="flex flex-col gap-2">
         <InventoryToolbar state={state} total={total} facets={facets}>
           <ColumnChooser visible={visibleColumns} />
+          {/* Saved views are named URLs (README): Repairs is one of them. */}
+          <ButtonLink size="sm" href={REPAIRS_SAVED_VIEW}>Repairs</ButtonLink>
         </InventoryToolbar>
+        {repairMode && <RepairChips state={state} />}
         <ChipFilterRow chips={chips} clearHref={href(clearFilters(state))} />
         {rows.length > 0 ? (
           <>
@@ -82,6 +91,7 @@ export default async function InventoryPage({
               canMutate={canMutate}
               filtersQS={serializeListState(state, INVENTORY_LIST_CONFIG).replace(/^\?/, "")}
               total={total}
+              repairMode={repairMode}
             />
             <div className="flex items-center justify-between pt-1">
               <span className="font-mono text-[11px] text-fg-muted">
