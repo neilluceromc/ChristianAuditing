@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — task 1 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 3 ahead of that.**
+**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–2 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 7 ahead of that.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,13 +13,13 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: task 1 of 14
-   is committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
-   so far (3 commits); `git status` should be clean.
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–2 of 14
+   are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
+   so far (7 commits); `git status` should be clean.
 
    **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
    2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
-   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 3 ahead of `main`.
+   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 7 ahead of `main`.
    Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
@@ -29,23 +29,39 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
    permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
    Phase 8's plan, not after.
-4. **Resume at Task 2** (user actions) of `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with
-   `superpowers:subagent-driven-development`. Task 1 is committed; 2–14 remain. Read the plan's
+4. **Resume at Task 3** (`/admin/users`) of `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with
+   `superpowers:subagent-driven-development`. Tasks 1–2 are committed; 3–14 remain. Read the plan's
    **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the `m365_sso`
    refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a later
-   task can silently break — then **§6a**, which carries what Task 1 actually established.
+   task can silently break — then **§6a**, which carries what Tasks 1 and 2 actually established.
    The plan has been amended to the shipped code (`docs(plan): …`), so trust it over any memory of
    what it used to say, and keep amending it whenever code deviates.
+
+   **Task 3 opens with a `⚠ REQUIRED AMENDMENT` block — read it, don't skim past it into the code.**
+   Task 2's review changed the contract Task 3 consumes: the two actions no longer return
+   `ActionResult<null>`, so the plan's `run()` helper announces success for a no-op save and its
+   `as Awaited<ReturnType<typeof setUserRole>>` cast is now unsafe (the two actions no longer share a
+   data shape); and Task 3 owns the **pre-click** warning that a self role change signs the actor out,
+   via `selfRoleChangeWarning` in `src/lib/admin-users.ts`. The code blocks below that banner predate
+   the fix — the banner is the current truth where they disagree.
 
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
 
-The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **345 unit tests across 26
-files** · `npm run build` · **`npx playwright test --workers=1` — 89 e2e tests, 7.3 minutes** (up
+The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **363 unit tests across 27
+files** (345/26 at the Phase 7 merge; Task 1 added `src/lib/admin-users.test.ts`, Task 2's review fix
+added five more cases to it) · `npm run build` · **`npx playwright test --workers=1` — 89 e2e tests,
+7.3 minutes** (up
 from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
 through the worker, repair mode, reservations, and equipment policies, including the viewer
 read-only path). This was the first full e2e run since Task 9, and it is what finally exercised the
 things the browser pane could never confirm — see the two gotchas below.
+
+**The e2e figure above is from the Phase 7 merge and has NOT been re-run on this branch.** Tasks 1 and
+2 added no UI and no route, so nothing in `e2e/` could exercise them; Task 14 is where `e2e/admin.spec.ts`
+lands and the suite is re-run. Every Phase 8 task so far has been confirmed with
+`npx tsc --noEmit` · `npm run lint` · `npm run test` · `npm run build` only — which is enough for these
+two and will stop being enough the moment Task 3 renders a page.
 
 **A recurring test-design gotcha worth knowing before you write more e2e:** a UI confirmation that
 clears itself on a timer cannot be asserted with the default `expect` budget. `/inventory/[id]/edit`'s
@@ -58,12 +74,14 @@ at a timing race. It failed once in three full runs and was reproduced byte-for-
 `updateAsset` 7s. The fix is headroom on the assertion (20s), not a weaker assertion.
 
 **Nothing is half-finished in the code.** Every task ended on a green commit, including Task 15's
-close-out. The next unit of work is a whole task — Phase 8's first — not a fragment of Phase 7.
+close-out and Phase 8's Tasks 1 and 2. The next unit of work is a whole task — Phase 8's **third** —
+not a fragment of anything.
 
-**State this session left behind:** working tree clean, no dev server running, `inventory-db-1` up
-and **freshly seeded** (Dennis Ong EMP-0090 is OFFBOARDING and holds all three fixture items —
-`BR-LT-0166`, `BR-PH-0312`, `BR-HS-0510` — with no wizard decisions made against them). No scratch
-files anywhere in the repo.
+**State this session left behind:** working tree clean, no dev server was ever started, `inventory-db-1`
+up with the Phase 7 seed still in it (**not** reseeded this session — Tasks 1 and 2 needed no fixtures).
+7 migrations, nothing pending. Dennis Ong EMP-0090 is OFFBOARDING and holds all three fixture items
+(`BR-LT-0166`, `BR-PH-0312`, `BR-HS-0510`) with no wizard decisions against them. No scratch files
+anywhere in the repo.
 
 ---
 
@@ -124,7 +142,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 task 1 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–2 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -248,6 +266,17 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
+**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–2 of 14 on the unmerged `phase-8-admin`)**
+(`docs/superpowers/plans/2026-08-19-phase-8-admin.md`): the user rules and the two mutations behind
+them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LABELS`, and the pure rules
+`lockReason` / `roleChange` / `disableChange`, with the permanent admin locked against **both** role and
+`disabled`. **Task 2** — `setUserRole` / `setUserDisabled` in `src/server/modules/admin/user-actions.ts`,
+**the first code anywhere in this repo that writes `User.role` or `User.disabled`**, plus
+`selfRoleChangeWarning` (added by review) and the shared `asActionResult` in `src/server/prisma-errors.ts`.
+`/audit` can now name a `user` row (`name · email` → `/admin/users`) instead of printing a truncated cuid.
+No UI yet — Task 3 is the first `/admin/users` page. Two commits per task, review fixes deliberately left
+unsquashed so the verdicts stay legible: `c699743` + `d29ce9b`, then `28e21ba` + `4b112cd`.
+
 ### Conventions every later phase must follow
 
 | Concern | Where |
@@ -279,10 +308,11 @@ scoped feed, so the only one showing the domain pill).
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 2–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 3–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Task 1 (the user rules) is done** — see §6a. Task 2 is next, and is the first code anywhere in
-  this repo to write `User.role` or `User.disabled`, which matters more than it sounds (§6a rule 2).
+  **Tasks 1 (the user rules) and 2 (the two mutations) are done** — see §6a. Task 3 is next and is the
+  first *page* in the workspace; it opens with a `⚠ REQUIRED AMENDMENT` block because Task 2's review
+  changed the contract it consumes (§0 item 4).
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -350,7 +380,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Task 1 established (READ BEFORE TASK 2)
+## 6a. Phase 8 mid-flight: what Tasks 1–2 established (READ BEFORE TASK 3)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -376,6 +406,60 @@ sharpened, and the ones a later task can silently break.
    string must not contain "permanent admin", and the lock string must not contain "your own account";
    the tests assert both directions. This is not styling — see the §7 gotcha about assertions that
    cannot tell two branches apart.
+
+**From Task 2 (`28e21ba` + the review fix `4b112cd`). Rule 5 is the one Task 3 must act on.**
+
+5. **Any self role change signs the actor out, and the page — not the action — has to say so first.**
+   `requireUser` compares the JWT's role to the DB's on every request and redirects a mismatch to
+   `/logout`, because the JWT freezes role at sign-in. So an admin changing their **own** role to any
+   different role is signed out mid-session, and `revalidatePath("/admin/users")` triggers exactly that
+   *inside the action's own response* — which means the success state very likely never renders. Scope
+   decision #3 still permits self-demotion; what it was missing was the warning.
+   **`selfRoleChangeWarning(target, next, actorId)`** in `src/lib/admin-users.ts` is `lockReason`'s
+   sibling — a warning, not a refusal, one string on two surfaces. Task 3 gates the select's `onChange`
+   behind a `Dialog` carrying that sentence (the precedent is
+   `src/components/offboarding/complete-button.tsx`), and `setUserRole` returns `signsOutActor` derived
+   from the same function so the two surfaces cannot disagree. **Never restate the rule inline as
+   `row.id === actorId`.**
+
+6. **Neither action returns `ActionResult<null>`, and the no-op path is why.** `setUserRole` returns
+   `{ changed, signsOutActor }`, `setUserDisabled` returns `{ changed }`, and `revalidatePath` fires only
+   when `changed`. Re-selecting a role a user already has writes nothing, and a caller that can't see
+   that will claim an immutable audit entry that does not exist — the identical bug
+   `src/server/modules/offboarding/actions.ts:239` already fixed one phase earlier, with a comment
+   saying so. **The trap when editing these:** both `$transaction` callbacks now return a full
+   `ActionResult` on *every* path and the caller discriminates on `.ok`. A returned `{ changed: false }`
+   is truthy, so the older `if (failure) return failure` shape would read a successful no-op as a
+   failure to propagate. Don't reintroduce it. And remember `writeAudit` runs inside that callback:
+   **returning** from a Prisma `$transaction` callback COMMITS it — only a throw rolls it back — so
+   every `return conflict(...)` must stay ahead of every write.
+
+7. **`asActionResult` is a shared plain module, `src/server/prisma-errors.ts`, and must never move into
+   a `"use server"` file.** Every export of a `"use server"` module becomes a network-reachable server
+   action, and this helper's first parameter is a function, which isn't serializable across that
+   boundary. The plan originally had it exported from `user-actions.ts`; Tasks 5, 7 and 13 import it from
+   `@/server/prisma-errors` instead. Its doc comment is deliberately a **precondition addressed to
+   callers** — the helper cannot see a callback's body, so each call site verifies the
+   conflict-before-write ordering in a comment of its own. Four private copies predate it (§8).
+
+8. **The audit trail names a user; the diff does not pad itself to do it.** `entityLabels` resolves
+   `user:<id>` to `name · email` linking to `/admin/users` (`User.name` has no unique constraint, so a
+   bare name would let two colleagues share one audit identity). The disable diff carries `disabled`
+   **only**. An earlier version added `email: { from: X, to: X }` to carry identity, which made `/audit`
+   print `Fields: disabled, email` — `/audit` renders diff *key names*, so that row told a later reader
+   the email had changed, in an append-only table that can never be corrected. **Don't put a
+   from-equals-to key in a diff to smuggle context; put the context in the label.** (There is one
+   sanctioned from===to precedent — `offboarding.completed`'s `m365Status` — and it earns it by
+   snapshotting a value that mutable rows can later lose. Nothing here can be lost: there is no
+   email-change flow and no user-deletion path.)
+
+9. **Scope decision #2's four facts were re-verified now that something finally writes these columns,
+   and all four hold** — the only writes to an existing `User` row anywhere in `src/` are Task 2's two
+   `updateMany` calls, and the lock is now a **database predicate** (`isPermanentAdmin: false` in both
+   guarded `where` clauses) rather than application code alone. **The deferred SSO callback is the change
+   that would falsify two of them at once:** it becomes a third producer of `User.role`, and SSO mappings
+   conventionally refresh role from group claims on every login — a writer of `User.role` on existing
+   rows, outside this module, unaware of the lock. Re-litigate #2 when that lands; don't re-cite it.
 
 ---
 
@@ -435,19 +519,44 @@ sharpened, and the ones a later task can silently break.
 - **Phase 8, Task 1 (recorded by review, judged not worth fixing now):** the permanent-admin lock is
   **direction-blind** — `disableChange` refuses *re-enabling* the permanent admin as well as disabling
   it, so if that account were ever disabled out of band the one transition that repairs the lockout is
-  the one the module forbids, leaving a manual DB edit as the only recovery (unreachable today, since
-  nothing writes `User.disabled` until Task 2; the correct rule would refuse only transitions that
+  the one the module forbids, leaving a manual DB edit as the only recovery (**this became reachable
+  the moment Task 2 landed** — `setUserDisabled` is now a real writer of `User.disabled`, though it
+  refuses the permanent admin in both directions, so the lockout still requires an out-of-band write to
+  create; the correct rule would refuse only transitions that
   *reduce* its access, and the fix is not one line because `lockReason` must still report the row as
   LOCKED for the UI while `disableChange` diverges — the two surfaces that share one string today would
   have to stop sharing it); **`ROLE_OPTIONS` is not exhaustiveness-checked** (`Role[]` accepts a subset
   and its test compares against a hardcoded literal, so a sixth role would silently vanish from every
   role select — `ROLE_LABELS: Record<Role, string>` would fail to compile, but that can be fixed
-  without touching `ROLE_OPTIONS`; `Role` is a runtime value from `@prisma/client`, so the test could
-  assert set-equality against the generated enum); **`TargetUser.disabled` is declared but never read**
+  without touching `ROLE_OPTIONS`). **The test half of that was FIXED in `4b112cd`**: it now asserts
+  set-equality against `Object.values(Role)` from `@prisma/client`, with the admin-first ordering split
+  into its own `it` so a failure says which claim broke. The *type* half stands — `ROLE_OPTIONS: Role[]`
+  still accepts a subset, and `as const satisfies readonly Role[]` plus an `Exclude<Role, …> extends
+  never` guard is what would move the guarantee to compile time. Also still open: **`TargetUser.disabled`
+  is declared but never read**
   by any of the three rules, despite the type's comment promising it holds only what they read; and the
   **self-disable guard fails open on an id-space mismatch** — `target.id === actorId` is the only
   identity-keyed rule and `TargetUser` is unbranded primitives, so a caller sourcing `actorId` from the
   `Employee` id space instead of `User` would silently turn a refusal into an allow.
+- **Phase 8, Task 2 (recorded by review, judged not worth fixing now):** there are now **five**
+  implementations of `asActionResult` — the new shared `src/server/prisma-errors.ts` plus four private
+  copies that predate it (`modules/admin/policy-actions.ts`, `modules/offboarding/actions.ts`,
+  `modules/purchases/actions.ts`, `modules/purchases/draft-actions.ts`). Migrating them is a one-file-each
+  change but not a pure deletion: `policy-actions.ts`'s copy carries an extra **P2003** branch with a
+  message specific to its own FK direction, and the purchases pair have a narrower signature
+  (`() => Promise<ActionResult<T>>` rather than `() => Promise<T>`). Worth one consolidation pass once
+  Phase 8's own callers (Tasks 5, 7, 13) have settled the shared shape. **P2025 is currently unreachable
+  in both user actions** — `updateMany` returns a count rather than throwing, and `auditEntry.create`
+  can only P2003 on a deleted actor, which no code path can produce — so `goneMessage` is insurance for
+  the later tasks, not for these two. The concurrency guard is also **safe by accident of which columns
+  are immutable rather than by construction**: `roleChange` reads only `isPermanentAdmin` and
+  `disableChange` only `isPermanentAdmin` + `id`, both of which nothing writes, so guarding the single
+  written field happens to cover each rule's whole read set. A future rule that reads `disabled` while
+  writing `role` — or any real "last admin" count — would open a window the current `where` clauses
+  don't cover. And `actionDot`'s new `"disable"` case is **unreachable today** (all four callers scope
+  `entityType` to employee/asset/purchase-request, and `/audit` never imports it); it is commented as
+  pre-wired for a feed Task 11 may add, and if that lands, `DEFECTIVE` — the *fault* family — is worth
+  re-examining as the reading for a deliberate administrative action.
 - **`/bootstrap`'s copy under-states the lock**: `src/app/(auth)/bootstrap/page.tsx` promises the
   permanent admin's *role* can never be changed, but Phase 8 widened that to access as well. Worth
   aligning when Task 3 lands. The corollary belongs here too — a bootstrapped permanent admin's account
