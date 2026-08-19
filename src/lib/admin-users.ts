@@ -57,7 +57,14 @@ export function roleChange(target: TargetUser, next: Role, actorId: string): Rul
  *
  * Self-disable is refused for the opposite reason to self-demotion — it ends
  * your own session with no way back for you specifically, so it reads as an
- * accident rather than an intent. The refusal names who can undo it.
+ * accident rather than an intent.
+ *
+ * The refusal names ANY other admin, not the permanent one: an ordinary admin
+ * may disable another ordinary admin (nothing here forbids it), so pointing at
+ * the permanent account would send someone to bother one specific person for
+ * something any of their colleagues can do. It also keeps this string free of
+ * the words "permanent admin", which is what lets the tests tell this branch
+ * apart from the lock branch above — see the note in the test file.
  */
 export function disableChange(target: TargetUser, next: boolean, actorId: string): RuleResult {
   const locked = lockReason(target);
@@ -66,7 +73,7 @@ export function disableChange(target: TargetUser, next: boolean, actorId: string
     return {
       allowed: false,
       reason:
-        "You can't disable your own account — you'd be signed out with no way back in. Ask the permanent admin to do it.",
+        "You can't disable your own account — you'd be signed out with no way back in. Another admin can do it for you.",
     };
   }
   return { allowed: true };

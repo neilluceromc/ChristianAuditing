@@ -60,6 +60,9 @@ describe("disableChange", () => {
     const res = disableChange(permanent, true, "actor-9");
     expect(res.allowed).toBe(false);
     expect(res.allowed === false && res.reason).toMatch(/permanent admin/i);
+    // ...and not with the self-disable wording, which is the other refusal this
+    // function can return.
+    expect(res.allowed === false && res.reason).not.toMatch(/your own account/i);
   });
 
   it("refuses to touch the permanent admin even when re-enabling", () => {
@@ -68,11 +71,18 @@ describe("disableChange", () => {
   });
 
   // Scope decision #3: unlike a demotion, this one has no way back for you.
-  it("refuses self-disable and names the way back", () => {
+  //
+  // Assert the DISTINGUISHING clause, not /permanent admin/. Both branches of
+  // disableChange return { allowed: false }, so a reason-match both strings
+  // satisfy cannot tell them apart — and no mutation test can catch that,
+  // because `allowed` is false either way. The negative assertion is what keeps
+  // the two strings disjoint as they get edited.
+  it("refuses self-disable, and says so in its own words", () => {
     const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: false };
     const res = disableChange(self, true, "actor-9");
     expect(res.allowed).toBe(false);
-    expect(res.allowed === false && res.reason).toMatch(/permanent admin/i);
+    expect(res.allowed === false && res.reason).toMatch(/your own account/i);
+    expect(res.allowed === false && res.reason).not.toMatch(/permanent admin/i);
   });
 
   it("allows re-enabling yourself, which is unreachable but harmless", () => {
