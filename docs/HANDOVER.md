@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phase 7 is DONE (15/15 tasks) and MERGED — `main` is at the `Merge phase 7` commit and `phase-7-offboarding` has been deleted** · **Phases 1–7 merged to main; Phase 8 is next. Nothing has been pushed — `main` is ahead of `origin/main` by 47 commits, which is deliberate.**
+**Last updated:** 2026-08-19 · **Phases 1–7 are all merged to `main` and pushed — `main` and `origin/main` are in sync, and `phase-7-offboarding` has been deleted** · **Phase 8 (admin + import/export + polish) is next and has no code yet; §6 carries its entry criteria.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,13 +13,11 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **The merge is already done — work on `main`.** Phase 7 was merged on 2026-08-19 with a `--no-ff`
-   commit (matching how phases 5 and 6 were merged) and `phase-7-offboarding` was deleted. The full
-   battery was re-run on the merged result before the branch was removed: 345 unit + 89 e2e, green.
-   **Nothing has been pushed** — `main` sits ahead of `origin/main` by 47 commits because the user
-   chose to merge locally and keep publishing as a separate decision. Do not push without asking;
-   the repo is public. `git status` should be clean and `git log --oneline -1` should read
-   `Merge phase 7 — offboarding, repairs, equipment policies`.
+1. **Phase 7 is merged and pushed — work on `main`.** It was merged on 2026-08-19 with a `--no-ff`
+   commit (matching phases 5 and 6), `phase-7-offboarding` was deleted, and `main` was pushed to
+   `origin`. The full battery was re-run on the merged result before the branch was removed: 345 unit
+   + 89 e2e, green. `git status` should be clean and `main` should be level with `origin/main`. The
+   repo is public, so the usual rule still holds — never commit `.env` or any real secret.
 2. `docker compose up -d db` → **`npx prisma migrate deploy`** (Phase 7 added a 7th migration) →
    `npm run db:seed` → open the preview (`preview_start` name `app-dev`).
 3. Read **§6** — it now carries Phase 8's entry criteria: the things the new admin/import/export
@@ -269,9 +267,6 @@ scoped feed, so the only one showing the domain pill).
 
 ## 5. What REMAINS
 
-- **Push `main` to `origin`, when the user decides to.** Phase 7 is merged and the branch is gone; the
-  47 unpushed commits on `main` are the only integration step left, and publishing to a public repo is
-  the user's call, not something to do unprompted (§0).
 - **Phase 8 — Admin + import/export + polish.** `/admin/users` (locked permanent admin),
   `/admin/webhooks` + `/deliveries` (dead-letter replay — **the worker currently dead-letters
   DELIVER_WEBHOOK jobs with "ships in Phase 8"**), `/admin/flags`; import (3-step dry-run → commit,
