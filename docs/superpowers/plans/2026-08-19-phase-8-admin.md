@@ -200,7 +200,11 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
 - `admin-users.ts` + `admin-users.test.ts` — `ROLE_OPTIONS`, `roleChange()` / `disableChange()`
   returning a typed refusal or an allowance, `lockReason()` for the UI, and — added by the Task 2
   review — `selfRoleChangeWarning()`, the warning (not a refusal) that a self role change signs you
-  out. The permanent-admin and self-disable rules live here so the page and the action cannot disagree.
+  out, and — added by the Task 3 review — `roleWorkspaces()`, the artboard's `Workspaces` column derived
+  from `ROLE_WORKSPACES`/`WORKSPACE_META`. The permanent-admin and self-disable rules live here so the
+  page and the action cannot disagree — **and Task 3 proved that only holds if the page actually calls
+  every rule**: it shipped once with a live Disable button on the actor's own row, because the UI
+  imported `selfRoleChangeWarning` and not `disableChange`.
 - `admin-flags.ts` + `admin-flags.test.ts` — `FLAG_SPECS` (key → label, description, `hasValue`,
   and an `unavailable` reason), plus `specFor()`, `flagChange()` and `domainValue()`. It is an
   **allowlist**: `FeatureFlag` is key-value, so without it the flags page writes arbitrary config.
@@ -861,50 +865,77 @@ Verified green at `4b112cd`: `npx tsc --noEmit` · `npm run lint` · **363 tests
 Card `3h`: role selects per row, **except the permanent admin**, which shows a `LOCKED` chip and static
 text and is tinted one step back. The constraint is stated before the click.
 
-> ### ⚠ REQUIRED AMENDMENT — read before implementing. The code blocks in this task predate `4b112cd`.
+> ### AMENDED to the shipped code (`5d8e819` + `8a604df`). The earlier REQUIRED AMENDMENT banner has been applied and folded in.
 >
-> Task 2's review changed the contract this page consumes, in two ways the blocks below do **not** yet
-> reflect. Both are the *stated, never discovered* principle this task's own first paragraph invokes, so
-> neither is optional.
+> The code below is what shipped and was confirmed in the browser. Six things differ from what this task
+> originally specified. The first is the one to read if you read only one, because the same mistake is
+> available in every remaining task of this phase.
 >
-> **1. The action results are no longer `ActionResult<null>`.** `setUserRole` now returns
-> `ActionResult<{ changed: boolean; signsOutActor: boolean }>` and `setUserDisabled` returns
-> `ActionResult<{ changed: boolean }>`. Step 2's `run()` helper must stop announcing success
-> unconditionally: **when `res.data.changed === false` nothing was written**, so the toast must not claim
-> a change and `router.refresh()` is a pointless round trip. Say something honest instead (the role was
-> already that) or stay silent. The existing
-> `const res = (await fn()) as Awaited<ReturnType<typeof setUserRole>>` cast is also now actively unsafe
-> — the two actions no longer share a data shape, so that cast lets `setUserDisabled`'s result be read as
-> if it carried `signsOutActor`. Give `run()` a real generic, or split it into two callers.
+> **1. The Disable button on the actor's own row was a guaranteed-fail affordance.** `lockReason` returns
+> `null` for your own row, so the `!row.locked` branch rendered a normal live button — while
+> `disableChange` refuses self-disable unconditionally, and `next` can only ever be `true` for the actor
+> (a disabled user is bounced at `guards.ts:19`, so they can never be looking at this page). **Every
+> click on it produced a red conflict banner. 100% of them.** That breaks brief section 3's hard constraint
+> — *"Anything a role can't do must not render an action they'll get a 403 from"* — and card 3h's whole
+> thesis, which this task applied meticulously to the permanent admin and to the self *role* change and
+> then dropped for the self *disable*. The rule was already written, exported and unit-tested; the UI
+> simply never imported it. **The lesson for Tasks 5, 8 and 13: for every rule module this phase adds,
+> check that the page consumes every refusal it can return, not just the one the design card names.**
 >
-> **2. A self role change signs the actor out, and this page is the surface that has to say so.** Per the
-> amended scope decision #3, `requireUser` bounces a JWT/DB role mismatch to `/logout`, so an admin
-> changing their **own** role — to any different role, not only a demotion — is signed out on their very
-> next request, and `revalidatePath` triggers it inside the action's own response. Without this, the admin
-> gets no warning before the click and no explanation after: exactly the failure `lockReason` exists to
-> prevent, in the one control on this screen that can cause it.
+> **2. `UserRow` carries `target: TargetUser`.** The first fix synthesized a `TargetUser` in the client
+> with a hardcoded `isPermanentAdmin: false`. It was true, and `selfRoleChangeWarning` does not even read
+> that field — which is what made it dangerous: unfalsifiable, so nothing would ever catch it going
+> wrong, while `admin-users.ts:42-44` promises that a rule which *starts* reading it is a change to one
+> function and not to its call sites. `listUsers` was already building that exact object and throwing it
+> away; it now returns it. Do not derive it from `row.locked` — that inverts the dependency.
 >
-> Use `selfRoleChangeWarning` from `@/lib/admin-users` (a pure module with no `node:` imports, so a
-> `"use client"` table may import it, exactly as it already imports `ROLE_LABELS`). It needs the **actor's
-> id**, which `listUsers` does not have — the page does, from `requireRole("admin")`. Thread it through as
-> a prop rather than widening `UserRow`, since it is a property of *who is looking*, not of the row.
+> **3. `changed: false` now always refreshes.** Reason about when that branch can fire: a `<select>`
+> emits no change event for the already-selected option, and the Disable button always sends the opposite
+> of what it shows — so it fires **only when the client's props are stale.** The original "a no-op
+> refresh is a pointless round trip" reasoning is therefore backwards: in the one case it fires, the
+> refresh is the entire remedy. Without it, a second admin clicking Disable on an already-disabled row
+> gets a spinner, then silence, **forever**, until they reload by hand. `router.refresh()` now runs on
+> every `ok`, with a neutral "already X" toast when nothing changed. `setUserRole`/`setUserDisabled` were
+> **not** touched: the server keeping `revalidatePath` gated on `changed` is right and matches
+> `offboarding/actions.ts`, and `router.refresh()` refetches regardless on a dynamic route.
 >
-> Gate the change behind a confirm rather than a static hint: the warning names the role you are about to
-> land as, so it can only be written once a role has been picked, and it is still stated before anything
-> is written. `src/components/offboarding/complete-button.tsx` is the precedent to follow — `Dialog` plus
-> a comment noting the README reserves dialogs for decisions of exactly this weight. Call
-> `selfRoleChangeWarning(target, picked, actorId)` in the select's `onChange`; if it returns a string,
-> open the dialog with that string as the body and run the mutation only on confirm; if it returns
-> `null`, run it directly as the block below already does. Reset the select on cancel so the UI doesn't
-> keep showing a role that was never saved. `signsOutActor` on the result is the belt-and-braces half —
-> use it to tell the actor what just happened before the redirect takes them, not as the primary warning.
+> **4. Progress is per-row.** `loading={pending}` off one shared `useTransition` put a spinner in all
+> five rows' buttons — four false claims per click. `queue-table.tsx:32,39-40` shares `pending` but
+> tracks the acting row by id, and `policy-editor.tsx:53,92` scopes its runner per card. Now
+> `loading={acting === row.id}`, with `disabled={pending}` still shared — that part is correct, it stops
+> cross-row double-submits into one shared error state.
 >
-> Don't restate the rule inline (`row.id === actorId`) anywhere. Both surfaces call the one function, so
-> they cannot disagree about when it applies — the same discipline `lockReason` already follows.
+> **5. Both refusal sentences moved out of the cells into a caption under the table.**
+> `PERMANENT_LOCK` is ~128 chars at `text-[10.5px]` in a 170px cell — about five wrapped lines, making
+> the first row 2-3x `--row-h` and defeating the density toggle (brief section 3.5) on the one row every
+> reader sees first. The self-disable refusal is ~100 chars in a 130px cell, so it had the same problem.
+> Cells now carry a short label (`LOCKED` + role, or `Your own account`); the caption carries the
+> sentences, which is where the artboard puts the explanation. **Both constraints are still stated on
+> screen** — that is the point — just not inside a 130px cell. Measured after: all five rows are 41px.
+>
+> **6. The artboard's `Workspaces` column was restored, and `Last seen` is an explicit deferral.**
+> This task claimed card 3h "only names the role select". True of the card's *prose*; its **artboard**
+> specifies four columns, and two were dropped silently. `Workspaces` is derivable today from
+> `ROLE_WORKSPACES` / `WORKSPACE_META` with no schema change, and it matters because the role name does
+> not answer the question — brief section 2 puts `it_staff` and `viewer` in the **same** workspace with
+> different access, so an admin picking "Viewer" otherwise learns nothing about what that grants. It is
+> a pure function, `roleWorkspaces()` in `src/lib/admin-users.ts`, tested against `ROLE_WORKSPACES`
+> rather than a hand-copied string table. `Last seen` is **deliberately not built**: `model User` has no
+> `lastSeenAt`, and brief section 3.1 forbids new backend work — the `Sign-in` column stands in for it.
+> `Avatar` was also restored, matching `employees/page.tsx:64`.
+>
+> Plus one shared-primitive fix: **`src/components/ui/dialog.tsx` gained `aria-describedby`.** It set
+> `aria-labelledby` only, and `useFocusTrap` focuses the first focusable element — Cancel — so a screen
+> reader announced the title, then "Cancel, button", and never the body. The warning sentence, the entire
+> reason this dialog exists, went unread. Additive, benefits all seven `Dialog` call sites, and this is
+> the one dialog in the app that ends the actor's session. **Confirmed in the browser:**
+> `aria-describedby` resolves to the warning text.
 
 **Files:**
 - Create: `src/server/modules/admin/queries.ts`, `src/components/admin/user-table.tsx`,
   `src/app/(app)/admin/users/page.tsx`
+- Modify: `src/lib/admin-users.ts` + `src/lib/admin-users.test.ts` (add `roleWorkspaces`),
+  `src/components/ui/dialog.tsx` (`aria-describedby`)
 
 - [ ] **Step 1: Write the query module**
 
@@ -913,7 +944,7 @@ this is its first one.
 
 ```ts
 import { prisma } from "@/server/db/client";
-import { lockReason, type TargetUser } from "@/lib/admin-users";
+import { lockReason, roleWorkspaces, type TargetUser } from "@/lib/admin-users";
 import type { Role } from "@prisma/client";
 
 export interface UserRow {
@@ -924,8 +955,17 @@ export interface UserRow {
   disabled: boolean;
   /** non-null → the row is locked, and this is the sentence explaining why */
   locked: string | null;
-  /** "credentials" | "SSO only" — a passwordHash-less row can only arrive via Entra */
-  signIn: string;
+  /** a passwordHash-less row can only arrive via Entra */
+  signIn: "credentials" | "SSO only";
+  /** "all four" | "IT · read-only" | … — see roleWorkspaces */
+  workspaces: string;
+  /**
+   * The exact shape every rule in `@/lib/admin-users` reads, passed straight
+   * through rather than left for the client to rebuild — a client-synthesized
+   * copy of this object is exactly the kind of thing that quietly hardcodes a
+   * field (isPermanentAdmin, say) that happens to be right today.
+   */
+  target: TargetUser;
 }
 
 export async function listUsers(): Promise<UserRow[]> {
@@ -948,6 +988,8 @@ export async function listUsers(): Promise<UserRow[]> {
       disabled: r.disabled,
       locked: lockReason(target),
       signIn: r.passwordHash ? "credentials" : "SSO only",
+      workspaces: roleWorkspaces(r.role),
+      target,
     };
   });
 }
@@ -965,122 +1007,308 @@ Create `src/components/admin/user-table.tsx`:
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { Avatar } from "@/components/ui/avatar";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Pill } from "@/components/ui/pill";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { ROLE_LABELS, ROLE_OPTIONS } from "@/lib/admin-users";
+import {
+  ROLE_LABELS, ROLE_OPTIONS, disableChange, selfRoleChangeWarning, type RuleResult,
+} from "@/lib/admin-users";
 import { setUserDisabled, setUserRole } from "@/server/modules/admin/user-actions";
+import type { ActionResult } from "@/server/action-result";
 import type { UserRow } from "@/server/modules/admin/queries";
+import type { Role } from "@prisma/client";
 
-export function UserTable({ rows }: { rows: UserRow[] }) {
+/** A role picked for the actor's own row, waiting on the confirm dialog. */
+interface PendingSelfChange {
+  row: UserRow;
+  next: Role;
+  warning: string;
+}
+
+/** `RuleResult`'s reason, or null when the rule allows it — a small reader so
+ * call sites don't each re-narrow the discriminated union by hand. */
+function refusalReason(verdict: RuleResult): string | null {
+  return verdict.allowed ? null : verdict.reason;
+}
+
+export function UserTable({ rows, actorId }: { rows: UserRow[]; actorId: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  // A deadline, not a duration: RateLimitNotice resets its own countdown on
+  // every mount, and this component remounts it (top of the table vs. inside
+  // the confirm dialog). Storing "when it ends" and computing the remaining
+  // seconds fresh at render — instead of a `retryAfterSec` captured once —
+  // is what keeps a remount from restarting the clock.
+  const [retryDeadline, setRetryDeadline] = useState<number | null>(null);
+  const [pendingChange, setPendingChange] = useState<PendingSelfChange | null>(null);
+  // Scoped to the one row whose Disable/Enable button is actually in flight —
+  // `pending` alone would put a spinner in all five rows for one click.
+  const [acting, setActing] = useState<string | null>(null);
 
-  function run(fn: () => Promise<{ ok: boolean } & Record<string, unknown>>, okMsg: string) {
+  const retryAfterSec =
+    retryDeadline === null ? null : Math.max(0, Math.ceil((retryDeadline - Date.now()) / 1000));
+
+  // Both constraints this screen enforces — the permanent-admin lock and the
+  // self-disable refusal — are stated once here rather than inside a 130px
+  // cell (card 3h still requires both be stated, just not squeezed into the
+  // Access column). Derived from the same rule functions the actions call,
+  // never a second copy of the wording.
+  const permanentLockCaption = rows.find((r) => r.locked)?.locked ?? null;
+  const selfRow = rows.find((r) => r.id === actorId);
+  // Guarded the same way the per-row check below is: when the actor IS the
+  // permanent admin, disableChange would return the lock reason again —
+  // identical to permanentLockCaption above it — rather than the self-disable
+  // wording, which would read as the same sentence stated twice.
+  const selfDisableCaption =
+    selfRow && !selfRow.locked && !selfRow.disabled
+      ? refusalReason(disableChange(selfRow.target, true, actorId))
+      : null;
+
+  // A real generic, not a same-shape-assumed cast — setUserRole and
+  // setUserDisabled don't share a data shape beyond `changed`. `changed` can
+  // only be false when this row's props were already stale (another admin
+  // edited it, or this tab was open across an edit), so `router.refresh()`
+  // always runs on success: in that one case it's the entire remedy, not a
+  // wasted round trip, and staying silent would leave the row looking like
+  // the click did nothing, forever, until a manual reload.
+  function run<T extends { changed: boolean }>(
+    fn: () => Promise<ActionResult<T>>,
+    messages: { changed: (data: T) => string; unchanged: string },
+    opts?: { onOk?: () => void; onSettled?: () => void },
+  ) {
     setError(null);
     startTransition(async () => {
-      const res = (await fn()) as Awaited<ReturnType<typeof setUserRole>>;
-      if (res.ok) {
-        toast(okMsg, "settled");
-        router.refresh();
-      } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      // Every refusal on this screen is a conflict or a forbidden — there are no
-      // field-level inputs to hang a validation error on, so all of them go to
-      // the banner rather than dead-ending silently.
-      else setError(res.message);
+      try {
+        const res = await fn();
+        if (res.ok) {
+          opts?.onOk?.();
+          toast(res.data.changed ? messages.changed(res.data) : messages.unchanged, "settled");
+          router.refresh();
+        } else if (res.kind === "rate_limited") {
+          setRetryDeadline(Date.now() + (res.retryAfterSec ?? 60) * 1000);
+        } else {
+          // Every refusal on this screen is a conflict or a forbidden — there
+          // are no field-level inputs to hang a validation error on, so all
+          // of them go to the banner rather than dead-ending silently.
+          setError(res.message);
+        }
+      } finally {
+        opts?.onSettled?.();
+      }
     });
   }
 
+  function submitRoleChange(row: UserRow, next: Role) {
+    run(
+      () => setUserRole({ userId: row.id, role: next }),
+      {
+        // The result also carries `signsOutActor`, deliberately unread here:
+        // on a self change, router.refresh() above runs requireUser again,
+        // whose JWT/DB role mismatch redirects this document to /logout — a
+        // full navigation that tears down ToastProvider before a toast
+        // queued this tick could reliably render. The confirm dialog already
+        // said this before the click; a notice on /login is the only place
+        // left for a post-redirect message, and that's out of scope here.
+        changed: () => `${row.name} is now ${ROLE_LABELS[next]}`,
+        unchanged: `${row.name} is already ${ROLE_LABELS[next]}`,
+      },
+      { onOk: () => setPendingChange(null) },
+    );
+  }
+
+  function pickRole(row: UserRow, next: Role) {
+    // One function decides when a role change signs the actor out, reading
+    // the same `target` object `listUsers` built server-side — this never
+    // restates that as `row.id === actorId` or re-synthesizes the target, so
+    // the select and the action can't drift apart on when it applies.
+    const warning = selfRoleChangeWarning(row.target, next, actorId);
+    if (warning) {
+      // A stale refusal from a different row's click must not leak into this
+      // dialog, reading as though it were about the change being confirmed.
+      setError(null);
+      setRetryDeadline(null);
+      setPendingChange({ row, next, warning });
+    } else {
+      submitRoleChange(row, next);
+    }
+  }
+
+  function toggleDisabled(row: UserRow) {
+    setActing(row.id);
+    run(
+      () => setUserDisabled({ userId: row.id, disabled: !row.disabled }),
+      {
+        changed: () => (row.disabled ? `${row.name} can sign in again` : `${row.name} is disabled`),
+        unchanged: row.disabled ? `${row.name} can already sign in` : `${row.name} is already disabled`,
+      },
+      { onSettled: () => setActing(null) },
+    );
+  }
+
   return (
-    <div className="flex max-w-[860px] flex-col gap-3">
-      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
-      {error && <Banner tone="fault" title={error} />}
+    <>
+      {retryAfterSec !== null && !pendingChange && (
+        <RateLimitNotice retryAfterSec={retryAfterSec} onExpire={() => setRetryDeadline(null)} />
+      )}
+      {error && !pendingChange && <Banner tone="fault" title={error} />}
 
       <Table>
         <THead>
           <Tr>
             <Th>User</Th>
             <Th width={170}>Role</Th>
+            <Th width={150}>Workspaces</Th>
             <Th width={110}>Sign-in</Th>
             <Th width={130}>Access</Th>
           </Tr>
         </THead>
         <TBody>
-          {rows.map((row) => (
-            <Tr key={row.id} className={cn(row.locked && "bg-surface-subtle")}>
-              <Td>
-                <span className={cn("block text-[12.5px]", row.disabled ? "text-fg-muted" : "text-fg")}>
-                  {row.name}
-                </span>
-                <span className="block font-mono text-[10.5px] text-fg-muted">{row.email}</span>
-              </Td>
+          {rows.map((row) => {
+            // Card 3h's thesis — the constraint is STATED, never discovered
+            // through a failed save — applies to this button exactly as it
+            // applies to the locked row: an admin can never actually disable
+            // their own account (disableChange refuses it outright, and a
+            // disabled user is bounced before they could see this page
+            // anyway), so a live "Disable" button on the actor's own row
+            // could only ever end in a conflict banner. Call the same rule
+            // the action calls and render its refusal as static text instead.
+            const disableRefusal =
+              !row.locked && !row.disabled ? refusalReason(disableChange(row.target, true, actorId)) : null;
 
-              <Td>
-                {row.locked ? (
-                  // Card 3h: the constraint is STATED. A LOCKED chip plus static
-                  // text, tinted one step back — never a select that fails on save.
-                  <span className="flex flex-col gap-1">
+            return (
+              <Tr key={row.id} className={cn(row.locked && "bg-surface-subtle")}>
+                <Td>
+                  <span className="flex items-center gap-2.5">
+                    <Avatar name={row.name} size="sm" />
+                    <span className="flex flex-col leading-tight">
+                      <span className={cn("text-[12.5px]", row.disabled ? "text-fg-muted" : "text-fg")}>
+                        {row.name}
+                      </span>
+                      <span className="font-mono text-[10.5px] text-fg-muted">
+                        {row.email}
+                        {row.locked && " · permanent"}
+                        {!row.locked && row.disabled && " · disabled"}
+                      </span>
+                    </span>
+                  </span>
+                </Td>
+
+                <Td>
+                  {row.locked ? (
+                    // Card 3h: the constraint is STATED. A LOCKED chip plus the
+                    // static role label — never a select that fails on save.
+                    // The reason it's locked lives in the caption below the
+                    // table, not squeezed into this 170px cell.
                     <span className="flex items-center gap-1.5">
                       <Pill>LOCKED</Pill>
                       <span className="text-[12px] text-fg-muted">{ROLE_LABELS[row.role]}</span>
                     </span>
-                    <span className="text-[10.5px] leading-snug text-fg-faint">{row.locked}</span>
-                  </span>
-                ) : (
-                  <Select
-                    aria-label={`Role for ${row.name}`}
-                    value={row.role}
-                    disabled={pending}
-                    className="w-[150px] py-1.5 text-xs"
-                    onChange={(e) =>
-                      run(
-                        () => setUserRole({ userId: row.id, role: e.target.value }),
-                        `${row.name} is now ${ROLE_LABELS[e.target.value as keyof typeof ROLE_LABELS]}`,
-                      )
-                    }
-                  >
-                    {ROLE_OPTIONS.map((role) => (
-                      <option key={role} value={role}>{ROLE_LABELS[role]}</option>
-                    ))}
-                  </Select>
-                )}
-              </Td>
+                  ) : (
+                    <Select
+                      aria-label={`Role for ${row.name}`}
+                      value={row.role}
+                      disabled={pending}
+                      className="w-[150px] py-1.5 text-xs"
+                      onChange={(e) => pickRole(row, e.target.value as Role)}
+                    >
+                      {ROLE_OPTIONS.map((role) => (
+                        <option key={role} value={role}>{ROLE_LABELS[role]}</option>
+                      ))}
+                    </Select>
+                  )}
+                </Td>
 
-              <Td>
-                <span className="font-mono text-[10.5px] text-fg-muted">{row.signIn}</span>
-              </Td>
+                <Td>
+                  <span className="text-[12px] text-fg-secondary">{row.workspaces}</span>
+                </Td>
 
-              <Td>
-                {row.locked ? (
-                  <span className="text-[12px] text-fg-muted">Always enabled</span>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant={row.disabled ? "secondary" : "ghost"}
-                    loading={pending}
-                    onClick={() =>
-                      run(
-                        () => setUserDisabled({ userId: row.id, disabled: !row.disabled }),
-                        row.disabled ? `${row.name} can sign in again` : `${row.name} is disabled`,
-                      )
-                    }
-                  >
-                    {row.disabled ? "Enable" : "Disable"}
-                  </Button>
-                )}
-              </Td>
-            </Tr>
-          ))}
+                <Td>
+                  <span className="font-mono text-[10.5px] text-fg-muted">{row.signIn}</span>
+                </Td>
+
+                <Td>
+                  {row.locked ? (
+                    <span className="text-[12px] text-fg-muted">Always enabled</span>
+                  ) : disableRefusal ? (
+                    // Short label in the cell; the sentence explaining it is
+                    // in the caption below — the same width discipline as
+                    // the locked row above.
+                    <span className="text-[12px] text-fg-muted">Your own account</span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant={row.disabled ? "secondary" : "ghost"}
+                      loading={acting === row.id}
+                      disabled={pending}
+                      aria-label={row.disabled ? `Enable ${row.name}` : `Disable ${row.name}`}
+                      onClick={() => toggleDisabled(row)}
+                    >
+                      {row.disabled ? "Enable" : "Disable"}
+                    </Button>
+                  )}
+                </Td>
+              </Tr>
+            );
+          })}
         </TBody>
       </Table>
-    </div>
+
+      {(permanentLockCaption || selfDisableCaption) && (
+        <div className="flex flex-col gap-1 px-1">
+          {permanentLockCaption && (
+            <p className="text-[11px] leading-snug text-fg-faint">{permanentLockCaption}</p>
+          )}
+          {selfDisableCaption && (
+            <p className="text-[11px] leading-snug text-fg-faint">{selfDisableCaption}</p>
+          )}
+        </div>
+      )}
+
+      {/*
+        A Dialog, not a static hint: the README reserves dialogs for decisions
+        of this weight, and this is the one control on this screen that can
+        end the actor's own session. The Select stays bound to `row.role`
+        (prop, not local state), so cancelling — or the dialog just closing —
+        snaps the visible value back to whatever is actually saved, with no
+        extra state to reset by hand.
+      */}
+      <Dialog
+        open={pendingChange !== null}
+        onClose={() => setPendingChange(null)}
+        title="Change your own role?"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPendingChange(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              loading={pending}
+              onClick={() => pendingChange && submitRoleChange(pendingChange.row, pendingChange.next)}
+            >
+              Change role
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2">
+          {/* Dialog portals to document.body and its focus trap marks every
+              other body child inert, so a refusal here has to render INSIDE
+              the dialog or the operator sees the spinner stop and nothing else. */}
+          {retryAfterSec !== null && (
+            <RateLimitNotice retryAfterSec={retryAfterSec} onExpire={() => setRetryDeadline(null)} />
+          )}
+          {error && <Banner tone="fault" title={error} />}
+          <p>{pendingChange?.warning}</p>
+        </div>
+      </Dialog>
+    </>
   );
 }
 ```
@@ -1097,7 +1325,7 @@ import { UserTable } from "@/components/admin/user-table";
 import { listUsers } from "@/server/modules/admin/queries";
 
 export default async function UsersPage() {
-  await requireRole("admin");
+  const actor = await requireRole("admin");
   const rows = await listUsers();
 
   return (
@@ -1108,7 +1336,7 @@ export default async function UsersPage() {
           Disabling an account keeps its history and blocks sign-in. The permanent admin cannot be
           demoted or disabled, so the system can never be locked out of itself.
         </Banner>
-        <UserTable rows={rows} />
+        <UserTable rows={rows} actorId={actor.id} />
       </div>
     </>
   );
@@ -1117,34 +1345,56 @@ export default async function UsersPage() {
 
 `requireRole("admin")` rather than `requireUser()`: unlike `/admin/equipment-policies`, this path is
 already admin-workspace-only in `PATH_RULES`, and only the `admin` role holds that workspace — so there
-is no viewer read-only variant to design here.
+is no viewer read-only variant to design here. It returns the actor, whose `id` the table needs for the
+two self-targeted rules.
 
 - [ ] **Step 4: Typecheck, lint, look at it**
 
 ```bash
-npx tsc --noEmit && npm run lint
+npx tsc --noEmit && npm run lint && npm run test
 ```
 
-In the preview as `admin@thebackroomop.com`, `/admin/users`:
+In the preview as `admin@thebackroomop.com`, `/admin/users` — **all of this was confirmed on
+`8a604df`:**
 
-1. Five rows, **System Admin first**, its Role cell showing a `LOCKED` chip, the static text `Admin`,
-   and the sentence about not locking the system out of itself. Its Access cell reads `Always enabled`
-   with no button.
-2. Change `V. Cruz` from Viewer to IT staff → the toast says so and the select holds its new value
-   after the refresh.
-3. Disable `V. Cruz` → the button flips to `Enable` and the name goes muted.
-4. `/audit` has two new `user` rows whose entity cell reads **`V. Cruz`**, not a truncated cuid, with
-   actions `role-change` and `disable`.
-5. Put `V. Cruz` back to Viewer and enabled, so the seeded fixture is unchanged for the e2e run.
+1. Five rows with initials avatars, **System Admin first**, its email line suffixed `. permanent`, its
+   Role cell showing a `LOCKED` chip and the static text `Admin`, its Access cell `Always enabled` with
+   no button. The lock sentence is in the caption **below** the table, not in the cell.
+2. The `Workspaces` column reads `all four` for the admin, `Purchasing` / `IT` / `Finance` for the
+   staff roles, and **`IT . read-only`** for the viewer — the artboard's own strings.
+3. Change `V. Cruz` from Viewer to IT staff, and the toast says so and the select holds its new value.
+4. Disable `V. Cruz`, and the button flips to `Enable`, the name goes muted, the email line gains
+   `. disabled`. Each Disable/Enable button's accessible name names its row.
+5. `/audit` has two new `user` rows whose entity cell reads **`V. Cruz . viewer@thebackroomop.com`**
+   (Task 2 changed this from the bare name), with actions `role-change` and `disable`, and **`Fields`
+   reading `role` and `disabled`** — no phantom `email`.
+6. **The self-targeted rules need a second admin, because the seeded `admin@` IS the permanent admin
+   and its row is locked — the two bugs above are invisible from that account.** Promote `it@`, sign in
+   as it, and check: its own row's Access cell reads `Your own account` with **no button**, and the
+   self-disable sentence joins the caption. Changing its own role opens the confirm dialog naming the
+   incoming role; Cancel snaps the select back to the saved value; Confirm writes, audits under the
+   actor's own name, and lands on `/login`.
+7. Put everything back afterwards. Note `AuditEntry` is append-only by DB trigger, so the entries this
+   leaves behind cannot be removed — reseed if you need a pristine fixture, and prefer **delta**
+   assertions over absolute audit counts in e2e (Task 14).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/server/modules/admin/queries.ts src/components/admin/user-table.tsx "src/app/(app)/admin/users/page.tsx"
+git add src/server/modules/admin/queries.ts src/components/admin/user-table.tsx "src/app/(app)/admin/users/page.tsx" src/lib/admin-users.ts src/lib/admin-users.test.ts src/components/ui/dialog.tsx
 git commit -m "feat(admin): users and roles, with the permanent admin locked before the click"
 ```
 
----
+As shipped this was two commits, left unsquashed so the review verdict stays legible: `5d8e819` is the
+task as originally written, `8a604df` (`fix(admin): the self-disable refusal is stated, not clicked
+into`) is the review fix.
+
+Verified green at `8a604df`: `npx tsc --noEmit` / `npm run lint` / **368 tests across 27 files** /
+`npm run build` / **`npx playwright test --workers=1` gave 88 of 89**, the one failure being a
+pre-existing navigation race in `e2e/offboarding.spec.ts` that this branch did not cause (it passed in a
+single-file run; fixed separately in `bf23284`, since `ui/dialog.tsx` is used by six e2e-covered
+components and the run existed to rule out a regression there).
+
 
 ### Task 4: The flag rules (TDD)
 
