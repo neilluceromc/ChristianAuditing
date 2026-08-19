@@ -1,5 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { lockReason, roleWorkspaces, type TargetUser } from "@/lib/admin-users";
+import { FLAG_SPECS, type FlagState } from "@/lib/admin-flags";
+import { flagDomain } from "@/lib/auth-shared";
 import type { Role } from "@prisma/client";
 
 export interface UserRow {
@@ -45,6 +47,58 @@ export async function listUsers(): Promise<UserRow[]> {
       signIn: r.passwordHash ? "credentials" : "SSO only",
       workspaces: roleWorkspaces(r.role),
       target,
+    };
+  });
+}
+
+export interface FlagRow {
+  key: string;
+  label: string;
+  description: string;
+  /**
+   * What the switch shows. NOT `row.enabled` — for a `hasValue` flag this is
+   * the EFFECTIVE state, computed with `flagDomain()` (the same expression
+   * `/login` and `/signup` use), because `(enabled: true, value: null)` is a
+   * real resting state (any deployment that bootstrapped without a domain)
+   * and reads as "wide open" to every enforcement point. Showing that row ON
+   * would be the admin page claiming a restriction nothing applies.
+   */
+  enabled: boolean;
+  hasValue: boolean;
+  value: string | null;
+  /** non-null → the switch is not usable, and this is the reason to print */
+  unavailable: string | null;
+  /**
+   * The row exactly as `flagChange`/`flagChangeWarning` need to see it — not
+   * `{ key, enabled, value }` rebuilt from the fields above, because `enabled`
+   * above is the effective value and would silently feed the rule a lie for
+   * exactly the row it exists to correct. Mirrors `UserRow.target`: the query
+   * builds the rule's input, the client never synthesizes it.
+   */
+  state: FlagState;
+}
+
+/**
+ * Driven by FLAG_SPECS, not by the table: a flag this build doesn't know about
+ * is not something the admin page should offer a switch for, and a spec with no
+ * row yet still renders (disabled, value null) rather than vanishing.
+ */
+export async function listFlags(): Promise<FlagRow[]> {
+  const rows = await prisma.featureFlag.findMany();
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  return FLAG_SPECS.map((spec) => {
+    const row = byKey.get(spec.key);
+    const value = typeof row?.value === "string" ? row.value : null;
+    const state: FlagState = { key: spec.key, enabled: row?.enabled ?? false, value };
+    return {
+      key: spec.key,
+      label: spec.label,
+      description: spec.description,
+      enabled: spec.hasValue ? flagDomain(row) !== null : row?.enabled ?? false,
+      hasValue: spec.hasValue,
+      value,
+      unavailable: spec.unavailable,
+      state,
     };
   });
 }
