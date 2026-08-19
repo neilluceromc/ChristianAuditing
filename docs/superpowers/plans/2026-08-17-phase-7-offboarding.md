@@ -3478,6 +3478,18 @@ git commit -m "feat(repairs): derived stages, the down clock, and fixtures that 
 > `returned-ok` is *defined* as "not DEFECTIVE", so a chip that keeps the pin composes to a query
 > matching nothing for every possible dataset. `withRepairStage` clears `status` and is tested for it.
 
+> **Amended after the Task 12 review — the shipped code differs from the blocks below in four ways:**
+> the Repair card on `/inventory/[id]` is gated on having repair **data** (`stage !== null ||
+> asset.vendor || asset.rmaRef || quote !== null`), not on having a stage, with only the Down and
+> Defective-since rows gated on the stage — gating the whole card hid the quote and the write-off
+> banner for an asset quoted before its DEFECTIVE approval executed, which is the normal order;
+> `ChipFilterRow` in `inventory/page.tsx` skips the `stage` facet while `repairMode` (its generic
+> remove cleared the stage without restoring the status pin, dumping the user out of repair mode);
+> `InventoryToolbar` hides the **Status** facet while a stage facet is active (a stage already
+> constrains status, and the dropdown was advertising counts for combinations that can never match);
+> and one exported `stageOf()` in `queries.ts`, typed `Prisma.Decimal | null`, replaces the three
+> hand-written copies of the row→stage marshalling.
+
 The saved view is a named URL; what makes it *repairs* is the stage chips, the **Down** column, and
 the warning on the record. The `HOLD` marker rides along in the same query because both facts come
 from the same read: reserved stock **still reads SPARE** (README 5c) and pretending otherwise creates
