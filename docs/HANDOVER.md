@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–2 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 7 ahead of that.**
+**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–3 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 12 ahead of that.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,13 +13,13 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–2 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–3 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
-   so far (7 commits); `git status` should be clean.
+   so far (12 commits); `git status` should be clean.
 
    **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
    2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
-   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 7 ahead of `main`.
+   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 12 ahead of `main`.
    Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
@@ -29,39 +29,49 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
    permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
    Phase 8's plan, not after.
-4. **Resume at Task 3** (`/admin/users`) of `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with
-   `superpowers:subagent-driven-development`. Tasks 1–2 are committed; 3–14 remain. Read the plan's
+4. **Resume at Task 4** (the flag rules, TDD) of `docs/superpowers/plans/2026-08-19-phase-8-admin.md`
+   with `superpowers:subagent-driven-development`. Tasks 1–3 are committed; 4–14 remain. Read the plan's
    **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the `m365_sso`
    refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a later
-   task can silently break — then **§6a**, which carries what Tasks 1 and 2 actually established.
-   The plan has been amended to the shipped code (`docs(plan): …`), so trust it over any memory of
-   what it used to say, and keep amending it whenever code deviates.
+   task can silently break — then **§6a**, which carries what Tasks 1–3 actually established.
+   Tasks 2 and 3 have both been amended to the shipped code (`docs(plan): …`), so trust the plan over
+   any memory of what it used to say, and keep amending it whenever code deviates.
 
-   **Task 3 opens with a `⚠ REQUIRED AMENDMENT` block — read it, don't skim past it into the code.**
-   Task 2's review changed the contract Task 3 consumes: the two actions no longer return
-   `ActionResult<null>`, so the plan's `run()` helper announces success for a no-op save and its
-   `as Awaited<ReturnType<typeof setUserRole>>` cast is now unsafe (the two actions no longer share a
-   data shape); and Task 3 owns the **pre-click** warning that a self role change signs the actor out,
-   via `selfRoleChangeWarning` in `src/lib/admin-users.ts`. The code blocks below that banner predate
-   the fix — the banner is the current truth where they disagree.
+   **The one thing to carry into Tasks 5, 8 and 13** — each of which pairs a rule module with a page —
+   is §6a rule 10: **a page must consume every refusal its rule module can return, not just the one the
+   design card names.** Task 3 shipped once with a live Disable button on the actor's own row because it
+   imported `selfRoleChangeWarning` and not `disableChange`; every click on that button was guaranteed
+   to fail. The rule was already written, exported and unit-tested. Nothing but a reviewer reading the
+   rule against the surface caught it, and it was invisible from the seeded `admin@` account.
 
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
 
-The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **363 unit tests across 27
-files** (345/26 at the Phase 7 merge; Task 1 added `src/lib/admin-users.test.ts`, Task 2's review fix
-added five more cases to it) · `npm run build` · **`npx playwright test --workers=1` — 89 e2e tests,
-7.3 minutes** (up
+The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **368 unit tests across 27
+files** (345/26 at the Phase 7 merge; Task 1 added `src/lib/admin-users.test.ts`, and Tasks 2 and 3's
+review fixes added ten more cases to it) · `npm run build` · **`npx playwright test --workers=1` — 89
+e2e tests, 7.9 minutes** (up
 from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
 through the worker, repair mode, reservations, and equipment policies, including the viewer
 read-only path). This was the first full e2e run since Task 9, and it is what finally exercised the
 things the browser pane could never confirm — see the two gotchas below.
 
-**The e2e figure above is from the Phase 7 merge and has NOT been re-run on this branch.** Tasks 1 and
-2 added no UI and no route, so nothing in `e2e/` could exercise them; Task 14 is where `e2e/admin.spec.ts`
-lands and the suite is re-run. Every Phase 8 task so far has been confirmed with
-`npx tsc --noEmit` · `npm run lint` · `npm run test` · `npm run build` only — which is enough for these
-two and will stop being enough the moment Task 3 renders a page.
+**The e2e suite WAS re-run on this branch, at Task 3, and it found a pre-existing flake.** Task 3
+modified `src/components/ui/dialog.tsx` — a primitive **six e2e-covered components** use — so the run
+existed to rule out a regression there. It was not one: 88 of 89 passed, and the failure was
+`e2e/offboarding.spec.ts`'s "Task 1 payoff" test, which passed in a single-file run. **The dump was the
+tell**: the browser was still on `/approvals` with the row rendered correctly and `→ MISSING` present,
+so the click had not navigated and the *next* assertion's default 5s budget was covering the whole
+click → route → server-render round trip. It was test 71 of 89, on a dev server eight minutes into a
+run. Same class as the "✓ Saved" race in §7, so the same answer — headroom, not a weaker assertion —
+fixed in `bf23284` by awaiting the URL change explicitly. **`e2e/admin.spec.ts` still does not exist;
+Task 14 writes it**, so nothing in `e2e/` covers `/admin/users` yet.
+
+**A note on isolating an e2e failure in this repo:** `-g "some test name"` is NOT a valid isolation for
+`offboarding.spec.ts`. Several of its tests depend on state earlier tests **in the same file** create
+(the wizard's decisions produce the approvals a later test opens), and only `beforeAll` reseeds. Filtering
+with `-g` made the same test fail at a *different*, earlier assertion, which reads like a second bug and
+is not one. **Run the whole spec file** to isolate.
 
 **A recurring test-design gotcha worth knowing before you write more e2e:** a UI confirmation that
 clears itself on a timer cannot be asserted with the default `expect` budget. `/inventory/[id]/edit`'s
@@ -74,14 +84,26 @@ at a timing race. It failed once in three full runs and was reproduced byte-for-
 `updateAsset` 7s. The fix is headroom on the assertion (20s), not a weaker assertion.
 
 **Nothing is half-finished in the code.** Every task ended on a green commit, including Task 15's
-close-out and Phase 8's Tasks 1 and 2. The next unit of work is a whole task — Phase 8's **third** —
-not a fragment of anything.
+close-out and Phase 8's Tasks 1–3. The next unit of work is a whole task — Phase 8's **fourth** — not a
+fragment of anything.
 
-**State this session left behind:** working tree clean, no dev server was ever started, `inventory-db-1`
-up with the Phase 7 seed still in it (**not** reseeded this session — Tasks 1 and 2 needed no fixtures).
-7 migrations, nothing pending. Dennis Ong EMP-0090 is OFFBOARDING and holds all three fixture items
-(`BR-LT-0166`, `BR-PH-0312`, `BR-HS-0510`) with no wizard decisions against them. No scratch files
-anywhere in the repo.
+**State this session left behind:** working tree clean, no dev server running (the preview was stopped
+before `npm run build`, and the last Playwright run managed its own), `inventory-db-1` up, 7 migrations,
+nothing pending. No scratch files anywhere in the repo.
+
+**The DB was last written by Playwright, whose `beforeAll` reseeds — so it holds a normal seed, but the
+seed of whichever spec ran last (`offboarding.spec.ts`), with that spec's mutations on top.** Reseed
+before anything that assumes pristine fixtures.
+
+**One environment note that cost time and will cost it again: `npm run db:seed` is BLOCKED by the harness
+classifier in this session** (it TRUNCATEs). `prisma migrate reset` was already known to be blocked (§3);
+add the seed to that list. Playwright can still reseed — every spec does it via `execSync` in `beforeAll`,
+and that is not blocked — so a full e2e run is currently the only in-session route to a fresh fixture. To
+reseed directly, run `npm run db:seed` from your own terminal. Because of this, Task 3's live verification
+was restored by editing rows back through the UI rather than reseeding: **all five users are at their
+seeded roles and enabled**, but **7 `user` `AuditEntry` rows remain** from the verification and cannot be
+removed (append-only by DB trigger). This is why Task 14's new assertions are written against an audit
+count **delta** rather than an absolute count — keep them that way.
 
 ---
 
@@ -134,7 +156,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 
 ## 3. Environment / how to run
 
-- **DB:** `docker compose up -d db`. Seed: `npm run db:seed` (TRUNCATE + reseed — the sanctioned reset; **`prisma migrate reset` is blocked by the harness classifier and unnecessary**). **7 migrations** as of the Phase 7 branch; add new ones as hand-written SQL dirs, then `npx prisma migrate deploy && npx prisma generate` (`migrate dev` also works but invents a name). **A reseed TRUNCATEs, so a migration's backfill does not survive it** — anything the app depends on has to be set by `prisma/seed.ts` too (`Employee.offboardingAt` is set both ways for exactly this reason).
+- **DB:** `docker compose up -d db`. Seed: `npm run db:seed` (TRUNCATE + reseed — the sanctioned reset; **`prisma migrate reset` is blocked by the harness classifier and unnecessary**). **As of Phase 8 Task 3, `npm run db:seed` is ALSO blocked by the classifier when run directly** — run it from your own terminal, or let Playwright do it (every spec reseeds via `execSync` in `beforeAll`, which is not blocked). **7 migrations** as of the Phase 7 branch; add new ones as hand-written SQL dirs, then `npx prisma migrate deploy && npx prisma generate` (`migrate dev` also works but invents a name). **A reseed TRUNCATEs, so a migration's backfill does not survive it** — anything the app depends on has to be set by `prisma/seed.ts` too (`Employee.offboardingAt` is set both ways for exactly this reason).
 - **Dev app:** never via Bash — use the Browser-pane preview (`preview_start` name `app-dev`, port 3000). The controller owns this server; subagents must not start one.
 - **Worker:** `npm run worker` (poll loop) or `npm run worker:once` (drain and exit — what e2e uses). In prod it's the compose `worker` service.
 - **NEVER run `npm run build` while a dev server is running** — they share `.next` and it bricks the dev server.
@@ -142,7 +164,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–2 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–3 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -274,8 +296,12 @@ them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LA
 **the first code anywhere in this repo that writes `User.role` or `User.disabled`**, plus
 `selfRoleChangeWarning` (added by review) and the shared `asActionResult` in `src/server/prisma-errors.ts`.
 `/audit` can now name a `user` row (`name · email` → `/admin/users`) instead of printing a truncated cuid.
-No UI yet — Task 3 is the first `/admin/users` page. Two commits per task, review fixes deliberately left
-unsquashed so the verdicts stay legible: `c699743` + `d29ce9b`, then `28e21ba` + `4b112cd`.
+**Task 3** — `/admin/users` itself: the permanent admin as a `LOCKED` chip with its reason in a caption,
+role selects per row, a confirm dialog before a self role change, the artboard's `Workspaces` column
+(`roleWorkspaces()`), avatars, and the actor's own row stating `Your own account` instead of a
+Disable button that could only fail. Also `aria-describedby` on the shared `Dialog` primitive. Two commits
+per task, review fixes deliberately left unsquashed so the verdicts stay legible: `c699743` + `d29ce9b`,
+then `28e21ba` + `4b112cd`, then `5d8e819` + `8a604df`.
 
 ### Conventions every later phase must follow
 
@@ -308,11 +334,11 @@ unsquashed so the verdicts stay legible: `c699743` + `d29ce9b`, then `28e21ba` +
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 3–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 4–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1 (the user rules) and 2 (the two mutations) are done** — see §6a. Task 3 is next and is the
-  first *page* in the workspace; it opens with a `⚠ REQUIRED AMENDMENT` block because Task 2's review
-  changed the contract it consumes (§0 item 4).
+  **Tasks 1 (the user rules), 2 (the two mutations) and 3 (`/admin/users`) are done** — see §6a. Task 4
+  is next: the flag rules, a TDD pure module with no UI, and the allowlist that stops `/admin/flags`
+  becoming an arbitrary writer into application config.
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -380,7 +406,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–2 established (READ BEFORE TASK 3)
+## 6a. Phase 8 mid-flight: what Tasks 1–3 established (READ BEFORE TASK 4)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -460,6 +486,45 @@ sharpened, and the ones a later task can silently break.
    that would falsify two of them at once:** it becomes a third producer of `User.role`, and SSO mappings
    conventionally refresh role from group claims on every login — a writer of `User.role` on existing
    rows, outside this module, unaware of the lock. Re-litigate #2 when that lands; don't re-cite it.
+
+**From Task 3 (`5d8e819` + the review fix `8a604df`). Rule 10 is the one that generalises.**
+
+10. **A page must consume EVERY refusal its rule module can return, not just the one the design card
+    names.** Task 3 shipped with a live **Disable** button on the actor's own row: `lockReason` returns
+    `null` for your own row, so the unlocked branch rendered a normal button, while `disableChange`
+    refuses self-disable unconditionally — and `next` can only be `true` for the actor, since a disabled
+    user is bounced at `guards.ts:19` and can never be on the page. **Every click was guaranteed to
+    fail.** The rule was already written, exported and unit-tested; the component imported
+    `selfRoleChangeWarning` and not `disableChange`. This breaks brief §3's hard constraint (*"Anything a
+    role can't do must not render an action they'll get a 403 from"*) and card 3h's own thesis, which the
+    same file applied correctly to the permanent admin two cells away. **Tasks 5, 8 and 13 each pair a
+    rule module with a page — check this explicitly for each.** Note also it was **invisible from the
+    seeded `admin@` account**, which is the permanent admin and therefore locked: verifying a
+    self-targeted rule requires promoting a second admin.
+
+11. **Don't synthesize a rule's input object in a client component.** The first fix built a `TargetUser`
+    in the table with a hardcoded `isPermanentAdmin: false`. True at the time, and
+    `selfRoleChangeWarning` does not even read that field — which is what made it dangerous: nothing
+    could ever falsify it, while `admin-users.ts:42-44` promises that a rule which *starts* reading a
+    pre-wired param is a change to one function, not to its call sites. `UserRow` now carries
+    `target: TargetUser`, which `listUsers` was already building and discarding. Don't derive it from
+    `row.locked` either — `locked` is computed *from* `isPermanentAdmin`, so that inverts the dependency.
+
+12. **`changed: false` must still refresh the page.** Work out when that branch can fire: a `<select>`
+    emits no change event for the already-selected option and a toggle button always sends the opposite
+    of what it shows, so it fires **only when the client's props are stale.** Task 2's original reasoning
+    ("a no-op refresh is a pointless round trip") is therefore exactly backwards — in the one reachable
+    case, the refresh is the whole remedy. Left as shipped, a second admin clicking Disable on an
+    already-disabled row got a spinner and then silence, repeatable forever, until they reloaded by hand.
+    The server keeping `revalidatePath` gated on `changed` is still correct; the client refreshes on every
+    `ok`.
+
+13. **`Dialog` now sets `aria-describedby`, and that was load-bearing, not polish.** It set
+    `aria-labelledby` only, and `useFocusTrap` focuses the first focusable element — usually Cancel — so
+    a screen reader announced the title, then "Cancel, button", and never the body. Every dialog in the
+    app was hiding its own reason for existing. Additive fix in the primitive; all seven call sites
+    benefit. **This is also why the e2e suite was re-run at Task 3** (see §0): six e2e-covered components
+    use that primitive.
 
 ---
 
@@ -557,6 +622,21 @@ sharpened, and the ones a later task can silently break.
   `entityType` to employee/asset/purchase-request, and `/audit` never imports it); it is commented as
   pre-wired for a feed Task 11 may add, and if that lands, `DEFECTIVE` — the *fault* family — is worth
   re-examining as the reading for a deliberate administrative action.
+- **Phase 8, Task 3 (recorded by review, judged not worth fixing now):** `listUsers()` is **unbounded**
+  — no `take`, no pagination, no URL state, unlike `/employees` and `/inventory` and against brief §3.2.
+  Fine at five users; a departure from the house list pattern worth closing if the org ever grows.
+  `roleWorkspaces()` hardcodes the artboard's literal string **"all four"** while deriving the count from
+  `Object.keys(WORKSPACE_META).length`, so adding a fifth workspace would render "all four" for five —
+  the count is right, the word isn't. The **`signsOutActor` field on `setUserRole` now has no consumer**:
+  the toast that used it was deleted as provably unreachable (`/logout` is a route handler, so the
+  redirect is a document navigation that destroys `ToastProvider` and every queued toast), and the
+  pre-click dialog is what actually does the job. It is left on the return type because a notice on
+  `/login` explaining *why* you were signed out is the thing that would consume it — worth doing in
+  Phase 9's polish, and until then the actor lands on a bare `/login` with no explanation. Also
+  repo-wide, noticed here: `router.refresh()` after a server action that already called
+  `revalidatePath` is a **second RSC round trip per mutation** (`policy-editor.tsx` does the same), and
+  `retryAfter` is never cleared on success in any of these components, so after a rate-limit window
+  slides you can briefly see a success toast and a "you've hit the cap" banner together.
 - **`/bootstrap`'s copy under-states the lock**: `src/app/(auth)/bootstrap/page.tsx` promises the
   permanent admin's *role* can never be changed, but Phase 8 widened that to access as well. Worth
   aligning when Task 3 lands. The corollary belongs here too — a bootstrapped permanent admin's account
