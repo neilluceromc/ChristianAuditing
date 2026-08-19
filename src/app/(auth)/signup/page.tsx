@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { prisma } from "@/server/db/client";
+import { flagDomain } from "@/lib/auth-shared";
 import { SignupForm } from "./signup-form";
 
 export default async function SignupPage() {
   const domainFlag = await prisma.featureFlag.findUnique({ where: { key: "allowed_domain" } });
-  const domain =
-    domainFlag?.enabled && typeof domainFlag.value === "string" ? domainFlag.value : null;
+  const domain = flagDomain(domainFlag);
   return (
     <div className="w-full max-w-[360px] rounded-[11px] border border-border bg-surface p-6 shadow-card">
       <div className="mb-5 flex items-center gap-2.5">

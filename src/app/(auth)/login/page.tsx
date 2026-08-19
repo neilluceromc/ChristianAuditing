@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { signIn } from "@/server/auth";
+import { flagDomain } from "@/lib/auth-shared";
 import { Button } from "@/components/ui/button";
 import { LoginForm } from "./login-form";
 
@@ -14,8 +15,7 @@ export default async function LoginPage({
     prisma.featureFlag.findUnique({ where: { key: "m365_sso" } }),
     prisma.featureFlag.findUnique({ where: { key: "allowed_domain" } }),
   ]);
-  const domain =
-    domainFlag?.enabled && typeof domainFlag.value === "string" ? domainFlag.value : null;
+  const domain = flagDomain(domainFlag);
   const showMicrosoft = !!ssoFlag?.enabled && !!process.env.AUTH_MICROSOFT_ENTRA_ID_ID;
 
   return (
