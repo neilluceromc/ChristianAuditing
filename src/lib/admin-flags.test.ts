@@ -74,7 +74,13 @@ describe("domainValue", () => {
     expect(domainValue("   ").ok).toBe(false);
   });
 
+  // Same trap as the address test above: the trailing domain-format check
+  // would ALSO reject "https://thebackroomop.com" (":" and "/" aren't valid
+  // domain characters either), so `.ok === false` alone can't tell the
+  // dedicated scheme check apart from that fallback firing by coincidence.
   it("rejects a scheme", () => {
-    expect(domainValue("https://thebackroomop.com").ok).toBe(false);
+    const res = domainValue("https://thebackroomop.com");
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toMatch(/https:\/\//i);
   });
 });
