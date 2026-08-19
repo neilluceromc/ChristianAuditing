@@ -205,9 +205,14 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
   page and the action cannot disagree — **and Task 3 proved that only holds if the page actually calls
   every rule**: it shipped once with a live Disable button on the actor's own row, because the UI
   imported `selfRoleChangeWarning` and not `disableChange`.
-- `admin-flags.ts` + `admin-flags.test.ts` — `FLAG_SPECS` (key → label, description, `hasValue`,
-  and an `unavailable` reason), plus `specFor()`, `flagChange()` and `domainValue()`. It is an
-  **allowlist**: `FeatureFlag` is key-value, so without it the flags page writes arbitrary config.
+- `admin-flags.ts` + `admin-flags.test.ts` — `FLAG_SPECS` (key → label, description, `hasValue`, an
+  `unavailable` reason and — added by the Task 4 review — an `offWarning`), plus `specFor()`,
+  `FlagState`, `flagChange(state, next)`, `flagChangeWarning(state, next)` and `domainValue()`. It is an
+  **allowlist**: `FeatureFlag` is key-value, so without it the flags page writes arbitrary config. Both
+  rules take the **direction**, because turning a dangerous thing off is never the dangerous direction.
+- `auth-shared.ts` — gains `flagDomain()`, the one expression for "is `allowed_domain` actually enforced
+  right now". Three readers hand-rolled it and Task 5's query would have been a fourth that disagreed;
+  the admin page must compute the enforced state exactly as the signup gate does, or its switch lies.
 - `webhooks.ts` + `webhooks.test.ts` — `WEBHOOK_EVENTS`, `EVENT_LABELS`, `parseEvents()`,
   `webhookEnvelope()`, and `deliveryStage()` (the `DEAD · 5/5` / `RETRYING · 2/5` / `DELIVERED` chip
   **label** — colour is not its business). **No `node:` imports**: a `"use client"` table calls
@@ -1400,20 +1405,95 @@ components and the run existed to rule out a regression there).
 
 `FeatureFlag` is a key-value table, which means `/admin/flags` is one careless action away from being
 an arbitrary writer into application configuration. This module is the allowlist: a flag this build
-does not know about is not editable, and a flag whose feature is not finished is not editable either.
+does not know about is not editable, and a flag whose feature is not finished cannot be turned on.
 
 Scope decision #7 is the reason the second half of that sentence exists. Read it before you start.
 
+> ### AMENDED to the shipped code (`cc43421` + `3ae53d2` + `e3191a2` + `3b158df`).
+>
+> The reviews changed the shape of this module, not just its details. **`flagChange` takes the flag's
+> state and the requested direction, not a key** — Task 5's plan code below still calls `flagChange(key)`
+> and must be updated. Five things to know:
+>
+> **1. CRITICAL, and the reason for the new signature: `allowed_domain` could be enabled with no value,
+> and then the switch read ON while signup was wide open.** `isAllowedDomain` (`src/lib/auth-shared.ts`)
+> returns `true` — **unrestricted** — whenever the domain is falsy, and `FeatureFlag.value` is `Json?`
+> with no default. `createBootstrapAdmin` with the domain field left blank writes `(enabled: false,
+> value: null)`, which is the resting state of **every deployment that bootstrapped without a domain**.
+> One click on the switch made that `(true, null)`: any address on earth could then create an account,
+> while `/admin/flags` rendered the switch ON beside *"Limits who may create an account."* `/signup` and
+> `/login` correctly showed no restriction banner, so the two surfaces disagreed and **the admin page was
+> the one lying.** `domainValue` refusing `""` was never the guard for this — that guards the *value*
+> path, and this state is reached through the *enable* path.
+>
+> **2. `flagChange` refused turning `m365_sso` OFF as well as on — the third instance of one defect
+> shape in this phase.** A database with `m365_sso.enabled = true` (hand-inserted, a restored backup, an
+> operator experimenting) shows *Continue with Microsoft* on `/login` — the roleless-login path scope
+> decision #7 exists to prevent — while the admin page renders the row ON with an UNAVAILABLE pill
+> explaining the danger and **no way to switch it off.** HANDOVER §8 already recorded this shape for
+> Task 1's `disableChange` (direction-blind, so the transition that repairs a lockout is the one it
+> forbids) and Task 3's Critical was its mirror image. **Turning a dangerous thing off is never the
+> dangerous direction.** `unavailable` now refuses only `next === true`.
+>
+> **3. `flagChangeWarning(state, next)` is new — `selfRoleChangeWarning`'s sibling.** Turning
+> `allowed_domain` off opens account creation to any address on the public internet, and the plan's page
+> wired the `<Switch>` straight to `setFlag` with no pre-click statement. `spec.description` is not a
+> substitute: it is static and renders identically in both states. The consequence lives in
+> **`FlagSpec.offWarning`** — spec data, exactly like `unavailable` — so a future consequential flag is a
+> line in `FLAG_SPECS` rather than an edit to the function. It is deliberately **not** keyed off
+> `hasValue`: a future value flag could be a numeric threshold whose off state widens nothing.
+>
+> **4. `m365_sso`'s description claimed a security property that does not exist.** It said the Microsoft
+> button was *"for accounts in the allowed domain."* `isAllowedDomain` is called in exactly one place —
+> the credentials `signUp` path — and there is no `signIn` callback anywhere in `src/server/auth`, so an
+> Entra login is filtered by nothing: not domain, not an existing `User`, not role. That sentence is what
+> an admin reads while deciding whether to want the feature. Now corrected, with a test asserting it
+> never re-acquires the claim. **`prisma/seed.ts` still carries the same falsehood in the row's own
+> `description` column** — which is why the page must render `spec.description` and never
+> `row.description` (they also disagree about the safety warning).
+>
+> **5. The effective-value read was duplicated three times and about to become a fourth that disagreed.**
+> `login/page.tsx`, `signup/page.tsx` and `signUp` each hand-rolled
+> `flag?.enabled && typeof flag.value === "string" ? flag.value : null`. That is not a DRY nit: **the
+> admin page must compute the enforced state with exactly the same expression as the signup gate, or the
+> switch misrepresents reality.** Extracted as `flagDomain()` in `src/lib/auth-shared.ts`, with a trim —
+> which makes the Critical above non-exploitable at every read site as defence in depth, independent of
+> whatever rule guards the write. All three call sites now use it, and `e2e/auth-shell.spec.ts` was
+> re-run (15/15) because those are Phase 2 auth files.
+>
+> Plus: `domainValue` gained a **253-character cap** (DNS's limit on a full name), and three regression
+> tests that lock in the property making it safe — **its final check is an ASCII whitelist**, so it is
+> immune to homoglyphs, to invisible Unicode format characters (U+200B/U+2060 are `Cf`, so `trim()`
+> leaves them — the whitelist is the immunity, not the trim; contrast HANDOVER §8's 3-character reason
+> minimum, which ends on a length check and does have that hole), and to a trailing dot. The refactor
+> those guard against is real: collapsing the four sequential checks into one looser pattern like
+> `/^[^\s@:/]+\.[^\s@:/]+$/` passes every test the plan originally specified while starting to accept a
+> Cyrillic-о homoglyph, which would be a silent 100% signup lockout.
+
 **Files:**
 - Create: `src/lib/admin-flags.ts`, `src/lib/admin-flags.test.ts`
+- Modify: `src/lib/auth-shared.ts` + `src/lib/auth-shared.test.ts` (add `flagDomain`),
+  `src/app/(auth)/login/page.tsx`, `src/app/(auth)/signup/page.tsx`, `src/server/auth/actions.ts`
+  (use it)
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/lib/admin-flags.test.ts`:
+Create `src/lib/admin-flags.test.ts`. **Write this first, run it, and confirm it fails because the
+module does not exist** before writing Step 3.
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { FLAG_SPECS, domainValue, flagChange, specFor } from "./admin-flags";
+import {
+  FLAG_SPECS, domainValue, flagChange, flagChangeWarning, specFor,
+  type FlagSpec, type FlagState,
+} from "./admin-flags";
+
+const ssoOff: FlagState = { key: "m365_sso", enabled: false, value: null };
+const ssoOn: FlagState = { key: "m365_sso", enabled: true, value: null };
+const domainOff: FlagState = { key: "allowed_domain", enabled: false, value: null };
+const domainOn: FlagState = { key: "allowed_domain", enabled: true, value: "thebackroomop.com" };
+const domainOnNoValue: FlagState = { key: "allowed_domain", enabled: true, value: null };
+const unknown: FlagState = { key: "arbitrary_key", enabled: false, value: null };
 
 describe("FLAG_SPECS", () => {
   it("covers both seeded keys", () => {
@@ -1425,6 +1505,16 @@ describe("FLAG_SPECS", () => {
       expect(spec.label).toBeTruthy();
       expect(spec.description).toBeTruthy();
     }
+  });
+
+  // The description is what an admin reads while deciding whether to want
+  // this feature. isAllowedDomain is only ever called from the credentials
+  // signUp path — there is no signIn callback anywhere, so an Entra login
+  // isn't filtered by domain at all. Claiming otherwise would be read as a
+  // fence that isn't there.
+  it("does not claim m365_sso is domain-restricted, which isn't true", () => {
+    const spec = specFor("m365_sso");
+    expect(spec?.description).not.toMatch(/allowed domain/i);
   });
 });
 
@@ -1439,25 +1529,122 @@ describe("specFor", () => {
 });
 
 describe("flagChange", () => {
-  it("allows the domain restriction", () => {
-    expect(flagChange("allowed_domain")).toEqual({ allowed: true });
+  it("allows turning the domain restriction on when a value is already set", () => {
+    expect(flagChange(domainOn, true)).toEqual({ allowed: true });
+  });
+
+  it("allows turning the domain restriction off, regardless of its value", () => {
+    expect(flagChange(domainOn, false)).toEqual({ allowed: true });
+    expect(flagChange(domainOnNoValue, false)).toEqual({ allowed: true });
+  });
+
+  // FeatureFlag.value is Json? with no default: (enabled: true, value: null)
+  // is the resting state of a deployment that bootstrapped without a domain.
+  // Enabling from there would render the switch ON beside "limits who may
+  // create an account" while signup stays open to any address — the switch
+  // would be lying. Only the "turn ON" direction is guarded; turning off
+  // never needs a value.
+  it("refuses turning the domain restriction on with no value set", () => {
+    const res = flagChange(domainOnNoValue, true);
+    expect(res.allowed).toBe(false);
+    expect(res.allowed === false && res.reason).toMatch(/set a domain/i);
+    expect(res.allowed === false && res.reason).not.toMatch(/doesn't recognise/i);
+    expect(res.allowed === false && res.reason).not.toMatch(/not wired|isn't wired/i);
+  });
+
+  it("refuses turning the domain restriction on with a whitespace-only value", () => {
+    const res = flagChange({ key: "allowed_domain", enabled: true, value: "   " }, true);
+    expect(res.allowed).toBe(false);
+    expect(res.allowed === false && res.reason).toMatch(/set a domain/i);
   });
 
   // Scope decision #7: auth/index.ts still carries TODO(sso-phase) — there is no
   // signIn callback mapping an Entra profile to a User row, so enabling this on a
   // deployment that HAS the env vars surfaces a button that authenticates and
   // lands a user with no role.
-  it("refuses m365_sso and explains that SSO isn't wired yet", () => {
-    const res = flagChange("m365_sso");
+  it("refuses turning m365_sso on and explains that SSO isn't wired yet", () => {
+    const res = flagChange(ssoOff, true);
     expect(res.allowed).toBe(false);
     expect(res.allowed === false && res.reason).toMatch(/not wired|isn't wired|no role/i);
+    expect(res.allowed === false && res.reason).not.toMatch(/set a domain/i);
+    expect(res.allowed === false && res.reason).not.toMatch(/doesn't recognise/i);
+  });
+
+  // The Critical this fix addresses: a key-only refusal would also block
+  // turning OFF an m365_sso row that got enabled out of band (hand-inserted,
+  // a restored backup, an operator experimenting) — exactly the repair scope
+  // decision #7 needs to stay reachable. Turning a dangerous thing off is
+  // never the dangerous direction.
+  it("allows turning m365_sso off even though it can't be turned on", () => {
+    expect(flagChange(ssoOn, false)).toEqual({ allowed: true });
   });
 
   // The table is key-value: without this, /admin/flags writes arbitrary config.
-  it("refuses a key with no spec", () => {
-    const res = flagChange("arbitrary_key");
-    expect(res.allowed).toBe(false);
-    expect(res.allowed === false && res.reason).toMatch(/doesn't recognise|not a flag/i);
+  // Refused in both directions — unlike m365_sso, there is no legitimate row
+  // behind an unrecognised key for an "off" transition to repair.
+  it("refuses a key with no spec, in either direction", () => {
+    const on = flagChange(unknown, true);
+    const off = flagChange(unknown, false);
+    expect(on.allowed).toBe(false);
+    expect(on.allowed === false && on.reason).toMatch(/doesn't recognise|not a flag/i);
+    expect(off.allowed).toBe(false);
+    expect(off.allowed === false && off.reason).toMatch(/doesn't recognise|not a flag/i);
+  });
+});
+
+describe("flagChangeWarning", () => {
+  // The consequence of THIS direction: opens signup to any address on the
+  // public internet. Stated pre-click so the page and the action can't
+  // disagree about when it applies — selfRoleChangeWarning's sibling.
+  it("warns when turning the domain restriction off", () => {
+    expect(flagChangeWarning(domainOn, false)).toMatch(/any email address/i);
+  });
+
+  it("is null when turning the domain restriction on", () => {
+    expect(flagChangeWarning(domainOff, true)).toBeNull();
+  });
+
+  it("is null for a flag other than allowed_domain, in either direction", () => {
+    expect(flagChangeWarning(ssoOn, false)).toBeNull();
+    expect(flagChangeWarning(ssoOff, true)).toBeNull();
+  });
+
+  it("is null for a key this build doesn't know", () => {
+    expect(flagChangeWarning(unknown, false)).toBeNull();
+  });
+
+  it("returns each spec's own offWarning", () => {
+    for (const spec of FLAG_SPECS) {
+      const state: FlagState = { key: spec.key, enabled: true, value: "thebackroomop.com" };
+      expect(flagChangeWarning(state, false)).toBe(spec.offWarning);
+    }
+  });
+
+  // The one above only catches DRIFT between the spec and the function. This
+  // one catches the structure: it registers a flag the function has never heard
+  // of and requires the warning to follow, which a `key === "allowed_domain"`
+  // branch cannot do however carefully its string is copied. That branch is
+  // what this module started with, and reintroducing it is the regression —
+  // the point of `offWarning` is that a new consequential flag is a line in
+  // FLAG_SPECS and not an edit here.
+  it("follows spec data for a flag added at runtime, not a hardcoded key", () => {
+    const probe: FlagSpec = {
+      key: "probe_flag",
+      label: "Probe",
+      description: "Registered by a test.",
+      hasValue: false,
+      unavailable: null,
+      offWarning: "Probe consequence.",
+    };
+    FLAG_SPECS.push(probe);
+    try {
+      const state: FlagState = { key: "probe_flag", enabled: true, value: null };
+      expect(flagChangeWarning(state, false)).toBe("Probe consequence.");
+      expect(flagChangeWarning(state, true)).toBeNull();
+    } finally {
+      FLAG_SPECS.splice(FLAG_SPECS.indexOf(probe), 1);
+    }
+    expect(FLAG_SPECS.map((f) => f.key)).not.toContain("probe_flag");
   });
 });
 
@@ -1470,8 +1657,14 @@ describe("domainValue", () => {
     expect(domainValue("mail.thebackroomop.com")).toEqual({ ok: true, value: "mail.thebackroomop.com" });
   });
 
+  // Asserted on the reason, not just `.ok`: the trailing domain-format check
+  // would ALSO reject "someone@thebackroomop.com" (the "@" isn't a valid
+  // domain character), so a mere `.ok === false` can't tell the dedicated
+  // "@" check apart from that fallback catching the same input by accident.
   it("rejects an address rather than silently keeping the local part", () => {
-    expect(domainValue("someone@thebackroomop.com").ok).toBe(false);
+    const res = domainValue("someone@thebackroomop.com");
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toMatch(/full address/i);
   });
 
   it("rejects a bare word with no dot", () => {
@@ -1482,8 +1675,45 @@ describe("domainValue", () => {
     expect(domainValue("   ").ok).toBe(false);
   });
 
+  // Same trap as the address test above: the trailing domain-format check
+  // would ALSO reject "https://thebackroomop.com" (":" and "/" aren't valid
+  // domain characters either), so `.ok === false` alone can't tell the
+  // dedicated scheme check apart from that fallback firing by coincidence.
   it("rejects a scheme", () => {
-    expect(domainValue("https://thebackroomop.com").ok).toBe(false);
+    const res = domainValue("https://thebackroomop.com");
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toMatch(/https:\/\//i);
+  });
+
+  it("rejects a domain longer than DNS's 253-character cap", () => {
+    const res = domainValue(`${"a".repeat(250)}.com`); // 254 chars, otherwise well-formed
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toMatch(/253|too long/i);
+  });
+
+  // The property that makes the final check safe is that it's an ASCII
+  // WHITELIST, not "has a dot" or some other shape test — so a refactor that
+  // "obviously" covers the address/scheme/bare-word cases with one looser
+  // pattern (e.g. /^[^\s@:/]+\.[^\s@:/]+$/) would start accepting these three
+  // and pass every other test in this file unchanged. The immunity is the
+  // whitelist, not trim() — trim() only strips real whitespace (Zs/line
+  // terminators), not the format characters (Cf) used below.
+  it("rejects a domain containing a Cyrillic homoglyph, not just a Latin lookalike", () => {
+    // "thebackrоomop.com" reads as thebackroomop.com but the 'о' after
+    // "backr" is CYRILLIC SMALL LETTER O (U+043E), not Latin 'o'.
+    expect(domainValue("thebackrоomop.com").ok).toBe(false);
+  });
+
+  it("rejects a domain carrying a zero-width space", () => {
+    expect(domainValue("thebackroomop​.com").ok).toBe(false);
+  });
+
+  it("rejects a domain carrying a trailing word joiner", () => {
+    expect(domainValue("thebackroomop.com⁠").ok).toBe(false);
+  });
+
+  it("rejects a trailing dot, which exact comparison would otherwise silently lock everyone out", () => {
+    expect(domainValue("thebackroomop.com.").ok).toBe(false);
   });
 });
 ```
@@ -1494,7 +1724,7 @@ describe("domainValue", () => {
 npx vitest run src/lib/admin-flags.test.ts
 ```
 
-Expected: FAIL — `Failed to resolve import "./admin-flags"`.
+Expect `Cannot find module './admin-flags'`. That is the RED step; do not skip past it.
 
 - [ ] **Step 3: Write the module**
 
@@ -1509,8 +1739,17 @@ export interface FlagSpec {
   description: string;
   /** value flags render a text editor beside the switch (allowed_domain) */
   hasValue: boolean;
-  /** non-null → the switch is not usable, and this is the reason to print */
+  /** non-null → turning this ON is refused, and this is the reason to print */
   unavailable: string | null;
+  /**
+   * non-null → turning this OFF is allowed but consequential, and this is the
+   * sentence to state before the click. Spec data rather than a branch in
+   * `flagChangeWarning`, for the same reason `unavailable` is: the consequence
+   * belongs to the individual flag, and it is NOT derivable from `hasValue` —
+   * a future value flag could be a numeric threshold whose off state widens
+   * nothing, and attaching this sentence to it would be a new lie.
+   */
+  offWarning: string | null;
 }
 
 /**
@@ -1522,8 +1761,14 @@ export const FLAG_SPECS: FlagSpec[] = [
   {
     key: "m365_sso",
     label: "Microsoft 365 sign-in",
-    description:
-      "Offers Continue with Microsoft on the sign-in page, for accounts in the allowed domain.",
+    // No domain-restriction claim here: isAllowedDomain is only ever called
+    // from the credentials signUp path (src/server/auth/actions.ts). There is
+    // no signIn callback anywhere in src/server/auth, so an Entra login is
+    // filtered by nothing — not domain, not an existing User, not role. This
+    // description is what an admin reads while deciding whether to want this
+    // feature; claiming a fence that doesn't exist would be the lie, not the
+    // fix, the moment someone wires the callback and forgets the domain check.
+    description: "Offers Continue with Microsoft on the sign-in page. Domain restriction is not applied to this path.",
     hasValue: false,
     // Scope decision #7. src/server/auth/index.ts registers the Entra provider
     // whenever three env vars are present, but carries TODO(sso-phase): there is
@@ -1534,6 +1779,9 @@ export const FLAG_SPECS: FlagSpec[] = [
     // callback plus deleting this string.
     unavailable:
       "Single sign-on isn't wired up yet — an Entra login would arrive with no role attached, so this switch stays off until that callback exists.",
+    // Nothing to warn about: it cannot be on in the first place, and if a row
+    // arrived enabled out of band then turning it off is the repair, not a risk.
+    offWarning: null,
   },
   {
     key: "allowed_domain",
@@ -1542,6 +1790,7 @@ export const FLAG_SPECS: FlagSpec[] = [
       "Limits who may create an account. Turn it off and any email address can sign up.",
     hasValue: true,
     unavailable: null,
+    offWarning: "Turning this off lets anyone with any email address create an account.",
   },
 ];
 
@@ -1549,16 +1798,74 @@ export function specFor(key: string): FlagSpec | null {
   return FLAG_SPECS.find((f) => f.key === key) ?? null;
 }
 
-/** One rule for both the page (which greys the row) and the action (which refuses). */
-export function flagChange(key: string): RuleResult {
-  const spec = specFor(key);
+/**
+ * The row as flagChange/flagChangeWarning need to see it, mirroring
+ * TargetUser / roleChange(target, next, actorId) — the rule reads the row
+ * plus the requested direction, not just the key, because "turn on" and
+ * "turn off" are different questions for both flags this build knows about.
+ * `value` is the flag's stored value already narrowed to a plain string (or
+ * null); callers read it off `FeatureFlag.value`, which is `Json?`.
+ */
+export interface FlagState {
+  key: string;
+  enabled: boolean;
+  value: string | null;
+}
+
+/**
+ * One rule for both the page (which greys the row / disables the switch) and
+ * the action (which refuses). Takes the direction because turning a
+ * dangerous thing OFF is never the dangerous direction — this phase has hit
+ * the same defect shape twice already (HANDOVER §8: the permanent-admin lock
+ * refuses re-enabling that account exactly as it refuses disabling it, so the
+ * one transition that repairs an out-of-band lockout is the one the rule
+ * forbids; Task 3's self-disable Critical was the mirror image). A key-only
+ * refusal here would make this a third: it would refuse turning OFF an
+ * `m365_sso` row that got enabled out of band — hand-inserted, a restored
+ * backup, an operator experimenting — which is exactly the repair scope
+ * decision #7 needs to stay reachable.
+ */
+export function flagChange(state: FlagState, next: boolean): RuleResult {
+  const spec = specFor(state.key);
   if (!spec) {
     return {
       allowed: false,
-      reason: `This build doesn't recognise the flag "${key}", so it can't be changed here.`,
+      reason: `This build doesn't recognise the flag "${state.key}", so it can't be changed here.`,
     };
   }
-  return spec.unavailable ? { allowed: false, reason: spec.unavailable } : { allowed: true };
+  if (spec.unavailable && next) {
+    return { allowed: false, reason: spec.unavailable };
+  }
+  // allowed_domain, turned ON with nothing to enforce: FeatureFlag.value is
+  // Json? with no default, so (enabled: true, value: null) is the resting
+  // state of any deployment that bootstrapped without a domain — and
+  // flagDomain (src/lib/auth-shared.ts) reads that as unrestricted. Enabling
+  // with no value would make the switch claim a restriction signup doesn't
+  // enforce, so this is refused on the way in rather than left to render a
+  // lie once it's saved.
+  if (spec.hasValue && next && !state.value?.trim()) {
+    return {
+      allowed: false,
+      reason: "Set a domain first — an empty restriction lets any address sign up.",
+    };
+  }
+  return { allowed: true };
+}
+
+/**
+ * selfRoleChangeWarning's sibling: a consequence that's true before the click,
+ * returned as one string so the page states it pre-click and the action cannot
+ * compute a different answer. Reads `spec.offWarning` rather than testing the
+ * key, so adding a flag with a consequential off state is a line in FLAG_SPECS
+ * and not a branch here.
+ *
+ * Only the OFF direction has warnings today. Turning something ON is either
+ * refused outright (`unavailable`, or `allowed_domain` with no value) or
+ * unremarkable, and a refusal is not a warning — flagChange owns that.
+ */
+export function flagChangeWarning(state: FlagState, next: boolean): string | null {
+  if (next) return null;
+  return specFor(state.key)?.offWarning ?? null;
 }
 
 export type DomainResult = { ok: true; value: string } | { ok: false; reason: string };
@@ -1577,6 +1884,19 @@ export function domainValue(raw: string): DomainResult {
   if (value.includes("/") || value.includes(":")) {
     return { ok: false, reason: "Just the domain, with no https:// in front of it" };
   }
+  // DNS caps a full name at 253 characters. This value is interpolated into
+  // /signup and /login copy and stored in an uncapped Json column, so an
+  // absurd length is a storage/rendering honesty concern, not a performance
+  // one — the regex below has no catastrophic-backtracking exposure to guard
+  // against.
+  if (value.length > 253) {
+    return { ok: false, reason: "That's too long for a domain — 253 characters max" };
+  }
+  // An ASCII whitelist, not merely "has a dot": this is what rejects a
+  // Cyrillic-о homoglyph and the invisible Unicode format characters (Cf,
+  // not Zs — trim() above only strips real whitespace, not these) that could
+  // otherwise ride along in a pasted domain. The immunity comes from this
+  // whitelist, not from the trim() call.
   if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(value)) {
     return { ok: false, reason: "That doesn't look like a domain — try thebackroomop.com" };
   }
@@ -1584,35 +1904,142 @@ export function domainValue(raw: string): DomainResult {
 }
 ```
 
-- [ ] **Step 4: Run the tests and watch them pass**
+- [ ] **Step 4: The shared effective-value reader**
 
-```bash
-npx vitest run src/lib/admin-flags.test.ts
+Add `flagDomain` to `src/lib/auth-shared.ts` (the whole file, for context — only the last function is
+new), then replace the hand-rolled expression in `src/app/(auth)/login/page.tsx`,
+`src/app/(auth)/signup/page.tsx` and `src/server/auth/actions.ts` with a call to it. Change **only**
+that expression in those three files; they are Phase 2 auth code covered by `e2e/auth-shell.spec.ts`.
+
+```ts
+export function normalizeEmail(input: string): string {
+  return input.trim().toLowerCase();
+}
+
+/**
+ * allowedDomain comes from the allowed_domain feature flag's value when the
+ * flag is enabled; null/undefined/"" means unrestricted. Matching is exact
+ * on the text after the LAST @ — subdomains are different domains.
+ */
+export function isAllowedDomain(
+  email: string,
+  allowedDomain: string | null | undefined,
+): boolean {
+  if (!allowedDomain) return true;
+  const at = email.lastIndexOf("@");
+  if (at < 0) return false;
+  return email.slice(at + 1).toLowerCase() === allowedDomain.toLowerCase();
+}
+
+/**
+ * The one expression for "is allowed_domain actually enforced right now" —
+ * every reader of the flag (login page, signup page, the signUp gate itself)
+ * must compute the SAME thing, or the admin page can describe a stricter
+ * reality than the gate enforces. `enabled` alone isn't the answer:
+ * `FeatureFlag.value` is `Json?` with no default, so `(enabled: true, value:
+ * null)` is the resting state of any deployment that bootstrapped without a
+ * domain, and would otherwise read as "restricted" while isAllowedDomain
+ * treats it as wide open. The trim defends the same read against `(enabled:
+ * true, value: "")` or `(… value: "   ")` — not reachable through this
+ * build's own write path once admin-flags.ts's flagChange guards it, but a
+ * value can still arrive here from psql or a future migration.
+ */
+export function flagDomain(
+  flag: { enabled: boolean; value: unknown } | null | undefined,
+): string | null {
+  if (!flag?.enabled || typeof flag.value !== "string") return null;
+  const trimmed = flag.value.trim();
+  return trimmed ? trimmed : null;
+}
 ```
 
-Expected: PASS, 13 tests.
-
-- [ ] **Step 5: Mutation-test it**
-
-1. Make `flagChange` return `{ allowed: true }` before the `spec.unavailable` check → the `m365_sso`
-   test must fail.
-2. Make `specFor` return `FLAG_SPECS[0]` instead of `null` for an unknown key → "refuses a key with no
-   spec" must fail.
-3. Drop the `@` check from `domainValue` → "rejects an address" must fail.
-
-- [ ] **Step 6: Typecheck, lint, commit**
+- [ ] **Step 5: Run the tests and watch them pass**
 
 ```bash
-npx tsc --noEmit && npm run lint && npx vitest run src/lib/admin-flags.test.ts
-git add src/lib/admin-flags.ts src/lib/admin-flags.test.ts
+npx tsc --noEmit && npm run lint && npm run test
+```
+
+- [ ] **Step 6: Mutation-test it — every branch, not a sample**
+
+Break each of these, confirm a test dies **and name which one**, then restore:
+
+1. `flagChange`'s direction guard: `spec.unavailable && next` → `spec.unavailable`.
+2. `flagChange`'s enable-with-no-value branch, removed entirely.
+3. `flagChangeWarning`'s `if (next) return null`.
+4. **`flagChangeWarning` reading `spec.offWarning` → a hardcoded `key === "allowed_domain"` branch
+   returning the same sentence.** This one is instructive: the "returns each spec's own offWarning"
+   test **passes** under it, because the copied string agrees — a drift test cannot catch a faithful
+   duplicate. The test that kills it registers a flag at runtime and requires the warning to follow.
+   That is the difference between testing agreement and testing structure.
+5. `flagDomain`'s `.trim()`, and its `typeof value === "string"` check.
+6. `domainValue`'s `@` check, its scheme check, and its 253-char cap — note the first two need
+   assertions on the refusal's **`reason`**, not just `ok === false`: the trailing format regex already
+   rejects `@`, `/` and `:`, so an `ok`-only assertion passes for the wrong reason and cannot detect the
+   deleted branch. The plan originally specified `ok`-only assertions here and they were a real defect.
+
+If a mutation leaves the suite green, the test for that rule is not testing it — fix the test.
+
+- [ ] **Step 7: Typecheck, lint, commit**
+
+```bash
+npx tsc --noEmit && npm run lint && npm run test
+npx playwright test e2e/auth-shell.spec.ts --workers=1
+git add src/lib/admin-flags.ts src/lib/admin-flags.test.ts src/lib/auth-shared.ts src/lib/auth-shared.test.ts "src/app/(auth)/login/page.tsx" "src/app/(auth)/signup/page.tsx" src/server/auth/actions.ts
 git commit -m "feat(admin): the flag allowlist, with SSO held shut until it works"
 ```
 
----
+As shipped this was four commits, left unsquashed so the review trail stays legible: `cc43421` (the
+task as written), `3ae53d2` (a test asserting `domainValue`'s reason text rather than only `ok`),
+`e3191a2` (the review fix), `3b158df` (`offWarning` as spec data).
+
+Verified green at `3b158df`: `npx tsc --noEmit` / `npm run lint` / **404 tests across 28 files** /
+`npx playwright test e2e/auth-shell.spec.ts` 15/15.
+
 
 ### Task 5: Flag actions + `/admin/flags`
 
 Card `3h`: switch rows with a description line. Two of them, one of which also carries a value.
+
+> ### ⚠ REQUIRED AMENDMENT — read before implementing. The code blocks in this task predate `3b158df`.
+>
+> Task 4's review changed the contract this task consumes, and found a Critical whose fix this task has to
+> honour. **The blocks below call `flagChange(key)`, which no longer exists** — it is now
+> `flagChange(state: FlagState, next: boolean)`, and there is a new `flagChangeWarning(state, next)`.
+>
+> **Ten things this task must guarantee.** The first three are the Critical; the rest are the shape.
+>
+> 1. **Never write `enabled: true` on a `hasValue` flag whose stored `value` isn't a non-empty string.**
+>    `flagChange` refuses it, but the action must **re-check inside the same transaction that reads the
+>    row** — the value can change between the page render and the click.
+> 2. **Never let the page show a `hasValue` flag as ON while it enforces nothing.** `listFlags` must
+>    return an *effective* state computed with `flagDomain()` from `src/lib/auth-shared.ts`, **not** raw
+>    `row.enabled`. This is the whole point: `(enabled: true, value: null)` is the resting state of any
+>    deployment that bootstrapped without a domain, and `isAllowedDomain` reads it as **wide open**. A
+>    switch reading ON beside "Limits who may create an account" while any address can sign up is the
+>    defect, and the admin page is the surface that lies.
+> 3. **`value` has exactly one write path and it is `domainValue`.** No clear/reset button that bypasses
+>    it, and no path that can store `null`, `""`, or a non-string.
+> 4. **Allow turning an `unavailable` flag OFF; refuse only turning it ON.** `flagChange` already does
+>    this — don't let the page render a disabled switch for the one direction the rule permits. An admin
+>    must always be able to close a dangerous sign-in path from this screen.
+> 5. **State the consequence of turning `allowed_domain` off BEFORE the click**, from
+>    `flagChangeWarning` — the `selfRoleChangeWarning` pattern Task 3 established, one string on two
+>    surfaces, not a toast after the fact. `spec.description` is not a substitute: it is static and reads
+>    identically in both states.
+> 6. **Render `spec.description`, never `FeatureFlag.description`.** The two already disagree —
+>    `FLAG_SPECS` carries the safety warning, `prisma/seed.ts:30` doesn't — and the spec's is the
+>    build-controlled prose. If a row must be created, note `FeatureFlag.description` is `String`
+>    **non-null with no default**.
+> 7. **Drive the listing from `FLAG_SPECS`, with a spec that has no row rendering as off.** Don't offer a
+>    switch whose only possible outcome is `conflict("isn't in the database")` — that is a spec with no
+>    row, which is the real state of `m365_sso` on any bootstrapped deployment, since bootstrap upserts
+>    only `allowed_domain`.
+> 8. **Check the page against the rule (HANDOVER §10).** Task 3's Critical was a page consuming only
+>    *some* of what its rule module could return. This task's rule can now return four distinct refusals
+>    and a warning. Confirm the page consumes every one.
+> 9. **Don't synthesize `FlagState` in the client (HANDOVER §11).** The query builds it from the real row.
+> 10. **A no-op must still refresh (HANDOVER §12).** Same reasoning as Task 3: the branch is reachable
+>     only when the client's props are stale, which is exactly when a refresh is the remedy.
 
 **Files:**
 - Create: `src/server/modules/admin/flag-actions.ts`, `src/components/admin/flag-rows.tsx`,
