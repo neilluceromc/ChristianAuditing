@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { FLAG_SPECS, domainValue, flagChange, flagChangeWarning, specFor, type FlagState } from "./admin-flags";
+import {
+  FLAG_SPECS, domainValue, flagChange, flagChangeWarning, specFor,
+  type FlagSpec, type FlagState,
+} from "./admin-flags";
 
 const ssoOff: FlagState = { key: "m365_sso", enabled: false, value: null };
 const ssoOn: FlagState = { key: "m365_sso", enabled: true, value: null };
@@ -124,6 +127,40 @@ describe("flagChangeWarning", () => {
 
   it("is null for a key this build doesn't know", () => {
     expect(flagChangeWarning(unknown, false)).toBeNull();
+  });
+
+  it("returns each spec's own offWarning", () => {
+    for (const spec of FLAG_SPECS) {
+      const state: FlagState = { key: spec.key, enabled: true, value: "thebackroomop.com" };
+      expect(flagChangeWarning(state, false)).toBe(spec.offWarning);
+    }
+  });
+
+  // The one above only catches DRIFT between the spec and the function. This
+  // one catches the structure: it registers a flag the function has never heard
+  // of and requires the warning to follow, which a `key === "allowed_domain"`
+  // branch cannot do however carefully its string is copied. That branch is
+  // what this module started with, and reintroducing it is the regression —
+  // the point of `offWarning` is that a new consequential flag is a line in
+  // FLAG_SPECS and not an edit here.
+  it("follows spec data for a flag added at runtime, not a hardcoded key", () => {
+    const probe: FlagSpec = {
+      key: "probe_flag",
+      label: "Probe",
+      description: "Registered by a test.",
+      hasValue: false,
+      unavailable: null,
+      offWarning: "Probe consequence.",
+    };
+    FLAG_SPECS.push(probe);
+    try {
+      const state: FlagState = { key: "probe_flag", enabled: true, value: null };
+      expect(flagChangeWarning(state, false)).toBe("Probe consequence.");
+      expect(flagChangeWarning(state, true)).toBeNull();
+    } finally {
+      FLAG_SPECS.splice(FLAG_SPECS.indexOf(probe), 1);
+    }
+    expect(FLAG_SPECS.map((f) => f.key)).not.toContain("probe_flag");
   });
 });
 

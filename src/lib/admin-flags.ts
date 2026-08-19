@@ -8,6 +8,15 @@ export interface FlagSpec {
   hasValue: boolean;
   /** non-null → turning this ON is refused, and this is the reason to print */
   unavailable: string | null;
+  /**
+   * non-null → turning this OFF is allowed but consequential, and this is the
+   * sentence to state before the click. Spec data rather than a branch in
+   * `flagChangeWarning`, for the same reason `unavailable` is: the consequence
+   * belongs to the individual flag, and it is NOT derivable from `hasValue` —
+   * a future value flag could be a numeric threshold whose off state widens
+   * nothing, and attaching this sentence to it would be a new lie.
+   */
+  offWarning: string | null;
 }
 
 /**
@@ -37,6 +46,9 @@ export const FLAG_SPECS: FlagSpec[] = [
     // callback plus deleting this string.
     unavailable:
       "Single sign-on isn't wired up yet — an Entra login would arrive with no role attached, so this switch stays off until that callback exists.",
+    // Nothing to warn about: it cannot be on in the first place, and if a row
+    // arrived enabled out of band then turning it off is the repair, not a risk.
+    offWarning: null,
   },
   {
     key: "allowed_domain",
@@ -45,6 +57,7 @@ export const FLAG_SPECS: FlagSpec[] = [
       "Limits who may create an account. Turn it off and any email address can sign up.",
     hasValue: true,
     unavailable: null,
+    offWarning: "Turning this off lets anyone with any email address create an account.",
   },
 ];
 
@@ -107,18 +120,19 @@ export function flagChange(state: FlagState, next: boolean): RuleResult {
 }
 
 /**
- * selfRoleChangeWarning's sibling: a consequence that's true before the
- * click, returned as one string so the page can state it pre-click and the
- * action can't compute a different answer. Only `allowed_domain` going OFF
- * has one — that's the direction that opens signup to any address on the
- * public internet; nothing else this module knows about needs a pre-click
- * warning (turning `allowed_domain` ON needs a value, which flagChange
- * already refuses without, and m365_sso carries its own `unavailable`
- * explanation rather than a warning).
+ * selfRoleChangeWarning's sibling: a consequence that's true before the click,
+ * returned as one string so the page states it pre-click and the action cannot
+ * compute a different answer. Reads `spec.offWarning` rather than testing the
+ * key, so adding a flag with a consequential off state is a line in FLAG_SPECS
+ * and not a branch here.
+ *
+ * Only the OFF direction has warnings today. Turning something ON is either
+ * refused outright (`unavailable`, or `allowed_domain` with no value) or
+ * unremarkable, and a refusal is not a warning — flagChange owns that.
  */
 export function flagChangeWarning(state: FlagState, next: boolean): string | null {
-  if (next || state.key !== "allowed_domain") return null;
-  return "Turning this off lets anyone with any email address create an account.";
+  if (next) return null;
+  return specFor(state.key)?.offWarning ?? null;
 }
 
 export type DomainResult = { ok: true; value: string } | { ok: false; reason: string };
