@@ -21,6 +21,46 @@ function isUnique(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
 }
 
+/**
+ * Prisma throws rather than returning; three shapes reach here:
+ *  - P2028: the transaction couldn't get a connection inside maxWait —
+ *    reachable with just two concurrent transactions.
+ *  - P2025: a check-then-delete race (findUnique, then delete) — the guarded
+ *    `if (!x) return conflict(...)` above each delete is the designed answer
+ *    to exactly this, but a delete (or a cascade from a parent's delete)
+ *    landing between the check and the delete defeats it.
+ *  - P2003: a create's FK reference (policy or asset type) is validated
+ *    inside the transaction but deleted concurrently before the write lands.
+ * Everything else rethrows: an unexpected error must not be laundered into a
+ * designed banner.
+ *
+ * NOTE for anyone editing the callbacks below: RETURNING a failure from a
+ * $transaction callback COMMITS the transaction — only a throw rolls it back.
+ * That is safe here because every `return conflict(...)` precedes every write.
+ * Add a write before one of them and it will commit silently.
+ */
+async function asActionResult<T>(
+  run: () => Promise<T>,
+  opts?: { goneMessage?: string },
+): Promise<T | ActionResult<never>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      if (err.code === "P2028") {
+        return conflict("The database is busy right now — nothing was written. Try that again.");
+      }
+      if (err.code === "P2025") {
+        return conflict(opts?.goneMessage ?? "That record no longer exists.");
+      }
+      if (err.code === "P2003") {
+        return conflict("Still referenced by other records — the database refused the write.");
+      }
+    }
+    throw err;
+  }
+}
+
 /** One slot, rendered the way the audit trail should read it. */
 async function slotList(tx: Prisma.TransactionClient, policyId: string): Promise<string[]> {
   const slots = await tx.policySlot.findMany({
@@ -77,34 +117,43 @@ export async function createPolicy(input: unknown): Promise<ActionResult<{ id: s
       appliesToTitle: "Target exactly one: a role title OR a department (role policy beats department policy).",
     });
   }
-  if (departmentId && !(await prisma.department.findUnique({ where: { id: departmentId } }))) {
+  const department = departmentId
+    ? await prisma.department.findUnique({ where: { id: departmentId } })
+    : null;
+  if (departmentId && !department) {
     return validationError({ appliesToDepartmentId: "Unknown department" });
   }
 
   try {
-    let id = "";
-    await prisma.$transaction(async (tx) => {
-      const policy = await tx.equipmentPolicy.create({
-        data: {
-          name: parsed.data.name,
-          appliesToTitle: title || null,
-          appliesToDepartmentId: departmentId || null,
-        },
+    const result = await asActionResult(async () => {
+      let id = "";
+      await prisma.$transaction(async (tx) => {
+        const policy = await tx.equipmentPolicy.create({
+          data: {
+            name: parsed.data.name,
+            appliesToTitle: title || null,
+            appliesToDepartmentId: departmentId || null,
+          },
+        });
+        id = policy.id;
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name,
+          entityType: "equipment-policy", entityId: policy.id,
+          action: "create",
+          diff: {
+            name: { from: null, to: policy.name },
+            // The trail never exposes raw ids — the department name is
+            // fetched above and carried through, not the cuid.
+            appliesTo: { from: null, to: title ? `role: ${title}` : `department: ${department?.name}` },
+            slots: { from: null, to: [] },
+          },
+        });
       });
-      id = policy.id;
-      await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name,
-        entityType: "equipment-policy", entityId: policy.id,
-        action: "create",
-        diff: {
-          name: { from: null, to: policy.name },
-          appliesTo: { from: null, to: title ? `role: ${title}` : `department: ${departmentId}` },
-          slots: { from: null, to: [] },
-        },
-      });
+      return id;
     });
+    if (typeof result !== "string") return result;
     revalidateAll();
-    return ok({ id });
+    return ok({ id: result });
   } catch (err) {
     if (isUnique(err)) return validationError({ name: "That policy name already exists" });
     throw err;
@@ -121,20 +170,33 @@ export async function deletePolicy(input: unknown): Promise<ActionResult<null>> 
   const parsed = idSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
 
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const policy = await tx.equipmentPolicy.findUnique({ where: { id: parsed.data.id } });
     if (!policy) return conflict("That policy no longer exists.");
     const before = await slotList(tx, policy.id);
+    // The row about to be deleted is the only one that can ever answer whom
+    // this policy applied to — resolve it now or lose it forever (AuditEntry
+    // is append-only; this row cannot be corrected after the fact).
+    const department = policy.appliesToDepartmentId
+      ? await tx.department.findUnique({ where: { id: policy.appliesToDepartmentId } })
+      : null;
+    const appliesTo = policy.appliesToTitle
+      ? `role: ${policy.appliesToTitle}`
+      : `department: ${department?.name}`;
     // PolicySlot cascades with the policy; assignments are untouched by design.
     await tx.equipmentPolicy.delete({ where: { id: policy.id } });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
       entityType: "equipment-policy", entityId: policy.id,
       action: "delete",
-      diff: { name: { from: policy.name, to: null }, slots: { from: before, to: null } },
+      diff: {
+        name: { from: policy.name, to: null },
+        appliesTo: { from: appliesTo, to: null },
+        slots: { from: before, to: null },
+      },
     });
     return null;
-  });
+  }), { goneMessage: "That policy no longer exists." });
   if (failure) return failure;
   revalidateAll();
   return ok(null);
@@ -157,7 +219,7 @@ export async function addSlot(input: unknown): Promise<ActionResult<{ id: string
   const d = parsed.data;
 
   let id = "";
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const policy = await tx.equipmentPolicy.findUnique({ where: { id: d.policyId } });
     if (!policy) return conflict("That policy no longer exists.");
     // A typeless slot could never be filled — computeLoadout matches on type —
@@ -172,7 +234,7 @@ export async function addSlot(input: unknown): Promise<ActionResult<{ id: string
     id = slot.id;
     await auditSlots(tx, user, policy.id, before, "policy.slot.added");
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidateAll();
   return ok({ id });
@@ -188,14 +250,14 @@ export async function removeSlot(input: unknown): Promise<ActionResult<null>> {
   const parsed = slotIdSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
 
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const slot = await tx.policySlot.findUnique({ where: { id: parsed.data.slotId } });
     if (!slot) return conflict("That slot no longer exists.");
     const before = await slotList(tx, slot.policyId);
     await tx.policySlot.delete({ where: { id: slot.id } });
     await auditSlots(tx, user, slot.policyId, before, "policy.slot.removed");
     return null;
-  });
+  }), { goneMessage: "That slot no longer exists." });
   if (failure) return failure;
   revalidateAll();
   return ok(null);
@@ -213,7 +275,7 @@ export async function setSlotRequired(input: unknown): Promise<ActionResult<null
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
 
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const slot = await tx.policySlot.findUnique({ where: { id: d.slotId } });
     if (!slot) return conflict("That slot no longer exists.");
     if (slot.required === d.required) return null;
@@ -227,7 +289,7 @@ export async function setSlotRequired(input: unknown): Promise<ActionResult<null
     if (written.count === 0) return conflict("Someone else just changed that slot — refresh.");
     await auditSlots(tx, user, slot.policyId, before, "policy.slot.changed");
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidateAll();
   return ok(null);

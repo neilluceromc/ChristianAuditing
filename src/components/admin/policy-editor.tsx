@@ -40,8 +40,17 @@ export interface TypeOption {
   label: string;
 }
 
-/** Shared error plumbing: every action returns the same ActionResult union. */
-function useRunner() {
+/**
+ * Shared error plumbing: every action returns the same ActionResult union.
+ *
+ * `claimedFieldKeys` lists the fieldErrors keys this card actually renders a
+ * FormError for. A validation refusal must render where the operator is
+ * looking (README rule) — src/components/admin/ref-table.tsx solves this by
+ * falling back to the first message regardless of key; here, any key no
+ * FormError claims falls back into the same banner the conflict path uses,
+ * so an unclaimed validation key can never dead-end silently.
+ */
+function useRunner(claimedFieldKeys: string[] = []) {
   const router = useRouter();
   const toast = useToast();
   const [pending, startTransition] = useTransition();
@@ -59,8 +68,12 @@ function useRunner() {
         onOk?.();
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      else if (res.kind === "validation") setFieldErrors(res.fieldErrors ?? {});
-      else setError(res.message);
+      else if (res.kind === "validation") {
+        const errs = res.fieldErrors ?? {};
+        setFieldErrors(errs);
+        const unclaimed = Object.keys(errs).find((key) => !claimedFieldKeys.includes(key));
+        if (unclaimed) setError(errs[unclaimed]);
+      } else setError(res.message);
     });
   }
 
@@ -76,7 +89,7 @@ export function PolicyEditor({
   types: TypeOption[];
   canMutate: boolean;
 }) {
-  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner();
+  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner(["name", "assetTypeId"]);
   const [name, setName] = useState("");
   const [typeId, setTypeId] = useState(types[0]?.id ?? "");
   const [required, setRequired] = useState(true);
@@ -125,28 +138,46 @@ export function PolicyEditor({
           {policy.slots.map((slot) => (
             <span key={slot.id} className="inline-flex items-center">
               {/* Solid = required (an unfilled one is the policy gap that lights
-                  up on the loadout view and in Home's HIRE rows); grey = optional. */}
-              <button
-                type="button"
-                disabled={!canMutate || pending}
-                aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"}${canMutate ? " — click to toggle" : ""}`}
-                onClick={() =>
-                  run(
-                    () => setSlotRequired({ slotId: slot.id, required: !slot.required }),
-                    `${slot.name} is now ${slot.required ? "optional" : "required"}`,
-                  )
-                }
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
-                  slot.required
-                    ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
-                    : "border-border bg-border-faint text-fg-muted",
-                  canMutate && "hover:opacity-80",
-                )}
-              >
-                {slot.name}
-                <span className="text-[9px] opacity-70">{slot.typeName}</span>
-              </button>
+                  up on the loadout view and in Home's HIRE rows); grey = optional.
+                  For a viewer this is display-only: a mutating affordance must be
+                  absent, not disabled, so it renders as a plain span with no
+                  onClick and no "click to toggle" in its label. */}
+              {canMutate ? (
+                <button
+                  type="button"
+                  disabled={pending}
+                  aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"} — click to toggle`}
+                  onClick={() =>
+                    run(
+                      () => setSlotRequired({ slotId: slot.id, required: !slot.required }),
+                      `${slot.name} is now ${slot.required ? "optional" : "required"}`,
+                    )
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
+                    slot.required
+                      ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
+                      : "border-border bg-border-faint text-fg-muted",
+                    "hover:opacity-80",
+                  )}
+                >
+                  {slot.name}
+                  <span className="text-[9px] opacity-70">{slot.typeName}</span>
+                </button>
+              ) : (
+                <span
+                  aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"}`}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
+                    slot.required
+                      ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
+                      : "border-border bg-border-faint text-fg-muted",
+                  )}
+                >
+                  {slot.name}
+                  <span className="text-[9px] opacity-70">{slot.typeName}</span>
+                </span>
+              )}
               {canMutate && (
                 <button
                   type="button"
@@ -215,11 +246,17 @@ export function PolicyEditor({
 }
 
 export function NewPolicyCard({ departments }: { departments: Array<{ id: string; name: string }> }) {
-  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner();
   const [name, setName] = useState("");
   const [target, setTarget] = useState("department");
   const [departmentId, setDepartmentId] = useState(departments[0]?.id ?? "");
   const [title, setTitle] = useState("");
+  // createPolicy's "target exactly one" refusal always keys its error as
+  // appliesToTitle, even when the department branch is the one showing —
+  // that branch renders no FormError for either target field, so the key
+  // must fall back to the banner instead of vanishing.
+  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner(
+    target === "title" ? ["name", "appliesToTitle"] : ["name"],
+  );
 
   return (
     <Card>
