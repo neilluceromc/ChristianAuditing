@@ -69,7 +69,7 @@ export function WizardSteps({
                 // aria-current belongs on this branch too — otherwise the bar
                 // tells a screen reader the operator is nowhere at all
                 aria-current={isCurrent ? "step" : undefined}
-                className={cn(shared, "border-dashed border-border-strong text-fg-faint")}
+                className={cn(shared, "border-dashed border-border-strong text-fg-muted")}
               >
                 {inner}
                 {/* `title` on a non-focusable span never reaches a keyboard
