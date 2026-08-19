@@ -26,7 +26,7 @@ export async function entityLabels(
     byType.get(e.entityType)!.add(e.entityId);
   }
   const map = new Map<string, { label: string; href: string | null }>();
-  const [assets, employees, approvals, purchases, policies] = await Promise.all([
+  const [assets, employees, approvals, purchases, policies, users] = await Promise.all([
     byType.has("asset")
       ? prisma.asset.findMany({ where: { id: { in: [...byType.get("asset")!] } }, select: { id: true, tag: true } })
       : [],
@@ -48,6 +48,12 @@ export async function entityLabels(
           select: { id: true, name: true },
         })
       : [],
+    byType.has("user")
+      ? prisma.user.findMany({
+          where: { id: { in: [...byType.get("user")!] } },
+          select: { id: true, name: true },
+        })
+      : [],
   ]);
   for (const a of assets) map.set(`asset:${a.id}`, { label: a.tag, href: `/inventory/${a.id}` });
   for (const e of employees) map.set(`employee:${e.id}`, { label: e.name, href: `/employees/${e.id}` });
@@ -56,6 +62,7 @@ export async function entityLabels(
   // A deleted policy has no row to resolve — it correctly keeps the truncated-id
   // fallback below; auditSentence's "delete" case reads the name from the diff instead.
   for (const p of policies) map.set(`equipment-policy:${p.id}`, { label: p.name, href: "/admin/equipment-policies" });
+  for (const u of users) map.set(`user:${u.id}`, { label: u.name, href: "/admin/users" });
   for (const e of entries) {
     const key = `${e.entityType}:${e.entityId}`;
     if (!map.has(key)) map.set(key, { label: e.entityId.slice(0, 10) + "…", href: null });

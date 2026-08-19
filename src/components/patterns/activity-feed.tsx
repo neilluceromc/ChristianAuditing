@@ -38,7 +38,7 @@ export function actionDot(action: string): string {
   if (action === "cancel") return "CANCELLED"; // closed
   if (action === "complete" || action === "offboarding.completed") return "COMPLETED"; // settled
   if (action === "submit" || action === "it-review") return "SUBMITTED"; // inflight
-  if (action.includes("failed") || action === "delete") return "DEFECTIVE"; // fault
+  if (action.includes("failed") || action === "delete" || action === "disable") return "DEFECTIVE"; // fault
   if (action === "create" || action.includes("executed")) return "DEPLOYED"; // settled
   if (action.includes("requested") || action === "claim") return "SUBMITTED"; // inflight
   return "SPARE"; // neutral
