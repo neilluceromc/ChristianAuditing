@@ -1,4 +1,5 @@
 import type { Role } from "@prisma/client";
+import { ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "./workspaces";
 
 /** Admin first: the select reads as a privilege ladder, most-privileged at the top. */
 export const ROLE_OPTIONS: Role[] = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"];
@@ -94,4 +95,21 @@ export function disableChange(target: TargetUser, next: boolean, actorId: string
 export function selfRoleChangeWarning(target: TargetUser, next: Role, actorId: string): string | null {
   if (target.id !== actorId || next === target.role) return null;
   return `You're changing your own role — you'll be signed out and will need to sign back in as ${ROLE_LABELS[next]}.`;
+}
+
+/**
+ * Card 3h's ARTBOARD (not its prose) specs a `Workspaces` column the table
+ * dropped silently — brief §2 puts `it_staff` and `viewer` in the SAME
+ * workspace with different access, so the role name alone doesn't answer
+ * what picking one actually grants. Derived from ROLE_WORKSPACES /
+ * WORKSPACE_META rather than a hand-copied string per role, so it can't
+ * drift from the table those two already define.
+ */
+export function roleWorkspaces(role: Role): string {
+  const ids = ROLE_WORKSPACES[role];
+  const all = Object.keys(WORKSPACE_META) as WorkspaceId[];
+  const base = ids.length === all.length ? "all four" : ids.map((id) => WORKSPACE_META[id].label).join(" · ");
+  // viewer shares it_staff's workspace but not its write access — the artboard
+  // marks that with a suffix rather than a fifth workspace that doesn't exist.
+  return role === "viewer" ? `${base} · read-only` : base;
 }

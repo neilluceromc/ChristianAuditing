@@ -1,8 +1,10 @@
 import { Role } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
-  ROLE_LABELS, ROLE_OPTIONS, disableChange, lockReason, roleChange, selfRoleChangeWarning, type TargetUser,
+  ROLE_LABELS, ROLE_OPTIONS, disableChange, lockReason, roleChange, roleWorkspaces, selfRoleChangeWarning,
+  type TargetUser,
 } from "./admin-users";
+import { ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "./workspaces";
 
 const ordinary: TargetUser = { id: "u-1", role: "it_staff", isPermanentAdmin: false, disabled: false };
 const permanent: TargetUser = { id: "u-0", role: "admin", isPermanentAdmin: true, disabled: false };
@@ -121,5 +123,35 @@ describe("selfRoleChangeWarning", () => {
   it("names the incoming role's label, not a raw enum", () => {
     const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: false };
     expect(selfRoleChangeWarning(self, "viewer", "actor-9")).toMatch(/viewer/i);
+  });
+});
+
+describe("roleWorkspaces", () => {
+  // Asserted against ROLE_WORKSPACES's own length, not a hardcoded "4" — the
+  // same mistake the ROLE_OPTIONS coverage test above avoids.
+  it("names admin's access 'all four' because admin holds every workspace in the table", () => {
+    const all = Object.keys(WORKSPACE_META) as WorkspaceId[];
+    expect(ROLE_WORKSPACES.admin.length).toBe(all.length);
+    expect(roleWorkspaces("admin")).toBe("all four");
+  });
+
+  it("joins a narrower role's workspace labels, derived from WORKSPACE_META rather than copied", () => {
+    const expected = ROLE_WORKSPACES.purchasing_staff.map((id) => WORKSPACE_META[id].label).join(" · ");
+    expect(roleWorkspaces("purchasing_staff")).toBe(expected);
+  });
+
+  // viewer shares it_staff's workspace but not its write access (brief §2) —
+  // this is the one role the suffix must fire for.
+  it("appends a read-only suffix for viewer, on top of the workspace(s) it shares", () => {
+    const base = ROLE_WORKSPACES.viewer.map((id) => WORKSPACE_META[id].label).join(" · ");
+    expect(roleWorkspaces("viewer")).toBe(`${base} · read-only`);
+  });
+
+  it("does not append the read-only suffix for a role that actually has write access", () => {
+    expect(roleWorkspaces("it_staff")).not.toMatch(/read-only/);
+  });
+
+  it("labels every role with something non-empty", () => {
+    for (const role of ROLE_OPTIONS) expect(roleWorkspaces(role)).toBeTruthy();
   });
 });
