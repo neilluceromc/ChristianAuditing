@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–3 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 12 ahead of that.**
+**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–4 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 19 ahead of that.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,13 +13,13 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–3 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–4 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
-   so far (12 commits); `git status` should be clean.
+   so far (19 commits); `git status` should be clean.
 
    **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
    2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
-   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 12 ahead of `main`.
+   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 19 ahead of `main`.
    Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
@@ -29,17 +29,20 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
    permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
    Phase 8's plan, not after.
-4. **Resume at Task 4** (the flag rules, TDD) of `docs/superpowers/plans/2026-08-19-phase-8-admin.md`
-   with `superpowers:subagent-driven-development`. Tasks 1–3 are committed; 4–14 remain. Read the plan's
+4. **Resume at Task 5** (flag actions + `/admin/flags`) of
+   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
+   Tasks 1–4 are committed; 5–14 remain. **Task 5 opens with a REQUIRED AMENDMENT carrying ten numbered
+   guarantees — read them before its code blocks, which predate `3b158df` and still call a
+   `flagChange(key)` that no longer exists.** Read the plan's
    **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the `m365_sso`
    refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a later
-   task can silently break — then **§6a**, which carries what Tasks 1–3 actually established.
-   Tasks 2 and 3 have both been amended to the shipped code (`docs(plan): …`), so trust the plan over
+   task can silently break — then **§6a**, which carries what Tasks 1–4 actually established.
+   Tasks 2, 3 and 4 have all been amended to the shipped code (`docs(plan): …`), so trust the plan over
    any memory of what it used to say, and keep amending it whenever code deviates.
 
    **The one thing to carry into Tasks 5, 8 and 13** — each of which pairs a rule module with a page —
    is §6a rule 10: **a page must consume every refusal its rule module can return, not just the one the
-   design card names.** Task 3 shipped once with a live Disable button on the actor's own row because it
+   design card names**, together with §6a rule 14: **a rule must permit the safe direction.** Task 3 shipped once with a live Disable button on the actor's own row because it
    imported `selfRoleChangeWarning` and not `disableChange`; every click on that button was guaranteed
    to fail. The rule was already written, exported and unit-tested. Nothing but a reviewer reading the
    rule against the surface caught it, and it was invisible from the seeded `admin@` account.
@@ -47,9 +50,9 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
 
-The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **368 unit tests across 27
-files** (345/26 at the Phase 7 merge; Task 1 added `src/lib/admin-users.test.ts`, and Tasks 2 and 3's
-review fixes added ten more cases to it) · `npm run build` · **`npx playwright test --workers=1` — 89
+The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **404 unit tests across 28
+files** (345/26 at the Phase 7 merge; Tasks 1–4 and their review fixes added the rest, and Task 4 alone
+accounts for 23 — most of them mutation-driven) · `npm run build` · **`npx playwright test --workers=1` — 89
 e2e tests, 7.9 minutes** (up
 from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
 through the worker, repair mode, reservations, and equipment policies, including the viewer
@@ -164,7 +167,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–3 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–4 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -299,9 +302,14 @@ them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LA
 **Task 3** — `/admin/users` itself: the permanent admin as a `LOCKED` chip with its reason in a caption,
 role selects per row, a confirm dialog before a self role change, the artboard's `Workspaces` column
 (`roleWorkspaces()`), avatars, and the actor's own row stating `Your own account` instead of a
-Disable button that could only fail. Also `aria-describedby` on the shared `Dialog` primitive. Two commits
-per task, review fixes deliberately left unsquashed so the verdicts stay legible: `c699743` + `d29ce9b`,
-then `28e21ba` + `4b112cd`, then `5d8e819` + `8a604df`.
+Disable button that could only fail. Also `aria-describedby` on the shared `Dialog` primitive.
+**Task 4** — `src/lib/admin-flags.ts` + tests, the feature-flag allowlist: `FLAG_SPECS`, `specFor`,
+`FlagState`, `flagChange(state, next)`, `flagChangeWarning(state, next)` and `domainValue`, with
+`m365_sso` refused ON but permitted OFF, and `allowed_domain` refused ON without a value. Plus
+`flagDomain()` in `src/lib/auth-shared.ts`, now the single effective-value expression for all four
+readers of that flag. No UI — Task 5 builds `/admin/flags`. Review fixes deliberately left unsquashed so
+the verdicts stay legible: `c699743` + `d29ce9b`; `28e21ba` + `4b112cd`; `5d8e819` + `8a604df`;
+`cc43421` + `3ae53d2` + `e3191a2` + `3b158df`.
 
 ### Conventions every later phase must follow
 
@@ -334,11 +342,11 @@ then `28e21ba` + `4b112cd`, then `5d8e819` + `8a604df`.
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 4–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 5–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1 (the user rules), 2 (the two mutations) and 3 (`/admin/users`) are done** — see §6a. Task 4
-  is next: the flag rules, a TDD pure module with no UI, and the allowlist that stops `/admin/flags`
-  becoming an arbitrary writer into application config.
+  **Tasks 1–4 are done** — the user rules, the two user mutations, `/admin/users`, and the flag
+  allowlist. See §6a. **Task 5 is next** and carries ten numbered guarantees in a REQUIRED AMENDMENT
+  block, because Task 4's review found a Critical that Task 5 is the surface for.
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -406,7 +414,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–3 established (READ BEFORE TASK 4)
+## 6a. Phase 8 mid-flight: what Tasks 1–4 established (READ BEFORE TASK 5)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -526,6 +534,55 @@ sharpened, and the ones a later task can silently break.
     benefit. **This is also why the e2e suite was re-run at Task 3** (see §0): six e2e-covered components
     use that primitive.
 
+**From Task 4 (`cc43421` through `3b158df`). Rule 14 is the one to carry forward — it is now this
+phase's most-repeated defect.**
+
+14. **A rule must permit the SAFE direction. This shape has appeared three times in four tasks.**
+    (a) Task 1's `disableChange` is direction-blind, so it refuses *re-enabling* the permanent admin as
+    well as disabling it — the one transition that repairs an out-of-band lockout is the one the rule
+    forbids (§8). (b) Task 3's Critical was the mirror image: a live control for an action the rule would
+    always refuse. (c) Task 4's `flagChange` refused turning `m365_sso` **off** as well as on — so a
+    database where that row is already enabled shows *Continue with Microsoft* on `/login`, the exact
+    roleless-login path scope decision #7 exists to prevent, while the admin page renders the row ON with
+    a pill explaining the danger **and no way to close it.** Both Phase 8 rule modules now take the
+    requested direction. **Turning a dangerous thing off is never the dangerous direction** — check it
+    for every rule Tasks 5, 8 and 13 add.
+
+15. **A switch must not be able to claim a restriction that isn't enforced.** `isAllowedDomain`
+    (`src/lib/auth-shared.ts`) returns `true` — **unrestricted** — whenever the domain is falsy, and
+    `FeatureFlag.value` is `Json?` with no default. `createBootstrapAdmin` with a blank domain writes
+    `(enabled: false, value: null)`, the resting state of **every deployment that bootstrapped without a
+    domain**. One click made that `(true, null)`: `/admin/flags` read ON beside *"Limits who may create an
+    account"* while any address on earth could sign up, and `/signup` correctly showed no banner — so the
+    two surfaces disagreed and **the admin page was the one lying.** `flagChange` now refuses enabling a
+    `hasValue` flag with no value, and **`flagDomain()` in `auth-shared.ts` is the single expression every
+    reader uses**, so the admin page cannot compute a stricter reality than the gate enforces. Three
+    readers had hand-rolled that expression; Task 5's query would have been a fourth that diverged.
+
+16. **A user-facing description can assert a security property the code doesn't have.** `m365_sso`'s said
+    the Microsoft button was *"for accounts in the allowed domain."* `isAllowedDomain` is called in
+    exactly one place — the credentials `signUp` path — and there is **no `signIn` callback anywhere** in
+    `src/server/auth`, so an Entra login is filtered by nothing: not domain, not an existing `User`, not
+    role. That is the sentence an admin reads while deciding whether to want the feature. Fixed, with a
+    test asserting it never re-acquires the claim. **`prisma/seed.ts` still carries the same falsehood in
+    the row's own `description` column**, which is why a flags page must render `spec.description` and
+    never `row.description`.
+
+17. **A test that asserts agreement is not a test that asserts structure.** `flagChangeWarning` reads
+    `spec.offWarning`. A test checking it equals each spec's `offWarning` catches *drift* — but a
+    reintroduced hardcoded `key === "allowed_domain"` branch returning the same sentence **passes it**,
+    which I verified by mutation. The property is "reads spec data", and the only test that catches it
+    registers a flag at runtime and requires the warning to follow. Worth remembering whenever a test's
+    name claims a structural guarantee: mutate the structure, not just the value.
+
+18. **`trim()` does not strip invisible characters; a whitelist is what saves you.** U+200B and U+2060 are
+    `Cf`, not `Zs`, so `trim()` leaves them — the hole §8 records for the 3-character reason minimum,
+    which ends on a *length* check. `domainValue` is immune because its final check is an ASCII
+    **whitelist**, and there are now regression tests saying so, plus a homoglyph case and a trailing-dot
+    case. The refactor they guard against is realistic: collapsing the four sequential checks into one
+    looser pattern passes every test the plan originally specified while accepting a Cyrillic-о
+    homoglyph — a silent 100% signup lockout.
+
 ---
 
 ## 7. Recurring gotchas that have cost real time
@@ -637,6 +694,22 @@ sharpened, and the ones a later task can silently break.
   `revalidatePath` is a **second RSC round trip per mutation** (`policy-editor.tsx` does the same), and
   `retryAfter` is never cleared on success in any of these components, so after a rate-limit window
   slides you can briefly see a success toast and a "you've hit the cap" banner together.
+- **Phase 8, Task 4 — two PRE-EXISTING Phase 2 bugs found by review, deliberately NOT fixed** (auth code
+  behind `e2e/auth-shell.spec.ts`, outside this phase's scope — but both are real, so don't lose them):
+  **(1) `createBootstrapAdmin` doesn't validate its domain field.** `src/server/auth/actions.ts:103` does
+  `String(...).trim().toLowerCase()` and nothing else, so bootstrapping with `someone@corp.com` stores
+  that verbatim; `isAllowedDomain` compares against the text after the last `@`, so it can never match and
+  **every signup is refused, permanently, from the deployment's first minute** — with the error reading
+  "Signup is limited to @someone@corp.com addresses." This is exactly the failure `domainValue`'s doc
+  comment describes, on the one path that doesn't call it. The fix is to route bootstrap through
+  `domainValue` (`src/lib/admin-flags.ts`) or move that function somewhere both can reach.
+  **(2) `/login` gates the Microsoft button on one env var where the provider needs three.**
+  `src/app/(auth)/login/page.tsx:19` tests only `AUTH_MICROSOFT_ENTRA_ID_ID`, while
+  `src/server/auth/index.ts:35-41` registers `MicrosoftEntraID` only when ID, SECRET **and** ISSUER are
+  all set — and its own comment says the conditional registration exists to stop a half-set env showing a
+  broken button. With only the ID set and the flag on, the button renders and `signIn` throws on an
+  unregistered provider. Low reachability today (the flag can't be turned on), but it widens the surface
+  scope decision #7 reasons about.
 - **`/bootstrap`'s copy under-states the lock**: `src/app/(auth)/bootstrap/page.tsx` promises the
   permanent admin's *role* can never be changed, but Phase 8 widened that to access as well. Worth
   aligning when Task 3 lands. The corollary belongs here too — a bootstrapped permanent admin's account
