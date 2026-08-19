@@ -24,13 +24,14 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
    permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
    Phase 8's plan, not after.
-4. Write Phase 8's plan with `superpowers:writing-plans` — `/admin/users`, `/admin/webhooks` +
-   `/deliveries` (dead-letter replay), `/admin/flags`, the 3-step import (dry-run → commit), the
-   Excel export upgrade + split-by-year chips, the printable label sheet, USB-scanner polish, the
-   deployment README, a full axe pass, and the Entra SSO decision. Re-read README cards `3h` (Admin
-   workspace) and `5a, 1m, 7g` (Import / export) before drafting tasks — they're where the locked-row,
-   dry-run and 10,000-row-cap behaviour is specified. Then execute with
-   `superpowers:subagent-driven-development`, same as every phase before it (§2).
+4. **Phase 8's plan is already written** — `docs/superpowers/plans/2026-08-19-phase-8-admin.md`, 14
+   tasks covering the Admin workspace only (§5 explains the split from the old combined Phase 8).
+   Execute it with `superpowers:subagent-driven-development`, same as every phase before it (§2):
+   Task 1 creates the `phase-8-admin` branch. Read its **Recorded scope decisions** first — the
+   permanent-admin lock covering `disabled`, the `m365_sso` refusal, and "the Job is the retry engine,
+   `WebhookDelivery` is the ledger" are the three a later task can silently break.
+   Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
+   README cards `5a, 1m, 7g` before drafting it.
 
 The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **345 unit tests across 26
 files** · `npm run build` · **`npx playwright test --workers=1` — 89 e2e tests, 7.3 minutes** (up
@@ -267,13 +268,28 @@ scoped feed, so the only one showing the domain pill).
 
 ## 5. What REMAINS
 
-- **Phase 8 — Admin + import/export + polish.** `/admin/users` (locked permanent admin),
-  `/admin/webhooks` + `/deliveries` (dead-letter replay — **the worker currently dead-letters
-  DELIVER_WEBHOOK jobs with "ships in Phase 8"**), `/admin/flags`; import (3-step dry-run → commit,
-  blocked rows grouped by cause), export upgrade (real Excel + split-by-year chips, including the
-  brief's `farewell-report` export route), printable label sheet, USB-scanner polish (a scan should tick
-  the matching wizard row), deployment README, full axe pass. Entra SSO wiring lands here or is
-  explicitly deferred.
+**The old "Phase 8" was split in two on 2026-08-19**, because as one plan it came to ~28 tasks — nearly
+double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
+pending-route table, so the split falls on a seam that already existed.
+
+- **Phase 8 — the Admin workspace. The plan is written and ready to execute:**
+  `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
+  `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
+  allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
+  rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
+  never existed** (an emitter, the worker's real delivery loop, and the ledger the page reads), and an
+  Admin Home so the workspace stops borrowing IT's. One migration: a single partial unique index.
+- **Phase 9 — import/export + polish. Not yet planned.** Import (3-step dry-run → commit, blocked rows
+  grouped by cause), export upgrade (real Excel + split-by-year chips, including the brief's
+  `farewell-report` route), printable label sheet, USB-scanner polish (a scan should tick the matching
+  wizard row), deployment README, full axe pass.
+- **Entra SSO is deferred, deliberately and on the record.** `src/server/auth/index.ts` registers the
+  provider when three env vars are set but carries `TODO(sso-phase)`: there is **no `signIn` callback**
+  mapping an Entra profile to a `User` row, so an Entra login would arrive with no role. That is why
+  Phase 8 makes `m365_sso` unavailable rather than togglable — on the one deployment that has
+  configured the env vars, a free switch is one click from a sign-in path that authenticates and lands
+  nowhere. Wiring it needs real tenant credentials; when they exist, the work is that callback plus
+  deleting the refusal.
 
 ---
 
