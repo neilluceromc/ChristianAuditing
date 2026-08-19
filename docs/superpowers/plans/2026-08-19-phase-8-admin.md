@@ -55,11 +55,24 @@ CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
    design: both mutations refuse server-side, and the row renders a `LOCKED` chip with static text,
    tinted one step back. The constraint is *stated*, never discovered through a failed save.
 
-2. **No separate "last admin" guard, and that is a decision rather than an oversight.** Because the
-   permanent admin can be neither demoted nor disabled (decision #1), at least one enabled `admin`
-   always exists. A second guard counting admins would be dead code that reads like a safety net —
-   worse than none, because the next reader would trust it. If `isPermanentAdmin` ever becomes
-   editable, this decision is what has to be revisited first.
+2. **No separate "last admin" guard, and that is a decision rather than an oversight.** A guard
+   counting admins would be dead code that reads like a safety net — worse than none, because the next
+   reader would trust it. **Amended after the Task 1 review, which checked the argument rather than
+   accepting it:** the property holds, but not for the reason first written. It rests on four facts
+   together, and the first three are what a later phase can break — (a) exactly one permanent admin per
+   database, from either of its **two** producers (`prisma/seed.ts` and `createBootstrapAdmin` in
+   `src/server/auth/actions.ts:115`, mutually exclusive because bootstrap is gated on
+   `tx.user.count() === 0`); (b) **no writer of `User.role` or `User.disabled` anywhere outside this
+   module** — Task 2 will be the first; (c) no user-deletion path at all; and (d) no email or password
+   change flow, so the permanent admin's credentials stay usable. Revisit this decision if any of those
+   changes, not only if `isPermanentAdmin` becomes editable.
+
+   The review also found the statement "at least one enabled `admin` always exists" is false as a
+   *global* claim, for a reason outside this phase: `/signup` is not gated on user count while
+   `/bootstrap` 404s once any row exists, so on an empty database whoever signs up first creates a
+   `viewer` and closes bootstrap forever. A last-admin guard would not have helped — it prevents
+   removing the last admin, it cannot conjure one — so this is a Phase 1 gap recorded in HANDOVER §8,
+   not an argument against this decision.
 
 3. **An admin may change their own role, and may not disable themselves.** Demoting yourself is
    recoverable — the permanent admin can restore it. Disabling yourself ends your own session with no
@@ -272,6 +285,9 @@ describe("disableChange", () => {
     const res = disableChange(permanent, true, "actor-9");
     expect(res.allowed).toBe(false);
     expect(res.allowed === false && res.reason).toMatch(/permanent admin/i);
+    // ...and not with the self-disable wording, which is the other refusal this
+    // function can return.
+    expect(res.allowed === false && res.reason).not.toMatch(/your own account/i);
   });
 
   it("refuses to touch the permanent admin even when re-enabling", () => {
@@ -280,11 +296,18 @@ describe("disableChange", () => {
   });
 
   // Scope decision #3: unlike a demotion, this one has no way back for you.
-  it("refuses self-disable and names the way back", () => {
+  //
+  // Assert the DISTINGUISHING clause, not /permanent admin/. Both branches of
+  // disableChange return { allowed: false }, so a reason-match both strings
+  // satisfy cannot tell them apart — and no mutation test can catch that,
+  // because `allowed` is false either way. The negative assertion is what keeps
+  // the two strings disjoint as they get edited.
+  it("refuses self-disable, and says so in its own words", () => {
     const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: false };
     const res = disableChange(self, true, "actor-9");
     expect(res.allowed).toBe(false);
-    expect(res.allowed === false && res.reason).toMatch(/permanent admin/i);
+    expect(res.allowed === false && res.reason).toMatch(/your own account/i);
+    expect(res.allowed === false && res.reason).not.toMatch(/permanent admin/i);
   });
 
   it("allows re-enabling yourself, which is unreachable but harmless", () => {
@@ -366,7 +389,14 @@ export function roleChange(target: TargetUser, next: Role, actorId: string): Rul
  *
  * Self-disable is refused for the opposite reason to self-demotion — it ends
  * your own session with no way back for you specifically, so it reads as an
- * accident rather than an intent. The refusal names who can undo it.
+ * accident rather than an intent.
+ *
+ * The refusal names ANY other admin, not the permanent one: an ordinary admin
+ * may disable another ordinary admin (nothing here forbids it), so pointing at
+ * the permanent account would send someone to bother one specific person for
+ * something any of their colleagues can do. It also keeps this string free of
+ * the words "permanent admin", which is what lets the tests tell this branch
+ * apart from the lock branch above — see the note in the test file.
  */
 export function disableChange(target: TargetUser, next: boolean, actorId: string): RuleResult {
   const locked = lockReason(target);
@@ -375,7 +405,7 @@ export function disableChange(target: TargetUser, next: boolean, actorId: string
     return {
       allowed: false,
       reason:
-        "You can't disable your own account — you'd be signed out with no way back in. Ask the permanent admin to do it.",
+        "You can't disable your own account — you'd be signed out with no way back in. Another admin can do it for you.",
     };
   }
   return { allowed: true };
@@ -388,7 +418,7 @@ export function disableChange(target: TargetUser, next: boolean, actorId: string
 npx vitest run src/lib/admin-users.test.ts
 ```
 
-Expected: PASS, 11 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 6: Mutation-test the suite before trusting it**
 
@@ -398,8 +428,11 @@ turn, confirm a test dies, and put it back:
 1. `lockReason` returns `null` unconditionally → the `lockReason` permanent test and all four
    permanent-admin tests must fail.
 2. Drop the `next &&` from the self-disable guard → "allows re-enabling yourself" must fail.
-3. Change `target.id === actorId` to `target.id !== actorId` → "allows disabling an ordinary user"
-   must fail.
+3. Change `target.id === actorId` to `target.id !== actorId` → **two** tests must fail: "allows
+   disabling an ordinary user" and "refuses self-disable" — the same comparison guards both paths.
+4. Swap the branches: return `PERMANENT_LOCK` as the self-disable reason → "refuses self-disable, and
+   says so in its own words" must fail. This is the mutation the original assertion could **not**
+   catch, because `allowed` is `false` in both branches and the old regex matched both strings.
 
 If a mutation leaves the suite green, the test for that rule is not testing it — fix the test, not the
 module.
