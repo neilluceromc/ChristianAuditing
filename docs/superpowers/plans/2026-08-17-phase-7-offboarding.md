@@ -4013,7 +4013,13 @@ export async function listReservations(tab: ReservationTab): Promise<{
       employeeNo: r.employee.employeeNo,
       reason: r.reason,
       expires: fmtDate(r.expiresAt),
-      resolved: fmtDate(r.resolvedAt),
+      // An EXPIRED hold has no resolvedAt and never will: nothing in the system
+      // sweeps ACTIVE → EXPIRED, so no code path records a resolution moment.
+      // The date that answers "when did this expire" is expiresAt, which the
+      // row already carries. Reading it from resolvedAt left every expired row
+      // rendering "expired —" forever. Backfilling resolvedAt in the seed
+      // instead would have invented a resolution event that never occurred.
+      resolved: r.state === "EXPIRED" ? fmtDate(r.expiresAt) : fmtDate(r.resolvedAt),
       closedBy: r.state === "EXPIRED" ? "clock" : r.state === "RELEASED" ? "person" : null,
     })),
     counts: {
