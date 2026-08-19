@@ -4176,11 +4176,32 @@ Entry criterion #6: solid chips are required slots, grey are optional, role poli
 policy — and **editing never touches existing assignments**, which is why every slot change records
 BOTH slot lists in the audit.
 
+> **Amended after the code review and the walkthrough in Step 6 — the shipped code differs from the
+> blocks below in the following ways.** In `policy-actions.ts`, an `asActionResult` helper now maps
+> P2028 (the transaction couldn't get a connection), P2025 (a check-then-delete race in `deletePolicy`
+> and `removeSlot`), and P2003 (a create's FK reference — the policy or the asset type — deleted
+> concurrently) to typed conflicts instead of letting them escape as 500s; all five actions are wrapped
+> in it. `createPolicy` now writes the department's **name** into the audit diff instead of its raw
+> cuid, and `deletePolicy`'s diff now carries `appliesTo`, because once the row is gone nothing else
+> can ever say whom the policy applied to, and `AuditEntry` is append-only. The shared P2003 message
+> also stopped reading like `reference-actions`'s "you cannot delete this, something still points at
+> it" — here it can only ever be reached by the two creates, so it always means the row being pointed
+> AT was just deleted, the exact inverse of the borrowed wording.
+>
+> In `policy-editor.tsx`, `useRunner` now takes `claimedFieldKeys` and falls any unclaimed validation
+> key back into the error banner: without it, with zero departments in the database, `createPolicy`'s
+> "target exactly one" refusal keys to `appliesToTitle`, which the department branch renders no
+> `FormError` for, so "Create policy" failed silently forever. The slot chip renders as a plain
+> `<span>` rather than a disabled `<button>` when `canMutate` is false, because this project's rule is
+> that a viewer's mutating affordances are absent, not disabled. And the type-name span lost
+> `opacity-70`, which composited the text down to 3.75:1 contrast and produced seven serious axe
+> violations, one per chip, for every role.
+
 **Files:**
 - Create: `src/server/modules/admin/policy-actions.ts`, `src/components/admin/policy-editor.tsx`,
   `src/app/(app)/admin/equipment-policies/page.tsx`
 - Modify: `src/server/modules/employees/queries.ts`, `src/app/(app)/employees/[id]/page.tsx`,
-  `src/server/modules/home/queries.ts`
+  `src/server/modules/home/queries.ts`, `src/server/modules/audit/queries.ts`, `src/lib/audit-list.ts`
 
 - [ ] **Step 1: Make policy resolution deterministic**
 
@@ -4190,7 +4211,8 @@ the first match — so the three `equipmentPolicy.findMany` calls must agree on 
 
 - `src/server/modules/employees/queries.ts` — `prisma.equipmentPolicy.findMany({ include: { slots: true } })`
 - `src/app/(app)/employees/[id]/page.tsx` — `prisma.equipmentPolicy.findMany({ include: { slots: { include: { assetType: true } } } })`
-- `src/server/modules/home/queries.ts` — the `equipmentPolicy.findMany` call there
+- `src/server/modules/home/queries.ts` — **two** calls that feed `resolvePolicy`, in `yourShift()` and
+  in `fleet()`; both need the `orderBy`.
 
 For example, the first becomes:
 
@@ -4226,6 +4248,52 @@ function revalidateAll() {
 
 function isUnique(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+}
+
+/**
+ * Prisma throws rather than returning; three shapes reach here:
+ *  - P2028: the transaction couldn't get a connection inside maxWait —
+ *    reachable with just two concurrent transactions.
+ *  - P2025: a check-then-delete race (findUnique, then delete) — the guarded
+ *    `if (!x) return conflict(...)` above each delete is the designed answer
+ *    to exactly this, but a delete (or a cascade from a parent's delete)
+ *    landing between the check and the delete defeats it.
+ *  - P2003: a create's FK reference (policy or asset type) is validated
+ *    inside the transaction but deleted concurrently before the write lands.
+ * Everything else rethrows: an unexpected error must not be laundered into a
+ * designed banner.
+ *
+ * NOTE for anyone editing the callbacks below: RETURNING a failure from a
+ * $transaction callback COMMITS the transaction — only a throw rolls it back.
+ * That is safe here because every `return conflict(...)` precedes every write.
+ * Add a write before one of them and it will commit silently.
+ */
+async function asActionResult<T>(
+  run: () => Promise<T>,
+  opts?: { goneMessage?: string },
+): Promise<T | ActionResult<never>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      if (err.code === "P2028") {
+        return conflict("The database is busy right now — nothing was written. Try that again.");
+      }
+      if (err.code === "P2025") {
+        return conflict(opts?.goneMessage ?? "That record no longer exists.");
+      }
+      if (err.code === "P2003") {
+        // Only the two creates can reach this: nothing references
+        // EquipmentPolicy but PolicySlot (which cascades), and nothing
+        // references PolicySlot at all. So an FK violation here always means
+        // the row being pointed AT was just deleted — the inverse of
+        // reference-actions.ts's "still referenced" P2003, and the message
+        // has to say the true thing for the state it renders in.
+        return conflict("Something this refers to was just deleted — nothing was written. Refresh and try again.");
+      }
+    }
+    throw err;
+  }
 }
 
 /** One slot, rendered the way the audit trail should read it. */
@@ -4284,34 +4352,43 @@ export async function createPolicy(input: unknown): Promise<ActionResult<{ id: s
       appliesToTitle: "Target exactly one: a role title OR a department (role policy beats department policy).",
     });
   }
-  if (departmentId && !(await prisma.department.findUnique({ where: { id: departmentId } }))) {
+  const department = departmentId
+    ? await prisma.department.findUnique({ where: { id: departmentId } })
+    : null;
+  if (departmentId && !department) {
     return validationError({ appliesToDepartmentId: "Unknown department" });
   }
 
   try {
-    let id = "";
-    await prisma.$transaction(async (tx) => {
-      const policy = await tx.equipmentPolicy.create({
-        data: {
-          name: parsed.data.name,
-          appliesToTitle: title || null,
-          appliesToDepartmentId: departmentId || null,
-        },
+    const result = await asActionResult(async () => {
+      let id = "";
+      await prisma.$transaction(async (tx) => {
+        const policy = await tx.equipmentPolicy.create({
+          data: {
+            name: parsed.data.name,
+            appliesToTitle: title || null,
+            appliesToDepartmentId: departmentId || null,
+          },
+        });
+        id = policy.id;
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name,
+          entityType: "equipment-policy", entityId: policy.id,
+          action: "create",
+          diff: {
+            name: { from: null, to: policy.name },
+            // The trail never exposes raw ids — the department name is
+            // fetched above and carried through, not the cuid.
+            appliesTo: { from: null, to: title ? `role: ${title}` : `department: ${department?.name}` },
+            slots: { from: null, to: [] },
+          },
+        });
       });
-      id = policy.id;
-      await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name,
-        entityType: "equipment-policy", entityId: policy.id,
-        action: "create",
-        diff: {
-          name: { from: null, to: policy.name },
-          appliesTo: { from: null, to: title ? `role: ${title}` : `department: ${departmentId}` },
-          slots: { from: null, to: [] },
-        },
-      });
+      return id;
     });
+    if (typeof result !== "string") return result;
     revalidateAll();
-    return ok({ id });
+    return ok({ id: result });
   } catch (err) {
     if (isUnique(err)) return validationError({ name: "That policy name already exists" });
     throw err;
@@ -4328,20 +4405,33 @@ export async function deletePolicy(input: unknown): Promise<ActionResult<null>> 
   const parsed = idSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
 
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const policy = await tx.equipmentPolicy.findUnique({ where: { id: parsed.data.id } });
     if (!policy) return conflict("That policy no longer exists.");
     const before = await slotList(tx, policy.id);
+    // The row about to be deleted is the only one that can ever answer whom
+    // this policy applied to — resolve it now or lose it forever (AuditEntry
+    // is append-only; this row cannot be corrected after the fact).
+    const department = policy.appliesToDepartmentId
+      ? await tx.department.findUnique({ where: { id: policy.appliesToDepartmentId } })
+      : null;
+    const appliesTo = policy.appliesToTitle
+      ? `role: ${policy.appliesToTitle}`
+      : `department: ${department?.name}`;
     // PolicySlot cascades with the policy; assignments are untouched by design.
     await tx.equipmentPolicy.delete({ where: { id: policy.id } });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
       entityType: "equipment-policy", entityId: policy.id,
       action: "delete",
-      diff: { name: { from: policy.name, to: null }, slots: { from: before, to: null } },
+      diff: {
+        name: { from: policy.name, to: null },
+        appliesTo: { from: appliesTo, to: null },
+        slots: { from: before, to: null },
+      },
     });
     return null;
-  });
+  }), { goneMessage: "That policy no longer exists." });
   if (failure) return failure;
   revalidateAll();
   return ok(null);
@@ -4364,7 +4454,7 @@ export async function addSlot(input: unknown): Promise<ActionResult<{ id: string
   const d = parsed.data;
 
   let id = "";
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const policy = await tx.equipmentPolicy.findUnique({ where: { id: d.policyId } });
     if (!policy) return conflict("That policy no longer exists.");
     // A typeless slot could never be filled — computeLoadout matches on type —
@@ -4379,7 +4469,7 @@ export async function addSlot(input: unknown): Promise<ActionResult<{ id: string
     id = slot.id;
     await auditSlots(tx, user, policy.id, before, "policy.slot.added");
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidateAll();
   return ok({ id });
@@ -4395,14 +4485,14 @@ export async function removeSlot(input: unknown): Promise<ActionResult<null>> {
   const parsed = slotIdSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
 
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const slot = await tx.policySlot.findUnique({ where: { id: parsed.data.slotId } });
     if (!slot) return conflict("That slot no longer exists.");
     const before = await slotList(tx, slot.policyId);
     await tx.policySlot.delete({ where: { id: slot.id } });
     await auditSlots(tx, user, slot.policyId, before, "policy.slot.removed");
     return null;
-  });
+  }), { goneMessage: "That slot no longer exists." });
   if (failure) return failure;
   revalidateAll();
   return ok(null);
@@ -4420,7 +4510,7 @@ export async function setSlotRequired(input: unknown): Promise<ActionResult<null
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
 
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await asActionResult(async () => prisma.$transaction(async (tx) => {
     const slot = await tx.policySlot.findUnique({ where: { id: d.slotId } });
     if (!slot) return conflict("That slot no longer exists.");
     if (slot.required === d.required) return null;
@@ -4434,7 +4524,7 @@ export async function setSlotRequired(input: unknown): Promise<ActionResult<null
     if (written.count === 0) return conflict("Someone else just changed that slot — refresh.");
     await auditSlots(tx, user, slot.policyId, before, "policy.slot.changed");
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidateAll();
   return ok(null);
@@ -4488,8 +4578,17 @@ export interface TypeOption {
   label: string;
 }
 
-/** Shared error plumbing: every action returns the same ActionResult union. */
-function useRunner() {
+/**
+ * Shared error plumbing: every action returns the same ActionResult union.
+ *
+ * `claimedFieldKeys` lists the fieldErrors keys this card actually renders a
+ * FormError for. A validation refusal must render where the operator is
+ * looking (README rule) — src/components/admin/ref-table.tsx solves this by
+ * falling back to the first message regardless of key; here, any key no
+ * FormError claims falls back into the same banner the conflict path uses,
+ * so an unclaimed validation key can never dead-end silently.
+ */
+function useRunner(claimedFieldKeys: string[] = []) {
   const router = useRouter();
   const toast = useToast();
   const [pending, startTransition] = useTransition();
@@ -4507,8 +4606,12 @@ function useRunner() {
         onOk?.();
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      else if (res.kind === "validation") setFieldErrors(res.fieldErrors ?? {});
-      else setError(res.message);
+      else if (res.kind === "validation") {
+        const errs = res.fieldErrors ?? {};
+        setFieldErrors(errs);
+        const unclaimed = Object.keys(errs).find((key) => !claimedFieldKeys.includes(key));
+        if (unclaimed) setError(errs[unclaimed]);
+      } else setError(res.message);
     });
   }
 
@@ -4524,7 +4627,7 @@ export function PolicyEditor({
   types: TypeOption[];
   canMutate: boolean;
 }) {
-  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner();
+  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner(["name", "assetTypeId"]);
   const [name, setName] = useState("");
   const [typeId, setTypeId] = useState(types[0]?.id ?? "");
   const [required, setRequired] = useState(true);
@@ -4573,28 +4676,46 @@ export function PolicyEditor({
           {policy.slots.map((slot) => (
             <span key={slot.id} className="inline-flex items-center">
               {/* Solid = required (an unfilled one is the policy gap that lights
-                  up on the loadout view and in Home's HIRE rows); grey = optional. */}
-              <button
-                type="button"
-                disabled={!canMutate || pending}
-                aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"}${canMutate ? " — click to toggle" : ""}`}
-                onClick={() =>
-                  run(
-                    () => setSlotRequired({ slotId: slot.id, required: !slot.required }),
-                    `${slot.name} is now ${slot.required ? "optional" : "required"}`,
-                  )
-                }
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
-                  slot.required
-                    ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
-                    : "border-border bg-border-faint text-fg-muted",
-                  canMutate && "hover:opacity-80",
-                )}
-              >
-                {slot.name}
-                <span className="text-[9px] opacity-70">{slot.typeName}</span>
-              </button>
+                  up on the loadout view and in Home's HIRE rows); grey = optional.
+                  For a viewer this is display-only: a mutating affordance must be
+                  absent, not disabled, so it renders as a plain span with no
+                  onClick and no "click to toggle" in its label. */}
+              {canMutate ? (
+                <button
+                  type="button"
+                  disabled={pending}
+                  aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"} — click to toggle`}
+                  onClick={() =>
+                    run(
+                      () => setSlotRequired({ slotId: slot.id, required: !slot.required }),
+                      `${slot.name} is now ${slot.required ? "optional" : "required"}`,
+                    )
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
+                    slot.required
+                      ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
+                      : "border-border bg-border-faint text-fg-muted",
+                    "hover:opacity-80",
+                  )}
+                >
+                  {slot.name}
+                  <span className="text-[9px]">{slot.typeName}</span>
+                </button>
+              ) : (
+                <span
+                  aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"}`}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
+                    slot.required
+                      ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
+                      : "border-border bg-border-faint text-fg-muted",
+                  )}
+                >
+                  {slot.name}
+                  <span className="text-[9px]">{slot.typeName}</span>
+                </span>
+              )}
               {canMutate && (
                 <button
                   type="button"
@@ -4663,11 +4784,17 @@ export function PolicyEditor({
 }
 
 export function NewPolicyCard({ departments }: { departments: Array<{ id: string; name: string }> }) {
-  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner();
   const [name, setName] = useState("");
   const [target, setTarget] = useState("department");
   const [departmentId, setDepartmentId] = useState(departments[0]?.id ?? "");
   const [title, setTitle] = useState("");
+  // createPolicy's "target exactly one" refusal always keys its error as
+  // appliesToTitle, even when the department branch is the one showing —
+  // that branch renders no FormError for either target field, so the key
+  // must fall back to the banner instead of vanishing.
+  const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useRunner(
+    target === "title" ? ["name", "appliesToTitle"] : ["name"],
+  );
 
   return (
     <Card>
@@ -4840,7 +4967,55 @@ export default async function EquipmentPoliciesPage() {
 }
 ```
 
-- [ ] **Step 5: Typecheck, lint, look at it**
+- [ ] **Step 5: Teach the audit display layer about `equipment-policy`**
+
+The task never named this step, but two layers needed it, or every new row on `/audit` prints a raw
+action string next to a truncated cuid.
+
+In `src/server/modules/audit/queries.ts`, `entityLabels` resolves `equipment-policy` ids to the
+policy's `name`, with an href back to `/admin/equipment-policies`, following the function's existing
+`Promise.all` + `byType.has(...)` shape:
+
+```ts
+    byType.has("equipment-policy")
+      ? prisma.equipmentPolicy.findMany({
+          where: { id: { in: [...byType.get("equipment-policy")!] } },
+          select: { id: true, name: true },
+        })
+      : [],
+```
+
+and, once that resolves:
+
+```ts
+  // A deleted policy has no row to resolve — it correctly keeps the truncated-id
+  // fallback below; auditSentence's "delete" case reads the name from the diff instead.
+  for (const p of policies) map.set(`equipment-policy:${p.id}`, { label: p.name, href: "/admin/equipment-policies" });
+```
+
+A policy that has since been deleted correctly keeps the truncated-id fallback the function already
+falls back to for any unresolved id — there is nothing left to look up.
+
+In `src/lib/audit-list.ts`, `AUDIT_ENTITY_TYPES` gains `"equipment-policy"`, so `/audit`'s Entity facet
+can filter to these rows:
+
+```ts
+export const AUDIT_ENTITY_TYPES = [
+  "asset", "employee", "approval", "purchase-request", "user",
+  "asset-category", "asset-type", "department", "equipment-policy",
+] as const;
+```
+
+**Tried and reverted:** cases for `delete` and the three `policy.slot.*` actions were also added to
+`auditSentence` in `src/lib/activity.ts`, then reverted. No surface routes an `equipment-policy` entry
+through that function — the four activity feeds it serves scope to `employee`, `asset`, and
+`purchase-request`, and `/audit` itself renders `listAudit`'s raw `action` plus the diff's key names,
+never `auditSentence`. The cases and the tests written for them exercised code nothing could reach.
+One consequence follows from that: the before-and-after slot lists are stored on every entry and are
+queryable, but they are rendered nowhere — `/audit` shows only `slots` as the name of a changed field,
+never the lists themselves.
+
+- [ ] **Step 6: Typecheck, lint, look at it**
 
 ```bash
 npx tsc --noEmit && npm run lint
@@ -4849,17 +5024,17 @@ npx tsc --noEmit && npm run lint
 In the preview as `it@thebackroomop.com`, `/admin/equipment-policies`:
 
 1. "Finance standard" with six chips — five solid, "second monitor" grey — and
-   `department: Finance · 4 people`.
+   `department: Finance · 3 people`.
 2. Click the grey `second monitor` chip → it goes solid; the toast says so.
 3. Add a slot ("webcam", any type, required) → a new solid chip appears.
 4. `/audit` now has an `equipment-policy` row whose diff carries **both** slot lists.
 5. Remove the webcam slot again and flip `second monitor` back to optional, so the seeded fixture is
    unchanged for the e2e run.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/server/modules/admin/policy-actions.ts src/components/admin/policy-editor.tsx "src/app/(app)/admin/equipment-policies/page.tsx" src/server/modules/employees/queries.ts "src/app/(app)/employees/[id]/page.tsx" src/server/modules/home/queries.ts
+git add src/server/modules/admin/policy-actions.ts src/components/admin/policy-editor.tsx "src/app/(app)/admin/equipment-policies/page.tsx" src/server/modules/employees/queries.ts "src/app/(app)/employees/[id]/page.tsx" src/server/modules/home/queries.ts src/lib/audit-list.ts src/server/modules/audit/queries.ts
 git commit -m "feat(policies): slot chips, required toggle, and an audit trail carrying both lists"
 ```
 
