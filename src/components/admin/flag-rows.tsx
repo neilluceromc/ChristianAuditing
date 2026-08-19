@@ -155,9 +155,30 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
                 />
               </div>
 
+              {/* Two different sentences, and both have to be here.
+                  `unavailable` is a property of the FLAG ("this feature isn't
+                  finished"), so it prints whenever it's set — including when
+                  the switch is live because the row is somehow already on and
+                  the safe direction is permitted, which is precisely when the
+                  admin most needs to know why they should close it.
+                  `verdict.reason` is a property of THIS CLICK, and without it
+                  a `hasValue` flag with no value renders a dead switch and no
+                  explanation: `row.unavailable` is null for allowed_domain, so
+                  on any deployment that bootstrapped without a domain the
+                  admin would see a greyed-out "Signup domain restriction" and
+                  nothing saying "set a domain first". The rule already returns
+                  that sentence — HANDOVER §6a rule 10 is that the page has to
+                  consume every refusal the rule can return, not just the one
+                  the design card names. */}
               {row.unavailable && (
                 <p className="border-l-2 border-border-strong pl-2.5 text-[11px] leading-snug text-fg-muted">
                   {row.unavailable}
+                </p>
+              )}
+
+              {!verdict.allowed && !row.unavailable && (
+                <p className="border-l-2 border-border-strong pl-2.5 text-[11px] leading-snug text-fg-muted">
+                  {verdict.reason}
                 </p>
               )}
 
