@@ -54,7 +54,13 @@ async function asActionResult<T>(
         return conflict(opts?.goneMessage ?? "That record no longer exists.");
       }
       if (err.code === "P2003") {
-        return conflict("Still referenced by other records — the database refused the write.");
+        // Only the two creates can reach this: nothing references
+        // EquipmentPolicy but PolicySlot (which cascades), and nothing
+        // references PolicySlot at all. So an FK violation here always means
+        // the row being pointed AT was just deleted — the inverse of
+        // reference-actions.ts's "still referenced" P2003, and the message
+        // has to say the true thing for the state it renders in.
+        return conflict("Something this refers to was just deleted — nothing was written. Refresh and try again.");
       }
     }
     throw err;

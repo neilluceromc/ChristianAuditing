@@ -162,7 +162,7 @@ export function PolicyEditor({
                   )}
                 >
                   {slot.name}
-                  <span className="text-[9px] opacity-70">{slot.typeName}</span>
+                  <span className="text-[9px]">{slot.typeName}</span>
                 </button>
               ) : (
                 <span
@@ -175,7 +175,7 @@ export function PolicyEditor({
                   )}
                 >
                   {slot.name}
-                  <span className="text-[9px] opacity-70">{slot.typeName}</span>
+                  <span className="text-[9px]">{slot.typeName}</span>
                 </span>
               )}
               {canMutate && (
