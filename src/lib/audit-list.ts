@@ -4,6 +4,7 @@ import type { ListConfig, ListState } from "./url-state";
 export const AUDIT_ENTITY_TYPES = [
   "asset", "employee", "approval", "purchase-request", "user",
   "asset-category", "asset-type", "department", "equipment-policy",
+  "feature-flag", "webhook-endpoint",
 ] as const;
 
 export const AUDIT_LIST_CONFIG: ListConfig = {

@@ -31,3 +31,8 @@ export function signPayload(body: string, secret: string, at: Date): string {
   const hex = createHmac("sha256", secret).update(`${t}.${body}`, "utf8").digest("hex");
   return `t=${t},v1=${hex}`;
 }
+
+/** AAD binds ciphertext to its endpoint row — a secret lifted into another row refuses to decrypt. */
+export function secretAad(endpointId: string): string {
+  return `webhook:${endpointId}`;
+}

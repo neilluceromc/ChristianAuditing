@@ -26,7 +26,7 @@ export async function entityLabels(
     byType.get(e.entityType)!.add(e.entityId);
   }
   const map = new Map<string, { label: string; href: string | null }>();
-  const [assets, employees, approvals, purchases, policies, users, flags] = await Promise.all([
+  const [assets, employees, approvals, purchases, policies, users, flags, endpoints] = await Promise.all([
     byType.has("asset")
       ? prisma.asset.findMany({ where: { id: { in: [...byType.get("asset")!] } }, select: { id: true, tag: true } })
       : [],
@@ -60,6 +60,12 @@ export async function entityLabels(
           select: { id: true, key: true },
         })
       : [],
+    byType.has("webhook-endpoint")
+      ? prisma.webhookEndpoint.findMany({
+          where: { id: { in: [...byType.get("webhook-endpoint")!] } },
+          select: { id: true, url: true },
+        })
+      : [],
   ]);
   for (const a of assets) map.set(`asset:${a.id}`, { label: a.tag, href: `/inventory/${a.id}` });
   for (const e of employees) map.set(`employee:${e.id}`, { label: e.name, href: `/employees/${e.id}` });
@@ -72,6 +78,9 @@ export async function entityLabels(
   // reads as an identity, not just a display name two people might share.
   for (const u of users) map.set(`user:${u.id}`, { label: `${u.name} · ${u.email}`, href: "/admin/users" });
   for (const f of flags) map.set(`feature-flag:${f.id}`, { label: f.key, href: "/admin/flags" });
+  // A deleted endpoint has no row to resolve — it correctly keeps the
+  // truncated-id fallback below; deleteEndpoint's diff carries the URL instead.
+  for (const e of endpoints) map.set(`webhook-endpoint:${e.id}`, { label: e.url, href: "/admin/webhooks" });
   for (const e of entries) {
     const key = `${e.entityType}:${e.entityId}`;
     if (!map.has(key)) map.set(key, { label: e.entityId.slice(0, 10) + "…", href: null });

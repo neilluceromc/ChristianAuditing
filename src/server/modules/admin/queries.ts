@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/client";
 import { lockReason, roleWorkspaces, type TargetUser } from "@/lib/admin-users";
 import { FLAG_SPECS, type FlagState } from "@/lib/admin-flags";
 import { flagDomain } from "@/lib/auth-shared";
+import { partitionEvents, type WebhookEvent } from "@/lib/webhooks";
 import type { Role } from "@prisma/client";
 
 export interface UserRow {
@@ -103,6 +104,53 @@ export async function listFlags(): Promise<FlagRow[]> {
       value,
       unavailable: spec.unavailable,
       state,
+    };
+  });
+}
+
+export interface EndpointRow {
+  id: string;
+  url: string;
+  events: WebhookEvent[];
+  /**
+   * Event names this row subscribes to that this build no longer recognises
+   * (a rename, a removed integration). Kept separate from `events` — not
+   * merged in and not silently dropped — because Task 8's editor owes the
+   * admin a way to see these exist before a save that touches only the URL
+   * can carry them forward or lose them.
+   */
+  unknownEvents: string[];
+  active: boolean;
+  /** how many attempts this endpoint has on record, and how many died */
+  attempts: number;
+  dead: number;
+}
+
+export async function listEndpoints(): Promise<EndpointRow[]> {
+  const rows = await prisma.webhookEndpoint.findMany({ orderBy: [{ url: "asc" }] });
+  // Two grouped counts rather than N per-row queries.
+  const [all, dead] = await Promise.all([
+    prisma.webhookDelivery.groupBy({ by: ["endpointId"], _count: { _all: true } }),
+    prisma.webhookDelivery.groupBy({
+      by: ["endpointId"],
+      where: { status: "DEAD" },
+      _count: { _all: true },
+    }),
+  ]);
+  const allBy = new Map(all.map((g) => [g.endpointId, g._count._all]));
+  const deadBy = new Map(dead.map((g) => [g.endpointId, g._count._all]));
+  // The secret is never selected out of this function — nothing above the
+  // worker has a reason to hold ciphertext, let alone plaintext.
+  return rows.map((r) => {
+    const { known, unknown } = partitionEvents(r.events);
+    return {
+      id: r.id,
+      url: r.url,
+      events: known,
+      unknownEvents: unknown,
+      active: r.active,
+      attempts: allBy.get(r.id) ?? 0,
+      dead: deadBy.get(r.id) ?? 0,
     };
   });
 }
