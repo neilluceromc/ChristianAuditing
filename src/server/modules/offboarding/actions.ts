@@ -11,6 +11,7 @@ import { createApproval, openApprovalForAsset } from "@/server/modules/approvals
 import { OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, decisionOf, reasonRequired } from "@/lib/offboarding";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { candidatesFor } from "@/server/modules/offboarding/queries";
+import { emitWebhook } from "@/server/webhooks/emit";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -336,6 +337,19 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
             .map((d) => `${d!.refNo} · ${d!.outcome} · ${d!.state}`),
         },
       },
+    });
+
+    // Inside the same transaction as the employment write, so no consumer is
+    // ever told about an offboarding that rolled back. `decisions` is one entry
+    // per held asset and the undecided guard above has already returned, so
+    // the count is the number of items actually settled — the one number worth
+    // sending. The item detail stays in the audit entry above, which is the
+    // immutable record; a webhook is a notification, not a replication feed
+    // (scope decision #14).
+    await emitWebhook(tx, "offboarding.completed", {
+      employeeId: employee.id,
+      employeeNo: employee.employeeNo,
+      decisions: decisions.length,
     });
     return null;
   }));
