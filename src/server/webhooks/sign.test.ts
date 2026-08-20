@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { decryptSecret, encryptSecret } from "@/server/crypto";
-import { SIGNATURE_HEADER, newSecret, secretAad, signPayload } from "./sign";
+import { SIGNATURE_HEADER } from "@/lib/webhooks";
+import { newSecret, secretAad, signPayload } from "./sign";
 
 const AT = new Date("2026-08-19T02:00:00Z"); // t = 1787104800
 

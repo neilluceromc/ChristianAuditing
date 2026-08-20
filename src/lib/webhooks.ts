@@ -19,6 +19,20 @@ export const WEBHOOK_EVENTS = [
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
+/**
+ * The header every signed POST carries, named ONCE for the three surfaces that
+ * have to agree: `signPayload` (which builds the value), the worker that sends
+ * it (Task 10), and `/admin/webhooks`, which tells the operator what to paste
+ * the shown-once secret against. It lives here rather than in
+ * `src/server/webhooks/sign.ts` — its original home — because that module
+ * imports `node:crypto` and so cannot be pulled into a `"use client"`
+ * component; a client-side copy of this string would be a second definition
+ * that a rename silently leaves behind, wrong, in the one place a human reads
+ * it (HANDOVER §6a rule 26).
+ */
+export const SIGNATURE_HEADER = "x-backroom-signature";
+
+
 export const EVENT_LABELS: Record<WebhookEvent, string> = {
   "approval.executed": "An approval finished executing",
   "offboarding.completed": "An offboarding was completed",
@@ -39,6 +53,31 @@ export const EVENT_LABELS: Record<WebhookEvent, string> = {
 export const ROTATION_WARNING =
   "Every delivery from now on signs with the new secret. Until the receiver is updated to match, " +
   "deliveries will fail immediately and go straight to Dead — use Replay all once it has the new secret.";
+
+/**
+ * `WebhookDelivery.endpointId` is `onDelete: Restrict`, so an endpoint with
+ * history cannot be deleted — and shouldn't be: the deliveries page is the
+ * record of what was sent, and dropping the endpoint would orphan it.
+ *
+ * The sentence lives here, as data, for the same reason `lockReason`
+ * (admin-users.ts) and `ROTATION_WARNING` do: `deleteEndpoint` prints it as a
+ * conflict when the click has already happened, and `/admin/webhooks` prints
+ * the SAME string beside a disabled Delete so the click doesn't have to
+ * (HANDOVER §6a rules 5, 10 and 11 — a page must consume every refusal its
+ * rule can return, and one string must not become two).
+ *
+ * Returns `null` for a deletable endpoint, so a caller can't render the
+ * refusal and the affordance at once. `attempts` is a count of
+ * `WebhookDelivery` rows for the endpoint, from either side: `listEndpoints`
+ * groups it for the page, `deleteEndpoint` counts it inside its transaction.
+ */
+export function deleteBlockedReason(attempts: number): string | null {
+  if (attempts <= 0) return null;
+  return (
+    `This endpoint has ${attempts} delivery ${attempts === 1 ? "attempt" : "attempts"} on record. ` +
+    "Disable it instead — deleting it would erase the record of what was sent."
+  );
+}
 
 /**
  * `WebhookEndpoint.events` is a raw `String[]` column, so it can hold anything

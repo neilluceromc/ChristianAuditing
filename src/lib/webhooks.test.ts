@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  EVENT_LABELS, WEBHOOK_EVENTS, deliveryStage, parseEvents, partitionEvents, webhookEnvelope,
+  EVENT_LABELS, SIGNATURE_HEADER, WEBHOOK_EVENTS, deleteBlockedReason, deliveryStage, parseEvents,
+  partitionEvents, webhookEnvelope,
 } from "./webhooks";
 import { MAX_JOB_ATTEMPTS } from "./jobs";
 import { statusFamily } from "./status";
@@ -160,5 +161,55 @@ describe("DeliveryStatus is in the six-family system", () => {
     expect(statusFamily("DELIVERED", "delivery")).toBe("settled");
     expect(statusFamily("DEAD", "delivery")).toBe("fault");
     expect(statusFamily("RETRYING", "delivery")).toBe("attention");
+  });
+});
+
+// The refusal /admin/webhooks states BESIDE a disabled Delete and the one
+// `deleteEndpoint` returns AFTER the click are the same string, from here.
+// Two copies would drift the moment one was reworded, and the page's copy is
+// the one an operator reads while deciding — §6a rules 5, 10 and 11.
+describe("deleteBlockedReason", () => {
+  // Null, not "" and not a sentence about being deletable: a caller renders
+  // the refusal or the affordance, never both, and `if (blocked)` is how both
+  // call sites branch. A truthy empty-ish return would put a blank
+  // explanation next to a dead button.
+  it("is null for an endpoint with no delivery history, so Delete stays live", () => {
+    expect(deleteBlockedReason(0)).toBeNull();
+    // Defensive: the count comes from a groupBy on one side and a COUNT(*) on
+    // the other, so it can only ever be >= 0 — but a negative must not read
+    // as "blocked".
+    expect(deleteBlockedReason(-1)).toBeNull();
+  });
+
+  it("names the count, and singularises one attempt", () => {
+    expect(deleteBlockedReason(1)).toContain("1 delivery attempt on record");
+    expect(deleteBlockedReason(1)).not.toContain("attempts");
+    expect(deleteBlockedReason(3)).toContain("3 delivery attempts on record");
+  });
+
+  // The point of the sentence is the ALTERNATIVE. Without it an admin reads
+  // "you can't delete this" and has nothing to do next — disabling is the
+  // safe direction and stays available in every case (§6a rule 14).
+  it("points at disabling instead, so the refusal isn't a dead end", () => {
+    expect(deleteBlockedReason(2)).toContain("Disable it instead");
+  });
+
+  // Textually disjoint from `deleteEndpoint`'s OTHER refusal — the P2003 race
+  // message ("That endpoint just received a delivery — refresh; it can no
+  // longer be deleted"). Two refusals a test can't tell apart is the §6a
+  // rule 4 trap.
+  it("does not read as the mid-click race refusal", () => {
+    expect(deleteBlockedReason(2)).not.toContain("refresh");
+  });
+});
+
+describe("SIGNATURE_HEADER", () => {
+  // Pinned by a literal, like `secretAad` (§6a rule 34): the value is a
+  // contract with receivers we cannot migrate, and a rename typechecks,
+  // lints, and passes every property-shaped assertion while silently
+  // breaking every receiver in existence. `src/server/webhooks/sign.test.ts`
+  // pins it too, from the consumer side.
+  it("is the exact header the worker sends and the admin page names", () => {
+    expect(SIGNATURE_HEADER).toBe("x-backroom-signature");
   });
 });

@@ -1,8 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
 
-/** Named once so the worker, any future docs page, and the tests agree. */
-export const SIGNATURE_HEADER = "x-backroom-signature";
-
 /**
  * Stripe/Slack-shaped signing, not GitHub's: signing the body alone made every
  * replay of a captured request byte-identical (same `id`, same `payload`, same

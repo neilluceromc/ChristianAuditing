@@ -8,7 +8,7 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { encryptSecret } from "@/server/crypto";
 import { newSecret, secretAad } from "@/server/webhooks/sign";
-import { WEBHOOK_EVENTS, parseEvents, partitionEvents } from "@/lib/webhooks";
+import { WEBHOOK_EVENTS, deleteBlockedReason, parseEvents, partitionEvents } from "@/lib/webhooks";
 import { diffOf } from "@/lib/audit-diff";
 import { asActionResult } from "@/server/prisma-errors";
 import {
@@ -347,11 +347,12 @@ export async function deleteEndpoint(input: unknown): Promise<ActionResult<null>
         // history cannot be deleted — and shouldn't be: the deliveries page is a
         // record of what was sent, and deleting the endpoint would orphan it.
         const history = await tx.webhookDelivery.count({ where: { endpointId: endpoint.id } });
-        if (history > 0) {
-          return conflict(
-            `That endpoint has ${history} delivery ${history === 1 ? "attempt" : "attempts"} on record. Disable it instead — deleting it would erase the history of what was sent.`,
-          );
-        }
+        // The sentence comes from `deleteBlockedReason`, not from here:
+        // /admin/webhooks states the same refusal beside a disabled Delete so
+        // the operator reads it BEFORE the click, and two copies of it would
+        // drift the moment one is reworded (§6a rules 5 and 11).
+        const blocked = deleteBlockedReason(history);
+        if (blocked) return conflict(blocked);
         await tx.webhookEndpoint.delete({ where: { id: endpoint.id } });
         await writeAudit(tx, {
           actorId: actor.id,
