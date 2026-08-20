@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–5 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 24 ahead of that.**
+**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–6 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 29 ahead of that.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,13 +13,13 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–5 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–6 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
-   so far (24 commits); `git status` should be clean.
+   so far (29 commits); `git status` should be clean.
 
    **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
    2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
-   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 24 ahead of `main`.
+   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 29 ahead of `main`.
    Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
@@ -29,18 +29,23 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
    permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
    Phase 8's plan, not after.
-4. **Resume at Task 6** (the webhook vocabulary, TDD) of
+4. **Resume at Task 7** (endpoint actions — the encrypted, shown-once secret) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
-   Tasks 1–5 are committed; 6–14 remain. Read the plan's
+   Tasks 1–6 are committed; 7–14 remain.
+
+   **Tasks 7, 8, 10 and 13 each open with a `REQUIRED AMENDMENT` block, and unusually these were written
+   BEFORE those tasks started.** Task 6's review read forward into them and verified its claims by running
+   the code, so four defects are already documented on tasks that haven't begun — most importantly that
+   **Task 7's `rotateSecret` audit diff is entirely `url: { from: X, to: X }`**, so a secret rotation
+   would log `Fields: url`. Read those banners before the code blocks they sit above. Read the plan's
    **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the `m365_sso`
    refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a later
-   task can silently break — then **§6a**, which carries what Tasks 1–5 actually established.
-   Tasks 2, 3, 4 and 5 have all been amended to the shipped code (`docs(plan): …`), so trust the plan over
+   task can silently break — then **§6a**, which carries what Tasks 1–6 actually established.
+   Tasks 2–6 have all been amended to the shipped code (`docs(plan): …`), so trust the plan over
    any memory of what it used to say, and keep amending it whenever code deviates.
 
-   **The one thing to carry into Tasks 8 and 13** — each of which pairs a rule module with a page — is
-   that **one defect shape has now appeared in five of the five tasks executed so far**, and every
-   instance was invisible to the unit suite. It is always the same root cause: **a rule and its surface
+   **The one thing to carry forward** is that **one defect shape has now appeared in six of the six tasks
+   executed so far**, and every instance was invisible to the unit suite. It is always the same root cause: **a rule and its surface
    that only partly agree.** §6a rules 8, 10, 11, 12 and 14 are the five faces of it, and Task 5
    reproduced rule 8 *after* rule 8 was written down. Before calling a task done, check explicitly:
    does the page consume **every** refusal the rule can return; does the rule permit the **safe**
@@ -54,9 +59,9 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
 
-The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **404 unit tests across 28
-files** (345/26 at the Phase 7 merge; Tasks 1–4 and their review fixes added the rest, and Task 4 alone
-accounts for 23 — most of them mutation-driven; Task 5 added none, being actions and UI) · `npm run build` · **`npx playwright test --workers=1` — 89
+The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **443 unit tests across 30
+files** (345/26 at the Phase 7 merge; Task 4 added 23 and Task 6 added 39, most of them mutation-driven;
+Task 5 added none, being actions and UI) · `npm run build` · **`npx playwright test --workers=1` — 89
 e2e tests, 7.9 minutes** (up
 from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
 through the worker, repair mode, reservations, and equipment policies, including the viewer
@@ -98,9 +103,14 @@ fragment of anything.
 before `npm run build`, and the last Playwright run managed its own), `inventory-db-1` up, 7 migrations,
 nothing pending. No scratch files anywhere in the repo.
 
-**The DB was last written by Playwright, whose `beforeAll` reseeds — so it holds a normal seed, but the
-seed of whichever spec ran last (`offboarding.spec.ts`), with that spec's mutations on top.** Reseed
-before anything that assumes pristine fixtures.
+**The DB is NOT pristine and cannot be made pristine in-session** (see the classifier note below). What
+has happened to it since the last reseed: Task 3's live verification (all five users restored to their
+seeded roles and enabled state, but **7 `user` `AuditEntry` rows** remain — append-only by DB trigger);
+Task 5's live verification (`allowed_domain` restored to `thebackroomop.com`, plus **`feature-flag` audit
+rows**, and it was briefly set to `(enabled: true, value: NULL)` to exercise the Critical); and Task 6's
+`npm run worker:once`, which **drained the seeded `EXECUTE_APPROVAL` job** — so one seeded approval is
+now EXECUTED and its asset moved. Nothing is broken, but **reseed before anything that assumes pristine
+fixtures**, and prefer **delta** assertions over absolute audit counts in e2e (Task 14).
 
 **One environment note that cost time and will cost it again: `npm run db:seed` is BLOCKED by the harness
 classifier in this session** (it TRUNCATEs). `prisma migrate reset` was already known to be blocked (§3);
@@ -171,7 +181,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–5 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–6 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -317,7 +327,15 @@ value editor for `allowed_domain`, a confirm dialog before the direction that op
 stated reason on any switch the rule won't move, and the `feature-flag` branch in `entityLabels` so the
 log can name the flag it changed. Review fixes deliberately left unsquashed so the verdicts stay
 legible: `c699743` + `d29ce9b`; `28e21ba` + `4b112cd`; `5d8e819` + `8a604df`;
-`cc43421` + `3ae53d2` + `e3191a2` + `3b158df`; `ce275c1` + `3157a5c` + `aaca261`.
+`cc43421` + `3ae53d2` + `e3191a2` + `3b158df`; `ce275c1` + `3157a5c` + `aaca261`;
+`5c4ab33` + `093a209`.
+**Task 6** — the webhook vocabulary, and the first code of the phase's second half: `src/lib/webhooks.ts`
+(`WEBHOOK_EVENTS`, `EVENT_LABELS`, `partitionEvents`/`parseEvents`, `webhookEnvelope`, `deliveryStage`),
+`src/lib/jobs.ts` (`MAX_JOB_ATTEMPTS`, now the repo's only `5` — the worker imports it), the `"delivery"`
+namespace and `JobStatus` families in `src/lib/status.ts`, and `src/server/webhooks/sign.ts` — the only
+file in the feature allowed to touch `node:crypto`, signing `t=<seconds>,v1=<hex>` over `"t.body"`.
+**Nothing consumes any of it yet**: Task 7 writes the endpoint actions, Task 9 the emitter, Task 10 the
+worker's real delivery loop.
 
 ### Conventions every later phase must follow
 
@@ -350,14 +368,14 @@ legible: `c699743` + `d29ce9b`; `28e21ba` + `4b112cd`; `5d8e819` + `8a604df`;
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 6–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 7–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1–5 are done** — the user rules, the two user mutations, `/admin/users`, the flag allowlist,
-  and `/admin/flags`. See §6a. **Task 6 is next**: the webhook vocabulary, a TDD pure module with no UI
-  and no DB. From there the phase turns to webhooks, which is where it stops being CRUD — Task 9 adds
-  the phase's **one migration**, Task 10 rewrites the worker's `DELIVER_WEBHOOK` branch from a
-  dead-letter placeholder into real delivery, and Task 12 adds seed fixtures. Those three are the
-  consequential ones.
+  **Tasks 1–6 are done** — the user rules, the two user mutations, `/admin/users`, the flag allowlist,
+  `/admin/flags`, and the webhook vocabulary. See §6a. **Task 7 is next.** The rest of the phase is where
+  it stops being CRUD: **Task 9 adds the phase's one migration**, **Task 10 rewrites the worker's
+  `DELIVER_WEBHOOK` branch** from a dead-letter placeholder into real HTTP delivery, and Task 12 adds seed
+  fixtures. Those three are the consequential ones, and Task 10 is the first code in this project that
+  makes an outbound network request.
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -425,7 +443,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–5 established (READ BEFORE TASK 6)
+## 6a. Phase 8 mid-flight: what Tasks 1–6 established (READ BEFORE TASK 7)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -636,6 +654,60 @@ phase's most-repeated defect.**
     `domainValue` normalizes to the same string, nothing is written, the key never changes, and the box
     keeps the uppercase forever — the exact failure the effect exists to prevent. The fix is to reset
     from the normalized value in the success path too, not to make the effect cleverer.
+
+**From Task 6 (`5c4ab33` + `093a209`). This review read FORWARD into Tasks 7–13 and its findings are
+already written into their plan text — rule 24 is why that mattered.**
+
+24. **A contract to systems you cannot migrate has exactly one cheap moment to get right, and it is
+    before the first consumer.** Task 6's signature signed only the body, so it was replayable — and this
+    phase *ships a replay button*, which the reviewer verified produces **byte-identical** bytes and
+    therefore a byte-identical signature (the envelope's four inputs are `delivery.id`, `.event`,
+    `.createdAt`, `.payload`, and `replayDelivery` touches none of them). With no timestamp in the
+    request a receiver cannot implement a tolerance window even if it wants to. We had copied GitHub's
+    scheme without either of its mitigations — GitHub mandates TLS and its delivery GUID **changes** on
+    redelivery, where ours is stable, and Task 7's URL schema permits `http://`. Now
+    `t=<seconds>,v1=<hex>` over `` `${t}.${body}` ``, where `v1` names the **scheme** (the old `sha256=`
+    named the algorithm, so the comment's claim that it gave receivers a migration path was false —
+    §6a rule 16 again). **Fixed at zero consumers; after Task 10 it is a breaking change to receivers we
+    cannot see.**
+
+25. **One parser cannot serve two callers that need opposite things.** `parseEvents` dropped unknown
+    events, which is right for `emitWebhook` (never fan out to a name nothing emits) and wrong for the
+    editor. The consequence was severe and silent: an endpoint holding a renamed event showed **no trace**
+    in the UI, and an admin editing **only the URL** caused the narrowed list to be written back —
+    permanently deleting the subscription — audited as `events: { from: [x], to: [x] }`, an append-only
+    entry asserting the field did not change on the write that erased it. Now `partitionEvents(raw) →
+    { known, unknown }` with `parseEvents = partitionEvents(raw).known`. **When a normalizer discards
+    something, ask which caller needs to know what was discarded.**
+
+26. **A number that appears in the UI needs exactly one definition.** The `DEAD · 5/5` chip's denominator
+    was a parameter fed from a literal in the worker, and Task 13's planned code declared a **second**.
+    Tune the worker to 3 and the chip reads `DEAD · 3/5` — card `3h`'s headline artifact, wrong, with a
+    green suite and a mutation-clean function. `MAX_JOB_ATTEMPTS` in `src/lib/jobs.ts` is now the only
+    `5`; the worker imports it and `deliveryStage` defaults to it. Note the name: it is the
+    **job-engine-wide** cap (`src/worker/index.ts:73` applies it to every job type), which is why it is
+    not `MAX_DELIVERY_ATTEMPTS` and does not live in `webhooks.ts`. **`npm run worker:once` is the only
+    check that covers `src/worker/index.ts` — nothing in the unit suite reaches that file.**
+
+27. **Adding a status to the family map means ALL of its values, and check the namespace.** Task 6 added
+    three of `DeliveryStatus`'s four; `PENDING` inherited the flat map's **approval** entry, so a queued
+    delivery rendered amber (`attention`) — and since `RETRYING` is also `attention`, **colour could not
+    distinguish "queued and healthy" from "failing".** `status.ts` already had namespaced lookups for
+    exactly this collision. There is now a `"delivery"` namespace covering all four, `JobStatus`'s
+    `RUNNING`/`DONE`/`FAILED` are in the flat map (`status.ts`'s doc comment claimed every enum value
+    mapped and it did not), and **an exhaustiveness test iterating the real Prisma enum objects** makes
+    the claim true. Any task that renders a new enum should add that enum to the test.
+
+28. **When a test's subject is embedded in a larger string, assert on the part a mutation would change.**
+    The first version of "the digest changes when the signing instant changes" compared the whole
+    `t=…,v1=…` header — which can only pass, because the visible `t=` differs between two instants no
+    matter what was actually hashed. A mutant that dropped `t` from the **signed string** sailed through
+    it. Same family as §6a rule 17 and the `ROLE_OPTIONS`/`domainValue` tautologies in §8. **Golden
+    vectors are the other half of this:** the reviewer demonstrated that
+    `createHmac("sha256", Buffer.from(secret, "base64url"))` — tempting, because Task 7's `newSecret()`
+    is base64url — passes every property-style assertion while invalidating every signature in
+    existence, and so does `.update(body, "latin1")` on any non-ASCII body. Pinned literals are what
+    catch those.
 
 ---
 
