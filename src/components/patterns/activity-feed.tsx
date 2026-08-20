@@ -41,7 +41,13 @@ export function actionDot(action: string): string {
   // "disable" (entityType "user") is unreachable today: every actionDot caller
   // scopes to employee/asset/purchase-request, and /audit — the one page that
   // renders "user" entries — never calls this. Pre-wired for a user-scoped
-  // feed Task 11 may add; not dead by mistake.
+  // feed Task 11 may add; not dead by mistake. "delete" already has several
+  // producers that never reach this function either (asset-category,
+  // asset-type, department via reference-actions.ts) — worth knowing before
+  // treating either bare verb as owned by one entity type. webhook-endpoint
+  // deliberately does NOT write "disable"/"enable"/"delete": it writes
+  // "endpoint-disable"/"endpoint-enable"/"endpoint-delete" specifically so it
+  // doesn't become one more producer sharing this line's meaning by accident.
   if (action.includes("failed") || action === "delete" || action === "disable") return "DEFECTIVE"; // fault
   if (action === "create" || action.includes("executed")) return "DEPLOYED"; // settled
   if (action.includes("requested") || action === "claim") return "SUBMITTED"; // inflight

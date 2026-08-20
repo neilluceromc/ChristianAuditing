@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 
 /** Named once so the worker, any future docs page, and the tests agree. */
 export const SIGNATURE_HEADER = "x-backroom-signature";
@@ -35,4 +35,16 @@ export function signPayload(body: string, secret: string, at: Date): string {
 /** AAD binds ciphertext to its endpoint row — a secret lifted into another row refuses to decrypt. */
 export function secretAad(endpointId: string): string {
   return `webhook:${endpointId}`;
+}
+
+/**
+ * 256 bits, base64url-encoded — 43 characters, no padding. Lives here rather
+ * than beside its only caller (`webhook-actions.ts`) because that file
+ * carries `"use server"`, whose exports must be async server actions and so
+ * can't include a plain sync helper — and because this shape is a contract
+ * the worker (Task 10) also has to honour when it signs with the decrypted
+ * value, same as `secretAad`.
+ */
+export function newSecret(): string {
+  return randomBytes(32).toString("base64url");
 }

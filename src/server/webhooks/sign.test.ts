@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { SIGNATURE_HEADER, signPayload } from "./sign";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { randomBytes } from "node:crypto";
+import { decryptSecret, encryptSecret } from "@/server/crypto";
+import { SIGNATURE_HEADER, newSecret, secretAad, signPayload } from "./sign";
 
 const AT = new Date("2026-08-19T02:00:00Z"); // t = 1787104800
 
@@ -56,5 +58,51 @@ describe("signPayload", () => {
 
   it("names the header once, so the worker and the docs can't drift", () => {
     expect(SIGNATURE_HEADER).toBe("x-backroom-signature");
+  });
+});
+
+describe("secretAad", () => {
+  // The pin that matters: `secretAad` is a one-line function with no other
+  // caller in this test file to catch a drift, and a rename of its prefix —
+  // or a Task 10 implementer independently reconstructing the AAD as
+  // `decryptSecret(endpoint.secret, endpoint.id)` instead of importing this
+  // function — typechecks, lints, and would pass every other test in this
+  // suite while making every PRE-EXISTING endpoint's secret permanently
+  // undecryptable (new rows would still round-trip, since createEndpoint and
+  // its own decrypt-caller would agree on whatever the new prefix is).
+  it("is exactly webhook:<id> — not webhook-endpoint:<id> or the bare id", () => {
+    expect(secretAad("abc")).toBe("webhook:abc");
+  });
+
+  describe("bound to encryptSecret/decryptSecret", () => {
+    beforeEach(() => {
+      vi.stubEnv("SECRET_ENCRYPTION_KEY", randomBytes(32).toString("base64"));
+    });
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("round-trips a secret encrypted under its own endpoint's AAD", () => {
+      const ct = encryptSecret("s3cr3t", secretAad("endpoint-1"));
+      expect(decryptSecret(ct, secretAad("endpoint-1"))).toBe("s3cr3t");
+    });
+
+    it("refuses to decrypt under a different endpoint's AAD — the whole point of binding it", () => {
+      const ct = encryptSecret("s3cr3t", secretAad("endpoint-1"));
+      expect(() => decryptSecret(ct, secretAad("endpoint-2"))).toThrow();
+    });
+  });
+});
+
+describe("newSecret", () => {
+  // 32 bytes (256 bits) of node:crypto randomBytes, base64url-encoded without
+  // padding: 43 characters from the base64url alphabet. A slip to, say,
+  // `randomBytes(8)` still returns a string and passes every other test in
+  // this file and every test in webhook-actions.ts's callers — this shape
+  // assertion is the only thing that catches it.
+  it("returns 256 bits as 43 base64url characters", () => {
+    expect(newSecret()).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("returns a fresh value every call", () => {
+    expect(newSecret()).not.toBe(newSecret());
   });
 });

@@ -26,6 +26,21 @@ export const EVENT_LABELS: Record<WebhookEvent, string> = {
 };
 
 /**
+ * The Rotate control's consequence, stated rather than left for an admin to
+ * discover — the same "stated, not discovered" discipline as `lockReason`
+ * (admin-users.ts) and `flagChangeWarning` (admin-flags.ts): one sentence,
+ * exported as data so a component never hardcodes it (§6a rules 5 and 11).
+ * Rotating is a hard cutover: every delivery from this moment signs with the
+ * new secret, a receiver still holding the old one will reject it (401), and
+ * the worker (Task 10) treats a 401 as permanent — so deliveries go straight
+ * to DEAD until the receiver is updated with the new secret. Recoverable
+ * with Replay all once it is.
+ */
+export const ROTATION_WARNING =
+  "Every delivery from now on signs with the new secret. Until the receiver is updated to match, " +
+  "deliveries will fail immediately and go straight to Dead — use Replay all once it has the new secret.";
+
+/**
  * `WebhookEndpoint.events` is a raw `String[]` column, so it can hold anything
  * that was ever written to it — including an event this build has since renamed.
  * `parseEvents` alone would DISCARD that fact: `emitWebhook` is right to fan

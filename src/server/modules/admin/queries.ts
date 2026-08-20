@@ -127,7 +127,15 @@ export interface EndpointRow {
 }
 
 export async function listEndpoints(): Promise<EndpointRow[]> {
-  const rows = await prisma.webhookEndpoint.findMany({ orderBy: [{ url: "asc" }] });
+  const rows = await prisma.webhookEndpoint.findMany({
+    orderBy: [{ url: "asc" }],
+    // `secret` is not in the `select` below — verify by looking up four
+    // lines, rather than trusting a comment that claims it. Without an
+    // explicit `select`, Prisma pulls every scalar column, including the
+    // ciphertext, and `EndpointRow` is consumed by a "use client" component:
+    // that ciphertext would ride along in the RSC payload on every render.
+    select: { id: true, url: true, events: true, active: true },
+  });
   // Two grouped counts rather than N per-row queries.
   const [all, dead] = await Promise.all([
     prisma.webhookDelivery.groupBy({ by: ["endpointId"], _count: { _all: true } }),
@@ -139,8 +147,6 @@ export async function listEndpoints(): Promise<EndpointRow[]> {
   ]);
   const allBy = new Map(all.map((g) => [g.endpointId, g._count._all]));
   const deadBy = new Map(dead.map((g) => [g.endpointId, g._count._all]));
-  // The secret is never selected out of this function — nothing above the
-  // worker has a reason to hold ciphertext, let alone plaintext.
   return rows.map((r) => {
     const { known, unknown } = partitionEvents(r.events);
     return {
