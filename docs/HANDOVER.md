@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–7 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
+**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–7 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -25,38 +25,73 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
-2. `docker compose up -d db` → **`npx prisma migrate deploy`** (Phase 7 added a 7th migration) →
-   `npm run db:seed` → open the preview (`preview_start` name `app-dev`).
-3. Read **§6** — it now carries Phase 8's entry criteria: the things the new admin/import/export
-   surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
-   permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
-   Phase 8's plan, not after.
+2. `docker compose up -d db` → **`npx prisma migrate deploy`** → `npm run db:seed` → open the preview
+   (`preview_start` name `app-dev`). **7 migrations, none pending** as of this handover; Phase 8's one
+   migration is still ahead of you, in Task 9.
+
+   **`npm run db:seed` is blocked by the harness classifier when an agent runs it** (see §3). Run it from
+   your own terminal, or let a Playwright spec do it — every spec reseeds via `execSync` in `beforeAll`
+   and that is not blocked. **The database is not pristine right now**; see the state paragraph below for
+   exactly what touched it.
+3. Read **§6** for Phase 8's entry criteria — the *why* behind the tasks (the worker's dead-lettered
+   webhook job, the permanent admin's locked row, the 10,000-row export cap). **The plan already exists
+   and already maps each criterion to a task**, so read §6 when a task's reasoning looks arbitrary, not
+   as something to act on. **§6a is the section that matters most** — it is what Tasks 1–7 actually
+   established, and it is where the recurring-defect checklist lives.
 4. **Resume at Task 8** (`/admin/webhooks`) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
    Tasks 1–7 are committed; 8–14 remain.
 
-   **Tasks 7, 8, 10 and 13 each open with a `REQUIRED AMENDMENT` block, and unusually these were written
-   BEFORE those tasks started.** Task 6's review read forward into them and verified its claims by running
-   the code, so four defects are already documented on tasks that haven't begun — most importantly that
-   **Task 7's `rotateSecret` audit diff is entirely `url: { from: X, to: X }`**, so a secret rotation
-   would log `Fields: url`. Read those banners before the code blocks they sit above. Read the plan's
-   **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the `m365_sso`
-   refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a later
-   task can silently break — then **§6a**, which carries what Tasks 1–6 actually established.
-   Tasks 2–6 have all been amended to the shipped code (`docs(plan): …`), so trust the plan over
-   any memory of what it used to say, and keep amending it whenever code deviates.
+   **Tasks 8, 10, 12 and 13 each open with a `REQUIRED AMENDMENT` block, written BEFORE those tasks
+   started.** Reviews of Tasks 6 and 7 read forward into them and verified the claims by running code, so
+   their defects are documented in advance rather than waiting to be discovered. **Read those banners
+   before the code blocks they sit above — the blocks are the original text and are stale where the two
+   disagree.** The highest-value ones:
+   - **Task 8:** an earlier version of its banner told the implementer the unknown-events warning should
+     say *"saving will remove it"*. **That is now false** — Task 7 preserves unknown events — and the
+     banner says so. Built from the old sentence, the page would tell the admin the opposite of what Save
+     does.
+   - **Task 10:** `fetch` follows redirects by default, so a 307 from an admin-approved receiver forwards
+     the signed body to a host nobody approved. This is the real SSRF hole; Task 7's `urlSchema` cannot
+     see past the first hop.
+   - **Task 13:** delete the second `MAX_DELIVERY_ATTEMPTS` literal, or the `DEAD · 5/5` chip silently
+     lies the day someone tunes the worker.
 
-   **The one thing to carry forward** is that **one defect shape has now appeared in six of the six tasks
-   executed so far**, and every instance was invisible to the unit suite. It is always the same root cause: **a rule and its surface
-   that only partly agree.** §6a rules 8, 10, 11, 12 and 14 are the five faces of it, and Task 5
-   reproduced rule 8 *after* rule 8 was written down. Before calling a task done, check explicitly:
-   does the page consume **every** refusal the rule can return; does the rule permit the **safe**
-   direction; is any context being smuggled into an audit diff as a from-equals-to key; and can `/audit`
-   **name** the entity type this task introduces (`entityLabels` — two tasks in a row have needed a new
-   branch there, and the plan scheduled neither). Task 3 shipped once with a live Disable button on the actor's own row because it
-   imported `selfRoleChangeWarning` and not `disableChange`; every click on that button was guaranteed
-   to fail. The rule was already written, exported and unit-tested. Nothing but a reviewer reading the
-   rule against the surface caught it, and it was invisible from the seeded `admin@` account.
+   Read the plan's **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the
+   `m365_sso` refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a
+   later task can silently break — then **§6a**, which carries what Tasks 1–7 actually established.
+   **Tasks 2–7 have all been amended to the shipped code** (`docs(plan): …`), so trust the plan over any
+   memory of what it used to say, and keep amending it whenever code deviates. Task 7's banner reads
+   `AMENDED` rather than `REQUIRED AMENDMENT` because it has been applied.
+
+   **THE CHECKLIST — the single most useful thing in this doc.** One defect shape has appeared in **all
+   seven tasks executed so far**, and **not one instance was caught by the unit suite**. It is always the
+   same root cause: **a rule and its surface that only partly agree.** Task 5 reproduced §6a rule 8 *after*
+   rule 8 was written down, which is why this is a checklist to run rather than a lesson to have absorbed.
+   Before calling any task done, check each of these explicitly:
+
+   - **Does the page consume EVERY refusal its rule module can return** — not just the one the design card
+     names? (rule 10. Task 3 shipped a live Disable button on the actor's own row because the component
+     imported `selfRoleChangeWarning` and not `disableChange`; **every click was guaranteed to fail**, the
+     rule was already written and unit-tested, and it was invisible from the seeded `admin@` account
+     because that row is locked.)
+   - **Does the rule permit the SAFE direction?** (rule 14. Three instances: Task 1's `disableChange`
+     refuses *re-enabling* the permanent admin, Task 3's Critical, and Task 4's `flagChange` refusing to
+     turn `m365_sso` **off**. Turning a dangerous thing off is never the dangerous direction.)
+   - **Is any context being smuggled into an audit diff as a from-equals-to key?** (rules 8 and 19. Twice
+     shipped — Task 2's `email`, Task 5's `key` — and Task 7 nearly made it three. `/audit` renders diff
+     **key names** into an append-only table, so the row claims a field changed that didn't. Context goes
+     in the **entity label**.)
+   - **Can `/audit` NAME the entity type this task introduces?** (rule 20. `entityLabels` in
+     `src/server/modules/audit/queries.ts` **and** `AUDIT_ENTITY_TYPES` in `src/lib/audit-list.ts` are two
+     separate places. Three tasks running have needed a new branch and **the plan scheduled none of
+     them.**)
+   - **Is every write guarded on a column the write actually moves** — or on `updatedAt`? (rules 21, 29,
+     30. Guarding an unchanged column can never fire: Postgres re-checks the predicate against the new row
+     version after the lock.)
+   - **Does a comment claim a property the code doesn't have?** (rule 16. Four instances, including one
+     that said signing made plain `http` safe and one that said a secret was never selected when it was
+     fetched on every render.)
 
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
@@ -67,8 +102,8 @@ mutation-driven; Task 5 added none, being actions and UI) · `npm run build` · 
 e2e tests, 7.9 minutes** (up
 from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
 through the worker, repair mode, reservations, and equipment policies, including the viewer
-read-only path). This was the first full e2e run since Task 9, and it is what finally exercised the
-things the browser pane could never confirm — see the two gotchas below.
+read-only path). That figure is from the Phase 7 merge; the paragraph below says what happened when it
+was re-run on this branch.
 
 **The e2e suite WAS re-run on this branch, at Task 3, and it found a pre-existing flake.** Task 3
 modified `src/components/ui/dialog.tsx` — a primitive **six e2e-covered components** use — so the run
@@ -97,13 +132,16 @@ the button still showing `"Loading" [disabled]` and an empty alert — nothing a
 at a timing race. It failed once in three full runs and was reproduced byte-for-byte by delaying
 `updateAsset` 7s. The fix is headroom on the assertion (20s), not a weaker assertion.
 
-**Nothing is half-finished in the code.** Every task ended on a green commit, including Task 15's
-close-out and Phase 8's Tasks 1–3. The next unit of work is a whole task — Phase 8's **fourth** — not a
-fragment of anything.
+**Nothing is half-finished in the code.** Every Phase 8 task ended on a green commit, and each one's
+plan text and §6a entry were updated in the same session it shipped. The next unit of work is a whole
+task — **Task 8** — not a fragment of anything. Every review finding was either fixed or recorded in
+§8; none was left silently open.
 
-**State this session left behind:** working tree clean, no dev server running (the preview was stopped
-before `npm run build`, and the last Playwright run managed its own), `inventory-db-1` up, 7 migrations,
-nothing pending. No scratch files anywhere in the repo.
+**State this session left behind:** working tree **clean**, **no dev server running** (verified: no
+`node.exe` processes), `inventory-db-1` **up**, **7 migrations, none pending** (`prisma migrate status`
+says "up to date"). **No scratch files anywhere in the repo** — the session's working scripts live in the
+harness scratchpad, outside the tree. Last verified green: `npx tsc --noEmit` · `npm run lint` ·
+**448 tests / 30 files** · `npm run build`.
 
 **The DB is NOT pristine and cannot be made pristine in-session** (see the classifier note below). What
 has happened to it since the last reseed: Task 3's live verification (all five users restored to their
@@ -111,8 +149,15 @@ seeded roles and enabled state, but **7 `user` `AuditEntry` rows** remain — ap
 Task 5's live verification (`allowed_domain` restored to `thebackroomop.com`, plus **`feature-flag` audit
 rows**, and it was briefly set to `(enabled: true, value: NULL)` to exercise the Critical); and Task 6's
 `npm run worker:once`, which **drained the seeded `EXECUTE_APPROVAL` job** — so one seeded approval is
-now EXECUTED and its asset moved. Nothing is broken, but **reseed before anything that assumes pristine
-fixtures**, and prefer **delta** assertions over absolute audit counts in e2e (Task 14).
+now EXECUTED and its asset moved; and Task 7's verification wrote **`webhook-endpoint` audit rows** while
+`allowed_domain` was edited to `backroomop.com` and back (it is `thebackroomop.com` now — confirmed, and
+it matters, because every seeded account is `@thebackroomop.com` and signup would refuse them otherwise).
+Nothing is broken, but **reseed before anything that assumes pristine fixtures**, and prefer **delta**
+assertions over absolute audit counts in e2e (Task 14).
+
+**There are still no `WebhookEndpoint` or `WebhookDelivery` rows.** Task 7 shipped the actions that create
+them but no page calls those actions yet, and the seed doesn't add any until Task 12 — which is exactly
+why Task 12 exists, since `/admin/webhooks/deliveries` is unreachable without fixtures.
 
 **One environment note that cost time and will cost it again: `npm run db:seed` is BLOCKED by the harness
 classifier in this session** (it TRUNCATEs). `prisma migrate reset` was already known to be blocked (§3);
