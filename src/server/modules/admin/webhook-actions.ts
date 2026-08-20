@@ -72,7 +72,10 @@ const urlSchema = z
   }, "That isn't a valid URL, or points at a host this app refuses to call");
 
 const eventsSchema = z
-  .array(z.enum(WEBHOOK_EVENTS as unknown as [string, ...string[]]))
+  // zod 4 takes the `as const` tuple directly and preserves WebhookEvent —
+  // no cast. Task 4 removed the same zod-3 idiom from ROLE_OPTIONS; the cast
+  // is what erases the element type and forces one downstream.
+  .array(z.enum(WEBHOOK_EVENTS))
   .min(1, "Pick at least one event — an endpoint with none would never fire");
 
 const createSchema = z.object({ url: urlSchema, events: eventsSchema });
