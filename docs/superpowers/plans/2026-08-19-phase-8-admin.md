@@ -2000,51 +2000,81 @@ Verified green at `3b158df`: `npx tsc --noEmit` / `npm run lint` / **404 tests a
 
 Card `3h`: switch rows with a description line. Two of them, one of which also carries a value.
 
-> ### ⚠ REQUIRED AMENDMENT — read before implementing. The code blocks in this task predate `3b158df`.
+> ### AMENDED to the shipped code (`ce275c1` + `3157a5c` + `aaca261`). The earlier REQUIRED AMENDMENT banner's ten guarantees are all satisfied and folded in.
 >
-> Task 4's review changed the contract this task consumes, and found a Critical whose fix this task has to
-> honour. **The blocks below call `flagChange(key)`, which no longer exists** — it is now
-> `flagChange(state: FlagState, next: boolean)`, and there is a new `flagChangeWarning(state, next)`.
+> The code below is what shipped and was confirmed in the browser. **Read #1 even if you read nothing
+> else: it is the fifth instance of one defect shape in five tasks, and the rule against it was already
+> written down when this task shipped it anyway.**
 >
-> **Ten things this task must guarantee.** The first three are the Critical; the rest are the shape.
+> **1. The audit diffs carried `key: { from: X, to: X }`, so `/audit` said the flag's key changed.**
+> `/audit` renders diff **key names**, so the Fields cell read `key, enabled` / `key, value` — telling a
+> future reader the key itself was edited, in a table that is append-only by DB trigger and can never be
+> corrected. This is **HANDOVER §6a rule 8 verbatim**, written after Task 2 shipped
+> `email: { from: X, to: X }` "to carry identity" and made `/audit` print `Fields: disabled, email`. It
+> does not qualify for the one sanctioned from-equals-to precedent (`offboarding.completed`'s
+> `m365Status`), which earns it by snapshotting something a mutable row can lose: **nothing writes
+> `FeatureFlag.key` anywhere in `src/`, and there is no flag-deletion path.** The comment defending it was
+> also false — it claimed the entity label resolved to the key, which it did not (see #2). Both diffs now
+> carry only the column they change.
 >
-> 1. **Never write `enabled: true` on a `hasValue` flag whose stored `value` isn't a non-empty string.**
->    `flagChange` refuses it, but the action must **re-check inside the same transaction that reads the
->    row** — the value can change between the page render and the click.
-> 2. **Never let the page show a `hasValue` flag as ON while it enforces nothing.** `listFlags` must
->    return an *effective* state computed with `flagDomain()` from `src/lib/auth-shared.ts`, **not** raw
->    `row.enabled`. This is the whole point: `(enabled: true, value: null)` is the resting state of any
->    deployment that bootstrapped without a domain, and `isAllowedDomain` reads it as **wide open**. A
->    switch reading ON beside "Limits who may create an account" while any address can sign up is the
->    defect, and the admin page is the surface that lies.
-> 3. **`value` has exactly one write path and it is `domainValue`.** No clear/reset button that bypasses
->    it, and no path that can store `null`, `""`, or a non-string.
-> 4. **Allow turning an `unavailable` flag OFF; refuse only turning it ON.** `flagChange` already does
->    this — don't let the page render a disabled switch for the one direction the rule permits. An admin
->    must always be able to close a dangerous sign-in path from this screen.
-> 5. **State the consequence of turning `allowed_domain` off BEFORE the click**, from
->    `flagChangeWarning` — the `selfRoleChangeWarning` pattern Task 3 established, one string on two
->    surfaces, not a toast after the fact. `spec.description` is not a substitute: it is static and reads
->    identically in both states.
-> 6. **Render `spec.description`, never `FeatureFlag.description`.** The two already disagree —
->    `FLAG_SPECS` carries the safety warning, `prisma/seed.ts:30` doesn't — and the spec's is the
->    build-controlled prose. If a row must be created, note `FeatureFlag.description` is `String`
->    **non-null with no default**.
-> 7. **Drive the listing from `FLAG_SPECS`, with a spec that has no row rendering as off.** Don't offer a
->    switch whose only possible outcome is `conflict("isn't in the database")` — that is a spec with no
->    row, which is the real state of `m365_sso` on any bootstrapped deployment, since bootstrap upserts
->    only `allowed_domain`.
-> 8. **Check the page against the rule (HANDOVER §10).** Task 3's Critical was a page consuming only
->    *some* of what its rule module could return. This task's rule can now return four distinct refusals
->    and a warning. Confirm the page consumes every one.
-> 9. **Don't synthesize `FlagState` in the client (HANDOVER §11).** The query builds it from the real row.
-> 10. **A no-op must still refresh (HANDOVER §12).** Same reasoning as Task 3: the branch is reachable
->     only when the client's props are stale, which is exactly when a refresh is the remedy.
+> **2. `/audit` could not name a `feature-flag` row, and no task in this plan ever fixed it.**
+> `entityLabels` had no `feature-flag` branch, so every flag row fell to the truncated-id fallback: an
+> unlinked `clx1234567…`. Task 2 added a `user` branch for exactly this reason. Task 7 adds only
+> `webhook-endpoint`, so this was never scheduled — meaning the single most consequential change the app
+> can record ("who may create an account was opened to the world") would have landed in the log as
+> `feature-flag | clx1234567… | update | key, enabled`. **Confirmed fixed in the browser:** the row now
+> reads `FEATURE-FLAG allowed_domain | flag-value | value`.
+> `AUDIT_ENTITY_TYPES` in `src/lib/audit-list.ts` is a **separate** gap and is still Task 7's (it adds
+> both `feature-flag` and `webhook-endpoint` there), so until Task 7 lands the Entity **facet** cannot
+> filter to these rows even though the label resolves.
+>
+> **3. `setFlagValue` wrote with no before-value guard.** Every sibling write in the codebase guards on
+> the before-value, and this module's own comment boasted that "the value it checks is the one this write
+> is guarded on" — a guarantee that did not extend to the action writing that column. Two admins saving
+> different domains: the second silently discards the first, **and the trail keeps two entries both
+> claiming the same `from`**, the second of which is false, permanently. Now a state-guarded `updateMany`
+> **keyed on `updatedAt`** rather than on `value`: `value` is `Json?`, so an equality filter needs
+> `Prisma.DbNull` for the null case and is fiddly, whereas `updatedAt` is `@updatedAt` and therefore a
+> clean optimistic-concurrency token that also catches a concurrent `enabled` flip.
+>
+> **4. The rate-limit countdown restarted across the dialog boundary — Task 3's bug, re-shipped.**
+> `retryAfter` held a duration, `RateLimitNotice` resets its countdown on every mount, and this component
+> mounts it twice (card list and dialog). Now the `retryDeadline` timestamp pattern from
+> `user-table.tsx:41-53`, copied rather than re-solved.
+>
+> **Also, from the same review:** distinct audit verbs (`flag-enable` / `flag-disable` / `flag-value`)
+> so `/audit`'s Action column distinguishes a switch flip from a value edit — both were `update`; both
+> actions now return `{ changed }` per §6a rule 6, so `revalidateAll()` no longer fires on a no-op and the
+> value toast stops claiming "updated" when nothing was written; the `draft` box is reset from the
+> normalized value on success, closing the case the `valuesKey` effect structurally cannot reach (stored
+> `example.com`, typed `EXAMPLE.COM` — normalizes to the same string, nothing written, key unchanged, box
+> keeps the uppercase forever); `setFlag`'s `validation` refusal routes to the **banner**, since
+> `FormError` only exists inside the `hasValue && !unavailable` block and a validation refusal on
+> `m365_sso` would otherwise vanish silently; `acting` is a composite `${key}:toggle` / `${key}:save` key
+> so a switch confirmation no longer spins the unrelated Save button; and the page's copy no longer says
+> *"the switch stays off until it is"*, which is false in the one state rule 14 deliberately keeps
+> closeable.
+>
+> **One earlier fix folded in (`3157a5c`):** the component computed `flagChange(row.state, next)` and used
+> the verdict only to set the switch's `disabled` prop — `verdict.reason` was never rendered, and
+> `row.unavailable` is `null` for `allowed_domain`, so a row with no usable value showed a **dead switch
+> with no explanation.** The two `<p>` blocks are deliberately separate: `unavailable` belongs to the
+> **flag** and prints whenever set (including when the switch is live because the row is already on and
+> closing it is permitted — precisely when the admin most needs it), while `verdict.reason` belongs to
+> **this click**.
+>
+> **A correction to a comment this task shipped, worth keeping straight:** `(enabled: true, value: null)`
+> is **not** "the resting state of a deployment that bootstrapped without a domain."
+> `createBootstrapAdmin` writes `enabled: !!domain, value: domain || undefined`, so a blank domain gives
+> **`(false, null)`**. And `(true, null)` now has **no in-app producer at all**, since `flagChange`
+> refuses it — it is reachable only out of band (psql, a restored backup, a migration). Both states render
+> OFF, disabled, with the reason, so the behaviour was always right; the comment was not.
 
 **Files:**
 - Create: `src/server/modules/admin/flag-actions.ts`, `src/components/admin/flag-rows.tsx`,
   `src/app/(app)/admin/flags/page.tsx`
-- Modify: `src/server/modules/admin/queries.ts`
+- Modify: `src/server/modules/admin/queries.ts` (add `FlagRow` / `listFlags`),
+  `src/server/modules/audit/queries.ts` (add the `feature-flag` label branch)
 
 - [ ] **Step 1: Write the actions**
 
@@ -2059,7 +2089,7 @@ import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
-import { domainValue, flagChange, specFor } from "@/lib/admin-flags";
+import { domainValue, flagChange, specFor, type FlagState } from "@/lib/admin-flags";
 import { asActionResult } from "@/server/prisma-errors";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
@@ -2078,7 +2108,7 @@ function revalidateAll() {
 
 const setSchema = z.object({ key: z.string().min(1), enabled: z.boolean() });
 
-export async function setFlag(input: unknown): Promise<ActionResult<null>> {
+export async function setFlag(input: unknown): Promise<ActionResult<{ changed: boolean }>> {
   const actor = await actionRole("admin");
   if (!actor) return forbidden();
   const rate = await checkRate(actor.id);
@@ -2087,17 +2117,32 @@ export async function setFlag(input: unknown): Promise<ActionResult<null>> {
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { key, enabled } = parsed.data;
 
-  // The allowlist runs BEFORE the row is read: an unknown key must be refused
-  // even if someone inserted a matching row by hand.
-  const verdict = flagChange(key);
-  if (!verdict.allowed) return conflict(verdict.reason);
-
-  const failure = await asActionResult(
+  // Same discriminated-on-.ok shape as user-actions.ts: every path below
+  // returns a full ActionResult, so the caller can tell a real refusal apart
+  // from a truthy-but-successful no-op.
+  //
+  // flagChange is called AFTER the row is read, inside this transaction —
+  // not before it. It used to run pre-transaction against just the key, but
+  // the new signature needs `value`, and the guarantee this task owns is
+  // that the value it checks is the one this write is guarded on, not
+  // whatever the page happened to render with: the stored value can change
+  // between the render and this click, so re-reading it here is the point,
+  // not an optimization to skip.
+  const result = await asActionResult(
     async () =>
       prisma.$transaction(async (tx) => {
         const flag = await tx.featureFlag.findUnique({ where: { key } });
         if (!flag) return conflict(`The flag "${key}" isn't in the database.`);
-        if (flag.enabled === enabled) return null;
+
+        const state: FlagState = {
+          key: flag.key,
+          enabled: flag.enabled,
+          value: typeof flag.value === "string" ? flag.value : null,
+        };
+        const verdict = flagChange(state, enabled);
+        if (!verdict.allowed) return conflict(verdict.reason);
+
+        if (flag.enabled === enabled) return ok({ changed: false }); // no-op: don't pollute the trail
 
         const written = await tx.featureFlag.updateMany({
           where: { key, enabled: flag.enabled },
@@ -2110,23 +2155,31 @@ export async function setFlag(input: unknown): Promise<ActionResult<null>> {
           actorLabel: actor.name,
           entityType: "feature-flag",
           entityId: flag.id,
-          action: "update",
-          // The key is in the diff because the entity label resolves to it, and
-          // a reader three months from now needs to know WHICH flag moved.
-          diff: { key: { from: flag.key, to: flag.key }, enabled: { from: flag.enabled, to: enabled } },
+          // Distinct per direction so /audit's Action column can tell a switch
+          // flip apart from a value edit (setFlagValue uses "flag-value").
+          action: enabled ? "flag-enable" : "flag-disable",
+          // No `key` entry here: /audit renders diff KEY NAMES, not values, so
+          // a from-equals-to `key` field would print "Fields: key, enabled" —
+          // telling a reader the flag's key itself changed. It didn't; nothing
+          // writes FeatureFlag.key and there is no flag-deletion path, so this
+          // doesn't qualify for the one sanctioned from===to precedent
+          // (offboarding.completed's m365Status, which snapshots a value a
+          // mutable row can later lose). The flag is already named — see
+          // entityLabels' "feature-flag" branch in audit/queries.ts.
+          diff: { enabled: { from: flag.enabled, to: enabled } },
         });
-        return null;
+        return ok({ changed: true });
       }),
     { goneMessage: "That flag no longer exists." },
   );
-  if (failure) return failure;
-  revalidateAll();
-  return ok(null);
+  if (!result.ok) return result;
+  if (result.data.changed) revalidateAll();
+  return result;
 }
 
 const valueSchema = z.object({ key: z.string().min(1), value: z.string() });
 
-export async function setFlagValue(input: unknown): Promise<ActionResult<null>> {
+export async function setFlagValue(input: unknown): Promise<ActionResult<{ changed: boolean }>> {
   const actor = await actionRole("admin");
   if (!actor) return forbidden();
   const rate = await checkRate(actor.id);
@@ -2137,215 +2190,390 @@ export async function setFlagValue(input: unknown): Promise<ActionResult<null>> 
 
   const spec = specFor(key);
   if (!spec?.hasValue) return conflict(`The flag "${key}" doesn't carry a value.`);
-  const verdict = flagChange(key);
-  if (!verdict.allowed) return conflict(verdict.reason);
 
-  // Today allowed_domain is the only value flag, and its value is a domain.
-  // When a second one arrives, this is the line that has to learn to branch.
+  // `value` has exactly one write path, and this is it: domainValue is the
+  // only function on it, there is no clear/reset branch, and nothing past
+  // this line can store null, "", or a non-string. flagChange is deliberately
+  // NOT called here — it takes a direction (turning the flag on/off), and a
+  // value edit isn't that; the flag's `enabled` column is untouched by this
+  // action on every path.
   const domain = domainValue(parsed.data.value);
   if (!domain.ok) return validationError({ value: domain.reason });
 
-  const failure = await asActionResult(
+  // Today allowed_domain is the only value flag, and its value is a domain.
+  // When a second one arrives, this is the line that has to learn to branch.
+  const result = await asActionResult(
     async () =>
       prisma.$transaction(async (tx) => {
         const flag = await tx.featureFlag.findUnique({ where: { key } });
         if (!flag) return conflict(`The flag "${key}" isn't in the database.`);
         const before = typeof flag.value === "string" ? flag.value : null;
-        if (before === domain.value) return null;
+        if (before === domain.value) return ok({ changed: false });
 
-        await tx.featureFlag.update({ where: { key }, data: { value: domain.value } });
+        // Guarded on `updatedAt`, not on `value`: `value` is Json?, and an
+        // equality filter on it needs Prisma.DbNull for the null case and is
+        // fiddly to get right, where `updatedAt` is `@updatedAt` and so is
+        // already a clean optimistic-concurrency token — bumped by ANY write
+        // to this row, which is a bonus: it also catches a concurrent
+        // `enabled` flip racing this value edit, not just a concurrent value
+        // edit. Without this guard, two admins reading the same `before` and
+        // saving different values would let the second write silently
+        // discard the first, while BOTH audit rows claimed `from: before` —
+        // the second one falsely, forever.
+        const written = await tx.featureFlag.updateMany({
+          where: { key, updatedAt: flag.updatedAt },
+          data: { value: domain.value },
+        });
+        if (written.count === 0) return conflict("Someone else just changed that flag — refresh.");
+
         await writeAudit(tx, {
           actorId: actor.id,
           actorLabel: actor.name,
           entityType: "feature-flag",
           entityId: flag.id,
-          action: "update",
-          diff: { key: { from: flag.key, to: flag.key }, value: { from: before, to: domain.value } },
+          // Distinct from setFlag's "flag-enable"/"flag-disable" — see the
+          // comment there.
+          action: "flag-value",
+          // No `key` entry — see the matching comment in setFlag.
+          diff: { value: { from: before, to: domain.value } },
         });
-        return null;
+        return ok({ changed: true });
       }),
     { goneMessage: "That flag no longer exists." },
   );
-  if (failure) return failure;
-  revalidateAll();
-  return ok(null);
+  if (!result.ok) return result;
+  if (result.data.changed) revalidateAll();
+  return result;
 }
 ```
-
-`setFlagValue` uses `update` rather than a guarded `updateMany` because `value` is `Json`: Prisma
-cannot express "where value equals this JSON" portably, and the read-then-write window here is a
-single admin editing a two-row table. Recorded so the difference from `setFlag` reads as a decision.
 
 - [ ] **Step 2: Add the query**
 
-Append to `src/server/modules/admin/queries.ts`:
+Append `FlagRow` and `listFlags` to `src/server/modules/admin/queries.ts`. The two things to get right
+are that **`enabled` is the EFFECTIVE state** (via `flagDomain`, the same expression `/login` and
+`/signup` use) while **`state` carries the RAW row** — feeding the rule the effective value would hand it
+a lie for exactly the row it exists to correct.
 
-```ts
-import { FLAG_SPECS } from "@/lib/admin-flags";
+- [ ] **Step 3: Add the `feature-flag` branch to `entityLabels`**
 
-export interface FlagRow {
-  key: string;
-  label: string;
-  description: string;
-  enabled: boolean;
-  hasValue: boolean;
-  value: string | null;
-  /** non-null → the switch is not usable, and this is the reason to print */
-  unavailable: string | null;
-}
+In `src/server/modules/audit/queries.ts`, following the existing `Promise.all` + `byType.has(...)` shape:
+`prisma.featureFlag.findMany({ where: { id: { in: [...] } }, select: { id: true, key: true } })`, then
+`map.set(\`feature-flag:${f.id}\`, { label: f.key, href: "/admin/flags" })`. Without it every flag row
+in the log is an unlinked truncated cuid.
 
-/**
- * Driven by FLAG_SPECS, not by the table: a flag this build doesn't know about
- * is not something the admin page should offer a switch for, and a spec with no
- * row yet still renders (disabled, value null) rather than vanishing.
- */
-export async function listFlags(): Promise<FlagRow[]> {
-  const rows = await prisma.featureFlag.findMany();
-  const byKey = new Map(rows.map((r) => [r.key, r]));
-  return FLAG_SPECS.map((spec) => {
-    const row = byKey.get(spec.key);
-    return {
-      key: spec.key,
-      label: spec.label,
-      description: spec.description,
-      enabled: row?.enabled ?? false,
-      hasValue: spec.hasValue,
-      value: typeof row?.value === "string" ? row.value : null,
-      unavailable: spec.unavailable,
-    };
-  });
-}
-```
-
-Only `FLAG_SPECS` is imported here. Task 11's `adminHome` is what needs `specFor`, and it adds that
-import when it needs it — lint runs `--max-warnings 0`, so importing it early is a build failure, not
-a tidy head start.
-
-- [ ] **Step 3: Write the rows component**
+- [ ] **Step 4: Write the rows component**
 
 Create `src/components/admin/flag-rows.tsx`:
 
 ```tsx
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
+import { Dialog } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/ui/pill";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { domainValue, flagChange, flagChangeWarning } from "@/lib/admin-flags";
 import { setFlag, setFlagValue } from "@/server/modules/admin/flag-actions";
+import type { ActionResult } from "@/server/action-result";
 import type { FlagRow } from "@/server/modules/admin/queries";
+
+/** A switch flip picked for a row whose rule returned a warning, waiting on the confirm dialog. */
+interface PendingToggle {
+  row: FlagRow;
+  next: boolean;
+  warning: string;
+}
 
 export function FlagRows({ rows }: { rows: FlagRow[] }) {
   const router = useRouter();
   const toast = useToast();
-  const [pending, startTransition] = useTransition();
+  // `pending` itself is unused: `startTransition` still batches the async
+  // calls below, but per-control busy state is tracked by `acting` instead —
+  // see its comment.
+  const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [fieldError, setFieldError] = useState<string | null>(null);
-  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  // Keyed by the SAME composite key as `acting` (`${row.key}:save`), not by
+  // `row.key` alone: today only Save ever populates this, but keying it to
+  // the control rather than the row keeps the two maps consistent if a
+  // second control on a row ever needs its own field error.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // A deadline, not a duration — RateLimitNotice resets its own countdown on
+  // every mount, and this component remounts it (top of the list vs. inside
+  // the confirm dialog). Storing "when it ends" and computing the remaining
+  // seconds fresh at render, instead of a `retryAfterSec` captured once, is
+  // what keeps crossing that boundary from restarting the clock (Task 3's
+  // bug, in user-table.tsx:41-53 — copied here rather than re-solved).
+  const [retryDeadline, setRetryDeadline] = useState<number | null>(null);
+  const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(null);
+  // Scoped to the one control actually in flight (`${row.key}:toggle` or
+  // `${row.key}:save`) — the precedent is user-table.tsx's `acting`. Without
+  // this, a single shared `pending` flag puts a spinner on every row's Save
+  // button while a different row's switch confirmation is still in flight.
+  const [acting, setActing] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>(
     () => Object.fromEntries(rows.map((r) => [r.key, r.value ?? ""])),
   );
 
-  function run(fn: () => Promise<{ ok: boolean } & Record<string, unknown>>, okMsg: string) {
+  const retryAfterSec =
+    retryDeadline === null ? null : Math.max(0, Math.ceil((retryDeadline - Date.now()) / 1000));
+
+  // `router.refresh()` re-renders this component with new `rows` props without
+  // remounting it, so the lazy initializer above only ever runs once — left
+  // alone, a Save that comes back normalized (lowercased, say) would write the
+  // canonical value to the database while the input kept showing whatever the
+  // admin actually typed. Keyed on the values themselves, not on `rows` (a new
+  // array every render), so an unrelated switch toggle's refresh — which never
+  // touches `value` — doesn't stomp an edit still in progress on this field.
+  //
+  // This alone still misses a NORMALIZING no-op: if the stored value is
+  // "example.com" and the admin types "EXAMPLE.COM", domainValue normalizes
+  // to the same string, nothing is written, and this key doesn't change — so
+  // the box would keep showing "EXAMPLE.COM" forever. The Save handler below
+  // covers that case directly, from the same domainValue() call it uses to
+  // decide whether to submit at all.
+  const valuesKey = rows.map((r) => `${r.key}:${r.value ?? ""}`).join("|");
+  useEffect(() => {
+    setDraft(Object.fromEntries(rows.map((r) => [r.key, r.value ?? ""])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valuesKey]);
+
+  // A real generic over the one shape both actions share. `changed` decides
+  // the toast wording (a value Save that normalizes to what's already stored
+  // writes nothing and must not claim "updated"), but `router.refresh()` runs
+  // on every `ok` regardless — the no-op branch is reachable only when this
+  // row's props are already stale (another admin, or another tab, changed
+  // the same flag), and in that one case the refresh IS the remedy. Staying
+  // silent would leave the control looking like the click did nothing,
+  // forever, until a manual reload.
+  function run(
+    actingKey: string,
+    fn: () => Promise<ActionResult<{ changed: boolean }>>,
+    messages: { changed: string; unchanged: string },
+    opts?: {
+      onOk?: (data: { changed: boolean }) => void;
+      onSettled?: () => void;
+      /** Where a `validation` refusal belongs. Only Save has a field to put it in. */
+      validationTarget?: "field" | "banner";
+    },
+  ) {
     setError(null);
-    setFieldError(null);
+    setFieldErrors((f) => ({ ...f, [actingKey]: "" }));
+    setActing(actingKey);
     startTransition(async () => {
-      const res = (await fn()) as Awaited<ReturnType<typeof setFlag>>;
-      if (res.ok) {
-        toast(okMsg, "settled");
-        router.refresh();
-      } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      // The only field on this screen is the domain value, so a validation
-      // refusal always belongs to it — but fall back to the banner rather than
-      // dropping the message if that ever stops being true.
-      else if (res.kind === "validation") {
-        setFieldError(Object.values(res.fieldErrors ?? {})[0] ?? res.message);
-      } else setError(res.message);
+      try {
+        const res = await fn();
+        if (res.ok) {
+          opts?.onOk?.(res.data);
+          toast(res.data.changed ? messages.changed : messages.unchanged, "settled");
+          router.refresh();
+        } else if (res.kind === "rate_limited") {
+          setRetryDeadline(Date.now() + (res.retryAfterSec ?? 60) * 1000);
+        } else if (res.kind === "validation" && opts?.validationTarget === "field") {
+          setFieldErrors((f) => ({ ...f, [actingKey]: Object.values(res.fieldErrors ?? {})[0] ?? res.message }));
+        } else {
+          // forbidden, conflict, or a validation refusal with no field to
+          // hang it on (setFlag's schema has none — unreachable today, but a
+          // refusal that routes nowhere is a silent failure waiting for the
+          // day it isn't).
+          setError(res.message);
+        }
+      } finally {
+        setActing(null);
+        opts?.onSettled?.();
+      }
     });
+  }
+
+  function submitToggle(row: FlagRow, next: boolean) {
+    run(
+      `${row.key}:toggle`,
+      () => setFlag({ key: row.key, enabled: next }),
+      {
+        changed: `${row.label} is ${next ? "on" : "off"}`,
+        unchanged: `${row.label} is already ${next ? "on" : "off"}`,
+      },
+      { onOk: () => setPendingToggle(null) },
+    );
+  }
+
+  function toggle(row: FlagRow, next: boolean) {
+    // flagChangeWarning reads the REAL row (row.state), never a client
+    // guess — see FlagRow.state's doc comment. Only the off direction ever
+    // carries a warning, and only allowed_domain's off does today.
+    const warning = flagChangeWarning(row.state, next);
+    if (warning) {
+      setError(null);
+      setRetryDeadline(null);
+      setPendingToggle({ row, next, warning });
+    } else {
+      submitToggle(row, next);
+    }
+  }
+
+  function saveValue(row: FlagRow) {
+    const raw = draft[row.key] ?? "";
+    // Computed client-side too, ahead of the call: the server is still the
+    // authority on whether the write happens, but knowing the NORMALIZED
+    // value here is what lets the success path reset the box to it even on
+    // a no-op (see valuesKey's comment above for why the effect alone misses
+    // that case).
+    const normalized = domainValue(raw);
+    run(
+      `${row.key}:save`,
+      () => setFlagValue({ key: row.key, value: raw }),
+      { changed: `${row.label} updated`, unchanged: `${row.label} is already set to that value` },
+      {
+        validationTarget: "field",
+        onOk: () => {
+          if (normalized.ok) setDraft((d) => ({ ...d, [row.key]: normalized.value }));
+        },
+      },
+    );
   }
 
   return (
     <div className="flex max-w-[720px] flex-col gap-3">
-      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
-      {error && <Banner tone="fault" title={error} />}
+      {retryAfterSec !== null && !pendingToggle && (
+        <RateLimitNotice retryAfterSec={retryAfterSec} onExpire={() => setRetryDeadline(null)} />
+      )}
+      {error && !pendingToggle && <Banner tone="fault" title={error} />}
 
-      {rows.map((row) => (
-        <Card key={row.key}>
-          <CardBody className="flex flex-col gap-2.5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex items-center gap-2">
-                  <span className="text-[13px] font-medium text-fg">{row.label}</span>
-                  <span className="font-mono text-[10px] text-fg-faint">{row.key}</span>
-                  {row.unavailable && <Pill>UNAVAILABLE</Pill>}
-                </span>
-                <span className="text-[11.5px] leading-snug text-fg-muted">{row.description}</span>
-              </div>
-              {/* Unlike a viewer's absent affordances, this switch is DISABLED
-                  rather than hidden: the admin has permission, the feature is
-                  what's missing. Hiding it would read as "this flag is gone". */}
-              <Switch
-                checked={row.enabled}
-                disabled={pending || !!row.unavailable}
-                aria-label={`${row.label}${row.unavailable ? " — unavailable" : ""}`}
-                onCheckedChange={(next) =>
-                  run(
-                    () => setFlag({ key: row.key, enabled: next }),
-                    `${row.label} is ${next ? "on" : "off"}`,
-                  )
-                }
-              />
-            </div>
+      {rows.map((row) => {
+        // The direction THIS click would attempt. Bound to the rule the
+        // action itself enforces, not to `row.unavailable` alone: an
+        // `unavailable` flag must still be closeable if it's somehow already
+        // on (HANDOVER §6a rule 14 — refusing the safe direction is the
+        // defect this phase keeps re-shipping), and a `hasValue` flag with no
+        // usable value must stay refused on the ON direction until a value
+        // is saved, even though `row.unavailable` is null for it.
+        const next = !row.enabled;
+        const verdict = flagChange(row.state, next);
+        const saveKey = `${row.key}:save`;
+        const fieldError = fieldErrors[saveKey];
 
-            {row.unavailable && (
-              <p className="border-l-2 border-border-strong pl-2.5 text-[11px] leading-snug text-fg-muted">
-                {row.unavailable}
-              </p>
-            )}
-
-            {row.hasValue && !row.unavailable && (
-              <div className="flex flex-wrap items-end gap-2 border-t border-border-faint pt-2.5">
-                <div className="flex flex-col gap-1">
-                  <Input
-                    aria-label={`Value for ${row.label}`}
-                    value={draft[row.key] ?? ""}
-                    invalid={!!fieldError}
-                    className="w-[220px] py-1.5 text-xs"
-                    onChange={(e) => setDraft((d) => ({ ...d, [row.key]: e.target.value }))}
-                  />
-                  <FormError>{fieldError}</FormError>
+        return (
+          <Card key={row.key}>
+            <CardBody className="flex flex-col gap-2.5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className="flex items-center gap-2">
+                    <span className="text-[13px] font-medium text-fg">{row.label}</span>
+                    <span className="font-mono text-[10px] text-fg-faint">{row.key}</span>
+                    {row.unavailable && <Pill>UNAVAILABLE</Pill>}
+                  </span>
+                  {/* spec.description, never FeatureFlag.description — the two
+                      disagree today, and the spec's is the build-controlled
+                      prose (see FLAG_SPECS's doc comments). */}
+                  <span className="text-[11.5px] leading-snug text-fg-muted">{row.description}</span>
                 </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  loading={pending}
-                  onClick={() =>
-                    run(
-                      () => setFlagValue({ key: row.key, value: draft[row.key] ?? "" }),
-                      `${row.label} updated`,
-                    )
-                  }
-                >
-                  Save
-                </Button>
+                {/* Unlike a viewer's absent affordances, this switch is DISABLED
+                    rather than hidden: the admin has permission, the feature is
+                    what's missing. Hiding it would read as "this flag is gone". */}
+                <Switch
+                  checked={row.enabled}
+                  disabled={acting !== null || !verdict.allowed}
+                  aria-label={`${row.label}${row.unavailable ? " — unavailable" : ""}`}
+                  onCheckedChange={(checked) => toggle(row, checked)}
+                />
               </div>
-            )}
-          </CardBody>
-        </Card>
-      ))}
+
+              {/* Two different sentences, and both have to be here.
+                  `unavailable` is a property of the FLAG ("this feature isn't
+                  finished"), so it prints whenever it's set — including when
+                  the switch is live because the row is somehow already on and
+                  the safe direction is permitted, which is precisely when the
+                  admin most needs to know why they should close it.
+                  `verdict.reason` is a property of THIS CLICK, and without it
+                  a `hasValue` flag with no value renders a dead switch and no
+                  explanation: `row.unavailable` is null for allowed_domain, so
+                  on any deployment that bootstrapped without a domain the
+                  admin would see a greyed-out "Signup domain restriction" and
+                  nothing saying "set a domain first". The rule already returns
+                  that sentence — HANDOVER §6a rule 10 is that the page has to
+                  consume every refusal the rule can return, not just the one
+                  the design card names. */}
+              {row.unavailable && (
+                <p className="border-l-2 border-border-strong pl-2.5 text-[11px] leading-snug text-fg-muted">
+                  {row.unavailable}
+                </p>
+              )}
+
+              {!verdict.allowed && !row.unavailable && (
+                <p className="border-l-2 border-border-strong pl-2.5 text-[11px] leading-snug text-fg-muted">
+                  {verdict.reason}
+                </p>
+              )}
+
+              {row.hasValue && !row.unavailable && (
+                <div className="flex flex-wrap items-end gap-2 border-t border-border-faint pt-2.5">
+                  <div className="flex flex-col gap-1">
+                    <Input
+                      aria-label={`Value for ${row.label}`}
+                      value={draft[row.key] ?? ""}
+                      invalid={!!fieldError}
+                      className="w-[220px] py-1.5 text-xs"
+                      onChange={(e) => setDraft((d) => ({ ...d, [row.key]: e.target.value }))}
+                    />
+                    <FormError>{fieldError}</FormError>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={acting === saveKey}
+                    disabled={acting !== null && acting !== saveKey}
+                    onClick={() => saveValue(row)}
+                  >
+                    Save
+                  </Button>
+                </div>
+              )}
+            </CardBody>
+          </Card>
+        );
+      })}
+
+      {/* Reserved for the one direction that carries a stated consequence
+          (allowed_domain, turned off): the sentence is shown BEFORE the
+          click, not as a toast after — the selfRoleChangeWarning pattern. */}
+      <Dialog
+        open={pendingToggle !== null}
+        onClose={() => setPendingToggle(null)}
+        title={pendingToggle ? `Turn off ${pendingToggle.row.label}?` : ""}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPendingToggle(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              loading={pendingToggle ? acting === `${pendingToggle.row.key}:toggle` : false}
+              onClick={() => pendingToggle && submitToggle(pendingToggle.row, pendingToggle.next)}
+            >
+              Turn off
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2">
+          {retryAfterSec !== null && (
+            <RateLimitNotice retryAfterSec={retryAfterSec} onExpire={() => setRetryDeadline(null)} />
+          )}
+          {error && <Banner tone="fault" title={error} />}
+          <p>{pendingToggle?.warning}</p>
+        </div>
+      </Dialog>
     </div>
   );
 }
 ```
 
-- [ ] **Step 4: Write the page**
+- [ ] **Step 5: Write the page**
 
 Create `src/app/(app)/admin/flags/page.tsx`:
 
@@ -2366,7 +2594,8 @@ export default async function FlagsPage() {
       <div className="flex max-w-[720px] flex-col gap-3">
         <Banner tone="neutral" title="These take effect immediately, for everyone">
           Both flags change who can get in, so they are audited like any other change. A flag marked
-          UNAVAILABLE is one whose feature isn&apos;t finished — the switch stays off until it is.
+          UNAVAILABLE is one whose feature isn&apos;t finished — it can always be turned off, never on,
+          until it is.
         </Banner>
         <FlagRows rows={rows} />
       </div>
@@ -2375,33 +2604,41 @@ export default async function FlagsPage() {
 }
 ```
 
-- [ ] **Step 5: Typecheck, lint, look at it**
+- [ ] **Step 6: Typecheck, lint, look at it**
 
 ```bash
-npx tsc --noEmit && npm run lint
+npx tsc --noEmit && npm run lint && npm run test
 ```
 
-In the preview as `admin@thebackroomop.com`, `/admin/flags`:
+In the preview as `admin@thebackroomop.com`, `/admin/flags` — **all of this was confirmed on `aaca261`:**
 
-1. Two cards. **Microsoft 365 sign-in** carries an `UNAVAILABLE` pill, a switch that will not move, and
-   the sentence about an Entra login arriving with no role. **Signup domain restriction** is on, with
-   `thebackroomop.com` in its value field.
-2. Change the domain to `TheBackroomOp.COM` and Save → it comes back lowercased, and `/audit` shows a
-   `feature-flag` row with `key, value` in the changed-fields cell.
-3. Try `someone@thebackroomop.com` → refused inline under the field, not in the banner.
-4. Toggle the domain restriction off and on → two audit rows, and `/login` stops and starts showing
-   its "Access is limited to @…" line.
-5. Put the value back to `thebackroomop.com` and leave the flag enabled, so the seeded fixture is
-   unchanged for the e2e run.
+1. Two cards. `m365_sso` carries an `UNAVAILABLE` pill, its corrected description (no domain-restriction
+   claim), and the reason sentence; its switch is off and disabled.
+2. `allowed_domain` shows its description, the value editor holding `thebackroomop.com`, and Save.
+3. Type `BackroomOp.COM` → Save → the DB holds `backroomop.com` (lowercased by `domainValue`) **and the
+   input box shows the normalized value**, not what was typed.
+4. `/audit`'s newest row reads **`FEATURE-FLAG allowed_domain | flag-value | value`** — named rather than
+   a truncated cuid, a verb that distinguishes a value edit from a switch flip, and **no phantom `key`
+   in the Fields cell.**
+5. **The state that produces the Critical needs a direct DB write, because the UI deliberately cannot
+   create it.** `UPDATE "FeatureFlag" SET enabled = true, value = NULL WHERE key = 'allowed_domain';`
+   then reload: the switch must read `aria-checked="false"` — **OFF, not ON** — and carry *"Set a domain
+   first — an empty restriction lets any address sign up."* If it reads ON, the page is claiming a
+   restriction `signUp` does not enforce. Restore the value afterwards.
+6. Turning `allowed_domain` off opens the confirm dialog with the consequence stated before the click.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/server/modules/admin/flag-actions.ts src/components/admin/flag-rows.tsx "src/app/(app)/admin/flags/page.tsx" src/server/modules/admin/queries.ts
+git add src/server/modules/admin/flag-actions.ts src/components/admin/flag-rows.tsx "src/app/(app)/admin/flags/page.tsx" src/server/modules/admin/queries.ts src/server/modules/audit/queries.ts
 git commit -m "feat(admin): feature flags, with the one that would break sign-in held shut"
 ```
 
----
+As shipped this was three commits, left unsquashed so the review trail stays legible: `ce275c1` (the task
+as written), `3157a5c` (the switch states its refusal), `aaca261` (the review fix).
+
+Verified green at `aaca261`: `npx tsc --noEmit` / `npm run lint` / **404 tests across 28 files**.
+
 
 ### Task 6: The webhook vocabulary (TDD)
 
