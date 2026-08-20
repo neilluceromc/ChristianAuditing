@@ -2652,19 +2652,87 @@ that reaches a node builtin either fails to build or drags a polyfill in behind 
 lives in `src/server/webhooks/sign.ts`, which only the worker imports. (This supersedes the single
 `src/lib/webhooks.ts` named in the file-structure section above.)
 
+> ### AMENDED to the shipped code (`5c4ab33` + `093a209`). Four Important findings, all fixed here rather than deferred.
+>
+> **1. The signature was replayable, and this phase ships a button that makes replays byte-identical.**
+> Task 10 builds the envelope from `(delivery.id, delivery.event, delivery.createdAt, delivery.payload)`
+> and `replayDelivery` writes only `status`/`attempts`/`deliveredAt` — **all four envelope inputs are
+> untouched, so a replay POSTs identical bytes and an identical signature.** With no timestamp anywhere
+> in the request a receiver cannot implement a tolerance window even if it wanted one. The original
+> scheme was GitHub's (`sha256=<hex>` over the body) without either of GitHub's mitigations: it mandates
+> TLS, and its delivery GUID **changes** on redelivery where our `id` is stable — and Task 7's URL schema
+> permits plain `http://`. The comment also claimed the `sha256=` prefix gave receivers a migration path;
+> it names the **algorithm**, not the signed-string construction, so changing to `"t.body"` would have
+> failed every signature silently. **Now Stripe/Slack shape:** `signPayload(body, secret, at: Date)`
+> signs `` `${t}.${body}` `` (`t` = Unix seconds) and returns `t=<seconds>,v1=<hex>`, where `v1` names
+> the **scheme** so the next change genuinely is detectable. Fixed here because there were **zero
+> consumers**; after Task 10 it is a breaking change to receivers we cannot see or migrate.
+>
+> **2. `parseEvents` narrowed silently and the first unrelated Save destroyed the evidence.**
+> `WebhookEndpoint.events` is a raw `String[]`, so it can hold an event this build has renamed. The
+> editor rendered no trace of the extra name, and an admin editing **only the URL** caused
+> `updateEndpoint` to write the narrowed list back — **permanently deleting the subscription** — and
+> audit it as `events: { from: [x], to: [x] }`, an append-only entry asserting the field did not change
+> on the very write that erased it. Silent narrowing is right for `emitWebhook` (never fan out to a name
+> nothing emits) and wrong for the editor; one function was serving two callers with opposite needs, and
+> Task 8 **structurally could not** detect the drop. Now **`partitionEvents(raw) → { known, unknown }`**,
+> with `parseEvents` implemented as `partitionEvents(raw).known` so there is still one parser.
+>
+> **3. The `DEAD · 5/5` chip's denominator had no owner.** Scope decision #6 governs the *numerator*
+> (`attempts` mirrored from the job). The denominator was a parameter, sourced from a literal in
+> `src/worker/index.ts` — and Task 13's code below declared a **second** `MAX_DELIVERY_ATTEMPTS = 5`.
+> Tune the worker to 3 and the chip reads `DEAD · 3/5`: card `3h`'s headline artifact, wrong, with a
+> green suite and a mutation-clean `deliveryStage`. The stated reason for the parameter was also false —
+> Task 13 calls `deliveryStage` **server-side** in `listDeliveries`, so no client component ever imports
+> it. Now **`src/lib/jobs.ts` exports `MAX_JOB_ATTEMPTS = 5`**, the worker imports it, and
+> `deliveryStage(status, attempts, maxAttempts = MAX_JOB_ATTEMPTS)` defaults to it. Note the name: this
+> is the **job-engine-wide** cap (`src/worker/index.ts:73` applies it to every job type), not a
+> delivery-specific one, which is why it is not called `MAX_DELIVERY_ATTEMPTS` and does not live in
+> `webhooks.ts`.
+>
+> **4. Step 3b taught the map three of `DeliveryStatus`'s four values.** `PENDING` was left inheriting
+> the flat map's approval entry, so a queued delivery rendered **amber** (`attention`) reading QUEUED —
+> and since `RETRYING` is also `attention`, **colour could not distinguish "queued and healthy" from
+> "failing".** A freshly-seeded deliveries page would be a wall of amber with the only real signal in the
+> text. `status.ts` already shipped the mechanism for exactly this (namespaced lookups override the flat
+> map where enum values collide across entities), so there is now a **`"delivery"` namespace covering all
+> four values**, and `JobStatus`'s `RUNNING`/`DONE`/`FAILED` were added to the flat map because
+> `status.ts`'s own doc comment claims every enum value maps and they did not. An **exhaustiveness test
+> over the real Prisma enum objects** now makes that claim true, and would have caught this on its own.
+>
+> Plus: `deliveryStage` has an explicit `PENDING` branch (the catch-all previously made a typo'd or
+> future status read as QUEUED); `webhookEnvelope` takes one object parameter instead of four positionals
+> of which two adjacent ones were both `string`; and **two golden vectors** were added after the reviewer
+> demonstrated that plausible refactors pass every existing test while changing every byte on the wire —
+> `createHmac("sha256", Buffer.from(secret, "base64url"))` (tempting, because Task 7's `newSecret()` is
+> base64url) and an alphabetised envelope literal. The signature now has pinned expected strings for an
+> ASCII and a UTF-8 body, and the envelope has a pinned `JSON.stringify` output, because key order is the
+> bytes the HMAC covers and scope decision #14 calls the envelope *stable*.
+>
+> **One test-design note worth carrying forward.** The first version of "the digest changes when the
+> signing instant changes" compared the **whole header**, which can only pass: the visible `t=` field
+> differs between two instants regardless of what was actually hashed, so a mutant that dropped `t` from
+> the signed string still passed it. The corrected test extracts and compares only the `v1=` digest. Same
+> class as the `ROLE_OPTIONS` and `domainValue` tautologies (HANDOVER §6a rules 17 and §8) — **when a
+> test's subject is embedded in a larger string, assert on the part the mutation would change.**
+
 **Files:**
 - Create: `src/lib/webhooks.ts`, `src/lib/webhooks.test.ts`, `src/server/webhooks/sign.ts`,
-  `src/server/webhooks/sign.test.ts`
+  `src/server/webhooks/sign.test.ts`, `src/lib/jobs.ts`
+- Modify: `src/lib/status.ts` + `src/lib/status.test.ts`, `src/worker/index.ts` (import
+  `MAX_JOB_ATTEMPTS` instead of declaring its own cap)
 
 - [ ] **Step 1: Write the failing test for the pure half**
 
-Create `src/lib/webhooks.test.ts`:
+Create `src/lib/webhooks.test.ts`. **Write it first, run it, and confirm it fails because the module
+does not exist** before writing Step 3.
 
 ```ts
 import { describe, expect, it } from "vitest";
 import {
-  EVENT_LABELS, WEBHOOK_EVENTS, deliveryStage, parseEvents, webhookEnvelope,
+  EVENT_LABELS, WEBHOOK_EVENTS, deliveryStage, parseEvents, partitionEvents, webhookEnvelope,
 } from "./webhooks";
+import { MAX_JOB_ATTEMPTS } from "./jobs";
 import { statusFamily } from "./status";
 
 describe("WEBHOOK_EVENTS", () => {
@@ -2698,12 +2766,52 @@ describe("parseEvents", () => {
     expect(parseEvents("approval.executed")).toEqual([]);
     expect(parseEvents([1, 2, 3])).toEqual([]);
   });
+
+  // parseEvents is partitionEvents().known, not an independent implementation
+  // — vary partitionEvents (via its exported behaviour) and parseEvents must
+  // move with it. Asserting agreement with a hand-copied expectation would
+  // pass even if someone re-forked parseEvents into its own filter, so this
+  // compares the two functions to each other on the same input instead.
+  it("is derived from partitionEvents, not a parallel implementation", () => {
+    const raw = ["purchase_request.completed", "asset.deleted", "approval.executed"];
+    expect(parseEvents(raw)).toEqual(partitionEvents(raw).known);
+  });
+});
+
+describe("partitionEvents", () => {
+  it("keeps known events in WEBHOOK_EVENTS order", () => {
+    expect(partitionEvents(["offboarding.completed", "approval.executed"]).known)
+      .toEqual(["approval.executed", "offboarding.completed"]);
+  });
+
+  it("keeps unknown events in input order rather than dropping them", () => {
+    expect(partitionEvents(["asset.deleted", "approval.executed", "widget.pinged"]).unknown)
+      .toEqual(["asset.deleted", "widget.pinged"]);
+  });
+
+  it("de-duplicates the unknown side too", () => {
+    expect(partitionEvents(["asset.deleted", "asset.deleted"]).unknown).toEqual(["asset.deleted"]);
+  });
+
+  it("returns empty arrays for junk from the database column", () => {
+    expect(partitionEvents(null)).toEqual({ known: [], unknown: [] });
+    expect(partitionEvents("approval.executed")).toEqual({ known: [], unknown: [] });
+  });
+
+  it("a name can only land on one side, never both", () => {
+    const { known, unknown } = partitionEvents(["approval.executed", "asset.deleted"]);
+    expect(known).toEqual(["approval.executed"]);
+    expect(unknown).toEqual(["asset.deleted"]);
+  });
 });
 
 describe("webhookEnvelope", () => {
   it("carries id, event, occurredAt and data — and nothing else", () => {
-    const env = webhookEnvelope("wd-1", "approval.executed", new Date("2026-08-19T02:00:00Z"), {
-      refNo: "APR-2042",
+    const env = webhookEnvelope({
+      id: "wd-1",
+      event: "approval.executed",
+      occurredAt: new Date("2026-08-19T02:00:00Z"),
+      data: { refNo: "APR-2042" },
     });
     expect(Object.keys(env).sort()).toEqual(["data", "event", "id", "occurredAt"]);
     expect(env).toEqual({
@@ -2712,6 +2820,23 @@ describe("webhookEnvelope", () => {
       occurredAt: "2026-08-19T02:00:00.000Z",
       data: { refNo: "APR-2042" },
     });
+  });
+
+  // Object.keys(...).sort() and toEqual are both order-blind: an
+  // alphabetised return literal would pass both of the assertions above
+  // while changing every byte the signature (src/server/webhooks/sign.ts)
+  // covers. Pinning the exact serialized string is what catches that,
+  // since scope decision #14 calls this envelope's shape stable.
+  it("serializes to a pinned byte-exact string — key order is part of the contract", () => {
+    const env = webhookEnvelope({
+      id: "wd-1",
+      event: "approval.executed",
+      occurredAt: new Date("2026-08-19T02:00:00Z"),
+      data: { refNo: "APR-2042" },
+    });
+    expect(JSON.stringify(env)).toBe(
+      '{"id":"wd-1","event":"approval.executed","occurredAt":"2026-08-19T02:00:00.000Z","data":{"refNo":"APR-2042"}}',
+    );
   });
 });
 
@@ -2735,6 +2860,20 @@ describe("deliveryStage", () => {
   it("reads a re-queued row with its attempts so far", () => {
     expect(deliveryStage("PENDING", 1, 5)).toBe("QUEUED · 1/5");
   });
+
+  // A status this build doesn't recognise must look unrecognised, not fall
+  // into the PENDING branch and read as a healthy queue.
+  it("passes an unrecognised status straight through rather than defaulting to QUEUED", () => {
+    expect(deliveryStage("SOMETHING_NEW", 3, 5)).toBe("SOMETHING_NEW");
+  });
+
+  // The denominator defaults to the worker's real cap so a caller can't
+  // silently supply a different number — this is what Important 3 in the
+  // quality review was about: two literal 5s (worker + this module) meant
+  // tuning one didn't tune the other, invisibly, with a green suite.
+  it("defaults the denominator to MAX_JOB_ATTEMPTS when none is supplied", () => {
+    expect(deliveryStage("DEAD", MAX_JOB_ATTEMPTS)).toBe(`DEAD · ${MAX_JOB_ATTEMPTS}/${MAX_JOB_ATTEMPTS}`);
+  });
 });
 
 // `deliveryStage` returns a LABEL and nothing else. Colour is not its business:
@@ -2742,11 +2881,15 @@ describe("deliveryStage", () => {
 // family; nothing gets a bespoke colour", and StatusPill derives the family from
 // the raw status value. DeliveryStatus was simply the one app enum that map had
 // never been taught — Step 3b fixes that, and these are the tests for it.
+// (`statusFamily` needs the "delivery" namespace here — PENDING and RETRYING
+// both live under "attention" in the flat map, which is exactly the collision
+// src/lib/status.ts's delivery namespace exists to separate; its own test
+// suite in src/lib/status.test.ts covers that in depth.)
 describe("DeliveryStatus is in the six-family system", () => {
   it("colours a dead delivery as a fault and a landed one as settled", () => {
-    expect(statusFamily("DELIVERED")).toBe("settled");
-    expect(statusFamily("DEAD")).toBe("fault");
-    expect(statusFamily("RETRYING")).toBe("attention");
+    expect(statusFamily("DELIVERED", "delivery")).toBe("settled");
+    expect(statusFamily("DEAD", "delivery")).toBe("fault");
+    expect(statusFamily("RETRYING", "delivery")).toBe("attention");
   });
 });
 ```
@@ -2757,13 +2900,39 @@ describe("DeliveryStatus is in the six-family system", () => {
 npx vitest run src/lib/webhooks.test.ts
 ```
 
-Expected: FAIL — `Failed to resolve import "./webhooks"`.
+Expect `Cannot find module './webhooks'`. That is the RED step; do not skip past it.
 
-- [ ] **Step 3: Write the pure module**
+- [ ] **Step 3: The job budget, which the chip's denominator borrows**
 
-Create `src/lib/webhooks.ts`. **No `node:` imports in this file** — see the rule at the top of this task. `./status` is fine: it is pure and already imported by client components.
+Create `src/lib/jobs.ts`. **`src/lib/`, not `src/server/`** — the worker imports it and so does
+`webhooks.ts`, which must stay free of `node:` builtins. Exactly one literal `5` may exist in the repo.
 
 ```ts
+/**
+ * The retry budget for EVERY job type in the queue — not just
+ * `DELIVER_WEBHOOK` — because `src/worker/index.ts` enforces one cap for the
+ * whole engine, not a per-type one. It is the single literal: the worker
+ * imports this instead of declaring its own `MAX_ATTEMPTS`.
+ *
+ * The deliveries chip's denominator (`DEAD · 5/5`) is this number, not a
+ * copy of it: scope decision #6 makes the `Job` row the retry engine, so a
+ * `WebhookDelivery`'s attempts are mirrored from its job rather than counted
+ * separately. If this changes, the chip changes with it — that's the point
+ * of importing it rather than re-declaring `5` in `src/lib/webhooks.ts`.
+ */
+export const MAX_JOB_ATTEMPTS = 5;
+```
+
+Then delete `const MAX_ATTEMPTS = 5;` from `src/worker/index.ts` and import this instead. That file's
+`DELIVER_WEBHOOK` branch is Task 10's to rewrite — **change nothing else in it here.**
+
+- [ ] **Step 4: Write the pure module**
+
+Create `src/lib/webhooks.ts`:
+
+```ts
+import { MAX_JOB_ATTEMPTS } from "./jobs";
+
 /**
  * Scope decision #9: a short, deliberate list, chosen so the three do not
  * overlap — asset lifecycle, HR/IT departure, procurement. Every entry is a
@@ -2792,15 +2961,42 @@ export const EVENT_LABELS: Record<WebhookEvent, string> = {
 /**
  * `WebhookEndpoint.events` is a raw `String[]` column, so it can hold anything
  * that was ever written to it — including an event this build has since renamed.
- * Normalising on read means the worker never fans out to a subscription nobody
- * can satisfy, and the editor never renders a checkbox with no label.
+ * `parseEvents` alone would DISCARD that fact: `emitWebhook` is right to fan
+ * out only to names it still knows, but an editor that reads through
+ * `parseEvents` and then saves has just narrowed the row on the admin's
+ * behalf — an edit to the URL alone silently deletes the unrecognised
+ * subscription, with nothing left to show it ever existed.
+ *
+ * `partitionEvents` keeps both halves so a caller that needs to show — or at
+ * least preserve — the leftover can. `known` is in `WEBHOOK_EVENTS` order for
+ * the same reason `parseEvents` always was: two endpoints with the same
+ * subscription must produce the same array. `unknown` has no canonical order
+ * to impose, so it keeps input order, de-duplicated.
+ */
+export function partitionEvents(raw: unknown): { known: WebhookEvent[]; unknown: string[] } {
+  if (!Array.isArray(raw)) return { known: [], unknown: [] };
+  const strings = raw.filter((e): e is string => typeof e === "string");
+  const wanted = new Set(strings);
+  const known = WEBHOOK_EVENTS.filter((e) => wanted.has(e));
+  const isKnown = new Set<string>(WEBHOOK_EVENTS);
+  const unknown: string[] = [];
+  const seen = new Set<string>();
+  for (const e of strings) {
+    if (isKnown.has(e) || seen.has(e)) continue;
+    seen.add(e);
+    unknown.push(e);
+  }
+  return { known, unknown };
+}
+
+/**
+ * The worker's view: fan out only to names this build still recognises.
+ * Never use this to populate an editor — it discards exactly the fact
+ * (`partitionEvents(...).unknown`) an editor needs to avoid silently
+ * deleting a subscription on an unrelated save.
  */
 export function parseEvents(raw: unknown): WebhookEvent[] {
-  if (!Array.isArray(raw)) return [];
-  const wanted = new Set(raw.filter((e): e is string => typeof e === "string"));
-  // WEBHOOK_EVENTS order, not input order: two endpoints with the same
-  // subscription must produce the same array, or every diff looks like a change.
-  return WEBHOOK_EVENTS.filter((e) => wanted.has(e));
+  return partitionEvents(raw).known;
 }
 
 export interface WebhookEnvelope {
@@ -2815,60 +3011,78 @@ export interface WebhookEnvelope {
  * never whole rows — a webhook is a notification that something happened, not a
  * replication feed, and shipping rows would make every schema change a breaking
  * change for consumers we cannot see or migrate.
+ *
+ * This function is the one place the envelope's KEY ORDER is defined — that
+ * matters because the signed bytes (`src/server/webhooks/sign.ts`) are
+ * whatever `JSON.stringify` produces from this object, not from a re-derived
+ * one. A single object parameter, rather than four positionals of which two
+ * (`id`, `event`) are same-typed strings, is deliberate: a caller can't ship
+ * `webhookEnvelope(delivery.event, delivery.id, …)` and have it compile.
  */
-export function webhookEnvelope(
-  id: string,
-  event: string,
-  occurredAt: Date,
-  data: Record<string, unknown>,
-): WebhookEnvelope {
-  return { id, event, occurredAt: occurredAt.toISOString(), data };
+export function webhookEnvelope(input: {
+  id: string;
+  event: string;
+  occurredAt: Date;
+  data: Record<string, unknown>;
+}): WebhookEnvelope {
+  return {
+    id: input.id,
+    event: input.event,
+    occurredAt: input.occurredAt.toISOString(),
+    data: input.data,
+  };
 }
 
 /**
  * The chip's LABEL on /admin/webhooks/deliveries — colour is not this
  * function's business (see Step 3b). The ratio is the point: card 3h shows
- * `DEAD · 5/5`, which is only meaningful because the denominator is the
- * worker's MAX_ATTEMPTS. Scope decision #6 is what keeps this number honest — the
- * delivery row's `attempts` is mirrored from the job rather than counted twice.
+ * `DEAD · 5/5`, which is only meaningful because the denominator is
+ * `MAX_JOB_ATTEMPTS` (`src/lib/jobs.ts`) — the worker's job-engine-wide retry
+ * cap, not a number this module owns. Scope decision #6 is what keeps the
+ * NUMERATOR honest — the delivery row's `attempts` is mirrored from the job
+ * rather than counted twice — and defaulting the denominator here is what
+ * keeps IT honest: a caller has to go out of its way to supply a different
+ * number, rather than every call site being a second place this can drift
+ * from the worker's actual cap.
  */
-export function deliveryStage(status: string, attempts: number, maxAttempts: number): string {
+export function deliveryStage(
+  status: string,
+  attempts: number,
+  maxAttempts: number = MAX_JOB_ATTEMPTS,
+): string {
   if (status === "DELIVERED") return "DELIVERED";
   if (status === "DEAD") return `DEAD · ${attempts}/${maxAttempts}`;
   if (status === "RETRYING") return `RETRYING · ${attempts}/${maxAttempts}`;
-  // PENDING with no attempt yet has no ratio worth printing: "0/5" reads as a
-  // failure that hasn't happened. Once it has been tried, the count is news.
-  return attempts > 0 ? `QUEUED · ${attempts}/${maxAttempts}` : "QUEUED";
+  if (status === "PENDING") {
+    // No attempt yet has no ratio worth printing: "0/5" reads as a failure
+    // that hasn't happened. Once it has been tried, the count is news.
+    return attempts > 0 ? `QUEUED · ${attempts}/${maxAttempts}` : "QUEUED";
+  }
+  // A status this build doesn't recognise (typo, future enum value, stale
+  // row) should look unrecognised rather than quietly reading as QUEUED —
+  // the PENDING branch above was never meant to be a catch-all.
+  return status;
 }
 ```
 
-- [ ] **Step 3b: Teach the six-family system about `DeliveryStatus`**
+- [ ] **Step 5: Teach the six-family system about `DeliveryStatus` and `JobStatus`**
 
-`src/lib/status.ts` states the rule: *every enum value in the app maps into exactly one family; nothing
-gets a bespoke colour*, and unknown values fall through to neutral. `DeliveryStatus` is the one app enum
-that map has never covered, so a `DEAD` delivery would render neutral — the same grey as a spare laptop
-— which is precisely the drift the six-family system exists to prevent.
+`src/lib/status.ts`. Two separate changes, and the second is the one a first pass misses:
 
-In the `MAP` in `src/lib/status.ts`, the line that currently reads:
+- **The flat `MAP`** gains `JobStatus`'s `RUNNING` / `DONE` / `FAILED` (`DEAD` and `PENDING` are already
+  there and are shared). `status.ts`'s own doc comment claims *every* enum value in the app maps into
+  exactly one family, and until this it was false — those three rendered neutral grey.
+- **A `"delivery"` namespace** covering all four `DeliveryStatus` values. `PENDING` unnamespaced resolves
+  to the **approval** family (`attention`), so a queued delivery would render amber reading QUEUED —
+  and `RETRYING` is also `attention`, so **colour could not distinguish "queued and healthy" from
+  "failing".** Namespaced lookups exist for exactly this collision; the file already says so.
 
-```ts
-  PENDING: "attention", APPROVED: "settled", REJECTED: "fault",
-```
+Then add an **exhaustiveness test** to `src/lib/status.test.ts` that iterates the real Prisma enum objects
+(`import { DeliveryStatus, JobStatus } from "@prisma/client"` — they are runtime values) and asserts every
+member resolves to something other than the neutral fallback, under the namespace each is read with. That
+test is what would have caught the missing `PENDING` on its own.
 
-gains the DeliveryStatus values it doesn't already carry (`PENDING` is there, and `attention` is right
-for a queued delivery too):
-
-```ts
-  PENDING: "attention", APPROVED: "settled", REJECTED: "fault",
-  // DeliveryStatus (Phase 8): DELIVERED landed, DEAD spent its budget,
-  // RETRYING is failing but not finished.
-  DELIVERED: "settled", DEAD: "fault", RETRYING: "attention",
-```
-
-Check the whole `MAP` for an existing `DELIVERED` or `DEAD` key first — if either is already claimed by
-another namespace, use `StatusPill`'s `ns` parameter rather than overwriting it.
-
-- [ ] **Step 4: Write the failing test for the signing half**
+- [ ] **Step 6: Write the failing test for the signing half**
 
 Create `src/server/webhooks/sign.test.ts`:
 
@@ -2876,24 +3090,57 @@ Create `src/server/webhooks/sign.test.ts`:
 import { describe, expect, it } from "vitest";
 import { SIGNATURE_HEADER, signPayload } from "./sign";
 
+const AT = new Date("2026-08-19T02:00:00Z"); // t = 1787104800
+
 describe("signPayload", () => {
-  it("is a prefixed hex HMAC-SHA256, so a consumer can tell the scheme apart", () => {
-    const sig = signPayload('{"a":1}', "shhh");
-    expect(sig).toMatch(/^sha256=[0-9a-f]{64}$/);
+  it("is t=<seconds>,v1=<64-hex>, so a receiver can find the timestamp without parsing hex", () => {
+    const sig = signPayload('{"a":1}', "shhh", AT);
+    expect(sig).toMatch(/^t=\d+,v1=[0-9a-f]{64}$/);
   });
 
-  it("is stable for the same body and secret", () => {
-    expect(signPayload('{"a":1}', "shhh")).toBe(signPayload('{"a":1}', "shhh"));
+  // Golden vectors: computed from this exact implementation and pasted as
+  // literals, so a refactor that changes the signed-string construction (key
+  // encoding, body encoding, separator, field order) is caught even though it
+  // would still pass every property-style assertion below.
+  it("matches a pinned vector for a fixed body, secret and instant", () => {
+    expect(signPayload('{"a":1}', "shhh", AT)).toBe(
+      "t=1787104800,v1=92d5a4bc4967ee6f3cd0906c63e8ab7aea6590005270d3642812deade4d29504",
+    );
+  });
+
+  it("matches a pinned vector for a non-ASCII body, pinning the UTF-8 encoding", () => {
+    expect(signPayload('{"msg":"café"}', "shhh", AT)).toBe(
+      "t=1787104800,v1=eb0b7a92544e2a68a322bc1b42f0815ecbc8fa8bb99b061646304d28b90cf09a",
+    );
+  });
+
+  it("is stable for the same body, secret and instant", () => {
+    expect(signPayload('{"a":1}', "shhh", AT)).toBe(signPayload('{"a":1}', "shhh", AT));
   });
 
   it("changes when the body changes", () => {
-    expect(signPayload('{"a":1}', "shhh")).not.toBe(signPayload('{"a":2}', "shhh"));
+    expect(signPayload('{"a":1}', "shhh", AT)).not.toBe(signPayload('{"a":2}', "shhh", AT));
   });
 
   // The whole point of a signing secret: a receiver that checks the signature
   // can tell our POST from anyone else's.
   it("changes when the secret changes", () => {
-    expect(signPayload('{"a":1}', "shhh")).not.toBe(signPayload('{"a":1}', "other"));
+    expect(signPayload('{"a":1}', "shhh", AT)).not.toBe(signPayload('{"a":1}', "other", AT));
+  });
+
+  // The whole point of THIS change: a replayed request — same body, same
+  // secret — must sign differently once time has moved on, or a captured
+  // request stays valid forever. Comparing the DIGEST alone (not the whole
+  // header) matters: the header's visible `t=` field always differs between
+  // two instants regardless of what got hashed, so a version that hashed
+  // only the body — dropping `t` from the signed string — would still pass
+  // a whole-string comparison. Only the digest tells you `t` was actually
+  // part of what got signed.
+  it("changes the v1 digest when the signing instant changes, even with the same body and secret", () => {
+    const later = new Date(AT.getTime() + 5 * 60_000);
+    const digest = (sig: string) => sig.split(",v1=")[1];
+    expect(digest(signPayload('{"a":1}', "shhh", AT)))
+      .not.toBe(digest(signPayload('{"a":1}', "shhh", later)));
   });
 
   it("names the header once, so the worker and the docs can't drift", () => {
@@ -2902,9 +3149,18 @@ describe("signPayload", () => {
 });
 ```
 
-- [ ] **Step 5: Write the signing module**
+**Two notes on these tests, both learned the hard way.** The golden vectors are not decoration: a
+reviewer demonstrated that `createHmac("sha256", Buffer.from(secret, "base64url"))` — tempting, since
+Task 7's `newSecret()` is base64url, so "key it with the real 32 bytes" reads like a tidy-up — passes
+every non-golden test while invalidating every signature in existence, and so does
+`.update(body, "latin1")` for any non-ASCII body. And the "digest changes when the instant changes" test
+must compare **only the `v1=` part**: comparing the whole header can only pass, because the visible `t=`
+differs between two instants no matter what was actually hashed.
 
-Create `src/server/webhooks/sign.ts`:
+- [ ] **Step 7: Write the signing module**
+
+Create `src/server/webhooks/sign.ts`. **This is the only file in the webhooks feature that may touch
+`node:crypto`** — `src/lib/webhooks.ts` must stay importable from a `"use client"` boundary.
 
 ```ts
 import { createHmac } from "node:crypto";
@@ -2913,43 +3169,99 @@ import { createHmac } from "node:crypto";
 export const SIGNATURE_HEADER = "x-backroom-signature";
 
 /**
- * HMAC-SHA256 over the exact bytes we POST, hex, prefixed with the algorithm so
- * a receiver can recognise a future scheme change instead of silently failing
- * every signature. The caller must sign the SAME string it sends — re-serialising
- * the object on either side is how signatures start disagreeing over key order.
+ * Stripe/Slack-shaped signing, not GitHub's: signing the body alone made every
+ * replay of a captured request byte-identical (same `id`, same `payload`, same
+ * signature — nothing to reject a delivery a receiver already processed, an
+ * admin's month-later "Replay", or an attacker's replay of a sniffed POST).
+ *
+ * The signed string is `` `${t}.${body}` ``, where `t` is Unix time in
+ * SECONDS at the moment of signing — the timestamp is part of what's hashed,
+ * not a sibling header, so a receiver can't strip it without invalidating the
+ * signature. The header value is `t=<seconds>,v1=<hex>`: `v1` names the
+ * *construction* (this exact "t.body" scheme), so a future change to how the
+ * string is built is something a receiver can detect, unlike a bare `sha256=`
+ * prefix that only ever named the algorithm.
+ *
+ * A receiver MUST: recompute the same `t.body` string, compare the digest
+ * with a timing-safe equality function (never `===` on the hex strings), and
+ * reject `t` outside a tolerance window — 5 minutes is the usual choice —
+ * to bound how long a captured request stays replayable.
+ *
+ * `at` is a parameter rather than `Date.now()` inside, so the caller signs
+ * the exact instant it sends (no drift between what's hashed and what's
+ * logged) and so this stays testable without mocking the clock.
  */
-export function signPayload(body: string, secret: string): string {
-  return `sha256=${createHmac("sha256", secret).update(body, "utf8").digest("hex")}`;
+export function signPayload(body: string, secret: string, at: Date): string {
+  const t = Math.floor(at.getTime() / 1000);
+  const hex = createHmac("sha256", secret).update(`${t}.${body}`, "utf8").digest("hex");
+  return `t=${t},v1=${hex}`;
 }
 ```
 
-- [ ] **Step 6: Run both suites and watch them pass**
+- [ ] **Step 8: Run both suites and watch them pass**
 
 ```bash
 npx vitest run src/lib/webhooks.test.ts src/server/webhooks/sign.test.ts
 ```
 
-Expected: PASS, 17 tests.
+- [ ] **Step 9: Mutation-test them — every branch, not a sample**
 
-- [ ] **Step 7: Mutation-test them**
+Break each of these, confirm a test dies **and name which one**, then restore: `parseEvents` returning
+input strings unfiltered; `partitionEvents`'s unknown side always `[]`, and its dedup removed;
+`deliveryStage`'s explicit `PENDING` branch, its `attempts > 0` branch, its `DEAD` ratio, and its default
+denominator hardcoded to a different number; `signPayload` ignoring its `secret`, and dropping `t` from
+the **hashed** string; each of the four `NAMESPACED.delivery` entries; and one flat-map `JobStatus` entry
+(the exhaustiveness test must die).
 
-1. Make `parseEvents` return `wanted` directly instead of filtering through `WEBHOOK_EVENTS` → both
-   "drops unknown events" and "keeps known events in WEBHOOK_EVENTS order" must fail.
-2. Drop the `attempts > 0` branch in `deliveryStage` so PENDING always prints a ratio → "reads a
-   never-attempted row as QUEUED" must fail.
-3. In `signPayload`, ignore `secret` (use a constant key) → "changes when the secret changes" must fail.
-
-- [ ] **Step 8: Typecheck, lint, commit**
+- [ ] **Step 10: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
-git add src/lib/webhooks.ts src/lib/webhooks.test.ts src/lib/status.ts src/server/webhooks/sign.ts src/server/webhooks/sign.test.ts
+git add src/lib/webhooks.ts src/lib/webhooks.test.ts src/lib/jobs.ts src/lib/status.ts src/lib/status.test.ts src/server/webhooks/sign.ts src/server/webhooks/sign.test.ts src/worker/index.ts
 git commit -m "feat(webhooks): the event list, the envelope, the chip, and the signature"
 ```
+
+As shipped this was two commits, left unsquashed so the review trail stays legible: `5c4ab33` (the task as
+originally written) and `093a209` (the review fix).
+
+Verified green at `093a209`: `npx tsc --noEmit` / `npm run lint` / **443 tests across 30 files** /
+`npm run worker:once` still drains a job, which is the only check that covers the `src/worker/index.ts`
+edit — nothing in the unit suite reaches that file.
+
 
 ---
 
 ### Task 7: Endpoint actions — the secret is encrypted, and shown once
+
+> ### REQUIRED AMENDMENT — three things the code blocks below get wrong. Read before implementing.
+>
+> **1. Two of the audit diffs are pure from-equals-to, which HANDOVER §6a rules 8 and 19 forbid — and
+> this would be the sixth and seventh instance of that shape in this phase.** `/audit` renders diff **key
+> names** into an append-only table, so:
+> - `rotateSecret`'s **entire** diff is `url: { from: endpoint.url, to: endpoint.url }`. A secret
+>   rotation would log `Fields: url` — telling a reader the URL changed. It didn't.
+> - `setEndpointActive`'s diff is `url: {equal}, active: {from,to}`, so merely enabling an endpoint logs
+>   `Fields: url, active`.
+> - `updateEndpoint`'s `events: { from: before, to: events }` is from-equals-to **whenever the save
+>   changed only the URL**, which is the common case.
+>
+> **The URL belongs in the entity label, not the diff** — and Step 3 of this task already teaches
+> `entityLabels` about `webhook-endpoint`, so the label is available. Each diff must contain only the
+> fields that actually changed. `createEndpoint`'s `from: null` and `deleteEndpoint`'s `to: null` are
+> fine; those are real transitions.
+>
+> **2. `flagChange`-style direction checks aside, check that the page consumes every refusal** these
+> actions can return (§6a rule 10). This phase has shipped that defect in five of five tasks.
+>
+> **3. `parseEvents` is now `partitionEvents(raw).known`** (Task 6's review). `EndpointRow` must carry
+> **`unknownEvents: string[]`** from `partitionEvents(...).unknown`, because otherwise a save that
+> touches only the URL silently deletes a subscription this build no longer recognises and audits it as
+> unchanged. `updateEndpoint` must not write a narrowed list without that having been surfaced — see
+> Task 8's banner for what the editor owes the admin.
+>
+> Also: **`signPayload` now takes three arguments** (`body`, `secret`, `at: Date`) and returns
+> `t=<seconds>,v1=<hex>`. Nothing in this task calls it, but `secretAad()` is still this task's to add to
+> `src/server/webhooks/sign.ts`, as the plan already says.
 
 Scope decisions #4 and #5. The signing secret is generated server-side, returned to the caller
 **exactly once**, and stored as ciphertext bound to its own row. Nothing ever reads it back for
@@ -3325,6 +3637,24 @@ git commit -m "feat(webhooks): endpoints, with the signing secret encrypted and 
 
 ---
 ### Task 8: `/admin/webhooks`
+
+> ### REQUIRED AMENDMENT — two things this page owes the admin that the blocks below don't provide.
+>
+> **1. Name the subscriptions this build no longer recognises.** `partitionEvents` (Task 6) returns
+> `unknown` alongside `known`, and Task 7's `EndpointRow` carries it. The editor must **say so** — the
+> endpoint is subscribed to a name this build cannot emit, and **saving will remove it.** Without that,
+> the first unrelated Save destroys the subscription permanently and audits it as unchanged. A `Banner`
+> naming the dropped events is enough.
+>
+> **2. Rotation is a hard cutover, and only the code knows it.** `deliverWebhook` decrypts the secret
+> **at attempt time**, so rotating re-signs in-flight deliveries with the new key. A receiver still
+> holding the old key returns 401, Task 10 classifies 4xx-except-408/429 as **permanent**, and the
+> delivery goes straight to `DEAD` on its first attempt — and so does every delivery after it, until
+> someone updates the receiver. It is recoverable with `replayAllDead`, but the operator is never told.
+> There is no `secretVersion` column and no key-id header, so a receiver cannot support an overlap
+> window. **The Rotate control must state this before the click** — the same "stated, not discovered"
+> discipline as `lockReason` and `flagChangeWarning`. (An overlap scheme — a nullable `secretPrev` and a
+> dual `sha256=a,sha256=b` header — is deliberately **out of scope**; this phase has one migration.)
 
 The endpoint list and its editor. The one screen in this phase with a genuinely unusual obligation:
 **the secret is visible exactly once**, in the response to create or rotate, and there is no way back
@@ -3887,6 +4217,20 @@ git commit -m "feat(webhooks): the producer that never existed, and the index th
 
 ### Task 10: The worker delivers for real
 
+> ### REQUIRED AMENDMENT — the signature changed in Task 6, and one line below is dead code.
+>
+> **`signPayload(body, secret, at)` now takes the signing instant and returns `t=<seconds>,v1=<hex>`.**
+> Sign the **exact bytes you POST** and send that whole string as `SIGNATURE_HEADER`. Do not re-serialise
+> the envelope between signing and sending, and pass the same `Date` you use for the attempt.
+>
+> **`MAX_ATTEMPTS` no longer exists in `src/worker/index.ts`** — it imports `MAX_JOB_ATTEMPTS` from
+> `src/lib/jobs.ts`, which is now the single literal. Don't reintroduce a local one.
+>
+> **Task 9's `if (!parseEvents(endpoint.events).includes(event)) continue;` is provably dead** and its
+> comment claims a guarantee it does not add: the SQL `events: { has: event }` already matched the
+> literal, and `event` is typed `WebhookEvent`, so `parseEvents` cannot drop it. Harmless, but delete it
+> or fix the comment rather than shipping a filter that reads as a safety net and isn't one.
+
 `src/worker/index.ts` currently answers every `DELIVER_WEBHOOK` job with
 `status: "DEAD", lastError: "webhook delivery ships in Phase 8"`. This is that phase.
 
@@ -4446,6 +4790,37 @@ git commit -m "feat(seed): endpoints and deliveries, so every delivery chip is r
 ---
 
 ### Task 13: `/admin/webhooks/deliveries` + replay
+
+> ### REQUIRED AMENDMENT — four things, three of them in the code blocks below.
+>
+> **1. Delete `export const MAX_DELIVERY_ATTEMPTS = 5;`** from `queries.ts`. Task 6's review established
+> that the chip's denominator has exactly one owner — `MAX_JOB_ATTEMPTS` in `src/lib/jobs.ts`, which the
+> worker imports and `deliveryStage` defaults to. A second literal here is what makes `DEAD · 3/5`
+> possible after someone tunes the worker. Call `deliveryStage(r.status, r.attempts)` and let the default
+> supply it.
+>
+> **2. Move `DELIVERY_TABS` / `parseDeliveryTab` into `src/lib/webhooks.ts` with unit tests.** As written
+> they sit in `queries.ts` beside the Prisma call — which HANDOVER §8 records as the exact reason Phase
+> 7's `RESERVATION_TABS` is *"the one list parser with no test"*: bundled with the query it cannot be
+> unit-tested without pulling in the DB client. Every sibling (`approvals-list.ts`, `purchases-list.ts`,
+> `audit-list.ts`) puts its pure tab/parse logic in `src/lib/`. Don't create the second recorded
+> exception.
+>
+> **3. Pass `ns="delivery"` when rendering a delivery status.** Task 6's review added a `"delivery"`
+> namespace to `src/lib/status.ts` because `PENDING` unnamespaced resolves to the **approval** family
+> (`attention`), which made a healthy queued delivery amber and indistinguishable from `RETRYING`. Also:
+> `deliveryStage` returns the chip's **label** and `statusFamily` needs the **status** — passing
+> `stageLabel` where `status` belongs greys every chip in the table with no error anywhere.
+>
+> **4. `replayDelivery`'s audit diff must not be from-equals-to** (§6a rules 8 and 19) — `event:
+> {from,to}` with equal sides would log `Fields: event` for a replay that changed no event. Record what
+> actually changed (`status`, `attempts`), and put the endpoint or event in the entity label.
+>
+> Two §6a rule 10 checks for this page: `replayDelivery` refuses a `DELIVERED` row **and** an inactive
+> endpoint — confirm neither can render a live Replay button, and that `replayAllDead`'s per-row rate
+> limit cannot silently under-queue without telling the operator how many actually went. And if this page
+> surfaces `Job` state (Task 10 notes "next attempt"), `JobStatus`'s families are now in the flat map —
+> use them rather than adding new ones.
 
 Card `3h`: delivery attempts with `DEAD · 5/5` rows and a **"Replay 4 dead-lettered"** control. Scope
 decision #11 settles what replay means — a decision to try again, not to resume — and scope decision
