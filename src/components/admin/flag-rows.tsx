@@ -12,7 +12,7 @@ import { Pill } from "@/components/ui/pill";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { flagChange, flagChangeWarning } from "@/lib/admin-flags";
+import { domainValue, flagChange, flagChangeWarning } from "@/lib/admin-flags";
 import { setFlag, setFlagValue } from "@/server/modules/admin/flag-actions";
 import type { ActionResult } from "@/server/action-result";
 import type { FlagRow } from "@/server/modules/admin/queries";
@@ -27,14 +27,36 @@ interface PendingToggle {
 export function FlagRows({ rows }: { rows: FlagRow[] }) {
   const router = useRouter();
   const toast = useToast();
-  const [pending, startTransition] = useTransition();
+  // `pending` itself is unused: `startTransition` still batches the async
+  // calls below, but per-control busy state is tracked by `acting` instead —
+  // see its comment.
+  const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Keyed by the SAME composite key as `acting` (`${row.key}:save`), not by
+  // `row.key` alone: today only Save ever populates this, but keying it to
+  // the control rather than the row keeps the two maps consistent if a
+  // second control on a row ever needs its own field error.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  // A deadline, not a duration — RateLimitNotice resets its own countdown on
+  // every mount, and this component remounts it (top of the list vs. inside
+  // the confirm dialog). Storing "when it ends" and computing the remaining
+  // seconds fresh at render, instead of a `retryAfterSec` captured once, is
+  // what keeps crossing that boundary from restarting the clock (Task 3's
+  // bug, in user-table.tsx:41-53 — copied here rather than re-solved).
+  const [retryDeadline, setRetryDeadline] = useState<number | null>(null);
   const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(null);
+  // Scoped to the one control actually in flight (`${row.key}:toggle` or
+  // `${row.key}:save`) — the precedent is user-table.tsx's `acting`. Without
+  // this, a single shared `pending` flag puts a spinner on every row's Save
+  // button while a different row's switch confirmation is still in flight.
+  const [acting, setActing] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>(
     () => Object.fromEntries(rows.map((r) => [r.key, r.value ?? ""])),
   );
+
+  const retryAfterSec =
+    retryDeadline === null ? null : Math.max(0, Math.ceil((retryDeadline - Date.now()) / 1000));
+
   // `router.refresh()` re-renders this component with new `rows` props without
   // remounting it, so the lazy initializer above only ever runs once — left
   // alone, a Save that comes back normalized (lowercased, say) would write the
@@ -42,46 +64,61 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
   // admin actually typed. Keyed on the values themselves, not on `rows` (a new
   // array every render), so an unrelated switch toggle's refresh — which never
   // touches `value` — doesn't stomp an edit still in progress on this field.
+  //
+  // This alone still misses a NORMALIZING no-op: if the stored value is
+  // "example.com" and the admin types "EXAMPLE.COM", domainValue normalizes
+  // to the same string, nothing is written, and this key doesn't change — so
+  // the box would keep showing "EXAMPLE.COM" forever. The Save handler below
+  // covers that case directly, from the same domainValue() call it uses to
+  // decide whether to submit at all.
   const valuesKey = rows.map((r) => `${r.key}:${r.value ?? ""}`).join("|");
   useEffect(() => {
     setDraft(Object.fromEntries(rows.map((r) => [r.key, r.value ?? ""])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valuesKey]);
 
-  // A real generic over the one shape both actions share — `changed: false`
-  // isn't part of this generic (neither action reports it: a no-op returns
-  // the same `ok(null)` as a real write), which is exactly why this always
-  // refreshes on `ok`. The branch is reachable only when this row's props
-  // are already stale (another admin, or another tab, changed the same
-  // flag), and in that one case the refresh IS the remedy — staying silent
-  // would leave the switch looking like the click did nothing, forever,
-  // until a manual reload.
+  // A real generic over the one shape both actions share. `changed` decides
+  // the toast wording (a value Save that normalizes to what's already stored
+  // writes nothing and must not claim "updated"), but `router.refresh()` runs
+  // on every `ok` regardless — the no-op branch is reachable only when this
+  // row's props are already stale (another admin, or another tab, changed
+  // the same flag), and in that one case the refresh IS the remedy. Staying
+  // silent would leave the control looking like the click did nothing,
+  // forever, until a manual reload.
   function run(
-    key: string,
-    fn: () => Promise<ActionResult<null>>,
-    okMsg: string,
-    opts?: { onOk?: () => void; onSettled?: () => void },
+    actingKey: string,
+    fn: () => Promise<ActionResult<{ changed: boolean }>>,
+    messages: { changed: string; unchanged: string },
+    opts?: {
+      onOk?: (data: { changed: boolean }) => void;
+      onSettled?: () => void;
+      /** Where a `validation` refusal belongs. Only Save has a field to put it in. */
+      validationTarget?: "field" | "banner";
+    },
   ) {
     setError(null);
-    setFieldErrors((f) => ({ ...f, [key]: "" }));
+    setFieldErrors((f) => ({ ...f, [actingKey]: "" }));
+    setActing(actingKey);
     startTransition(async () => {
       try {
         const res = await fn();
         if (res.ok) {
-          opts?.onOk?.();
-          toast(okMsg, "settled");
+          opts?.onOk?.(res.data);
+          toast(res.data.changed ? messages.changed : messages.unchanged, "settled");
           router.refresh();
         } else if (res.kind === "rate_limited") {
-          setRetryAfter(res.retryAfterSec ?? 60);
-        } else if (res.kind === "validation") {
-          // The only field on this screen is a value editor, so a validation
-          // refusal belongs to whichever row's Save was clicked.
-          setFieldErrors((f) => ({ ...f, [key]: Object.values(res.fieldErrors ?? {})[0] ?? res.message }));
+          setRetryDeadline(Date.now() + (res.retryAfterSec ?? 60) * 1000);
+        } else if (res.kind === "validation" && opts?.validationTarget === "field") {
+          setFieldErrors((f) => ({ ...f, [actingKey]: Object.values(res.fieldErrors ?? {})[0] ?? res.message }));
         } else {
-          // forbidden or conflict: no field to hang either on, so the banner.
+          // forbidden, conflict, or a validation refusal with no field to
+          // hang it on (setFlag's schema has none — unreachable today, but a
+          // refusal that routes nowhere is a silent failure waiting for the
+          // day it isn't).
           setError(res.message);
         }
       } finally {
+        setActing(null);
         opts?.onSettled?.();
       }
     });
@@ -89,9 +126,12 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
 
   function submitToggle(row: FlagRow, next: boolean) {
     run(
-      row.key,
+      `${row.key}:toggle`,
       () => setFlag({ key: row.key, enabled: next }),
-      `${row.label} is ${next ? "on" : "off"}`,
+      {
+        changed: `${row.label} is ${next ? "on" : "off"}`,
+        unchanged: `${row.label} is already ${next ? "on" : "off"}`,
+      },
       { onOk: () => setPendingToggle(null) },
     );
   }
@@ -103,17 +143,38 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
     const warning = flagChangeWarning(row.state, next);
     if (warning) {
       setError(null);
-      setRetryAfter(null);
+      setRetryDeadline(null);
       setPendingToggle({ row, next, warning });
     } else {
       submitToggle(row, next);
     }
   }
 
+  function saveValue(row: FlagRow) {
+    const raw = draft[row.key] ?? "";
+    // Computed client-side too, ahead of the call: the server is still the
+    // authority on whether the write happens, but knowing the NORMALIZED
+    // value here is what lets the success path reset the box to it even on
+    // a no-op (see valuesKey's comment above for why the effect alone misses
+    // that case).
+    const normalized = domainValue(raw);
+    run(
+      `${row.key}:save`,
+      () => setFlagValue({ key: row.key, value: raw }),
+      { changed: `${row.label} updated`, unchanged: `${row.label} is already set to that value` },
+      {
+        validationTarget: "field",
+        onOk: () => {
+          if (normalized.ok) setDraft((d) => ({ ...d, [row.key]: normalized.value }));
+        },
+      },
+    );
+  }
+
   return (
     <div className="flex max-w-[720px] flex-col gap-3">
-      {retryAfter !== null && !pendingToggle && (
-        <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />
+      {retryAfterSec !== null && !pendingToggle && (
+        <RateLimitNotice retryAfterSec={retryAfterSec} onExpire={() => setRetryDeadline(null)} />
       )}
       {error && !pendingToggle && <Banner tone="fault" title={error} />}
 
@@ -127,7 +188,8 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
         // is saved, even though `row.unavailable` is null for it.
         const next = !row.enabled;
         const verdict = flagChange(row.state, next);
-        const fieldError = fieldErrors[row.key];
+        const saveKey = `${row.key}:save`;
+        const fieldError = fieldErrors[saveKey];
 
         return (
           <Card key={row.key}>
@@ -149,7 +211,7 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
                     what's missing. Hiding it would read as "this flag is gone". */}
                 <Switch
                   checked={row.enabled}
-                  disabled={pending || !verdict.allowed}
+                  disabled={acting !== null || !verdict.allowed}
                   aria-label={`${row.label}${row.unavailable ? " — unavailable" : ""}`}
                   onCheckedChange={(checked) => toggle(row, checked)}
                 />
@@ -197,10 +259,9 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
                   <Button
                     size="sm"
                     variant="secondary"
-                    loading={pending}
-                    onClick={() =>
-                      run(row.key, () => setFlagValue({ key: row.key, value: draft[row.key] ?? "" }), `${row.label} updated`)
-                    }
+                    loading={acting === saveKey}
+                    disabled={acting !== null && acting !== saveKey}
+                    onClick={() => saveValue(row)}
                   >
                     Save
                   </Button>
@@ -223,7 +284,7 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
             <Button variant="ghost" onClick={() => setPendingToggle(null)}>Cancel</Button>
             <Button
               variant="primary"
-              loading={pending}
+              loading={pendingToggle ? acting === `${pendingToggle.row.key}:toggle` : false}
               onClick={() => pendingToggle && submitToggle(pendingToggle.row, pendingToggle.next)}
             >
               Turn off
@@ -232,8 +293,8 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
         }
       >
         <div className="flex flex-col gap-2">
-          {retryAfter !== null && (
-            <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />
+          {retryAfterSec !== null && (
+            <RateLimitNotice retryAfterSec={retryAfterSec} onExpire={() => setRetryDeadline(null)} />
           )}
           {error && <Banner tone="fault" title={error} />}
           <p>{pendingToggle?.warning}</p>

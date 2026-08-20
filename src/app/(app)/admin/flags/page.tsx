@@ -14,7 +14,8 @@ export default async function FlagsPage() {
       <div className="flex max-w-[720px] flex-col gap-3">
         <Banner tone="neutral" title="These take effect immediately, for everyone">
           Both flags change who can get in, so they are audited like any other change. A flag marked
-          UNAVAILABLE is one whose feature isn&apos;t finished — the switch stays off until it is.
+          UNAVAILABLE is one whose feature isn&apos;t finished — it can always be turned off, never on,
+          until it is.
         </Banner>
         <FlagRows rows={rows} />
       </div>

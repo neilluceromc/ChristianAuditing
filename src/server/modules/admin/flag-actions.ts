@@ -25,7 +25,7 @@ function revalidateAll() {
 
 const setSchema = z.object({ key: z.string().min(1), enabled: z.boolean() });
 
-export async function setFlag(input: unknown): Promise<ActionResult<null>> {
+export async function setFlag(input: unknown): Promise<ActionResult<{ changed: boolean }>> {
   const actor = await actionRole("admin");
   if (!actor) return forbidden();
   const rate = await checkRate(actor.id);
@@ -59,7 +59,7 @@ export async function setFlag(input: unknown): Promise<ActionResult<null>> {
         const verdict = flagChange(state, enabled);
         if (!verdict.allowed) return conflict(verdict.reason);
 
-        if (flag.enabled === enabled) return ok(null); // no-op: don't pollute the trail
+        if (flag.enabled === enabled) return ok({ changed: false }); // no-op: don't pollute the trail
 
         const written = await tx.featureFlag.updateMany({
           where: { key, enabled: flag.enabled },
@@ -72,23 +72,31 @@ export async function setFlag(input: unknown): Promise<ActionResult<null>> {
           actorLabel: actor.name,
           entityType: "feature-flag",
           entityId: flag.id,
-          action: "update",
-          // The key is in the diff because the entity label resolves to it, and
-          // a reader three months from now needs to know WHICH flag moved.
-          diff: { key: { from: flag.key, to: flag.key }, enabled: { from: flag.enabled, to: enabled } },
+          // Distinct per direction so /audit's Action column can tell a switch
+          // flip apart from a value edit (setFlagValue uses "flag-value").
+          action: enabled ? "flag-enable" : "flag-disable",
+          // No `key` entry here: /audit renders diff KEY NAMES, not values, so
+          // a from-equals-to `key` field would print "Fields: key, enabled" —
+          // telling a reader the flag's key itself changed. It didn't; nothing
+          // writes FeatureFlag.key and there is no flag-deletion path, so this
+          // doesn't qualify for the one sanctioned from===to precedent
+          // (offboarding.completed's m365Status, which snapshots a value a
+          // mutable row can later lose). The flag is already named — see
+          // entityLabels' "feature-flag" branch in audit/queries.ts.
+          diff: { enabled: { from: flag.enabled, to: enabled } },
         });
-        return ok(null);
+        return ok({ changed: true });
       }),
     { goneMessage: "That flag no longer exists." },
   );
   if (!result.ok) return result;
-  revalidateAll();
+  if (result.data.changed) revalidateAll();
   return result;
 }
 
 const valueSchema = z.object({ key: z.string().min(1), value: z.string() });
 
-export async function setFlagValue(input: unknown): Promise<ActionResult<null>> {
+export async function setFlagValue(input: unknown): Promise<ActionResult<{ changed: boolean }>> {
   const actor = await actionRole("admin");
   if (!actor) return forbidden();
   const rate = await checkRate(actor.id);
@@ -117,22 +125,40 @@ export async function setFlagValue(input: unknown): Promise<ActionResult<null>> 
         const flag = await tx.featureFlag.findUnique({ where: { key } });
         if (!flag) return conflict(`The flag "${key}" isn't in the database.`);
         const before = typeof flag.value === "string" ? flag.value : null;
-        if (before === domain.value) return ok(null);
+        if (before === domain.value) return ok({ changed: false });
 
-        await tx.featureFlag.update({ where: { key }, data: { value: domain.value } });
+        // Guarded on `updatedAt`, not on `value`: `value` is Json?, and an
+        // equality filter on it needs Prisma.DbNull for the null case and is
+        // fiddly to get right, where `updatedAt` is `@updatedAt` and so is
+        // already a clean optimistic-concurrency token — bumped by ANY write
+        // to this row, which is a bonus: it also catches a concurrent
+        // `enabled` flip racing this value edit, not just a concurrent value
+        // edit. Without this guard, two admins reading the same `before` and
+        // saving different values would let the second write silently
+        // discard the first, while BOTH audit rows claimed `from: before` —
+        // the second one falsely, forever.
+        const written = await tx.featureFlag.updateMany({
+          where: { key, updatedAt: flag.updatedAt },
+          data: { value: domain.value },
+        });
+        if (written.count === 0) return conflict("Someone else just changed that flag — refresh.");
+
         await writeAudit(tx, {
           actorId: actor.id,
           actorLabel: actor.name,
           entityType: "feature-flag",
           entityId: flag.id,
-          action: "update",
-          diff: { key: { from: flag.key, to: flag.key }, value: { from: before, to: domain.value } },
+          // Distinct from setFlag's "flag-enable"/"flag-disable" — see the
+          // comment there.
+          action: "flag-value",
+          // No `key` entry — see the matching comment in setFlag.
+          diff: { value: { from: before, to: domain.value } },
         });
-        return ok(null);
+        return ok({ changed: true });
       }),
     { goneMessage: "That flag no longer exists." },
   );
   if (!result.ok) return result;
-  revalidateAll();
+  if (result.data.changed) revalidateAll();
   return result;
 }

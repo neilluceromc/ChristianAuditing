@@ -58,10 +58,14 @@ export interface FlagRow {
   /**
    * What the switch shows. NOT `row.enabled` — for a `hasValue` flag this is
    * the EFFECTIVE state, computed with `flagDomain()` (the same expression
-   * `/login` and `/signup` use), because `(enabled: true, value: null)` is a
-   * real resting state (any deployment that bootstrapped without a domain)
-   * and reads as "wide open" to every enforcement point. Showing that row ON
-   * would be the admin page claiming a restriction nothing applies.
+   * `/login` and `/signup` use). `createBootstrapAdmin` with a blank domain
+   * writes `(enabled: false, value: null)`, not `(true, null)` — so the state
+   * this exists to catch, `(enabled: true, value: null)`, has no in-app
+   * producer at all now that `flagChange` refuses it; it's reachable only
+   * out-of-band (psql, a restored backup, a migration). Still has to render
+   * correctly if it shows up: `enabled: true` there would read as "wide open"
+   * to every enforcement point, and the admin page claiming a restriction
+   * nothing applies is the defect either state's mishandling would repeat.
    */
   enabled: boolean;
   hasValue: boolean;

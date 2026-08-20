@@ -26,7 +26,7 @@ export async function entityLabels(
     byType.get(e.entityType)!.add(e.entityId);
   }
   const map = new Map<string, { label: string; href: string | null }>();
-  const [assets, employees, approvals, purchases, policies, users] = await Promise.all([
+  const [assets, employees, approvals, purchases, policies, users, flags] = await Promise.all([
     byType.has("asset")
       ? prisma.asset.findMany({ where: { id: { in: [...byType.get("asset")!] } }, select: { id: true, tag: true } })
       : [],
@@ -54,6 +54,12 @@ export async function entityLabels(
           select: { id: true, name: true, email: true },
         })
       : [],
+    byType.has("feature-flag")
+      ? prisma.featureFlag.findMany({
+          where: { id: { in: [...byType.get("feature-flag")!] } },
+          select: { id: true, key: true },
+        })
+      : [],
   ]);
   for (const a of assets) map.set(`asset:${a.id}`, { label: a.tag, href: `/inventory/${a.id}` });
   for (const e of employees) map.set(`employee:${e.id}`, { label: e.name, href: `/employees/${e.id}` });
@@ -65,6 +71,7 @@ export async function entityLabels(
   // `User.name` isn't unique (only `email` is) — the label carries both so it
   // reads as an identity, not just a display name two people might share.
   for (const u of users) map.set(`user:${u.id}`, { label: `${u.name} · ${u.email}`, href: "/admin/users" });
+  for (const f of flags) map.set(`feature-flag:${f.id}`, { label: f.key, href: "/admin/flags" });
   for (const e of entries) {
     const key = `${e.entityType}:${e.entityId}`;
     if (!map.has(key)) map.set(key, { label: e.entityId.slice(0, 10) + "…", href: null });
