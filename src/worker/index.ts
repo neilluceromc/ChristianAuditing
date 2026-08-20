@@ -1,10 +1,10 @@
 import { prisma } from "../server/db/client";
 import { executeApproval } from "./execute-approval";
+import { MAX_JOB_ATTEMPTS } from "../lib/jobs";
 
 const WORKER_ID = `worker-${process.pid}`;
 const POLL_MS = 3_000;
 const STALE_MS = 5 * 60_000;
-const MAX_ATTEMPTS = 5;
 const ONCE = process.argv.includes("--once");
 
 let draining = false;
@@ -70,7 +70,7 @@ async function tick(): Promise<boolean> {
     console.log(`[worker] ${job.type} ${job.id} done`);
   } catch (err) {
     const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    const dead = job.attempts >= MAX_ATTEMPTS;
+    const dead = job.attempts >= MAX_JOB_ATTEMPTS;
     await prisma.job.update({
       where: { id: job.id },
       data: dead
