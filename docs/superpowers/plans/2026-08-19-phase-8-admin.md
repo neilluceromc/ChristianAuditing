@@ -3233,7 +3233,77 @@ edit — nothing in the unit suite reaches that file.
 
 ### Task 7: Endpoint actions — the secret is encrypted, and shown once
 
-> ### REQUIRED AMENDMENT — three things the code blocks below get wrong. Read before implementing.
+> ### AMENDED to the shipped code (`cc13bf5` + `df7a9a8` + `e90b277`). The pre-written amendment below was applied; six further Important findings were fixed on top of it.
+>
+> **The code blocks in the Steps below are the ORIGINAL text and are now stale in several places.** Read
+> the shipped files as the source of truth: `src/server/modules/admin/webhook-actions.ts`,
+> `src/server/modules/admin/queries.ts`, `src/server/webhooks/sign.ts`, `src/server/prisma-errors.ts`.
+> What changed beyond the pre-written amendment:
+>
+> **A. Every write is guarded, and `rotateSecret` was the dangerous one.** It shipped as a bare
+> `tx.webhookEndpoint.update` with no guard. Two rotations racing — two admins, **or one operator
+> double-clicking**, since nothing upstream gates repeat clicks — both succeed; the second wins in the DB
+> while the shown-once banner displays whichever response resolved last. The operator pastes S1 into the
+> receiver, S2 is live, every delivery 401s, Task 10 classifies that as permanent, and deliveries go
+> straight to `DEAD`. **The shown-once design is exactly what makes this undetectable** — the reveal is
+> the only place the value ever appears, so there is nothing to check it against. Now guarded on
+> `updatedAt`.
+>
+> **B. `updateEndpoint` guarded the one column neither writer touches.** Its guard was `where: { url }`,
+> with a comment claiming that was "enough, because the editor saves both fields together." Two admins
+> editing **only the events** (same URL): Postgres re-checks the predicate against the new row version
+> after the lock (EvalPlanQual), the URL still matches, so the second write commits over the first with no
+> conflict, and its append-only audit entry claims a `from` that had already been superseded. **§6a rule
+> 21 verbatim** — the same defect as Task 5's `setFlagValue`. Now guarded on `updatedAt`.
+> `setEndpointActive` was deliberately **left alone**: it guards on `active`, the column it writes.
+>
+> **C. `listEndpoints` fetched the ciphertext while its comment said it didn't.** `findMany` with no
+> `select` pulls every scalar column, so `secret` was materialised on every render — and `EndpointRow` is
+> consumed by a `"use client"` component, so the object is serialised into the RSC payload. One `...r`
+> from ciphertext in an admin page's source. Now an explicit `select`, with a comment that asserts
+> something a reader can verify four lines up.
+>
+> **D. The `http://` comment claimed a security property signing does not provide.** It said http was safe
+> *"because the payload is signed either way."* Signing gives the **receiver** integrity and authenticity;
+> it says nothing about where the URL points, and over plain http gives **no confidentiality** — the
+> envelope and its HMAC cross the wire in the clear, replayable for the five minutes `sign.ts` allows.
+> Rewritten to say what is true.
+>
+> **E. One SSRF guard, deliberately narrow.** `isBlockedWebhookHost` refuses `169.254.0.0/16` and
+> `metadata.google.internal` — never legitimate webhook targets, zero false positives. **Loopback and
+> RFC1918 are deliberately NOT blocked**: scope decision #4's "a receiver may be another container on the
+> same host" rationale and this plan's own `http://localhost:4999/hook` verification both depend on them.
+> **The guard's soundness rests on a non-obvious fact, verified rather than assumed:** it pattern-matches
+> only a dotted quad, but `new URL` normalizes every integer form first — `http://2852039166/`,
+> `http://0xa9fea9fe/` and `http://0251.0376.0251.0376/` all yield hostname `169.254.169.254`, so there is
+> no decimal/hex/octal bypass. IPv6 `[fd00:ec2::254]` is **not** blocked; accepted, since this deployment
+> has no metadata service. The broader capability — an authenticated admin can make the worker POST to any
+> host it can reach — is an **accepted capability, not an escalation**: the actor can already change roles
+> and open signup, and Task 10 stores only status codes, never response bodies, so it is a blind
+> reachability oracle rather than a data read.
+>
+> **F. An unrecognised event is removable, deliberately.** `updateEndpoint` preserves unknown events on
+> every save — which was right, but combined with no other writer of `events` and `deleteEndpoint`
+> refusing any endpoint with history, it made them **unremovable for the row's lifetime**. It now accepts
+> **`removeUnknown: string[]`** (default `[]`, **never inferred from absence**) and audits the removal as a
+> real `events` diff, comparing the full raw column on both sides so the dropped name appears in `from`
+> and not in `to`.
+>
+> Plus: `secretAad` is now **pinned by a literal test** (`secretAad("abc") === "webhook:abc"`) with an
+> encrypt/decrypt round-trip and a cross-row-AAD refusal — renaming that six-character prefix, or a Task
+> 10 implementer passing `endpoint.id` instead of `secretAad(endpoint.id)`, typechecks and passes
+> everything while making every **pre-existing** secret permanently undecryptable and leaving new ones
+> fine; `newSecret` moved to `sign.ts` (a plain module a test can import) with its 43-char/256-bit shape
+> pinned; `asActionResult` gained a **P2003** branch with an `opts.restrictedMessage` override, because
+> `deleteEndpoint`'s count-then-delete window is real once Task 9's emitter exists and an unhandled P2003
+> reaches the operator as an error boundary rather than a banner; the action verbs are namespaced
+> (`endpoint-enable` / `endpoint-disable` / `endpoint-delete`) per §6a rule 22; `ROTATION_WARNING` is a
+> const in `src/lib/webhooks.ts` so Task 8 does not hardcode it; and `eventsSchema` dropped the
+> `as unknown as [string, ...string[]]` cast, which is the zod-3 idiom Task 4 already removed once.
+>
+> ---
+>
+> **The pre-written amendment, for the record — all three were applied:**
 >
 > **1. Two of the audit diffs are pure from-equals-to, which HANDOVER §6a rules 8 and 19 forbid — and
 > this would be the sixth and seventh instance of that shape in this phase.** `/audit` renders diff **key
@@ -3640,21 +3710,43 @@ git commit -m "feat(webhooks): endpoints, with the signing secret encrypted and 
 
 > ### REQUIRED AMENDMENT — two things this page owes the admin that the blocks below don't provide.
 >
-> **1. Name the subscriptions this build no longer recognises.** `partitionEvents` (Task 6) returns
-> `unknown` alongside `known`, and Task 7's `EndpointRow` carries it. The editor must **say so** — the
-> endpoint is subscribed to a name this build cannot emit, and **saving will remove it.** Without that,
-> the first unrelated Save destroys the subscription permanently and audits it as unchanged. A `Banner`
-> naming the dropped events is enough.
+> **1. Name the subscriptions this build no longer recognises — and CORRECTION: saving does NOT remove
+> them.** An earlier version of this banner said *"saving will remove it"*. That was true of Task 6's
+> `parseEvents` and is **false of Task 7's shipped code, which preserves unknown events on every write.**
+> If you implement the old sentence the banner tells the admin the opposite of what Save does.
 >
-> **2. Rotation is a hard cutover, and only the code knows it.** `deliverWebhook` decrypts the secret
+> What to build: `partitionEvents` returns `unknown` alongside `known` and Task 7's `EndpointRow` carries
+> it as `unknownEvents`. Name those events in a `Banner`, say the build no longer sends them, and offer
+> **one explicit removal** that passes their exact names in `updateEndpoint`'s **`removeUnknown: string[]`**
+> input — never inferred from absence. Without a removal affordance the banner nags forever about a
+> subscription nothing can honour; with one, the deletion is deliberate, legible and audited as a real
+> `events` diff.
+>
+> **2. Rotation is a hard cutover — and the sentence already exists, so don't retype it.**
+> `ROTATION_WARNING` in `src/lib/webhooks.ts` (added by Task 7's review) is the string; render **that**,
+> not an inline copy — §6a rules 5 and 11, the same one-string-two-surfaces discipline as `lockReason` and
+> `flagChangeWarning`. Why it matters: `deliverWebhook` decrypts the secret
 > **at attempt time**, so rotating re-signs in-flight deliveries with the new key. A receiver still
 > holding the old key returns 401, Task 10 classifies 4xx-except-408/429 as **permanent**, and the
 > delivery goes straight to `DEAD` on its first attempt — and so does every delivery after it, until
 > someone updates the receiver. It is recoverable with `replayAllDead`, but the operator is never told.
 > There is no `secretVersion` column and no key-id header, so a receiver cannot support an overlap
-> window. **The Rotate control must state this before the click** — the same "stated, not discovered"
-> discipline as `lockReason` and `flagChangeWarning`. (An overlap scheme — a nullable `secretPrev` and a
-> dual `sha256=a,sha256=b` header — is deliberately **out of scope**; this phase has one migration.)
+> window. **The Rotate control must state this before the click.** (An overlap scheme — a nullable
+> `secretPrev` and a dual-signature header — is deliberately **out of scope**; this phase has one
+> migration.)
+>
+> **3. Gate the `Menu` items on `pending`.** As drafted only `EventChecks` and the Save button are gated,
+> so a double-click on **Rotate** is a live race — and per Task 7's amendment (A) that race hands the
+> operator a secret that isn't the live one, undetectably.
+>
+> **4. Compare `dirty` on canonically ordered event lists.** As drafted it joins the checkbox click order
+> against the row's canonical order, so untick-then-retick offers a Save, the server's canonicalised no-op
+> check returns early, and the toast claims success with no audit entry written — §6a rule 6's
+> phantom-entry shape.
+>
+> **5. `useRunner` must claim `events`**, with a `FormError` under the checkboxes. As drafted it claims
+> only `url`, so `eventsSchema`'s refusal ("Pick at least one event…") lands in the banner while this
+> task's own verification text says it renders under the checkboxes. Fix one or the other.
 
 The endpoint list and its editor. The one screen in this phase with a genuinely unusual obligation:
 **the secret is visible exactly once**, in the response to create or rotate, and there is no way back
@@ -4230,6 +4322,28 @@ git commit -m "feat(webhooks): the producer that never existed, and the index th
 > comment claims a guarantee it does not add: the SQL `events: { has: event }` already matched the
 > literal, and `event` is typed `WebhookEvent`, so `parseEvents` cannot drop it. Harmless, but delete it
 > or fix the comment rather than shipping a filter that reads as a safety net and isn't one.
+>
+> **Three more, from Task 7's review. The first is the one with teeth:**
+>
+> **`fetch` defaults to `redirect: "follow"`.** A 307/308 from an admin-approved receiver forwards the
+> method, the body **and the signature header** to any host that receiver names — one the admin never
+> approved and cannot see. Neither Stripe nor GitHub follows webhook redirects. Set
+> **`redirect: "manual"`** and treat a 3xx as a permanent failure. This is the real SSRF hole; the
+> `urlSchema` guard in Task 7 cannot see past the first hop.
+>
+> **Response bodies must never enter `lastError`** — status and statusText only, which is what keeps the
+> accepted-capability argument in Task 7's amendment (E) true by making this a blind oracle rather than a
+> data read. Say so in a comment so it isn't "improved" later.
+>
+> **A `decryptSecret` failure must mark the `WebhookDelivery` row `DEAD` with the reason, before
+> throwing.** As drafted the decrypt happens before the first `mark()`, and the worker's catch updates
+> **`Job` only** — so a row whose secret can't be decrypted sits at `PENDING`/`attempts: 0` forever,
+> `deliveryStage` renders it as a healthy `QUEUED`, and the real error is buried in `Job.lastError`, which
+> no admin page reads. Treat it as a `Permanent` in the same shape as the disabled-endpoint branch.
+>
+> And call **`secretAad(endpoint.id)`** — not `endpoint.id`, not a re-derived string. Task 7 pinned that
+> with a literal test precisely because getting it wrong breaks every pre-existing secret while leaving
+> newly created ones working.
 
 `src/worker/index.ts` currently answers every `DELIVER_WEBHOOK` job with
 `status: "DEAD", lastError: "webhook delivery ships in Phase 8"`. This is that phase.
@@ -4641,6 +4755,19 @@ git commit -m "feat(admin): a Home whose body matches its own sidebar"
 ---
 
 ### Task 12: The fixtures the deliveries page needs
+
+> ### REQUIRED AMENDMENT — three checks from Task 7's review.
+>
+> **1. Keep `encryptSecret(HOOK_SECRET, secretAad(id))`.** As drafted this is correct — a seed that stored
+> the secret as plaintext would silently defeat scope decision #4, and nothing would fail.
+>
+> **2. Confirm `SECRET_ENCRYPTION_KEY` is actually visible in the seed process.** Today it arrives only as
+> an implicit side effect of Prisma Client's `.env` loading. If it is absent, `encryptSecret` throws and
+> the seed fails loudly — which is the good outcome, but verify it rather than discovering it.
+>
+> **3. The insert-then-update pair is `Promise.all`'d, not transactional.** Harmless immediately after
+> `TRUNCATE`, but the "no reader ever sees the empty placeholder" argument that justifies the same pattern
+> in `createEndpoint` does **not** apply here. Either wrap it or state why it doesn't need wrapping.
 
 `prisma/seed.ts` has never created a `WebhookEndpoint`, so every state the deliveries page is designed
 around — `DELIVERED`, `RETRYING`, and the `DEAD · 5/5` row with its "Replay" control — is unreachable
