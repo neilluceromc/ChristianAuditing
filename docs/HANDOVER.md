@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–8 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
+**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–9 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,7 +13,7 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–8 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–9 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
    so far; `git rev-list --count main..HEAD` is the count, and `git status` should be clean.
    **Don't trust a commit count written into this doc** — I corrected it twice and each correction was
@@ -26,8 +26,8 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
 2. `docker compose up -d db` → **`npx prisma migrate deploy`** → `npm run db:seed` → open the preview
-   (`preview_start` name `app-dev`). **7 migrations, none pending** as of this handover; Phase 8's one
-   migration is still ahead of you, in Task 9.
+   (`preview_start` name `app-dev`). **8 migrations, none pending** as of this handover — Task 9 added
+   the phase's one and only migration, so there is none ahead of you.
 
    **`npm run db:seed` is blocked by the harness classifier when an agent runs it** (see §3). Run it from
    your own terminal, or let a Playwright spec do it — every spec reseeds via `execSync` in `beforeAll`
@@ -38,11 +38,18 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    and already maps each criterion to a task**, so read §6 when a task's reasoning looks arbitrary, not
    as something to act on. **§6a is the section that matters most** — it is what Tasks 1–7 actually
    established, and it is where the recurring-defect checklist lives.
-4. **Resume at Task 9** (the emitter + the phase's one migration) of
+4. **Resume at Task 10** (the worker delivers for real) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
-   Tasks 1–8 are committed; 9–14 remain. **Task 9 is the first of the three consequential ones**
-   (9 adds the migration, 10 makes the first outbound network request this project has ever made, 12 adds
-   the fixtures without which `/admin/webhooks/deliveries` is unreachable).
+   Tasks 1–9 are committed; 10–14 remain. **Task 10 is the most consequential task in the phase** — the
+   first code in this project that makes an outbound network request, replacing the worker's
+   `DELIVER_WEBHOOK` dead-letter placeholder. Read its banner twice.
+
+   **The pipeline is now live up to exactly that boundary**, and it is worth knowing what that looks
+   like: emitting works, so a completed purchase / executed approval / completed offboarding writes a
+   `WebhookDelivery` + a `DELIVER_WEBHOOK` `Job`, and the worker then **dead-letters that job** with
+   `"webhook delivery ships in Phase 8"` while the delivery row sits at `PENDING` forever. **That
+   divergence is not a bug in Task 9** — nothing mirrors job state onto the ledger until Task 10 does it.
+   Don't "fix" the PENDING.
 
    **Tasks 10, 12 and 13 each open with a `REQUIRED AMENDMENT` block, written BEFORE those tasks
    started.** Reviews of Tasks 6 and 7 read forward into them and verified the claims by running code, so
@@ -56,7 +63,11 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    - **Task 13:** delete the second `MAX_DELIVERY_ATTEMPTS` literal, or the `DEAD · 5/5` chip silently
      lies the day someone tunes the worker. It also pairs a rule with a page, so run rule 10 on it.
 
-   **Task 8's banner now reads `AMENDED` and its code blocks ARE the shipped code**, like Tasks 2–7.
+   **Tasks 8 and 9 now read `AMENDED` and their code blocks ARE the shipped code**, like Tasks 2–7.
+   **Task 9 had no banner written for it in advance, and it still had two defects** — the migration was
+   missing the CHECK constraint that makes its own unique index mean anything, and the emitter carried a
+   dead branch with a comment describing a guard the type system already provided (rules 39 and 40).
+   Treat the absence of a banner as "nobody has looked yet", not "this one is fine".
 
    Read the plan's **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the
    `m365_sso` refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a
@@ -97,6 +108,11 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
      one that said signing made plain `http` safe, one that said a secret was never selected when it was
      fetched on every render, and Task 8's banner promising "the button below" in the one branch that
      renders no button. **It applies to user-facing prose exactly as much as to comments** — rule 35.)
+   - **When copying an existing pattern, did you copy ALL of it?** (rule 39. Task 9's migration mirrored
+     `Job_one_live_execute_per_approval` and left behind its companion CHECK constraint — without which
+     the partial unique index it copied silently constrains nothing, because it indexes an expression and
+     Postgres never collides NULLs. The original migration's own comment says exactly this. Same shape as
+     rule 27, where a status family map got three of an enum's four values.)
    - **Is a number or a contract string in the UI defined anywhere else?** (rules 26, 37, 38. Task 8
      found two: the page's prose said a delivery "retries five times" where `MAX_JOB_ATTEMPTS` is the
      worker's cap and means five attempts in TOTAL, and the shown-once banner hardcoded the signature
@@ -143,11 +159,11 @@ at a timing race. It failed once in three full runs and was reproduced byte-for-
 
 **Nothing is half-finished in the code.** Every Phase 8 task ended on a green commit, and each one's
 plan text and §6a entry were updated in the same session it shipped. The next unit of work is a whole
-task — **Task 9** — not a fragment of anything. Every review finding was either fixed or recorded in
+task — **Task 10** — not a fragment of anything. Every review finding was either fixed or recorded in
 §8; none was left silently open.
 
 **State this session left behind:** working tree **clean**, **no dev server running** (verified: no
-`node.exe` processes), `inventory-db-1` **up**, **7 migrations, none pending** (`prisma migrate status`
+`node.exe` processes), `inventory-db-1` **up**, **8 migrations, none pending** (`prisma migrate status`
 says "up to date"). **No scratch files anywhere in the repo** — the session's working scripts live in the
 harness scratchpad, outside the tree. Last verified green: `npx tsc --noEmit` · `npm run lint` ·
 **453 tests / 30 files** · `npm run build`.
@@ -173,6 +189,18 @@ out. **Do not leave one behind:** the secret is shown exactly once, so an endpoi
 session is one whose plaintext secret nobody holds, and Task 10's end-to-end check needs that plaintext
 to verify the signature at its local receiver. Task 10 creates its own; the seed adds fixtures in Task 12,
 which is why Task 12 exists at all — `/admin/webhooks/deliveries` is unreachable without them.
+
+**Task 9's verification moved real fixture data, and this is the paragraph to read before trusting any
+seeded state.** A reseed is genuinely worth running from your own terminal before Task 12 or 14. What
+moved: **`PR-0195`, `PR-0198` and `PR-0201` are all now `COMPLETED`** (they were IT_REVIEWED, SUBMITTED
+and DRAFT — so the seed's "one PR per state" property is GONE, and `PR-0198`, the bounce-back fixture the
+purchasing e2e leans on, is one of them); **`APR-2041` is EXECUTED** and its asset **`BR-LT-0181` moved
+SPARE → DEPLOYED** and is assigned to EMP-0097; and **Grace Lim (EMP-0063) is OFFBOARDED** — she was
+ACTIVE, and was deliberately made OFFBOARDING-with-nothing-held to exercise the third emit call site.
+She was **not** edited back: the completion wrote an append-only audit entry, and flipping her to ACTIVE
+would leave the row contradicting a trail that can never be corrected. All the webhook rows those
+verifications produced (2 endpoints, 3 deliveries, 2 dead jobs) **were** deleted — their shown-once
+secrets are lost, so they would only mislead Task 10.
 
 **One `WebhookDelivery` row was inserted by hand during Task 8's verification and deleted again**, to
 exercise the Delete gate. If you need the same, the insert is
@@ -241,7 +269,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 
 ## 3. Environment / how to run
 
-- **DB:** `docker compose up -d db`. Seed: `npm run db:seed` (TRUNCATE + reseed — the sanctioned reset; **`prisma migrate reset` is blocked by the harness classifier and unnecessary**). **As of Phase 8 Task 3, `npm run db:seed` is ALSO blocked by the classifier when run directly** — run it from your own terminal, or let Playwright do it (every spec reseeds via `execSync` in `beforeAll`, which is not blocked). **7 migrations** as of the Phase 7 branch; add new ones as hand-written SQL dirs, then `npx prisma migrate deploy && npx prisma generate` (`migrate dev` also works but invents a name). **A reseed TRUNCATEs, so a migration's backfill does not survive it** — anything the app depends on has to be set by `prisma/seed.ts` too (`Employee.offboardingAt` is set both ways for exactly this reason).
+- **DB:** `docker compose up -d db`. Seed: `npm run db:seed` (TRUNCATE + reseed — the sanctioned reset; **`prisma migrate reset` is blocked by the harness classifier and unnecessary**). **As of Phase 8 Task 3, `npm run db:seed` is ALSO blocked by the classifier when run directly** — run it from your own terminal, or let Playwright do it (every spec reseeds via `execSync` in `beforeAll`, which is not blocked). **8 migrations** as of Phase 8 Task 9 (7 at the Phase 7 merge); add new ones as hand-written SQL dirs, then `npx prisma migrate deploy && npx prisma generate` (`migrate dev` also works but invents a name). **A reseed TRUNCATEs, so a migration's backfill does not survive it** — anything the app depends on has to be set by `prisma/seed.ts` too (`Employee.offboardingAt` is set both ways for exactly this reason).
 - **Dev app:** never via Bash — use the Browser-pane preview (`preview_start` name `app-dev`, port 3000). The controller owns this server; subagents must not start one.
 - **Worker:** `npm run worker` (poll loop) or `npm run worker:once` (drain and exit — what e2e uses). In prod it's the compose `worker` service.
 - **NEVER run `npm run build` while a dev server is running** — they share `.next` and it bricks the dev server.
@@ -249,7 +277,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–8 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–9 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -373,7 +401,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–8 of 14 on the unmerged `phase-8-admin`)**
+**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–9 of 14 on the unmerged `phase-8-admin`)**
 (`docs/superpowers/plans/2026-08-19-phase-8-admin.md`): the user rules and the two mutations behind
 them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LABELS`, and the pure rules
 `lockReason` / `roleChange` / `disableChange`, with the permanent admin locked against **both** role and
@@ -415,8 +443,15 @@ sends with one explicit removal. Added `deleteBlockedReason` to `src/lib/webhook
 one-string-two-surfaces rule) and **moved `SIGNATURE_HEADER` there from `src/server/webhooks/sign.ts`**,
 which a client component cannot import. Review fixes for Tasks 6–8, unsquashed:
 `5c4ab33` + `093a209`; `cc13bf5` + `df7a9a8` + `e90b277`; `4b26385`.
-**Still nothing DELIVERS**: Task 9 writes the emitter and the phase's one migration, Task 10 the worker's
-real delivery loop, Task 12 the fixtures, Task 13 `/admin/webhooks/deliveries`.
+**Task 9** — `emitWebhook` in `src/server/webhooks/emit.ts`, the only producer of `DELIVER_WEBHOOK`
+jobs: no I/O, called inside the transaction that writes the domain change, writing one `WebhookDelivery`
+(the ledger) plus one `Job` (the retry engine) per **active, subscribed** endpoint. Wired into
+`executeApproval` (worker-side, relative import), `completeOffboarding` and `runTransition`'s `complete`
+branch. Plus the phase's one migration: `Job_one_live_deliver_per_delivery` **and**
+`Job_deliver_payload_shape`, the pair that together mean "at most one live job per delivery" while still
+letting Replay re-enqueue a terminal one.
+**Still nothing DELIVERS**: emitted jobs dead-letter on the worker's Phase-8 placeholder. Task 10 writes
+the real delivery loop, Task 12 the fixtures, Task 13 `/admin/webhooks/deliveries`.
 
 ### Conventions every later phase must follow
 
@@ -449,14 +484,14 @@ real delivery loop, Task 12 the fixtures, Task 13 `/admin/webhooks/deliveries`.
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 9–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 10–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1–8 are done** — the user rules, the two user mutations, `/admin/users`, the flag allowlist,
-  `/admin/flags`, the webhook vocabulary, the endpoint actions, and `/admin/webhooks`. See §6a.
-  **Task 9 is next**, and everything from here stops being CRUD: **Task 9 adds the phase's one
-  migration**, **Task 10 rewrites the worker's `DELIVER_WEBHOOK` branch** from a dead-letter placeholder
-  into real HTTP delivery, and Task 12 adds seed fixtures. Those three are the consequential ones, and
-  Task 10 is the first code in this project that makes an outbound network request.
+  **Tasks 1–9 are done** — the user rules, the two user mutations, `/admin/users`, the flag allowlist,
+  `/admin/flags`, the webhook vocabulary, the endpoint actions, `/admin/webhooks`, and the emitter plus
+  the phase's one migration. See §6a. **Task 10 is next and is the consequential one**: it rewrites the
+  worker's `DELIVER_WEBHOOK` branch from a dead-letter placeholder into real HTTP delivery — the first
+  code in this project that makes an outbound network request. Task 12 then adds the seed fixtures
+  `/admin/webhooks/deliveries` needs to be reachable at all.
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -524,7 +559,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–8 established (READ BEFORE TASK 9)
+## 6a. Phase 8 mid-flight: what Tasks 1–9 established (READ BEFORE TASK 10)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -881,6 +916,50 @@ are the two a later task can reproduce.**
     when a server-only module holds a value the UI must display, move the value, don't copy it — and
     `src/lib/*` versus `src/server/*` is the line that decides which module can hold it.
 
+**From Task 9 (`5a5494e`) — the first task with no advance banner, which still had two defects. Rule 39
+is the one to carry.**
+
+39. **Mirroring an existing pattern means mirroring ALL of it — and a constraint that silently doesn't
+    constrain looks identical to one that does.** Task 9's migration was told to mirror
+    `Job_one_live_execute_per_approval`, and did: a partial unique index on
+    `(payload->>'deliveryId')` where the job is live. What it did not copy is the **companion CHECK**
+    (`Job_execute_payload_shape`), whose own comment in
+    `20260814093000_provenance_restrict_and_indexes` says why it exists — *"or the one-live-job partial
+    unique above it silently no-ops (NULLs never collide)"*. The index is on an **expression**; a job
+    with no `deliveryId` key evaluates to NULL, and Postgres never collides NULLs, so unlimited live
+    jobs would have been permitted for exactly the malformed payloads the guarantee matters most for.
+    **Nothing in a green suite can tell you this.** The only thing that catches it is asserting the
+    constraint against the live database — insert the violating row and require the error. Same family
+    as rule 27 (a status map given three of an enum's four values). When you copy a guard, go read what
+    else the migration that introduced it shipped in the same breath.
+
+40. **A runtime re-check that the type system already guarantees is dead code, and its comment is a
+    lie about where safety comes from.** The plan's emitter had
+    `if (!parseEvents(endpoint.events).includes(event)) continue;`, commented as stopping a renamed
+    event being resurrected by a stale row. `has` is exact array membership, so every row the query
+    returns provably contains `event`, and `event` is typed `WebhookEvent` — so `partitionEvents` puts
+    it in `known` unconditionally and the branch can never be taken. Harmless in itself; the damage is
+    the comment, which tells the next reader that a runtime filter is what makes this safe when the
+    **parameter type** is. Rule 16 in the form where the false claim is about which mechanism protects
+    you. Ask of any defensive branch: what input reaches it, and can that input exist?
+
+41. **"Prove it does nothing" is not a test of a producer.** Task 9's plan verified the emitter by
+    completing a purchase with no endpoints configured and asserting `WebhookDelivery` count `0` — which
+    an `emitWebhook` with an empty body passes perfectly. The positive case has to be run too, and the
+    cheap version is worth knowing: create **two** endpoints subscribed to **different** events, trigger
+    one, and require exactly one delivery on the right endpoint plus a `Job` whose `deliveryId` matches
+    it. Then disable it and trigger again to prove `active: true` means "stops receiving". Generalise:
+    when a task's verification only asserts an absence, ask what a no-op implementation would do.
+
+42. **The worker's call sites are the ones a typecheck proves least about.** `src/worker/**` runs under
+    `tsx`, not Next, and uses relative imports exclusively — there is not one `@/` import under that
+    directory. A new module imported from both sides (`emit.ts` is imported by the worker AND by two
+    `"use server"` modules) has to use the style that works in both. `npm run worker:once` loading at
+    all is the cheap smoke test — module resolution happens before any job is leased — and executing a
+    real approval through it is the full one. **Note also `emit.ts` is a PLAIN module deliberately:**
+    its first parameter is a transaction client, which is not serialisable, and being exported from a
+    `"use server"` file would make it a network-reachable action (§6a rule 7's shape).
+
 ---
 
 ## 7. Recurring gotchas that have cost real time
@@ -1025,6 +1104,23 @@ are the two a later task can reproduce.**
   card `3h`'s artboard**: the artboard is one bordered container of divider-separated rows with the mono
   key as the primary label, where this ships a discrete `Card` per flag with the human label primary and
   the key demoted to 10px. Deliberate and arguably better, recorded so it reads as a choice.
+- **Phase 8, Tasks 8 and 9 (recorded, judged not worth fixing now):** **`emitWebhook` can fail the
+  transaction it is called from.** Scope decision #10 forbids I/O and it does none, but `create` is
+  still a write: the emitter reads an endpoint, a concurrent `deleteEndpoint` commits, and
+  `webhookDelivery.create` then violates its foreign key. In `executeApproval` that surfaces as
+  `EXECUTION_FAILED` on the approval, which a retry clears (the endpoint is gone by then, so the retry
+  emits nothing). Not guardable cheaply: swallowing is unavailable because a failed statement poisons
+  the Postgres transaction, and emitting outside the transaction trades this for "webhook fired for a
+  change that rolled back", which is strictly worse. Narrow enough to accept, recorded so it isn't
+  rediscovered as a mystery. **`Job_one_live_deliver_per_delivery` and `Job_deliver_payload_shape` exist
+  only in raw migration SQL, not in `schema.prisma`** — the fourth and fifth constraints in that
+  position (`Reservation_one_active_hold_per_asset` is already on this list for the same reason), so
+  `prisma db pull` still would not reproduce the schema this app actually depends on. **The delete
+  affordance on `/admin/webhooks` is disabled from `endpoint.attempts`, which counts ALL deliveries** —
+  so an endpoint whose entire history is a single dead delivery from a long-deleted receiver can never
+  be deleted through the UI, only disabled. Correct per the rule (the ledger is the record of what was
+  sent), but there is no "purge this endpoint's history" path anywhere, and Task 13 is where one would
+  naturally live if it is ever wanted.
 - **`/bootstrap`'s copy under-states the lock**: `src/app/(auth)/bootstrap/page.tsx` promises the
   permanent admin's *role* can never be changed, but Phase 8 widened that to access as well. Worth
   aligning when Task 3 lands. The corollary belongs here too — a bootstrapped permanent admin's account

@@ -4484,6 +4484,48 @@ git commit -m "feat(webhooks): endpoints, and a secret you get exactly one look 
 
 ### Task 9: The emitter, and the index that stops a double-click
 
+> ### AMENDED — this section is the code as SHIPPED (`5a5494e`). Two things the original blocks got
+> wrong, both worth reading before Tasks 10 and 13.
+>
+> **1. The migration was HALF a guarantee.** The partial unique index indexes an **expression**
+> (`payload->>'deliveryId'`), and Postgres never collides NULLs — so a `DELIVER_WEBHOOK` job with no
+> `deliveryId` key would have been permitted without limit, and the "at most one live job per delivery"
+> promise would have quietly not applied to exactly the payloads most likely to be malformed. The
+> sibling index this task was told to mirror **already has the companion constraint**
+> (`Job_execute_payload_shape`, in `20260814093000_provenance_restrict_and_indexes`) with a comment
+> saying precisely this — *"or the one-live-job partial unique above it silently no-ops (NULLs never
+> collide)"*. The plan copied the index and not its companion. `Job_deliver_payload_shape` is now in the
+> same migration, so the phase still has **one** migration.
+>
+> Proven against the live database, all four cases: a `DELIVER_WEBHOOK` job with `payload = '{}'` is
+> refused by the CHECK; a well-formed one is accepted; a **second live** job for the same `deliveryId` is
+> refused by the unique index; and once the first job is `DONE`, the same `deliveryId` **can** be
+> enqueued again — which is not incidental, it is what makes Task 13's Replay possible at all. A unique
+> index without the `status IN ('PENDING','RUNNING')` predicate would have blocked replay forever.
+>
+> **2. The emitter's `parseEvents` re-check was dead code with a false comment.** The plan had
+> `if (!parseEvents(endpoint.events).includes(event)) continue;`, commented as stopping a renamed event
+> from being resurrected by a stale row. It cannot fire: `has` is exact array membership, so any row the
+> query returns provably contains `event`, and `event` is typed `WebhookEvent` — therefore
+> `partitionEvents` puts it in `known` unconditionally. §6a rule 16, in the form where the comment
+> describes a guard the type system already provides. Removed, and the comment now says what is actually
+> true: **the parameter type is the guard.** Unrecognised names in the same row are irrelevant to this
+> event and are preserved untouched by Task 7's `removeUnknown`.
+>
+> **3. One accepted failure mode, recorded rather than guarded** (it is in `emit.ts`'s doc comment too).
+> Scope decision #10 forbids I/O, and this does none — but `create` is still a write, and a throw here
+> rolls back the caller's transaction. The reachable path is narrow: the emitter reads an endpoint, a
+> concurrent `deleteEndpoint` commits, and `webhookDelivery.create` then violates its foreign key. In
+> `executeApproval` that surfaces as `EXECUTION_FAILED`, which a retry clears (the endpoint is gone by
+> then, so the retry emits nothing). **Swallowing it is not available** — a failed statement poisons the
+> Postgres transaction, so there is nothing left to continue with — and moving the emit outside the
+> transaction trades this for the far worse "webhook fired for a change that rolled back." Recorded in
+> HANDOVER §8.
+>
+> **4. Local names, corrected.** `runTransition` calls the request row **`req`**, not `request`. And in
+> `execute-approval.ts`, `asset` is non-null by the guard at the top of `runExecution`, so the plan's
+> `asset?.tag ?? null` hedge is misleading — it is `asset.tag`, a real tag.
+
 The producer that has never existed. `emitWebhook` writes rows and performs **no I/O** — scope
 decision #10 — because an unreachable endpoint must never roll back the inventory change that
 mentioned it.
@@ -4494,18 +4536,35 @@ mentioned it.
 - Modify: `src/worker/execute-approval.ts`, `src/server/modules/offboarding/actions.ts`,
   `src/server/modules/purchases/actions.ts`
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
-Create `prisma/migrations/20260819090000_job_one_live_deliver_per_delivery/migration.sql`:
+`prisma/migrations/20260819090000_job_one_live_deliver_per_delivery/migration.sql`:
 
 ```sql
--- At most one live delivery job per WebhookDelivery row. The mirror of
+-- At most one live delivery job per WebhookDelivery row. The exact mirror of
 -- Job_one_live_execute_per_approval (20260814090100_integrity_constraints):
 -- Task 13's Replay re-enqueues, and a double-click would otherwise put two
--- workers on one delivery and POST the same envelope twice.
+-- workers on one delivery and POST the same envelope twice — which a receiver
+-- cannot deduplicate, because a replay reuses the delivery's id and therefore
+-- produces a byte-identical envelope and signature (see webhooks/sign.ts).
+--
+-- Raw SQL with no schema.prisma counterpart, like the three integrity
+-- constraints before it: `prisma db pull` will not reproduce it. HANDOVER §8
+-- tracks that gap rather than pretending it isn't there.
 CREATE UNIQUE INDEX "Job_one_live_deliver_per_delivery"
   ON "Job" ((payload->>'deliveryId'))
   WHERE "status" IN ('PENDING', 'RUNNING') AND "type" = 'DELIVER_WEBHOOK';
+
+-- The other half of that guarantee, and the half the plan for this task left
+-- out: the partial unique above indexes an EXPRESSION, and a DELIVER_WEBHOOK
+-- job with no 'deliveryId' key yields NULL, which never collides with
+-- anything. Without this constraint the index silently permits unlimited live
+-- jobs for a malformed payload — the identical reasoning, and the identical
+-- pairing, as Job_execute_payload_shape in
+-- 20260814093000_provenance_restrict_and_indexes. Copying the index without
+-- its companion copies half a guarantee.
+ALTER TABLE "Job" ADD CONSTRAINT "Job_deliver_payload_shape"
+  CHECK (type <> 'DELIVER_WEBHOOK' OR payload ? 'deliveryId');
 ```
 
 Apply it and regenerate the client:
@@ -4514,21 +4573,33 @@ Apply it and regenerate the client:
 npx prisma migrate deploy && npx prisma generate
 ```
 
-Expected: `1 migration found` … `Applied`. This is a raw-SQL index with no `schema.prisma` counterpart,
-exactly like the three integrity constraints before it — `prisma db pull` would not reproduce it, which
-is why HANDOVER §8 tracks that gap rather than pretending it doesn't exist.
+Expected: `8 migrations found` … `Applied`. Raw SQL with no `schema.prisma` counterpart, exactly like
+the three integrity constraints before it — `prisma db pull` would not reproduce it, which is why
+HANDOVER §8 tracks that gap rather than pretending it doesn't exist.
 
-- [ ] **Step 2: Write the emitter**
+**Then prove both halves bite**, because an index that silently doesn't constrain looks identical to one
+that does:
+
+```bash
+docker exec inventory-db-1 psql -U inventory -d inventory \
+  -c "insert into \"Job\" (id,type,payload) values ('t1','DELIVER_WEBHOOK','{}'::jsonb);"
+```
+
+Expected: `violates check constraint "Job_deliver_payload_shape"`. Then insert two jobs with the same
+`deliveryId` (second refused by the unique index), mark the first `DONE`, and insert again (**accepted** —
+that is Replay). Clean up the test rows afterwards.
+
+- [x] **Step 2: Write the emitter**
 
 Create `src/server/webhooks/emit.ts`:
 
 ```ts
 import type { Prisma } from "@prisma/client";
-// Relative, not "@/": src/worker runs under tsx and every worker-side module
-// in this repo imports relatively (see execute-approval.ts). emit.ts is imported
-// from BOTH the worker and Next server actions, so it has to use the style that
-// works in both.
-import { parseEvents, type WebhookEvent } from "../../lib/webhooks";
+// Relative, not "@/": src/worker runs under tsx and every worker-side module in
+// this repo imports relatively (verified — there is not one "@/" import under
+// src/worker). emit.ts is imported from BOTH the worker (execute-approval.ts)
+// and Next server actions, so it has to use the style that works in both.
+import type { WebhookEvent } from "../../lib/webhooks";
 
 /**
  * The only producer of DELIVER_WEBHOOK jobs. Called from INSIDE the transaction
@@ -4543,23 +4614,50 @@ import { parseEvents, type WebhookEvent } from "../../lib/webhooks";
  * Scope decision #6: one WebhookDelivery (the ledger the page reads) plus one
  * Job (the retry engine) per subscribed endpoint, created together so they
  * cannot disagree about whether a delivery exists.
+ *
+ * It lives in a PLAIN module, deliberately. Two of its three call sites are
+ * `"use server"` files, where every export becomes a network-reachable server
+ * action — and this function's first parameter is a transaction client, which
+ * is not serialisable across that boundary. Importing INTO a "use server"
+ * module is fine; being exported FROM one would not be (the same reasoning
+ * that put `asActionResult` in src/server/prisma-errors.ts).
+ *
+ * **One accepted failure mode, recorded rather than guarded.** These are still
+ * writes, so they can still fail, and a throw here rolls back the caller's
+ * transaction. The reachable case is narrow: this reads an endpoint, a
+ * concurrent `deleteEndpoint` commits, and the `webhookDelivery.create` below
+ * then violates its foreign key. For `executeApproval` that surfaces as
+ * EXECUTION_FAILED on the approval, which a retry clears (the endpoint is gone
+ * by then, so the retry emits nothing). Swallowing it is not an option — a
+ * failed statement poisons the Postgres transaction, so there is nothing left
+ * to continue with — and the alternative, emitting outside the transaction,
+ * trades this for the far worse "webhook fired for a change that rolled back".
  */
 export async function emitWebhook(
   tx: Prisma.TransactionClient,
   event: WebhookEvent,
   data: Record<string, unknown>,
 ): Promise<void> {
+  // `active: true` is load-bearing, not a nicety: a disabled endpoint must
+  // stop RECEIVING, and the only way to express that is to never write the
+  // delivery. Its existing history stays readable on the deliveries page.
+  //
+  // The SQL predicate is the whole filter, and `parseEvents` is deliberately
+  // NOT re-applied to the result. `has` is exact array membership, and `event`
+  // is typed `WebhookEvent` — so any row this returns provably contains a name
+  // that is in WEBHOOK_EVENTS, which is exactly what `partitionEvents` would
+  // put in `known`. A runtime re-check here could never fail, and a comment
+  // claiming it stopped a renamed event from being resurrected would be
+  // describing something the type system already made impossible. The
+  // parameter type IS the guard; unrecognised names in the same row are
+  // irrelevant to this event and are preserved untouched (Task 7's
+  // `removeUnknown`).
   const endpoints = await tx.webhookEndpoint.findMany({
     where: { active: true, events: { has: event } },
-    select: { id: true, events: true },
+    select: { id: true },
   });
 
   for (const endpoint of endpoints) {
-    // `events` is a raw String[]; the SQL `has` above matched the stored text,
-    // and parseEvents is the same normalisation the editor and worker apply, so
-    // a renamed event can't be resurrected by a stale row.
-    if (!parseEvents(endpoint.events).includes(event)) continue;
-
     const delivery = await tx.webhookDelivery.create({
       data: {
         endpointId: endpoint.id,
@@ -4568,6 +4666,10 @@ export async function emitWebhook(
         status: "PENDING",
       },
     });
+    // `deliveryId` is not optional in any sense the database will tolerate:
+    // Job_deliver_payload_shape (this phase's migration) rejects a
+    // DELIVER_WEBHOOK job without it, because the one-live-job-per-delivery
+    // unique index is on an expression and NULLs never collide.
     await tx.job.create({
       data: { type: "DELIVER_WEBHOOK", payload: { deliveryId: delivery.id } },
     });
@@ -4578,41 +4680,33 @@ export async function emitWebhook(
 `data` is the envelope's `data` only — `webhookEnvelope` wraps it at delivery time (Task 10), so the
 stored payload stays the facts and the envelope stays a presentation concern.
 
-- [ ] **Step 3: Emit on `approval.executed`**
+- [x] **Step 3: Emit on `approval.executed`**
 
-In `src/worker/execute-approval.ts`, the execution transaction ends by writing the approval's audit
-entry. Add the import at the top:
-
-```ts
-import { emitWebhook } from "../server/webhooks/emit";
-```
-
-Relative, matching every other import in that file — the worker runs under `tsx`, not Next.
-
-and emit immediately after that `tx.auditEntry.create({ … action: "executed" … })` call, still inside
-the same `tx`:
+In `src/worker/execute-approval.ts`, add `import { emitWebhook } from "../server/webhooks/emit";` —
+relative, matching every other import in that file, because the worker runs under `tsx` and there is not
+one `@/` import anywhere under `src/worker`. Emit as the **last statement** of `runExecution`'s
+transaction, after the `action: "executed"` audit entry:
 
 ```ts
+    // Last thing in the transaction, and only reachable on genuine success:
+    // every guard above leaves through `return fail(...)`, so nothing that
+    // ended as EXECUTION_FAILED gets here. Scope decision #14 — ids and
+    // refNos, never whole rows. `asset` is non-null by the guard at the top
+    // of this function, so assetTag is the real tag rather than a hedge.
     await emitWebhook(tx, "approval.executed", {
       approvalId: approval.id,
       refNo: approval.refNo,
       type: approval.type,
-      assetId: approval.assetId,
-      assetTag: asset?.tag ?? null,
+      assetId: asset.id,
+      assetTag: asset.tag,
     });
 ```
 
-Scope decision #14 — ids and refNos, never whole rows. Use whatever local the surrounding code already
-holds for the asset; if it is not in scope at that point, pass `assetTag: null` rather than adding a
-query, because the consumer has `assetId`.
+- [x] **Step 4: Emit on `offboarding.completed`**
 
-- [ ] **Step 4: Emit on `offboarding.completed`**
-
-Import it as `@/server/webhooks/emit` here — this file is a Next module, unlike the worker.
-
-In `src/server/modules/offboarding/actions.ts`, `completeOffboarding` writes an audit entry with
-`action: "offboarding.completed"` carrying the decision set. Add the import and emit inside the same
-transaction, directly after that `writeAudit` call:
+Import as `@/server/webhooks/emit` here — this file is a Next module, unlike the worker. In
+`completeOffboarding`, directly after the `action: "offboarding.completed"` `writeAudit` call and inside
+the same transaction:
 
 ```ts
     await emitWebhook(tx, "offboarding.completed", {
@@ -4622,47 +4716,70 @@ transaction, directly after that `writeAudit` call:
     });
 ```
 
-Use the same `decisions` local the audit diff already uses. If its name differs in the shipped code,
-match the shipped name rather than renaming it — this is the one number the event is worth sending.
+`decisions` is one entry per held asset and the undecided guard has already returned, so the count is
+the number of items actually settled. The item detail stays in the audit entry, which is the immutable
+record; a webhook is a notification, not a replication feed.
 
-- [ ] **Step 5: Emit on `purchase_request.completed`**
+- [x] **Step 5: Emit on `purchase_request.completed`**
 
-In `src/server/modules/purchases/actions.ts`, `runTransition` handles every purchase transition inside
-one transaction and sets `data.completedAt = now` when `action === "complete"`. Emit inside that same
-transaction, after the NoteEntry and `writeAudit` calls, guarded on the action:
+In `runTransition`, after the `NoteEntry` and `writeAudit` calls and before `acted = …`. The request row
+local is **`req`**:
 
 ```ts
     if (action === "complete") {
       await emitWebhook(tx, "purchase_request.completed", {
-        purchaseRequestId: request.id,
-        refNo: request.refNo,
+        purchaseRequestId: req.id,
+        refNo: req.refNo,
       });
     }
 ```
 
-Match the local names `runTransition` actually uses for the request row.
+`complete` is the only action reaching `COMPLETED`, and only from `IT_REVIEWED`
+(`purchase-flow.ts:83`) — so guarding on the action is equivalent to guarding on the destination state,
+without a second definition of which transition finishes a request.
 
-- [ ] **Step 6: Prove the emitter writes nothing when nobody is listening**
+- [x] **Step 6: Prove the emitter fires — and doesn't**
 
-There are no endpoints in the seed until Task 12, which makes this the cheapest possible check that
-the emitter is inert by default:
+The plan originally asked only for the inert case (no endpoints → `SELECT count(*) FROM
+"WebhookDelivery"` is `0`). **That is not sufficient: an `emitWebhook` with an empty body passes it
+perfectly.** Both halves were run:
 
-```bash
-npm run db:seed
-npm run worker:once
-docker exec inventory-db-1 psql -U inventory -d inventory -c "SELECT count(*) FROM \"WebhookDelivery\";"
-```
+1. **Inert.** With zero endpoints, complete a purchase request. It completes; `WebhookDelivery` stays 0
+   and no `DELIVER_WEBHOOK` job appears.
+2. **Positive, with an event filter.** Create TWO endpoints — one subscribed to
+   `purchase_request.completed`, one to `approval.executed` **only**. Complete a request: exactly ONE
+   delivery, on the first endpoint, `status PENDING`, `attempts 0`, payload `{refNo,
+   purchaseRequestId}`, plus one `DELIVER_WEBHOOK` job whose `deliveryId` **is** that delivery's id.
+   The `approval.executed` endpoint gets nothing.
+3. **Disabled.** Set `active = false` and complete another request → no new delivery. `active: true` in
+   the emitter's `where` is what makes "disabled" mean "stops receiving".
+4. **The worker's own call site.** Claim and approve `APR-2041` (its three system checks pass, so
+   execution succeeds), then `npm run worker:once`. The asset moves SPARE → DEPLOYED, the approval
+   reaches EXECUTED, and `approval.executed` is emitted from inside the worker's transaction and picked
+   up **in the same drain**. This is the only check that proves the relative import resolves under
+   `tsx`; a cheaper smoke test is that `npm run worker:once` loads at all.
+5. **Offboarding.** The cheapest real exercise of the third call site is an OFFBOARDING employee holding
+   **nothing** with `m365Status` inactive — `completeOffboarding` then succeeds immediately and emits
+   with `decisions: 0`, which also confirms `employee.employeeNo` is in scope (the `findUnique` uses
+   `include`, so all scalars ride along).
 
-Expected: `0`. The seed's `APR-2035` demo job still runs and still fails the way it always has —
-emitting is additive and must not have changed it.
+In every case the resulting `DELIVER_WEBHOOK` jobs dead-letter on the **existing**
+`"webhook delivery ships in Phase 8"` placeholder, and `WebhookDelivery.status` stays `PENDING` — the
+ledger is not mirrored from the job until Task 10. That divergence is Task 10's boundary, not a bug here.
 
-- [ ] **Step 7: Typecheck, lint, full unit suite, commit**
+**Clean up the endpoints and deliveries afterwards** — their shown-once secrets are gone, so they would
+only mislead Task 10, which needs a plaintext secret at its receiver.
+
+- [x] **Step 7: Typecheck, lint, full unit suite, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
 git add prisma/migrations/20260819090000_job_one_live_deliver_per_delivery src/server/webhooks/emit.ts src/worker/execute-approval.ts src/server/modules/offboarding/actions.ts src/server/modules/purchases/actions.ts
 git commit -m "feat(webhooks): the producer that never existed, and the index that stops a double-send"
 ```
+
+No unit tests: `emitWebhook` needs a transaction client and the suite is node-only with no database, the
+same reason Task 5 added none. Its verification is live, above.
 
 ---
 
