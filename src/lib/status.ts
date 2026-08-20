@@ -23,6 +23,9 @@ const MAP: Record<string, StatusFamily> = {
   // what the row needs from the reader, not which enum it came from)
   PENDING: "attention", APPROVED: "settled", REJECTED: "fault",
   CLAIMED: "inflight", EXECUTED: "settled", EXECUTION_FAILED: "fault",
+  // DeliveryStatus (Phase 8): DELIVERED landed, DEAD spent its budget,
+  // RETRYING is failing but not finished.
+  DELIVERED: "settled", DEAD: "fault", RETRYING: "attention",
   // Reservation
   ACTIVE: "inflight", FULFILLED: "settled", RELEASED: "closed", EXPIRED: "closed",
   // Microsoft 365 (lowercase, canonical four)
