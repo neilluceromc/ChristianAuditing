@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–4 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 19 ahead of that.**
+**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–5 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 24 ahead of that.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,13 +13,13 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–4 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–5 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
-   so far (19 commits); `git status` should be clean.
+   so far (24 commits); `git status` should be clean.
 
    **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
    2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
-   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 19 ahead of `main`.
+   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 24 ahead of `main`.
    Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
@@ -29,20 +29,24 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
    permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
    Phase 8's plan, not after.
-4. **Resume at Task 5** (flag actions + `/admin/flags`) of
+4. **Resume at Task 6** (the webhook vocabulary, TDD) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
-   Tasks 1–4 are committed; 5–14 remain. **Task 5 opens with a REQUIRED AMENDMENT carrying ten numbered
-   guarantees — read them before its code blocks, which predate `3b158df` and still call a
-   `flagChange(key)` that no longer exists.** Read the plan's
+   Tasks 1–5 are committed; 6–14 remain. Read the plan's
    **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the `m365_sso`
    refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a later
-   task can silently break — then **§6a**, which carries what Tasks 1–4 actually established.
-   Tasks 2, 3 and 4 have all been amended to the shipped code (`docs(plan): …`), so trust the plan over
+   task can silently break — then **§6a**, which carries what Tasks 1–5 actually established.
+   Tasks 2, 3, 4 and 5 have all been amended to the shipped code (`docs(plan): …`), so trust the plan over
    any memory of what it used to say, and keep amending it whenever code deviates.
 
-   **The one thing to carry into Tasks 5, 8 and 13** — each of which pairs a rule module with a page —
-   is §6a rule 10: **a page must consume every refusal its rule module can return, not just the one the
-   design card names**, together with §6a rule 14: **a rule must permit the safe direction.** Task 3 shipped once with a live Disable button on the actor's own row because it
+   **The one thing to carry into Tasks 8 and 13** — each of which pairs a rule module with a page — is
+   that **one defect shape has now appeared in five of the five tasks executed so far**, and every
+   instance was invisible to the unit suite. It is always the same root cause: **a rule and its surface
+   that only partly agree.** §6a rules 8, 10, 11, 12 and 14 are the five faces of it, and Task 5
+   reproduced rule 8 *after* rule 8 was written down. Before calling a task done, check explicitly:
+   does the page consume **every** refusal the rule can return; does the rule permit the **safe**
+   direction; is any context being smuggled into an audit diff as a from-equals-to key; and can `/audit`
+   **name** the entity type this task introduces (`entityLabels` — two tasks in a row have needed a new
+   branch there, and the plan scheduled neither). Task 3 shipped once with a live Disable button on the actor's own row because it
    imported `selfRoleChangeWarning` and not `disableChange`; every click on that button was guaranteed
    to fail. The rule was already written, exported and unit-tested. Nothing but a reviewer reading the
    rule against the surface caught it, and it was invisible from the seeded `admin@` account.
@@ -52,7 +56,7 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **404 unit tests across 28
 files** (345/26 at the Phase 7 merge; Tasks 1–4 and their review fixes added the rest, and Task 4 alone
-accounts for 23 — most of them mutation-driven) · `npm run build` · **`npx playwright test --workers=1` — 89
+accounts for 23 — most of them mutation-driven; Task 5 added none, being actions and UI) · `npm run build` · **`npx playwright test --workers=1` — 89
 e2e tests, 7.9 minutes** (up
 from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
 through the worker, repair mode, reservations, and equipment policies, including the viewer
@@ -167,7 +171,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–4 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–5 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -307,9 +311,13 @@ Disable button that could only fail. Also `aria-describedby` on the shared `Dial
 `FlagState`, `flagChange(state, next)`, `flagChangeWarning(state, next)` and `domainValue`, with
 `m365_sso` refused ON but permitted OFF, and `allowed_domain` refused ON without a value. Plus
 `flagDomain()` in `src/lib/auth-shared.ts`, now the single effective-value expression for all four
-readers of that flag. No UI — Task 5 builds `/admin/flags`. Review fixes deliberately left unsquashed so
-the verdicts stay legible: `c699743` + `d29ce9b`; `28e21ba` + `4b112cd`; `5d8e819` + `8a604df`;
-`cc43421` + `3ae53d2` + `e3191a2` + `3b158df`.
+readers of that flag.
+**Task 5** — `setFlag` / `setFlagValue`, `listFlags`, `/admin/flags` and `FlagRows`: two switch cards, a
+value editor for `allowed_domain`, a confirm dialog before the direction that opens signup to anyone, a
+stated reason on any switch the rule won't move, and the `feature-flag` branch in `entityLabels` so the
+log can name the flag it changed. Review fixes deliberately left unsquashed so the verdicts stay
+legible: `c699743` + `d29ce9b`; `28e21ba` + `4b112cd`; `5d8e819` + `8a604df`;
+`cc43421` + `3ae53d2` + `e3191a2` + `3b158df`; `ce275c1` + `3157a5c` + `aaca261`.
 
 ### Conventions every later phase must follow
 
@@ -342,11 +350,14 @@ the verdicts stay legible: `c699743` + `d29ce9b`; `28e21ba` + `4b112cd`; `5d8e81
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 5–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 6–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1–4 are done** — the user rules, the two user mutations, `/admin/users`, and the flag
-  allowlist. See §6a. **Task 5 is next** and carries ten numbered guarantees in a REQUIRED AMENDMENT
-  block, because Task 4's review found a Critical that Task 5 is the surface for.
+  **Tasks 1–5 are done** — the user rules, the two user mutations, `/admin/users`, the flag allowlist,
+  and `/admin/flags`. See §6a. **Task 6 is next**: the webhook vocabulary, a TDD pure module with no UI
+  and no DB. From there the phase turns to webhooks, which is where it stops being CRUD — Task 9 adds
+  the phase's **one migration**, Task 10 rewrites the worker's `DELIVER_WEBHOOK` branch from a
+  dead-letter placeholder into real delivery, and Task 12 adds seed fixtures. Those three are the
+  consequential ones.
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -414,7 +425,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–4 established (READ BEFORE TASK 5)
+## 6a. Phase 8 mid-flight: what Tasks 1–5 established (READ BEFORE TASK 6)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -583,6 +594,49 @@ phase's most-repeated defect.**
     looser pattern passes every test the plan originally specified while accepting a Cyrillic-о
     homoglyph — a silent 100% signup lockout.
 
+**From Task 5 (`ce275c1` + `3157a5c` + `aaca261`).**
+
+19. **Rule 8 got reproduced after it was written down — treat it as a checklist item, not a lesson.**
+    Task 5's audit diffs carried `key: { from: X, to: X }` for exactly the reason Task 2's carried
+    `email` — "to carry identity" — and `/audit`, which renders diff **key names**, printed
+    `Fields: key, enabled`. Append-only, uncorrectable. **Before any task that writes an audit diff:
+    does every key in it name a field that actually changed?** If context is needed, it goes in the
+    entity label. The one sanctioned exception remains `offboarding.completed`'s `m365Status`, which
+    earns it by snapshotting a value a mutable row can lose.
+
+20. **A new `entityType` needs an `entityLabels` branch, and the plan will not remind you.** Task 2
+    needed one for `user`; Task 5 needed one for `feature-flag` and the plan **never scheduled it**
+    (Task 7 adds only `webhook-endpoint`). Without it every row of that type is an unlinked truncated
+    cuid — so the most consequential thing the app can record, "signup was opened to any address",
+    would have read `feature-flag | clx1234567… | update | key, enabled`. Note there are **two**
+    places: `entityLabels` in `src/server/modules/audit/queries.ts` (the label) and
+    `AUDIT_ENTITY_TYPES` in `src/lib/audit-list.ts` (the facet). Task 7 owns the latter for both
+    `feature-flag` and `webhook-endpoint`, so until it lands the facet cannot filter flag rows even
+    though the label resolves. **Tasks 7 and 13 introduce `webhook-endpoint` and `webhook-delivery`
+    — check both places for each.**
+
+21. **Guard the write even when the column is `Json`.** `setFlagValue` shipped with an unguarded
+    `update`, so two admins saving different domains meant the second silently discarded the first
+    **and the trail held two entries both claiming the same `from`** — the second false, permanently.
+    A `Json?` column makes an equality filter awkward (`Prisma.DbNull` for the null case), which is
+    presumably why it was skipped. **`updatedAt` is the answer**: it is `@updatedAt`, so it is a clean
+    optimistic-concurrency token, and it catches a concurrent change to *any* column rather than just
+    the one being written.
+
+22. **Distinct audit verbs, per mutation.** Both flag actions shipped as `action: "update"`, so
+    `/audit`'s Action column could not tell a switch flip from a value edit — only the Fields cell
+    hinted, and that cell was simultaneously polluted by rule 8. Now `flag-enable` / `flag-disable` /
+    `flag-value`, matching the sibling module's `role-change` / `disable` / `enable`. Don't add cases to
+    `actionDot` for any of them: `/audit` never calls it and the four activity feeds scope to
+    employee/asset/purchase-request, so it is dead code (§6a rule 13's note).
+
+23. **A client mirror of server state needs a reset path the server can't trigger.** `flag-rows` keys a
+    `useEffect` on every row's value to resync the input after `router.refresh()`. That structurally
+    cannot catch a **normalizing no-op**: stored `example.com`, admin types `EXAMPLE.COM`,
+    `domainValue` normalizes to the same string, nothing is written, the key never changes, and the box
+    keeps the uppercase forever — the exact failure the effect exists to prevent. The fix is to reset
+    from the normalized value in the success path too, not to make the effect cleverer.
+
 ---
 
 ## 7. Recurring gotchas that have cost real time
@@ -710,6 +764,23 @@ phase's most-repeated defect.**
   broken button. With only the ID set and the flag on, the button renders and `signIn` throws on an
   unregistered provider. Low reachability today (the flag can't be turned on), but it widens the surface
   scope decision #7 reasons about.
+- **Phase 8, Task 5 (recorded by review, judged not worth fixing now):** `m365_sso`'s displayed state is
+  the **raw** `row.enabled`, not an effective one — `/login` gates the button on
+  `enabled && !!AUTH_MICROSOFT_ENTRA_ID_ID`, so on a database where that row was enabled out of band with
+  no env vars configured, `/admin/flags` shows the switch ON while `/login` shows nothing. That is the
+  same "admin page describes a reality the enforcement point doesn't have" that `FlagRow.enabled` exists
+  to prevent, just not applied to this flag; mitigated by the UNAVAILABLE pill and its sentence sitting
+  right beside it, and unreachable in-app since the flag cannot be turned on. **`setFlag`'s zod schema has
+  no `.max()` on `key`**, so a large string is parsed before `flagChange` rejects it — bounded by Next's
+  server-action body limit, cosmetic. The value editor's `FormError` is **not** wired to its `Input` via
+  `aria-describedby` (it is `role="alert"`, so it is still announced on appearance, and `FormField`
+  already does this properly but is bypassed here). `SwitchProps` exposes no `aria-describedby` channel at
+  all, so a disabled switch's reason cannot be programmatically attached — harmless today because a
+  disabled `<button>` isn't focusable and the sibling `<p>` is read in document order, but worth knowing
+  if a switch ever needs to be focusable-but-refusing. And **presentationally the flags panel departs from
+  card `3h`'s artboard**: the artboard is one bordered container of divider-separated rows with the mono
+  key as the primary label, where this ships a discrete `Card` per flag with the human label primary and
+  the key demoted to 10px. Deliberate and arguably better, recorded so it reads as a choice.
 - **`/bootstrap`'s copy under-states the lock**: `src/app/(auth)/bootstrap/page.tsx` promises the
   permanent admin's *role* can never be changed, but Phase 8 widened that to access as well. Worth
   aligning when Task 3 lands. The corollary belongs here too — a bootstrapped permanent admin's account
