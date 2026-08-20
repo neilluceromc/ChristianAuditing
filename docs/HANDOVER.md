@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–6 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 29 ahead of that.**
+**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–6 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 28 ahead of that.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -15,11 +15,11 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–6 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
-   so far (29 commits); `git status` should be clean.
+   so far (28 commits); `git status` should be clean.
 
    **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
    2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
-   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 29 ahead of `main`.
+   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 28 ahead of `main`.
    Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
