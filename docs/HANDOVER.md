@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–6 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 28 ahead of that.**
+**Last updated:** 2026-08-19 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–7 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is 33 ahead of that.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,13 +13,13 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–6 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–7 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
-   so far (28 commits); `git status` should be clean.
+   so far (33 commits); `git status` should be clean.
 
    **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
    2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
-   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 28 ahead of `main`.
+   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is 33 ahead of `main`.
    Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
    decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
    public — never commit `.env` or any real secret.
@@ -29,9 +29,9 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    surfaces have to account for from their first commit (the worker's dead-lettered webhook job, the
    permanent admin's locked row, the 10,000-row export cap, and the rest). Read it before writing
    Phase 8's plan, not after.
-4. **Resume at Task 7** (endpoint actions — the encrypted, shown-once secret) of
+4. **Resume at Task 8** (`/admin/webhooks`) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
-   Tasks 1–6 are committed; 7–14 remain.
+   Tasks 1–7 are committed; 8–14 remain.
 
    **Tasks 7, 8, 10 and 13 each open with a `REQUIRED AMENDMENT` block, and unusually these were written
    BEFORE those tasks started.** Task 6's review read forward into them and verified its claims by running
@@ -59,9 +59,9 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
 
-The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **443 unit tests across 30
-files** (345/26 at the Phase 7 merge; Task 4 added 23 and Task 6 added 39, most of them mutation-driven;
-Task 5 added none, being actions and UI) · `npm run build` · **`npx playwright test --workers=1` — 89
+The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **448 unit tests across 30
+files** (345/26 at the Phase 7 merge; Task 4 added 23, Task 6 added 39 and Task 7 added 5, most of them
+mutation-driven; Task 5 added none, being actions and UI) · `npm run build` · **`npx playwright test --workers=1` — 89
 e2e tests, 7.9 minutes** (up
 from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
 through the worker, repair mode, reservations, and equipment policies, including the viewer
@@ -181,7 +181,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–6 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–7 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -443,7 +443,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–6 established (READ BEFORE TASK 7)
+## 6a. Phase 8 mid-flight: what Tasks 1–7 established (READ BEFORE TASK 8)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -708,6 +708,55 @@ already written into their plan text — rule 24 is why that mattered.**
     is base64url — passes every property-style assertion while invalidating every signature in
     existence, and so does `.update(body, "latin1")` on any non-ASCII body. Pinned literals are what
     catch those.
+
+**From Task 7 (`cc13bf5` + `df7a9a8` + `e90b277`) — the security-critical task, and the one where a
+design choice made a bug invisible.**
+
+29. **Guard EVERY write, and notice when a design choice hides the failure.** `rotateSecret` shipped a
+    bare `update`. Two rotations racing — two admins, **or one operator double-clicking** — both succeed;
+    the second wins in the DB while the shown-once banner shows whichever response resolved last. The
+    operator pastes S1, S2 is live, every delivery 401s, the worker treats that as permanent, everything
+    goes `DEAD`. **The shown-once design is what makes it undetectable**: the reveal is the only place the
+    value ever appears, so there is nothing to check it against. When a feature deliberately makes state
+    unreadable, every write to that state needs a guard *more* than usual, not less.
+
+30. **Guard on a column the write actually moves — or on `updatedAt`.** `updateEndpoint` guarded on `url`
+    while the common edit changes only `events`. Postgres re-checks a `where` against the **new** row
+    version after the lock (EvalPlanQual), so the stale-but-unchanged `url` still matched and the second
+    write committed over the first, with an append-only audit entry claiming a superseded `from`. Same as
+    §6a rule 21. `updatedAt` is `@updatedAt` and moves on every write, whichever column changed — that is
+    the general answer. `setEndpointActive` needs no such fix: it guards the column it writes.
+
+31. **`findMany` with no `select` fetches everything, including ciphertext.** `listEndpoints` pulled
+    `secret` on every render while its comment claimed *"never selected"* — true only of what it
+    *returned*. Its rows feed a `"use client"` component, so the object is serialised into the RSC
+    payload: one `...r` from ciphertext in an admin page's source. **An explicit `select` makes the
+    guarantee structural**, and the comment should assert something a reader can check four lines up.
+
+32. **Signing is not confidentiality, and saying it is stops the next reader from fixing it.** The
+    `http://` allowance was justified with *"the payload is signed either way, which is what makes that
+    safe."* Signing gives the **receiver** integrity and authenticity; it says nothing about where the URL
+    points, and over plain http the envelope and its HMAC cross the wire in the clear. §6a rule 16 again,
+    and this one is load-bearing because it reads as "already considered".
+
+33. **SSRF here is an accepted capability, recorded as one.** An authenticated admin can make the worker
+    POST to any host it can reach. That actor can already change roles and open signup, and Task 10 stores
+    only status codes — never bodies — so it is a blind reachability oracle, not a data read. `urlSchema`
+    refuses `169.254.0.0/16` and `metadata.google.internal` only; **loopback and RFC1918 are deliberately
+    allowed** (scope decision #4 and the plan's own `http://localhost:4999/hook` verification depend on
+    them). **The guard's soundness rests on a non-obvious fact worth not breaking:** it pattern-matches a
+    dotted quad, and `new URL` normalizes every integer form to one first — `http://2852039166/`,
+    `http://0xa9fea9fe/`, `http://0251.0376.0251.0376/` all yield `169.254.169.254`. IPv6
+    `[fd00:ec2::254]` is not blocked; accepted, no metadata service here. **The real hole is in Task 10:**
+    `fetch` follows redirects by default, so a 307 from an approved receiver forwards the signed body to a
+    host the admin never approved — `urlSchema` cannot see past the first hop.
+
+34. **Pin a magic string that a rename would silently invalidate.** `secretAad` is `` `webhook:${id}` ``
+    in a one-line function. Renaming it — or a caller passing `endpoint.id` instead of
+    `secretAad(endpoint.id)` — typechecks, lints, passes everything, and makes every **pre-existing**
+    secret permanently undecryptable while newly created ones work perfectly. Now pinned by a literal
+    (`secretAad("abc") === "webhook:abc"`) plus a round-trip and a cross-row refusal. Rule 28's lesson
+    applied to a constant rather than a format.
 
 ---
 
