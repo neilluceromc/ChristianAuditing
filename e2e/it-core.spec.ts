@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
+import { readSheet } from "read-excel-file/node";
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login (see
@@ -97,14 +98,23 @@ test.describe("inventory list", () => {
     await expect(page.getByText(/2 approvals created/)).toBeVisible();
   });
 
-  test("CSV export honors filters and is typed", async ({ page }) => {
+  // Was a CSV assertion until Phase 9 Task 3 converted this route to .xlsx
+  // (the brief specifies Excel downloads). Kept as a ROUND TRIP rather than a
+  // header check: parsing the buffer back is the only thing that proves a real
+  // spreadsheet was written, and a text-substring assertion cannot be made
+  // against a zipped binary at all.
+  test("xlsx export honors filters and is typed", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     const res = await page.request.get("/inventory/export?status=DEPLOYED");
     expect(res.status()).toBe(200);
-    expect(res.headers()["content-type"]).toContain("text/csv");
-    const body = await res.text();
-    expect(body).toContain("BR-LT-0148");
-    expect(body).not.toContain("BR-LT-0181"); // SPARE — filtered out
+    expect(res.headers()["content-type"]).toContain("spreadsheetml.sheet");
+    expect(res.headers()["content-disposition"]).toMatch(/attachment; filename="assets-\d{4}-\d{2}-\d{2}\.xlsx"/);
+
+    const grid = (await readSheet(Buffer.from(await res.body()))) as unknown[][];
+    expect(grid[0][0]).toBe("Tag");
+    const tags = grid.slice(1).map((r) => r[0]);
+    expect(tags).toContain("BR-LT-0148");
+    expect(tags).not.toContain("BR-LT-0181"); // SPARE — filtered out
   });
 });
 
