@@ -27,8 +27,12 @@ import type { TodoRow } from "@/server/modules/home/queries";
  * on IT, Jump-to on purchasing and finance — see the `!focus` blocks below).
  * The Admin Home has no secondary section: its three lists (users, flags,
  * webhooks) are the whole page. Showing the toggle there would render a
- * control that flips a cookie and re-renders the page identically — the
- * defect class HANDOVER §6a rule 10 names. A `Record` rather than an inline
+ * control that flips a cookie and re-renders the page identically. That is a
+ * NEAR relative of HANDOVER §6a rule 10 rather than an instance of it — rule
+ * 10 is about an action guaranteed to FAIL (a Disable button whose rule
+ * always refuses); this one succeeds and simply does nothing visible. Same
+ * remedy, different failure: don't render a control whose effect the page
+ * cannot deliver. A `Record` rather than an inline
  * `ws !== "admin"` so a future secondary section on Admin's Home is a
  * one-word change here, and adding a fifth workspace forces a decision at
  * this table instead of being silently `true` by omission.
