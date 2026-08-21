@@ -290,10 +290,11 @@ async function main() {
       // two — there is no honest baseline among these three.
       //
       // Taken anyway, deliberately: approval.executed fires exactly once per
-      // approval, and liveHook is this seed's only subscriber to it, so no
-      // number of genuinely-EXECUTED-with-an-asset approvals in this seed
-      // could source more than a handful of these deliveries even in the best
-      // case — and today there are zero. The design needs four (to make
+      // approval, and liveHook is this seed's only subscriber to it — so the
+      // number of honest deliveries available here is exactly the number of
+      // EXECUTED-approvals-that-have-an-assetId in this seed, which is ZERO.
+      // (Not "a handful": there is no cap, one qualifying approval would buy
+      // exactly one delivery.) The design needs four (to make
       // DELIVERED, RETRYING and DEAD · 5/5 all reachable and to produce the
       // "4 attempts" count on /admin/webhooks). Closing this gap for real
       // means adding EXECUTED approvals WITH an assetId to the seed, which is
