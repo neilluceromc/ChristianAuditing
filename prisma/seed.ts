@@ -300,6 +300,11 @@ async function main() {
         status: "RETRYING",
         attempts: 2,
         lastError: "connect ETIMEDOUT 10.0.0.9:443",
+        // deliver-webhook.ts clears this to null on a later success, and that
+        // clear is only a real behaviour to see if this fixture starts with a
+        // real value — mirrors the worker's own backoff shape (2**attempts *
+        // 30s) without depending on it: no Job is queued for this delivery.
+        nextAttemptAt: new Date(Date.now() + 2 ** 2 * 30_000),
       },
       // The row the design is about: five attempts spent, dead-lettered, replayable.
       // Same caveat as APR-2035 above: APR-2040 is seeded PENDING, not EXECUTED,
