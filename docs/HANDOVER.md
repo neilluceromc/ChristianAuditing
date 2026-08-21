@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–11 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
+**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–12 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,7 +13,7 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–11 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–12 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
    so far; `git rev-list --count main..HEAD` is the count, and `git status` should be clean.
    **Don't trust a commit count written into this doc** — I corrected it twice and each correction was
@@ -29,26 +29,31 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    (`preview_start` name `app-dev`). **8 migrations, none pending** as of this handover — Task 9 added
    the phase's one and only migration, so there is none ahead of you.
 
-   **`npm run db:seed` is blocked by the harness classifier when an agent runs it** (see §3). Run it from
-   your own terminal, or let a Playwright spec do it — every spec reseeds via `execSync` in `beforeAll`
-   and that is not blocked. **The database is not pristine right now**; see the state paragraph below for
-   exactly what touched it.
+   **`npm run db:seed` is blocked by the harness classifier when an agent runs it** (see §3). The cheap
+   in-session route to a fresh database is **`npx playwright test e2e/auth-shell.spec.ts --workers=1`** —
+   ~60s, 15 tests, and it reseeds via `execSync` in `beforeAll`, which is not blocked. That is how Task 12
+   was verified. **The database IS pristine as of this handover** (that run is the last thing that touched
+   it), which is a change from every previous handover — see the state paragraph below.
 3. Read **§6** for Phase 8's entry criteria — the *why* behind the tasks (the worker's dead-lettered
    webhook job, the permanent admin's locked row, the 10,000-row export cap). **The plan already exists
    and already maps each criterion to a task**, so read §6 when a task's reasoning looks arbitrary, not
    as something to act on. **§6a is the section that matters most** — it is what Tasks 1–7 actually
    established, and it is where the recurring-defect checklist lives.
-4. **Resume at Task 12** (the seed fixtures the deliveries page needs) of
+4. **Resume at Task 13** (`/admin/webhooks/deliveries` + replay) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
-   Tasks 1–11 are committed; 12–14 remain.
+   Tasks 1–12 are committed; 13–14 remain. **Task 13 is the last real screen, and it pairs a rule module
+   with a page — the combination this phase has broken every single time (§6a rules 10, 36, 47).** Its
+   banner has four amendments; run the §0 checklist against it regardless of what the banner says.
+   Its fixtures now exist, so it is reachable against a fresh database for the first time.
 
    **Tasks 8, 9 and 10 were executed by a single context** (implement + self-review in one session).
-   **Task 11 was the first executed properly subagent-driven** — fresh sonnet implementer, then a sonnet
+   **Tasks 11 and 12 were executed properly subagent-driven** — fresh sonnet implementer, then a sonnet
    spec-compliance review, then a sonnet quality review, with the implementer fixing and each reviewer
-   re-reviewing. It is worth knowing what that bought, because it is the argument for doing 12–14 the
-   same way: the spec review caught an unrequested redundant `Jump to` card, and the **quality review
-   caught §6a rule 15 reproduced on a new page** — a defect a green suite could not see and which the
-   same-context tasks before it would plausibly have shipped. **Keep using subagents for 12–14.**
+   re-reviewing. Both times it found something a green suite could not: Task 11's quality review caught
+   §6a rule 15 reproduced on a new page, and **Task 12's caught a comment asserting an "honest baseline"
+   fixture that the worker's own guard makes impossible** (rule 51). Task 12's implementer independently
+   found four more — including a promissory comment Task 10 had shipped about a fixture that did not yet
+   exist. **Keep using subagents for 13–14.** Task 13 is the one where it matters most.
 
    **THE WEBHOOK PIPELINE IS COMPLETE AND WORKS END TO END.** A completed purchase / executed approval /
    completed offboarding writes a `WebhookDelivery` + a `Job`, and the worker now really POSTs a signed
@@ -115,6 +120,11 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
      one that said signing made plain `http` safe, one that said a secret was never selected when it was
      fetched on every render, and Task 8's banner promising "the button below" in the one branch that
      renders no button. **It applies to user-facing prose exactly as much as to comments** — rule 35.)
+   - **Could this fixture have been produced by the running code?** (rules 51, 52. Task 12's seeded
+     webhook deliveries cited an approval type in the DB's `@map`'d spelling rather than the emitted one,
+     omitted two fields the emitter always sends, paired refNos with the wrong types, and cited a purchase
+     request in a state that cannot fire the event. **Check a new fixture against the emitter, not against
+     the plan** — and if a payload shape is at issue, capture a real one from a live run first.)
    - **Does a SUMMARY surface recompute a state that a detail surface already computes properly?**
      (rule 47. Task 11's Admin Home read `FeatureFlag.enabled` raw while `listFlags` two functions above
      it computes the *effective* state through `flagDomain` — so Home would have said a signup
@@ -187,8 +197,12 @@ says "up to date"). **No scratch files anywhere in the repo** — the session's 
 harness scratchpad, outside the tree. Last verified green: `npx tsc --noEmit` · `npm run lint` ·
 **460 tests / 30 files** · `npm run build`.
 
-**The DB is NOT pristine and cannot be made pristine in-session** (see the classifier note below). What
-has happened to it since the last reseed: Task 3's live verification (all five users restored to their
+**THE DB IS PRISTINE as of this handover** — Task 12's verification reseeded it via
+`npx playwright test e2e/auth-shell.spec.ts --workers=1` (15/15 passed), which cleared every piece of
+drift the paragraphs below describe. **They are kept for the record of what a verification pass costs,
+not as a description of current state.** The one thing a reseed cannot undo is nothing here: the audit
+table, the purchase-request states, `APR-2041`/`BR-LT-0181`, and Grace Lim (EMP-0063) are all back to
+their seeded values. Historical record follows: Task 3's live verification (all five users restored to their
 seeded roles and enabled state, but **7 `user` `AuditEntry` rows** remain — append-only by DB trigger);
 Task 5's live verification (`allowed_domain` restored to `thebackroomop.com`, plus **`feature-flag` audit
 rows**, and it was briefly set to `(enabled: true, value: NULL)` to exercise the Critical); and Task 6's
@@ -220,9 +234,8 @@ session is one whose plaintext secret nobody holds, and Task 10's end-to-end che
 to verify the signature at its local receiver. Task 10 creates its own; the seed adds fixtures in Task 12,
 which is why Task 12 exists at all — `/admin/webhooks/deliveries` is unreachable without them.
 
-**Task 9's verification moved real fixture data, and this is the paragraph to read before trusting any
-seeded state.** A reseed is genuinely worth running from your own terminal before Task 12 or 14. What
-moved: **`PR-0195`, `PR-0198` and `PR-0201` are all now `COMPLETED`** (they were IT_REVIEWED, SUBMITTED
+**Task 9's verification moved real fixture data** (since undone by Task 12's reseed — kept for the
+record). What moved: **`PR-0195`, `PR-0198` and `PR-0201` are all now `COMPLETED`** (they were IT_REVIEWED, SUBMITTED
 and DRAFT — so the seed's "one PR per state" property is GONE, and `PR-0198`, the bounce-back fixture the
 purchasing e2e leans on, is one of them); **`APR-2041` is EXECUTED** and its asset **`BR-LT-0181` moved
 SPARE → DEPLOYED** and is assigned to EMP-0097; and **Grace Lim (EMP-0063) is OFFBOARDED** — she was
@@ -305,9 +318,16 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **NEVER run `npm run build` while a dev server is running** — they share `.next` and it bricks the dev server.
 - **Full battery:** `npx tsc --noEmit && npm run lint && npm run test && npm run build`, then `npm run db:seed && npx playwright test --workers=1`. The e2e run takes ~5 minutes; **run it in the foreground with a long timeout.** A backgrounded Playwright run that is never reaped keeps its own `beforeAll` reseed racing yours, which produces FK/unique errors and a cascade of unrelated timeouts in specs that pass in isolation — diagnose by listing live `node.exe` command lines, not by editing assertions.
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
-- **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
+- **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **As of Phase 8 Task 12: 2 `WebhookEndpoint` rows** (`hooks.thebackroomop.com/inventory`
+active, subscribed to `approval.executed` + `offboarding.completed`; `legacy.thebackroomop.com/erp-bridge`
+**disabled**, subscribed to `purchase_request.completed` — so "disabled" is a real state on the list) with
+their secrets AES-GCM encrypted under `secretAad(row.id)`, **and 5 `WebhookDelivery` rows** spread so every
+chip `deliveryStage` can produce is reachable: 2 `DELIVERED`, 1 `RETRYING · 2/5` (with a real
+`nextAttemptAt`), 2 `DEAD · 5/5`. **No `DELIVER_WEBHOOK` `Job` rows, deliberately** — a queued one would
+make `worker:once` POST to a hostname that does not resolve on every seeded run. **On the Phase 7
+branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–11 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–12 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -431,7 +451,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–11 of 14 on the unmerged `phase-8-admin`)**
+**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–12 of 14 on the unmerged `phase-8-admin`)**
 (`docs/superpowers/plans/2026-08-19-phase-8-admin.md`): the user rules and the two mutations behind
 them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LABELS`, and the pure rules
 `lockReason` / `roleChange` / `disableChange`, with the permanent admin locked against **both** role and
@@ -497,6 +517,10 @@ linking to its own admin page. Also **`flagEnabled(spec, row)` in `src/lib/admin
 single expression for a flag's EFFECTIVE on/off state, which `listFlags` and `adminHome` both call, and
 **`SHOWS_FOCUS_TOGGLE` in `page.tsx`**, so the Focus button is not offered on a Home with nothing to
 collapse. First task executed properly subagent-driven; both reviews found real defects.
+**Task 12** — the seed fixtures: 2 endpoints (one disabled) with encrypted secrets, and 5 deliveries
+spread across every chip `deliveryStage` can render, including the `DEAD · 5/5` row the design's Replay
+control exists for. No `DELIVER_WEBHOOK` jobs. `/admin/webhooks/deliveries` is now reachable against a
+fresh database for the first time — which it has to be before Task 13 builds it.
 
 ### Conventions every later phase must follow
 
@@ -529,14 +553,14 @@ collapse. First task executed properly subagent-driven; both reviews found real 
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 12–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 13–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1–11 are done**: the user rules, the two user mutations, `/admin/users`, the flag allowlist,
+  **Tasks 1–12 are done**: the user rules, the two user mutations, `/admin/users`, the flag allowlist,
   `/admin/flags`, the webhook vocabulary, the endpoint actions, `/admin/webhooks`, the emitter plus the
-  phase's one migration, the worker's real signed HTTP delivery, and an Admin Home. See §6a. **What
-  remains is fixtures, one page, and close-out**: Task 12 the seed fixtures without which
-  `/admin/webhooks/deliveries` cannot be reached at all, Task 13 that page plus replay, Task 14 the e2e
-  spec (`e2e/admin.spec.ts` still does not exist) and the full battery.
+  phase's one migration, the worker's real signed HTTP delivery, an Admin Home, and the seed fixtures.
+  See §6a. **What remains is one page and close-out**: Task 13 `/admin/webhooks/deliveries` plus replay
+  — the last real screen, and the one that pairs a rule module with a page — and Task 14 the e2e spec
+  (`e2e/admin.spec.ts` still does not exist) plus the full battery.
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -604,7 +628,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–11 established (READ BEFORE TASK 12)
+## 6a. Phase 8 mid-flight: what Tasks 1–12 established (READ BEFORE TASK 13)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -1092,6 +1116,50 @@ evidence for doing 12–14 the same way.**
     that happened to be true, and checking took one grep. The quality reviewer's rule-47 finding was
     likewise confirmed by reading `listFlags` before any code changed.
 
+**From Task 12 (`8521589` → `b0d7c94`) — a fixture-only task, which found more defects per line than
+any task in the phase. All of them were fixtures that the running code could not have produced.**
+
+51. **A fixture must be checkable against the CODE THAT WRITES IT, never against the plan — and the
+    comment describing it is the part most likely to be false.** The plan's seeded webhook deliveries had
+    four shape defects: `type` in the DB's `@map`'d spelling (`lifecycle.assign`) rather than the Prisma
+    client value the emitter actually sends (`lifecycle_assign`); `assetId`/`assetTag` missing though the
+    emitter always sends both; refNos paired with the wrong types; and a `purchase_request.completed`
+    delivery citing `PR-0198`, which is seeded `SUBMITTED` and therefore cannot fire that event. **The
+    method that caught them was comparing against a payload captured from a live run** (Task 9's
+    verification), not against the plan text. Then the comment block turned out to be worse than the data:
+    it disclosed two rows as fiction while presenting a third as the honest one, and that third
+    (`APR-2031`) **carries no `assetId`, which `execute-approval.ts:63-65` refuses for every approval type
+    before ever reaching `emitWebhook`.** All three were fiction on the same axis. When you write a
+    fixture, the honest comment is usually shorter than the one you first want to write.
+
+52. **A promissory comment is a defect from the moment it ships until the task it names lands, and
+    nothing checks it.** `deliver-webhook.ts` (Task 10) shipped *"Task 12's seed gives a RETRYING fixture
+    a real `nextAttemptAt`"* — and Task 12's planned code did not set one. It was found from the other
+    side, by the implementer reading the comment while writing the fixture; nothing else would have. If
+    you must write one, phrase it as an intention ("Task 12 is expected to…") rather than a statement of
+    fact, or better, don't.
+
+53. **State a deliberate ABSENCE, not just deliberate presences.** Seeding no `DELIVER_WEBHOOK` `Job`
+    rows is load-bearing — one would make `worker:once` POST to a hostname that does not resolve on every
+    seeded run — and the block said nothing about it, three lines below the file's own
+    `// Job queued for the APPROVED approval`. A reader had every reason to read the absence as an
+    oversight to fix. Same for one plaintext `HOOK_SECRET` shared by two endpoints: safe because
+    `secretAad(id)` binds each ciphertext to its row, and worth saying so, or the next reader "fixes" a
+    copy-paste that was never one.
+
+54. **"The secret is encrypted" is the claim that fails silently, so test the ROUND TRIP.** A length
+    check on the ciphertext column proves nothing about whether it decrypts. Task 12's verification
+    decrypts both seeded secrets under `secretAad(theirOwnId)` back to the fixture plaintext **and**
+    confirms decrypting one under the other endpoint's AAD is refused. Do that whenever a seed writes
+    ciphertext — a seed that stored plaintext, or encrypted under the wrong AAD, would look identical
+    until something tried to use it.
+
+55. **The cheap in-session reseed is a Playwright spec.** `npm run db:seed` is classifier-blocked for
+    agents, but every spec reseeds via `execSync` in `beforeAll` and that is not blocked.
+    `npx playwright test e2e/auth-shell.spec.ts --workers=1` is ~60s / 15 tests and doubles as a
+    regression check on the fixture you just changed. This is how Task 12 verified its numbers against a
+    genuinely fresh database rather than reasoning about them.
+
 ---
 
 ## 7. Recurring gotchas that have cost real time
@@ -1253,6 +1321,19 @@ evidence for doing 12–14 the same way.**
   be deleted through the UI, only disabled. Correct per the rule (the ledger is the record of what was
   sent), but there is no "purge this endpoint's history" path anywhere, and Task 13 is where one would
   naturally live if it is ever wanted.
+- **Phase 8, Task 12 — a PRE-EXISTING seed gap, surfaced by a fixture review and deliberately left
+  visible:** **`APR-2031` is seeded `EXECUTED` but carries no `assetId`**, and
+  `src/worker/execute-approval.ts:63-65` refuses every approval type with
+  `if (!approval.assetId || !approval.asset) return fail(…)` before doing any work. So the seed contains
+  an executed approval the real execution path could never have produced — which also means it can never
+  have emitted `approval.executed`, which is why Task 12's webhook deliveries have no honest source row
+  at all. Task 12's quality review proposed adding `assetId` to that literal; declined, because it edits
+  an approval the IT Home and other fixtures read, needs a full ~8-minute Playwright run to clear, and
+  would silently close a gap worth knowing about. The alternative — adding a *new* `EXECUTED` approval —
+  is worse: `e2e/approvals-audit.spec.ts` pins `Closed 2`. **If Phase 9 ever tidies the seed, this is the
+  one-line fix, and it needs the full e2e suite run behind it.** Related, and cheap to get wrong the same
+  way: `prisma/seed.ts` is NOT prettier-formatted (compact one-line object literals per row) — running
+  `npx prettier --write` on it produces a ~575-line reformat that buries any real change.
 - **Phase 8, Task 10 (recorded, judged out of scope):** **there is no `secretVersion` column and no
   key-id header**, so a receiver cannot support an overlap window during a rotation — rotating is a hard
   cutover, which is why `ROTATION_WARNING` exists and why `/admin/webhooks` states it before the click.

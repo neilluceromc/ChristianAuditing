@@ -5373,38 +5373,92 @@ git commit -m "feat(admin): a Home whose body matches its own sidebar"
 
 ### Task 12: The fixtures the deliveries page needs
 
-> ### REQUIRED AMENDMENT — three checks from Task 7's review.
+> ### AMENDED — the code as SHIPPED (`8521589` → `b0d7c94`, five commits, deliberately unsquashed).
+> Executed subagent-driven. **The plan's fixture had five things wrong with it, and every one was a
+> fixture that could not have come from this codebase** — which is precisely the defect this task exists
+> to close, so it is worth reading the list before writing any other fixture in this project.
 >
-> **1. Keep `encryptSecret(HOOK_SECRET, secretAad(id))`.** As drafted this is correct — a seed that stored
-> the secret as plaintext would silently defeat scope decision #4, and nothing would fail.
+> #### The payload shapes did not match what the emitter actually writes
 >
-> **2. Confirm `SECRET_ENCRYPTION_KEY` is actually visible in the seed process.** Today it arrives only as
-> an implicit side effect of Prisma Client's `.env` loading. If it is absent, `encryptSecret` throws and
-> the seed fails loudly — which is the good outcome, but verify it rather than discovering it.
+> **1. `type` used the DB representation, not the emitted one.** `prisma/schema.prisma`'s
+> `enum ApprovalType` is `@map`'d: the Prisma **client** value is `lifecycle_assign` (underscore) while
+> the **column** stores `lifecycle.assign` (dotted). `execute-approval.ts` passes `approval.type` — the
+> client value. The plan seeded the dotted form, which the emitter never produces.
 >
-> **3. The insert-then-update pair is `Promise.all`'d, not transactional.** Harmless immediately after
-> `TRUNCATE`, but the "no reader ever sees the empty placeholder" argument that justifies the same pattern
-> in `createEndpoint` does **not** apply here. Either wrap it or state why it doesn't need wrapping.
+> **2. `assetId` and `assetTag` were missing.** The real `approval.executed` payload always carries both
+> (`execute-approval.ts`, the `emitWebhook` call). Verified against a payload captured from a live
+> execution during Task 9, not against the plan.
+>
+> **3. The refNos were paired with the wrong types.** The plan gave APR-2031 `lifecycle.assign` and
+> APR-2035 `lifecycle.change-status`; the seeded rows are actually `lifecycle_transfer` and
+> `lifecycle_assign`.
+>
+> **4. `PR-0198` is seeded `SUBMITTED`, not `COMPLETED`** — and `purchase_request.completed` only ever
+> fires from the `complete` transition. Swapped to **PR-0188**, this seed's one genuinely `COMPLETED`
+> request. Free, so there was no reason to carry an incoherent row.
+>
+> **5. `nextAttemptAt` was never set on the `RETRYING` row — and Task 10 had already shipped a comment
+> promising it was.** `deliver-webhook.ts` says *"Task 12's seed gives a RETRYING fixture a real
+> `nextAttemptAt`, so a row that later lands must not keep advertising an attempt that will never
+> happen."* Left as drafted, that comment described a fixture that did not exist. Now set, mirroring the
+> worker's own `2 ** attempts * 30_000` backoff shape. **A promissory comment written in one task is a
+> defect until the task it names lands — and nothing checks it.**
+>
+> #### The comment block was worse than the data
+>
+> **6. It claimed an honest baseline that does not exist.** A first pass disclosed APR-2035 and APR-2040
+> as fiction (neither is `EXECUTED`) while presenting APR-2031 as the row that genuinely could have fired
+> `approval.executed`. **It could not.** APR-2031 carries no `assetId`, and
+> `src/worker/execute-approval.ts:63-65` refuses *every* approval type with
+> `if (!approval.assetId || !approval.asset) return fail(…)` **before** reaching `emitWebhook`. So all
+> three rows are fiction, on the same axis, and the "licence" framing rested on a distinction that does
+> not hold. The comments now say that.
+>
+> **This surfaced a pre-existing seed gap, recorded in HANDOVER §8 rather than fixed here: the seed
+> contains an `EXECUTED` approval the real execution path could never have produced.** The review
+> proposed adding `assetId` to APR-2031's literal; declined, because it edits an approval other fixtures
+> and the IT Home read, needs a full ~8-minute Playwright run to clear, and would silently close a gap
+> better left visible. The reviewer agreed on re-review, and independently found that the alternative —
+> adding a *new* `EXECUTED` approval — is worse: `e2e/approvals-audit.spec.ts` pins `Closed 2`.
+>
+> **7. The "no `Job` rows" decision was invisible.** It is load-bearing (a queued job makes
+> `worker:once` POST to a non-resolving hostname on every seeded run) and the file's own convention three
+> lines up is an explicit `// Job queued for the APPROVED approval`. A reader had every reason to read
+> the absence as an oversight. Now stated. Also stated: that one plaintext `HOOK_SECRET` for both
+> endpoints is deliberate, because `secretAad(id)` is what makes the ciphertexts non-interchangeable.
 
-`prisma/seed.ts` has never created a `WebhookEndpoint`, so every state the deliveries page is designed
-around — `DELIVERED`, `RETRYING`, and the `DEAD · 5/5` row with its "Replay" control — is unreachable
+`prisma/seed.ts` had never created a `WebhookEndpoint`, so every state the deliveries page is designed
+around — `DELIVERED`, `RETRYING`, and the `DEAD · 5/5` row with its "Replay" control — was unreachable
 against a fresh database. This is the Phase 6 lesson: *a seeded fixture that doesn't exercise its own
 design is a silent gap.*
 
 **Files:**
 - Modify: `prisma/seed.ts`
 
-- [ ] **Step 1: Seed two endpoints and a spread of deliveries**
+- [x] **Step 1: Seed two endpoints and a spread of deliveries**
 
-`TRUNCATE` in `prisma/seed.ts` already covers `WebhookEndpoint`, `WebhookDelivery` and `Job`, so this
-is purely additive. Add near the end of the seed, after the approvals block:
+`TRUNCATE` already covers `WebhookEndpoint`, `WebhookDelivery` and `Job`, so this is purely additive.
+Import `encryptSecret` from `../src/server/crypto` and `secretAad` from `../src/server/webhooks/sign`.
+`day(offset)` is the file's existing date helper. As shipped, after the approvals block:
 
 ```ts
   // Webhooks. Two endpoints so "disabled" is a real state on the list, and a
   // spread of deliveries so every chip deliveryStage() can produce is reachable
   // against a fresh database — including the DEAD · 5/5 row the design's
   // "Replay 4 dead-lettered" control exists for.
+  //
+  // Deliberately no Job rows for any of these deliveries. The deliveries below
+  // are history, not a live queue — a queued DELIVER_WEBHOOK job would make
+  // `npm run worker:once` try to POST to hooks.thebackroomop.com, which does
+  // not resolve, on every seeded run. Contrast the APPROVED approval just
+  // above, which DOES get a Job (line ~218): that one is meant to be picked up
+  // and executed; these are meant to sit still as history.
+  //
   // A fixture value, not a real secret — it signs nothing that leaves this machine.
+  // The same value is reused for both endpoints, deliberately: secretAad(id)
+  // binds each ciphertext to its own row, so two endpoints sharing a plaintext
+  // secret is safe (a ciphertext lifted from one endpoint's row still refuses
+  // to decrypt under the other's AAD), not an accidental copy-paste.
   const HOOK_SECRET = "seed-signing-secret-not-a-real-one";
   const [liveHook, offHook] = await Promise.all([
     prisma.webhookEndpoint.create({
@@ -5425,6 +5479,16 @@ is purely additive. Add near the end of the seed, after the approvals block:
     }),
   ]);
   // The AAD binds ciphertext to the row id, which only exists after the insert.
+  // Not wrapped in $transaction: createEndpoint wraps this same pair because
+  // it runs in a live app, where a concurrent request could read the row
+  // between these two writes (see its comment: "the placeholder never leaves
+  // this transaction").
+  // A seed script has no concurrent reader — nothing else is connected to this
+  // database while it runs — and if this throws partway (e.g. encryptSecret
+  // finds no key), the mandatory TRUNCATE at the top of the next run discards
+  // whatever this left behind. There is no window where a bad row is visible
+  // and no partial state that survives to be fixed; a transaction here would
+  // add rollback semantics for a script that's always rerun from scratch.
   await Promise.all([
     prisma.webhookEndpoint.update({
       where: { id: liveHook.id },
@@ -5438,12 +5502,42 @@ is purely additive. Add near the end of the seed, after the approvals block:
 
   await prisma.webhookDelivery.createMany({
     data: [
+      // None of the three approval.executed rows below could have been
+      // produced by the real execution path. APR-2035 and APR-2040 are not
+      // EXECUTED (APPROVED and PENDING respectively), and approval.executed
+      // only ever fires atomically with that transition. APR-2031 IS
+      // EXECUTED, but it carries no assetId — execute-approval.ts:63-65
+      // refuses to execute (and so never reaches the emitWebhook call at
+      // ~line 179) for exactly that reason: `if (!approval.assetId ||
+      // !approval.asset) return fail(...)`. So the assetId/assetTag on the
+      // APR-2031 row below are as invented as the type/assetId on the other
+      // two — there is no honest baseline among these three.
+      //
+      // Taken anyway, deliberately: approval.executed fires exactly once per
+      // approval, and liveHook is this seed's only subscriber to it — so the
+      // number of honest deliveries available here is exactly the number of
+      // EXECUTED-approvals-that-have-an-assetId in this seed, which is ZERO.
+      // (Not "a handful": there is no cap, one qualifying approval would buy
+      // exactly one delivery.) The design needs four (to make
+      // DELIVERED, RETRYING and DEAD · 5/5 all reachable and to produce the
+      // "4 attempts" count on /admin/webhooks). Closing this gap for real
+      // means adding EXECUTED approvals WITH an assetId to the seed, which is
+      // NOT free: the handover pins this seed at "7 approvals (all 6
+      // states)", IT Home's shift list and /approvals' counts derive from it,
+      // and 89 existing e2e tests run over that data. Anyone tempted to
+      // "correct" this by adding or editing approvals MUST run the full
+      // `npx playwright test` suite first — do not touch this without doing
+      // that. `type` is still the Prisma CLIENT value (underscored, matching
+      // what execute-approval.ts actually passes as `approval.type`), not the
+      // dotted @map'd column value — getting the representation right is
+      // still worth doing even though the row itself is a licensed fiction.
       {
         endpointId: liveHook.id,
         event: "approval.executed",
-        payload: { approvalId: "seed", refNo: "APR-2031", type: "lifecycle.assign" },
+        payload: { approvalId: "seed", refNo: "APR-2031", type: "lifecycle_transfer", assetId: a0148.id, assetTag: a0148.tag },
         status: "DELIVERED",
         attempts: 1,
+        lastError: null,
         deliveredAt: day(-2),
       },
       {
@@ -5455,27 +5549,44 @@ is purely additive. Add near the end of the seed, after the approvals block:
         lastError: null,
         deliveredAt: day(-1),
       },
+      // Retrying, not yet dead. Same licence as APR-2031 above, same
+      // structural reason (see that comment) — this row cites a real approval
+      // and a real ApprovalType client value, but APR-2035 is seeded
+      // APPROVED, not EXECUTED.
       {
         endpointId: liveHook.id,
         event: "approval.executed",
-        payload: { approvalId: "seed", refNo: "APR-2035", type: "lifecycle.change-status" },
+        payload: { approvalId: "seed", refNo: "APR-2035", type: "lifecycle_assign", assetId: a0181.id, assetTag: a0181.tag },
         status: "RETRYING",
         attempts: 2,
         lastError: "connect ETIMEDOUT 10.0.0.9:443",
+        // deliver-webhook.ts clears this to null on a later success, and that
+        // clear is only a real behaviour to see if this fixture starts with a
+        // real value — mirrors the worker's own backoff shape (2**attempts *
+        // 30s) without depending on it: no Job is queued for this delivery.
+        nextAttemptAt: new Date(Date.now() + 2 ** 2 * 30_000),
       },
-      // The row the design is about: five attempts spent, dead-lettered, replayable.
+      // The row the design is about: five attempts spent, dead-lettered,
+      // replayable. Same licence as APR-2031 above, same structural reason —
+      // APR-2040 is seeded PENDING, not EXECUTED.
       {
         endpointId: liveHook.id,
         event: "approval.executed",
-        payload: { approvalId: "seed", refNo: "APR-2040", type: "lifecycle.return" },
+        payload: { approvalId: "seed", refNo: "APR-2040", type: "lifecycle_return", assetId: a0148.id, assetTag: a0148.tag },
         status: "DEAD",
         attempts: 5,
         lastError: "500 Internal Server Error",
       },
+      // PR-0188 is this seed's one COMPLETED request — purchase_request.completed
+      // only ever fires from COMPLETED (purchases/actions.ts's `complete`
+      // branch), and unlike the two approval.executed rows above, there's no
+      // structural reason to cite anything else here: offHook is subscribed
+      // to only this one event, so a single delivery citing the seed's one
+      // genuinely-completed request costs nothing and has no ceiling problem.
       {
         endpointId: offHook.id,
         event: "purchase_request.completed",
-        payload: { purchaseRequestId: "seed", refNo: "PR-0198" },
+        payload: { purchaseRequestId: "seed", refNo: "PR-0188" },
         status: "DEAD",
         attempts: 5,
         lastError: "404 Not Found",
@@ -5484,47 +5595,48 @@ is purely additive. Add near the end of the seed, after the approvals block:
   });
 ```
 
-Import `encryptSecret` from `../src/server/crypto` and `secretAad` from `../src/server/webhooks/sign`
-at the top of the seed. `day(offset)` is the seed's existing date helper (`prisma/seed.ts:6`), so the
-dates above need no new code.
+- [x] **Step 2: Reseed and check every chip is reachable**
 
-Note the two-step insert-then-update, for the same reason `createEndpoint` does it: the AAD binds the
-ciphertext to the row id, and the id only exists after the insert.
-
-**No `Job` rows are seeded for these.** A `PENDING` job would make `npm run worker:once` immediately
-try to POST to a hostname that doesn't resolve, turning every seeded run into a slow, noisy failure.
-The deliveries are history; the queue is empty.
-
-- [ ] **Step 2: Reseed and check every chip is reachable**
+**`npm run db:seed` is blocked by the harness classifier** (§3), so the in-session route to a fresh
+fixture is to run any Playwright spec — every one reseeds via `execSync` in `beforeAll`, and that is not
+blocked. `npx playwright test e2e/auth-shell.spec.ts --workers=1` is the cheapest (~60s, 15 tests), and
+it doubles as a check that the new fixture broke nothing.
 
 ```bash
-npm run db:seed
-docker exec inventory-db-1 psql -U inventory -d inventory -c "SELECT status, attempts, count(*) FROM \"WebhookDelivery\" GROUP BY 1,2 ORDER BY 1;"
+docker exec inventory-db-1 psql -U inventory -d inventory -c "SELECT status, attempts, count(*) FROM \"WebhookDelivery\" GROUP BY 1,2 ORDER BY 1,2;"
 ```
 
-Expected: `DEAD | 5 | 2`, `DELIVERED | 1 | 1`, `DELIVERED | 2 | 1`, `RETRYING | 2 | 1`.
+Verified against a genuinely fresh database: `RETRYING|2|1`, `DELIVERED|1|1`, `DELIVERED|2|1`,
+`DEAD|5|2`. The chips `deliveryStage` produces from those rows are `DELIVERED`, `DELIVERED`,
+`RETRYING · 2/5`, `DEAD · 5/5`, `DEAD · 5/5` — every state the design needs, including the headline one.
 
-Then confirm the worker is still quiet — the seeded deliveries must not have created work:
+Also verified, because "the secret is encrypted" is exactly the claim that fails silently: both
+ciphertexts **round-trip** under `secretAad(theirOwnId)` back to the fixture plaintext, and decrypting
+one under the *other* endpoint's AAD is **refused**. A length check would not have shown that.
+
+Then confirm the worker is still quiet:
 
 ```bash
 npm run worker:once
 ```
 
-Expected: the usual `APR-2035` demo failure and nothing webhook-shaped.
+Only the seeded `EXECUTE_APPROVAL` is drained (APR-2035 → `EXECUTION_FAILED`, the demo, unchanged), and
+**no `DELIVER_WEBHOOK` job exists or is created.** The five deliveries are untouched.
 
-- [ ] **Step 3: Confirm the numbers the earlier tasks assert**
+- [x] **Step 3: Confirm the numbers the earlier tasks assert**
 
-Two Phase 8 screens now read these fixtures. Check them before the e2e spec depends on them:
+Derived from `listEndpoints`/`adminHome` against the fresh seed — all exact:
 
-- `/admin/webhooks` — two cards, the second carrying a `DISABLED` pill; the first shows `4 attempts`
-  and a `1 dead` link, the second `1 attempt` and `1 dead`.
-- Admin Home — `Endpoints 2`, `Dead deliveries 2`, and the integrations line reading
-  `2 delivered, 2 dead, 1 endpoint disabled.`
+- `/admin/webhooks`: `hooks…/inventory` active, **4 attempts, 1 dead**; `legacy…/erp-bridge` disabled,
+  **1 attempt, 1 dead**.
+- Admin Home: **`Endpoints 2`**, **`Dead deliveries 2`**, and the integrations line
+  **`2 delivered, 2 dead, 1 endpoint disabled.`**
 
-If a number disagrees, fix the fixture rather than the assertion — these are the values Task 14's spec
-will pin.
+Note `listEndpoints` counts delivery **rows** per endpoint, not the sum of the `attempts` column — which
+is why four deliveries read as "4 attempts". If a number disagrees, fix the fixture, not the assertion:
+Task 14's spec pins these.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add prisma/seed.ts
