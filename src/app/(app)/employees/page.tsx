@@ -28,9 +28,9 @@ export default async function EmployeesPage({
     employeeFacetOptions(state),
   ]);
 
-  const href = (s: typeof state, gaps = gapsOnly) => {
+  const href = (s: typeof state, gaps = gapsOnly, base = "/employees") => {
     const qs = serializeListState(s, EMPLOYEES_LIST_CONFIG);
-    return "/employees" + (gaps ? (qs ? `${qs}&gaps=1` : "?gaps=1") : qs);
+    return base + (gaps ? (qs ? `${qs}&gaps=1` : "?gaps=1") : qs);
   };
   const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0 || gapsOnly;
 
@@ -39,11 +39,10 @@ export default async function EmployeesPage({
       <PageHeader
         title="Employees"
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
-        // No query string: unlike /audit/export, this route always exports
-        // the whole roster (see the route's own comment for why), so it
-        // would be misleading to carry the list's current filters into the
-        // link.
-        actions={<ButtonLink href="/employees/export">Export</ButtonLink>}
+        // Carries the same q/facets/gaps as the list — the export honours
+        // "Policy gaps only" exactly like listEmployees does, via the shared
+        // filteredEmployees cut, so the sheet matches what's on screen.
+        actions={<ButtonLink href={href(state, gapsOnly, "/employees/export")}>Export</ButtonLink>}
       />
       <div className="flex flex-col gap-2">
         <EmployeesToolbar state={state} total={total} facets={facets} gapsOnly={gapsOnly} />

@@ -1,43 +1,27 @@
 import { requireUser } from "@/server/auth/guards";
-import { prisma } from "@/server/db/client";
 import { toXlsxBuffer } from "@/server/xlsx/write";
 import { EMPLOYEE_EXPORT_COLUMNS, EXPORT_CAP } from "@/lib/export-columns";
 import { capRefusal, exportFilename, xlsxResponse } from "@/server/export/respond";
+import { EMPLOYEES_LIST_CONFIG } from "@/lib/employees-list";
+import { parseListState } from "@/lib/url-state";
+import { employeeExportRows } from "@/server/modules/employees/queries";
 
-// Unlike /audit/export, this is the whole roster, unfiltered: the brief's use
-// case for this sheet is "who do we have and what are they holding", and the
-// list page's search/department/employment facets exist to help a human find
-// one row, not to define a subset worth exporting on its own. If that
-// changes, honour the page's filters the same way the audit route does.
-export async function GET() {
+/**
+ * Honours exactly what `/employees` shows, including "Policy gaps only" —
+ * that filter's cut can't be expressed in SQL (it needs loadout resolution
+ * per employee, see `employeeExportRows`), so this calls the same helper the
+ * page's `listEmployees` does rather than re-deriving the cut here. Getting
+ * this wrong once already shipped a sheet that silently ignored `gaps=1`.
+ */
+export async function GET(req: Request) {
   await requireUser();
+  const url = new URL(req.url);
+  const state = parseListState(url.searchParams, EMPLOYEES_LIST_CONFIG);
+  const gapsOnly = url.searchParams.get("gaps") === "1";
 
-  const count = await prisma.employee.count();
-  if (count > EXPORT_CAP) return capRefusal(count);
+  const rows = await employeeExportRows(state, gapsOnly);
+  if (rows.length > EXPORT_CAP) return capRefusal(rows.length);
 
-  const employees = await prisma.employee.findMany({
-    orderBy: { employeeNo: "asc" },
-    include: {
-      department: true,
-      // The count the /employees list shows, from the same relation, so the
-      // two cannot disagree.
-      _count: { select: { assets: true } },
-    },
-  });
-
-  const buffer = await toXlsxBuffer(
-    EMPLOYEE_EXPORT_COLUMNS,
-    employees.map((e) => ({
-      employeeNo: e.employeeNo,
-      name: e.name,
-      // `department` is a required relation, so this is never null.
-      department: e.department.name,
-      title: e.title,
-      employment: e.employment,
-      m365Status: e.m365Status,
-      joinedAt: e.joinedAt,
-      itemsHeld: e._count.assets,
-    })),
-  );
+  const buffer = await toXlsxBuffer(EMPLOYEE_EXPORT_COLUMNS, rows);
   return xlsxResponse(exportFilename("employees", new Date()), buffer);
 }

@@ -21,6 +21,53 @@ export interface EmployeeListRow {
 }
 
 /**
+ * One employee, with its loadout resolved. `missingRequired` is `null` when
+ * no policy applies (never "0 missing" — those read differently on screen).
+ */
+interface ResolvedEmployee {
+  employee: Awaited<ReturnType<typeof fetchCandidates>>[number];
+  missingRequired: number | null;
+}
+
+async function fetchCandidates(state: ListState) {
+  const orderKey = state.sort[0]?.key ?? "name";
+  const orderDir = state.sort[0]?.dir ?? "asc";
+  return prisma.employee.findMany({
+    where: buildEmployeeWhere(state),
+    include: {
+      department: true,
+      assets: { select: { id: true, tag: true, model: true, typeId: true, status: true } },
+    },
+    orderBy: { [orderKey]: orderDir },
+  });
+}
+
+/**
+ * The gaps cut, in ONE place. `buildEmployeeWhere(state)` is a SQL candidate
+ * set only — the loadout it's cut against (policy resolution + slot fill)
+ * cannot be expressed in SQL, so "policy gaps only" is necessarily an
+ * in-memory filter (HANDOVER §8's pattern: a SQL candidate set is not safe to
+ * act on, every consumer of it needs the same final cut). `listEmployees` and
+ * the employees export both call this instead of each computing their own
+ * `missingRequired > 0` — see this file's history for why that must stay one
+ * expression, not two that can drift.
+ */
+async function filteredEmployees(state: ListState, gapsOnly: boolean): Promise<ResolvedEmployee[]> {
+  const [employees, policies] = await Promise.all([
+    fetchCandidates(state),
+    prisma.equipmentPolicy.findMany({ include: { slots: true }, orderBy: [{ name: "asc" }] }),
+  ]);
+
+  const all = employees.map((employee): ResolvedEmployee => {
+    const policy = resolvePolicy(employee, policies);
+    const loadout = policy ? computeLoadout(policy.slots, employee.assets) : null;
+    return { employee, missingRequired: loadout ? loadout.missingRequired : null };
+  });
+
+  return gapsOnly ? all.filter((r) => (r.missingRequired ?? 0) > 0) : all;
+}
+
+/**
  * The two columns a normal HR list wouldn't have — Items and Loadout — are
  * why IT opens this page. Loadout needs policy resolution per employee, so
  * we fetch the (team-scale) matching set, compute in memory, and paginate
@@ -31,24 +78,12 @@ export async function listEmployees(state: ListState, gapsOnly: boolean): Promis
   total: number;
   pageCount: number;
 }> {
-  const orderKey = state.sort[0]?.key ?? "name";
-  const orderDir = state.sort[0]?.dir ?? "asc";
-  const [employees, policies] = await Promise.all([
-    prisma.employee.findMany({
-      where: buildEmployeeWhere(state),
-      include: {
-        department: true,
-        assets: { select: { id: true, tag: true, model: true, typeId: true, status: true } },
-      },
-      orderBy: { [orderKey]: orderDir },
-    }),
-    prisma.equipmentPolicy.findMany({ include: { slots: true }, orderBy: [{ name: "asc" }] }),
-  ]);
-
-  const all = employees.map((e): EmployeeListRow => {
-    const policy = resolvePolicy(e, policies);
-    const loadout = policy ? computeLoadout(policy.slots, e.assets) : null;
-    return {
+  const filtered = await filteredEmployees(state, gapsOnly);
+  const total = filtered.length;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = filtered.slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE);
+  return {
+    rows: page.map(({ employee: e, missingRequired }): EmployeeListRow => ({
       id: e.id,
       name: e.name,
       title: e.title,
@@ -57,15 +92,39 @@ export async function listEmployees(state: ListState, gapsOnly: boolean): Promis
       employment: e.employment,
       m365: e.m365Status,
       items: e.assets.length,
-      missingRequired: loadout ? loadout.missingRequired : null,
+      missingRequired,
       joined: fmtDate(e.joinedAt),
-    };
-  });
+    })),
+    total,
+    pageCount,
+  };
+}
 
-  const filtered = gapsOnly ? all.filter((r) => (r.missingRequired ?? 0) > 0) : all;
-  const total = filtered.length;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return { rows: filtered.slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE), total, pageCount };
+export interface EmployeeExportRow {
+  employeeNo: string; name: string; department: string; title: string;
+  employment: string; m365Status: string | null; joinedAt: Date; itemsHeld: number;
+}
+
+/**
+ * The export's row source. Same `filteredEmployees` cut `listEmployees`
+ * uses — so "Policy gaps only" on screen and the export agree on which rows
+ * that means — but UNPAGINATED (the export writes every matching row, not
+ * one page of them) and with a real `Date` for `joinedAt` rather than the
+ * list's display-formatted string, because the xlsx column needs a Date
+ * cell to format as one.
+ */
+export async function employeeExportRows(state: ListState, gapsOnly: boolean): Promise<EmployeeExportRow[]> {
+  const filtered = await filteredEmployees(state, gapsOnly);
+  return filtered.map(({ employee: e }) => ({
+    employeeNo: e.employeeNo,
+    name: e.name,
+    department: e.department.name,
+    title: e.title,
+    employment: e.employment,
+    m365Status: e.m365Status,
+    joinedAt: e.joinedAt,
+    itemsHeld: e.assets.length,
+  }));
 }
 
 export interface EmployeeFacets {
