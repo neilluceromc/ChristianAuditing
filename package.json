@@ -29,8 +29,10 @@
     "prisma": "^6.13.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "read-excel-file": "^9.3.10",
     "tailwind-merge": "^3.6.0",
     "tsx": "^4.20.0",
+    "write-excel-file": "^4.1.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
