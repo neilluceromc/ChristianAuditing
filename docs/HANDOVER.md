@@ -1571,6 +1571,16 @@ any task in the phase. All of them were fixtures that the running code could not
   is rate-limited per row** (one `checkRate` token for the batch plus one per delivery, against a 60/min
   cap), which is invisible at seed scale and correct at real scale — and now visible when it bites,
   because the action reports `queued` against `attempted` with the reason.
+- **Phase 9, Task 4 — the facet-count half of §8's candidate-set rule, for employees.**
+  `employeeFacetOptions` never receives `gapsOnly`, so with "Policy gaps only" active the toolbar's
+  department/employment counts describe the candidate set while the table and the export show the cut
+  set (3 of 10 in the seed). Identical in kind to the assets version already tracked here, and now
+  carrying the same explanatory comment in `src/server/modules/employees/queries.ts`. Accepted for the
+  same reason: they are read-only display counts, and both consumers that ACT on the set
+  (`listEmployees`, `employeeExportRows`) resolve the real cut through `filteredEmployees`. **Pre-existing
+  — Phase 9 fixed the list/export half of this pattern and deliberately left the count half**, so a
+  future reader has a signal rather than a mystery. Closing it means teaching the facet counts to run
+  the in-memory cut, which costs a full resolve per facet.
 - **Phase 8, Task 14 — a DELIBERATE, STANDING deviation from `design_handover/README.md`, recorded
   here because a CSS comment is not durable enough.** The design handover specifies
   `text-faint` as **`#98A2B3`** (light) and **`#6B7480`** (dark), for "mono metadata, placeholder".

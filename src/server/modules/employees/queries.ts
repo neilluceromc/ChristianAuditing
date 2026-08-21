@@ -133,6 +133,15 @@ export interface EmployeeFacets {
 }
 
 export async function employeeFacetOptions(state: ListState): Promise<EmployeeFacets> {
+  // NOTE on the gaps toggle, and the same note inventory/queries.ts carries
+  // about repair mode: this function never receives `gapsOnly`, so when the
+  // toggle is on these groupBy queries count the CANDIDATE set (everyone
+  // matching the SQL where) while the table and the export show the cut set
+  // (`filteredEmployees`). A SQL groupBy cannot apply that cut — it needs
+  // resolvePolicy/computeLoadout per employee — so the counts may read high
+  // with gaps active (3 of 10 in the seed). They are read-only display
+  // counts, not something acted on: `listEmployees` and `employeeExportRows`
+  // both resolve the exact cut set themselves. Tracked in HANDOVER §8.
   const without = (facet: string): ListState => ({ ...state, filters: { ...state.filters, [facet]: [] } });
   const [deptGroups, empGroups, departments] = await Promise.all([
     prisma.employee.groupBy({ by: ["departmentId"], where: buildEmployeeWhere(without("department")), _count: true }),
