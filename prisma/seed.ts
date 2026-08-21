@@ -289,10 +289,23 @@ async function main() {
         lastError: null,
         deliveredAt: day(-1),
       },
-      // Retrying, not yet dead. type/assetId/assetTag are illustrative (this
-      // fixture doesn't have a second EXECUTED approval to cite honestly), but
-      // the refNo still names a real row and the type is at least a real
-      // ApprovalType client value in the correct representation.
+      // Retrying, not yet dead. Deliberate licence, recorded rather than
+      // accidental: approval.executed fires exactly once per approval,
+      // atomically with its transition to EXECUTED, and liveHook is this
+      // seed's only endpoint subscribed to that event — so the honest ceiling
+      // for approval.executed deliveries here is ONE (APR-2031, the seed's
+      // only EXECUTED approval). The design needs four (to make DELIVERED,
+      // RETRYING and DEAD · 5/5 all reachable and to produce the "4 attempts"
+      // count on /admin/webhooks), and one EXECUTED approval cannot source
+      // four. APR-2035 is seeded APPROVED, not EXECUTED — this row cites a
+      // real approval and a real ApprovalType client value, but not one this
+      // exact approval could itself have produced. Fixing that means adding
+      // EXECUTED approvals to the seed, which is NOT free: the handover pins
+      // this seed at "7 approvals (all 6 states)", IT Home's shift list and
+      // /approvals' counts derive from it, and 89 existing e2e tests run over
+      // that data. Anyone tempted to "correct" this by adding approvals MUST
+      // run the full `npx playwright test` suite first — do not touch this
+      // without doing that.
       {
         endpointId: liveHook.id,
         event: "approval.executed",
@@ -307,9 +320,13 @@ async function main() {
         nextAttemptAt: new Date(Date.now() + 2 ** 2 * 30_000),
       },
       // The row the design is about: five attempts spent, dead-lettered, replayable.
-      // Same caveat as APR-2035 above: APR-2040 is seeded PENDING, not EXECUTED,
-      // so nothing has really fired this one yet either — illustrative, not a
-      // state this exact row could reach on its own.
+      // Same deliberate licence as APR-2035 above, same reason: one EXECUTED
+      // approval (APR-2031) cannot source the four approval.executed
+      // deliveries this design needs, so APR-2040 (seeded PENDING, not
+      // EXECUTED) fills the DEAD slot. See the comment on the APR-2035 row —
+      // do not "fix" this without running the full e2e suite first; it would
+      // mean adding EXECUTED approvals, and 89 existing e2e tests run over
+      // this seed's approvals data.
       {
         endpointId: liveHook.id,
         event: "approval.executed",
@@ -318,15 +335,16 @@ async function main() {
         attempts: 5,
         lastError: "500 Internal Server Error",
       },
-      // PR-0198 is seeded SUBMITTED (the bounce-back-with-notes fixture), not
-      // COMPLETED — purchase_request.completed only ever fires from COMPLETED
-      // (purchases/actions.ts's `complete` branch). PR-0188 is this seed's one
-      // COMPLETED request, if this needs to cite a row honestly; kept as
-      // PR-0198 here to match the value named for this task.
+      // PR-0188 is this seed's one COMPLETED request — purchase_request.completed
+      // only ever fires from COMPLETED (purchases/actions.ts's `complete`
+      // branch), and unlike the two approval.executed rows above, there's no
+      // structural reason to cite anything else here: offHook is subscribed
+      // to only this one event, so a single delivery citing the seed's one
+      // genuinely-completed request costs nothing and has no ceiling problem.
       {
         endpointId: offHook.id,
         event: "purchase_request.completed",
-        payload: { purchaseRequestId: "seed", refNo: "PR-0198" },
+        payload: { purchaseRequestId: "seed", refNo: "PR-0188" },
         status: "DEAD",
         attempts: 5,
         lastError: "404 Not Found",
