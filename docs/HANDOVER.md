@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–12 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
+**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–12 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -32,19 +32,30 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    **`npm run db:seed` is blocked by the harness classifier when an agent runs it** (see §3). The cheap
    in-session route to a fresh database is **`npx playwright test e2e/auth-shell.spec.ts --workers=1`** —
    ~60s, 15 tests, and it reseeds via `execSync` in `beforeAll`, which is not blocked. That is how Task 12
-   was verified. **The database IS pristine as of this handover** (that run is the last thing that touched
-   it), which is a change from every previous handover — see the state paragraph below.
+   was verified. **The database is freshly seeded, with one known deviation** — a later
+   `npm run worker:once` drained the seed's `EXECUTE_APPROVAL` demo, so `APR-2035` reads
+   `EXECUTION_FAILED` rather than `APPROVED`. Everything Task 13 needs is exactly as seeded. Details in
+   the state paragraph below.
 3. Read **§6** for Phase 8's entry criteria — the *why* behind the tasks (the worker's dead-lettered
    webhook job, the permanent admin's locked row, the 10,000-row export cap). **The plan already exists
    and already maps each criterion to a task**, so read §6 when a task's reasoning looks arbitrary, not
-   as something to act on. **§6a is the section that matters most** — it is what Tasks 1–7 actually
-   established, and it is where the recurring-defect checklist lives.
+   as something to act on. **§6a is the section that matters most** — it is what Tasks 1–12 actually
+   established (55 numbered rules), and the **checklist in item 4 below is the distilled version**: run
+   that against every task, and read §6a's entry for whichever rules the checklist points at.
 4. **Resume at Task 13** (`/admin/webhooks/deliveries` + replay) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
    Tasks 1–12 are committed; 13–14 remain. **Task 13 is the last real screen, and it pairs a rule module
    with a page — the combination this phase has broken every single time (§6a rules 10, 36, 47).** Its
    banner has four amendments; run the §0 checklist against it regardless of what the banner says.
    Its fixtures now exist, so it is reachable against a fresh database for the first time.
+
+   **ONE THING IS OUTSTANDING and needs a human at a keyboard: the Admin Home has never been LOOKED at.**
+   Task 11's data assertions were all verified by calling `adminHome()` directly (all five roles present,
+   `sum(rows) === total`, `m365_sso` reading `unavailable`), and `npm run build` renders the route — but
+   the purely visual pass (four tiles then three lists, no fleet bar or age histogram, IT Home unchanged
+   when you switch back) was never done, because the dev server came up with an expired session both
+   times and **an agent will not type a password into a login form** (§7). Sign in once at
+   `http://localhost:3000` and the check takes a minute. Nothing else depends on it.
 
    **Tasks 8, 9 and 10 were executed by a single context** (implement + self-review in one session).
    **Tasks 11 and 12 were executed properly subagent-driven** — fresh sonnet implementer, then a sonnet
@@ -83,16 +94,19 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
    Read the plan's **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the
    `m365_sso` refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a
-   later task can silently break — then **§6a**, which carries what Tasks 1–7 actually established.
-   **Tasks 2–7 have all been amended to the shipped code** (`docs(plan): …`), so trust the plan over any
-   memory of what it used to say, and keep amending it whenever code deviates. Task 7's banner reads
-   `AMENDED` rather than `REQUIRED AMENDMENT` because it has been applied.
+   later task can silently break — then **§6a**, which carries what Tasks 1–12 actually established.
+   **Tasks 2–12 have all been amended to the shipped code** (`docs(plan): …`), so trust the plan over any
+   memory of what it used to say, and keep amending it whenever code deviates. Their banners read
+   `AMENDED` rather than `REQUIRED AMENDMENT` because they have been applied; only **Task 13's is still
+   `REQUIRED AMENDMENT`**, i.e. written in advance and not yet acted on.
 
-   **THE CHECKLIST — the single most useful thing in this doc.** One defect shape has appeared in **all
-   eight tasks executed so far**, and **not one instance was caught by the unit suite**. It is always the
-   same root cause: **a rule and its surface that only partly agree.** Task 5 reproduced §6a rule 8 *after*
-   rule 8 was written down, which is why this is a checklist to run rather than a lesson to have absorbed.
-   Before calling any task done, check each of these explicitly:
+   **THE CHECKLIST — the single most useful thing in this doc.** Every one of the twelve tasks executed
+   so far has hit at least one of these, and **not one instance was caught by the unit suite** — several
+   were found only by a fresh reviewer reading a sibling function, or by running the real thing against a
+   real database. The root cause is nearly always the same: **a rule and its surface that only partly
+   agree.** Rules 15 and 8 were each reproduced on a NEW page *after* being written down here (Tasks 11
+   and 5), which is why this is a checklist to run and not a lesson to have absorbed. Before calling any
+   task done, check each of these explicitly:
 
    - **Does the page consume EVERY refusal its rule module can return** — not just the one the design card
      names? (rule 10 — **now four instances, and it is the only rule this phase has broken in every
@@ -146,6 +160,14 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
      worker's cap and means five attempts in TOTAL, and the shown-once banner hardcoded the signature
      header name a rename would leave behind.)
 
+   **Applied to Task 13 specifically**, the four that will bite: it pairs `deliveryStage`/replay rules
+   with a page (item 1 — `replayDelivery` refuses a `DELIVERED` row **and** an inactive endpoint, so
+   neither may render a live Replay button); it renders a delivery status, so it needs
+   `statusFamily(status, "delivery")` and not the flat map, and the **status** rather than
+   `deliveryStage`'s label (item 8's family); its planned `MAX_DELIVERY_ATTEMPTS` literal is a second
+   definition of `MAX_JOB_ATTEMPTS` (item 11); and `replayDelivery` writes an audit diff, so item 3
+   applies — record what changed (`status`, `attempts`), never a from-equals-to `event`.
+
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
 
@@ -191,18 +213,29 @@ plan text and §6a entry were updated in the same session it shipped. The next u
 task — **Task 10** — not a fragment of anything. Every review finding was either fixed or recorded in
 §8; none was left silently open.
 
-**State this session left behind:** working tree **clean**, **no dev server running** (verified: no
-`node.exe` processes), `inventory-db-1` **up**, **8 migrations, none pending** (`prisma migrate status`
-says "up to date"). **No scratch files anywhere in the repo** — the session's working scripts live in the
+**State this session left behind:** working tree **clean**, **no dev server running** (verified: zero
+`node.exe` processes, and nothing listening on 3000/4999/5000), `inventory-db-1` **up**, **8 migrations,
+none pending** (`prisma migrate status` says "up to date"). `main` is **4 commits ahead of
+`origin/main`** and the branch is **54 ahead of `main`** — but count it rather than trusting that
+(`git rev-list --count main..HEAD`), because every correction to this line is itself a commit. **No scratch files anywhere in the repo** — the session's working scripts live in the
 harness scratchpad, outside the tree. Last verified green: `npx tsc --noEmit` · `npm run lint` ·
 **460 tests / 30 files** · `npm run build`.
 
-**THE DB IS PRISTINE as of this handover** — Task 12's verification reseeded it via
+**THE DB IS FRESHLY SEEDED, with ONE known deviation.** Task 12's verification reseeded it via
 `npx playwright test e2e/auth-shell.spec.ts --workers=1` (15/15 passed), which cleared every piece of
-drift the paragraphs below describe. **They are kept for the record of what a verification pass costs,
-not as a description of current state.** The one thing a reseed cannot undo is nothing here: the audit
-table, the purchase-request states, `APR-2041`/`BR-LT-0181`, and Grace Lim (EMP-0063) are all back to
-their seeded values. Historical record follows: Task 3's live verification (all five users restored to their
+drift the paragraphs below describe — the purchase-request states are back to one-per-state,
+`APR-2041`/`BR-LT-0181` are back, Grace Lim (EMP-0063) is ACTIVE again, and the audit table is down to
+the seed's own 3 `asset` rows. **They are kept below as the record of what a verification pass costs,
+not as a description of current state.**
+
+**The one deviation, and it is the seed's own demo:** a `npm run worker:once` was run after that reseed
+(to prove Task 12 seeds no webhook work), which **drained the seeded `EXECUTE_APPROVAL` job**. So
+`APR-2035` is `EXECUTION_FAILED` rather than the seeded `APPROVED`, its job is `DONE` rather than
+`PENDING`, and there is a 4th audit row (`approval` / `execution.failed`). Nothing else differs.
+**If Task 14's spec asserts anything about that demo, reseed first** — one Playwright spec run, ~60s.
+Everything Task 13 needs (2 endpoints, 5 deliveries, no `DELIVER_WEBHOOK` jobs) is exactly as seeded.
+
+Historical record follows: Task 3's live verification (all five users restored to their
 seeded roles and enabled state, but **7 `user` `AuditEntry` rows** remain — append-only by DB trigger);
 Task 5's live verification (`allowed_domain` restored to `thebackroomop.com`, plus **`feature-flag` audit
 rows**, and it was briefly set to `(enabled: true, value: NULL)` to exercise the Critical); and Task 6's
@@ -284,6 +317,17 @@ One **plan per phase** under `docs/superpowers/plans/`, executed **subagent-driv
 3. **The controller applies review fixes** for small, well-understood defects directly and verifies live in the Browser pane; larger fixes go back to an implementer subagent.
 4. **Amend the plan doc whenever code deviates** (commit as `docs(plan): …`) so the plan never lies to a future reader.
 5. Finish with `superpowers:finishing-a-development-branch` → merge to main, delete branch, push.
+
+**Settled 2026-08-21: subagent-driven execution is the approved mode, and it is now exercised rather
+than aspirational.** Tasks 8–10 of Phase 8 were done single-context (one agent implementing and
+self-reviewing) because agent dispatch was gated in that session; the user lifted the gate for 11
+onward. Tasks 11 and 12 ran the full loop — fresh implementer, spec-compliance review, quality review,
+each reviewer re-reviewing after fixes — and **both turned up defects that types, lint and a fully green
+unit suite could not see** (§6a rules 47 and 51). Two things learned about running it: a self-review is
+structurally bad at catching unrequested scope, because the author has already justified it to
+themselves; and **verify a reviewer's claims before acting on them** — one hinged on a nav table having
+only three entries (true, and one grep to check), and the correct remedy for another was the opposite of
+what it proposed.
 
 **Models:** sonnet implementers and spec reviewers; opus for quality reviews of anything that moves
 data or gates access. **Verbatim implementers transfer plan defects wholesale — the reviews are where
@@ -1163,6 +1207,9 @@ any task in the phase. All of them were fixtures that the running code could not
 ---
 
 ## 7. Recurring gotchas that have cost real time
+
+- **A fresh dev server has no session, and an agent will not type the seeded password into the login form.** It happened twice in one session. Any check that needs a signed-in browser therefore needs **you** to sign in once at `http://localhost:3000` (`admin@thebackroomop.com`), after which the agent can drive the page normally. **Two workarounds that need no browser at all, and are often better:** call the page's own query directly (`npx tsx` a throwaway script under the gitignored `backups/` that imports e.g. `adminHome()` and prints its output — this is how Task 11's data assertions were verified, and it checks the numbers rather than the pixels); or, for anything the DB can answer, `docker exec inventory-db-1 psql -U inventory -d inventory -c "…"` (note **`-U inventory`**, not `postgres` — that role does not exist and the error is unhelpful). Delete the scratch script afterwards. Reserve the browser for what only the browser shows: layout, contrast, focus order, axe.
+- **Browser-pane synthetic clicks often miss React handlers.** A `computer` click at page coordinates can land nowhere because the screenshot frame is scaled (a 1400×900 viewport screenshots at 800×514, so page coords are ~1.75× too large). Dispatching from `javascript_tool` is reliable: `el.click()` on the real element works for buttons AND for React-controlled checkboxes; for text inputs use the native value setter plus an `input` event, since assigning `.value` alone does not notify React. Also: the `Menu` primitive closes on **mousedown** outside, so `document.body.click()` does NOT close it — the next trigger click then toggles it shut and your menu item is gone.
 
 - **Prisma `mode: "insensitive"` on an identity/`equals` field compiles to ILIKE**, making `%`/`_` wildcards — caused an auth bypass AND an enumeration oracle. Use `findUnique` on a normalized value. `contains`-search is the sanctioned use.
 - **Installing any npm package on Windows** drops the Linux optional-dep trees (`@tailwindcss/oxide-wasm32-wasi`, `@emnapi/*`) from `package-lock.json` and breaks the Alpine prod `npm ci`. Regenerate inside Linux: `docker run --rm -v "$PWD:/app" -w //app node:22-alpine sh -c "npm i -g npm@11 && npm install --package-lock-only --no-audit --no-fund"` (Git Bash needs `MSYS_NO_PATHCONV=1` and `//app`).
