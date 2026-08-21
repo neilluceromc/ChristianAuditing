@@ -7,7 +7,7 @@ import bcrypt from "bcryptjs";
 import { signIn, signOut } from "./index";
 import { requireUser } from "./guards";
 import { prisma } from "../db/client";
-import { isAllowedDomain, normalizeEmail } from "@/lib/auth-shared";
+import { flagDomain, isAllowedDomain, normalizeEmail } from "@/lib/auth-shared";
 import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 
 export interface AuthFormState {
@@ -57,8 +57,7 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   if (password.length < 10) return { error: "Password must be at least 10 characters." };
 
   const domainFlag = await prisma.featureFlag.findUnique({ where: { key: "allowed_domain" } });
-  const domain =
-    domainFlag?.enabled && typeof domainFlag.value === "string" ? domainFlag.value : null;
+  const domain = flagDomain(domainFlag);
   if (!isAllowedDomain(email, domain)) {
     return { error: `Signup is limited to @${domain} addresses.` };
   }

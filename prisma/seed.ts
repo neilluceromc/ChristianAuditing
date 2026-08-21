@@ -1,5 +1,7 @@
 import { PrismaClient, type AssetStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { encryptSecret } from "../src/server/crypto";
+import { secretAad } from "../src/server/webhooks/sign";
 
 const prisma = new PrismaClient();
 
@@ -215,6 +217,158 @@ async function main() {
   // Job queued for the APPROVED approval (worker executes it in Phase 4)
   const apr2035 = await prisma.approval.findUniqueOrThrow({ where: { refNo: "APR-2035" } });
   await prisma.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: apr2035.id } } });
+
+  // Webhooks. Two endpoints so "disabled" is a real state on the list, and a
+  // spread of deliveries so every chip deliveryStage() can produce is reachable
+  // against a fresh database — including the DEAD · 5/5 row the design's
+  // "Replay 4 dead-lettered" control exists for.
+  //
+  // Deliberately no Job rows for any of these deliveries. The deliveries below
+  // are history, not a live queue — a queued DELIVER_WEBHOOK job would make
+  // `npm run worker:once` try to POST to hooks.thebackroomop.com, which does
+  // not resolve, on every seeded run. Contrast the APPROVED approval just
+  // above, which DOES get a Job (line ~218): that one is meant to be picked up
+  // and executed; these are meant to sit still as history.
+  //
+  // A fixture value, not a real secret — it signs nothing that leaves this machine.
+  // The same value is reused for both endpoints, deliberately: secretAad(id)
+  // binds each ciphertext to its own row, so two endpoints sharing a plaintext
+  // secret is safe (a ciphertext lifted from one endpoint's row still refuses
+  // to decrypt under the other's AAD), not an accidental copy-paste.
+  const HOOK_SECRET = "seed-signing-secret-not-a-real-one";
+  const [liveHook, offHook] = await Promise.all([
+    prisma.webhookEndpoint.create({
+      data: {
+        url: "https://hooks.thebackroomop.com/inventory",
+        events: ["approval.executed", "offboarding.completed"],
+        active: true,
+        secret: "",
+      },
+    }),
+    prisma.webhookEndpoint.create({
+      data: {
+        url: "https://legacy.thebackroomop.com/erp-bridge",
+        events: ["purchase_request.completed"],
+        active: false,
+        secret: "",
+      },
+    }),
+  ]);
+  // The AAD binds ciphertext to the row id, which only exists after the insert.
+  // Not wrapped in $transaction: createEndpoint wraps this same pair because
+  // it runs in a live app, where a concurrent request could read the row
+  // between these two writes (see its comment: "the placeholder never leaves
+  // this transaction").
+  // A seed script has no concurrent reader — nothing else is connected to this
+  // database while it runs — and if this throws partway (e.g. encryptSecret
+  // finds no key), the mandatory TRUNCATE at the top of the next run discards
+  // whatever this left behind. There is no window where a bad row is visible
+  // and no partial state that survives to be fixed; a transaction here would
+  // add rollback semantics for a script that's always rerun from scratch.
+  await Promise.all([
+    prisma.webhookEndpoint.update({
+      where: { id: liveHook.id },
+      data: { secret: encryptSecret(HOOK_SECRET, secretAad(liveHook.id)) },
+    }),
+    prisma.webhookEndpoint.update({
+      where: { id: offHook.id },
+      data: { secret: encryptSecret(HOOK_SECRET, secretAad(offHook.id)) },
+    }),
+  ]);
+
+  await prisma.webhookDelivery.createMany({
+    data: [
+      // None of the three approval.executed rows below could have been
+      // produced by the real execution path. APR-2035 and APR-2040 are not
+      // EXECUTED (APPROVED and PENDING respectively), and approval.executed
+      // only ever fires atomically with that transition. APR-2031 IS
+      // EXECUTED, but it carries no assetId — execute-approval.ts:63-65
+      // refuses to execute (and so never reaches the emitWebhook call at
+      // ~line 179) for exactly that reason: `if (!approval.assetId ||
+      // !approval.asset) return fail(...)`. So the assetId/assetTag on the
+      // APR-2031 row below are as invented as the type/assetId on the other
+      // two — there is no honest baseline among these three.
+      //
+      // Taken anyway, deliberately: approval.executed fires exactly once per
+      // approval, and liveHook is this seed's only subscriber to it — so the
+      // number of honest deliveries available here is exactly the number of
+      // EXECUTED-approvals-that-have-an-assetId in this seed, which is ZERO.
+      // (Not "a handful": there is no cap, one qualifying approval would buy
+      // exactly one delivery.) The design needs four (to make
+      // DELIVERED, RETRYING and DEAD · 5/5 all reachable and to produce the
+      // "4 attempts" count on /admin/webhooks). Closing this gap for real
+      // means adding EXECUTED approvals WITH an assetId to the seed, which is
+      // NOT free: the handover pins this seed at "7 approvals (all 6
+      // states)", IT Home's shift list and /approvals' counts derive from it,
+      // and 89 existing e2e tests run over that data. Anyone tempted to
+      // "correct" this by adding or editing approvals MUST run the full
+      // `npx playwright test` suite first — do not touch this without doing
+      // that. `type` is still the Prisma CLIENT value (underscored, matching
+      // what execute-approval.ts actually passes as `approval.type`), not the
+      // dotted @map'd column value — getting the representation right is
+      // still worth doing even though the row itself is a licensed fiction.
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2031", type: "lifecycle_transfer", assetId: a0148.id, assetTag: a0148.tag },
+        status: "DELIVERED",
+        attempts: 1,
+        lastError: null,
+        deliveredAt: day(-2),
+      },
+      {
+        endpointId: liveHook.id,
+        event: "offboarding.completed",
+        payload: { employeeId: "seed", employeeNo: "EMP-0093", decisions: 2 },
+        status: "DELIVERED",
+        attempts: 2,
+        lastError: null,
+        deliveredAt: day(-1),
+      },
+      // Retrying, not yet dead. Same licence as APR-2031 above, same
+      // structural reason (see that comment) — this row cites a real approval
+      // and a real ApprovalType client value, but APR-2035 is seeded
+      // APPROVED, not EXECUTED.
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2035", type: "lifecycle_assign", assetId: a0181.id, assetTag: a0181.tag },
+        status: "RETRYING",
+        attempts: 2,
+        lastError: "connect ETIMEDOUT 10.0.0.9:443",
+        // deliver-webhook.ts clears this to null on a later success, and that
+        // clear is only a real behaviour to see if this fixture starts with a
+        // real value — mirrors the worker's own backoff shape (2**attempts *
+        // 30s) without depending on it: no Job is queued for this delivery.
+        nextAttemptAt: new Date(Date.now() + 2 ** 2 * 30_000),
+      },
+      // The row the design is about: five attempts spent, dead-lettered,
+      // replayable. Same licence as APR-2031 above, same structural reason —
+      // APR-2040 is seeded PENDING, not EXECUTED.
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2040", type: "lifecycle_return", assetId: a0148.id, assetTag: a0148.tag },
+        status: "DEAD",
+        attempts: 5,
+        lastError: "500 Internal Server Error",
+      },
+      // PR-0188 is this seed's one COMPLETED request — purchase_request.completed
+      // only ever fires from COMPLETED (purchases/actions.ts's `complete`
+      // branch), and unlike the two approval.executed rows above, there's no
+      // structural reason to cite anything else here: offHook is subscribed
+      // to only this one event, so a single delivery citing the seed's one
+      // genuinely-completed request costs nothing and has no ceiling problem.
+      {
+        endpointId: offHook.id,
+        event: "purchase_request.completed",
+        payload: { purchaseRequestId: "seed", refNo: "PR-0188" },
+        status: "DEAD",
+        attempts: 5,
+        lastError: "404 Not Found",
+      },
+    ],
+  });
 
   // Reservations — all four states
   await prisma.reservation.createMany({

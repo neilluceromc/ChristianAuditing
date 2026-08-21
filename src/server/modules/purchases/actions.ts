@@ -7,6 +7,7 @@ import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
+import { emitWebhook } from "@/server/webhooks/emit";
 import { diffOf } from "@/lib/audit-diff";
 import {
   CANONICAL_NOTE, PURCHASE_ACTION_ROLES, PURCHASE_NOTE_KIND, REASON_REQUIRED,
@@ -167,6 +168,18 @@ async function runTransition(action: PurchaseAction, input: unknown): Promise<Ac
         ...(reason ? { reason: { from: null, to: reason } } : {}),
       },
     });
+
+    // `complete` is the ONLY action that reaches COMPLETED, and only from
+    // IT_REVIEWED (purchase-flow.ts:83) — so guarding on the action here is
+    // equivalent to guarding on the destination state, without a second
+    // definition of which transition finishes a request. Inside the same
+    // transaction as the state write and its NoteEntry.
+    if (action === "complete") {
+      await emitWebhook(tx, "purchase_request.completed", {
+        purchaseRequestId: req.id,
+        refNo: req.refNo,
+      });
+    }
 
     acted = { refNo: req.refNo, state: t.next };
     return null;

@@ -208,6 +208,17 @@ test.describe("asset record", () => {
 });
 
 test.describe("employees & loadout", () => {
+  // The LIST, which nothing axe-checked until Phase 8's Task 14 — and it was
+  // carrying 10 serious colour-contrast violations the whole time, one per row's
+  // employeeNo, from `--text-faint` failing WCAG AA at 2.57:1. Only
+  // /employees/[id] was ever scanned (below), which is why the suite stayed
+  // green. This is the assertion that stops the token regressing.
+  test("axe passes on the list, not just the detail page", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/employees");
+    await expectNoSeriousAxe(page);
+  });
+
   test("list shows loadout gaps; the gaps filter narrows", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees");
@@ -232,18 +243,21 @@ test.describe("employees & loadout", () => {
     await expect(page.getByRole("button", { name: /headset slot, empty, required/ })).toBeVisible({ timeout: 20_000 });
   });
 
-  // BUG (app, not test): axe reports ~6 "serious" color-contrast violations
-  // on this page. text-fg-faint (--text-faint: #98a2b3 in light mode, see
-  // src/app/globals.css:16) renders at 10-10.5px in several LoadoutView
-  // slot-tile labels — e.g. the "{typeName} · required/optional" line and
-  // the "{age} · − return" hint in src/components/employees/loadout-view.tsx
-  // (around lines 219-236) — against white/near-white tile backgrounds
-  // (#ffffff, #faf8f3, #f6f7f9). Measured ratios are ~2.4:1-2.57:1; WCAG 2 AA
-  // requires 4.5:1 for normal-size text. Repro: log in as it@thebackroomop.com,
-  // open /employees/<Marites Bautista's id> (any employee with a policy works),
-  // run an axe scan — violations list multiple color-contrast nodes inside
-  // the "Equipment slots" grid — tile microcopy moved from --text-faint to
-  // --text-muted (2.5:1 -> 4.7:1) after axe flagged 6 serious violations here.
+  // FIXED, twice — kept as the record of how, because the two fixes are a
+  // useful contrast in approach. Axe once reported ~6 serious colour-contrast
+  // violations here: `--text-faint` at 10-10.5px in LoadoutView's slot-tile
+  // microcopy (the "{typeName} · required/optional" line, the "{age} · − return"
+  // hint) against near-white tile backgrounds, at ~2.4:1-2.57:1 where WCAG AA
+  // wants 4.5:1.
+  //
+  // Phase 7 fixed it at the CALL SITE, moving that microcopy to
+  // `--text-muted`. Phase 8's Task 14 then found the same defect on ~24 other
+  // usages — including ten on the /employees LIST, which nothing axe-checked —
+  // and fixed it at the TOKEN instead (`--text-faint` is now #667085 light /
+  // #868f9c dark; see the reasoning beside the declaration in
+  // src/app/globals.css). Neither hex in the original note survives, which is
+  // why this comment no longer quotes a line number for it: a citation that
+  // drifts is worse than a name you can grep.
   test("loadout view passes axe", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees");

@@ -1,10 +1,11 @@
 import { prisma } from "../server/db/client";
 import { executeApproval } from "./execute-approval";
+import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";
+import { MAX_JOB_ATTEMPTS } from "../lib/jobs";
 
 const WORKER_ID = `worker-${process.pid}`;
 const POLL_MS = 3_000;
 const STALE_MS = 5 * 60_000;
-const MAX_ATTEMPTS = 5;
 const ONCE = process.argv.includes("--once");
 
 let draining = false;
@@ -50,11 +51,12 @@ async function handle(job: LeasedJob): Promise<void> {
     return;
   }
   if (job.type === "DELIVER_WEBHOOK") {
-    // No producer exists until Phase 8 — dead-letter honestly instead of spinning.
-    await prisma.job.update({
-      where: { id: job.id },
-      data: { status: "DEAD", lastError: "webhook delivery ships in Phase 8" },
-    });
+    // Job_deliver_payload_shape (Task 9's migration) makes a job without this
+    // key impossible to insert, so this throw is a belt-and-braces check on a
+    // row that predates the constraint — not the guard the invariant rests on.
+    const deliveryId = String((job.payload as { deliveryId?: unknown } | null)?.deliveryId ?? "");
+    if (!deliveryId) throw new Error("DELIVER_WEBHOOK job has no deliveryId");
+    await deliverWebhook(deliveryId, job.attempts);
     return;
   }
   throw new Error(`Unknown job type ${job.type}`);
@@ -70,7 +72,13 @@ async function tick(): Promise<boolean> {
     console.log(`[worker] ${job.type} ${job.id} done`);
   } catch (err) {
     const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    const dead = job.attempts >= MAX_ATTEMPTS;
+    // A 404, a disabled endpoint, an undecryptable secret or a vanished
+    // delivery row cannot succeed on attempt five either — dead-letter it now
+    // rather than spending the budget to reach the same answer four failures
+    // later. The delivery row is already DEAD in that case (deliver-webhook.ts
+    // marks it before throwing, which is what `permanent()` exists to
+    // guarantee), so the ledger and the job agree without a second write.
+    const dead = job.attempts >= MAX_JOB_ATTEMPTS || err instanceof PermanentDeliveryError;
     await prisma.job.update({
       where: { id: job.id },
       data: dead

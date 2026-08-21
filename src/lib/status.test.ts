@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DeliveryStatus, JobStatus } from "@prisma/client";
 import { statusFamily, isSystemFailure, STATUS_FAMILIES } from "./status";
 
 describe("statusFamily", () => {
@@ -17,6 +18,8 @@ describe("statusFamily", () => {
     ["ACTIVE", "inflight"], ["FULFILLED", "settled"], ["RELEASED", "closed"], ["EXPIRED", "closed"],
     // M365 (lowercase — case-sensitive on purpose: reservation ACTIVE is inflight, M365 active is settled)
     ["pending", "attention"], ["active", "settled"], ["offboarding", "inflight"], ["inactive", "closed"],
+    // JobStatus (Phase 8 worker) — PENDING above is shared with approval/purchase-unit
+    ["RUNNING", "inflight"], ["DONE", "settled"], ["FAILED", "fault"], ["DEAD", "fault"],
   ];
 
   it.each(cases)("%s → %s", (value, family) => {
@@ -56,5 +59,47 @@ describe("employment namespace (entry criterion #2)", () => {
   });
   it("unknown employment values map to neutral, not the flat map", () => {
     expect(statusFamily("SUBMITTED", "employment")).toBe("neutral");
+  });
+});
+
+describe("delivery namespace (DeliveryStatus)", () => {
+  it("colours all four DeliveryStatus values", () => {
+    expect(statusFamily("PENDING", "delivery")).toBe("inflight");
+    expect(statusFamily("RETRYING", "delivery")).toBe("attention");
+    expect(statusFamily("DELIVERED", "delivery")).toBe("settled");
+    expect(statusFamily("DEAD", "delivery")).toBe("fault");
+  });
+
+  // The whole point of the namespace: PENDING means something different for
+  // a delivery (queued, worker will get to it — nobody owes an action) than
+  // for an approval or purchase unit (sitting in someone's queue). If a
+  // future edit collapsed the namespace back into the flat map, this is the
+  // assertion that would catch it — both calls read the same key.
+  it("PENDING differs by namespace — that's the collision this namespace exists to fix", () => {
+    expect(statusFamily("PENDING", "delivery")).not.toBe(statusFamily("PENDING"));
+  });
+
+  it("unknown delivery values map to neutral, not the flat map", () => {
+    expect(statusFamily("SUBMITTED", "delivery")).toBe("neutral");
+  });
+});
+
+describe("every Prisma enum member maps to a real family", () => {
+  // Proof, not a repeated assertion of agreement: this iterates the actual
+  // runtime enum objects Prisma generates, so adding a new DeliveryStatus or
+  // JobStatus value without teaching MAP/NAMESPACED about it fails HERE
+  // instead of rendering neutral grey in production. Import 4's bug — three
+  // of DeliveryStatus's four values taught, one left to fall through — is
+  // exactly the shape this test exists to catch on its own.
+  it("every DeliveryStatus value is non-neutral under the delivery namespace", () => {
+    for (const value of Object.values(DeliveryStatus)) {
+      expect(statusFamily(value, "delivery")).not.toBe("neutral");
+    }
+  });
+
+  it("every JobStatus value is non-neutral in the flat map", () => {
+    for (const value of Object.values(JobStatus)) {
+      expect(statusFamily(value)).not.toBe("neutral");
+    }
   });
 });

@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../server/db/client";
 import { executionPlan } from "../lib/approval-execution";
 import { APPROVAL_TYPE_LABEL } from "../lib/labels";
+import { emitWebhook } from "../server/webhooks/emit";
 
 type Diff = Record<string, { from: unknown; to: unknown }>;
 
@@ -168,6 +169,19 @@ async function runExecution(approvalId: string): Promise<void> {
         action: "executed",
         diff: { state: { from: "APPROVED", to: "EXECUTED" } },
       },
+    });
+
+    // Last thing in the transaction, and only reachable on genuine success:
+    // every guard above leaves through `return fail(...)`, so nothing that
+    // ended as EXECUTION_FAILED gets here. Scope decision #14 — ids and
+    // refNos, never whole rows. `asset` is non-null by the guard at the top
+    // of this function, so assetTag is the real tag rather than a hedge.
+    await emitWebhook(tx, "approval.executed", {
+      approvalId: approval.id,
+      refNo: approval.refNo,
+      type: approval.type,
+      assetId: asset.id,
+      assetTag: asset.tag,
     });
   });
 }

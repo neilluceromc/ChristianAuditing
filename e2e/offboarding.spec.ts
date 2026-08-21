@@ -186,9 +186,18 @@ test.describe.serial("the 4-step wizard", () => {
     // The queue's change cell must name the real target, not a hard-coded SPARE.
     await expect(row).toContainText("→ MISSING");
     await row.getByRole("link").first().click();
+    // Wait for the navigation itself, with headroom, before asserting on the
+    // detail page's content. Without this the next assertion's default 5s
+    // budget has to cover the whole click → route → server-render round trip,
+    // and a dev server ~70 tests into a full suite run does not always make
+    // it: this failed in the full run and passed in isolation and in a
+    // single-file run, and the dump showed the browser still sitting on
+    // /approvals with the row rendered correctly. Same class as the "✓ Saved"
+    // flash race in HANDOVER §7 — the fix is headroom, not a weaker assertion.
+    await expect(page).toHaveURL(/\/approvals\/[a-z0-9]+$/i, { timeout: 20_000 });
 
     // "What the system checked" must pass on a Missing return, not cross it.
-    await expect(page.getByText("returns as MISSING")).toBeVisible();
+    await expect(page.getByText("returns as MISSING")).toBeVisible({ timeout: 20_000 });
     await page.getByRole("button", { name: "Claim" }).click();
     await page.getByRole("button", { name: "Approve" }).click();
 

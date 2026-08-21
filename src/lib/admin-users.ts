@@ -1,0 +1,115 @@
+import type { Role } from "@prisma/client";
+import { ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "./workspaces";
+
+/** Admin first: the select reads as a privilege ladder, most-privileged at the top. */
+export const ROLE_OPTIONS: Role[] = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"];
+
+export const ROLE_LABELS: Record<Role, string> = {
+  admin: "Admin",
+  it_staff: "IT staff",
+  purchasing_staff: "Purchasing staff",
+  finance_staff: "Finance staff",
+  viewer: "Viewer",
+};
+
+/** Only the fields the rules below read, so a caller can pass a narrow select. */
+export interface TargetUser {
+  id: string;
+  role: Role;
+  isPermanentAdmin: boolean;
+  disabled: boolean;
+}
+
+export type RuleResult = { allowed: true } | { allowed: false; reason: string };
+
+const PERMANENT_LOCK =
+  "This is the permanent admin account — its role and access can't be changed, so the system can never be locked out of itself.";
+
+/**
+ * Why this row cannot be edited at all, or null when it can. The page prints
+ * this beside a LOCKED chip so the constraint is STATED (card 3h) rather than
+ * discovered through a failed save, and the actions call the same rules below,
+ * so a hand-rolled request is refused on exactly the same grounds.
+ */
+export function lockReason(target: TargetUser): string | null {
+  return target.isPermanentAdmin ? PERMANENT_LOCK : null;
+}
+
+/**
+ * Scope decision #3: demoting yourself is allowed. It is recoverable — the
+ * permanent admin can put it back — and forbidding it would mean an admin
+ * tidying up their own over-privilege has to ask someone else to do it.
+ *
+ * `next` and `actorId` are unused today and are part of the signature on
+ * purpose: every caller already has them, so adding a rule that needs either
+ * one is a change to this function alone rather than to four call sites.
+ */
+export function roleChange(target: TargetUser, next: Role, actorId: string): RuleResult {
+  void next;
+  void actorId;
+  const locked = lockReason(target);
+  return locked ? { allowed: false, reason: locked } : { allowed: true };
+}
+
+/**
+ * Wider than card 3h asks for, deliberately (scope decision #1): `authorize()`
+ * returns null for a disabled user, so disabling the permanent admin ends every
+ * route back into the system just as completely as demoting them would.
+ *
+ * Self-disable is refused for the opposite reason to self-demotion — it ends
+ * your own session with no way back for you specifically, so it reads as an
+ * accident rather than an intent.
+ *
+ * The refusal names ANY other admin, not the permanent one: an ordinary admin
+ * may disable another ordinary admin (nothing here forbids it), so pointing at
+ * the permanent account would send someone to bother one specific person for
+ * something any of their colleagues can do. It also keeps this string free of
+ * the words "permanent admin", which is what lets the tests tell this branch
+ * apart from the lock branch above — see the note in the test file.
+ */
+export function disableChange(target: TargetUser, next: boolean, actorId: string): RuleResult {
+  const locked = lockReason(target);
+  if (locked) return { allowed: false, reason: locked };
+  if (next && target.id === actorId) {
+    return {
+      allowed: false,
+      reason:
+        "You can't disable your own account — you'd be signed out with no way back in. Another admin can do it for you.",
+    };
+  }
+  return { allowed: true };
+}
+
+/**
+ * `lockReason`'s sibling: one string, two surfaces. The JWT freezes role at
+ * sign-in, so `requireUser` compares it to the DB on every request and bounces
+ * a mismatch to `/logout` — meaning an admin who changes their OWN role (to
+ * ANY other role, not only a demotion) gets signed out on their very next
+ * request, mid-session, with no warning. This is a WARNING, not a refusal:
+ * scope decision #3 permits self-demotion on purpose, and this doesn't touch
+ * that — it only makes the consequence visible before the click, the way
+ * `lockReason` makes the permanent-admin lock visible before the click. Task
+ * 3's page prints this text pre-click; the action returns the same flag so
+ * the page can also render the post-click state truthfully.
+ */
+export function selfRoleChangeWarning(target: TargetUser, next: Role, actorId: string): string | null {
+  if (target.id !== actorId || next === target.role) return null;
+  return `You're changing your own role — you'll be signed out and will need to sign back in as ${ROLE_LABELS[next]}.`;
+}
+
+/**
+ * Card 3h's ARTBOARD (not its prose) specs a `Workspaces` column the table
+ * dropped silently — brief §2 puts `it_staff` and `viewer` in the SAME
+ * workspace with different access, so the role name alone doesn't answer
+ * what picking one actually grants. Derived from ROLE_WORKSPACES /
+ * WORKSPACE_META rather than a hand-copied string per role, so it can't
+ * drift from the table those two already define.
+ */
+export function roleWorkspaces(role: Role): string {
+  const ids = ROLE_WORKSPACES[role];
+  const all = Object.keys(WORKSPACE_META) as WorkspaceId[];
+  const base = ids.length === all.length ? "all four" : ids.map((id) => WORKSPACE_META[id].label).join(" · ");
+  // viewer shares it_staff's workspace but not its write access — the artboard
+  // marks that with a suffix rather than a fifth workspace that doesn't exist.
+  return role === "viewer" ? `${base} · read-only` : base;
+}

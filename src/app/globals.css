@@ -13,7 +13,14 @@
   --text: #101828;
   --text-secondary: #475467;
   --text-muted: #667085;
-  --text-faint: #98a2b3;
+  /* AA-compliant faint. #98a2b3 was the design handover's value and fails WCAG AA
+     wherever it renders real text (2.4:1 on --canvas, 2.57:1 on --surface; 4.5:1 is
+     required at these sizes, and AA gives no size relief below 18pt). Raising it to
+     4.5:1 against the DARKEST background it sits on (--canvas #f6f7f9) leaves no room
+     for a third tier in light mode: anything lighter than --text-muted fails, so faint
+     and muted coincide here and stay distinct in dark mode. Keep the token — the
+     semantic tier is still meaningful, and a lighter canvas would re-separate them. */
+  --text-faint: #667085;
   --accent: #2563a8;
   --accent-hover: #1d4e87;
   --accent-fg: #ffffff;
@@ -98,7 +105,13 @@
   --text: #e6e9ef;
   --text-secondary: #c7cdd8;
   --text-muted: #9aa4b2;
-  --text-faint: #6b7480;
+  /* 3.41:1 before, against --surface-raised #1d2129 — the lightest surface any
+     component actually paints faint text on, and so the binding case. (--surface-accent
+     #152435 is very slightly lighter still, but nothing uses it as a background —
+     grep for bg-surface-accent — so it does not bind. Re-check this if that changes.)
+     #868f9c is 4.93:1 on --surface-raised and stays visibly dimmer than --text-muted,
+     so dark mode keeps the three tiers light mode has to collapse. */
+  --text-faint: #868f9c;
   --accent: #6aa9e0;
   --accent-hover: #8fc0ea;
   --accent-fg: #0b1119;

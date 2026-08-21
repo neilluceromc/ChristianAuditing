@@ -1,11 +1,13 @@
 import { cookies } from "next/headers";
 import { requireUser } from "@/server/auth/guards";
-import { resolveWorkspace, WORKSPACE_NAV } from "@/lib/workspaces";
+import { resolveWorkspace, WORKSPACE_NAV, type WorkspaceId } from "@/lib/workspaces";
 import { filterSectionsForRole } from "@/components/shell/sidebar";
 import { safeSection } from "@/lib/section";
 import {
   ageHistogram, claimedByYou, financeHome, fleet, purchasingHome, warrantyRunway, yourShift,
 } from "@/server/modules/home/queries";
+import { adminHome } from "@/server/modules/admin/queries";
+import { AdminHomeBody } from "@/components/home/admin-home";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
 import { Stat } from "@/components/ui/stat";
@@ -19,6 +21,28 @@ import { WarrantyRunway } from "@/components/home/warranty-runway";
 import { JumpTo } from "@/components/home/jump-to";
 import Link from "next/link";
 import type { TodoRow } from "@/server/modules/home/queries";
+
+/**
+ * Focus's only job is hiding SECONDARY sections (fleet/age/warranty/Jump-to
+ * on IT, Jump-to on purchasing and finance — see the `!focus` blocks below).
+ * The Admin Home has no secondary section: its three lists (users, flags,
+ * webhooks) are the whole page. Showing the toggle there would render a
+ * control that flips a cookie and re-renders the page identically. That is a
+ * NEAR relative of HANDOVER §6a rule 10 rather than an instance of it — rule
+ * 10 is about an action guaranteed to FAIL (a Disable button whose rule
+ * always refuses); this one succeeds and simply does nothing visible. Same
+ * remedy, different failure: don't render a control whose effect the page
+ * cannot deliver. A `Record` rather than an inline
+ * `ws !== "admin"` so a future secondary section on Admin's Home is a
+ * one-word change here, and adding a fifth workspace forces a decision at
+ * this table instead of being silently `true` by omission.
+ */
+const SHOWS_FOCUS_TOGGLE: Record<WorkspaceId, boolean> = {
+  it: true,
+  purchasing: true,
+  finance: true,
+  admin: false,
+};
 
 function TodoList({ rows, empty }: { rows: TodoRow[]; empty: string }) {
   if (rows.length === 0) return <p className="text-xs text-fg-muted">{empty}</p>;
@@ -50,9 +74,31 @@ export default async function Home() {
     <PageHeader
       title={`Hello, ${user.name.split(" ")[0]}`}
       badge={isViewer ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
-      actions={<FocusToggle on={focus} />}
+      actions={SHOWS_FOCUS_TOGGLE[ws] ? <FocusToggle on={focus} /> : undefined}
     />
   );
+
+  // ── Admin: who can get in, what is switched on, are integrations healthy ─
+  if (ws === "admin") {
+    const admin = await safeSection("Admin overview", () => adminHome());
+    return (
+      <>
+        {header}
+        <div className="flex max-w-[900px] flex-col gap-4">
+          {/*
+            No "Jump to" here: WORKSPACE_NAV.admin is Users & roles, Webhooks,
+            Feature flags, and AdminHomeBody already links to all three
+            inline. A Jump-to card would repeat those same three links plus
+            one back to this page — the redundancy IT/purchasing/finance
+            don't have, because none of their bodies carry inline links.
+          */}
+          <SectionCard title="System" result={admin}>
+            {(data) => <AdminHomeBody data={data} />}
+          </SectionCard>
+        </div>
+      </>
+    );
+  }
 
   // ── Purchasing: a to-do list and spend ─────────────────────────────────
   if (ws === "purchasing") {

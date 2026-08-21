@@ -19,6 +19,11 @@ export function Dialog({
 }) {
   const setTrapRef = useFocusTrap(open, onClose);
   const titleId = useId();
+  // Focus lands on the first focusable element (Cancel, typically), never on
+  // the body text — without aria-describedby a screen reader announces the
+  // title and then "Cancel, button" and nothing else, so the entire reason
+  // the dialog exists is never read out.
+  const descId = useId();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted || !open) return null;
@@ -36,12 +41,13 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={descId}
         tabIndex={-1}
         className="relative max-h-[calc(100vh-2rem)] w-[352px] max-w-full overflow-y-auto rounded-(--radius-card) border border-border bg-surface-raised p-4 shadow-dialog"
         style={{ animation: "pop var(--dur-4) var(--ease-std)" }}
       >
         <h2 id={titleId} className="text-[15px] font-semibold text-fg">{title}</h2>
-        <div className="mt-2 text-[13px] text-fg-secondary">{children}</div>
+        <div id={descId} className="mt-2 text-[13px] text-fg-secondary">{children}</div>
         {footer && <div className="mt-4 flex justify-end gap-2">{footer}</div>}
       </div>
     </div>,
