@@ -5647,36 +5647,77 @@ git commit -m "feat(seed): endpoints and deliveries, so every delivery chip is r
 
 ### Task 13: `/admin/webhooks/deliveries` + replay
 
-> ### REQUIRED AMENDMENT — four things, three of them in the code blocks below.
+> ### AMENDED — the code as SHIPPED (`5394a8a`).
+> **All four pre-written amendments were applied.** Restated as shipped, because the code blocks below
+> are now the real thing and no longer say what the banner was warning about:
 >
-> **1. Delete `export const MAX_DELIVERY_ATTEMPTS = 5;`** from `queries.ts`. Task 6's review established
-> that the chip's denominator has exactly one owner — `MAX_JOB_ATTEMPTS` in `src/lib/jobs.ts`, which the
-> worker imports and `deliveryStage` defaults to. A second literal here is what makes `DEAD · 3/5`
-> possible after someone tunes the worker. Call `deliveryStage(r.status, r.attempts)` and let the default
-> supply it.
+> 1. **`MAX_DELIVERY_ATTEMPTS` was never written.** `listDeliveries` calls
+>    `deliveryStage(r.status, r.attempts)` and lets the default supply `MAX_JOB_ATTEMPTS`.
+> 2. **`DELIVERY_TABS` / `parseDeliveryTab` live in `src/lib/webhooks.ts`**, with 7 unit tests — so this
+>    phase did not create the second recorded no-test list parser.
+> 3. **`ns="delivery"` is passed, and `status` goes where `status` belongs** (`value={row.status}`,
+>    `label={row.stageLabel}`).
+> 4. **The audit diff is `{ status, attempts }`** — what moved. No from-equals-to `event`.
 >
-> **2. Move `DELIVERY_TABS` / `parseDeliveryTab` into `src/lib/webhooks.ts` with unit tests.** As written
-> they sit in `queries.ts` beside the Prisma call — which HANDOVER §8 records as the exact reason Phase
-> 7's `RESERVATION_TABS` is *"the one list parser with no test"*: bundled with the query it cannot be
-> unit-tested without pulling in the DB client. Every sibling (`approvals-list.ts`, `purchases-list.ts`,
-> `audit-list.ts`) puts its pure tab/parse logic in `src/lib/`. Don't create the second recorded
-> exception.
+> **Three things the banner did not foresee. The first is the important one.**
 >
-> **3. Pass `ns="delivery"` when rendering a delivery status.** Task 6's review added a `"delivery"`
-> namespace to `src/lib/status.ts` because `PENDING` unnamespaced resolves to the **approval** family
-> (`attention`), which made a healthy queued delivery amber and indistinguishable from `RETRYING`. Also:
-> `deliveryStage` returns the chip's **label** and `statusFamily` needs the **status** — passing
-> `stageLabel` where `status` belongs greys every chip in the table with no error anywhere.
+> #### 5. Rule 10 needed a THIRD condition, and the seed hid it
 >
-> **4. `replayDelivery`'s audit diff must not be from-equals-to** (§6a rules 8 and 19) — `event:
-> {from,to}` with equal sides would log `Fields: event` for a replay that changed no event. Record what
-> actually changed (`status`, `attempts`), and put the endpoint or event in the entity label.
+> `replayDelivery` refuses a delivery that already holds a live `DELIVER_WEBHOOK` job —
+> `Job_one_live_deliver_per_delivery` raises P2002 — and the banner's rule-10 check named only two
+> refusals (`DELIVERED`, inactive endpoint). But **every freshly-emitted `PENDING` row and every
+> backing-off `RETRYING` row holds a live job**: that is what those statuses mean. So the planned
+> `replayable: r.status !== "DELIVERED" && r.endpoint.active` would have rendered a Replay button whose
+> P2002 was *certain* on most of the table — Task 3's shipped-Disable-on-a-locked-row defect, one phase
+> later, with a larger blast radius.
 >
-> Two §6a rule 10 checks for this page: `replayDelivery` refuses a `DELIVERED` row **and** an inactive
-> endpoint — confirm neither can render a live Replay button, and that `replayAllDead`'s per-row rate
-> limit cannot silently under-queue without telling the operator how many actually went. And if this page
-> surfaces `Job` state (Task 10 notes "next attempt"), `JobStatus`'s families are now in the flat map —
-> use them rather than adding new ones.
+> **It is invisible against this repo's seed**, which deliberately queues no `Job` rows for its
+> deliveries (Task 12, step 1) — so every Replay works against seeded data and the suite would have
+> stayed green. It was found by asking the checklist's question about every refusal rather than the two
+> the design card names, and confirmed by inserting a live job against the real database and watching
+> `replayable` flip.
+>
+> `listDeliveries` therefore reads the live-job set in the same `Promise.all` (one query, not one per
+> row), and the three conditions now have **one owner**: `replayBlockedReason` in `src/lib/webhooks.ts`,
+> which the action refuses with and the query renders from. That is `deleteBlockedReason`'s exact shape,
+> in the same module, for the same reason — a fourth refusal added to the action can no longer leave a
+> live button behind. 8 unit tests, mutation-checked.
+>
+> #### 6. `replayAllDead` returned a bare `ok`, which let it under-queue silently
+>
+> The banner asked for this and the planned code did not do it: the component announced
+> `Replaying ${deadReplayable}` — **the count rendered before the click** — while the action returned
+> only `{ queued }`, silently dropped every refusal, and swallowed unexpected throws in a bare
+> `catch {}`. A batch of four that queued two would have toasted "Replaying 4".
+>
+> As shipped it returns `{ queued, attempted, blocked }`; the banner says `Queued 2 of 4` with the
+> reason, and the `catch {}` is gone — `replayDelivery` maps every failure it expects, and laundering
+> what escapes that into a short count with no reason is the thing `src/server/prisma-errors.ts`
+> explicitly forbids. It also **breaks out of the loop on `rate_limited`**, since every remaining row is
+> then a round trip that cannot succeed.
+>
+> #### 7. Two smaller ones
+>
+> - **The reset now clears `nextAttemptAt`.** The planned reset set `status`/`attempts`/`deliveredAt` and
+>   left a stale future timestamp on a row it had just re-queued — while `deliver-webhook.ts` clears the
+>   same column on success with the comment *"must not keep advertising an attempt that will never
+>   happen."* The same argument, unapplied.
+> - **The guarded `updateMany` reports its own zero count**, like every other write in this module. The
+>   planned version wrote, then created a job, and relied on that job's P2002 to roll the transaction
+>   back — which happens to work and is not a guard.
+>
+> #### Two deviations from the plan's UI, both toward what the app already does
+>
+> - **`Tabs`, not a hand-rolled `<nav>` of `<Link>`s.** The plan reimplemented the component
+>   `/purchases` and `/reservations` render, down to a parallel `TAB_LABELS` map in the page. The labels
+>   now ride on `DELIVERY_TABS`, so there is one list.
+> - **A per-control `acting` key and a rate-limit DEADLINE**, not one shared `pending` and a duration —
+>   the two details `endpoint-editor.tsx` documents at length. The plan's single `pending` would have
+>   spun every row's button on one click and left the others clickable.
+>
+> **`EmptyState` is passed INTO the client table as a prop** rather than the page returning early,
+> because the batch control is deliberately not tab-filtered: an operator on an empty Delivered tab must
+> still be offered the dead-lettered replay. Verified — see step 5.
 
 Card `3h`: delivery attempts with `DEAD · 5/5` rows and a **"Replay 4 dead-lettered"** control. Scope
 decision #11 settles what replay means — a decision to try again, not to resume — and scope decision
@@ -5685,23 +5726,139 @@ decision #11 settles what replay means — a decision to try again, not to resum
 **Files:**
 - Create: `src/components/admin/delivery-table.tsx`,
   `src/app/(app)/admin/webhooks/deliveries/page.tsx`
-- Modify: `src/server/modules/admin/webhook-actions.ts`, `src/server/modules/admin/queries.ts`
+- Modify: `src/server/modules/admin/webhook-actions.ts`, `src/server/modules/admin/queries.ts`,
+  **`src/lib/webhooks.ts`** and **`src/lib/webhooks.test.ts`** (the tab vocabulary and the replay rule,
+  neither of which the plan had here — see amendments 2 and 5)
 
-- [ ] **Step 1: Add the replay actions**
+- [x] **Step 0: The rule and the tab vocabulary (TDD)**
 
-Append to `src/server/modules/admin/webhook-actions.ts`. Note the P2002 handling: the partial unique
-index from Task 9 is what makes a double-click safe, and its refusal is a *designed* answer, not a bug.
+Appended to `src/lib/webhooks.ts`. `replayBlockedReason` is the one owner of the replay conditions;
+`DELIVERY_TABS` carries its own labels and status groups so the page has no second list.
 
 ```ts
 /**
- * Scope decision #11: replay is a decision to try again, so the attempt cycle
- * RESETS rather than resuming. `lastError` is deliberately kept until the next
- * attempt overwrites it — while the row sits queued, why it died last time is
- * still the most useful thing on the screen.
+ * Exported as data, like `ROTATION_WARNING`, because it has two producers that
+ * must not drift: `replayBlockedReason` returns it when the page already knows
+ * a live job exists, and `replayDelivery`'s P2002 branch returns it when
+ * `Job_one_live_deliver_per_delivery` discovered the same fact mid-click. An
+ * operator who loses that race should read the same sentence either way.
+ */
+export const ALREADY_QUEUED_REASON = "That delivery is already queued for another attempt.";
+
+/**
+ * Why this delivery cannot be replayed, or `null` when it can.
  *
- * Job_one_live_deliver_per_delivery (Task 9) is what stops a double-click
- * producing two live jobs for one delivery; P2002 here means "already queued",
- * which is a conflict the operator can act on rather than an error.
+ * The same shape as `deleteBlockedReason` above, for the same reason and with
+ * the same discipline: `replayDelivery` prints these sentences when the click
+ * has already happened, and `listDeliveries` calls the SAME function to decide
+ * whether a Replay control may render at all — so a fourth refusal added to
+ * the action cannot leave the table offering a button whose click is
+ * guaranteed to fail (HANDOVER §6a rule 10, which this phase has broken in
+ * every task that pairs a rule with a page). Returning `null` rather than a
+ * boolean pair is what stops a caller rendering the refusal and the
+ * affordance at once.
+ *
+ * `alreadyQueued` is the one condition a delivery row cannot answer by itself:
+ * it means a live `DELIVER_WEBHOOK` job exists, which
+ * `Job_one_live_deliver_per_delivery` will refuse to duplicate. Without it,
+ * every freshly-emitted PENDING row and every backing-off RETRYING row offers
+ * a Replay whose P2002 is certain — invisible against this repo's seed, which
+ * queues no jobs for its deliveries at all.
+ *
+ * The order is the order `replayDelivery` checks in, so the sentence an
+ * operator reads after a race is the sentence this would have given before it.
+ */
+export function replayBlockedReason(delivery: {
+  status: string;
+  endpointUrl: string;
+  endpointActive: boolean;
+  alreadyQueued: boolean;
+}): string | null {
+  if (delivery.status === "DELIVERED") {
+    return "That one already landed — there's nothing to replay.";
+  }
+  if (!delivery.endpointActive) {
+    return `${delivery.endpointUrl} is disabled — enable the endpoint first, or the replay will just die again.`;
+  }
+  if (delivery.alreadyQueued) return ALREADY_QUEUED_REASON;
+  return null;
+}
+```
+
+```ts
+/**
+ * The tab contract for `/admin/webhooks/deliveries`: `?state=`, the same one
+ * `/purchases` and `/reservations` use, and the one `endpoint-editor.tsx`
+ * already links into with `?state=DEAD`.
+ *
+ * Here, in `src/lib`, rather than beside the Prisma call in
+ * `admin/queries.ts`: `RESERVATION_TABS` is bundled with its query and is for
+ * that reason the one list parser in this app with no unit test (HANDOVER §8),
+ * because reaching it pulls in the DB client. Every other sibling
+ * (`approvals-list.ts`, `purchases-list.ts`, `audit-list.ts`) keeps the pure
+ * part here.
+ *
+ * `label` and `statuses` ride on the ENTRY, not in a second map beside the
+ * page's markup: a `TAB_LABELS` record and a `where`-building ternary are two
+ * more lists that have to agree with this one, and §6a rule 26 is what happens
+ * when they stop.
+ *
+ * "In flight" groups PENDING and RETRYING because to an operator that is one
+ * fact — the worker still owes this delivery an attempt. They are two statuses
+ * only because of how the last attempt went, which the chip already says.
+ */
+export const DELIVERY_TABS = [
+  // `null`, not a list of all four statuses: an unfiltered query cannot go
+  // stale the day a fifth DeliveryStatus is added, whereas an enumeration
+  // here would silently hide the new rows from the one tab whose whole job is
+  // to hide nothing. The other three enumerate deliberately — a new status
+  // belongs in no existing tab until someone decides which.
+  { id: "ALL", label: "All", statuses: null },
+  { id: "DEAD", label: "Dead-lettered", statuses: ["DEAD"] },
+  { id: "PENDING", label: "In flight", statuses: ["PENDING", "RETRYING"] },
+  { id: "DELIVERED", label: "Delivered", statuses: ["DELIVERED"] },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  statuses: readonly DeliveryStatus[] | null;
+}[];
+
+export type DeliveryTab = (typeof DELIVERY_TABS)[number]["id"];
+
+/**
+ * `null | undefined` as well as `string`, matching `parseReservationTab`:
+ * `searchParams` hands back `undefined` for an absent key and
+ * `URLSearchParams.get` hands back `null`, and a parser that only accepts one
+ * of those is a cast waiting to happen at the other call site.
+ */
+export function parseDeliveryTab(raw: string | null | undefined): DeliveryTab {
+  return (DELIVERY_TABS.some((t) => t.id === raw) ? raw : "ALL") as DeliveryTab;
+}
+```
+
+15 tests in `src/lib/webhooks.test.ts` (7 for the tabs, 8 for the rule), including the completeness
+assertion the `satisfies` clause cannot make — that the four tabs between them account for all four
+`DeliveryStatus` values, so a fifth added to the enum fails a test rather than quietly becoming
+reachable only from All.
+
+- [x] **Step 1: Add the replay actions**
+
+Appended to `src/server/modules/admin/webhook-actions.ts`, which also gained
+`import { Prisma } from "@prisma/client"` for the P2002 check.
+
+```ts
+/**
+ * Scope decision #11: replay is a decision to try AGAIN, not to resume, so the
+ * attempt cycle resets. `lastError` is deliberately kept until the next attempt
+ * overwrites it — while the row sits queued, why it died last time is still the
+ * most useful thing on the screen.
+ *
+ * `Job_one_live_deliver_per_delivery` (Task 9's migration) is what stops a
+ * double-click producing two live jobs for one delivery, which would POST a
+ * byte-identical envelope twice; P2002 here means "already queued", which is a
+ * conflict the operator can act on rather than an error. `listDeliveries`
+ * folds the same fact into `replayable`, so the button should not have been
+ * live — this catch is for the race, not for the ordinary case.
  */
 export async function replayDelivery(input: unknown): Promise<ActionResult<null>> {
   const actor = await actionRole("admin");
@@ -5712,6 +5869,9 @@ export async function replayDelivery(input: unknown): Promise<ActionResult<null>
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
 
   try {
+    // Every `return conflict(...)` below precedes every write: the three
+    // pre-checks come first, and the fourth is the guarded `updateMany`'s own
+    // zero-count case, which guards the very statement it reports on.
     const failure = await asActionResult(
       async () =>
         prisma.$transaction(async (tx) => {
@@ -5720,18 +5880,41 @@ export async function replayDelivery(input: unknown): Promise<ActionResult<null>
             include: { endpoint: true },
           });
           if (!delivery) return conflict("That delivery no longer exists.");
-          if (delivery.status === "DELIVERED") {
-            return conflict("That one already landed — there's nothing to replay.");
-          }
-          if (!delivery.endpoint.active) {
-            return conflict(
-              `${delivery.endpoint.url} is disabled — enable the endpoint first, or the replay will just die again.`,
-            );
-          }
-          await tx.webhookDelivery.updateMany({
-            where: { id: delivery.id, status: delivery.status },
-            data: { status: "PENDING", attempts: 0, deliveredAt: null },
+          // The refusals come from `replayBlockedReason`, which
+          // `listDeliveries` also calls to decide whether a Replay control may
+          // render — one owner, so the table cannot offer a button this
+          // function would refuse (§6a rules 5, 10 and 11). `alreadyQueued` is
+          // left false here on purpose: the live-job condition is enforced by
+          // `Job_one_live_deliver_per_delivery` a few lines below, and its
+          // P2002 returns the very same sentence. Reading the job table again
+          // inside this transaction would only re-answer, less reliably, what
+          // the index answers atomically.
+          const blocked = replayBlockedReason({
+            status: delivery.status,
+            endpointUrl: delivery.endpoint.url,
+            endpointActive: delivery.endpoint.active,
+            alreadyQueued: false,
           });
+          if (blocked) return conflict(blocked);
+          // Guarded on `status`, a column this write MOVES (§6a rules 21, 29,
+          // 30) — guarding an unchanged column can never fire, because
+          // Postgres re-checks the predicate against the new row version after
+          // the lock.
+          const written = await tx.webhookDelivery.updateMany({
+            where: { id: delivery.id, status: delivery.status },
+            data: {
+              status: "PENDING",
+              attempts: 0,
+              deliveredAt: null,
+              // Cleared for the same reason the DELIVERED path clears it: a
+              // row that is queued afresh must not keep advertising an
+              // attempt from its old backoff that will never happen.
+              nextAttemptAt: null,
+            },
+          });
+          if (written.count === 0) {
+            return conflict("Someone else just changed that delivery — refresh and replay again.");
+          }
           await tx.job.create({
             data: { type: "DELIVER_WEBHOOK", payload: { deliveryId: delivery.id } },
           });
@@ -5741,9 +5924,14 @@ export async function replayDelivery(input: unknown): Promise<ActionResult<null>
             entityType: "webhook-endpoint",
             entityId: delivery.endpointId,
             action: "replay",
+            // What actually changed, and nothing else. A from-equals-to
+            // `event` here would make `/audit` render "Fields: event" for a
+            // replay that changed no event (§6a rules 8 and 19) — the
+            // endpoint's identity belongs in the entity label, which
+            // `entityLabels` resolves to its URL.
             diff: {
-              delivery: { from: delivery.status, to: "PENDING" },
-              event: { from: delivery.event, to: delivery.event },
+              status: { from: delivery.status, to: "PENDING" },
+              attempts: { from: delivery.attempts, to: 0 },
             },
           });
           return null;
@@ -5752,8 +5940,13 @@ export async function replayDelivery(input: unknown): Promise<ActionResult<null>
     );
     if (failure) return failure;
   } catch (err) {
+    // `asActionResult` has no P2002 branch — it rethrows anything it doesn't
+    // recognise — so this catch is the only thing between the unique index and
+    // a 500.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      return conflict("That delivery is already queued for another attempt.");
+      // The same sentence `replayBlockedReason` gives when the page already
+      // knew — not a second copy that a reword would strand.
+      return conflict(ALREADY_QUEUED_REASON);
     }
     throw err;
   }
@@ -5761,58 +5954,72 @@ export async function replayDelivery(input: unknown): Promise<ActionResult<null>
   return ok(null);
 }
 
-/** The design's "Replay 4 dead-lettered" — one decision, not four clicks. */
-export async function replayAllDead(): Promise<ActionResult<{ queued: number }>> {
+/**
+ * The design's "Replay 4 dead-lettered" — one decision, not four clicks.
+ *
+ * Returns what actually happened rather than a bare success: `attempted` is
+ * what the batch found, `queued` is what really went, and `blocked` is the
+ * first refusal. A caller that only knew "ok" would report the count it
+ * rendered BEFORE the click, which is the number this can most easily fall
+ * short of — a batch that silently under-queues reads as a batch that worked.
+ */
+export async function replayAllDead(): Promise<
+  ActionResult<{ queued: number; attempted: number; blocked: string | null }>
+> {
   const actor = await actionRole("admin");
   if (!actor) return forbidden();
   const rate = await checkRate(actor.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
   // Only endpoints that are actually live: replaying into a disabled endpoint
-  // spends five attempts to reach the answer the operator already has.
+  // spends an attempt to reach the answer the operator already has. Same
+  // predicate as `listDeliveries`' `deadReplayable`, so the count on the
+  // button is the count this loop walks.
   const dead = await prisma.webhookDelivery.findMany({
     where: { status: "DEAD", endpoint: { active: true } },
     select: { id: true },
   });
 
   let queued = 0;
+  let blocked: string | null = null;
   for (const row of dead) {
-    // One transaction per row, and a P2002 skips rather than aborting the batch:
-    // one already-queued delivery must not stop the other three.
-    try {
-      const res = await replayDelivery({ id: row.id });
-      if (res.ok) queued += 1;
-    } catch {
-      // replayDelivery already maps the errors it expects; anything escaping
-      // here is one row's problem, not the batch's.
+    // One transaction per row, via the single-row action itself: a batch
+    // replay leaves exactly the same audit trail as four individual ones, and
+    // one already-queued delivery must not stop the other three. Deliberately
+    // NOT wrapped in a try/catch — `replayDelivery` maps every failure it
+    // expects onto an ActionResult, and swallowing what escapes that would
+    // launder a real fault into a short count with no reason attached
+    // (`src/server/prisma-errors.ts` states the same rule for its own
+    // rethrow).
+    const res = await replayDelivery({ id: row.id });
+    if (res.ok) {
+      queued += 1;
+      continue;
     }
+    blocked ??= res.message;
+    // Each row costs a rate-limit token, so a long batch can exhaust the
+    // actor's budget mid-way. Once that happens every remaining row is a
+    // round trip that cannot succeed — stop, and let the caller report the
+    // partial with its reason.
+    if (res.kind === "rate_limited") break;
   }
-  revalidateAll();
-  return ok({ queued });
+  // No `revalidateAll()` here: `replayDelivery` revalidates on every success,
+  // and if none succeeded there is nothing to revalidate.
+  return ok({ queued, attempted: dead.length, blocked });
 }
 ```
 
-`replayAllDead` calls `replayDelivery`, which re-checks the guard and re-audits per row — deliberately,
-so a batch replay leaves exactly the same trail as four individual ones. It also means the batch is
-rate-limited per row, which at seed scale is invisible and at real scale is the correct behaviour.
+`replayAllDead` calls `replayDelivery`, which re-checks the guard and re-audits per row —
+deliberately, so a batch replay leaves exactly the same trail as four individual ones. It also means
+the batch is rate-limited per row, which is why it reports `queued` against `attempted` rather than
+claiming the count on its own button.
 
-- [ ] **Step 2: Add the query**
+- [x] **Step 2: Add the query**
 
-Append to `src/server/modules/admin/queries.ts`:
+Appended to `src/server/modules/admin/queries.ts`, which also gained `fmtDateTime` from `@/lib/format`
+and `Prisma` as a type import.
 
 ```ts
-import { deliveryStage } from "@/lib/webhooks";
-
-/** The worker's MAX_ATTEMPTS. Named here so the chip's denominator has one source. */
-export const MAX_DELIVERY_ATTEMPTS = 5;
-
-export const DELIVERY_TABS = ["ALL", "DEAD", "PENDING", "DELIVERED"] as const;
-export type DeliveryTab = (typeof DELIVERY_TABS)[number];
-
-export function parseDeliveryTab(raw: string | undefined): DeliveryTab {
-  return (DELIVERY_TABS as readonly string[]).includes(raw ?? "") ? (raw as DeliveryTab) : "ALL";
-}
-
 export interface DeliveryRow {
   id: string;
   endpointUrl: string;
@@ -5820,37 +6027,95 @@ export interface DeliveryRow {
   when: string;
   attempts: number;
   lastError: string | null;
-  /** raw DeliveryStatus — StatusPill derives the colour from it (Task 6, Step 3b) */
+  /**
+   * The raw DeliveryStatus. `StatusPill` derives the colour from THIS, with
+   * `ns="delivery"` — unnamespaced, PENDING resolves to the approval family
+   * (attention) and a healthy queued delivery goes amber, indistinguishable
+   * from a failing one (Task 6, `src/lib/status.ts`).
+   */
   status: string;
-  /** the label only: "DEAD · 5/5" */
+  /** The chip's LABEL only — "DEAD · 5/5". Never passed where `status` belongs. */
   stageLabel: string;
+  /**
+   * Whether a live Replay control may render. Every one of `replayDelivery`'s
+   * refusals is folded in here, which is the point: a button whose click is
+   * guaranteed to fail is §6a rule 10's exact shape.
+   */
   replayable: boolean;
 }
 
-const PAGE = 50;
+const DELIVERY_PAGE = 50;
 
+/**
+ * A live `DELIVER_WEBHOOK` job's delivery id, or null for a payload that has
+ * none. Defensive about the shape because `Job.payload` is a `Json` column: it
+ * can legally hold an array or a bare string, and the migration that added
+ * `Job_one_live_deliver_per_delivery` had to add a CHECK constraint precisely
+ * because a payload with no `deliveryId` is possible.
+ */
+function liveDeliveryId(payload: Prisma.JsonValue): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const id = payload.deliveryId;
+  return typeof id === "string" ? id : null;
+}
+
+/**
+ * Scope decision #12: no pagination, matching `/approvals` — the newest
+ * `DELIVERY_PAGE` attempts, with a line saying so when there are more.
+ *
+ * `WebhookDelivery.nextAttemptAt` is deliberately NOT read. Only the seed ever
+ * writes it (`prisma/seed.ts`) — the worker's retry path (`mark` in
+ * `src/worker/deliver-webhook.ts`) never does, it only clears the column on a
+ * success — so a "next attempt" column sourced from it would read as authoritative
+ * and be blank for every delivery the running code produced. The real schedule
+ * is the job's `runAt`; if this page ever shows it, take it from there.
+ */
 export async function listDeliveries(
   tab: DeliveryTab,
 ): Promise<{ rows: DeliveryRow[]; total: number; deadReplayable: number }> {
-  const where =
-    tab === "ALL"
-      ? {}
-      : tab === "PENDING"
-        ? { status: { in: ["PENDING", "RETRYING"] as const } }
-        : { status: tab };
+  const statuses = DELIVERY_TABS.find((t) => t.id === tab)!.statuses;
+  const where: Prisma.WebhookDeliveryWhereInput = statuses
+    ? { status: { in: [...statuses] } }
+    : {};
 
-  const [rows, total, deadReplayable] = await Promise.all([
+  const [rows, total, deadReplayable, liveJobs] = await Promise.all([
     prisma.webhookDelivery.findMany({
       where,
-      include: { endpoint: true },
-      // createdAt alone is not a stable order — rows written in one transaction
-      // share a millisecond (HANDOVER §7). The id tiebreaker is mandatory.
+      // An explicit `select`, not `include: { endpoint: true }`: that pulls
+      // every endpoint scalar including the encrypted `secret`, for the same
+      // reason `listEndpoints` above spells its columns out. The ciphertext
+      // has no business crossing this boundary even to be discarded here.
+      select: {
+        id: true, event: true, status: true, attempts: true, lastError: true, createdAt: true,
+        endpoint: { select: { url: true, active: true } },
+      },
+      // createdAt alone is not a stable order — rows written in one
+      // transaction share a millisecond (HANDOVER §7), and this seed writes
+      // five in one `createMany`. The id tiebreaker is mandatory.
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: PAGE,
+      take: DELIVERY_PAGE,
     }),
     prisma.webhookDelivery.count({ where }),
+    // Not filtered by `tab`: this is the batch control's offer, and it means
+    // the same thing on every tab. A DEAD delivery cannot also hold a live
+    // job — the worker dead-letters both in the same failure (`retryStatus`
+    // and `tick`'s `dead` read the same `attempts` against the same cap) — so
+    // this count needs no live-job exclusion the way `replayable` below does.
     prisma.webhookDelivery.count({ where: { status: "DEAD", endpoint: { active: true } } }),
+    // One query for the whole live set rather than one per row. This is what
+    // lets the page know, BEFORE the click, that `replayDelivery` would refuse
+    // with "already queued" — without it, every freshly-emitted PENDING row and
+    // every backing-off RETRYING row renders a Replay button whose P2002 is
+    // guaranteed. The live set is bounded by how fast the worker drains it.
+    prisma.job.findMany({
+      where: { type: "DELIVER_WEBHOOK", status: { in: ["PENDING", "RUNNING"] } },
+      select: { payload: true },
+    }),
   ]);
+
+  const queued = new Set(
+    liveJobs.map((j) => liveDeliveryId(j.payload)).filter((id): id is string => id !== null),
+  );
 
   return {
     total,
@@ -5863,19 +6128,31 @@ export async function listDeliveries(
       attempts: r.attempts,
       lastError: r.lastError,
       status: r.status,
-      stageLabel: deliveryStage(r.status, r.attempts, MAX_DELIVERY_ATTEMPTS),
-      replayable: r.status !== "DELIVERED" && r.endpoint.active,
+      // No third argument: `deliveryStage` defaults the denominator to
+      // MAX_JOB_ATTEMPTS, the worker's own cap. A local literal here is what
+      // makes `DEAD · 3/5` possible the day someone tunes the worker.
+      stageLabel: deliveryStage(r.status, r.attempts),
+      // `replayBlockedReason` is the ONE owner of the conditions — the same
+      // function `replayDelivery` refuses with — so a refusal added to the
+      // action cannot leave a live Replay button behind here (§6a rule 10).
+      // The sentence itself is not carried onto the row: the chip already says
+      // DELIVERED or QUEUED, the disabled endpoint is stated on
+      // /admin/webhooks, and a 90px actions column has no room for prose.
+      replayable:
+        replayBlockedReason({
+          status: r.status,
+          endpointUrl: r.endpoint.url,
+          endpointActive: r.endpoint.active,
+          alreadyQueued: queued.has(r.id),
+        }) === null,
     })),
   };
 }
 ```
 
-Import `fmtDateTime` from wherever `src/server/modules/audit/queries.ts` imports it — reuse that helper
-rather than formatting dates a second way.
+- [x] **Step 3: Write the table**
 
-- [ ] **Step 3: Write the table**
-
-Create `src/components/admin/delivery-table.tsx`:
+`src/components/admin/delivery-table.tsx`:
 
 ```tsx
 "use client";
@@ -5890,37 +6167,91 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { replayAllDead, replayDelivery } from "@/server/modules/admin/webhook-actions";
 import type { DeliveryRow } from "@/server/modules/admin/queries";
+import type { ActionResult } from "@/server/action-result";
+
+/**
+ * The same ActionResult ladder as every other admin screen, with the two
+ * details `endpoint-editor.tsx` had to get right.
+ *
+ * `acting` is a per-CONTROL key rather than one shared boolean: this table
+ * renders a Replay on every replayable row plus the batch control, and a
+ * single `pending` would spin all of them while one was in flight — and,
+ * worse, would leave every other row clickable, so a second click could queue
+ * a different delivery while the first was still resolving.
+ *
+ * The rate limit is stored as a DEADLINE, not a duration. `RateLimitNotice`
+ * keys its countdown on the `retryAfterSec` prop, so a second refusal that
+ * happened to compute the same number of seconds would not restart the clock;
+ * a deadline changes on every refusal.
+ */
+function useRunner() {
+  const router = useRouter();
+  const toast = useToast();
+  const [, startTransition] = useTransition();
+  const [acting, setActing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retryDeadline, setRetryDeadline] = useState<number | null>(null);
+
+  const retryAfterSec =
+    retryDeadline === null ? null : Math.max(0, Math.ceil((retryDeadline - Date.now()) / 1000));
+
+  function run<T>(actingKey: string, fn: () => Promise<ActionResult<T>>, onOk: (data: T) => void) {
+    setError(null);
+    setActing(actingKey);
+    startTransition(async () => {
+      try {
+        const res = await fn();
+        if (res.ok) {
+          onOk(res.data);
+          // Unconditional, even where the server wrote nothing: the only way
+          // to reach a no-op from here is props that are already stale, in
+          // which case the refresh IS the remedy (§6a rule 12).
+          router.refresh();
+        } else if (res.kind === "rate_limited") {
+          setRetryDeadline(Date.now() + (res.retryAfterSec ?? 60) * 1000);
+        } else {
+          // forbidden or conflict — "already queued for another attempt", the
+          // disabled-endpoint refusal, and the status guard's "someone else
+          // just changed that delivery" all land here. Neither action can
+          // return `validation` for input this component builds itself (a row
+          // id it was handed), so there is no field-error branch to route.
+          setError(res.message);
+        }
+      } finally {
+        setActing(null);
+      }
+    });
+  }
+
+  return { acting, error, setError, retryAfterSec, clearRetry: () => setRetryDeadline(null), toast, run };
+}
 
 export function DeliveryTable({
   rows,
   total,
   deadReplayable,
+  empty,
 }: {
   rows: DeliveryRow[];
   total: number;
   deadReplayable: number;
+  /**
+   * Rendered in place of the table when this tab has no rows. It comes in
+   * from the page rather than the empty branch living there, because the batch
+   * control below is deliberately NOT tab-filtered: an operator sitting on an
+   * empty Delivered tab must still be offered the dead-lettered replay, and a
+   * page that returned early would take the offer away.
+   */
+  empty: React.ReactNode;
 }) {
-  const router = useRouter();
-  const toast = useToast();
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [retryAfter, setRetryAfter] = useState<number | null>(null);
-
-  function run(fn: () => Promise<{ ok: boolean } & Record<string, unknown>>, okMsg: string) {
-    setError(null);
-    startTransition(async () => {
-      const res = (await fn()) as Awaited<ReturnType<typeof replayDelivery>>;
-      if (res.ok) {
-        toast(okMsg, "settled");
-        router.refresh();
-      } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-      else setError(res.message);
-    });
-  }
+  const { acting, error, setError, retryAfterSec, clearRetry, toast, run } = useRunner();
+  const busy = acting !== null;
 
   return (
     <div className="flex flex-col gap-3">
-      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+      {retryAfterSec !== null && (
+        <RateLimitNotice retryAfterSec={retryAfterSec} onExpire={clearRetry} />
+      )}
       {error && <Banner tone="fault" title={error} />}
 
       {deadReplayable > 0 && (
@@ -5932,9 +6263,29 @@ export function DeliveryTable({
           <Button
             size="sm"
             variant="secondary"
-            loading={pending}
+            disabled={busy}
+            loading={acting === "all"}
             onClick={() =>
-              run(() => replayAllDead(), `Replaying ${deadReplayable} dead-lettered`)
+              run("all", replayAllDead, ({ queued, attempted, blocked }) => {
+                if (queued === attempted) {
+                  toast(`Queued ${queued} for another attempt`, "settled");
+                  return;
+                }
+                // The count that actually went, never the count on the button.
+                // A batch can fall short — a delivery queued between this
+                // render and the click, or the actor's rate budget running out
+                // part-way — and "Replaying 4" over a queue of two is exactly
+                // the kind of claim a page gets believed on. The reason goes
+                // in the banner rather than the toast, because a toast that
+                // says "2 of 4" and then vanishes sends the operator back to
+                // guess why.
+                toast(`Queued ${queued} of ${attempted}`, "fault");
+                setError(
+                  blocked
+                    ? `Queued ${queued} of ${attempted}. The rest stopped here: ${blocked}`
+                    : `Queued ${queued} of ${attempted}.`,
+                );
+              })
             }
           >
             Replay {deadReplayable} dead-lettered
@@ -5942,96 +6293,111 @@ export function DeliveryTable({
         </div>
       )}
 
-      <Table>
-        <THead>
-          <Tr>
-            <Th width={150}>When</Th>
-            <Th>Endpoint</Th>
-            <Th width={210}>Event</Th>
-            <Th width={140}>Status</Th>
-            <Th width={90} aria-label="Row actions" />
-          </Tr>
-        </THead>
-        <TBody>
-          {rows.map((row) => (
-            <Tr key={row.id}>
-              <Td mono>{row.when}</Td>
-              <Td>
-                <span className="block truncate font-mono text-[11px] text-fg">{row.endpointUrl}</span>
-                {row.lastError && (
-                  // The reason it died is the most useful thing on the row while
-                  // it waits — keep it visible rather than behind a disclosure.
-                  <span className="block truncate text-[10.5px] text-fg-muted" title={row.lastError}>
-                    {row.lastError}
-                  </span>
-                )}
-              </Td>
-              <Td mono>{row.event}</Td>
-              <Td>
-                {/* StatusPill derives the family from the raw status, which is
-                    why Task 6 taught src/lib/status.ts about DeliveryStatus:
-                    colour is the design system's job, not deliveryStage's. */}
-                <StatusPill value={row.status} label={row.stageLabel} />
-              </Td>
-              <Td>
-                {row.replayable && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    loading={pending}
-                    onClick={() => run(() => replayDelivery({ id: row.id }), "Queued for another attempt")}
-                  >
-                    Replay
-                  </Button>
-                )}
-              </Td>
+      {rows.length === 0 ? (
+        empty
+      ) : (
+        <Table>
+          <THead>
+            <Tr>
+              <Th width={150}>When</Th>
+              <Th>Endpoint</Th>
+              <Th width={210}>Event</Th>
+              <Th width={140}>Status</Th>
+              <Th width={90} aria-label="Row actions" />
             </Tr>
-          ))}
-        </TBody>
-      </Table>
+          </THead>
+          <TBody>
+            {rows.map((row) => (
+              <Tr key={row.id}>
+                <Td mono>{row.when}</Td>
+                <Td>
+                  <span className="block truncate font-mono text-[11px] text-fg">
+                    {row.endpointUrl}
+                  </span>
+                  {row.lastError && (
+                    // The reason it died is the most useful thing on the row
+                    // while it waits — visible, rather than behind a disclosure.
+                    // It survives a replay too: `replayDelivery` deliberately
+                    // keeps `lastError` until the next attempt overwrites it.
+                    <span className="block truncate text-[10.5px] text-fg-muted" title={row.lastError}>
+                      {row.lastError}
+                    </span>
+                  )}
+                </Td>
+                <Td mono>{row.event}</Td>
+                <Td>
+                  {/* `value` is the raw status and `label` is the stage: passing
+                      the label where the value belongs greys every chip in the
+                      table with no error anywhere. `ns="delivery"`, or PENDING
+                      resolves to the approval family and a healthy queued
+                      delivery goes amber — the same colour as a failing one. */}
+                  <StatusPill value={row.status} label={row.stageLabel} ns="delivery" />
+                </Td>
+                <Td>
+                  {/* `replayable` already excludes all three of
+                      `replayDelivery`'s refusals — landed, disabled endpoint,
+                      already queued — so no Replay rendered here has a
+                      guaranteed-failing click (§6a rule 10). */}
+                  {row.replayable && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      loading={acting === row.id}
+                      onClick={() =>
+                        run(
+                          row.id,
+                          () => replayDelivery({ id: row.id }),
+                          () => toast("Queued for another attempt", "settled"),
+                        )
+                      }
+                    >
+                      Replay
+                    </Button>
+                  )}
+                </Td>
+              </Tr>
+            ))}
+          </TBody>
+        </Table>
+      )}
 
       {total > rows.length && (
         <p className="text-[11px] text-fg-muted">
           Showing {rows.length} of {total}. Older attempts aren&apos;t paged through yet.
         </p>
       )}
-      {total === 0 && <p className="text-xs text-fg-muted">No delivery attempts in this view.</p>}
     </div>
   );
 }
 ```
 
-`StatusPill({ value, label })` is the right component here, not `Pill` — `Pill` only knows
+`StatusPill({ value, label, ns })` is the right component here, not `Pill` — `Pill` only knows
 `neutral | accent`, whereas `StatusPill` looks the value up in the six-family map and paints the
-`DEAD` row as a fault. That is why Task 6 Step 3b had to teach the map about `DeliveryStatus` first.
+`DEAD` row as a fault. That is why Task 6 Step 3b had to teach the map about `DeliveryStatus` first,
+and why `ns="delivery"` is not optional.
 
-- [ ] **Step 4: Write the page**
+- [x] **Step 4: Write the page**
 
-Create `src/app/(app)/admin/webhooks/deliveries/page.tsx`:
+`src/app/(app)/admin/webhooks/deliveries/page.tsx`:
 
 ```tsx
-import Link from "next/link";
 import { requireRole } from "@/server/auth/guards";
-import { cn } from "@/lib/cn";
+import { toSearchParams } from "@/lib/url-state";
+import { DELIVERY_TABS, parseDeliveryTab } from "@/lib/webhooks";
+import { listDeliveries } from "@/server/modules/admin/queries";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { Tabs } from "@/components/ui/tabs";
 import { DeliveryTable } from "@/components/admin/delivery-table";
-import { DELIVERY_TABS, listDeliveries, parseDeliveryTab } from "@/server/modules/admin/queries";
-
-const TAB_LABELS: Record<string, string> = {
-  ALL: "All",
-  DEAD: "Dead-lettered",
-  PENDING: "In flight",
-  DELIVERED: "Delivered",
-};
 
 export default async function DeliveriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ state?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireRole("admin");
-  const { state } = await searchParams;
-  const tab = parseDeliveryTab(state);
+  const tab = parseDeliveryTab(toSearchParams(await searchParams).get("state"));
   const { rows, total, deadReplayable } = await listDeliveries(tab);
 
   return (
@@ -6041,53 +6407,83 @@ export default async function DeliveriesPage({
         breadcrumb={[{ label: "Webhooks", href: "/admin/webhooks" }, { label: "Delivery attempts" }]}
       />
       <div className="flex flex-col gap-3">
-        {/* Tabs write ?state=, the same contract /purchases and /reservations use. */}
-        <nav className="flex gap-1" aria-label="Delivery status">
-          {DELIVERY_TABS.map((value) => (
-            <Link
-              key={value}
-              href={value === "ALL" ? "/admin/webhooks/deliveries" : `/admin/webhooks/deliveries?state=${value}`}
-              aria-current={tab === value ? "page" : undefined}
-              className={cn(
-                "rounded-(--radius-ctl) px-2.5 py-1 text-[12px] font-medium",
-                tab === value ? "bg-surface-subtle text-fg" : "text-fg-muted hover:text-fg-secondary",
-              )}
-            >
-              {TAB_LABELS[value]}
-            </Link>
-          ))}
-        </nav>
-        <DeliveryTable rows={rows} total={total} deadReplayable={deadReplayable} />
+        {/* `Tabs`, not a hand-rolled nav: this is the same `?state=` contract
+            and the same affordance /purchases and /reservations render, and
+            `endpoint-editor.tsx` already links into `?state=DEAD`. The labels
+            come off DELIVERY_TABS rather than a map beside this markup, so
+            there is only one list to keep true. */}
+        <Tabs
+          items={DELIVERY_TABS.map((t) => ({
+            label: t.label,
+            href:
+              t.id === "ALL"
+                ? "/admin/webhooks/deliveries"
+                : `/admin/webhooks/deliveries?state=${t.id}`,
+            active: t.id === tab,
+          }))}
+          className="pb-1"
+        />
+
+        <DeliveryTable
+          rows={rows}
+          total={total}
+          deadReplayable={deadReplayable}
+          empty={
+            <EmptyState
+              title={tab === "ALL" ? "Nothing has been sent yet" : "Nothing in this tab"}
+              description={
+                tab === "ALL"
+                  ? "An attempt is recorded the moment an approval executes, an offboarding completes or a purchase request is completed — provided an endpoint subscribes to that event."
+                  : "Attempts move between these tabs as the worker retries them."
+              }
+            />
+          }
+        />
       </div>
     </>
   );
 }
 ```
 
-- [ ] **Step 5: Typecheck, lint, look at it**
+- [x] **Step 5: Typecheck, lint, look at it**
+
+`npx tsc --noEmit` · `npm run lint` · **474 unit tests across 30 files** (up 14 from 460) ·
+`npm run build` renders `/admin/webhooks/deliveries` (5.02 kB).
+
+**Verified against the real database and a real browser**, not read: a throwaway Playwright spec drove
+the seeded fixture through Chromium as `admin@thebackroomop.com`, and was deleted afterwards since
+Task 14 owns the permanent `e2e/admin.spec.ts`. Every item of the original step 5 held:
+
+1. Five rows. One `DEAD · 5/5` against `hooks.thebackroomop.com/inventory` with
+   `500 Internal Server Error` under the URL; one `RETRYING · 2/5`; two `DELIVERED`.
+2. The banner offered **Replay 1 dead-lettered** — one, not two: the second dead row belongs to the
+   *disabled* `erp-bridge` endpoint.
+3. The `Dead-lettered` tab wrote `?state=DEAD` and showed both dead rows; the one on the disabled
+   endpoint had no Replay button.
+4. Clicking Replay on the live one moved it out of the DEAD tab and into `QUEUED` on In flight, with
+   `500 Internal Server Error` still on the row — and **it renders no Replay button there**, because it
+   now holds a live job. That is amendment 5 working: the second click is refused *by absence*, and the
+   P2002 path is the race only.
+5. `npm run worker:once` came back `RETRYING · 1/5`, against a job reading `attempts: 1,
+   status: PENDING` with a backoff `runAt`. The ledger mirrors the job.
+6. The audit row reads `replay` on `hooks.thebackroomop.com/inventory` with
+   `Fields: status, attempts` — and no `event`.
+7. The empty branch was forced (by deleting the two DELIVERED rows) to confirm the `EmptyState` crosses
+   the RSC boundary and that **the batch offer survives on an empty tab**. Reseeded afterwards.
+
+Also probed directly, since the seed cannot show it: inserting a live `DELIVER_WEBHOOK` job flips that
+delivery's `replayable` to `false` and leaves every other row alone; a second live job for the same
+delivery is refused `P2002`; a `DELIVER_WEBHOOK` payload with no `deliveryId` is refused by Task 9's
+CHECK constraint. Removing the job restores `replayable`.
+
+**STILL OUTSTANDING — needs a human at a keyboard.** The purely *visual* pass (chip colours in both
+themes, the table at 375px with a long endpoint URL, where the banner sits) has not been done.
+Everything above is behavioural, asserted through the DOM. §7's login wall does not apply to the
+Playwright harness — it fills the seed's own fixture password — but it does apply to looking at a page.
+
+- [x] **Step 6: Commit**
 
 ```bash
-npx tsc --noEmit && npm run lint
-```
-
-In the preview as `admin@thebackroomop.com`, `/admin/webhooks/deliveries` (after Task 12's seed):
-
-1. Five rows. One reads `DEAD · 5/5` against `hooks.thebackroomop.com/inventory` with
-   `500 Internal Server Error` under the URL; one reads `RETRYING · 2/5`; two read `DELIVERED`.
-2. The banner offers **Replay 1 dead-lettered** — one, not two: the second dead row belongs to the
-   *disabled* `erp-bridge` endpoint, and replaying into it would just die again.
-3. The `Dead-lettered` tab writes `?state=DEAD` and shows both dead rows; the one on the disabled
-   endpoint has no Replay button.
-4. Click Replay on the live one → it becomes `QUEUED`, and clicking again is refused with "already
-   queued for another attempt" rather than creating a second job.
-5. `npm run worker:once` → it attempts delivery to a hostname that doesn't resolve and comes back
-   `RETRYING · 1/5`. That is the correct outcome, and it proves the ledger mirrors the job.
-6. Reseed afterwards so the fixture is unchanged for the e2e run.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/components/admin/delivery-table.tsx "src/app/(app)/admin/webhooks/deliveries/page.tsx" src/server/modules/admin/webhook-actions.ts src/server/modules/admin/queries.ts
 git commit -m "feat(webhooks): delivery attempts, and a replay that means try again"
 ```
 
