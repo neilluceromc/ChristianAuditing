@@ -656,6 +656,42 @@ git commit -m "feat(export): assets export is xlsx, and an oversized selection i
 
 ### Task 4: The audit and employees export routes
 
+> ### AMENDED — as SHIPPED (`6c2083d` + `15490e5`). Two plan errors, one of them a correctness bug.
+>
+> **1. There is no `/inventory/export` PATH_RULES entry to copy.** Step 5 said to add rules "beside the
+> existing `/inventory/export` rule". That rule has never existed — export routes ride the general
+> prefix rules (`/^\/inventory(\/|$)/`, and `/^\/(employees|audit|offboarding|reservations)(\/|$)/`
+> for these two), and `middleware.ts`'s matcher covers route handlers, so both new routes were already
+> governed. Shipped with **four pinning tests** in `workspaces.test.ts` instead of a redundant rule:
+> `/audit/export` passes for `it_staff` and is refused for `finance_staff`, `/employees/export`
+> likewise against `purchasing_staff`. Access matches each route's own page, which is the rule.
+>
+> **2. THE EMPLOYEES EXPORT IGNORED THE PAGE'S FILTERS.** The plan's route took no `req` and exported
+> the whole roster, while the audit route honoured its filter. `/employees` parses a full list state
+> (search, facets, sort) **plus** a separate `gaps=1` flag. So filtering to "Policy gaps only" and
+> clicking Export produced ten rows instead of three — a sheet contradicting the screen it was launched
+> from.
+>
+> This is **§8's candidate-set rule**, which the assets export already obeys and which the plan
+> silently broke for employees. The gaps cut cannot be expressed in SQL: `listEmployees` applies it in
+> memory, after `resolvePolicy`/`computeLoadout` run per employee, so `buildEmployeeWhere(state)` alone
+> yields the CANDIDATE set. §8: *"every consumer of that `where` needs the cut — not just the one that
+> renders the list."* And `listEmployees` paginates, so the export cannot simply call it.
+>
+> Fixed by mirroring `repairStageIds`: a shared `filteredEmployees(state, gapsOnly)` in
+> `src/server/modules/employees/queries.ts` owns the SQL fetch AND the in-memory cut;
+> `listEmployees` paginates it, `employeeExportRows` takes it whole. **The `missingRequired > 0`
+> expression now exists exactly once** (`queries.ts:67`, two callers at 81 and 117 — verified by grep,
+> not by assertion). The page's Export link carries the current list state through.
+>
+> **`/audit` genuinely has no in-memory cut** — `buildAuditWhere` is pure SQL (a `contains` OR plus an
+> `entityType` facet) and `AUDIT_LIST_CONFIG` declares no derived facets. So the asymmetry between the
+> two routes is real, not a second oversight.
+>
+> **This invariant has no unit test and cannot easily get one** — `filteredEmployees` hits Prisma, like
+> `listEmployees`, which has never had one either. Task 13's e2e is its only possible guard; the
+> assertion is written into that task.
+
 Scope decision 11 — these are a query and a column spec each.
 
 **Files:**
@@ -2381,6 +2417,14 @@ Copy the `login` and `expectNoSeriousAxe` helpers from `e2e/admin.spec.ts`. Asse
 9. `/inventory/export?ids=` with 501 ids returns **413**. Build the URL from `Array(501)`; the refusal
    precedes the query, so the ids need not exist.
 10. The year chips render with counts, and `?purchaseYear=` narrows both the list and the export.
+11. **A filtered export matches its screen.** `/employees?gaps=1` and `/employees/export?gaps=1` must
+    agree on their row count, and that count must be strictly smaller than the unfiltered one. This is
+    the ONLY possible guard on the bug Task 4 shipped and fixed: the gaps cut happens in memory after
+    the SQL `where`, so an export that used the `where` alone returned the candidate set — ten rows
+    against a screen showing three. `filteredEmployees` is not unit-testable (it hits Prisma, as
+    `listEmployees` does), so if this spec does not assert it, nothing does. Assert the same way for
+    `/inventory?stage=…` against `/inventory/export?stage=…`, which is the identical pattern via
+    `repairStageIds` and equally untested.
 
 **Wrap the upload chain in `test.describe.serial`** — steps 2→5 share database state, and both
 `e2e/admin.spec.ts:24` and `offboarding.spec.ts:75` establish that idiom for this shape. Without it one
