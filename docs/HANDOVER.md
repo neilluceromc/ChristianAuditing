@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–13 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
+**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is COMPLETE — all 14 tasks done on branch `phase-8-admin`, green end to end, and NOT MERGED.** · **Nothing is pushed: `main` is 4 commits ahead of `origin/main`, and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.** · **Merging and pushing are the user's decisions and have not been made — do neither unprompted.** · Battery at close: **474 unit tests / 30 files**, **102 e2e / 7.4 min**, `tsc` + `lint` + `build` clean.
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,11 +13,16 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–13 of 14
-   are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
-   so far; `git rev-list --count main..HEAD` is the count, and `git status` should be clean.
-   **Don't trust a commit count written into this doc** — I corrected it twice and each correction was
-   itself a commit, so it chases itself. The command is the answer.
+1. **`git checkout phase-8-admin`** — do NOT start from `main`, and do not assume Phase 8 landed
+   there. **All 14 tasks are committed on that branch and NOTHING is merged.** `git log --oneline
+   main..HEAD` shows the phase; `git rev-list --count main..HEAD` is the count, and `git status` should
+   be clean. **Don't trust a commit count written into this doc** — I corrected it twice and each
+   correction was itself a commit, so it chases itself. The command is the answer.
+
+   **The first decision of the next session is what to do with this branch**, and it is the user's, not
+   yours: merge to `main`, open a PR, or leave it. Phase 9's work does not depend on the answer — it
+   touches import/export and polish, not `/admin/*` — so you can plan Phase 9 without resolving it, but
+   do not start a second phase on top of an unmerged one without asking which base they want.
 
    **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
    2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
@@ -29,103 +34,74 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    (`preview_start` name `app-dev`). **8 migrations, none pending** as of this handover — Task 9 added
    the phase's one and only migration, so there is none ahead of you.
 
-   **`npm run db:seed` was NOT blocked this session** — it ran directly, twice, both times fine. Treat
-   §3's classifier note as "may be blocked", not "is". If it is, the cheap in-session route to a fresh
-   database is **`npx playwright test e2e/auth-shell.spec.ts --workers=1`** — ~60s, 15 tests, reseeding via
-   `execSync` in `beforeAll`, which is not blocked. **The database is freshly seeded with no known
-   deviation**: Task 13's verification replayed a delivery and ran `worker:once`, then reseeded at the
-   end. Everything Task 14 needs is exactly as seeded.
-3. Read **§6** for Phase 8's entry criteria — the *why* behind the tasks (the worker's dead-lettered
-   webhook job, the permanent admin's locked row, the 10,000-row export cap). **The plan already exists
-   and already maps each criterion to a task**, so read §6 when a task's reasoning looks arbitrary, not
-   as something to act on. **§6a is the section that matters most** — it is what Tasks 1–13 actually
-   established (60 numbered rules), and the **checklist in item 4 below is the distilled version**: run
-   that against every task, and read §6a's entry for whichever rules the checklist points at.
-4. **Resume at Task 14** (E2E, full battery, close-out) of
-   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
-   Tasks 1–13 are committed; only 14 remains. **Task 14 is the only task with no banner and no
-   amendments, because nothing has read forward into it** — §0's checklist applies to it exactly as much
-   as to the others (treat the absence of a banner as "nobody has looked yet", not "this one is fine").
-   `e2e/admin.spec.ts` still does not exist; Task 14 writes it, and it now has four screens to cover
-   rather than three.
+   **`npm run db:seed` was NOT blocked this session** — it ran directly, several times, always fine.
+   Treat §3's classifier note as "may be blocked", not "is". If it is, the cheap in-session route to a
+   fresh database is **`npx playwright test e2e/auth-shell.spec.ts --workers=1`** — ~60s, 15 tests,
+   reseeding via `execSync` in `beforeAll`, which is never blocked.
 
-   **Task 13 left a ready-made head start for it.** Its verification was a throwaway Playwright spec
-   that drove `/admin/webhooks/deliveries` end to end — the five seeded rows and their chips, the
-   `Replay 1 dead-lettered` count, the `?state=DEAD` tab, the click, the refusal-by-absence afterwards,
-   the `worker:once` mirror, and the audit row's `Fields: status, attempts`. It was deleted (Task 14 owns
-   the permanent spec) but **the assertions are written out in full in the plan's amended Task 13,
-   step 5** — lift them rather than re-deriving them.
+   **The database is NOT freshly seeded.** The last thing that ran was the full Playwright suite, which
+   leaves whatever `e2e/purchases.spec.ts` — alphabetically last — finished with. Reseed before
+   trusting any fixture-dependent read. That is normal after a battery, not a problem.
+3. Read **§6** for **Phase 9's** entry criteria — what the brief and the current state of the code
+   commit the next plan to (import is new from zero, the export cap that must not regress, the scanner
+   contract the offboarding wizard doesn't honour yet, the 10 imports/min limit). Unlike every previous
+   version of this section, **there is no plan yet**, so §6 is a list of things to act on rather than
+   background reading. **§6a is the other section that matters** — 63 numbered rules, all of them things Phase 8's
+   fourteen tasks established the hard way,
+   and the **checklist in item 4 below is the distilled version**: run it against every task you
+   execute, and read §6a's entry for whichever rules it points at. §6a is about how work goes wrong in
+   THIS codebase; it did not stop being true when Phase 8 ended.
+4. **Write the Phase 9 plan** with `superpowers:writing-plans`. There is no plan yet — that is the
+   next piece of work, and it is a planning task, not an implementation one. Phase 9 is
+   **import/export + polish**: see §6 for the entry criteria and §5 for the scope. Before drafting,
+   re-read README cards **`5a, 1m, 7g`** (`design_handover/README.md`, "Import / export" and "Every
+   screen's states") — they are the source for the dry-run stepper, the blocked-rows-grouped-by-cause
+   rule, partial-import-by-default, the split-by-year export chips, the label sheet and the scanner
+   contract, none of which is repeated in full here.
 
-   **TWO THINGS ARE OUTSTANDING and both need a human at a keyboard — both are purely visual, and
-   nothing depends on either.** (a) **The Admin Home has never been LOOKED at.**
-   Task 11's data assertions were all verified by calling `adminHome()` directly (all five roles present,
-   `sum(rows) === total`, `m365_sso` reading `unavailable`), and `npm run build` renders the route — but
-   the purely visual pass (four tiles then three lists, no fleet bar or age histogram, IT Home unchanged
-   when you switch back) was never done, because the dev server came up with an expired session both
-   times and **an agent will not type a password into a login form** (§7 — though see §7's third
-   route: a throwaway Playwright spec CAN sign in, because the e2e harness fills the seed's fixture
-   password from a script; that is how Task 13 was verified, and it would have covered Task 11's data
-   assertions too). Sign in once at
-   `http://localhost:3000` and the check takes a minute. (b) **`/admin/webhooks/deliveries` has been
-   driven but not looked at** — every behaviour on it is asserted through the DOM by the spec described
-   above, so what is missing is only the pixels: chip colours in both themes (four families on one
-   table), the row at 375px with a long endpoint URL and a long `lastError` under it, and where the
-   dead-lettered banner sits relative to the tabs.
+   **Two things about Phase 9 that should shape the plan rather than surprise it.** Import is the
+   first feature in this project that **writes rows the user never typed**, in bulk, from a file — so
+   the dry-run is not a nicety, it is the whole safety model, and "partial import is the default"
+   means the plan has to say what a half-applied import leaves behind and how an operator sees it.
+   And the label sheet plus the scanner polish are the only two items in the phase with no server
+   surface at all, which makes them the easiest to under-plan and the easiest to leave until they are
+   the reason the phase does not close.
 
-   **Tasks 8, 9 and 10 were executed by a single context** (implement + self-review in one session).
-   **Tasks 11 and 12 were executed properly subagent-driven** — fresh sonnet implementer, then a sonnet
-   spec-compliance review, then a sonnet quality review, with the implementer fixing and each reviewer
-   re-reviewing. Both times it found something a green suite could not: Task 11's quality review caught
-   §6a rule 15 reproduced on a new page, and **Task 12's caught a comment asserting an "honest baseline"
-   fixture that the worker's own guard makes impossible** (rule 51). Task 12's implementer independently
-   found four more — including a promissory comment Task 10 had shipped about a fixture that did not yet
-   exist.
+   **Phase 8 is done, and its plan is worth reading before you write a new one** —
+   `docs/superpowers/plans/2026-08-19-phase-8-admin.md`, 14 tasks, all amended to the shipped code.
+   Not for its content but for its shape: every task carries an `AMENDED` banner recording what the
+   plan got wrong, and reading three or four of those is the fastest way to learn what this project's
+   plans habitually get wrong. The short version, which Phase 9's plan should try to avoid earning:
 
-   **Task 13 was NOT subagent-driven** — implement plus self-review in one context, like Tasks 8–10,
-   because the session it ran in was configured not to spawn agents unprompted. Recorded plainly so
-   nobody reads its code as having had a second pair of eyes. What it had instead was the strongest
-   *behavioural* verification of any task in this phase: a throwaway Playwright spec drove the real page
-   in a real browser against a real database, and the serious defect it found (§6a rule 56) came from
-   running the §0 checklist deliberately, then confirming the finding by manipulating the database — not
-   from reading the diff. **Prefer subagents for Task 14 if the session allows it**; if it does not, the
-   substitute that actually worked here was *executable* verification of every claim, not more reading.
+   - **A plan's code blocks are a draft, not a spec.** Across Phase 8, twelve of fourteen tasks
+     shipped with at least one deviation from the planned code, and in nearly every case the code was
+     right and the plan was wrong. Write the plan to be argued with.
+   - **A plan cannot schedule what it does not know exists.** Three tasks running needed a new
+     `entityLabels` / `AUDIT_ENTITY_TYPES` branch and the plan scheduled none of them (rule 20).
+   - **A pre-written review banner is one person's forward read, not an audit.** Task 10 had a
+     five-item banner, every item correct, and shipped two more defects of the same family — one
+     inside the branch the banner named as the model to copy. Task 13 had four, all correct and all
+     applied, and shipped three more (rules 56–58).
+   - **The absence of a banner means nobody has looked**, not that a task is fine. Task 9 had none and
+     shipped two defects; Task 14 had none and shipped two idiom gaps a review caught.
 
-   **THE WEBHOOK PIPELINE IS COMPLETE AND WORKS END TO END, AND IT NOW HAS A PAGE.** A completed
-   purchase / executed approval / completed offboarding writes a `WebhookDelivery` + a `Job`, the worker
-   really POSTs a signed envelope, retries with backoff, and dead-letters — with the ledger mirroring the
-   job at every step — and `/admin/webhooks/deliveries` (Task 13) reads it, with a per-row Replay and a
-   batch one. A receiver independently recomputing the HMAC accepted the signature. Verified live this
-   session: replay → `QUEUED` → `worker:once` → `RETRYING · 1/5` against a job at `attempts: 1`.
+   **PHASE 8 IS COMPLETE AND VERIFIED, AND TWO PURELY VISUAL CHECKS ARE STILL OUTSTANDING.** Every
+   screen exists, the webhook pipeline works end to end, and the battery is green (§4). What has never
+   been done is a human *looking* at two of the screens — see the end of §4. Neither blocks Phase 9,
+   and nothing depends on either; they need someone at a keyboard for a minute each, which is why they
+   are still here.
 
-   **Tasks 12 and 13 each opened with a `REQUIRED AMENDMENT` block, written BEFORE those tasks
-   started; both now read `AMENDED`.** Reviews of Tasks 6 and 7 read forward into them and verified the claims by running code, so
-   their defects are documented in advance rather than waiting to be discovered. **Read those banners
-   before the code blocks they sit above — the blocks are the original text and are stale where the two
-   disagree.** The highest-value ones:
-   - **Task 13 (now shipped):** all four of its pre-written amendments were right and were applied —
-     **and it still shipped with three more defects the banner had not foreseen, one of them serious**
-     (§6a rules 56–58). Same lesson as Task 10, twice over: **a banner is one reviewer's forward read,
-     not a completed audit.**
+   **On execution mode, because it changed mid-phase and the difference is on the record.** Tasks 8–10
+   and 13 were implement-plus-self-review in one context; Tasks 11, 12 and 14 ran the full
+   subagent loop — fresh implementer, then a spec-compliance review, then a code-quality review, each
+   reviewer re-reviewing after fixes. **Every one of the subagent-reviewed tasks turned up something a
+   green suite could not see**, and Task 14 is the sharpest example: the implementer's first report
+   claimed twelve passing tests when one failed reproducibly, and its confident diagnosis of a
+   contrast bug ("not a pre-existing pattern") was wrong about a defect that had been in the codebase
+   since Phase 3. Both were caught by verifying rather than trusting. **Use the loop for Phase 9, and
+   verify the implementer's claims — especially the green ones.**
 
-   **Tasks 8, 9 and 10 now read `AMENDED` and their code blocks ARE the shipped code**, like Tasks 2–7.
-   **Task 9 had no banner written for it in advance, and it still had two defects** — the migration was
-   missing the CHECK constraint that makes its own unique index mean anything, and the emitter carried a
-   dead branch with a comment describing a guard the type system already provided (rules 39 and 40).
-   Treat the absence of a banner as "nobody has looked yet", not "this one is fine".
-
-   **And Task 10 is the counter-lesson: it HAD a five-item banner, every item was right, and it still
-   shipped with two more defects of the same kind** (rules 43 and 44) — one of them in the very branch
-   the banner held up as the correct model to copy. A banner tells you what one reviewer found reading
-   forward; it is not a completed audit.
-
-   Read the plan's **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the
-   `m365_sso` refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a
-   later task can silently break — then **§6a**, which carries what Tasks 1–13 actually established.
-   **Tasks 2–13 have all been amended to the shipped code** (`docs(plan): …`), so trust the plan over any
-   memory of what it used to say, and keep amending it whenever code deviates. Every banner now reads
-   `AMENDED`; **Task 14 has none at all**, which is the "nobody has looked yet" case, not the safe one.
-
-   **THE CHECKLIST — the single most useful thing in this doc.** Every one of the thirteen tasks executed
+   **THE CHECKLIST — the single most useful thing in this doc.** Every one of the fourteen tasks executed
    so far has hit at least one of these, and **not one instance was caught by the unit suite** — several
    were found only by a fresh reviewer reading a sibling function, or by running the real thing against a
    real database. The root cause is nearly always the same: **a rule and its surface that only partly
@@ -190,25 +166,28 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
      worker's cap and means five attempts in TOTAL, and the shown-once banner hardcoded the signature
      header name a rename would leave behind.)
 
-   **Applied to Task 14 specifically**, the ones that will bite: it writes the assertions that are
-   the only protection for behaviours no unit test can reach, so the trap is asserting something that
-   passes for the wrong reason — see §7 on `-g` isolation in this repo (state from earlier tests in the
-   same file is load-bearing, and only `beforeAll` reseeds). Task 13's own throwaway spec hit exactly
-   that: its second test failed because its first had already replayed the one live dead row. **A shared
-   database means test order is part of the fixture; assert counts that survive it, or reseed.**
+   **Applied to Phase 9**, the four that will bite hardest. **Import is a rule module paired with a
+   page** — the combination this checklist's first item has caught in every single task that has ever
+   tried it, so whatever `importRows`/`validateImport` refuses, the Results step has to consume all of
+   it, not just the causes the design card names. **Blocked rows grouped by cause is a summary
+   surface** recomputing a verdict the dry run already computed — item 8's shape exactly, so call the
+   dry run's own expression rather than re-deriving a count. **The 10 imports/min limit is a number in
+   the UI** (item 11): it belongs beside `RATE_LIMITS` in `src/lib/rate-limit.ts` as a new `RateKind`,
+   not as a literal in a component. And **import writes an audit entry for rows nobody typed**, so
+   item 4 applies before you write the action — `/audit` needs to be able to name whatever entity type
+   an imported row is, and item 3 applies to its diff: an import's audit diff is a from-null
+   transition, never a from-equals-to.
 
-   Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
-   README cards `5a, 1m, 7g` before drafting it.
-
-The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **474 unit tests across 30
-files** (345/26 at the Phase 7 merge; Task 4 added 23, Task 6 added 39, Task 7 added 5, Task 8 added 5,
-Task 11 added 7 and Task 13 added 14, most of them mutation-driven; Tasks 5, 9, 10 and 12 added none —
-actions, UI, worker and seed code the suite cannot reach) · `npm run build` · **`npx playwright test --workers=1` — 89
-e2e tests, 7.9 minutes** (up
-from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
-through the worker, repair mode, reservations, and equipment policies, including the viewer
-read-only path). That figure is from the Phase 7 merge; the paragraph below says what happened when it
-was re-run on this branch.
+The branch is green end to end, and this is the FULL battery run at Phase 8's close, not a figure
+carried over from an earlier merge: `npx tsc --noEmit` · `npm run lint` · **474 unit tests across 30
+files**, up from 345 across 26 at the Phase 7 merge — so Phase 8 added **129**, most of them
+mutation-driven, concentrated in the three pure-rule modules it created
+(`src/lib/admin-users.test.ts` 23, `src/lib/admin-flags.test.ts` 36, `src/lib/webhooks.test.ts` 41).
+Several tasks added none at all: actions, UI, worker, seed and e2e code are what the unit suite cannot
+reach, which is exactly why §6a's rules mostly describe defects it could not have caught. · `npm run build` ·
+**`npx playwright test --workers=1` — 102 e2e tests, 7.4 minutes** (up from 89 before this phase:
+Task 14's `e2e/admin.spec.ts` adds 12, and one more went into `e2e/it-core.spec.ts` — an axe check on
+the `/employees` LIST, which had never had one).
 
 **The e2e suite WAS re-run on this branch, at Task 3, and it found a pre-existing flake.** Task 3
 modified `src/components/ui/dialog.tsx` — a primitive **six e2e-covered components** use — so the run
@@ -218,8 +197,20 @@ tell**: the browser was still on `/approvals` with the row rendered correctly an
 so the click had not navigated and the *next* assertion's default 5s budget was covering the whole
 click → route → server-render round trip. It was test 71 of 89, on a dev server eight minutes into a
 run. Same class as the "✓ Saved" race in §7, so the same answer — headroom, not a weaker assertion —
-fixed in `bf23284` by awaiting the URL change explicitly. **`e2e/admin.spec.ts` still does not exist;
-Task 14 writes it**, so nothing in `e2e/` covers `/admin/users` yet.
+fixed in `bf23284` by awaiting the URL change explicitly.
+
+**`e2e/admin.spec.ts` NOW EXISTS** (Task 14, 12 tests) and covers all four admin screens plus the
+Admin Home. Its `users & roles` block is `test.describe.serial`, because its five tests deliberately
+chain (V. Cruz's role and disabled state, then J. Sarmiento's promotion, carry forward) — the same
+idiom `offboarding.spec.ts:75` and `approvals-audit.spec.ts:92` already use for that shape, and the
+reason is diagnostic: without it one real failure cascades into three misleading ones.
+
+**One flake was seen once during Task 14 and did not reproduce.** `e2e/it-core.spec.ts:127` ("edit
+writes field-level history rows") failed on one combined run and then passed on three subsequent runs
+including the full battery. It is the "✓ Saved" class again, which §7 records as fixed in Phase 7 with
+a 20s assertion — so this is either a second site that assertion did not cover or a genuine
+intermittent. **It is recorded rather than closed**: nobody has proved it fixed, and "it passed on
+re-run" is not that proof. If it reappears, read the dump before touching the assertion.
 
 **A note on isolating an e2e failure in this repo:** `-g "some test name"` is NOT a valid isolation for
 `offboarding.spec.ts`. Several of its tests depend on state earlier tests **in the same file** create
@@ -400,7 +391,7 @@ chip `deliveryStage` can produce is reachable: 2 `DELIVERED`, 1 `RETRYING · 2/5
 make `worker:once` POST to a hostname that does not resolve on every seeded run. **On the Phase 7
 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–13 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 COMPLETE on `phase-8-admin`, unmerged)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -524,7 +515,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–13 of 14 on the unmerged `phase-8-admin`)**
+**Phase 8 — Admin workspace (COMPLETE, all 14 tasks on the unmerged `phase-8-admin`)**
 (`docs/superpowers/plans/2026-08-19-phase-8-admin.md`): the user rules and the two mutations behind
 them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LABELS`, and the pure rules
 `lockReason` / `roleChange` / `disableChange`, with the permanent admin locked against **both** role and
@@ -610,7 +601,55 @@ replay refusals, which the action refuses with and the query renders `replayable
 Verified in a real browser against a real database, including the click, the refusal-by-absence
 afterwards, `worker:once` producing `RETRYING · 1/5`, and the audit row. `5394a8a`.
 
+**Task 14** — `e2e/admin.spec.ts`, 12 tests, the only protection any `/admin/*` route has: the
+permanent admin's lock stated before the click (and its affordances ABSENT, not disabled), an ordinary
+role change resolved to a NAME on `/audit`, a disable that then blocks sign-in, **a no-op save that
+writes no audit entry** and **a self role change that warns naming the incoming role, signs the actor
+out, and lets them back in with the new role** — the last two are the behaviours Task 2's review said
+were the whole reason this spec exists, and the plan's own draft had omitted both. Plus the flags
+allowlist, the shown-once secret, the no-events refusal, the delivery chips, and a replayed delivery
+losing its Replay control. One axe check per area. `cde5c12` → `e3b0002`.
+
+Task 14 also produced **`aa75b44`, a WCAG AA fix that is not scoped to Phase 8 at all.** Its new axe
+checks surfaced `--text-faint` (`#98A2B3`) rendering at **2.4–2.57:1** where AA requires 4.5:1 — on
+~24 usages, including ten on the `/employees` list that had been there since Phase 3, green only
+because `it-core.spec.ts` axe-checked `/employees/[id]` and never the list. Fixed at the TOKEN
+(`#667085` light, `#868f9c` dark), not at the three Phase 8 call sites that happened to trip the new
+checks. **This puts shipped code deliberately out of step with `design_handover/README.md`, which
+specifies the old values and which §7 calls the untouchable source of truth** — see §8 for the
+standing record of that deviation, because it is the kind of thing that must not be discoverable only
+by grepping a CSS comment.
+
+**TWO PURELY VISUAL CHECKS WERE NEVER DONE, and they need a human at a keyboard.** Everything about
+both screens is asserted behaviourally — through the DOM, by `e2e/admin.spec.ts`, against a real
+database — so what is missing is only what the eye catches. Neither blocks Phase 9 and nothing depends
+on either. Sign in once at `http://localhost:3000` as `admin@thebackroomop.com` and both take about a
+minute:
+
+1. **The Admin Home (Task 11) has never been LOOKED at.** Its data was verified by calling
+   `adminHome()` directly (all five roles present, `sum(rows) === total`, `m365_sso` reading
+   `unavailable`) and `e2e/admin.spec.ts` now asserts its structure. What to check by eye: four tiles
+   then three lists, **no fleet bar and no age histogram** (those belong to IT Home and their presence
+   here was the original bug), and that IT Home is unchanged when you switch the workspace back.
+2. **`/admin/webhooks/deliveries` (Task 13) has been driven but not looked at.** What to check: the
+   status chips in **both** light and dark themes — four status families land on one table, and the
+   `delivery` namespace exists precisely so a healthy `QUEUED` row does not read as amber like a
+   failing one — plus the table at **375px** with a long endpoint URL and a long `lastError` beneath
+   it, and where the dead-lettered banner sits relative to the tabs.
+
 ### Conventions every later phase must follow
+
+**Added by Phase 8** (both learned the hard way, both cheap to violate):
+
+- **A retry engine and its ledger are written in the SAME handler, from the same value.** Scope
+  decision #6: the `Job` row owns retries, `WebhookDelivery` mirrors it. `deliver-webhook.ts` derives
+  the ledger's terminal state from the same `attempts` and the same `MAX_JOB_ATTEMPTS` the worker uses,
+  because a mirror that disagrees only on the LAST step is worse than no mirror (§6a rule 43).
+- **A `"use server"` module makes every export a server action, so the worker cannot import one.** That
+  is why `secretAad`/`signPayload` live in `src/server/webhooks/sign.ts` and not beside the actions
+  that also need them. The mirror-image rule: **a `src/lib/` module imported by a client component must
+  not reach `node:`** — which is why `SIGNATURE_HEADER` had to move OUT of `sign.ts` into
+  `src/lib/webhooks.ts` when a client component needed to name it.
 
 | Concern | Where |
 |---|---|
@@ -641,20 +680,10 @@ afterwards, `worker:once` producing `RETRYING · 1/5`, and the audit row. `5394a
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: task 14 of 14 remains** on branch `phase-8-admin`.
-  `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1–13 are done**: the user rules, the two user mutations, `/admin/users`, the flag allowlist,
-  `/admin/flags`, the webhook vocabulary, the endpoint actions, `/admin/webhooks`, the emitter plus the
-  phase's one migration, the worker's real signed HTTP delivery, an Admin Home, the seed fixtures, and
-  `/admin/webhooks/deliveries` plus replay. **Every screen in the phase exists.** See §6a.
-  **What remains is close-out only**: Task 14 — the e2e spec (`e2e/admin.spec.ts` still does not exist,
-  and it now has four screens to cover) plus the full battery. Two purely visual passes are also
-  outstanding and need a human at a keyboard; see §0 item 4.
-  `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
-  allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
-  rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
-  never existed** (an emitter, the worker's real delivery loop, and the ledger the page reads), and an
-  Admin Home so the workspace stops borrowing IT's. One migration: a single partial unique index.
+- **Phase 8 — the Admin workspace. COMPLETE. Nothing engineering-side remains.** What it delivered is
+  §4; the invariants it established are §6a. Two things are outstanding and neither is code: **the
+  merge/push decision, which is the user's and unmade**, and **two purely visual checks** listed at the
+  end of §4. Do not treat this bullet as work.
 - **Phase 9 — import/export + polish. Not yet planned.** Import (3-step dry-run → commit, blocked rows
   grouped by cause), export upgrade (real Excel + split-by-year chips, including the brief's
   `farewell-report` route), printable label sheet, USB-scanner polish (a scan should tick the matching
@@ -669,58 +698,69 @@ pending-route table, so the split falls on a seam that already existed.
 
 ---
 
-## 6. Phase 8 entry criteria (the plan implements these — §6a is what's been built)
+## 6. Phase 9 entry criteria — READ THIS BEFORE WRITING THE PLAN
 
-These are what the design brief and the state of the codebase committed the plan to. **The plan now
-exists and maps each of them to a task**, so this section is here as the *why* behind those tasks
-rather than as something to act on directly — read it when a task's reasoning looks arbitrary. What
-has actually been built, and the invariants it established, is §6a.
+Unlike every previous version of this section, **there is no Phase 9 plan yet.** These are things to
+act on, not background. They are what the brief and the current state of the code commit the next plan
+to. Source: `design_handover/README.md` cards `5a, 1m, 7g` — re-read them; they carry the stepper
+shape, the label-sheet geometry and the scanner rules in more detail than is repeated here.
 
-1. **The worker already has an opinion about webhooks, and it isn't "not implemented."**
-   `src/worker/index.ts` dead-letters every `DELIVER_WEBHOOK` job on purpose: `status: "DEAD"`,
-   `lastError: "webhook delivery ships in Phase 8"`. `/admin/webhooks/deliveries` isn't just a new
-   read of the `Job` table (Phase 4 left that as a leftover, §8) — it's the reader that makes good on
-   an existing placeholder, and "Replay" has to mean something to a job the worker will keep
-   dead-lettering until Phase 8 also teaches it to actually deliver.
-2. **`WebhookEndpoint.secret` is a plain `String` column today** (`prisma/schema.prisma`), unlike
-   `Secret.ciphertext` which is AES-256-GCM with an AAD bound to its row (§4 conventions table). If
-   `/admin/webhooks` ships storing that secret as typed, it ships storing it in the clear — decide
-   whether encrypting it is in scope for this phase or an explicit deferral, not something later
-   discovered by grepping the database.
-3. **`User.isPermanentAdmin` already exists on the schema** (`prisma/schema.prisma`) with no UI reading
-   it yet. The brief is explicit that this has to read as a `LOCKED` chip stated before the click —
-   "why can't I change this role" must never be answered by a failed save.
-4. **Import is new from zero** — there is no import code anywhere in `src/` today. Brief `[5a]`
-   specifies the shape: Upload → Validate → Results, where Validate is an explicit **dry run** (no
-   writes; the whole verdict arrives at once, not a climbing counter), Results groups blocked rows
-   **by cause** rather than repeating one line per row, and **partial import is the default** — not
-   all-or-nothing. Rate limited to 10/min, matching the `checkRate` pattern every other action module
-   already uses.
-5. **The export path already refuses over its cap — don't regress that.**
-   `src/app/(app)/inventory/export/route.ts` counts before querying and returns a 413 with nothing
-   written past 10,000 rows; the Excel upgrade + split-by-year chips (brief `[5a]`) has to keep that
-   behavior, not just change the output format. The one export gap already on record (§8, Phase 3) is
-   real but narrower than "no cap": `?ids=` silently slices to 500 instead of refusing, which is worth
-   fixing in the same pass rather than carrying into `/audit` and `/employees` exports as they're added.
-6. **`/admin` has no Home of its own today** (§8, Phase 6) — it falls through to the IT layout, so an
-   admin currently sees SLA breaches and fleet composition under a Users/Webhooks/Flags sidebar.
-   Decide in the plan whether Phase 8 gives Admin its own Home or leaves that fall-through as the
-   deliberate answer; don't let it stay merely unnoticed.
-7. **The scanner contract (`?q=` exact-tag-match redirects to the record, README `[5a,1m,7g]`) is
-   real everywhere it's been built, but the offboarding wizard doesn't yet tick a matching row when
-   scanned** — Task 15's e2e confirmed there is no scan handling in
-   `src/app/(app)/offboarding/[employeeId]/page.tsx` today. That polish is explicitly Phase 8's, per
-   the brief.
-8. **Re-read README cards `3h` (Admin workspace) and `5a, 1m, 7g` (Import / export)** before drafting
-   tasks — they're the source for the locked-row, dry-run, blocked-row-grouping and 10,000-row-cap
-   behavior above, plus the label sheet and USB-scanner specifics not repeated here.
+1. **Import is new from zero.** There is no import code anywhere in `src/` today — no route, no
+   action, no parser. Brief `[5a]` fixes the shape: **Upload → Validate → Results**, where Validate is
+   an explicit **dry run** that writes nothing and delivers the whole verdict at once (*not* a climbing
+   counter), Results shows a proportional bar plus counts of new / updates / blocked, and blocked rows
+   are **grouped by cause with a fix action per cause** ("Update instead", "Create category", "Leave as
+   spare") rather than one line per row — the brief's own words: eighteen identical "duplicate serial"
+   lines is a wall, one line with a button is a decision. **Partial import is the default**, not
+   all-or-nothing, so the plan must say what a half-applied import leaves behind and how an operator
+   sees which half.
+2. **Import is rate limited to 10/min**, which is a DIFFERENT cap from the 60/min mutation cap every
+   existing action uses. `checkRate(userId, kind)` already takes a `RateKind` and
+   `src/lib/rate-limit.ts` already holds `RATE_LIMITS` as a map — so this is a new entry there, not a
+   literal in an action and certainly not a number in a component (§6a rules 26, 37, 38).
+3. **The export path already refuses over its cap — do not regress it.**
+   `src/app/(app)/inventory/export/route.ts` counts before querying and returns a **413** past
+   **10,000** rows (`CAP`, line 8; the 413 at line 31), writing nothing. The Excel upgrade plus
+   split-by-year chips has to keep that, not merely change the output format. The narrower gap already
+   on record (§8, Phase 3) is real and worth closing in the same pass: **`?ids=` silently `.slice(0,
+   500)`s** (line 21) instead of refusing, and that pattern must not be copied into the `/audit` and
+   `/employees` exports as they are added.
+4. **The `farewell-report` export route from the brief does not exist.** Phase 7 shipped the
+   offboarding farewell report as a printable page only — neither emailable nor an Excel export (§8,
+   Phase 7 Task 15). The brief's route is Phase 9's.
+5. **The scanner contract is honoured everywhere except the one place the brief singles out.** `?q=`
+   exact-tag-match redirecting to the record works on the built surfaces, but **the offboarding wizard
+   does not tick a matching row when scanned** — there is no scan handling in
+   `src/app/(app)/offboarding/[employeeId]/page.tsx`. A USB scanner is just a keyboard, so this is
+   input handling, not hardware work.
+6. **The printable label sheet does not exist**: a 3×4 A4 sheet of asset tags with scan codes,
+   printable straight from a bulk selection or a completed purchase, so sticker and record are created
+   in the same minute. Note this and the label sheet are **the only two items in the phase with no
+   server surface**, which makes them the easiest to under-plan and the likeliest to be the reason the
+   phase does not close on time.
+7. **The full axe pass is Phase 9's, and Phase 8 has already done a slice of it — read §8 first.**
+   Task 14 fixed `--text-faint` app-wide for WCAG AA contrast (§4), which means the remaining known
+   accessibility debt is narrower than it was but no longer matches the design handover's stated
+   tokens. Two known items are already recorded: the app-wide `heading-order` violation (`PageHeader`
+   renders `<h1>`, `CardHeader` renders `<h3>`, so every page combining them skips `<h2>` — moderate,
+   below the serious/critical bar the specs assert on) and `SegmentedControl` exposing no
+   `aria-describedby`/`aria-invalid`. Neither is fixed. **Decide in the plan whether "full axe pass"
+   means clearing moderates too**, because the e2e helper only fails on serious/critical today and a
+   pass that leaves the helper alone will not notice.
+8. **The deployment README does not exist**, and everything it needs to say is already true and
+   scattered: the compose profile (`docker compose --profile prod up`), the loopback-only db, the
+   generated secrets including `SECRET_ENCRYPTION_KEY`, the migration procedure (additive SQL dirs;
+   `prisma migrate reset` is classifier-blocked), the worker service, and the npm-on-Windows
+   package-lock hazard in §7. This is a writing task with no code, which historically means it slips.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–13 established (READ BEFORE TASK 14)
+## 6a. What Phase 8's fourteen tasks established (63 rules — still true in Phase 9)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
-sharpened, and the ones a later task can silently break.
+sharpened, and the ones a later task can silently break. **Phase 8 is finished, but this section is
+not history** — rules 8, 10, 15, 16, 26 and 47 were each broken on a NEW page *after* being written
+down here, which is why §0's checklist exists as a thing to run rather than a thing to have read.
 
 1. **The permanent admin is locked against `role` AND `disabled`, and the UI says so before the click.**
    `authorize()` returns `null` for a disabled user, so disabling that account locks every human out as
@@ -1284,6 +1324,33 @@ any task in the phase. All of them were fixtures that the running code could not
     written by NOTHING but the seed** (the worker's retry path never sets it, only clears it), so
     Task 13 deliberately does not render it and says so in `listDeliveries`. If a "next attempt" column
     is ever wanted, it comes from the job's `runAt`. Tracked in §8.
+61. **A `fill()` that lands before React hydrates is silently discarded, and the assertion after it
+    can pass for the wrong reason.** Task 14's flags test failed reproducibly on the full-file run and
+    passed standalone. The tell was Playwright's own snapshot: the textbox held the STORED value, not
+    the typed one, and the error slot was present but empty — so the action had received the original
+    value and no-op'd. `src/components/admin/flag-rows.tsx` binds the input to `draft[row.key]`,
+    initialised from props, so hydration overwrites anything typed before it runs. It passed alone
+    because compiling the route inside the test bought hydration the time it needed; in the full file
+    an earlier test had already warmed `/admin/flags`. **Fix with headroom, never a weaker assertion:
+    wait for the field's expected INITIAL value (which proves the controlled component is mounted from
+    props), fill, then assert the new value stuck BEFORE clicking submit.** That last assertion is the
+    point — it turns a lost keystroke into a clear failure instead of a wrong-reason pass. Same family
+    as §7's "✓ Saved" race and the Task 3 navigation race.
+62. **"The other specs pass" is not evidence the other pages are clean — it may only mean nobody
+    looked.** Task 14's implementer found a contrast violation on three admin pages and concluded it
+    was not a pre-existing pattern, having checked that other axe-covered pages passed. The same token
+    was failing on ~24 usages, including ten on `/employees`, and the suite was green solely because
+    `it-core.spec.ts` axe-checked `/employees/[id]` and never the list. **Before calling a defect new,
+    grep for the construct on older surfaces AND check whether any test actually asserts against
+    them.** A green suite bounds what has been checked, not what is true. The corollary bit twice in
+    one task: fixing three call sites would have left twenty-one, and made two tokens mean one thing.
+63. **A comment that cites a line number is a promise that rots.** The token fix above invalidated a
+    forensic comment in `e2e/it-core.spec.ts` that quoted both a hex value and `globals.css:16` — the
+    hex changed, and inserting an explanatory comment above the declaration moved the line. Worse, that
+    comment opened with "BUG (app, not test)" and ran eleven lines before revealing in its final clause
+    that the bug had been FIXED. **Cite names you can grep, not coordinates, and when a note records a
+    resolved bug, say so in its first line.** (Rule 16's family: a comment must not claim a property
+    the code lacks — including a location.)
 
 ---
 
@@ -1328,13 +1395,18 @@ any task in the phase. All of them were fixtures that the running code could not
   plus a **negative** assertion on the other branch's wording, which keeps the two strings disjoint as
   they get edited. Whenever one function returns two different refusals, ask what the test would do if
   they were swapped.
-- **`design_handover/` is excluded from lint/build** and must stay untouched — it's the source of truth, not code.
+- **`design_handover/` is excluded from lint/build** and must stay untouched — it's the source of truth, not code. **One deliberate exception now exists**, and it is recorded in §8: Phase 8 changed `--text-faint` away from the hex this doc specifies, because the specified value fails WCAG AA. The rule stands; the exception is documented rather than silent.
+- **A `"use server"` module makes EVERY export a server action, so the worker cannot import one.** Server actions are compiled into a POST endpoint per export and are not callable in a plain Node process — which is why `secretAad`/`signPayload` live in `src/server/webhooks/sign.ts` rather than beside the webhook actions that also use them. The mirror-image trap is just as sharp: **a `src/lib/` module imported by a client component must not reach `node:`**, or the client build breaks. That is why `SIGNATURE_HEADER` had to move out of `sign.ts` (which imports `node:crypto`) into `src/lib/webhooks.ts` when `/admin/webhooks` needed to print the header name. The two rules together mean a value shared by the worker AND a client component belongs in `src/lib/` with no `node:` imports anywhere in its module graph.
+- **Typing into a controlled input immediately after a navigation can lose the keystrokes to hydration**, and the assertion that follows may then pass for the wrong reason rather than failing. Playwright's `fill()` operates on the DOM; if React hydrates afterwards it rebinds the input to its prop-derived state and your text is gone, the submit posts the ORIGINAL value, and a no-op branch returns a cheerful toast. It is timing-sensitive, so it shows up in a full-file run and vanishes when you run the test alone (the route is already compiled, so the page arrives faster and loses the race). **Assert the field's initial value, fill, then assert the filled value before clicking submit** — see §6a rule 61.
 - **A UI confirmation that clears itself on a timer needs headroom on the assertion, not just on the timer.** `/inventory/[id]/edit`'s "✓ Saved" is a 3-second self-clearing flash (`setSaved(true)` plus a 3000ms timeout in `src/components/inventory/asset-form.tsx`), so the default 5s Playwright budget has to cover the whole server-action round trip *before* the flash even starts. A dev server minutes into a full e2e run occasionally takes long enough that it doesn't, and the failure looks like "element(s) not found" with the button still reading `"Loading" [disabled]` — nothing points at a timing race. It failed once in three full runs and was reproduced byte-for-byte by delaying `updateAsset` 7s. Fixed with a 20s assertion, not a weaker one.
 - **A new audit `action` string needs a reader that will actually see it — check that BEFORE teaching the display layer, not after.** Phase 7 initially taught `auditSentence` four new cases and then reverted all four: the app's activity feeds each scope to one `entityType` (`employee` / `asset` / `purchase-request`), and `/audit` itself renders `listAudit`'s raw `action` string plus the diff's **key names** — it never calls `auditSentence` at all. So the four new cases were unreachable by any page in the app, and their tests were exercising dead code. Before adding a case for a new `entityType`, trace which surface would actually route it through the function you're editing.
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
 
-- **Phase 4 leftovers:** `/approvals` shows the first 50 rows of a tab with a "showing N of M" hint but no pagination; no admin surface reads the `Job` table (Phase 8's deliveries page is the natural home); the worker's stale-lease recovery uses a 5-minute wall-clock heuristic (safe now because every terminal write is state-guarded).
+- **Phase 4 leftovers:** `/approvals` shows the first 50 rows of a tab with a "showing N of M" hint but no pagination; no admin surface LISTS the `Job` table — Phase 8 half-answered this: `/admin/webhooks/deliveries`
+  reads `Job` to decide whether a delivery already has a live one (that is what makes its Replay
+  control honest), but nothing anywhere renders job state, `lastError` or `runAt`, so a stuck
+  `EXECUTE_APPROVAL` job is still invisible outside `psql`; the worker's stale-lease recovery uses a 5-minute wall-clock heuristic (safe now because every terminal write is state-guarded).
 - **Phase 5 leftovers:** the draft autosave churns unit rows (`createDraft`/`saveDraft` return only request-level fields, so `/purchases/new` never learns the unit ids it just created and every later autosave deletes and recreates the set — `/purchases/[id]/edit` does pass real ids and updates in place); `/purchases` has no sortable headers or column chooser; the ⌘K palette now returns purchase requests to `it_staff` and `viewer`, and the detail page shows money and finance notes to anyone who can reach it (no field-level restriction was specified); `addComment` deliberately still accepts comments on COMPLETED/CANCELLED requests.
 - **Settled 2026-08-17 — "Admin" means system administration, and the procurement department is just Purchasing.** No renaming is pending: the `Admin` workspace (Users & roles / Webhooks / Feature flags) is software settings, the `admin` role is the superuser, and the procurement workspace is `Purchasing` as built. Recorded only so nobody re-opens it.
 - **Phase 6 leftovers:** the Admin workspace has no Home of its own (`ws === "admin"` falls through to the IT layout, so an admin sees SLA breaches and fleet composition under a Users/Webhooks/Flags sidebar); "Retry this section" refreshes the whole route because RSC has no per-section refetch; section degradation is loader-level, so a render-time bug inside a section still escapes to the route error boundary; `/finance/assets` has no search, no sortable headers and no book-value column (depreciation is a policy nobody has stated); Home's `DATA` rows key on `DATA:<assetId>`, which is unambiguous only while an asset can't be both MISSING and DEPLOYED-without-a-holder.
@@ -1498,6 +1570,43 @@ any task in the phase. All of them were fixtures that the running code could not
   is rate-limited per row** (one `checkRate` token for the batch plus one per delivery, against a 60/min
   cap), which is invisible at seed scale and correct at real scale — and now visible when it bites,
   because the action reports `queued` against `attempted` with the reason.
+- **Phase 8, Task 14 — a DELIBERATE, STANDING deviation from `design_handover/README.md`, recorded
+  here because a CSS comment is not durable enough.** The design handover specifies
+  `text-faint` as **`#98A2B3`** (light) and **`#6B7480`** (dark), for "mono metadata, placeholder".
+  Both fail WCAG AA: measured **2.40:1** against `--canvas` and **2.575:1** against `--surface` in
+  light, **3.41:1** against `--surface-raised` in dark, where AA requires 4.5:1 and grants no relief
+  below 18pt. `src/app/globals.css` now ships **`#667085`** (light, 4.64:1 on canvas / 4.98:1 on
+  surface) and **`#868f9c`** (dark, 4.93:1). The design doc has NOT been edited — it remains the source
+  of truth for everything else, and this is the one place shipped code knowingly disagrees with it.
+  **Two consequences worth knowing before anyone "fixes" this back.** (a) *Light mode lost a tier.* At
+  4.5:1 against `--canvas` there is no room for a third step: anything lighter than `--text-muted`
+  fails, so light-mode `faint` and `muted` now hold the SAME value while dark mode keeps all three. The
+  token survives because the semantic tier is still real and a lighter canvas would re-separate them.
+  (b) *This overrides a Phase 7 precedent.* Phase 7 hit the same defect on the offboarding wizard's
+  locked step-bar entries and fixed it at the CALL SITE (`text-fg-faint` → `text-fg-muted`, recorded in
+  §4). Phase 8 fixed it at the token instead, because ~24 usages shared the defect and patching a
+  subset leaves two tokens meaning one thing. Both fixes are correct for their scale; the call-site one
+  is now redundant but harmless. If the design system is ever revised, revisit this together with the
+  `heading-order` violation below — they are the two known standing a11y items.
+- **Phase 8, Task 14 — the flake nobody has closed.** `e2e/it-core.spec.ts:127` ("edit writes
+  field-level history rows") failed once during Task 14 and then passed on three subsequent runs
+  including the full battery. It is the "✓ Saved" self-clearing-flash class that §7 records as fixed in
+  Phase 7 with a 20s assertion — so this is either a second site that fix did not cover, or a genuine
+  intermittent. **Recorded, not closed**: "it passed on re-run" is not proof, and this project has
+  already had one failure of exactly that shape turn out to be a real timing bug with a real cause. If
+  it reappears, read the Playwright dump before touching the assertion.
+- **Phase 8 leftovers (recorded, judged out of scope):** `/admin/webhooks/deliveries` has **no
+  pagination** — scope decision #12, matching `/approvals`; it shows the newest 50 with a "Showing N of
+  M" line, and unlike `/purchases` and `/reservations` its tabs carry **no per-tab counts** (four extra
+  `count`s in the existing `Promise.all` would close that). **`replayAllDead` is rate-limited per row**,
+  because it calls `replayDelivery` per delivery and each call spends a token against the 60/min cap —
+  invisible at seed scale, correct at real scale, and now visible when it bites because the action
+  reports `queued` against `attempted`. **Nothing prunes `WebhookDelivery`**, so the ledger grows
+  without bound; there is no retention policy anywhere in the schema. **`WebhookDelivery.nextAttemptAt`
+  is written by nothing but the seed** (§6a rule 60) — the job's `runAt` is the real schedule, so either
+  the worker should maintain the column or it should go. (The raw-SQL-only constraints
+  `Job_one_live_deliver_per_delivery` and `Job_deliver_payload_shape` are already tracked in the
+  Tasks 8-and-9 bullet above — not repeated here.)
 - **`/bootstrap`'s copy under-states the lock**: `src/app/(auth)/bootstrap/page.tsx` promises the
   permanent admin's *role* can never be changed, but Phase 8 widened that to access as well. Worth
   aligning when Task 3 lands. The corollary belongs here too — a bootstrapped permanent admin's account
