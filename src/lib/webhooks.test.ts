@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  EVENT_LABELS, SIGNATURE_HEADER, WEBHOOK_EVENTS, deleteBlockedReason, deliveryStage, parseEvents,
-  partitionEvents, webhookEnvelope,
+  ALREADY_QUEUED_REASON, DELIVERY_TABS, EVENT_LABELS, SIGNATURE_HEADER, WEBHOOK_EVENTS,
+  deleteBlockedReason, deliveryStage, parseDeliveryTab, parseEvents, partitionEvents,
+  replayBlockedReason, webhookEnvelope,
 } from "./webhooks";
 import { MAX_JOB_ATTEMPTS } from "./jobs";
 import { statusFamily } from "./status";
@@ -211,5 +212,136 @@ describe("SIGNATURE_HEADER", () => {
   // pins it too, from the consumer side.
   it("is the exact header the worker sends and the admin page names", () => {
     expect(SIGNATURE_HEADER).toBe("x-backroom-signature");
+  });
+});
+
+describe("DELIVERY_TABS", () => {
+  it("leads with All, and All is the one tab that filters nothing", () => {
+    expect(DELIVERY_TABS[0].id).toBe("ALL");
+    // `null` rather than a list of every status: an enumeration would need
+    // editing the day a fifth DeliveryStatus is added, and until someone did,
+    // the All tab would quietly stop showing everything.
+    expect(DELIVERY_TABS[0].statuses).toBeNull();
+  });
+
+  it("groups PENDING and RETRYING under one In-flight tab", () => {
+    const inFlight = DELIVERY_TABS.find((t) => t.id === "PENDING")!;
+    expect(inFlight.statuses).toEqual(["PENDING", "RETRYING"]);
+    expect(inFlight.label).toBe("In flight");
+  });
+
+  /**
+   * The completeness check the `satisfies` clause cannot make: it proves every
+   * entry names a real DeliveryStatus, not that the four tabs between them
+   * account for all of them. A fifth status added to the enum without a tab
+   * would be reachable ONLY from All — visible, but with no way to filter to
+   * it — and this is the assertion that says so out loud.
+   */
+  it("covers all four DeliveryStatus values exactly once across the filtering tabs", () => {
+    const covered = DELIVERY_TABS.flatMap((t) => t.statuses ?? []);
+    expect([...covered].sort()).toEqual(["DEAD", "DELIVERED", "PENDING", "RETRYING"]);
+  });
+
+  it("labels every tab as something other than the bare enum value", () => {
+    for (const tab of DELIVERY_TABS) expect(tab.label).not.toBe(tab.id);
+  });
+});
+
+describe("parseDeliveryTab", () => {
+  it("accepts every id the tab list offers", () => {
+    for (const tab of DELIVERY_TABS) expect(parseDeliveryTab(tab.id)).toBe(tab.id);
+  });
+
+  // `undefined` from `searchParams`, `null` from `URLSearchParams.get` — both
+  // are "no tab chosen", and both mean All.
+  it("falls back to ALL for absent, empty and unrecognised values", () => {
+    expect(parseDeliveryTab(undefined)).toBe("ALL");
+    expect(parseDeliveryTab(null)).toBe("ALL");
+    expect(parseDeliveryTab("")).toBe("ALL");
+    expect(parseDeliveryTab("RETRYING")).toBe("ALL");
+    expect(parseDeliveryTab("dead")).toBe("ALL");
+  });
+
+  // RETRYING is deliberately NOT a tab id — it is reachable through In flight.
+  // Accepting it would build a `?state=RETRYING` URL that no tab renders as
+  // active, so the page would show a filtered list with every tab looking
+  // unselected. That there is no RETRYING tab is asserted by the compiler, not
+  // here: `DeliveryTab` has no such member, so the obvious
+  // `DELIVERY_TABS.some((t) => t.id === "RETRYING")` is a TS2367 error rather
+  // than a passing test. What this checks is the runtime half — the parser
+  // does not let the value through on the strength of being a real status.
+  it("does not accept a DeliveryStatus that isn't its own tab", () => {
+    expect(parseDeliveryTab("RETRYING")).toBe("ALL");
+  });
+});
+
+describe("replayBlockedReason", () => {
+  const dead = {
+    status: "DEAD",
+    endpointUrl: "https://hooks.example.com/inventory",
+    endpointActive: true,
+    alreadyQueued: false,
+  };
+
+  it("is null for a dead delivery on a live endpoint — the case the design is about", () => {
+    expect(replayBlockedReason(dead)).toBeNull();
+  });
+
+  // Replay is the RECOVERY direction, and every non-terminal state is
+  // recoverable: a row that has stalled with no live job behind it is exactly
+  // the row an operator needs to be able to push (§6a rule 14 — turning a
+  // dangerous thing off, or retrying a failed one, is never the dangerous
+  // direction).
+  it("permits RETRYING and PENDING rows that have no live job", () => {
+    expect(replayBlockedReason({ ...dead, status: "RETRYING" })).toBeNull();
+    expect(replayBlockedReason({ ...dead, status: "PENDING" })).toBeNull();
+  });
+
+  it("refuses a delivery that already landed, rather than POSTing it twice", () => {
+    expect(replayBlockedReason({ ...dead, status: "DELIVERED" })).toContain("already landed");
+  });
+
+  // Not a nicety: the worker treats a disabled endpoint as PERMANENT, so a
+  // replay into one dies on its first attempt and the operator learns nothing
+  // they didn't already know.
+  it("refuses a disabled endpoint, and names it so the operator knows which", () => {
+    const reason = replayBlockedReason({ ...dead, endpointActive: false });
+    expect(reason).toContain("is disabled");
+    expect(reason).toContain("https://hooks.example.com/inventory");
+  });
+
+  /**
+   * The condition a delivery row cannot answer alone, and the one whose absence
+   * put a guaranteed-failing button on every in-flight row: a live
+   * DELIVER_WEBHOOK job means `Job_one_live_deliver_per_delivery` will refuse a
+   * second, so the click can only ever return P2002.
+   */
+  it("refuses a delivery that already has a live job, in every non-terminal state", () => {
+    for (const status of ["PENDING", "RETRYING", "DEAD"]) {
+      expect(replayBlockedReason({ ...dead, status, alreadyQueued: true })).toBe(
+        ALREADY_QUEUED_REASON,
+      );
+    }
+  });
+
+  // The order is load-bearing: a DELIVERED row whose job is somehow still live
+  // must read as landed, not as queued — "already queued for another attempt"
+  // would tell an operator to wait for something that is already done.
+  it("reports the terminal state ahead of the queue state", () => {
+    expect(
+      replayBlockedReason({ ...dead, status: "DELIVERED", alreadyQueued: true }),
+    ).toContain("already landed");
+  });
+
+  // Every refusal is textually distinct, or a test — and an operator — cannot
+  // tell which of three things happened (§6a rule 4).
+  it("gives three refusals no two of which read alike", () => {
+    const reasons = [
+      replayBlockedReason({ ...dead, status: "DELIVERED" }),
+      replayBlockedReason({ ...dead, endpointActive: false }),
+      replayBlockedReason({ ...dead, alreadyQueued: true }),
+    ];
+    expect(new Set(reasons).size).toBe(3);
+    expect(reasons.every((r) => r !== null)).toBe(true);
   });
 });

@@ -2,13 +2,17 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { encryptSecret } from "@/server/crypto";
 import { newSecret, secretAad } from "@/server/webhooks/sign";
-import { WEBHOOK_EVENTS, deleteBlockedReason, parseEvents, partitionEvents } from "@/lib/webhooks";
+import {
+  ALREADY_QUEUED_REASON, WEBHOOK_EVENTS, deleteBlockedReason, parseEvents, partitionEvents,
+  replayBlockedReason,
+} from "@/lib/webhooks";
 import { diffOf } from "@/lib/audit-diff";
 import { asActionResult } from "@/server/prisma-errors";
 import {
@@ -377,4 +381,165 @@ export async function deleteEndpoint(input: unknown): Promise<ActionResult<null>
   if (failure) return failure;
   revalidateAll();
   return ok(null);
+}
+
+/**
+ * Scope decision #11: replay is a decision to try AGAIN, not to resume, so the
+ * attempt cycle resets. `lastError` is deliberately kept until the next attempt
+ * overwrites it — while the row sits queued, why it died last time is still the
+ * most useful thing on the screen.
+ *
+ * `Job_one_live_deliver_per_delivery` (Task 9's migration) is what stops a
+ * double-click producing two live jobs for one delivery, which would POST a
+ * byte-identical envelope twice; P2002 here means "already queued", which is a
+ * conflict the operator can act on rather than an error. `listDeliveries`
+ * folds the same fact into `replayable`, so the button should not have been
+ * live — this catch is for the race, not for the ordinary case.
+ */
+export async function replayDelivery(input: unknown): Promise<ActionResult<null>> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  try {
+    // Every `return conflict(...)` below precedes every write: the three
+    // pre-checks come first, and the fourth is the guarded `updateMany`'s own
+    // zero-count case, which guards the very statement it reports on.
+    const failure = await asActionResult(
+      async () =>
+        prisma.$transaction(async (tx) => {
+          const delivery = await tx.webhookDelivery.findUnique({
+            where: { id: parsed.data.id },
+            include: { endpoint: true },
+          });
+          if (!delivery) return conflict("That delivery no longer exists.");
+          // The refusals come from `replayBlockedReason`, which
+          // `listDeliveries` also calls to decide whether a Replay control may
+          // render — one owner, so the table cannot offer a button this
+          // function would refuse (§6a rules 5, 10 and 11). `alreadyQueued` is
+          // left false here on purpose: the live-job condition is enforced by
+          // `Job_one_live_deliver_per_delivery` a few lines below, and its
+          // P2002 returns the very same sentence. Reading the job table again
+          // inside this transaction would only re-answer, less reliably, what
+          // the index answers atomically.
+          const blocked = replayBlockedReason({
+            status: delivery.status,
+            endpointUrl: delivery.endpoint.url,
+            endpointActive: delivery.endpoint.active,
+            alreadyQueued: false,
+          });
+          if (blocked) return conflict(blocked);
+          // Guarded on `status`, a column this write MOVES (§6a rules 21, 29,
+          // 30) — guarding an unchanged column can never fire, because
+          // Postgres re-checks the predicate against the new row version after
+          // the lock.
+          const written = await tx.webhookDelivery.updateMany({
+            where: { id: delivery.id, status: delivery.status },
+            data: {
+              status: "PENDING",
+              attempts: 0,
+              deliveredAt: null,
+              // Cleared for the same reason the DELIVERED path clears it: a
+              // row that is queued afresh must not keep advertising an
+              // attempt from its old backoff that will never happen.
+              nextAttemptAt: null,
+            },
+          });
+          if (written.count === 0) {
+            return conflict("Someone else just changed that delivery — refresh and replay again.");
+          }
+          await tx.job.create({
+            data: { type: "DELIVER_WEBHOOK", payload: { deliveryId: delivery.id } },
+          });
+          await writeAudit(tx, {
+            actorId: actor.id,
+            actorLabel: actor.name,
+            entityType: "webhook-endpoint",
+            entityId: delivery.endpointId,
+            action: "replay",
+            // What actually changed, and nothing else. A from-equals-to
+            // `event` here would make `/audit` render "Fields: event" for a
+            // replay that changed no event (§6a rules 8 and 19) — the
+            // endpoint's identity belongs in the entity label, which
+            // `entityLabels` resolves to its URL.
+            diff: {
+              status: { from: delivery.status, to: "PENDING" },
+              attempts: { from: delivery.attempts, to: 0 },
+            },
+          });
+          return null;
+        }),
+      { goneMessage: "That delivery no longer exists." },
+    );
+    if (failure) return failure;
+  } catch (err) {
+    // `asActionResult` has no P2002 branch — it rethrows anything it doesn't
+    // recognise — so this catch is the only thing between the unique index and
+    // a 500.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      // The same sentence `replayBlockedReason` gives when the page already
+      // knew — not a second copy that a reword would strand.
+      return conflict(ALREADY_QUEUED_REASON);
+    }
+    throw err;
+  }
+  revalidateAll();
+  return ok(null);
+}
+
+/**
+ * The design's "Replay 4 dead-lettered" — one decision, not four clicks.
+ *
+ * Returns what actually happened rather than a bare success: `attempted` is
+ * what the batch found, `queued` is what really went, and `blocked` is the
+ * first refusal. A caller that only knew "ok" would report the count it
+ * rendered BEFORE the click, which is the number this can most easily fall
+ * short of — a batch that silently under-queues reads as a batch that worked.
+ */
+export async function replayAllDead(): Promise<
+  ActionResult<{ queued: number; attempted: number; blocked: string | null }>
+> {
+  const actor = await actionRole("admin");
+  if (!actor) return forbidden();
+  const rate = await checkRate(actor.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  // Only endpoints that are actually live: replaying into a disabled endpoint
+  // spends an attempt to reach the answer the operator already has. Same
+  // predicate as `listDeliveries`' `deadReplayable`, so the count on the
+  // button is the count this loop walks.
+  const dead = await prisma.webhookDelivery.findMany({
+    where: { status: "DEAD", endpoint: { active: true } },
+    select: { id: true },
+  });
+
+  let queued = 0;
+  let blocked: string | null = null;
+  for (const row of dead) {
+    // One transaction per row, via the single-row action itself: a batch
+    // replay leaves exactly the same audit trail as four individual ones, and
+    // one already-queued delivery must not stop the other three. Deliberately
+    // NOT wrapped in a try/catch — `replayDelivery` maps every failure it
+    // expects onto an ActionResult, and swallowing what escapes that would
+    // launder a real fault into a short count with no reason attached
+    // (`src/server/prisma-errors.ts` states the same rule for its own
+    // rethrow).
+    const res = await replayDelivery({ id: row.id });
+    if (res.ok) {
+      queued += 1;
+      continue;
+    }
+    blocked ??= res.message;
+    // Each row costs a rate-limit token, so a long batch can exhaust the
+    // actor's budget mid-way. Once that happens every remaining row is a
+    // round trip that cannot succeed — stop, and let the caller report the
+    // partial with its reason.
+    if (res.kind === "rate_limited") break;
+  }
+  // No `revalidateAll()` here: `replayDelivery` revalidates on every success,
+  // and if none succeeded there is nothing to revalidate.
+  return ok({ queued, attempted: dead.length, blocked });
 }

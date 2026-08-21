@@ -1,8 +1,12 @@
 import { prisma } from "@/server/db/client";
 import { lockReason, roleWorkspaces, ROLE_OPTIONS, type TargetUser } from "@/lib/admin-users";
 import { FLAG_SPECS, flagEnabled, type FlagState } from "@/lib/admin-flags";
-import { partitionEvents, type WebhookEvent } from "@/lib/webhooks";
-import type { Role } from "@prisma/client";
+import { fmtDateTime } from "@/lib/format";
+import {
+  DELIVERY_TABS, deliveryStage, partitionEvents, replayBlockedReason, type DeliveryTab,
+  type WebhookEvent,
+} from "@/lib/webhooks";
+import type { Prisma, Role } from "@prisma/client";
 
 export interface UserRow {
   id: string;
@@ -206,5 +210,134 @@ export async function adminHome(): Promise<AdminHome> {
       unavailable: !!spec.unavailable,
     })),
     webhooks: { endpoints, inactive, dead, delivered },
+  };
+}
+
+export interface DeliveryRow {
+  id: string;
+  endpointUrl: string;
+  event: string;
+  when: string;
+  attempts: number;
+  lastError: string | null;
+  /**
+   * The raw DeliveryStatus. `StatusPill` derives the colour from THIS, with
+   * `ns="delivery"` — unnamespaced, PENDING resolves to the approval family
+   * (attention) and a healthy queued delivery goes amber, indistinguishable
+   * from a failing one (Task 6, `src/lib/status.ts`).
+   */
+  status: string;
+  /** The chip's LABEL only — "DEAD · 5/5". Never passed where `status` belongs. */
+  stageLabel: string;
+  /**
+   * Whether a live Replay control may render. Every one of `replayDelivery`'s
+   * refusals is folded in here, which is the point: a button whose click is
+   * guaranteed to fail is §6a rule 10's exact shape.
+   */
+  replayable: boolean;
+}
+
+const DELIVERY_PAGE = 50;
+
+/**
+ * A live `DELIVER_WEBHOOK` job's delivery id, or null for a payload that has
+ * none. Defensive about the shape because `Job.payload` is a `Json` column: it
+ * can legally hold an array or a bare string, and the migration that added
+ * `Job_one_live_deliver_per_delivery` had to add a CHECK constraint precisely
+ * because a payload with no `deliveryId` is possible.
+ */
+function liveDeliveryId(payload: Prisma.JsonValue): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const id = payload.deliveryId;
+  return typeof id === "string" ? id : null;
+}
+
+/**
+ * Scope decision #12: no pagination, matching `/approvals` — the newest
+ * `DELIVERY_PAGE` attempts, with a line saying so when there are more.
+ *
+ * `WebhookDelivery.nextAttemptAt` is deliberately NOT read. Only the seed ever
+ * writes it (`prisma/seed.ts`) — the worker's retry path (`mark` in
+ * `src/worker/deliver-webhook.ts`) never does, it only clears the column on a
+ * success — so a "next attempt" column sourced from it would read as authoritative
+ * and be blank for every delivery the running code produced. The real schedule
+ * is the job's `runAt`; if this page ever shows it, take it from there.
+ */
+export async function listDeliveries(
+  tab: DeliveryTab,
+): Promise<{ rows: DeliveryRow[]; total: number; deadReplayable: number }> {
+  const statuses = DELIVERY_TABS.find((t) => t.id === tab)!.statuses;
+  const where: Prisma.WebhookDeliveryWhereInput = statuses
+    ? { status: { in: [...statuses] } }
+    : {};
+
+  const [rows, total, deadReplayable, liveJobs] = await Promise.all([
+    prisma.webhookDelivery.findMany({
+      where,
+      // An explicit `select`, not `include: { endpoint: true }`: that pulls
+      // every endpoint scalar including the encrypted `secret`, for the same
+      // reason `listEndpoints` above spells its columns out. The ciphertext
+      // has no business crossing this boundary even to be discarded here.
+      select: {
+        id: true, event: true, status: true, attempts: true, lastError: true, createdAt: true,
+        endpoint: { select: { url: true, active: true } },
+      },
+      // createdAt alone is not a stable order — rows written in one
+      // transaction share a millisecond (HANDOVER §7), and this seed writes
+      // five in one `createMany`. The id tiebreaker is mandatory.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: DELIVERY_PAGE,
+    }),
+    prisma.webhookDelivery.count({ where }),
+    // Not filtered by `tab`: this is the batch control's offer, and it means
+    // the same thing on every tab. A DEAD delivery cannot also hold a live
+    // job — the worker dead-letters both in the same failure (`retryStatus`
+    // and `tick`'s `dead` read the same `attempts` against the same cap) — so
+    // this count needs no live-job exclusion the way `replayable` below does.
+    prisma.webhookDelivery.count({ where: { status: "DEAD", endpoint: { active: true } } }),
+    // One query for the whole live set rather than one per row. This is what
+    // lets the page know, BEFORE the click, that `replayDelivery` would refuse
+    // with "already queued" — without it, every freshly-emitted PENDING row and
+    // every backing-off RETRYING row renders a Replay button whose P2002 is
+    // guaranteed. The live set is bounded by how fast the worker drains it.
+    prisma.job.findMany({
+      where: { type: "DELIVER_WEBHOOK", status: { in: ["PENDING", "RUNNING"] } },
+      select: { payload: true },
+    }),
+  ]);
+
+  const queued = new Set(
+    liveJobs.map((j) => liveDeliveryId(j.payload)).filter((id): id is string => id !== null),
+  );
+
+  return {
+    total,
+    deadReplayable,
+    rows: rows.map((r) => ({
+      id: r.id,
+      endpointUrl: r.endpoint.url,
+      event: r.event,
+      when: fmtDateTime(r.createdAt),
+      attempts: r.attempts,
+      lastError: r.lastError,
+      status: r.status,
+      // No third argument: `deliveryStage` defaults the denominator to
+      // MAX_JOB_ATTEMPTS, the worker's own cap. A local literal here is what
+      // makes `DEAD · 3/5` possible the day someone tunes the worker.
+      stageLabel: deliveryStage(r.status, r.attempts),
+      // `replayBlockedReason` is the ONE owner of the conditions — the same
+      // function `replayDelivery` refuses with — so a refusal added to the
+      // action cannot leave a live Replay button behind here (§6a rule 10).
+      // The sentence itself is not carried onto the row: the chip already says
+      // DELIVERED or QUEUED, the disabled endpoint is stated on
+      // /admin/webhooks, and a 90px actions column has no room for prose.
+      replayable:
+        replayBlockedReason({
+          status: r.status,
+          endpointUrl: r.endpoint.url,
+          endpointActive: r.endpoint.active,
+          alreadyQueued: queued.has(r.id),
+        }) === null,
+    })),
   };
 }

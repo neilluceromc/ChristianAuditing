@@ -1,3 +1,4 @@
+import type { DeliveryStatus } from "@prisma/client";
 import { MAX_JOB_ATTEMPTS } from "./jobs";
 
 /**
@@ -77,6 +78,54 @@ export function deleteBlockedReason(attempts: number): string | null {
     `This endpoint has ${attempts} delivery ${attempts === 1 ? "attempt" : "attempts"} on record. ` +
     "Disable it instead — deleting it would erase the record of what was sent."
   );
+}
+
+/**
+ * Exported as data, like `ROTATION_WARNING`, because it has two producers that
+ * must not drift: `replayBlockedReason` returns it when the page already knows
+ * a live job exists, and `replayDelivery`'s P2002 branch returns it when
+ * `Job_one_live_deliver_per_delivery` discovered the same fact mid-click. An
+ * operator who loses that race should read the same sentence either way.
+ */
+export const ALREADY_QUEUED_REASON = "That delivery is already queued for another attempt.";
+
+/**
+ * Why this delivery cannot be replayed, or `null` when it can.
+ *
+ * The same shape as `deleteBlockedReason` above, for the same reason and with
+ * the same discipline: `replayDelivery` prints these sentences when the click
+ * has already happened, and `listDeliveries` calls the SAME function to decide
+ * whether a Replay control may render at all — so a fourth refusal added to
+ * the action cannot leave the table offering a button whose click is
+ * guaranteed to fail (HANDOVER §6a rule 10, which this phase has broken in
+ * every task that pairs a rule with a page). Returning `null` rather than a
+ * boolean pair is what stops a caller rendering the refusal and the
+ * affordance at once.
+ *
+ * `alreadyQueued` is the one condition a delivery row cannot answer by itself:
+ * it means a live `DELIVER_WEBHOOK` job exists, which
+ * `Job_one_live_deliver_per_delivery` will refuse to duplicate. Without it,
+ * every freshly-emitted PENDING row and every backing-off RETRYING row offers
+ * a Replay whose P2002 is certain — invisible against this repo's seed, which
+ * queues no jobs for its deliveries at all.
+ *
+ * The order is the order `replayDelivery` checks in, so the sentence an
+ * operator reads after a race is the sentence this would have given before it.
+ */
+export function replayBlockedReason(delivery: {
+  status: string;
+  endpointUrl: string;
+  endpointActive: boolean;
+  alreadyQueued: boolean;
+}): string | null {
+  if (delivery.status === "DELIVERED") {
+    return "That one already landed — there's nothing to replay.";
+  }
+  if (!delivery.endpointActive) {
+    return `${delivery.endpointUrl} is disabled — enable the endpoint first, or the replay will just die again.`;
+  }
+  if (delivery.alreadyQueued) return ALREADY_QUEUED_REASON;
+  return null;
 }
 
 /**
@@ -183,4 +232,53 @@ export function deliveryStage(
   // row) should look unrecognised rather than quietly reading as QUEUED —
   // the PENDING branch above was never meant to be a catch-all.
   return status;
+}
+
+/**
+ * The tab contract for `/admin/webhooks/deliveries`: `?state=`, the same one
+ * `/purchases` and `/reservations` use, and the one `endpoint-editor.tsx`
+ * already links into with `?state=DEAD`.
+ *
+ * Here, in `src/lib`, rather than beside the Prisma call in
+ * `admin/queries.ts`: `RESERVATION_TABS` is bundled with its query and is for
+ * that reason the one list parser in this app with no unit test (HANDOVER §8),
+ * because reaching it pulls in the DB client. Every other sibling
+ * (`approvals-list.ts`, `purchases-list.ts`, `audit-list.ts`) keeps the pure
+ * part here.
+ *
+ * `label` and `statuses` ride on the ENTRY, not in a second map beside the
+ * page's markup: a `TAB_LABELS` record and a `where`-building ternary are two
+ * more lists that have to agree with this one, and §6a rule 26 is what happens
+ * when they stop.
+ *
+ * "In flight" groups PENDING and RETRYING because to an operator that is one
+ * fact — the worker still owes this delivery an attempt. They are two statuses
+ * only because of how the last attempt went, which the chip already says.
+ */
+export const DELIVERY_TABS = [
+  // `null`, not a list of all four statuses: an unfiltered query cannot go
+  // stale the day a fifth DeliveryStatus is added, whereas an enumeration
+  // here would silently hide the new rows from the one tab whose whole job is
+  // to hide nothing. The other three enumerate deliberately — a new status
+  // belongs in no existing tab until someone decides which.
+  { id: "ALL", label: "All", statuses: null },
+  { id: "DEAD", label: "Dead-lettered", statuses: ["DEAD"] },
+  { id: "PENDING", label: "In flight", statuses: ["PENDING", "RETRYING"] },
+  { id: "DELIVERED", label: "Delivered", statuses: ["DELIVERED"] },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  statuses: readonly DeliveryStatus[] | null;
+}[];
+
+export type DeliveryTab = (typeof DELIVERY_TABS)[number]["id"];
+
+/**
+ * `null | undefined` as well as `string`, matching `parseReservationTab`:
+ * `searchParams` hands back `undefined` for an absent key and
+ * `URLSearchParams.get` hands back `null`, and a parser that only accepts one
+ * of those is a cast waiting to happen at the other call site.
+ */
+export function parseDeliveryTab(raw: string | null | undefined): DeliveryTab {
+  return (DELIVERY_TABS.some((t) => t.id === raw) ? raw : "ALL") as DeliveryTab;
 }
