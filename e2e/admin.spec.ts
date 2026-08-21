@@ -142,9 +142,21 @@ test.describe("feature flags", () => {
   test("the domain value is normalised and refuses an address", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/admin/flags");
+    await expect(page.getByRole("heading", { name: "Feature flags" })).toBeVisible({ timeout: 20_000 });
     const field = page.getByRole("textbox", { name: /Value for Signup domain restriction/ });
+    // The input is controlled — `draft` in flag-rows.tsx is seeded from
+    // `row.value` on mount. Typing before hydration attaches gets silently
+    // overwritten the moment React takes over (same race class as HANDOVER
+    // §7's "✓ Saved" flash), and a fill() that lands in that window is lost
+    // with no error — the next assertion would just see the pre-hydration
+    // value and could pass for the wrong reason. Asserting the seeded value
+    // first proves the component is live before anything is typed into it.
+    await expect(field).toHaveValue("thebackroomop.com", { timeout: 20_000 });
 
     await field.fill("someone@thebackroomop.com");
+    // Asserted BEFORE the click: this is what turns a lost keystroke into a
+    // clear failure here instead of a confusing one three lines down.
+    await expect(field).toHaveValue("someone@thebackroomop.com");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText(/Just the domain, not a full address/)).toBeVisible({ timeout: 20_000 });
 
@@ -157,6 +169,7 @@ test.describe("feature flags", () => {
     // what this test is actually checking. A genuinely different domain,
     // still mixed-case, is what a real update AND normalisation both need.
     await field.fill("EXAMPLE.ORG");
+    await expect(field).toHaveValue("EXAMPLE.ORG");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText(/Signup domain restriction updated/)).toBeVisible({ timeout: 20_000 });
     await page.reload();
@@ -171,7 +184,14 @@ test.describe("webhooks", () => {
     await expect(page.getByRole("heading", { name: "Webhooks" })).toBeVisible({ timeout: 20_000 });
     await expectNoSeriousAxe(page);
 
-    await page.getByRole("textbox", { name: "New endpoint URL" }).fill("https://example.test/hook");
+    const url = page.getByRole("textbox", { name: "New endpoint URL" });
+    // Same controlled-input race as the flags domain field: NewEndpointCard's
+    // `url` state starts at "" on mount, so proving that starting value
+    // first is what stands between hydration silently eating a fill() and a
+    // failure that actually says so.
+    await expect(url).toHaveValue("");
+    await url.fill("https://example.test/hook");
+    await expect(url).toHaveValue("https://example.test/hook");
     await page.getByRole("checkbox", { name: /New endpoint: An approval finished executing/ }).check();
     await page.getByRole("button", { name: "Create endpoint" }).click();
 
@@ -184,7 +204,11 @@ test.describe("webhooks", () => {
   test("an endpoint with no events is refused where the operator is looking", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/admin/webhooks");
-    await page.getByRole("textbox", { name: "New endpoint URL" }).fill("https://example.test/none");
+    await expect(page.getByRole("heading", { name: "Webhooks" })).toBeVisible({ timeout: 20_000 });
+    const url = page.getByRole("textbox", { name: "New endpoint URL" });
+    await expect(url).toHaveValue("");
+    await url.fill("https://example.test/none");
+    await expect(url).toHaveValue("https://example.test/none");
     await page.getByRole("button", { name: "Create endpoint" }).click();
     await expect(page.getByText(/Pick at least one event/)).toBeVisible({ timeout: 20_000 });
   });
