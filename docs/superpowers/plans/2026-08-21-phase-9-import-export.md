@@ -996,6 +996,42 @@ git commit -m "feat(export): the farewell report as a sheet, from the report's o
 
 ### Task 6: Split-by-year chips
 
+> ### AMENDED — as SHIPPED (`cd2aff2`). Wider than planned, for a good reason.
+> **The plan said "add it to `buildAssetWhere` itself, not the page" and did not say HOW.** That matters:
+> `buildAssetWhere` takes a `ListState`, and `ListState` only round-trips `config.facets` through
+> `serializeListState`/`parseListState`. `purchaseYear` is deliberately **not** a facet (it is a
+> nav-destination single value, per the `?state=` precedent). So threading it inside `ListState` would
+> have seen it **silently dropped** across the export href, the bulk drawer's "act on all matching", and
+> the toolbar's own navigation — which is Task 4's employees `gaps=1` bug exactly.
+>
+> Shipped as an explicit second parameter, `buildAssetWhere(state, purchaseYear)`, threaded the way
+> `gapsOnly` is threaded through `listEmployees`/`employeeExportRows`, plus one owner
+> (`withPurchaseYearQS`) for splicing it back onto a serialized query string wherever one is rebuilt.
+> That touched six files rather than three — `actions.ts` and `page.tsx` included — and the extra
+> surface is the point: **all six consumers of that `where` now inherit the filter.** Verified caller by
+> caller: `listAssets`, `repairStageIds`, the four `facetOptions` groupBys (each via `without(facet)`),
+> the export route, and `bulkRequestStatusChange`, which parses `purchaseYear` off the same serialized
+> string it already reconstructs `state` from. `purchaseYearBuckets` deliberately passes NO
+> `purchaseYear` — it is the year facet's own count, so by the `without(facet)` rule it must not apply
+> its own filter, and clicking a chip therefore shows exactly the count printed on it.
+>
+> **`purchaseYear` needs no in-memory cut** — unlike the repair `stage` facet it is fully expressible in
+> SQL — so it is simpler than `repairStageIds`, not another instance of it. Said in a comment so nobody
+> later assumes otherwise.
+>
+> **Grouping is in memory** over a `purchasedAt`-only projection, because Prisma's `groupBy` cannot
+> extract a year and doing it in raw SQL would mean a second, driftable copy of `buildAssetWhere`.
+>
+> **The acceptance test passed on real data:** buckets `{2020:1, 2021:1, 2022:2, 2023:3, 2024:15,
+> 2026:3}` summing to 25/25; `?purchaseYear=2026` exporting exactly 3 rows, all 2026; `SPARE` 5 overall
+> and 2 within 2026, so it composes with other facets. `purchaseYear=none` produces `{purchasedAt: null}`
+> and runs clean but returns 0 — **the seed has no undated assets, so that case is carried by unit tests
+> only** (rule 65: an equality at zero is not evidence). `e2e/it-core.spec.ts` 20/20, including the
+> export test.
+>
+> Recorded, not fixed: **there is no "All years" chip**, so clearing just the year needs "Clear filters".
+> Matches the plan as written; a minor UX gap for Phase 10's polish pass.
+
 Brief `[5a]`: "offer split-by-year chips **sized to their counts**". They are the concrete escape from
 the cap refusal, which is why `capRefusalText` points at them.
 
