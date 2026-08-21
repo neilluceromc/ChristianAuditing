@@ -105,9 +105,12 @@
   --text: #e6e9ef;
   --text-secondary: #c7cdd8;
   --text-muted: #9aa4b2;
-  /* 3.41:1 before, against --surface-raised #1d2129 — the lightest surface faint text
-     sits on, and so the binding case. #868f9c is 4.93:1 there and stays visibly dimmer
-     than --text-muted, so dark mode keeps the three tiers light mode has to collapse. */
+  /* 3.41:1 before, against --surface-raised #1d2129 — the lightest surface any
+     component actually paints faint text on, and so the binding case. (--surface-accent
+     #152435 is very slightly lighter still, but nothing uses it as a background —
+     grep for bg-surface-accent — so it does not bind. Re-check this if that changes.)
+     #868f9c is 4.93:1 on --surface-raised and stays visibly dimmer than --text-muted,
+     so dark mode keeps the three tiers light mode has to collapse. */
   --text-faint: #868f9c;
   --accent: #6aa9e0;
   --accent-hover: #8fc0ea;
