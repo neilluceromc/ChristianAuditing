@@ -6,6 +6,8 @@ import { safeSection } from "@/lib/section";
 import {
   ageHistogram, claimedByYou, financeHome, fleet, purchasingHome, warrantyRunway, yourShift,
 } from "@/server/modules/home/queries";
+import { adminHome } from "@/server/modules/admin/queries";
+import { AdminHomeBody } from "@/components/home/admin-home";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
 import { Stat } from "@/components/ui/stat";
@@ -53,6 +55,26 @@ export default async function Home() {
       actions={<FocusToggle on={focus} />}
     />
   );
+
+  // ── Admin: who can get in, what is switched on, are integrations healthy ─
+  if (ws === "admin") {
+    const admin = await safeSection("Admin overview", () => adminHome());
+    return (
+      <>
+        {header}
+        <div className="flex max-w-[900px] flex-col gap-4">
+          <SectionCard title="System" result={admin}>
+            {(data) => <AdminHomeBody data={data} />}
+          </SectionCard>
+          {!focus && (
+            <SectionCard title="Jump to" result={{ ok: true, data: sections }}>
+              {(s) => <JumpTo sections={s} />}
+            </SectionCard>
+          )}
+        </div>
+      </>
+    );
+  }
 
   // ── Purchasing: a to-do list and spend ─────────────────────────────────
   if (ws === "purchasing") {

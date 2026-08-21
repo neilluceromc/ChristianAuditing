@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db/client";
-import { lockReason, roleWorkspaces, type TargetUser } from "@/lib/admin-users";
+import { lockReason, roleWorkspaces, ROLE_OPTIONS, type TargetUser } from "@/lib/admin-users";
 import { FLAG_SPECS, type FlagState } from "@/lib/admin-flags";
 import { flagDomain } from "@/lib/auth-shared";
 import { partitionEvents, type WebhookEvent } from "@/lib/webhooks";
@@ -159,4 +159,50 @@ export async function listEndpoints(): Promise<EndpointRow[]> {
       dead: deadBy.get(r.id) ?? 0,
     };
   });
+}
+
+export interface AdminHome {
+  users: { total: number; disabled: number; byRole: Array<{ role: Role; count: number }> };
+  flags: Array<{ key: string; label: string; enabled: boolean; unavailable: boolean }>;
+  webhooks: { endpoints: number; inactive: number; dead: number; delivered: number };
+}
+
+export async function adminHome(): Promise<AdminHome> {
+  const [byRole, disabled, flagRows, endpoints, inactive, dead, delivered] = await Promise.all([
+    prisma.user.groupBy({ by: ["role"], _count: { _all: true } }),
+    prisma.user.count({ where: { disabled: true } }),
+    prisma.featureFlag.findMany(),
+    prisma.webhookEndpoint.count(),
+    prisma.webhookEndpoint.count({ where: { active: false } }),
+    prisma.webhookDelivery.count({ where: { status: "DEAD" } }),
+    prisma.webhookDelivery.count({ where: { status: "DELIVERED" } }),
+  ]);
+
+  const enabledBy = new Map(flagRows.map((f) => [f.key, f.enabled]));
+  return {
+    users: {
+      total: byRole.reduce((sum, g) => sum + g._count._all, 0),
+      disabled,
+      // Driven by ROLE_OPTIONS so a role nobody holds still shows as 0 rather
+      // than vanishing — "no admins" is exactly the kind of thing a zero row
+      // is for. ROLE_OPTIONS lists every Role enum value, so this sum can
+      // never disagree with the reduce() above.
+      byRole: ROLE_OPTIONS.map((role) => ({
+        role,
+        count: byRole.find((g) => g.role === role)?._count._all ?? 0,
+      })),
+    },
+    // FLAG_SPECS-driven for the same reason as listFlags: a hand-inserted row
+    // is not something this page should report as configuration.
+    flags: FLAG_SPECS.map((spec) => ({
+      key: spec.key,
+      label: spec.label,
+      enabled: enabledBy.get(spec.key) ?? false,
+      // `spec` is already the FLAG_SPECS entry for this key, so reading
+      // spec.unavailable directly is the same lookup specFor(spec.key) would
+      // do, minus the redundant re-scan of the array we're already iterating.
+      unavailable: !!spec.unavailable,
+    })),
+    webhooks: { endpoints, inactive, dead, delivered },
+  };
 }
