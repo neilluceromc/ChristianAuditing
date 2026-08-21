@@ -5145,22 +5145,88 @@ real receiver is its only coverage, which is why Step 4 is as detailed as it is.
 
 ### Task 11: Admin gets its own Home
 
-Scope decision #13, and HANDOVER §6 criterion #6. Today `resolveWorkspace` can return `"admin"` but
-`src/app/(app)/page.tsx` only branches on `purchasing` and `finance` — so an admin lands on the IT
-Home and reads SLA breaches and fleet composition under a Users / Webhooks / Feature-flags sidebar.
-The sidebar and the body describe different jobs.
+> ### AMENDED — the code as SHIPPED (`e3e19eb` + `68fc359` + `aa91cf4` + `ac976ac`, deliberately
+> unsquashed). **This was the first task executed subagent-driven** (fresh sonnet implementer → sonnet
+> spec review → sonnet quality review), and the two reviews found things the previous three tasks'
+> single-context passes would plausibly have missed.
+>
+> **1. The flag state on this page was the raw column, not the effective one — §6a rule 15, reproduced
+> one page up.** `adminHome()` read `FeatureFlag.enabled` directly, while `listFlags()` two functions
+> above it computes `spec.hasValue ? flagDomain(row) !== null : row?.enabled ?? false`. Those differ for
+> `allowed_domain` in the state `(enabled: true, value: null)` — which `flagDomain`'s own doc comment
+> calls *"the resting state of any deployment that bootstrapped without a domain"*. In that state the
+> Admin Home would have shown a green dot and **"on"** beside "Signup domain restriction" while
+> `/signup` enforced nothing **and `/admin/flags` one click away correctly said "off"** — two admin
+> surfaces contradicting each other, with the summary being the liar. Fixed by extracting
+> **`flagEnabled(spec, row)`** into `src/lib/admin-flags.ts` and routing BOTH callers through it: a
+> copied ternary would have been the second definition of the expression rule 15 exists to keep single
+> (the handover records three readers having already hand-rolled it once). Seven unit tests, mutation-
+> verified — reintroducing the raw-column shortcut kills three of them. **Proven live:** forcing
+> `(enabled: true, value: NULL)` makes the Home read `off`; restoring the domain makes it read `on`.
+>
+> **2. The plan's Step 3 snippet left the Focus toggle inert.** `FocusToggle` renders unconditionally in
+> the shared `header`, and Focus's entire job across the other three Homes is hiding secondary sections.
+> The Admin Home has none, so as drafted the button would flip a cookie and re-render identically. The
+> implementer's first instinct — add a `!focus`-gated `Jump to` card so Focus has something to hide — was
+> rejected on review: `WORKSPACE_NAV.admin` is exactly Users & roles / Webhooks / Feature flags, all
+> three of which `AdminHomeBody` already links inline, so that card would have repeated them plus a link
+> to the page you are on. **The fix is to not offer the control:** `SHOWS_FOCUS_TOGGLE:
+> Record<WorkspaceId, boolean>` in `page.tsx`, so a fifth workspace is a compile error rather than a
+> silent `undefined`. Note this is a *near relative* of §6a rule 10 and not an instance — rule 10 is
+> about an action guaranteed to FAIL; this one succeeds and does nothing visible. Same remedy.
+>
+> **3. Three smaller corrections to the plan's code.** `String(...)` around the `Stat` values is
+> unnecessary (`value` is a `ReactNode`; every sibling branch passes raw numbers). `specFor(spec.key)`
+> while already iterating `FLAG_SPECS` re-finds an object in hand — `spec.unavailable` directly, which is
+> what `listFlags` already does. And `` `, ${webhooks.inactive} endpoint disabled` `` does not
+> pluralise, so two disabled endpoints read "2 endpoint disabled".
+>
+> **Two review Minors were declined on the record**, not overlooked: collapsing the seven parallel
+> queries to five via `groupBy` (the count-pairs would each need `?? 0` fallbacks — more code and a new
+> way to be wrong, for two round trips on a rarely-loaded page), and moving `SHOWS_FOCUS_TOGGLE` into
+> `src/lib/workspaces.ts` beside the other three `Record<WorkspaceId, …>` tables (that module is the
+> nav-and-access truth the **edge middleware** reads; whether one page's header renders a control is a
+> fact about that page's JSX, and coupling routing truth to layout is the worse trade). Both reviewers
+> independently agreed with the second call once the middleware point was made.
+
+Scope decision #13, and HANDOVER §6 criterion #6. `resolveWorkspace` could already return `"admin"`
+while `src/app/(app)/page.tsx` only branched on `purchasing` and `finance` — so an admin landed on the
+IT Home and read SLA breaches and fleet composition under a Users / Webhooks / Feature-flags sidebar.
+The sidebar and the body described different jobs.
 
 The Admin Home answers the three questions its own sidebar raises: **who can get in, what is switched
 on, and are the integrations healthy.**
 
 **Files:**
 - Create: `src/components/home/admin-home.tsx`
-- Modify: `src/server/modules/admin/queries.ts`, `src/app/(app)/page.tsx`
+- Modify: `src/server/modules/admin/queries.ts`, `src/app/(app)/page.tsx`, `src/lib/admin-flags.ts`,
+  `src/lib/admin-flags.test.ts`
 
-- [ ] **Step 1: Add the query**
+- [x] **Step 1: One expression for "is this flag effectively on"**
 
-Append to `src/server/modules/admin/queries.ts`. It needs `specFor`, so extend the existing
-`@/lib/admin-flags` import to `import { FLAG_SPECS, specFor } from "@/lib/admin-flags";`.
+In `src/lib/admin-flags.ts`:
+
+```ts
+export function flagEnabled(
+  spec: FlagSpec,
+  row: { enabled: boolean; value: unknown } | null | undefined,
+): boolean {
+  return spec.hasValue ? flagDomain(row) !== null : row?.enabled ?? false;
+}
+```
+
+`listFlags()` replaces its inline ternary with a call to it, and `adminHome()` (Step 2) uses it rather
+than the raw column. Takes `FlagSpec` rather than a bare `hasValue: boolean` deliberately: both call
+sites already hold the spec, and a same-named boolean on a different object (`FlagRow.hasValue` sits
+next to `.enabled` and `.value`) could otherwise be passed into the wrong slot. Seven tests in
+`src/lib/admin-flags.test.ts`; mutate it to `return row?.enabled ?? false` and three must fail.
+
+- [x] **Step 2: Add the query**
+
+Append to `src/server/modules/admin/queries.ts`, extending its `@/lib/admin-flags` import with
+`flagEnabled` and its `@/lib/admin-users` import with `ROLE_OPTIONS`. Shape as the plan originally had
+it, with two changes: the flag map is keyed `key → row` rather than `key → boolean` (the helper needs
+`value`, not just the bit), and `unavailable` reads `spec.unavailable`:
 
 ```ts
 export interface AdminHome {
@@ -5168,48 +5234,15 @@ export interface AdminHome {
   flags: Array<{ key: string; label: string; enabled: boolean; unavailable: boolean }>;
   webhooks: { endpoints: number; inactive: number; dead: number; delivered: number };
 }
-
-export async function adminHome(): Promise<AdminHome> {
-  const [byRole, disabled, flagRows, endpoints, inactive, dead, delivered] = await Promise.all([
-    prisma.user.groupBy({ by: ["role"], _count: { _all: true } }),
-    prisma.user.count({ where: { disabled: true } }),
-    prisma.featureFlag.findMany(),
-    prisma.webhookEndpoint.count(),
-    prisma.webhookEndpoint.count({ where: { active: false } }),
-    prisma.webhookDelivery.count({ where: { status: "DEAD" } }),
-    prisma.webhookDelivery.count({ where: { status: "DELIVERED" } }),
-  ]);
-
-  const enabledBy = new Map(flagRows.map((f) => [f.key, f.enabled]));
-  return {
-    users: {
-      total: byRole.reduce((sum, g) => sum + g._count._all, 0),
-      disabled,
-      // Driven by ROLE_OPTIONS so a role nobody holds still shows as 0 rather
-      // than vanishing — "no admins" is exactly the kind of thing a zero row
-      // is for.
-      byRole: ROLE_OPTIONS.map((role) => ({
-        role,
-        count: byRole.find((g) => g.role === role)?._count._all ?? 0,
-      })),
-    },
-    // FLAG_SPECS-driven for the same reason as listFlags: a hand-inserted row
-    // is not something this page should report as configuration.
-    flags: FLAG_SPECS.map((spec) => ({
-      key: spec.key,
-      label: spec.label,
-      enabled: enabledBy.get(spec.key) ?? false,
-      unavailable: !!specFor(spec.key)?.unavailable,
-    })),
-    webhooks: { endpoints, inactive, dead, delivered },
-  };
-}
 ```
 
-Extend the file's existing imports with `ROLE_OPTIONS` from `@/lib/admin-users` (it already imports
-`lockReason` and `TargetUser` from there).
+`byRole` is driven by `ROLE_OPTIONS` so a role nobody holds shows as `0` rather than vanishing — "no
+admins" is exactly what a zero row is for — and `flags` by `FLAG_SPECS`, so a hand-inserted row is not
+reported as configuration. `ROLE_OPTIONS` covers every value of the Prisma `Role` enum, which is what
+keeps the Accounts tile and the role list from disagreeing; **if a sixth role is ever added, check that
+still holds** (rule 27's shape).
 
-- [ ] **Step 2: Write the component**
+- [x] **Step 3: Write the component**
 
 Create `src/components/home/admin-home.tsx`:
 
@@ -5225,16 +5258,16 @@ export function AdminHomeBody({ data }: { data: AdminHomeData }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap gap-3">
-        <Stat label="Accounts" value={String(users.total)} />
+        <Stat label="Accounts" value={users.total} />
         <Stat
           label="Disabled"
-          value={String(users.disabled)}
+          value={users.disabled}
           hint={users.disabled === 0 ? "everyone can sign in" : "blocked from signing in"}
         />
-        <Stat label="Endpoints" value={String(webhooks.endpoints)} />
+        <Stat label="Endpoints" value={webhooks.endpoints} />
         <Stat
           label="Dead deliveries"
-          value={String(webhooks.dead)}
+          value={webhooks.dead}
           hint={webhooks.dead === 0 ? "nothing to replay" : "waiting on a replay"}
         />
       </div>
@@ -5292,7 +5325,9 @@ export function AdminHomeBody({ data }: { data: AdminHomeData }) {
           {webhooks.endpoints === 0
             ? "No endpoints configured — nothing outside this system is being told when approvals execute."
             : `${webhooks.delivered} delivered, ${webhooks.dead} dead${
-                webhooks.inactive > 0 ? `, ${webhooks.inactive} endpoint disabled` : ""
+                webhooks.inactive > 0
+                  ? `, ${webhooks.inactive} endpoint${webhooks.inactive === 1 ? "" : "s"} disabled`
+                  : ""
               }.`}
         </p>
         <Link href="/admin/webhooks" className="text-[12px] font-medium text-accent hover:underline">
@@ -5304,57 +5339,33 @@ export function AdminHomeBody({ data }: { data: AdminHomeData }) {
 }
 ```
 
-`Stat` takes `{ label, value, hint }` and `StatusDot` takes `value` (not `status`) — both verified
-against the shipped components.
+- [x] **Step 4: Branch the Home route, and stop offering Focus where it does nothing**
 
-- [ ] **Step 3: Branch the Home route**
+In `src/app/(app)/page.tsx`, add the `admin` branch **above** `purchasing` and `finance`, wrapped in the
+same `max-w-[900px]` container purchasing uses and with **no** `Jump to` card (see amendment 2). Add
+`SHOWS_FOCUS_TOGGLE: Record<WorkspaceId, boolean>` at module level and make `header`'s `actions` honour
+it. `PageHeader` already renders nothing for a falsy `actions`, so admin gets no empty wrapper.
 
-In `src/app/(app)/page.tsx`, the route already computes `ws` and returns early for `purchasing` and
-`finance`. Add the same shape for `admin`, **above** those two so the ordering reads as a list of
-workspaces rather than a fall-through, and import what it needs:
-
-```tsx
-import { adminHome } from "@/server/modules/admin/queries";
-import { AdminHomeBody } from "@/components/home/admin-home";
-```
-
-```tsx
-  if (ws === "admin") {
-    const admin = await safeSection("Admin overview", () => adminHome());
-    return (
-      <>
-        {header}
-        <SectionCard title="System" result={admin}>
-          {(data) => <AdminHomeBody data={data} />}
-        </SectionCard>
-      </>
-    );
-  }
-```
-
-Use whatever local the file already binds for the page header — the existing `purchasing` and
-`finance` branches show the exact shape; copy theirs rather than inventing a second one. Everything
-loads through `safeSection` and renders through `SectionCard`, so a failing query gives the designed
-FAILED card instead of a blank page, exactly like every other Home.
-
-- [ ] **Step 4: Typecheck, lint, look at it**
+- [x] **Step 5: Verify**
 
 ```bash
-npx tsc --noEmit && npm run lint
+npx tsc --noEmit && npm run lint && npm run test
 ```
 
-In the preview as `admin@thebackroomop.com`, switch the workspace to **Admin** and open `/`:
+**460 tests / 30 files** (up 7). The data assertions were checked by calling `adminHome()` directly
+rather than through the browser: all five roles present with `sum(rows) === total`; `Microsoft 365
+sign-in` reads `unavailable`, not `off`; and the rule-15 fix proven by forcing `allowed_domain` to
+`(enabled: true, value: NULL)` → Home reads `off`, then restoring the domain → `on`. **Restore that
+value afterwards** — every seeded account is `@thebackroomop.com` and signup refuses them otherwise.
 
-1. Four stat tiles, then the three lists. No SLA breaches, no fleet bar, no age histogram — the body
-   now matches its own sidebar.
-2. The role list shows all five roles including any with a count of 0.
-3. `Microsoft 365 sign-in` reads `unavailable`, not `off`.
-4. Switch back to the IT workspace and confirm the IT Home is untouched.
+Still outstanding, and it needs a signed-in browser: the purely visual pass (four tiles then three
+lists, no fleet bar or age histogram, and the IT Home unchanged when you switch back).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
-git add src/components/home/admin-home.tsx src/server/modules/admin/queries.ts "src/app/(app)/page.tsx"
+git add src/components/home/admin-home.tsx src/server/modules/admin/queries.ts \
+  "src/app/(app)/page.tsx" src/lib/admin-flags.ts src/lib/admin-flags.test.ts
 git commit -m "feat(admin): a Home whose body matches its own sidebar"
 ```
 

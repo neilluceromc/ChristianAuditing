@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–10 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
+**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–11 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,7 +13,7 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–10 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–11 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
    so far; `git rev-list --count main..HEAD` is the count, and `git status` should be clean.
    **Don't trust a commit count written into this doc** — I corrected it twice and each correction was
@@ -38,10 +38,17 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    and already maps each criterion to a task**, so read §6 when a task's reasoning looks arbitrary, not
    as something to act on. **§6a is the section that matters most** — it is what Tasks 1–7 actually
    established, and it is where the recurring-defect checklist lives.
-4. **Resume at Task 11** (Admin gets its own Home) of
+4. **Resume at Task 12** (the seed fixtures the deliveries page needs) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
-   Tasks 1–10 are committed; 11–14 remain. **Task 11 is the smallest task left** — a pure read surface,
-   no new mutations — which makes it the natural next one now that the hard half of the pipeline is done.
+   Tasks 1–11 are committed; 12–14 remain.
+
+   **Tasks 8, 9 and 10 were executed by a single context** (implement + self-review in one session).
+   **Task 11 was the first executed properly subagent-driven** — fresh sonnet implementer, then a sonnet
+   spec-compliance review, then a sonnet quality review, with the implementer fixing and each reviewer
+   re-reviewing. It is worth knowing what that bought, because it is the argument for doing 12–14 the
+   same way: the spec review caught an unrequested redundant `Jump to` card, and the **quality review
+   caught §6a rule 15 reproduced on a new page** — a defect a green suite could not see and which the
+   same-context tasks before it would plausibly have shipped. **Keep using subagents for 12–14.**
 
    **THE WEBHOOK PIPELINE IS COMPLETE AND WORKS END TO END.** A completed purchase / executed approval /
    completed offboarding writes a `WebhookDelivery` + a `Job`, and the worker now really POSTs a signed
@@ -108,6 +115,12 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
      one that said signing made plain `http` safe, one that said a secret was never selected when it was
      fetched on every render, and Task 8's banner promising "the button below" in the one branch that
      renders no button. **It applies to user-facing prose exactly as much as to comments** — rule 35.)
+   - **Does a SUMMARY surface recompute a state that a detail surface already computes properly?**
+     (rule 47. Task 11's Admin Home read `FeatureFlag.enabled` raw while `listFlags` two functions above
+     it computes the *effective* state through `flagDomain` — so Home would have said a signup
+     restriction was ON while `/admin/flags` correctly said OFF and `/signup` enforced nothing. §6a rule
+     15's exact shape, on a new page, one phase later. **Any new page that summarises state another page
+     already renders: find that page's expression and call it, don't re-derive it.**)
    - **When two rows must agree, do they agree on the LAST step as well as the middle?** (rule 43. Task
      10's handler wrote `RETRYING` on every retryable failure while the worker dead-letters the job at the
      cap — so on attempt five the job read `DEAD` and the ledger read `RETRYING`, and `DEAD · 5/5`, card
@@ -126,9 +139,10 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    Phase 9 (import/export + polish) still needs planning with `superpowers:writing-plans`; re-read
    README cards `5a, 1m, 7g` before drafting it.
 
-The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **453 unit tests across 30
-files** (345/26 at the Phase 7 merge; Task 4 added 23, Task 6 added 39, Task 7 added 5 and Task 8 added
-5, most of them mutation-driven; Task 5 added none, being actions and UI) · `npm run build` · **`npx playwright test --workers=1` — 89
+The branch is green end to end: `npx tsc --noEmit` · `npm run lint` · **460 unit tests across 30
+files** (345/26 at the Phase 7 merge; Task 4 added 23, Task 6 added 39, Task 7 added 5, Task 8 added 5
+and Task 11 added 7, most of them mutation-driven; Tasks 5, 9 and 10 added none — actions, UI, and
+worker code the suite cannot reach) · `npm run build` · **`npx playwright test --workers=1` — 89
 e2e tests, 7.9 minutes** (up
 from 75 before this phase; Phase 7's own `e2e/offboarding.spec.ts` adds 14 — the wizard end to end
 through the worker, repair mode, reservations, and equipment policies, including the viewer
@@ -171,7 +185,7 @@ task — **Task 10** — not a fragment of anything. Every review finding was ei
 `node.exe` processes), `inventory-db-1` **up**, **8 migrations, none pending** (`prisma migrate status`
 says "up to date"). **No scratch files anywhere in the repo** — the session's working scripts live in the
 harness scratchpad, outside the tree. Last verified green: `npx tsc --noEmit` · `npm run lint` ·
-**453 tests / 30 files** · `npm run build`.
+**460 tests / 30 files** · `npm run build`.
 
 **The DB is NOT pristine and cannot be made pristine in-session** (see the classifier note below). What
 has happened to it since the last reseed: Task 3's live verification (all five users restored to their
@@ -187,6 +201,12 @@ and **Task 8's live verification, which is the largest single contributor to the
 earlier pass), from two endpoints that were both created and then deleted through the UI.
 Nothing is broken, but **reseed before anything that assumes pristine fixtures**, and prefer **delta**
 assertions over absolute audit counts in e2e (Task 14).
+
+**Task 11's verification touched one row and put it back:** `allowed_domain` was forced to
+`(enabled: true, value: NULL)` to prove the rule-15 fix, then restored to `thebackroomop.com`
+(confirmed — and it matters, because every seeded account is `@thebackroomop.com` and signup would
+refuse them otherwise). One `feature-flag` audit row may have been added by nothing here — the force was
+raw SQL, not the action — so the audit table is unchanged by Task 11.
 
 **Task 10's verification left nothing behind either** — its endpoint (whose secret it deliberately
 corrupted to test that path) and all six of its deliveries were deleted, and the scratch scripts it used
@@ -287,7 +307,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–10 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–11 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -411,7 +431,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–10 of 14 on the unmerged `phase-8-admin`)**
+**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–11 of 14 on the unmerged `phase-8-admin`)**
 (`docs/superpowers/plans/2026-08-19-phase-8-admin.md`): the user rules and the two mutations behind
 them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LABELS`, and the pure rules
 `lockReason` / `roleChange` / `disableChange`, with the permanent admin locked against **both** role and
@@ -470,6 +490,13 @@ body — status and statusText only, which is what keeps the SSRF capability a b
 makes it agree with the job on the final attempt as well as the earlier ones.
 **The pipeline is COMPLETE.** Nothing READS it yet: Task 12 adds the fixtures, Task 13
 `/admin/webhooks/deliveries`.
+**Task 11** — the Admin Home: `adminHome()` in `queries.ts`, `AdminHomeBody` in
+`src/components/home/admin-home.tsx`, and an `admin` branch in `src/app/(app)/page.tsx` above the other
+workspaces. Four stat tiles then three lists — who can get in, what is switched on, integrations — each
+linking to its own admin page. Also **`flagEnabled(spec, row)` in `src/lib/admin-flags.ts`**, now the
+single expression for a flag's EFFECTIVE on/off state, which `listFlags` and `adminHome` both call, and
+**`SHOWS_FOCUS_TOGGLE` in `page.tsx`**, so the Focus button is not offered on a Home with nothing to
+collapse. First task executed properly subagent-driven; both reviews found real defects.
 
 ### Conventions every later phase must follow
 
@@ -502,15 +529,14 @@ makes it agree with the job on the final attempt as well as the earlier ones.
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 11–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 12–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1–10 are done**, and with Task 10 the webhook pipeline is complete end to end: the user rules,
-  the two user mutations, `/admin/users`, the flag allowlist, `/admin/flags`, the webhook vocabulary, the
-  endpoint actions, `/admin/webhooks`, the emitter plus the phase's one migration, and the worker's real
-  signed HTTP delivery with backoff and dead-lettering. See §6a. **What remains is all read surfaces and
-  close-out**: Task 11 an Admin Home, Task 12 the seed fixtures without which
-  `/admin/webhooks/deliveries` cannot be reached, Task 13 that page plus replay, Task 14 the e2e spec
-  and the full battery.
+  **Tasks 1–11 are done**: the user rules, the two user mutations, `/admin/users`, the flag allowlist,
+  `/admin/flags`, the webhook vocabulary, the endpoint actions, `/admin/webhooks`, the emitter plus the
+  phase's one migration, the worker's real signed HTTP delivery, and an Admin Home. See §6a. **What
+  remains is fixtures, one page, and close-out**: Task 12 the seed fixtures without which
+  `/admin/webhooks/deliveries` cannot be reached at all, Task 13 that page plus replay, Task 14 the e2e
+  spec (`e2e/admin.spec.ts` still does not exist) and the full battery.
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -578,7 +604,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–10 established (READ BEFORE TASK 11)
+## 6a. Phase 8 mid-flight: what Tasks 1–11 established (READ BEFORE TASK 12)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -1020,6 +1046,51 @@ defects of the same family — one of them inside the branch the banner named as
     core worth extracting, so `npm run worker:once` against a real receiver is its ONLY coverage. Anything
     that changes it needs the seven-case table in the plan's Task 10 Step 4 re-run — a green
     `npm run test` says nothing whatsoever about this file.
+
+**From Task 11 (`e3e19eb` → `ac976ac`) — the first task executed properly subagent-driven, and the
+evidence for doing 12–14 the same way.**
+
+47. **A summary surface must not re-derive a state the detail surface already computes — §6a rule 15
+    recurred, one phase later, on a brand-new page.** `adminHome()` read `FeatureFlag.enabled` raw;
+    `listFlags()`, two functions above it in the same file, computes the EFFECTIVE state
+    (`spec.hasValue ? flagDomain(row) !== null : row?.enabled ?? false`). They differ exactly in
+    `(enabled: true, value: null)` — which `flagDomain`'s doc comment calls the resting state of any
+    deployment that bootstrapped without a domain. The Admin Home would have shown a green dot and "on"
+    beside *Signup domain restriction* while `/signup` enforced nothing **and `/admin/flags` one click
+    away said "off"**: two admin surfaces contradicting each other, the summary being the liar. Rule 15
+    was recorded after Task 5 and this still happened, which is why it is now a checklist line and not a
+    lesson. The fix is `flagEnabled(spec, row)` in `src/lib/admin-flags.ts` with **both** callers routed
+    through it — a copied ternary would have been the second definition rule 15 exists to prevent (three
+    readers had already hand-rolled it once). Seven tests, mutation-verified: reintroducing the
+    raw-column shortcut kills three.
+
+48. **Don't invent work for a control that has nothing to do — remove the control.** The plan's Step 3
+    left `FocusToggle` rendering on the Admin Home with nothing gated on `focus`, so the button flipped a
+    cookie and re-rendered identically. The implementer's first fix was to add a `!focus`-gated `Jump to`
+    card so Focus would have something to hide; review rejected it, because `WORKSPACE_NAV.admin` is
+    exactly the three destinations `AdminHomeBody` already links inline — the card would have repeated
+    them plus a link to the page you are on. `SHOWS_FOCUS_TOGGLE: Record<WorkspaceId, boolean>` is the
+    fix: don't offer it. **Note it is a near relative of rule 10, not an instance** — rule 10 is an
+    action guaranteed to FAIL, this one succeeds and does nothing visible. Same remedy, and worth keeping
+    the distinction because the citation was wrong in the first comment written for it.
+
+49. **Two reviewers can split on where something belongs, and the tiebreaker is blast radius.** The
+    quality review wanted `SHOWS_FOCUS_TOGGLE` moved to `src/lib/workspaces.ts` beside the other three
+    `Record<WorkspaceId, …>` tables; the spec review wanted it next to the JSX it governs. Kept in
+    `page.tsx`: `workspaces.ts` is the nav-and-access truth the **edge middleware** reads, and "does this
+    Home have a focus-gated secondary section" is a fact about one page's composition. Coupling routing
+    truth to layout for a single consumer is the worse trade — and the quality reviewer agreed once the
+    middleware point was made. **Recorded because the tempting refactor is the wrong one.**
+
+50. **What the subagent split actually bought, stated plainly.** Tasks 8–10 were implemented and reviewed
+    in one context; Task 11 had a fresh implementer and two fresh reviewers. The spec review caught
+    unrequested scope (the `Jump to` card) that a self-review is structurally bad at noticing, since the
+    author has already justified it to themselves. The quality review caught rule 47 — a correctness
+    defect invisible to types, lint and 453 passing tests, found only by reading the sibling function and
+    asking whether two surfaces could disagree. **Also: verify a reviewer's claims before acting on them.**
+    The spec reviewer's redundancy argument depended on `WORKSPACE_NAV.admin` having only three entries;
+    that happened to be true, and checking took one grep. The quality reviewer's rule-47 finding was
+    likewise confirmed by reading `listFlags` before any code changed.
 
 ---
 
