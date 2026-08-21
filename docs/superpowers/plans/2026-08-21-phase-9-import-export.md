@@ -390,6 +390,19 @@ git commit -m "feat(export): one xlsx writer, round-tripped by its own test"
 > matching its source `Decimal` — which is the `.toNumber()` boundary working. **Unverified by eye:**
 > whether the header renders bold and Cost right-aligns in real Excel. Task 13's e2e covers the route;
 > the visual pass does not exist yet.
+>
+> **Two review fixes landed on top (`1cd405c`), both worth carrying into Tasks 4 and 5.**
+> `exportFilename` now enforces its own guarantee instead of asserting a caller-side convention: it
+> strips anything outside `[A-Za-z0-9_-]` from the prefix. The comment had claimed the filename is
+> "never from user input" — true of `"assets"`, and about to be false, because **Task 5 passes
+> `farewell-${report.employeeNo}` and `employeeNo` is `String @unique` with no format constraint
+> anywhere** (not in `prisma/schema.prisma:196`, not in any zod schema in `src/`). Reproduced before
+> fixing: a `"` yields `attachment; filename="farewell-EMP"0042.xlsx"`, breaking out of the quoted
+> attribute. CRLF is NOT exploitable — Node's `Headers` throws on it — so this was a malformed header,
+> not header splitting. Fixed in the one function that writes download headers, with 4 tests.
+> And `export-columns.test.ts` now pins the **full ordered 14-label list**, because the twelve-column
+> spec passed every assertion the file previously had. The regression that actually happened was caught
+> by diffing a deleted file; now the suite catches it.
 
 Scope decisions 9, 10 and 11. The cap message and the `?ids=` refusal get exactly one owner each,
 because four routes are about to want them.
@@ -540,9 +553,20 @@ export function xlsxResponse(filename: string, body: Buffer): Response {
   });
 }
 
-/** `assets-2026-08-21.xlsx` — sortable, and unambiguous in a downloads folder. */
+/**
+ * `assets-2026-08-21.xlsx` — sortable, and unambiguous in a downloads folder.
+ *
+ * The prefix is stripped to `[A-Za-z0-9_-]` HERE rather than trusted from the
+ * caller, because this is the one place a `content-disposition` is built and
+ * one caller already passes a value derived from the database:
+ * `farewell-${employeeNo}`, where `employeeNo` has no format constraint in the
+ * schema or in any zod validator. An unstripped `"` breaks out of the quoted
+ * filename attribute. (CRLF cannot: Node's `Headers` rejects it outright.) The
+ * safe set covers every prefix this app passes.
+ */
 export function exportFilename(prefix: string, now: Date): string {
-  return `${prefix}-${now.toISOString().slice(0, 10)}.xlsx`;
+  const safePrefix = prefix.replace(/[^A-Za-z0-9_-]/g, "");
+  return `${safePrefix}-${now.toISOString().slice(0, 10)}.xlsx`;
 }
 ```
 
