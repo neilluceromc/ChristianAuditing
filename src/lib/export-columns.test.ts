@@ -11,6 +11,29 @@ describe("export column specs", () => {
   it("names the tag first, because that is the column a human scans for", () => {
     expect(ASSET_EXPORT_COLUMNS[0].label).toBe("Tag");
   });
+
+  // Pins the full shape — count, order and every label in one assertion — so
+  // a dropped, renamed or reordered column fails the suite instead of only
+  // being caught by diffing against the deleted CSV route by hand, which is
+  // how "Employee no" and "RMA ref" going missing was actually found.
+  it("carries all fourteen columns, in this exact order", () => {
+    expect(ASSET_EXPORT_COLUMNS.map((c) => c.label)).toEqual([
+      "Tag",
+      "Model",
+      "Serial",
+      "Category",
+      "Type",
+      "Status",
+      "Assigned to",
+      "Employee no",
+      "Purchased",
+      "Cost",
+      "Warranty until",
+      "Vendor",
+      "RMA ref",
+      "Notes",
+    ]);
+  });
 });
 
 describe("capRefusalText", () => {
