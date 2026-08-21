@@ -883,6 +883,39 @@ git commit -m "feat(export): audit and employee sheets, on the shared cap guard"
 
 ### Task 5: The farewell-report export route
 
+> ### AMENDED — as SHIPPED (`7df3388`). **The plan invented two fields for the third time.**
+> `FAREWELL_EXPORT_COLUMNS` specified `decidedBy` and `decidedAt`. Neither exists: `Decision`
+> (`src/lib/offboarding.ts:113`) carries `refNo`, `outcome`, `state`, `reason` and nothing else, and
+> `grep -rn "decidedBy\|decidedAt" src/` returns nothing at all. Same mistake as Task 4's invented
+> `email` column and Task 3's two dropped columns — **three column specs, three defects, and the
+> pattern is always the same: a spec written from what the sheet ought to say rather than from what the
+> source actually holds.** Shipped instead with the real fields the report page's own columns already
+> show: `refNo` and `state` as **Request** and **Status**, and the plan's "Note" renamed **Reason** to
+> match the page's header. Final order: Tag, Model, Outcome, Reason, Value, Request, Status.
+>
+> **Widening `Decision` to carry an approver and a timestamp was considered and declined** — see §8.
+> Short version: "decided" is DERIVED from the approvals that exist (Phase 7 scope decision #3, no
+> wizard-state table), so those fields are a feature against `AuditEntry`, not two properties to add,
+> and adding them to a domain type for an export's benefit inverts the dependency.
+>
+> **The query is `getWizard(employeeId)`, not the plan's invented `getFarewellReport`** — already
+> extracted in Phase 7, so no extraction was needed. Better than asked for: the implementer noticed the
+> page and the route were both about to filter `WizardData.items` down to decided ones independently,
+> and extracted `decidedItems(items)` (`queries.ts:180`) so both call one expression. That is rule 47
+> pre-empted one layer down, and the page now calls the helper too.
+>
+> It also corrected a **stale promissory claim in the report's printed footer**, which said a real Excel
+> export would "land with Phase 8's export work". That became false the moment this task shipped, and it
+> is the exact §6a rule 52 shape — a promise is a defect from the moment it ships until the task it
+> names lands.
+>
+> **Verification was honest but thin, and that matters.** The live seeded database has **zero**
+> `lifecycle_return` approvals, so Dennis (EMP-0090) has three held items and no decided ones — the
+> page's count and the sheet's row count both came back 0 and "matched" at zero, which proves almost
+> nothing. A synthetic non-DB round trip confirmed the mapping, null-cost cells and outcome labels. **A
+> non-zero case is asserted in Task 13 instead**, where Phase 7's e2e already drives a full offboarding
+> and can create the state.
+
 The brief's fourth export. Phase 7 shipped the farewell report as a printable page
 (`src/app/(app)/offboarding/[employeeId]/report/page.tsx`); this is the same data as a sheet.
 
@@ -2417,7 +2450,14 @@ Copy the `login` and `expectNoSeriousAxe` helpers from `e2e/admin.spec.ts`. Asse
 9. `/inventory/export?ids=` with 501 ids returns **413**. Build the URL from `Array(501)`; the refusal
    precedes the query, so the ids need not exist.
 10. The year chips render with counts, and `?purchaseYear=` narrows both the list and the export.
-11. **A filtered export matches its screen.** `/employees?gaps=1` and `/employees/export?gaps=1` must
+11. **The farewell sheet matches the printed report, with rows in it.** Drive an offboarding far
+    enough to decide at least two items (Phase 7's `e2e/offboarding.spec.ts` already does this — reuse
+    its steps), then assert the printable report shows N decided items and
+    `/offboarding/<id>/report/export` downloads a sheet with N data rows. **Task 5 could only verify
+    this at zero**, because the seeded database has no `lifecycle_return` approvals, and an equality
+    that holds at zero is not evidence. This is the assertion that makes reusing `decidedItems` mean
+    something.
+12. **A filtered export matches its screen.** `/employees?gaps=1` and `/employees/export?gaps=1` must
     agree on their row count, and that count must be strictly smaller than the unfiltered one. This is
     the ONLY possible guard on the bug Task 4 shipped and fixed: the gaps cut happens in memory after
     the SQL `where`, so an export that used the `where` alone returned the candidate set — ten rows

@@ -1571,6 +1571,18 @@ any task in the phase. All of them were fixtures that the running code could not
   is rate-limited per row** (one `checkRate` token for the batch plus one per delivery, against a 60/min
   cap), which is invisible at seed scale and correct at real scale — and now visible when it bites,
   because the action reports `queued` against `attempted` with the reason.
+- **Phase 9, Task 5 — the farewell report cannot say WHO decided an item, or WHEN.** `Decision`
+  (`src/lib/offboarding.ts:113`) carries `refNo`, `outcome`, `state`, `reason` — no actor, no
+  timestamp — so neither the printable report nor the new `.xlsx` export can attribute a decision. For
+  a document HR reads and files, that is a real gap. It was declined for Phase 9 deliberately and the
+  reasoning is worth keeping: **"decided" is DERIVED from the approvals that exist** (Phase 7 scope
+  decision #3 — there is no wizard-state table, which is what makes a half-finished offboarding N
+  correct records instead of a lost session). So the actor and the moment are not two fields to add to
+  a type; they are a join against the `Approval` row and its `AuditEntry` trail, where the data already
+  exists. Widening `Decision` to carry them would touch the wizard, `decisionOf`, and every consumer,
+  and would mean a domain type growing fields for an export's benefit. **The data is not lost — it is in
+  the audit log.** If HR asks for attribution on the report, this is a small feature against
+  `AuditEntry`, not a schema change.
 - **Phase 9, Task 4 — the facet-count half of §8's candidate-set rule, for employees.**
   `employeeFacetOptions` never receives `gapsOnly`, so with "Policy gaps only" active the toolbar's
   department/employment counts describe the candidate set while the table and the export show the cut
