@@ -3,8 +3,13 @@ import { requireUser } from "@/server/auth/guards";
 import {
   clearFilters, parseListState, serializeListState, toSearchParams, withFilter,
 } from "@/lib/url-state";
-import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
-import { exactTagMatch, facetOptions, getInventoryColumns, listAssets } from "@/server/modules/inventory/queries";
+import {
+  INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
+  type PurchaseYearValue,
+} from "@/lib/inventory-list";
+import {
+  exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
+} from "@/server/modules/inventory/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
@@ -24,7 +29,9 @@ export default async function InventoryPage({
 }) {
   const user = await requireUser();
   const canMutate = user.role === "admin" || user.role === "it_staff";
-  const state = parseListState(toSearchParams(await searchParams), INVENTORY_LIST_CONFIG);
+  const sp = toSearchParams(await searchParams);
+  const state = parseListState(sp, INVENTORY_LIST_CONFIG);
+  const purchaseYear = parsePurchaseYear(sp.get("purchaseYear"));
 
   // USB scanner contract: an exact tag match opens the record, not a list.
   if (state.q) {
@@ -32,14 +39,21 @@ export default async function InventoryPage({
     if (hit) redirect(`/inventory/${hit.id}`);
   }
 
-  const [{ rows, total, pageCount }, facets, visibleColumns] = await Promise.all([
-    listAssets(state),
-    facetOptions(state),
+  const [{ rows, total, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
+    listAssets(state, purchaseYear),
+    facetOptions(state, purchaseYear),
     getInventoryColumns(user.id),
+    purchaseYearBuckets(state),
   ]);
+  const yearChips = purchaseYearChips(yearBuckets);
 
-  const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0;
-  const href = (s: typeof state) => "/inventory" + serializeListState(s, INVENTORY_LIST_CONFIG);
+  const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0 || purchaseYear !== null;
+  // purchaseYear defaults to the current one so pagination/facet-remove links
+  // don't silently drop it — a caller that means to clear it (Clear filters)
+  // passes `null` explicitly.
+  const href = (s: typeof state, py: PurchaseYearValue | null = purchaseYear) =>
+    "/inventory" + withPurchaseYearQS(serializeListState(s, INVENTORY_LIST_CONFIG), py);
+  const exportQS = withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear);
   const repairMode = isRepairView(state);
 
   const chips: FilterChip[] = [];
@@ -72,7 +86,7 @@ export default async function InventoryPage({
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
         actions={
           <>
-            <ButtonLink href={"/inventory/export" + serializeListState(state, INVENTORY_LIST_CONFIG)}>
+            <ButtonLink href={"/inventory/export" + exportQS}>
               Export
             </ButtonLink>
             {canMutate && <ButtonLink variant="primary" href="/inventory/new">New asset</ButtonLink>}
@@ -80,25 +94,34 @@ export default async function InventoryPage({
         }
       />
       <div className="flex flex-col gap-2">
-        <InventoryToolbar state={state} total={total} facets={facets}>
+        <InventoryToolbar
+          state={state}
+          total={total}
+          facets={facets}
+          yearChips={yearChips}
+          purchaseYear={purchaseYear}
+        >
           <ColumnChooser visible={visibleColumns} />
           {/* Saved views are named URLs (README): Repairs is one of them. */}
           <ButtonLink size="sm" href={REPAIRS_SAVED_VIEW}>Repairs</ButtonLink>
         </InventoryToolbar>
         {repairMode && <RepairChips state={state} />}
-        <ChipFilterRow chips={chips} clearHref={href(clearFilters(state))} />
+        {/* Clearing filters resets purchaseYear too — it is the same
+            "start over" gesture as clearing every other facet. */}
+        <ChipFilterRow chips={chips} clearHref={href(clearFilters(state), null)} />
         {rows.length > 0 ? (
           <>
             {/* key: any URL-state change remounts the island — selection must
                 never silently survive a page/filter/sort change (it would act
-                on rows the user can no longer see). */}
+                on rows the user can no longer see). purchaseYear is part of
+                that key via exportQS even though it isn't part of `state`. */}
             <InventoryTable
-              key={serializeListState(state, INVENTORY_LIST_CONFIG)}
+              key={exportQS}
               rows={rows}
               state={state}
               visible={visibleColumns}
               canMutate={canMutate}
-              filtersQS={serializeListState(state, INVENTORY_LIST_CONFIG).replace(/^\?/, "")}
+              filtersQS={exportQS.replace(/^\?/, "")}
               total={total}
               repairMode={repairMode}
             />
@@ -113,7 +136,7 @@ export default async function InventoryPage({
           <EmptyState
             title="Your filters matched nothing"
             description={`${chips.length + (state.q ? 1 : 0)} active filter${chips.length + (state.q ? 1 : 0) === 1 ? "" : "s"} — loosen or clear them.`}
-            actions={<ButtonLink href={href(clearFilters(state))}>Clear filters</ButtonLink>}
+            actions={<ButtonLink href={href(clearFilters(state), null)}>Clear filters</ButtonLink>}
           />
         ) : (
           <EmptyState
