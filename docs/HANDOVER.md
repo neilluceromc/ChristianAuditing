@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is COMPLETE — all 14 tasks done on branch `phase-8-admin`, green end to end, and NOT MERGED.** · **Nothing is pushed: `main` is 4 commits ahead of `origin/main`, and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.** · **Merging and pushing are the user's decisions and have not been made — do neither unprompted.** · Battery at close: **474 unit tests / 30 files**, **102 e2e / 7.4 min**, `tsc` + `lint` + `build` clean.
+**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–5 of 14 committed, unmerged.** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, run at the Task 5 close: **495 unit tests / 32 files**, **102 e2e / 7.5 min**, `tsc` + `lint` + `build` clean, and `docker compose --profile prod build` verified at Task 1.
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,23 +13,24 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`, and do not assume Phase 8 landed
-   there. **All 14 tasks are committed on that branch and NOTHING is merged.** `git log --oneline
-   main..HEAD` shows the phase; `git rev-list --count main..HEAD` is the count, and `git status` should
-   be clean. **Don't trust a commit count written into this doc** — I corrected it twice and each
-   correction was itself a commit, so it chases itself. The command is the answer.
+1. **`git checkout phase-9-import-export`** — Phase 9 is mid-flight there, tasks 1–5 of 14
+   committed. Phase 8 IS merged to `main` (`e5a5730`, `--no-ff`) and `phase-8-admin` is deleted, so
+   `main` is a valid base; this branch forks from it. `git log --oneline main..HEAD` shows the phase so
+   far and `git status` should be clean. **Don't trust a commit count written into this doc** — every
+   correction to one is itself a commit, so it chases itself. The command is the answer.
 
-   **The first decision of the next session is what to do with this branch**, and it is the user's, not
-   yours: merge to `main`, open a PR, or leave it. Phase 9's work does not depend on the answer — it
-   touches import/export and polish, not `/admin/*` — so you can plan Phase 9 without resolving it, but
-   do not start a second phase on top of an unmerged one without asking which base they want.
-
-   **Push state, which is easy to get wrong here.** Phases 1–7 were merged to `main` and pushed on
-   2026-08-19. Four commits landed on `main` *after* that push — the Phase 8 plan (3) and a handover
-   update (1) — so **`main` is 4 ahead of `origin/main`**, and `phase-8-admin` is many commits ahead of `main` (count it — see item 1).
-   Nothing is lost; it is simply unpushed. The user treats merging and publishing as separate
-   decisions and has asked for each explicitly, so **never push or merge unprompted.** The repo is
+   **Nothing has been pushed, at all, for either phase.** `main` is roughly 72 commits ahead of
+   `origin/main`. That is not a problem, it is a standing decision: the user treats merging and
+   publishing as separate choices and asks for each explicitly. **Never push unprompted.** The repo is
    public — never commit `.env` or any real secret.
+
+   **Push state, which is easy to get wrong here.** The last thing pushed to `origin/main` was the
+   Phase 1–7 merge, on 2026-08-19. Everything since is local: the Phase 8 plan, all of Phase 8, its
+   merge commit, the Phase 9 plan, and Phase 9 tasks 1–5. That is **~72 commits on `main` plus the
+   branch** — count it rather than trusting that number. Nothing is lost; it is simply unpushed, and
+   deliberately so. The user treats merging and publishing as separate decisions and has asked for each
+   explicitly, so **never push or merge unprompted.** The repo is public — never commit `.env` or any
+   real secret.
 2. `docker compose up -d db` → **`npx prisma migrate deploy`** → `npm run db:seed` → open the preview
    (`preview_start` name `app-dev`). **8 migrations, none pending** as of this handover — Task 9 added
    the phase's one and only migration, so there is none ahead of you.
@@ -42,64 +43,56 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    **The database is NOT freshly seeded.** The last thing that ran was the full Playwright suite, which
    leaves whatever `e2e/purchases.spec.ts` — alphabetically last — finished with. Reseed before
    trusting any fixture-dependent read. That is normal after a battery, not a problem.
-3. Read **§6** for **Phase 9's** entry criteria — what the brief and the current state of the code
-   commit the next plan to (import is new from zero, the export cap that must not regress, the scanner
-   contract the offboarding wizard doesn't honour yet, the 10 imports/min limit). Unlike every previous
-   version of this section, **there is no plan yet**, so §6 is a list of things to act on rather than
-   background reading. **§6a is the other section that matters** — 63 numbered rules, all of them things Phase 8's
+
+   **Two dependencies were added in Phase 9 Task 1** (`write-excel-file`, `read-excel-file`) and the
+   lockfile was regenerated inside Alpine per §7's procedure. If `node_modules` looks stale, `npm ci`
+   rather than `npm install` — an `npm install` on Windows is what §7's hazard is about.
+3. Read **§6** for Phase 9's entry criteria, which now records **which of them are already done**
+   (all four export routes, the cap, the `?ids=` refusal) and which remain (the two importers). The plan
+   exists — `docs/superpowers/plans/2026-08-21-phase-9-import-export.md`, 14 tasks, 12 recorded scope
+   decisions — so §6 is the *why* behind the remaining tasks rather than a list to act on directly. **§6a is the other section that matters** — 63 numbered rules, all of them things Phase 8's
    fourteen tasks established the hard way,
    and the **checklist in item 4 below is the distilled version**: run it against every task you
    execute, and read §6a's entry for whichever rules it points at. §6a is about how work goes wrong in
    THIS codebase; it did not stop being true when Phase 8 ended.
-4. **Write the Phase 9 plan** with `superpowers:writing-plans`. There is no plan yet — that is the
-   next piece of work, and it is a planning task, not an implementation one. Phase 9 is
-   **import/export + polish**: see §6 for the entry criteria and §5 for the scope. Before drafting,
-   re-read README cards **`5a, 1m, 7g`** (`design_handover/README.md`, "Import / export" and "Every
-   screen's states") — they are the source for the dry-run stepper, the blocked-rows-grouped-by-cause
-   rule, partial-import-by-default, the split-by-year export chips, the label sheet and the scanner
-   contract, none of which is repeated in full here.
+4. **Resume at Task 6** of `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` with
+   `superpowers:subagent-driven-development`. Tasks 1–5 are committed; 6–14 remain. Task 6 is the
+   split-by-year chips — the last export-side task, and the smallest thing left before the import half
+   begins at Task 7.
 
-   **Two things about Phase 9 that should shape the plan rather than surprise it.** Import is the
-   first feature in this project that **writes rows the user never typed**, in bulk, from a file — so
-   the dry-run is not a nicety, it is the whole safety model, and "partial import is the default"
-   means the plan has to say what a half-applied import leaves behind and how an operator sees it.
-   And the label sheet plus the scanner polish are the only two items in the phase with no server
-   surface at all, which makes them the easiest to under-plan and the easiest to leave until they are
-   the reason the phase does not close.
+   **What is done:** the two xlsx dependencies, installed with the Alpine lockfile regenerated (T1); the
+   one module that owns `write-excel-file` (T2); the shared cap/response helpers plus the assets export
+   converted to xlsx with `?ids=` now refusing instead of slicing (T3); the audit and employees export
+   routes (T4); the farewell-report route (T5). **All four export routes the brief requires now exist.**
+   `src/lib/csv.ts` is deleted.
 
-   **Phase 8 is done, and its plan is worth reading before you write a new one** —
-   `docs/superpowers/plans/2026-08-19-phase-8-admin.md`, 14 tasks, all amended to the shipped code.
-   Not for its content but for its shape: every task carries an `AMENDED` banner recording what the
-   plan got wrong, and reading three or four of those is the fastest way to learn what this project's
-   plans habitually get wrong. The short version, which Phase 9's plan should try to avoid earning:
+   **What remains:** Task 6 (year chips), then the import half — Task 7 is the pure rule module and is
+   the heart of the phase, Tasks 8–11 build the reader, the dry run, the commit and the wizard, Task 12
+   is the employee importer, Task 13 the e2e, Task 14 the battery and close-out.
 
-   - **A plan's code blocks are a draft, not a spec.** Across Phase 8, twelve of fourteen tasks
-     shipped with at least one deviation from the planned code, and in nearly every case the code was
-     right and the plan was wrong. Write the plan to be argued with.
-   - **A plan cannot schedule what it does not know exists.** Three tasks running needed a new
-     `entityLabels` / `AUDIT_ENTITY_TYPES` branch and the plan scheduled none of them (rule 20).
-   - **A pre-written review banner is one person's forward read, not an audit.** Task 10 had a
-     five-item banner, every item correct, and shipped two more defects of the same family — one
-     inside the branch the banner named as the model to copy. Task 13 had four, all correct and all
-     applied, and shipped three more (rules 56–58).
-   - **The absence of a banner means nobody has looked**, not that a task is fine. Task 9 had none and
-     shipped two defects; Task 14 had none and shipped two idiom gaps a review caught.
+   **THE SINGLE MOST USEFUL THING TO KNOW BEFORE YOU EXECUTE ANOTHER TASK: this plan has been wrong, in
+   a way that mattered, in every one of the five tasks that has shipped.** Not stylistically wrong —
+   wrong in ways that would have shipped defects. In order: Task 1's stated hazard could not fire for
+   those packages; Task 2's code would have produced a **headerless sheet** on any zero-row export;
+   Task 3's column spec silently **dropped two real columns** the CSV emitted; Task 4's employees export
+   **ignored the page's filters** and would have exported ten rows against a screen showing three; Task
+   5's column spec **invented an approver and a timestamp** that exist nowhere in the codebase.
 
-   **PHASE 8 IS COMPLETE AND VERIFIED, AND TWO PURELY VISUAL CHECKS ARE STILL OUTSTANDING.** Every
-   screen exists, the webhook pipeline works end to end, and the battery is green (§4). What has never
-   been done is a human *looking* at two of the screens — see the end of §4. Neither blocks Phase 9,
-   and nothing depends on either; they need someone at a keyboard for a minute each, which is why they
-   are still here.
+   **Three of those five were column specs, and all three failed the same way** — written from what the
+   sheet ought to say rather than from what the source actually holds. Two column specs remain, in
+   Tasks 7 and 12. Read the source before you trust either.
 
-   **On execution mode, because it changed mid-phase and the difference is on the record.** Tasks 8–10
-   and 13 were implement-plus-self-review in one context; Tasks 11, 12 and 14 ran the full
-   subagent loop — fresh implementer, then a spec-compliance review, then a code-quality review, each
-   reviewer re-reviewing after fixes. **Every one of the subagent-reviewed tasks turned up something a
-   green suite could not see**, and Task 14 is the sharpest example: the implementer's first report
-   claimed twelve passing tests when one failed reproducibly, and its confident diagnosis of a
-   contrast bug ("not a pre-existing pattern") was wrong about a defect that had been in the codebase
-   since Phase 3. Both were caught by verifying rather than trusting. **Use the loop for Phase 9, and
-   verify the implementer's claims — especially the green ones.**
+   So: **treat every code block in that plan as a draft to check, not a spec to follow.** Every
+   implementer prompt this session said so explicitly, and every implementer found something. When the
+   plan and the code disagree, the code wins and the plan gets amended — Tasks 1–5 all carry `AMENDED`
+   banners recording exactly what was wrong, and reading three of them is the fastest way to calibrate.
+
+   **A second thing, learned the hard way at the Task 5 close.** Five tasks shipped with `tsc`, `lint`,
+   the unit suite and `npm run build` green, and **an e2e test had been failing the whole time** —
+   `it-core.spec.ts` asserted `text/csv` on a route Task 3 converted to xlsx. Nobody ran Playwright,
+   including two code reviews. **Run the full e2e suite at least every few tasks**, not only at Task 14;
+   the unit suite cannot see a route's content type. Fixed in `139feef`, and the assertion is now a
+   round trip through the buffer rather than a header check.
 
    **THE CHECKLIST — the single most useful thing in this doc.** Every one of the fourteen tasks executed
    so far has hit at least one of these, and **not one instance was caught by the unit suite** — several
@@ -391,7 +384,7 @@ chip `deliveryStage` can produce is reachable: 2 `DELIVERED`, 1 `RETRYING · 2/5
 make `worker:once` POST to a hostname that does not resolve on every seeded run. **On the Phase 7
 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 COMPLETE on `phase-8-admin`, unmerged)
+## 4. What's DONE (Phases 1–8 on `main`; Phase 9 tasks 1–5 on `phase-9-import-export`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -515,7 +508,23 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 8 — Admin workspace (COMPLETE, all 14 tasks on the unmerged `phase-8-admin`)**
+**Phase 9 — import / export (MID-FLIGHT, tasks 1–5 of 14 on `phase-9-import-export`)**
+
+**All four export routes the brief requires now exist, as `.xlsx`.** `src/server/xlsx/write.ts` is the
+one module that imports `write-excel-file`, exposing `toXlsxBuffer(columns, rows)`; it builds the grid
+via the library's public `getSheetData` rather than its objects overload, because that overload cannot
+tell an empty row array from a finished sheet and would emit a **headerless** file for a zero-row
+export. `src/lib/export-columns.ts` holds the four column specs plus `EXPORT_CAP` (10,000) and
+`IDS_CAP` (500); `src/server/export/respond.ts` owns the 413 refusals and the download headers, and
+sanitises the filename prefix to `[A-Za-z0-9_-]` because one caller derives it from `employeeNo`, which
+has no format constraint. The assets route now **refuses** an oversized `?ids=` selection instead of
+silently slicing it to 500 (§8's recorded gap, closed). `src/lib/csv.ts` is deleted. The employees
+export honours the page's search, facets AND policy-gaps filter through a shared
+`filteredEmployees` — the gaps cut is in-memory, so a bare `where` would have exported the candidate
+set. The farewell-report route reuses the report page's own `getWizard` plus a shared `decidedItems`,
+so the sheet and the printable page cannot disagree about which rows belong.
+
+**Phase 8 — Admin workspace (COMPLETE, all 14 tasks, MERGED to `main` as `e5a5730`)**
 (`docs/superpowers/plans/2026-08-19-phase-8-admin.md`): the user rules and the two mutations behind
 them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LABELS`, and the pure rules
 `lockReason` / `roleChange` / `disableChange`, with the permanent admin locked against **both** role and
@@ -680,10 +689,18 @@ minute:
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. COMPLETE. Nothing engineering-side remains.** What it delivered is
-  §4; the invariants it established are §6a. Two things are outstanding and neither is code: **the
-  merge/push decision, which is the user's and unmade**, and **two purely visual checks** listed at the
-  end of §4. Do not treat this bullet as work.
+- **Phase 8 — the Admin workspace. COMPLETE and MERGED** (`e5a5730`). What it delivered is §4; the
+  invariants it established are §6a. Two things remain outstanding and neither is code: **the push
+  decision, which is the user's and unmade**, and **two purely visual checks** listed at the end of §4.
+- **Phase 9 — import / export. MID-FLIGHT: tasks 1–5 of 14 done** on `phase-9-import-export`.
+  `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` (14 tasks, 12 recorded scope decisions,
+  every shipped task carrying an `AMENDED` banner). The export half is essentially finished — see §4.
+  **What remains is Task 6 (split-by-year chips) and the whole import half**: the pure rule module
+  (T7, the heart), the sheet reader (T8), the dry run (T9), the commit (T10), the wizard (T11), the
+  employee importer (T12), e2e (T13), close-out (T14).
+- **Phase 10 — polish. Not yet planned.** Split out of Phase 9 on 2026-08-21 because the two halves
+  share almost no code: the printable 3×4 A4 label sheet with scan codes, USB-scanner polish so a scan
+  ticks the matching offboarding wizard row, the deployment README, and the full axe pass.
 - **Phase 9 — import/export + polish. Not yet planned.** Import (3-step dry-run → commit, blocked rows
   grouped by cause), export upgrade (real Excel + split-by-year chips, including the brief's
   `farewell-report` route), printable label sheet, USB-scanner polish (a scan should tick the matching
@@ -698,10 +715,12 @@ pending-route table, so the split falls on a seam that already existed.
 
 ---
 
-## 6. Phase 9 entry criteria — READ THIS BEFORE WRITING THE PLAN
+## 6. Phase 9 entry criteria (the plan implements these — most of the export half is DONE)
 
-Unlike every previous version of this section, **there is no Phase 9 plan yet.** These are things to
-act on, not background. They are what the brief and the current state of the code commit the next plan
+**The plan now exists** (`docs/superpowers/plans/2026-08-21-phase-9-import-export.md`) and items 3,
+4 and most of 7 below are **DONE** — see §4. What remains of this section is items 1 and 2 (the two
+importers), which are Tasks 7–12. Items 5, 6 and 8, plus the axe pass, were split out to **Phase 10**.
+Read this as the *why* behind the remaining tasks. They are what the brief and the current state of the code commit the next plan
 to. Source: `design_handover/README.md` cards `5a, 1m, 7g` — re-read them; they carry the stepper
 shape, the label-sheet geometry and the scanner rules in more detail than is repeated here.
 
@@ -756,7 +775,7 @@ shape, the label-sheet geometry and the scanner rules in more detail than is rep
 
 ---
 
-## 6a. What Phase 8's fourteen tasks established (63 rules — still true in Phase 9)
+## 6a. What Phases 8 and 9 have established (65 rules — read before executing anything)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break. **Phase 8 is finished, but this section is
@@ -1352,6 +1371,25 @@ any task in the phase. All of them were fixtures that the running code could not
     that the bug had been FIXED. **Cite names you can grep, not coordinates, and when a note records a
     resolved bug, say so in its first line.** (Rule 16's family: a comment must not claim a property
     the code lacks — including a location.)
+64. **A column spec written from what the output OUGHT to say is wrong three times out of three.**
+    Phase 9's plan produced three export column specs and all three were defective, identically: Task 3
+    **dropped** `Employee no` and `RMA ref`, two columns the CSV it replaced actually emitted; Task 4
+    **invented** an `email` field the `Employee` model does not have; Task 5 **invented** `decidedBy`
+    and `decidedAt`, which appear nowhere in `src/` at all. None was caught by a test — the specs'
+    assertions (unique non-empty labels, a known first column) pass just as happily on a spec missing
+    two columns as on a complete one. **Write a column spec from the source, not from the intent, and
+    when a task rewrites an existing output, diff the OLD output's field list against the new spec.**
+    The suite now pins the asset sheet's full ordered label list precisely because that is the only
+    assertion that would have caught it. Same family as rule 39 (copying a pattern but not all of it),
+    one layer up.
+65. **An equality that holds at zero is not evidence.** Task 5 verified that the farewell sheet's row
+    count matches the printable report's by running both against the live database — and both returned
+    **0**, because the seed contains no `lifecycle_return` approvals, so the employee had three held
+    items and no decided ones. The check passed and proved nothing: a function returning a constant
+    empty array satisfies it. Sibling of the Task 9 lesson that *"prove it does nothing" is not a test
+    of a producer*. **When a verification compares two counts, confirm at least one of them is
+    non-zero**, or say plainly in the report that you could not — which Task 5 did, and which is why the
+    real assertion moved to the e2e that can create the state.
 
 ---
 
