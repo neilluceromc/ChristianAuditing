@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import {
-  clearFilters, parseListState, serializeListState, toSearchParams, withFilter,
+  clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter,
 } from "@/lib/url-state";
 import {
   INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
@@ -50,10 +50,30 @@ export default async function InventoryPage({
   const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0 || purchaseYear !== null;
   // purchaseYear defaults to the current one so pagination/facet-remove links
   // don't silently drop it — a caller that means to clear it (Clear filters)
-  // passes `null` explicitly.
+  // passes `null` explicitly. This is also handed down to RepairChips (a
+  // Server Component, so a function prop is fine — no RSC serialization
+  // boundary between two Server Components) and, as a precomputed map
+  // rather than the function itself (InventoryTable is a Client Component
+  // and cannot receive a raw function prop from here), to InventoryTable's
+  // sort headers via `sortHrefs` below. A sort click and a stage click used
+  // to silently drop `?purchaseYear=` because both built their own
+  // `/inventory` URL straight from `serializeListState`, without ever
+  // knowing the year existed — defeating the one thing these chips exist
+  // for: the escape from the export's cap refusal. Neither component
+  // imports `serializeListState` or `INVENTORY_LIST_CONFIG` any more, so
+  // neither can reconstruct that bug.
   const href = (s: typeof state, py: PurchaseYearValue | null = purchaseYear) =>
     "/inventory" + withPurchaseYearQS(serializeListState(s, INVENTORY_LIST_CONFIG), py);
   const exportQS = withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear);
+  // One href per sortable key — the result of clicking that column's header —
+  // plain serializable data, unlike `href` above, so it can cross into the
+  // InventoryTable Client Component.
+  const sortHrefs: Record<string, string> = Object.fromEntries(
+    INVENTORY_LIST_CONFIG.sortable.map((key) => [
+      key,
+      href({ ...state, sort: toggleSort(state.sort, key), page: 1 }),
+    ]),
+  );
   const repairMode = isRepairView(state);
 
   const chips: FilterChip[] = [];
@@ -105,7 +125,7 @@ export default async function InventoryPage({
           {/* Saved views are named URLs (README): Repairs is one of them. */}
           <ButtonLink size="sm" href={REPAIRS_SAVED_VIEW}>Repairs</ButtonLink>
         </InventoryToolbar>
-        {repairMode && <RepairChips state={state} />}
+        {repairMode && <RepairChips state={state} href={href} />}
         {/* Clearing filters resets purchaseYear too — it is the same
             "start over" gesture as clearing every other facet. */}
         <ChipFilterRow chips={chips} clearHref={href(clearFilters(state), null)} />
@@ -124,6 +144,7 @@ export default async function InventoryPage({
               filtersQS={exportQS.replace(/^\?/, "")}
               total={total}
               repairMode={repairMode}
+              sortHrefs={sortHrefs}
             />
             <div className="flex items-center justify-between pt-1">
               <span className="font-mono text-[11px] text-fg-muted">

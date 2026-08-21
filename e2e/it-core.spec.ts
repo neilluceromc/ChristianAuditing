@@ -45,6 +45,25 @@ test.describe("inventory list", () => {
     await expect(page).toHaveURL(/sort=-model/);
   });
 
+  // Regression: onSort used to build its own "/inventory" + serializeListState
+  // URL directly, which has no idea ?purchaseYear= exists (it's a nav value
+  // parsed on its own, deliberately not a config facet — see
+  // src/lib/inventory-list.ts's parsePurchaseYear). That silently dropped the
+  // year on the single most routine interaction with the table, defeating the
+  // chips' whole purpose: capRefusalText tells the operator narrowing by year
+  // is the escape from the export cap, and an escape that a sort click
+  // reverts is not an escape. Fixed by having the page precompute one href
+  // per sortable key (sortHrefs) instead of letting the Client Component
+  // build the URL itself.
+  test("a sort click from a year-filtered list keeps the year in the URL", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory?purchaseYear=2024");
+    await expect(page).toHaveURL(/purchaseYear=2024/);
+    await page.getByRole("button", { name: "Model" }).click();
+    await expect(page).toHaveURL(/sort=model/);
+    await expect(page).toHaveURL(/purchaseYear=2024/);
+  });
+
   test("facets update the URL only on Apply, and chips echo it", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");

@@ -127,6 +127,14 @@ describe("parsePurchaseYear", () => {
     expect(parsePurchaseYear("")).toBeNull();
   });
 
+  // The regex rejects these by construction, but pinning it means a later
+  // "simplify this to parseInt" refactor fails loudly instead of silently
+  // accepting a year no fleet could ever have a purchase date in.
+  it("rejects '0' and negative numbers, not just non-numeric strings", () => {
+    expect(parsePurchaseYear("0")).toBeNull();
+    expect(parsePurchaseYear("-1")).toBeNull();
+  });
+
   it("null/undefined (param absent) parses to null", () => {
     expect(parsePurchaseYear(null)).toBeNull();
     expect(parsePurchaseYear(undefined)).toBeNull();

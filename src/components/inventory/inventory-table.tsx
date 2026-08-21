@@ -7,8 +7,8 @@ import { StatusDot } from "@/components/ui/status";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/ui/pill";
-import { BULK_MAX, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
-import { serializeListState, toggleSort, type ListState } from "@/lib/url-state";
+import { BULK_MAX } from "@/lib/inventory-list";
+import type { ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { BulkDrawer } from "./bulk-drawer";
@@ -48,6 +48,7 @@ export function InventoryTable({
   filtersQS,
   total,
   repairMode = false,
+  sortHrefs,
 }: {
   rows: AssetRow[];
   state: ListState;
@@ -57,6 +58,19 @@ export function InventoryTable({
   total: number;
   /** the repairs saved view: adds Stage + Down (README 7b) */
   repairMode?: boolean;
+  /**
+   * One `/inventory` URL per sortable key, keyed by that key — the result of
+   * clicking that column header, already computed by the page. This is a
+   * Client Component (`router.push` below), so it cannot receive the page's
+   * `href` builder as a function prop — React Server Components only let a
+   * Server Component pass plain, serializable data across that boundary.
+   * Precomputing the map keeps this component from ever calling
+   * `serializeListState` itself, which is what silently dropped
+   * `?purchaseYear=` here before: this component never imports
+   * `serializeListState`, `INVENTORY_LIST_CONFIG` or `withPurchaseYearQS` at
+   * all, so it cannot reconstruct a URL that forgets the year.
+   */
+  sortHrefs: Record<string, string>;
 }) {
   const router = useRouter();
 
@@ -92,8 +106,7 @@ export function InventoryTable({
   });
 
   function onSort(sortKey: string) {
-    const next = { ...state, sort: toggleSort(state.sort, sortKey), page: 1 };
-    router.push("/inventory" + serializeListState(next, INVENTORY_LIST_CONFIG));
+    router.push(sortHrefs[sortKey]);
   }
 
   function sortProps(col: ColumnDef) {
