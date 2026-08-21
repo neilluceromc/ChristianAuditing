@@ -119,6 +119,22 @@ These are settled. A task that needs to break one must say so and amend this lis
 
 ### Task 1: The two dependencies, installed so the Alpine image still builds
 
+> ### AMENDED — as SHIPPED (`adaecca`). The procedure was right; its stated reason did not apply.
+> All five steps ran clean: the Alpine `docker compose --profile prod build` completed for both the
+> `web` and `migrate` targets, and the gates held at 474 tests.
+>
+> **But `git diff package-lock.json` contains no `os`/`cpu` entries at all** — not for either package
+> nor for any of their five transitive deps (`fflate`, `saxen`, `unzipper-esm`, `node-int64`,
+> `worker-f`). So there was nothing win32-only to drop, and the §7 hazard this task was built around
+> could not have fired for THESE packages. That is a consequence of scope decision 1 rather than luck:
+> choosing the pure-JS pair over `exceljs` (which pulls `archiver` and `unzipper`) is what made the
+> lockfile platform-neutral. **Keep Step 2 anyway** — it is cheap, it is the only way to know, and the
+> next dependency this project adds may not be pure JS.
+>
+> One side effect worth knowing: **`graceful-fs` lost its `"dev": true` flag**, because
+> `unzipper-esm` is a production dependency of `read-excel-file` and pulls it into the production tree.
+> Harmless, and the reason the prod image grew.
+
 This is a real task in this repo, not boilerplate. HANDOVER §7: installing any npm package **on
 Windows** drops the Linux optional-dependency trees from `package-lock.json`, which breaks the Alpine
 production image — and the failure appears at `docker compose --profile prod build`, not at
