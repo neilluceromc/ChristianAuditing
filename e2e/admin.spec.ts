@@ -21,7 +21,7 @@ test.beforeAll(() => {
   execSync("npm run db:seed", { timeout: 120_000 });
 });
 
-test.describe("users & roles", () => {
+test.describe.serial("users & roles", () => {
   test("the permanent admin is locked before the click, not on save", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/admin/users");
@@ -174,6 +174,15 @@ test.describe("feature flags", () => {
     await expect(page.getByText(/Signup domain restriction updated/)).toBeVisible({ timeout: 20_000 });
     await page.reload();
     await expect(field).toHaveValue("example.org");
+
+    // Deliberately left at "example.org" — not restored to
+    // "thebackroomop.com" — for the rest of this file. Safe for two reasons:
+    // authorize() (src/server/auth/actions.ts), the credentials path every
+    // login() call in this file goes through, never reads allowed_domain at
+    // all; and adminHome's "What is switched on" list (src/components/home/
+    // admin-home.tsx) reads only the flag's `enabled` boolean via
+    // flagEnabled, never its value. Nothing later in this file, or in any
+    // later spec file (each one reseeds), depends on this value.
   });
 });
 
