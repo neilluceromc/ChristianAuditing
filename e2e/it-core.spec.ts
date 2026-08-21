@@ -208,6 +208,17 @@ test.describe("asset record", () => {
 });
 
 test.describe("employees & loadout", () => {
+  // The LIST, which nothing axe-checked until Phase 8's Task 14 — and it was
+  // carrying 10 serious colour-contrast violations the whole time, one per row's
+  // employeeNo, from `--text-faint` failing WCAG AA at 2.57:1. Only
+  // /employees/[id] was ever scanned (below), which is why the suite stayed
+  // green. This is the assertion that stops the token regressing.
+  test("axe passes on the list, not just the detail page", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/employees");
+    await expectNoSeriousAxe(page);
+  });
+
   test("list shows loadout gaps; the gaps filter narrows", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees");
