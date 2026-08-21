@@ -40,7 +40,18 @@ test.beforeAll(() => {
 async function openWizard(page: Page) {
   await page.goto("/offboarding");
   await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Open wizard" }).click();
-  await expect(page.getByRole("heading", { name: "Dennis Ong", level: 1 })).toBeVisible();
+  // Headroom, not a weaker assertion (HANDOVER §7). This is the FIRST hit of
+  // the dynamic /offboarding/[employeeId] route in the whole suite, and this
+  // file runs seventh of eight — so the click has to cover a cold compile on a
+  // dev server that has already been compiling for six-odd minutes. It began
+  // failing reproducibly in the full run (twice), while passing 14/14 in
+  // isolation, once Phase 9 added three more route handlers for the server to
+  // get through first. Awaiting the URL separately from the heading is what
+  // makes a real failure here say which half broke, instead of blaming the
+  // heading for a navigation that never happened — the same fix Phase 8's
+  // Task 3 applied to the "Task 1 payoff" test in this file (`bf23284`).
+  await expect(page).toHaveURL(/\/offboarding\/[^/]+$/, { timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "Dennis Ong", level: 1 })).toBeVisible({ timeout: 20_000 });
 }
 
 // The page header carries its own "Farewell report" link (to the printable
