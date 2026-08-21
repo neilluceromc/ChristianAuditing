@@ -1,5 +1,7 @@
 import { PrismaClient, type AssetStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { encryptSecret } from "../src/server/crypto";
+import { secretAad } from "../src/server/webhooks/sign";
 
 const prisma = new PrismaClient();
 
@@ -215,6 +217,117 @@ async function main() {
   // Job queued for the APPROVED approval (worker executes it in Phase 4)
   const apr2035 = await prisma.approval.findUniqueOrThrow({ where: { refNo: "APR-2035" } });
   await prisma.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: apr2035.id } } });
+
+  // Webhooks. Two endpoints so "disabled" is a real state on the list, and a
+  // spread of deliveries so every chip deliveryStage() can produce is reachable
+  // against a fresh database — including the DEAD · 5/5 row the design's
+  // "Replay 4 dead-lettered" control exists for.
+  // A fixture value, not a real secret — it signs nothing that leaves this machine.
+  const HOOK_SECRET = "seed-signing-secret-not-a-real-one";
+  const [liveHook, offHook] = await Promise.all([
+    prisma.webhookEndpoint.create({
+      data: {
+        url: "https://hooks.thebackroomop.com/inventory",
+        events: ["approval.executed", "offboarding.completed"],
+        active: true,
+        secret: "",
+      },
+    }),
+    prisma.webhookEndpoint.create({
+      data: {
+        url: "https://legacy.thebackroomop.com/erp-bridge",
+        events: ["purchase_request.completed"],
+        active: false,
+        secret: "",
+      },
+    }),
+  ]);
+  // The AAD binds ciphertext to the row id, which only exists after the insert.
+  // Not wrapped in $transaction: createEndpoint's reason for wrapping this same
+  // pair ("no reader ever sees the empty placeholder") is about a LIVE app,
+  // where a concurrent request could read the row between these two writes.
+  // A seed script has no concurrent reader — nothing else is connected to this
+  // database while it runs — and if this throws partway (e.g. encryptSecret
+  // finds no key), the mandatory TRUNCATE at the top of the next run discards
+  // whatever this left behind. There is no window where a bad row is visible
+  // and no partial state that survives to be fixed; a transaction here would
+  // add rollback semantics for a script that's always rerun from scratch.
+  await Promise.all([
+    prisma.webhookEndpoint.update({
+      where: { id: liveHook.id },
+      data: { secret: encryptSecret(HOOK_SECRET, secretAad(liveHook.id)) },
+    }),
+    prisma.webhookEndpoint.update({
+      where: { id: offHook.id },
+      data: { secret: encryptSecret(HOOK_SECRET, secretAad(offHook.id)) },
+    }),
+  ]);
+
+  await prisma.webhookDelivery.createMany({
+    data: [
+      // APR-2031 is the seed's one EXECUTED approval (lifecycle_transfer) — the
+      // only refNo that could genuinely have fired approval.executed. `type`
+      // is the Prisma CLIENT value (underscored), matching what
+      // execute-approval.ts actually passes (`approval.type`), not the dotted
+      // @map'd column value. assetId/assetTag are always present on the real
+      // payload (execute-approval.ts's emitWebhook call) so this fixture
+      // carries plausible ones too.
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2031", type: "lifecycle_transfer", assetId: a0148.id, assetTag: a0148.tag },
+        status: "DELIVERED",
+        attempts: 1,
+        deliveredAt: day(-2),
+      },
+      {
+        endpointId: liveHook.id,
+        event: "offboarding.completed",
+        payload: { employeeId: "seed", employeeNo: "EMP-0093", decisions: 2 },
+        status: "DELIVERED",
+        attempts: 2,
+        lastError: null,
+        deliveredAt: day(-1),
+      },
+      // Retrying, not yet dead. type/assetId/assetTag are illustrative (this
+      // fixture doesn't have a second EXECUTED approval to cite honestly), but
+      // the refNo still names a real row and the type is at least a real
+      // ApprovalType client value in the correct representation.
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2035", type: "lifecycle_assign", assetId: a0181.id, assetTag: a0181.tag },
+        status: "RETRYING",
+        attempts: 2,
+        lastError: "connect ETIMEDOUT 10.0.0.9:443",
+      },
+      // The row the design is about: five attempts spent, dead-lettered, replayable.
+      // Same caveat as APR-2035 above: APR-2040 is seeded PENDING, not EXECUTED,
+      // so nothing has really fired this one yet either — illustrative, not a
+      // state this exact row could reach on its own.
+      {
+        endpointId: liveHook.id,
+        event: "approval.executed",
+        payload: { approvalId: "seed", refNo: "APR-2040", type: "lifecycle_return", assetId: a0148.id, assetTag: a0148.tag },
+        status: "DEAD",
+        attempts: 5,
+        lastError: "500 Internal Server Error",
+      },
+      // PR-0198 is seeded SUBMITTED (the bounce-back-with-notes fixture), not
+      // COMPLETED — purchase_request.completed only ever fires from COMPLETED
+      // (purchases/actions.ts's `complete` branch). PR-0188 is this seed's one
+      // COMPLETED request, if this needs to cite a row honestly; kept as
+      // PR-0198 here to match the value named for this task.
+      {
+        endpointId: offHook.id,
+        event: "purchase_request.completed",
+        payload: { purchaseRequestId: "seed", refNo: "PR-0198" },
+        status: "DEAD",
+        attempts: 5,
+        lastError: "404 Not Found",
+      },
+    ],
+  });
 
   // Reservations — all four states
   await prisma.reservation.createMany({
