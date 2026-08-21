@@ -39,6 +39,11 @@ export default async function EmployeesPage({
       <PageHeader
         title="Employees"
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
+        // No query string: unlike /audit/export, this route always exports
+        // the whole roster (see the route's own comment for why), so it
+        // would be misleading to carry the list's current filters into the
+        // link.
+        actions={<ButtonLink href="/employees/export">Export</ButtonLink>}
       />
       <div className="flex flex-col gap-2">
         <EmployeesToolbar state={state} total={total} facets={facets} gapsOnly={gapsOnly} />

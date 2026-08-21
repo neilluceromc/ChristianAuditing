@@ -166,6 +166,10 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // a dead end on the page built for that role. The secrets rule above still
   // precedes this one, so finance gains the record, never the credentials.
   { test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing", "finance"] },
+  // Covers /employees/export and /audit/export too (prefix + "(\/|$)"): an
+  // export route intentionally has no separate rule of its own — like
+  // /inventory/export above, it matches its list page's access exactly
+  // because it IS that page's data, just downloaded instead of rendered.
   { test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
   { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance"] },
   // Brief §6.1 is a three-party handoff: purchasing drafts, IT specs it,

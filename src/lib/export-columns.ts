@@ -52,3 +52,42 @@ export const ASSET_EXPORT_COLUMNS: XlsxColumn<{
   { label: "RMA ref", width: 16, cell: (r) => ({ value: r.rmaRef }) },
   { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
 ];
+
+/**
+ * The audit sheet. `entityLabel` is the resolved label `entityLabels()`
+ * produces for the page (asset tag, employee name, …) — never the raw
+ * `entityId` — so the export reads the same way the screen does; see
+ * `src/server/modules/audit/queries.ts`'s `entityLabels`.
+ */
+export const AUDIT_EXPORT_COLUMNS: XlsxColumn<{
+  when: Date; actor: string; entityType: string; entityLabel: string; action: string; fields: string;
+}>[] = [
+  { label: "When", width: 18, cell: (r) => ({ value: r.when, type: Date, format: "yyyy-mm-dd hh:mm" }) },
+  { label: "Actor", width: 26, cell: (r) => ({ value: r.actor }) },
+  { label: "Entity type", width: 18, cell: (r) => ({ value: r.entityType }) },
+  { label: "Entity", width: 32, cell: (r) => ({ value: r.entityLabel }) },
+  { label: "Action", width: 20, cell: (r) => ({ value: r.action }) },
+  { label: "Fields changed", width: 30, cell: (r) => ({ value: r.fields }) },
+];
+
+/**
+ * Checked against `prisma/schema.prisma`'s `Employee`, which is narrower than
+ * you might assume: there is **no email column**, the date is `joinedAt` not
+ * `startedAt`, and `title` and `departmentId` are both REQUIRED. Do not add an
+ * Email column here — nothing would fill it.
+ */
+export const EMPLOYEE_EXPORT_COLUMNS: XlsxColumn<{
+  employeeNo: string; name: string; department: string; title: string;
+  employment: string; m365Status: string | null; joinedAt: Date; itemsHeld: number;
+}>[] = [
+  { label: "Employee no", width: 14, cell: (r) => ({ value: r.employeeNo }) },
+  { label: "Name", width: 26, cell: (r) => ({ value: r.name }) },
+  { label: "Department", width: 20, cell: (r) => ({ value: r.department }) },
+  { label: "Title", width: 24, cell: (r) => ({ value: r.title }) },
+  { label: "Employment", width: 16, cell: (r) => ({ value: r.employment }) },
+  // Nullable and deliberately last of the text columns: null means "never
+  // synced", which is a real and common state, not a gap to be filled in.
+  { label: "M365", width: 14, cell: (r) => ({ value: r.m365Status }) },
+  { label: "Joined", width: 13, cell: (r) => ({ value: r.joinedAt, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Items held", width: 12, cell: (r) => ({ value: r.itemsHeld, type: Number }) },
+];

@@ -50,7 +50,14 @@ export default async function AuditPage({
 
   return (
     <>
-      <PageHeader title="Audit log" />
+      <PageHeader
+        title="Audit log"
+        actions={
+          <ButtonLink href={"/audit/export" + serializeListState(state, AUDIT_LIST_CONFIG)}>
+            Export
+          </ButtonLink>
+        }
+      />
       <div className="flex flex-col gap-2">
         <AuditToolbar state={state} total={total} entityOptions={entityOptions} />
         <ChipFilterRow chips={chips} clearHref={href(clearFilters(state))} />

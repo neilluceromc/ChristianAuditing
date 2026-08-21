@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ASSET_EXPORT_COLUMNS, EXPORT_CAP, IDS_CAP, capRefusalText, idsRefusalText } from "./export-columns";
+import {
+  ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS, EXPORT_CAP, IDS_CAP,
+  capRefusalText, idsRefusalText,
+} from "./export-columns";
 
 describe("export column specs", () => {
   it("gives every column a label and no duplicates — a repeated header breaks Excel's AutoFilter", () => {
@@ -58,5 +61,30 @@ describe("idsRefusalText", () => {
     expect(text).toContain("900");
     expect(text).toContain(String(IDS_CAP));
     expect(text).not.toContain(String(EXPORT_CAP));
+  });
+});
+
+describe("audit and employee column specs", () => {
+  it("gives each sheet unique labels", () => {
+    for (const spec of [AUDIT_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS]) {
+      const labels = spec.map((c) => c.label);
+      expect(new Set(labels).size).toBe(labels.length);
+    }
+  });
+
+  // The audit sheet must carry the resolved entity LABEL, not the raw id —
+  // /audit renders labels and an export that regressed to cuids would be
+  // useless for the thing exports are for (§6a rule 20's spirit).
+  it("the audit sheet names an entity label column, not an id", () => {
+    const labels = AUDIT_EXPORT_COLUMNS.map((c) => c.label);
+    expect(labels).toContain("Entity");
+    expect(labels.some((l) => /id/i.test(l))).toBe(false);
+  });
+
+  // Checked against prisma/schema.prisma's Employee — no email column exists,
+  // so an Email header here would name a column nothing could ever fill.
+  it("the employee sheet does not claim an email column that the schema has no data for", () => {
+    const labels = EMPLOYEE_EXPORT_COLUMNS.map((c) => c.label);
+    expect(labels.some((l) => /email/i.test(l))).toBe(false);
   });
 });

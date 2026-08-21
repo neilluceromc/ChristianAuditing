@@ -48,6 +48,12 @@ describe("pathAllowedForRole", () => {
     ["/employees", "purchasing_staff", false],
     ["/audit", "finance_staff", false],
     ["/audit", "it_staff", true],
+    // export routes match their list page's access exactly (no dedicated
+    // rule of their own — same shape as /inventory/export)
+    ["/audit/export", "it_staff", true],
+    ["/audit/export", "finance_staff", false],
+    ["/employees/export", "it_staff", true],
+    ["/employees/export", "purchasing_staff", false],
     // inventory is shared with purchasing (Reference nav)
     ["/inventory", "purchasing_staff", true],
     // finance reads the asset record because /finance/assets is a register of
