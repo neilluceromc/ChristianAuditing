@@ -6491,6 +6491,81 @@ git commit -m "feat(webhooks): delivery attempts, and a replay that means try ag
 
 ### Task 14: E2E, full battery, close-out
 
+> ### AMENDED — as SHIPPED (`cde5c12` → `038299d`, six commits, deliberately unsquashed).
+> Executed subagent-driven: fresh implementer, spec-compliance review, code-quality review, each
+> reviewer re-reviewing after fixes, plus a fourth review of the handover rewrite against Step 4's own
+> eight sub-items. **Both code reviews and the doc review each found something, and none of it was
+> visible in a green suite.**
+>
+> #### The draft spec below omitted the two behaviours this task's own preamble says it exists for
+>
+> The preamble names them: the no-op save that writes no audit entry, and the self role change that
+> warns, signs the actor out, and lets them back in with the new role. **Neither appears in the ~200-line
+> code block underneath it**, and nothing else in the repo covers either. Both were added. That is the
+> defect worth carrying forward: **a plan can state its own reason for existing in prose and then fail
+> to encode it three lines later**, and the code block is what an implementer builds from.
+>
+> #### One draft assertion was provably stale before the task began
+>
+> "replaying twice is refused rather than queued twice" clicked a Replay button on the requeued row and
+> expected an "already queued" conflict. Task 13 had already established that a delivery holding a live
+> job renders **no Replay control at all** (`replayBlockedReason`'s `alreadyQueued` branch), so the
+> button that test clicks does not exist. Rewritten to assert refusal by ABSENCE, and renamed "a
+> replayed delivery loses its Replay control, not just its click". Note the direction: the plan's own
+> warning is "check the page before changing the assertion", and here the page was right and the plan
+> was wrong — the warning cuts both ways.
+>
+> #### Four more assertions were corrected against shipped source, all verified
+>
+> The seed already stores `allowed_domain` as `thebackroomop.com`, so the draft's same-domain case
+> change would have hit `setFlagValue`'s no-op branch and asserted the wrong toast (now uses a genuinely
+> different domain). The permanent-admin sentence lives in a caption BELOW the table, not in the `<tr>`.
+> `getByText("UNAVAILABLE")` matched the page's own banner prose as well as the chip, so it needed
+> `exact: true`. And `getByText("DELIVERED")` is a case-insensitive substring match that also catches
+> the "Delivered" TAB.
+>
+> #### A hydration race, which is the most reusable finding here
+>
+> The flags test passed standalone and **failed reproducibly in the full-file run**. Playwright's
+> snapshot was the tell: the textbox held the STORED value and the error slot was empty, so the action
+> had received the original value and no-op'd. `fill()` had landed before React hydrated, and hydration
+> rebound the controlled input to its prop-derived state. It passed alone because compiling the route
+> inside the test bought hydration the time it needed. Fixed with headroom on all three `fill()` sites —
+> assert the initial value, fill, assert the typed value, THEN submit — never by weakening an assertion.
+> §6a rule 61.
+>
+> #### Two house-idiom gaps the quality review caught
+>
+> `users & roles` is five tests that chain deliberately and was a plain `test.describe`; it is now
+> `test.describe.serial`, matching `offboarding.spec.ts:75` and `approvals-audit.spec.ts:92` — without
+> it one real failure cascades into three misleading ones. And the `allowed_domain` mutation left at
+> `example.org` now says in a comment why that is safe, rather than leaving the next reader to re-derive
+> the trace.
+>
+> #### Step 3 surfaced a WCAG AA failure that is not Phase 8's, and it was fixed at the token
+>
+> The new axe checks caught `--text-faint` at **2.4-2.57:1** where AA wants 4.5:1. It is a **specified
+> design token** (`design_handover/README.md`: "mono metadata, placeholder"), it fails at every size —
+> AA gives no relief below 18pt — and it was failing on ~24 usages including **ten on `/employees`,
+> since Phase 3**, green only because `it-core.spec.ts` axe-checked `/employees/[id]` and never the
+> list. The implementer's first instinct was to patch the three Phase 8 call sites that tripped the new
+> checks and it reported the defect as "not a pre-existing pattern" — wrong, and §6a rule 62 is that
+> lesson. **The user chose to fix the token globally** (`#667085` light, `#868f9c` dark, verified with
+> axe over nine routes in BOTH themes), which put shipped code knowingly out of step with the design
+> handover — recorded in HANDOVER §8, because a CSS comment is not a durable record. Light mode loses a
+> tier as a consequence: at 4.5:1 against `--canvas` nothing lighter than `--text-muted` passes.
+>
+> #### Step 4's instruction was followed except where it was wrong
+>
+> Item 1 says "Phases 1-8 merged". Phase 8 is **not** merged — that is the user's decision and it is
+> unmade — so the header states complete-on-an-unmerged-branch with nothing pushed. The instruction's
+> own parenthesis ("the user decides that separately; write what is actually true") is what makes this
+> compliance rather than deviation.
+>
+> **Battery at close: `tsc` + `lint` clean, 474 unit tests / 30 files, `build` clean, 102 e2e in
+> 7.4 minutes** (89 before this task: `admin.spec.ts` adds 12 and an `/employees`-list axe check adds
+> one). Independently cross-checked: 102 is exactly the number of `test(` declarations across `e2e/`.
+
 **Added by Task 2's review — two behaviors only e2e can protect.** Neither has a unit test, by design
 (the pure rules are covered in `src/lib/admin-users.test.ts`; the actions are thin wiring over them), so
 if this spec doesn't assert them, nothing does:
@@ -6509,7 +6584,7 @@ if this spec doesn't assert them, nothing does:
 - Create: `e2e/admin.spec.ts`
 - Modify: `docs/HANDOVER.md`
 
-- [ ] **Step 1: Write the e2e spec**
+- [x] **Step 1: Write the e2e spec**
 
 Create `e2e/admin.spec.ts`. It sorts first alphabetically, so it runs before every other spec file —
 which is exactly why it reseeds in `beforeAll` like all the others.
@@ -6695,7 +6770,7 @@ test.describe("admin home", () => {
 If a locator disagrees with what shipped, **check the page before changing the assertion** — several of
 these encode a rule rather than a label.
 
-- [ ] **Step 2: Get the spec green**
+- [x] **Step 2: Get the spec green**
 
 ```bash
 npm run db:seed && npx playwright test e2e/admin.spec.ts --workers=1
@@ -6704,7 +6779,7 @@ npm run db:seed && npx playwright test e2e/admin.spec.ts --workers=1
 Run it in the **foreground** with a long timeout. Never background a Playwright run: an unreaped run's
 own `beforeAll` reseed races the next one and produces a cascade of unrelated failures.
 
-- [ ] **Step 3: Run the whole battery**
+- [x] **Step 3: Run the whole battery**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test && npm run build
@@ -6714,7 +6789,7 @@ npm run db:seed && npx playwright test --workers=1
 **Restart the preview first** — a long-lived dev server degrades the suite into phantom failures
 (HANDOVER §7). Expect the e2e count to rise from 89 by however many tests Step 1 added.
 
-- [ ] **Step 4: Update the handover for Phase 9**
+- [x] **Step 4: Update the handover for Phase 9**
 
 Rewrite `docs/HANDOVER.md` so a fresh session can start Phase 9 cold. Keep the structure; §§1, 2, 3
 and 7 stay largely as they are.
@@ -6750,9 +6825,11 @@ git add docs/HANDOVER.md
 git commit -m "docs: handover advanced — phase 8 done, phase 9 entry criteria"
 ```
 
-- [ ] **Step 5: Finish the branch**
+- [ ] **Step 5: Finish the branch** — THE ONLY THING LEFT IN PHASE 8, and it is not ours to do.
 
 Use `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions** —
-present the options and wait rather than doing either unprompted. This repo is public.
+present the options and wait rather than doing either unprompted. This repo is public. As of `038299d`
+the options have been presented and no decision has been made; the branch is green, clean, and
+unmerged. Also still open, and equally not code: the two visual checks at the end of HANDOVER §4.
 
 ---
