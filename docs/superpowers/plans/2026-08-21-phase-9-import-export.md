@@ -181,6 +181,43 @@ git commit -m "build: add write-excel-file and read-excel-file"
 
 ### Task 2: The workbook writer (TDD)
 
+> ### AMENDED — as SHIPPED (`b9d0f76`). The public shape is as planned; the internals are not.
+> **Both API details this task flagged as uncertain were right as written** — `read-excel-file/node`
+> does export `readSheet` as a NAMED export, and `write-excel-file/node`'s default export does take
+> `{ columns }` with per-column `cell` functions and does have `.toBuffer()`. (`{ schema }` was removed
+> from the library and now throws.) So the README-derived guesses held.
+>
+> **What the plan did NOT anticipate is a real bug: a zero-row export silently loses its header.**
+> `write-excel-file`'s own dispatcher cannot tell an empty *objects* array from a pre-built empty
+> *SheetData* — `node_modules/write-excel-file/commonjs/xlsx/generateXlsxFileContents.js:207` reads
+> `if (arg1.length === 0 || Array.isArray(arg1[0]))` and takes the raw-SheetData branch, so line 231
+> (the branch that calls `getSheetData` to build the header) never runs. With `rows: []` the emitted
+> sheet contains `<sheetData/>` — no header, not even the labels. **The plan's Step 3 code, run as
+> written, fails its own Step 1 test.** Verified independently by reading the dispatcher and by
+> unzipping a generated file.
+>
+> The fix is to build the grid ourselves with the library's own **public** `getSheetData(rows, columns)`
+> — declared in `node_modules/write-excel-file/node/index.d.ts:47`, so this is supported API and not an
+> internal — and hand the resulting grid to `writeExcelFile`'s raw-SheetData overload. The grid always
+> contains the header row, so it is never length-0 and the ambiguity cannot arise.
+>
+> **A comment in the plan also claimed something false about the library**, and it is corrected in the
+> shipped code rather than repeated: the plan said write-excel-file "writes an empty cell for undefined
+> and the literal for null". It does not. Its `row.js`'s `isEmpty()` treats `undefined`, `null` and `""`
+> identically, so both already produce an empty cell. The `value ?? undefined` coercion is still
+> required, but purely to satisfy the library's published TYPE (`CellObject.value` excludes `null`) —
+> it is a type-checker requirement, not a runtime fix. Rule 16's shape, caught before it shipped.
+>
+> The `XlsxColumn` type also now imports the library's real `Value` and `CellObject["type"]` rather
+> than the plan's `unknown` placeholders, adding only `| null` for this app's nullable columns — so the
+> boundary is provably compatible with the library's contract instead of opaque.
+>
+> **On the deliberate-breakage check**, which produced a finding of its own: removing `?? undefined` is
+> caught by `tsc`, NOT by the round-trip test — because null and undefined really are identical at
+> runtime. Stringifying null to `"null"` IS caught by the test. So the test guards the failure mode it
+> is named for, but the type system is what guards the coercion. Worth knowing before anyone
+> "simplifies" either one away.
+
 One module owns `write-excel-file`. Its test writes a real buffer and reads it back with
 `read-excel-file`, which is both a round-trip assertion and the cheapest possible proof that the two
 libraries agree — a test that only asserted "a Buffer came back" would pass on a corrupt file.
@@ -249,13 +286,20 @@ Expected: FAIL — `Cannot find module './write'`.
 
 - [ ] **Step 3: Write the module**
 
+As shipped:
+
 ```ts
-import writeExcelFile from "write-excel-file/node";
+import writeExcelFile, { getSheetData } from "write-excel-file/node";
+import type { CellObject, Column, Value } from "write-excel-file/node";
 
 /**
- * One column of an export sheet. `cell` returns write-excel-file's cell object
- * so a caller can set `type` and `format` per column without this module
- * knowing anything about the domain.
+ * One column of an export sheet. `cell` returns almost write-excel-file's own
+ * cell shape (`Value`/`CellObject["type"]` come straight from the library, so
+ * a caller can set a real `type`/`format` without this module knowing
+ * anything about the domain) — except `value` may be `null`, because every
+ * nullable column in this app (cost, serial, assignee) needs to say "no
+ * value" and the library's own type only allows `undefined` for that. The
+ * translation happens once, below, rather than in every caller.
  *
  * The header is always bold: these files are opened in Excel by people, and a
  * sheet whose first row looks like data is one AutoFilter away from being
@@ -264,7 +308,7 @@ import writeExcelFile from "write-excel-file/node";
 export interface XlsxColumn<T> {
   label: string;
   width?: number;
-  cell: (row: T) => { value: unknown; type?: unknown; format?: string };
+  cell: (row: T) => { value: Value | null; type?: CellObject["type"]; format?: string };
 }
 
 /**
@@ -273,18 +317,32 @@ export interface XlsxColumn<T> {
  * HTTP downloads and nothing should touch the filesystem to serve one.
  */
 export async function toXlsxBuffer<T>(columns: XlsxColumn<T>[], rows: T[]): Promise<Buffer> {
-  return writeExcelFile(rows, {
-    columns: columns.map((c) => ({
-      // `value ?? undefined`: write-excel-file writes an empty cell for
-      // undefined and the literal for null, and every nullable column in this
-      // app would otherwise export the word "null".
-      header: { value: c.label, fontWeight: "bold" },
-      width: c.width,
-      cell: (row: T) => {
-        const out = c.cell(row);
-        return { ...out, value: out.value ?? undefined };
-      },
-    })),
+  const libColumns: Column<T>[] = columns.map((c) => ({
+    header: { value: c.label, fontWeight: "bold" as const },
+    width: c.width,
+    // `value ?? undefined`: at runtime write-excel-file treats `null` and
+    // `undefined` identically (both become an empty cell — see its
+    // `row.js`'s `isEmpty()`), but its published type only allows
+    // `undefined` in `CellObject.value`. This coercion exists to satisfy
+    // that type, not to work around a real behavioural difference — do not
+    // read it as one.
+    cell: (row: T): CellObject => {
+      const out = c.cell(row);
+      return { value: out.value ?? undefined, type: out.type, format: out.format };
+    },
+  }));
+
+  // `writeExcelFile(rows, { columns })` cannot tell an empty *objects* array
+  // apart from an already-empty *sheet*: its own dispatcher treats a
+  // zero-length first argument as pre-built SheetData and never calls
+  // `columns[].cell`/`header` at all, so a zero-row export would silently
+  // come out with no header row either. Building the grid ourselves with
+  // `getSheetData` sidesteps that ambiguity — the header row is always
+  // present, so the grid this hands to `writeExcelFile` is never actually
+  // empty, even when `rows` is.
+  const sheetData = getSheetData(rows, libColumns);
+  return writeExcelFile(sheetData, {
+    columns: libColumns.map((c) => ({ width: c.width })),
   }).toBuffer();
 }
 ```
