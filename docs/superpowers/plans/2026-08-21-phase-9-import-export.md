@@ -363,6 +363,34 @@ git commit -m "feat(export): one xlsx writer, round-tripped by its own test"
 
 ### Task 3: The shared response helpers, and the assets export becomes xlsx
 
+> ### AMENDED — as SHIPPED (`f558c53`). **The plan's column spec silently dropped two columns.**
+> The CSV export this task converts emitted **fourteen** columns; the plan's `ASSET_EXPORT_COLUMNS`
+> listed twelve. Missing: **`Employee no`** (`assignee.employeeNo`) and **`RMA ref`** (`asset.rmaRef`) —
+> both real columns of the shipped CSV (see `git show f558c53~1:"src/app/(app)/inventory/export/route.ts"`,
+> the `toCsv` header). Nothing in the scope decisions authorised dropping data: decision 9 covers
+> deleting the CSV module and its formula-injection guard, not narrowing the sheet. Shipped with all
+> fourteen, in their original positions.
+>
+> **This is worth more than the fix.** A task framed as "convert the format" is one where a column list
+> retyped by hand looks complete and is not, and the plan's own tests could not catch it — they assert
+> unique non-empty labels and that Tag comes first, all of which a twelve-column spec satisfies. When
+> a task rewrites an existing output, **diff the old output's fields against the new spec** rather than
+> reviewing the new spec on its own merits. Same family as §6a rule 39 (copying a pattern but not all
+> of it), one layer up: this copied a route and not all of its columns.
+>
+> Everything else in the plan matched reality — the `toXlsxBuffer` signature, the `capRefusalText` /
+> `idsRefusalText` shapes, and the route's existing `repairStageIds` logic, which survives untouched.
+>
+> Verified without a browser, and the reason is worth recording: the implementer declined to type the
+> seeded fixture password into a login form (entering any password into a field is on its prohibited
+> list) and instead used §7's recommended route — a throwaway `tsx` script under the gitignored
+> `backups/`, calling the route's exact `buildAssetWhere` / `buildAssetOrderBy` / `toXlsxBuffer` path
+> against the live seeded database, then deleted. It confirmed 25 assets, a 5,091-byte buffer, the
+> fourteen-column header in order, 25 data rows, and a `Cost` cell round-tripping as a JS `number`
+> matching its source `Decimal` — which is the `.toNumber()` boundary working. **Unverified by eye:**
+> whether the header renders bold and Cost right-aligns in real Excel. Task 13's e2e covers the route;
+> the visual pass does not exist yet.
+
 Scope decisions 9, 10 and 11. The cap message and the `?ids=` refusal get exactly one owner each,
 because four routes are about to want them.
 
@@ -462,10 +490,15 @@ export const ASSET_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Type", width: 18, cell: (r) => ({ value: r.typeName }) },
   { label: "Status", width: 14, cell: (r) => ({ value: r.status }) },
   { label: "Assigned to", width: 24, cell: (r) => ({ value: r.assigneeName }) },
+  // Employee no and RMA ref are NOT optional extras — the CSV this replaces
+  // emitted both, and leaving them out is a silent data loss dressed as a
+  // format change. See this task's AMENDED banner.
+  { label: "Employee no", width: 14, cell: (r) => ({ value: r.assigneeNo }) },
   { label: "Purchased", width: 13, cell: (r) => ({ value: r.purchasedAt, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Cost", width: 13, cell: (r) => ({ value: r.cost, type: Number, format: "#,##0.00" }) },
   { label: "Warranty until", width: 14, cell: (r) => ({ value: r.warrantyUntil, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Vendor", width: 20, cell: (r) => ({ value: r.vendorName }) },
+  { label: "RMA ref", width: 18, cell: (r) => ({ value: r.rmaRef }) },
   { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
 ];
 ```
