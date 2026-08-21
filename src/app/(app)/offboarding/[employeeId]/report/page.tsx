@@ -1,9 +1,10 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
-import { getWizard } from "@/server/modules/offboarding/queries";
+import { decidedItems, getWizard } from "@/server/modules/offboarding/queries";
 import { OUTCOME_LABEL, OUTCOME_STATUS } from "@/lib/offboarding";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { PrintButton } from "@/components/employees/print-button";
+import { ButtonLink } from "@/components/ui/button-link";
 
 const STRIPES = "repeating-linear-gradient(135deg, #EEF1F5 0 6px, #F7F9FB 6px 12px)";
 
@@ -13,14 +14,16 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
   const data = await getWizard(employeeId);
   if (!data) notFound();
   const { employee, totals } = data;
-  // flatMap rather than filter so `decision` is structurally non-null on the
-  // rows this sheet prints, instead of six assertions sitting far from the
-  // filter that proves them
-  const decided = data.items.flatMap((i) => (i.decision ? [{ ...i, decision: i.decision }] : []));
+  // `decidedItems` is shared with the .xlsx export route so the sheet and the
+  // printed page can never disagree about which rows belong (§6a rule 47).
+  const decided = decidedItems(data.items);
 
   return (
     <div className="mx-auto max-w-[760px]">
-      <div className="flex justify-end pb-3 print:hidden">
+      <div className="flex justify-end gap-2 pb-3 print:hidden">
+        <ButtonLink href={`/offboarding/${employeeId}/report/export`} variant="secondary">
+          Export sheet
+        </ButtonLink>
         <PrintButton />
       </div>
       {/* Light-theme-only on purpose: this is a printed artifact. */}
@@ -154,7 +157,7 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
         </div>
 
         <p className="font-mono text-[8.5px] text-[#98A2B3]">
-          {employee.employeeNo} · {decided.length} decision(s) · a real Excel export and the HR email land with Phase 8&apos;s export work
+          {employee.employeeNo} · {decided.length} decision(s) · the HR email is a future handoff, not yet built
         </p>
       </div>
     </div>

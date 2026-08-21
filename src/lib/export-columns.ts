@@ -91,3 +91,32 @@ export const EMPLOYEE_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Joined", width: 13, cell: (r) => ({ value: r.joinedAt, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Items held", width: 12, cell: (r) => ({ value: r.itemsHeld, type: Number }) },
 ];
+
+/**
+ * The farewell report, as a sheet. Row shape is `DecidedItem` from
+ * `src/server/modules/offboarding/queries.ts` — the same rows the printable
+ * report prints, via that module's `decidedItems`, never re-derived here.
+ *
+ * The plan for this task named "Decided by" and "Decided" (a timestamp)
+ * columns. Neither exists on `Decision` (`src/lib/offboarding.ts`): it
+ * carries `refNo`, `outcome`, `state` and `reason` only — no approver actor,
+ * no decision timestamp, and adding either would mean widening the shared
+ * `Decision`/`DecisionCandidate` types and the query that fills them, which
+ * is out of this task's scope and not something to do by inventing a field
+ * quietly. `Request` and `Status` below are the real analogue: they are
+ * exactly the two facts the printed page's own "Request" column shows
+ * (`refNo` and `state`), just as two cells instead of one. `Reason` is the
+ * plan's "Note" column under its actual name, matching the page's header.
+ */
+export const FAREWELL_EXPORT_COLUMNS: XlsxColumn<{
+  tag: string; model: string; outcome: string; reason: string | null;
+  cost: number | null; refNo: string; state: string;
+}>[] = [
+  { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
+  { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
+  { label: "Outcome", width: 16, cell: (r) => ({ value: r.outcome }) },
+  { label: "Reason", width: 30, cell: (r) => ({ value: r.reason }) },
+  { label: "Value", width: 13, cell: (r) => ({ value: r.cost, type: Number, format: "#,##0.00" }) },
+  { label: "Request", width: 16, cell: (r) => ({ value: r.refNo }) },
+  { label: "Status", width: 16, cell: (r) => ({ value: r.state }) },
+];

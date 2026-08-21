@@ -165,6 +165,22 @@ export interface WizardSlot {
   status: string | null;
 }
 
+/** A `WizardItem` known to carry a real decision — `decision` narrowed from nullable. */
+export interface DecidedItem extends WizardItem {
+  decision: Decision;
+}
+
+/**
+ * The rows the farewell report prints, on either surface. Both the printable
+ * page and its `.xlsx` export need exactly "items with a live decision" — the
+ * held-but-undecided items in `WizardData.items` are not part of the report
+ * for either audience. One filter, called from both places, is what keeps the
+ * two from disagreeing about which rows belong (§6a rule 47).
+ */
+export function decidedItems(items: WizardItem[]): DecidedItem[] {
+  return items.flatMap((i) => (i.decision ? [{ ...i, decision: i.decision }] : []));
+}
+
 export interface WizardData {
   employee: {
     id: string;

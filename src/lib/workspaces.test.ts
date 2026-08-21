@@ -54,6 +54,8 @@ describe("pathAllowedForRole", () => {
     ["/audit/export", "finance_staff", false],
     ["/employees/export", "it_staff", true],
     ["/employees/export", "purchasing_staff", false],
+    ["/offboarding/emp1/report/export", "it_staff", true],
+    ["/offboarding/emp1/report/export", "purchasing_staff", false],
     // inventory is shared with purchasing (Reference nav)
     ["/inventory", "purchasing_staff", true],
     // finance reads the asset record because /finance/assets is a register of

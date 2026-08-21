@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS, EXPORT_CAP, IDS_CAP,
-  capRefusalText, idsRefusalText,
+  ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS, EXPORT_CAP,
+  FAREWELL_EXPORT_COLUMNS, IDS_CAP, capRefusalText, idsRefusalText,
 } from "./export-columns";
 
 describe("export column specs", () => {
@@ -86,5 +86,37 @@ describe("audit and employee column specs", () => {
   it("the employee sheet does not claim an email column that the schema has no data for", () => {
     const labels = EMPLOYEE_EXPORT_COLUMNS.map((c) => c.label);
     expect(labels.some((l) => /email/i.test(l))).toBe(false);
+  });
+});
+
+// The plan for this sheet named "Decided by" and "Decided" columns. Neither
+// exists: `Decision` (src/lib/offboarding.ts) carries only `refNo`, `outcome`,
+// `state` and `reason` — no approver actor, no timestamp. Rather than invent
+// them (the same mistake this plan already made twice, on the asset and
+// employee specs), the sheet carries the two real fields the printed report
+// shows in its "Request" column instead — see this task's commit for the
+// full account.
+describe("farewell column spec", () => {
+  it("gives every column a label and no duplicates", () => {
+    const labels = FAREWELL_EXPORT_COLUMNS.map((c) => c.label);
+    expect(labels.every((l) => l.length > 0)).toBe(true);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("pins the full ordered label list, so a dropped or invented column fails loudly", () => {
+    expect(FAREWELL_EXPORT_COLUMNS.map((c) => c.label)).toEqual([
+      "Tag",
+      "Model",
+      "Outcome",
+      "Reason",
+      "Value",
+      "Request",
+      "Status",
+    ]);
+  });
+
+  it("does not claim a 'Decided by' or 'Decided' column the underlying Decision has no data for", () => {
+    const labels = FAREWELL_EXPORT_COLUMNS.map((c) => c.label);
+    expect(labels.some((l) => /decided/i.test(l))).toBe(false);
   });
 });
