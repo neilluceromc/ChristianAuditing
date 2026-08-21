@@ -714,10 +714,11 @@ shape, the label-sheet geometry and the scanner rules in more detail than is rep
    lines is a wall, one line with a button is a decision. **Partial import is the default**, not
    all-or-nothing, so the plan must say what a half-applied import leaves behind and how an operator
    sees which half.
-2. **Import is rate limited to 10/min**, which is a DIFFERENT cap from the 60/min mutation cap every
-   existing action uses. `checkRate(userId, kind)` already takes a `RateKind` and
-   `src/lib/rate-limit.ts` already holds `RATE_LIMITS` as a map — so this is a new entry there, not a
-   literal in an action and certainly not a number in a component (§6a rules 26, 37, 38).
+2. **Import is rate limited to 10/min, and the plumbing for that ALREADY EXISTS — do not re-invent it.**
+   `src/lib/rate-limit.ts` has held `import: { limit: 10, windowMs: 60_000 }` since Phase 1, beside the
+   60/min `mutation` kind, and `checkRate(userId, kind)` already takes the `RateKind`. So the import
+   actions pass `checkRate(actor.id, "import")` and nothing else changes. The trap is writing `10` into
+   an action or a component instead (§6a rules 26, 37, 38) — the number has an owner already.
 3. **The export path already refuses over its cap — do not regress it.**
    `src/app/(app)/inventory/export/route.ts` counts before querying and returns a **413** past
    **10,000** rows (`CAP`, line 8; the 413 at line 31), writing nothing. The Excel upgrade plus
