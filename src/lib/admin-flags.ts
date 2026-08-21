@@ -1,4 +1,5 @@
 import type { RuleResult } from "./admin-users";
+import { flagDomain } from "./auth-shared";
 
 export interface FlagSpec {
   key: string;
@@ -63,6 +64,27 @@ export const FLAG_SPECS: FlagSpec[] = [
 
 export function specFor(key: string): FlagSpec | null {
   return FLAG_SPECS.find((f) => f.key === key) ?? null;
+}
+
+/**
+ * The one expression for "does this flag's switch show as ON" — every reader
+ * that summarizes a flag's on/off state (listFlags, adminHome, and any future
+ * one) must call this rather than re-deriving it from `row.enabled` and
+ * `spec.hasValue` separately. For a `hasValue` flag (allowed_domain today),
+ * ON means flagDomain resolves a real, enforced value — NOT the raw `enabled`
+ * column: `(enabled: true, value: null)` is the resting state of a deployment
+ * that bootstrapped without a domain (see flagDomain's own comment), and
+ * `row.enabled` alone would read that as restricted while /signup enforces
+ * nothing. HANDOVER §6a rule 15: a switch must not be able to claim a
+ * restriction that isn't enforced — this was already hand-rolled by three
+ * readers before it existed; adding a fourth divergent copy is the mistake
+ * this function exists to prevent.
+ */
+export function flagEnabled(
+  spec: FlagSpec,
+  row: { enabled: boolean; value: unknown } | null | undefined,
+): boolean {
+  return spec.hasValue ? flagDomain(row) !== null : row?.enabled ?? false;
 }
 
 /**

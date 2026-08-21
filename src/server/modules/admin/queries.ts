@@ -1,7 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { lockReason, roleWorkspaces, ROLE_OPTIONS, type TargetUser } from "@/lib/admin-users";
-import { FLAG_SPECS, type FlagState } from "@/lib/admin-flags";
-import { flagDomain } from "@/lib/auth-shared";
+import { FLAG_SPECS, flagEnabled, type FlagState } from "@/lib/admin-flags";
 import { partitionEvents, type WebhookEvent } from "@/lib/webhooks";
 import type { Role } from "@prisma/client";
 
@@ -58,8 +57,8 @@ export interface FlagRow {
   description: string;
   /**
    * What the switch shows. NOT `row.enabled` — for a `hasValue` flag this is
-   * the EFFECTIVE state, computed with `flagDomain()` (the same expression
-   * `/login` and `/signup` use). `createBootstrapAdmin` with a blank domain
+   * the EFFECTIVE state, computed with `flagEnabled()` (the same expression
+   * `/login` and `/signup` use via `flagDomain`). `createBootstrapAdmin` with a blank domain
    * writes `(enabled: false, value: null)`, not `(true, null)` — so the state
    * this exists to catch, `(enabled: true, value: null)`, has no in-app
    * producer at all now that `flagChange` refuses it; it's reachable only
@@ -99,7 +98,7 @@ export async function listFlags(): Promise<FlagRow[]> {
       key: spec.key,
       label: spec.label,
       description: spec.description,
-      enabled: spec.hasValue ? flagDomain(row) !== null : row?.enabled ?? false,
+      enabled: flagEnabled(spec, row),
       hasValue: spec.hasValue,
       value,
       unavailable: spec.unavailable,
@@ -178,7 +177,7 @@ export async function adminHome(): Promise<AdminHome> {
     prisma.webhookDelivery.count({ where: { status: "DELIVERED" } }),
   ]);
 
-  const enabledBy = new Map(flagRows.map((f) => [f.key, f.enabled]));
+  const rowByKey = new Map(flagRows.map((f) => [f.key, f]));
   return {
     users: {
       total: byRole.reduce((sum, g) => sum + g._count._all, 0),
@@ -197,7 +196,10 @@ export async function adminHome(): Promise<AdminHome> {
     flags: FLAG_SPECS.map((spec) => ({
       key: spec.key,
       label: spec.label,
-      enabled: enabledBy.get(spec.key) ?? false,
+      // flagEnabled, not the raw row.enabled column — see its doc comment.
+      // Reading the raw column here would let this summary show ON for
+      // allowed_domain while /signup enforces nothing (HANDOVER §6a rule 15).
+      enabled: flagEnabled(spec, rowByKey.get(spec.key)),
       // `spec` is already the FLAG_SPECS entry for this key, so reading
       // spec.unavailable directly is the same lookup specFor(spec.key) would
       // do, minus the redundant re-scan of the array we're already iterating.

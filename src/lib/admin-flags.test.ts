@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  FLAG_SPECS, domainValue, flagChange, flagChangeWarning, specFor,
+  FLAG_SPECS, domainValue, flagChange, flagChangeWarning, flagEnabled, specFor,
   type FlagSpec, type FlagState,
 } from "./admin-flags";
 
@@ -41,6 +41,47 @@ describe("specFor", () => {
 
   it("returns null for a key this build doesn't know", () => {
     expect(specFor("something_someone_inserted")).toBeNull();
+  });
+});
+
+describe("flagEnabled", () => {
+  const domainSpec = specFor("allowed_domain")!;
+  const ssoSpec = specFor("m365_sso")!;
+
+  // The exact state flagDomain's own doc comment calls out: the resting state
+  // of a deployment that bootstrapped without a domain. Reading raw
+  // `row.enabled` here (rather than calling this function) is precisely the
+  // regression HANDOVER §6a rule 15 exists to catch.
+  it("hasValue flag: (enabled: true, value: null) reads as OFF", () => {
+    expect(flagEnabled(domainSpec, { enabled: true, value: null })).toBe(false);
+  });
+
+  it("hasValue flag: an empty-string value reads as OFF", () => {
+    expect(flagEnabled(domainSpec, { enabled: true, value: "" })).toBe(false);
+  });
+
+  it("hasValue flag: a whitespace-only value reads as OFF", () => {
+    expect(flagEnabled(domainSpec, { enabled: true, value: "   " })).toBe(false);
+  });
+
+  it("hasValue flag: enabled with a real domain reads as ON", () => {
+    expect(flagEnabled(domainSpec, { enabled: true, value: "example.com" })).toBe(true);
+  });
+
+  it("hasValue flag: a real value with enabled: false still reads as OFF", () => {
+    expect(flagEnabled(domainSpec, { enabled: false, value: "example.com" })).toBe(false);
+  });
+
+  it("non-hasValue flag follows row.enabled directly", () => {
+    expect(flagEnabled(ssoSpec, { enabled: true, value: null })).toBe(true);
+    expect(flagEnabled(ssoSpec, { enabled: false, value: null })).toBe(false);
+  });
+
+  it("a missing or null row reads as OFF for both flag shapes", () => {
+    expect(flagEnabled(domainSpec, undefined)).toBe(false);
+    expect(flagEnabled(domainSpec, null)).toBe(false);
+    expect(flagEnabled(ssoSpec, undefined)).toBe(false);
+    expect(flagEnabled(ssoSpec, null)).toBe(false);
   });
 });
 
