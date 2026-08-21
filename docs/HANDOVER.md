@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–5 of 14 committed, unmerged.** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, run at the Task 5 close: **495 unit tests / 32 files**, **102 e2e / 7.5 min**, `tsc` + `lint` + `build` clean, and `docker compose --profile prod build` verified at Task 1.
+**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–5 of 14 committed, unmerged.** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, run at the Task 5 close: **514 unit tests / 32 files**, **102 e2e / 7.5 min**, `tsc` + `lint` + `build` clean, and `docker compose --profile prod build` verified at Task 1.
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -775,7 +775,7 @@ shape, the label-sheet geometry and the scanner rules in more detail than is rep
 
 ---
 
-## 6a. What Phases 8 and 9 have established (65 rules — read before executing anything)
+## 6a. What Phases 8 and 9 have established (66 rules — read before executing anything)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break. **Phase 8 is finished, but this section is
@@ -1371,6 +1371,17 @@ any task in the phase. All of them were fixtures that the running code could not
     that the bug had been FIXED. **Cite names you can grep, not coordinates, and when a note records a
     resolved bug, say so in its first line.** (Rule 16's family: a comment must not claim a property
     the code lacks — including a location.)
+66. **A `"use client"` component cannot take a function prop from a Server Component, and nothing in
+    the toolchain will tell you.** Phase 9 Task 6 fixed a dropped-filter bug by passing the page's URL
+    builder down to two components so neither could rebuild a URL wrongly. That works for
+    `RepairChips` (a Server Component) and is **impossible** for `InventoryTable`, which carries
+    `"use client"` — React only passes serializable data across that boundary. It receives a
+    precomputed `Record<string, string>` of hrefs instead. **`tsc`, `lint` and `build` all pass on the
+    broken version**; it fails only when the page actually renders, which in this repo means only under
+    Playwright. So: when the fix for "a caller can get this wrong" is "pass the caller a function",
+    check which side of the client boundary the caller is on first, and prefer precomputed data across
+    it. Related to §7's note that a `"use server"` module's exports are all server actions — both are
+    boundary rules the type system does not enforce.
 64. **A column spec written from what the output OUGHT to say is wrong three times out of three.**
     Phase 9's plan produced three export column specs and all three were defective, identically: Task 3
     **dropped** `Employee no` and `RMA ref`, two columns the CSV it replaced actually emitted; Task 4

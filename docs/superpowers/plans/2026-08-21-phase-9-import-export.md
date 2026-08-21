@@ -1029,6 +1029,32 @@ git commit -m "feat(export): the farewell report as a sheet, from the report's o
 > only** (rule 65: an equality at zero is not evidence). `e2e/it-core.spec.ts` 20/20, including the
 > export test.
 >
+> **A review fix landed on top (`0c37a98`), and it is the finding worth keeping from this task.**
+> Two hrefs hand-rolled `serializeListState` and so **dropped the year**: `inventory-table.tsx`'s sort
+> handler (clicking ANY column header from a year-filtered list cleared the chip — zero preconditions,
+> the most routine interaction with the table) and `repair-chips.tsx`'s stage chips (two clicks away).
+> Not a data-integrity bug — the export and `bulkRequestStatusChange` both derive from the current URL,
+> so nothing ever acted on a set the screen was not showing — but it defeated the feature's stated
+> purpose, since `capRefusalText` promises these chips are the escape from a cap refusal and the escape
+> vanished on the next sort.
+>
+> **Fixed structurally rather than by patching two call sites**: the page's `href` builder is passed
+> down, so neither component knows the year exists and neither imports `serializeListState` — the
+> mistake became unavailable rather than merely corrected. Five places built an `/inventory` URL; three
+> were right, two were wrong, and nothing had prevented a sixth from being wrong too.
+>
+> **The controller's suggested one-liner did not survive contact, and the reason is worth recording:**
+> `InventoryTable` is a `"use client"` component, so it **cannot** take a raw function prop from a
+> Server Component page. It receives a precomputed `sortHrefs: Record<string, string>` instead;
+> `RepairChips`, a Server Component, does take the builder. **That failure mode is invisible to `tsc`,
+> `lint` AND `build`** — it only surfaces when the page renders, i.e. under Playwright. Worth knowing
+> before passing a callback across that boundary again.
+>
+> Guarded by a new e2e assertion (`e2e/it-core.spec.ts`: from `?purchaseYear=2024`, click Model, assert
+> BOTH `sort=model` and `purchaseYear=2024` survive) — the only kind of test that can see a client
+> navigation. 21/21. **`clearFilters` deliberately DOES drop the year**: it is the same start-over
+> gesture as clearing any other facet, matching the `gaps=1` precedent.
+>
 > Recorded, not fixed: **there is no "All years" chip**, so clearing just the year needs "Clear filters".
 > Matches the plan as written; a minor UX gap for Phase 10's polish pass.
 
