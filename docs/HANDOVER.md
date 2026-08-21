@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–9 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
+**Last updated:** 2026-08-20 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 (the Admin workspace) is MID-FLIGHT on branch `phase-8-admin` — tasks 1–10 of 14 done, unmerged** · **Two things are unpushed: `main` is 4 commits ahead of `origin/main` (the Phase 8 plan + this doc), and the branch is well ahead of that — **count it, don't trust a number in this doc**: `git rev-list --count main..HEAD`.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,7 +13,7 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–9 of 14
+1. **`git checkout phase-8-admin`** — do NOT start from `main`. Phase 8 is mid-flight: tasks 1–10 of 14
    are committed on that branch and nothing is merged. `git log --oneline main..HEAD` shows the phase
    so far; `git rev-list --count main..HEAD` is the count, and `git status` should be clean.
    **Don't trust a commit count written into this doc** — I corrected it twice and each correction was
@@ -38,36 +38,36 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    and already maps each criterion to a task**, so read §6 when a task's reasoning looks arbitrary, not
    as something to act on. **§6a is the section that matters most** — it is what Tasks 1–7 actually
    established, and it is where the recurring-defect checklist lives.
-4. **Resume at Task 10** (the worker delivers for real) of
+4. **Resume at Task 11** (Admin gets its own Home) of
    `docs/superpowers/plans/2026-08-19-phase-8-admin.md` with `superpowers:subagent-driven-development`.
-   Tasks 1–9 are committed; 10–14 remain. **Task 10 is the most consequential task in the phase** — the
-   first code in this project that makes an outbound network request, replacing the worker's
-   `DELIVER_WEBHOOK` dead-letter placeholder. Read its banner twice.
+   Tasks 1–10 are committed; 11–14 remain. **Task 11 is the smallest task left** — a pure read surface,
+   no new mutations — which makes it the natural next one now that the hard half of the pipeline is done.
 
-   **The pipeline is now live up to exactly that boundary**, and it is worth knowing what that looks
-   like: emitting works, so a completed purchase / executed approval / completed offboarding writes a
-   `WebhookDelivery` + a `DELIVER_WEBHOOK` `Job`, and the worker then **dead-letters that job** with
-   `"webhook delivery ships in Phase 8"` while the delivery row sits at `PENDING` forever. **That
-   divergence is not a bug in Task 9** — nothing mirrors job state onto the ledger until Task 10 does it.
-   Don't "fix" the PENDING.
+   **THE WEBHOOK PIPELINE IS COMPLETE AND WORKS END TO END.** A completed purchase / executed approval /
+   completed offboarding writes a `WebhookDelivery` + a `Job`, and the worker now really POSTs a signed
+   envelope, retries with backoff, and dead-letters — with the ledger mirroring the job at every step. A
+   receiver independently recomputing the HMAC accepted the signature. **What does NOT exist yet is any
+   page that reads it** (Task 13) or any seeded fixture (Task 12), so the only way to look at a delivery
+   today is `psql`.
 
-   **Tasks 10, 12 and 13 each open with a `REQUIRED AMENDMENT` block, written BEFORE those tasks
+   **Tasks 12 and 13 each open with a `REQUIRED AMENDMENT` block, written BEFORE those tasks
    started.** Reviews of Tasks 6 and 7 read forward into them and verified the claims by running code, so
    their defects are documented in advance rather than waiting to be discovered. **Read those banners
    before the code blocks they sit above — the blocks are the original text and are stale where the two
    disagree.** The highest-value ones:
-   - **Task 10:** `fetch` follows redirects by default, so a 307 from an admin-approved receiver forwards
-     the signed body to a host nobody approved. This is the real SSRF hole; Task 7's `urlSchema` cannot
-     see past the first hop. **Its import of `SIGNATURE_HEADER` is already amended** — Task 8 moved that
-     constant to `src/lib/webhooks.ts` (rule 38).
    - **Task 13:** delete the second `MAX_DELIVERY_ATTEMPTS` literal, or the `DEAD · 5/5` chip silently
      lies the day someone tunes the worker. It also pairs a rule with a page, so run rule 10 on it.
 
-   **Tasks 8 and 9 now read `AMENDED` and their code blocks ARE the shipped code**, like Tasks 2–7.
+   **Tasks 8, 9 and 10 now read `AMENDED` and their code blocks ARE the shipped code**, like Tasks 2–7.
    **Task 9 had no banner written for it in advance, and it still had two defects** — the migration was
    missing the CHECK constraint that makes its own unique index mean anything, and the emitter carried a
    dead branch with a comment describing a guard the type system already provided (rules 39 and 40).
    Treat the absence of a banner as "nobody has looked yet", not "this one is fine".
+
+   **And Task 10 is the counter-lesson: it HAD a five-item banner, every item was right, and it still
+   shipped with two more defects of the same kind** (rules 43 and 44) — one of them in the very branch
+   the banner held up as the correct model to copy. A banner tells you what one reviewer found reading
+   forward; it is not a completed audit.
 
    Read the plan's **Recorded scope decisions** first — the permanent-admin lock covering `disabled`, the
    `m365_sso` refusal, and "the Job is the retry engine, `WebhookDelivery` is the ledger" are the three a
@@ -108,6 +108,11 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
      one that said signing made plain `http` safe, one that said a secret was never selected when it was
      fetched on every render, and Task 8's banner promising "the button below" in the one branch that
      renders no button. **It applies to user-facing prose exactly as much as to comments** — rule 35.)
+   - **When two rows must agree, do they agree on the LAST step as well as the middle?** (rule 43. Task
+     10's handler wrote `RETRYING` on every retryable failure while the worker dead-letters the job at the
+     cap — so on attempt five the job read `DEAD` and the ledger read `RETRYING`, and `DEAD · 5/5`, card
+     3h's headline artifact, could never render for the commonest cause of a dead delivery. A mirror that
+     agrees on four steps out of five looks authoritative and is wrong exactly when someone is looking.)
    - **When copying an existing pattern, did you copy ALL of it?** (rule 39. Task 9's migration mirrored
      `Job_one_live_execute_per_approval` and left behind its companion CHECK constraint — without which
      the partial unique index it copied silently constrains nothing, because it indexes an expression and
@@ -182,6 +187,11 @@ and **Task 8's live verification, which is the largest single contributor to the
 earlier pass), from two endpoints that were both created and then deleted through the UI.
 Nothing is broken, but **reseed before anything that assumes pristine fixtures**, and prefer **delta**
 assertions over absolute audit counts in e2e (Task 14).
+
+**Task 10's verification left nothing behind either** — its endpoint (whose secret it deliberately
+corrupted to test that path) and all six of its deliveries were deleted, and the scratch scripts it used
+lived under the gitignored `backups/t10/` and are gone. **No process is left listening on 4999 or 5000**
+(verified).
 
 **There are still no `WebhookEndpoint` or `WebhookDelivery` rows, and that is deliberate.** Task 8's page
 can now create them, and its verification did — twice — but both endpoints were deleted again on the way
@@ -277,7 +287,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Seeded accounts** (all `@thebackroomop.com`, password `ChangeMe123!`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer).
 - **Seed contents:** 22 assets (all 8 statuses), 10 employees (Marites EMP-0042 holds 4 items against the only equipment policy → 1 gap; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **On the Phase 7 branch:** 25 assets (Dennis EMP-0090 holds `BR-LT-0166` / `BR-PH-0312` / `BR-HS-0510`), and every non-ACTIVE employee carries `offboardingAt = day(-3)`.
 
-## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–9 on `phase-8-admin`)
+## 4. What's DONE (Phases 1–7 on `main`; Phase 8 tasks 1–10 on `phase-8-admin`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -401,7 +411,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–9 of 14 on the unmerged `phase-8-admin`)**
+**Phase 8 — Admin workspace (MID-FLIGHT, tasks 1–10 of 14 on the unmerged `phase-8-admin`)**
 (`docs/superpowers/plans/2026-08-19-phase-8-admin.md`): the user rules and the two mutations behind
 them. **Task 1** — `src/lib/admin-users.ts` + tests: `ROLE_OPTIONS` / `ROLE_LABELS`, and the pure rules
 `lockReason` / `roleChange` / `disableChange`, with the permanent admin locked against **both** role and
@@ -450,8 +460,16 @@ jobs: no I/O, called inside the transaction that writes the domain change, writi
 branch. Plus the phase's one migration: `Job_one_live_deliver_per_delivery` **and**
 `Job_deliver_payload_shape`, the pair that together mean "at most one live job per delivery" while still
 letting Replay re-enqueue a terminal one.
-**Still nothing DELIVERS**: emitted jobs dead-letter on the worker's Phase-8 placeholder. Task 10 writes
-the real delivery loop, Task 12 the fixtures, Task 13 `/admin/webhooks/deliveries`.
+**Task 10** — `src/worker/deliver-webhook.ts`, the first outbound network request in this project.
+One attempt per job: signs the exact bytes it POSTs (`t=<seconds>,v1=<hex>` over `` `${t}.${body}` ``),
+**`redirect: "manual"`** so an approved receiver cannot bounce the signed body to a host nobody approved,
+`AbortSignal.timeout(10s)`, and a classification of permanent (3xx, 4xx except 408/429, disabled
+endpoint, undecryptable secret, missing row) versus retryable (everything else). Never reads a response
+body — status and statusText only, which is what keeps the SSRF capability a blind oracle. The worker's
+`tick()` still owns backoff and the cap; the handler's job is the ledger, and `retryStatus()` is what
+makes it agree with the job on the final attempt as well as the earlier ones.
+**The pipeline is COMPLETE.** Nothing READS it yet: Task 12 adds the fixtures, Task 13
+`/admin/webhooks/deliveries`.
 
 ### Conventions every later phase must follow
 
@@ -484,14 +502,15 @@ the real delivery loop, Task 12 the fixtures, Task 13 `/admin/webhooks/deliverie
 double any phase so far — and its two halves share no code. `/admin/*` already mapped to phase 8 in the
 pending-route table, so the split falls on a seam that already existed.
 
-- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 10–14 of 14 remain** on branch `phase-8-admin`.
+- **Phase 8 — the Admin workspace. MID-FLIGHT: tasks 11–14 of 14 remain** on branch `phase-8-admin`.
   `docs/superpowers/plans/2026-08-19-phase-8-admin.md` (14 tasks, 14 recorded scope decisions).
-  **Tasks 1–9 are done** — the user rules, the two user mutations, `/admin/users`, the flag allowlist,
-  `/admin/flags`, the webhook vocabulary, the endpoint actions, `/admin/webhooks`, and the emitter plus
-  the phase's one migration. See §6a. **Task 10 is next and is the consequential one**: it rewrites the
-  worker's `DELIVER_WEBHOOK` branch from a dead-letter placeholder into real HTTP delivery — the first
-  code in this project that makes an outbound network request. Task 12 then adds the seed fixtures
-  `/admin/webhooks/deliveries` needs to be reachable at all.
+  **Tasks 1–10 are done**, and with Task 10 the webhook pipeline is complete end to end: the user rules,
+  the two user mutations, `/admin/users`, the flag allowlist, `/admin/flags`, the webhook vocabulary, the
+  endpoint actions, `/admin/webhooks`, the emitter plus the phase's one migration, and the worker's real
+  signed HTTP delivery with backoff and dead-lettering. See §6a. **What remains is all read surfaces and
+  close-out**: Task 11 an Admin Home, Task 12 the seed fixtures without which
+  `/admin/webhooks/deliveries` cannot be reached, Task 13 that page plus replay, Task 14 the e2e spec
+  and the full battery.
   `/admin/users` (permanent admin locked against **both** role and disable), `/admin/flags` (an
   allowlist, with `m365_sso` held shut — see below), `/admin/webhooks` (signing secret encrypted at
   rest, shown once), `/admin/webhooks/deliveries` + dead-letter replay, **the webhook pipeline that has
@@ -559,7 +578,7 @@ has actually been built, and the invariants it established, is §6a.
 
 ---
 
-## 6a. Phase 8 mid-flight: what Tasks 1–9 established (READ BEFORE TASK 10)
+## 6a. Phase 8 mid-flight: what Tasks 1–10 established (READ BEFORE TASK 11)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break.
@@ -960,6 +979,48 @@ is the one to carry.**
     its first parameter is a transaction client, which is not serialisable, and being exported from a
     `"use server"` file would make it a network-reachable action (§6a rule 7's shape).
 
+**From Task 10 (`7ad0014`) — the security-critical task, and the one that proves a banner is not an
+audit. It had five pre-written amendments, every one of them correct, and still shipped with two more
+defects of the same family — one of them inside the branch the banner named as the model to copy.**
+
+43. **A mirror that agrees on four steps out of five is worse than no mirror, because the page looks
+    authoritative.** `deliverWebhook` was drafted to write `RETRYING` on every retryable failure. The
+    worker's `tick()` dead-letters the job when `job.attempts >= MAX_JOB_ATTEMPTS` — so on the fifth
+    failure the **job** goes `DEAD` and the **delivery row** still says `RETRYING`, `deliveryStage`
+    renders `RETRYING · 5/5`, and **card `3h`'s headline artifact `DEAD · 5/5` can only ever appear for a
+    PERMANENT failure**, never for a receiver that was simply down — which is the commonest way a
+    delivery dies. Scope decision #6 makes that row a mirror of the job; the fix (`retryStatus(attempts)`)
+    derives the terminal decision from the same value and the same constant the worker uses, so they
+    cannot drift. **The general question: when two rows must agree, check the LAST transition, not just
+    the steady state.** A test that stops after one attempt passes either way — this took driving one
+    delivery through all five.
+
+44. **A banner is what one reviewer found reading forward, not a completed audit — and its own examples
+    can be broken.** Task 10's banner said to treat a `decryptSecret` failure "as a `Permanent` in the
+    same shape as the disabled-endpoint branch." **The disabled-endpoint branch had the identical bug**:
+    it threw without marking the delivery row, leaving it at `PENDING`/`0` — which `deliveryStage`
+    renders as a healthy `QUEUED` — while the job went `DEAD` and the real reason sat in `Job.lastError`,
+    a column no admin page reads. One omission in two paths, with the banner pointing at the broken one
+    as the model. Fixed **structurally** rather than by remembering: a private
+    `permanent(id, attempts, reason)` marks `DEAD` and *then* throws, so a `Permanent` cannot be raised
+    without the ledger moving. When a review tells you to copy a sibling, read the sibling.
+
+45. **Printing a signature is not testing it.** Task 10's plan verified delivery by printing the
+    `x-backroom-signature` header and eyeballing the envelope. Task 6's review had already demonstrated
+    two mutations that produce perfectly well-formed headers and invalidate every signature in existence
+    (`Buffer.from(secret, "base64url")` as the HMAC key, and `.update(body, "latin1")`). **The receiver
+    has to RECOMPUTE the HMAC**, which means the test needs the plaintext secret — obtainable without
+    scraping the shown-once banner by creating the endpoint from a script that calls the same
+    `newSecret` / `encryptSecret(…, secretAad(id))` pair `createEndpoint` does. The check that proved the
+    SSRF fix is the same shape: a **second listener on another port that must stay silent**, rather than
+    an assertion about the first one.
+
+46. **`src/worker/**` has no unit coverage at all and cannot easily get any** (§6a rule 26 said this for
+    `index.ts`; it is now true of a second file). `deliver-webhook.ts` is `fetch` plus Prisma with no pure
+    core worth extracting, so `npm run worker:once` against a real receiver is its ONLY coverage. Anything
+    that changes it needs the seven-case table in the plan's Task 10 Step 4 re-run — a green
+    `npm run test` says nothing whatsoever about this file.
+
 ---
 
 ## 7. Recurring gotchas that have cost real time
@@ -1121,6 +1182,18 @@ is the one to carry.**
   be deleted through the UI, only disabled. Correct per the rule (the ledger is the record of what was
   sent), but there is no "purge this endpoint's history" path anywhere, and Task 13 is where one would
   naturally live if it is ever wanted.
+- **Phase 8, Task 10 (recorded, judged out of scope):** **there is no `secretVersion` column and no
+  key-id header**, so a receiver cannot support an overlap window during a rotation — rotating is a hard
+  cutover, which is why `ROTATION_WARNING` exists and why `/admin/webhooks` states it before the click.
+  An overlap scheme (nullable `secretPrev` + a dual-signature header) was declined deliberately: this
+  phase has one migration. **`lastError` for a network failure is undici's terse `"fetch failed"`** with
+  no cause chain, so "DNS did not resolve" and "connection refused" are indistinguishable on the
+  deliveries page; surfacing `err.cause.code` would fix it and was left alone because the retry behaviour
+  is identical either way. **The delivery is signed with the secret decrypted AT ATTEMPT TIME**, which is
+  what makes rotation affect in-flight deliveries — deliberate (a replay after rotation must use the live
+  secret), but it does mean a delivery's signature is not reproducible from the row afterwards.
+  **IPv6 literals are not checked by `urlSchema`** (§6a rule 33) and `redirect: "manual"` does not change
+  that: it closes the redirect hop, not the first hop.
 - **`/bootstrap`'s copy under-states the lock**: `src/app/(auth)/bootstrap/page.tsx` promises the
   permanent admin's *role* can never be changed, but Phase 8 widened that to access as well. Worth
   aligning when Task 3 lands. The corollary belongs here too — a bootstrapped permanent admin's account

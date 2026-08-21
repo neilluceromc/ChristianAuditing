@@ -4785,65 +4785,81 @@ same reason Task 5 added none. Its verification is live, above.
 
 ### Task 10: The worker delivers for real
 
-> ### REQUIRED AMENDMENT — the signature changed in Task 6, and one line below is dead code.
+> ### AMENDED — this section is the code as SHIPPED (`7ad0014`). The banner's five items were all real;
+> **two more of the same kind were found while implementing them**, and both are in the "ledger mirrors
+> the job" family this task's own intro names.
 >
-> **`signPayload(body, secret, at)` now takes the signing instant and returns `t=<seconds>,v1=<hex>`.**
-> Sign the **exact bytes you POST** and send that whole string as `SIGNATURE_HEADER`. Do not re-serialise
-> the envelope between signing and sending, and pass the same `Date` you use for the attempt.
+> #### The five the reviewers wrote in advance, all confirmed
 >
-> **`MAX_ATTEMPTS` no longer exists in `src/worker/index.ts`** — it imports `MAX_JOB_ATTEMPTS` from
-> `src/lib/jobs.ts`, which is now the single literal. Don't reintroduce a local one.
+> **1. `redirect: "manual"`, and a 3xx is PERMANENT.** `fetch` defaults to `follow`, so a 307/308 from an
+> approved receiver forwards the method, the body **and the signature header** to any host that receiver
+> names — one the admin never approved and which Task 7's `urlSchema` never got to inspect, because it
+> can only see the first hop. This is the real SSRF hole. Neither Stripe nor GitHub follows webhook
+> redirects. **Verified with a receiver that 307s to a second local port: that port logged nothing.**
+> A 3xx is also terminal — retrying cannot make a redirect resolve — and its `lastError` has to *say so*,
+> because "307 Temporary Redirect" reads to an operator as exactly the kind of transient thing a retry
+> fixes.
 >
-> **Task 9's `if (!parseEvents(endpoint.events).includes(event)) continue;` is provably dead** and its
-> comment claims a guarantee it does not add: the SQL `events: { has: event }` already matched the
-> literal, and `event` is typed `WebhookEvent`, so `parseEvents` cannot drop it. Harmless, but delete it
-> or fix the comment rather than shipping a filter that reads as a safety net and isn't one.
+> **2. Response bodies never enter `lastError`** — status and statusText only, which is what keeps Task
+> 7's accepted-capability argument true by making this a blind reachability oracle rather than a way to
+> read arbitrary internal HTTP responses back out of an admin page. The shipped code also **cancels** the
+> response body, which releases the socket and makes the never-read property structural rather than
+> incidental. There is a comment telling the next reader not to "improve" it.
 >
-> **Three more, from Task 7's review. The first is the one with teeth:**
+> **3. A `decryptSecret` failure marks the row `DEAD` before throwing.** As drafted the decrypt happened
+> before any `mark()`, and the worker's catch updates **`Job` only** — so the row sat at `PENDING`/`0`
+> forever, `deliveryStage` rendered it as a healthy `QUEUED`, and the real error was buried in
+> `Job.lastError`, a column no admin page reads.
 >
-> **`fetch` defaults to `redirect: "follow"`.** A 307/308 from an admin-approved receiver forwards the
-> method, the body **and the signature header** to any host that receiver names — one the admin never
-> approved and cannot see. Neither Stripe nor GitHub follows webhook redirects. Set
-> **`redirect: "manual"`** and treat a 3xx as a permanent failure. This is the real SSRF hole; the
-> `urlSchema` guard in Task 7 cannot see past the first hop.
+> **4. `secretAad(endpoint.id)`**, never a bare id or a re-derived string (Task 7 pinned it with a literal
+> test for this reason). **5. `MAX_JOB_ATTEMPTS`**, not a reintroduced local `MAX_ATTEMPTS`.
 >
-> **Response bodies must never enter `lastError`** — status and statusText only, which is what keeps the
-> accepted-capability argument in Task 7's amendment (E) true by making this a blind oracle rather than a
-> data read. Say so in a comment so it isn't "improved" later.
+> #### The two the banner did not have
 >
-> **A `decryptSecret` failure must mark the `WebhookDelivery` row `DEAD` with the reason, before
-> throwing.** As drafted the decrypt happens before the first `mark()`, and the worker's catch updates
-> **`Job` only** — so a row whose secret can't be decrypted sits at `PENDING`/`attempts: 0` forever,
-> `deliveryStage` renders it as a healthy `QUEUED`, and the real error is buried in `Job.lastError`, which
-> no admin page reads. Treat it as a `Permanent` in the same shape as the disabled-endpoint branch.
+> **6. A retryable failure on the LAST attempt has to write `DEAD`, not `RETRYING`.** This is the one that
+> matters. The worker's `tick()` dead-letters the job when `job.attempts >= MAX_JOB_ATTEMPTS`, but the
+> drafted handler always wrote `RETRYING` on a retryable failure — so on the fifth failure the **job** goes
+> `DEAD` while the **delivery row** still reads `RETRYING`. `deliveryStage` then renders `RETRYING · 5/5`,
+> and **card `3h`'s headline artifact, `DEAD · 5/5`, never appears for the single commonest cause of a
+> dead delivery: a receiver that was simply down.** Only permanent failures would have produced it. Shipped
+> as `retryStatus(attempts)`, which mirrors `tick()`'s decision from the same value and the same constant.
+> Verified by driving one delivery through all five attempts against a 500: `RETRYING` 1–4 with `attempts`
+> in lockstep with the job, then `DEAD` in **both** at 5, and `deliveryStage` returning `DEAD · 5/5`.
 >
-> And call **`secretAad(endpoint.id)`** — not `endpoint.id`, not a re-derived string. Task 7 pinned that
-> with a literal test precisely because getting it wrong breaks every pre-existing secret while leaving
-> newly created ones working.
+> **7. The disabled-endpoint branch had the exact bug the banner's item 3 describes.** Item 3 said to treat
+> a decrypt failure "as a `Permanent` in the same shape as the disabled-endpoint branch" — but that branch
+> threw **without marking the row**, so it left the ledger at `PENDING` too. Two paths, one omission, and
+> the banner pointed at the broken one as the model. Fixed structurally rather than by remembering: a
+> private `permanent(id, attempts, reason)` helper marks `DEAD` *and then* throws, so a `Permanent` cannot
+> be raised without the ledger moving. The only path that throws `Permanent` directly is the one where the
+> row does not exist to mark.
 
 `src/worker/index.ts` currently answers every `DELIVER_WEBHOOK` job with
 `status: "DEAD", lastError: "webhook delivery ships in Phase 8"`. This is that phase.
 
 The delivery handler owns one subtle obligation: **the `WebhookDelivery` row is a mirror of the job,
 not a second retry loop** (scope decision #6). The worker's existing `catch` already does backoff and
-dead-letters at `MAX_ATTEMPTS`; the handler's job is to make the ledger say the same thing.
+dead-letters at `MAX_JOB_ATTEMPTS`; the handler's job is to make the ledger say the same thing — which,
+per amendments 6 and 7, is harder than it sounds and is where both new defects lived.
 
 **Files:**
 - Create: `src/worker/deliver-webhook.ts`
 - Modify: `src/worker/index.ts`
 
-- [ ] **Step 1: Write the delivery handler**
+- [x] **Step 1: Write the delivery handler**
 
 Create `src/worker/deliver-webhook.ts`:
 
 ```ts
 import { prisma } from "../server/db/client";
 import { decryptSecret } from "../server/crypto";
+import { MAX_JOB_ATTEMPTS } from "../lib/jobs";
+import { SIGNATURE_HEADER, webhookEnvelope } from "../lib/webhooks";
 // secretAad and the signer both live in sign.ts precisely so the worker never
-// has to import webhook-actions.ts, which carries "use server".
-import { SIGNATURE_HEADER } from "../lib/webhooks"; // AMENDED by Task 8: moved out of
-import { secretAad, signPayload } from "../server/webhooks/sign"; // sign.ts, which imports node:crypto
-import { webhookEnvelope } from "../lib/webhooks";
+// has to import webhook-actions.ts, which carries "use server". SIGNATURE_HEADER
+// is in lib/webhooks.ts instead, because /admin/webhooks names the same header
+// in a client component and sign.ts imports node:crypto (Task 8).
+import { secretAad, signPayload } from "../server/webhooks/sign";
 
 const TIMEOUT_MS = 10_000;
 
@@ -4851,37 +4867,87 @@ const TIMEOUT_MS = 10_000;
 class Permanent extends Error {}
 
 /**
+ * The ledger's status for a RETRYABLE failure, mirroring the decision
+ * `tick()` is about to make about the job from the same `attempts` value and
+ * the same constant (`src/worker/index.ts`: `job.attempts >= MAX_JOB_ATTEMPTS`).
+ *
+ * This exists because the obvious version — always write RETRYING and let the
+ * worker worry about the cap — puts the two out of step on the one attempt
+ * that matters most. On the fifth failure the job goes DEAD while the delivery
+ * row still reads RETRYING, so `deliveryStage` renders `RETRYING · 5/5` and
+ * card 3h's headline artifact, `DEAD · 5/5`, never appears for the commonest
+ * cause of a dead delivery: a receiver that was simply down. Scope decision #6
+ * makes this row a MIRROR of the job; a mirror that disagrees on the terminal
+ * state is worse than no mirror, because the page looks authoritative.
+ */
+function retryStatus(attempts: number): "RETRYING" | "DEAD" {
+  return attempts >= MAX_JOB_ATTEMPTS ? "DEAD" : "RETRYING";
+}
+
+/**
  * One attempt. Throwing hands control back to the worker's existing catch, which
- * owns backoff and the dead-letter at MAX_ATTEMPTS — so this function must NOT
+ * owns backoff and the dead-letter at MAX_JOB_ATTEMPTS — so this function must NOT
  * implement its own retry. What it does own is keeping WebhookDelivery in step
  * with the job, which is what makes the page's `DEAD · 5/5` chip honest.
  *
  * `attempts` is the job's own count, passed in, so the two can never diverge.
+ *
+ * **Why the writes below need no optimistic guard**, unlike every mutation in
+ * `src/server`: the job lease IS the lock. `leaseNext` claims one job with
+ * `FOR UPDATE SKIP LOCKED`, and `Job_one_live_deliver_per_delivery` (Task 9's
+ * migration) makes it impossible for a second live job to exist for this
+ * delivery — so there is exactly one writer of this row at a time. That is a
+ * load-bearing dependency on a raw-SQL index with no schema.prisma
+ * counterpart: if it is ever dropped, these updates need guards.
  */
 export async function deliverWebhook(deliveryId: string, attempts: number): Promise<void> {
   const delivery = await prisma.webhookDelivery.findUnique({
     where: { id: deliveryId },
     include: { endpoint: true },
   });
-  // A delivery whose row is gone is not a failure to retry — nothing to send.
+  // A delivery whose row is gone is not a failure to retry — nothing to send,
+  // and nothing to mark either, which is why this one throws directly instead
+  // of going through `permanent()`.
   if (!delivery) throw new Permanent(`WebhookDelivery ${deliveryId} no longer exists`);
   if (delivery.status === "DELIVERED") return;
   if (!delivery.endpoint.active) {
-    throw new Permanent(`Endpoint ${delivery.endpoint.url} is disabled`);
+    return permanent(delivery.id, attempts, `Endpoint ${delivery.endpoint.url} is disabled`);
   }
 
   const body = JSON.stringify(
-    webhookEnvelope(
-      delivery.id,
-      delivery.event,
-      delivery.createdAt,
-      (delivery.payload ?? {}) as Record<string, unknown>,
-    ),
+    webhookEnvelope({
+      id: delivery.id,
+      event: delivery.event,
+      occurredAt: delivery.createdAt,
+      data: (delivery.payload ?? {}) as Record<string, unknown>,
+    }),
   );
-  // Sign the exact bytes we send. Re-serialising on either side is how
-  // signatures start disagreeing over key order.
-  const secret = decryptSecret(delivery.endpoint.secret, secretAad(delivery.endpoint.id));
-  const signature = signPayload(body, secret);
+
+  // One instant for the whole attempt: it goes into the signature (the signed
+  // string is `${t}.${body}`, so a receiver's tolerance window is checked
+  // against this) and, on success, into deliveredAt. Signing at a different
+  // moment than the one we record is how a log stops explaining a rejection.
+  const at = new Date();
+
+  let secret: string;
+  try {
+    // secretAad(endpoint.id), never a bare id or a re-derived string: Task 7
+    // pinned that with a literal test because getting it wrong leaves newly
+    // created secrets working while every pre-existing one silently fails.
+    secret = decryptSecret(delivery.endpoint.secret, secretAad(delivery.endpoint.id));
+  } catch (err) {
+    // A secret this build cannot decrypt will not become decryptable on
+    // attempt five. Marking the row FIRST is the whole point: the worker's
+    // catch updates the Job only, so a throw from here without this leaves the
+    // delivery at PENDING/0 forever, which `deliveryStage` renders as a
+    // perfectly healthy QUEUED while the real error sits in `Job.lastError` —
+    // a column no admin page reads.
+    return permanent(
+      delivery.id,
+      attempts,
+      `Signing secret could not be decrypted: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   let response: Response;
   try {
@@ -4889,33 +4955,95 @@ export async function deliverWebhook(deliveryId: string, attempts: number): Prom
       method: "POST",
       headers: {
         "content-type": "application/json",
-        [SIGNATURE_HEADER]: signature,
+        // Sign the exact bytes we send. Re-serialising the envelope on either
+        // side of this is how signatures start disagreeing over key order.
+        [SIGNATURE_HEADER]: signPayload(body, secret, at),
         "user-agent": "backroom-inventory/1",
       },
       body,
+      // NOT the default "follow". A 307/308 from an approved receiver would
+      // otherwise forward the method, the body AND the signature header to any
+      // host that receiver names — one the admin never approved and cannot
+      // see, and one Task 7's urlSchema never got to inspect, since it can only
+      // check the first hop. Neither Stripe nor GitHub follows webhook
+      // redirects. This is the difference between the accepted capability
+      // (scope decision #4: an admin may point this at hosts it can reach) and
+      // an open relay (anyone who controls a receiver may redirect it
+      // anywhere).
+      redirect: "manual",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
     // Connection refused, DNS failure, timeout — all worth retrying.
-    await mark(delivery.id, "RETRYING", attempts, err instanceof Error ? err.message : String(err));
+    await mark(delivery.id, retryStatus(attempts), attempts, err instanceof Error ? err.message : String(err));
     throw err;
   }
 
+  // The body is never read, and that is a deliberate security property, not an
+  // oversight: it keeps this a blind reachability oracle rather than a way for
+  // an admin to read arbitrary internal HTTP responses back out of
+  // `lastError`, which is what Task 7's accepted-capability argument rests on.
+  // Only status and statusText are ever recorded. Cancelling releases the
+  // socket that would otherwise be held until GC. Do not "improve" this by
+  // capturing response text for diagnostics.
+  await response.body?.cancel().catch(() => {});
+
   if (!response.ok) {
-    const detail = `${response.status} ${response.statusText}`.trim();
-    // 4xx (except 408/429) means the receiver understood and refused. Retrying
-    // a 404 or a 401 five times just delays the same answer.
-    const permanent = response.status >= 400 && response.status < 500
-      && response.status !== 408 && response.status !== 429;
-    await mark(delivery.id, permanent ? "DEAD" : "RETRYING", attempts, detail);
-    if (permanent) throw new Permanent(detail);
-    throw new Error(detail);
+    const permanentFailure = isPermanentStatus(response.status);
+    await mark(
+      delivery.id,
+      permanentFailure ? "DEAD" : retryStatus(attempts),
+      attempts,
+      describe(response.status, response.statusText),
+    );
+    if (permanentFailure) throw new Permanent(describe(response.status, response.statusText));
+    throw new Error(describe(response.status, response.statusText));
   }
 
   await prisma.webhookDelivery.update({
     where: { id: delivery.id },
-    data: { status: "DELIVERED", attempts, lastError: null, deliveredAt: new Date(), nextAttemptAt: null },
+    data: {
+      status: "DELIVERED",
+      attempts,
+      lastError: null,
+      deliveredAt: at,
+      // Cleared rather than left: Task 12's seed gives a RETRYING fixture a
+      // real nextAttemptAt, so a row that later lands must not keep advertising
+      // an attempt that will never happen.
+      nextAttemptAt: null,
+    },
   });
+}
+
+/**
+ * A 3xx is permanent because we do not follow redirects (see the fetch call):
+ * retrying cannot make a redirect resolve, so the receiver has to be
+ * reconfigured. A 4xx other than 408/429 means the receiver understood and
+ * refused — retrying a 404 or a 401 five times just delays the same answer.
+ * Everything else (5xx, 408, 429) is the receiver having a bad moment.
+ */
+function isPermanentStatus(status: number): boolean {
+  if (status >= 300 && status < 400) return true;
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
+ * Status and statusText ONLY — see the comment at the `body.cancel()` above.
+ * A 3xx says why it is terminal, because "307 Temporary Redirect" otherwise
+ * reads to an operator as exactly the kind of transient thing a retry fixes.
+ */
+function describe(status: number, statusText: string): string {
+  const base = `${status} ${statusText}`.trim();
+  if (status >= 300 && status < 400) {
+    return `${base} — redirects are not followed; point the endpoint at its final URL`;
+  }
+  return base;
+}
+
+/** Mark the ledger DEAD, then throw. Pairing them is what stops a Permanent from leaving the row stale. */
+async function permanent(id: string, attempts: number, reason: string): Promise<never> {
+  await mark(id, "DEAD", attempts, reason);
+  throw new Permanent(reason);
 }
 
 async function mark(
@@ -4935,20 +5063,19 @@ export { Permanent as PermanentDeliveryError };
 
 `nextAttemptAt` is deliberately left alone on a failure: the job's `runAt` is the real schedule, and a
 second copy of it on the delivery row is exactly the drift scope decision #6 exists to prevent. Task 13
-reads the job when it wants to show "next attempt".
+reads the job when it wants to show "next attempt". It is *cleared* on success, because Task 12's seed
+gives a `RETRYING` fixture a real one.
 
-- [ ] **Step 2: Replace the dead-letter branch**
+- [x] **Step 2: Replace the dead-letter branch**
 
-In `src/worker/index.ts`, add the import:
-
-```ts
-import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";
-```
-
-Replace the whole `if (job.type === "DELIVER_WEBHOOK") { … }` block in `handle()` with:
+In `src/worker/index.ts`, add `import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";`
+and replace the whole `if (job.type === "DELIVER_WEBHOOK") { … }` block in `handle()` with:
 
 ```ts
   if (job.type === "DELIVER_WEBHOOK") {
+    // Job_deliver_payload_shape (Task 9's migration) makes a job without this
+    // key impossible to insert, so this throw is a belt-and-braces check on a
+    // row that predates the constraint — not the guard the invariant rests on.
     const deliveryId = String((job.payload as { deliveryId?: unknown } | null)?.deliveryId ?? "");
     if (!deliveryId) throw new Error("DELIVER_WEBHOOK job has no deliveryId");
     await deliverWebhook(deliveryId, job.attempts);
@@ -4956,61 +5083,63 @@ Replace the whole `if (job.type === "DELIVER_WEBHOOK") { … }` block in `handle
   }
 ```
 
-- [ ] **Step 3: Let a permanent failure skip the retry budget**
+- [x] **Step 3: Let a permanent failure skip the retry budget**
 
-`tick()`'s catch currently dead-letters only when `job.attempts >= MAX_ATTEMPTS`. A `PermanentDeliveryError`
-should not wait for five attempts. In that `catch`, change:
-
-```ts
-    const dead = job.attempts >= MAX_ATTEMPTS;
-```
-
-to:
+In `tick()`'s catch, `const dead = job.attempts >= MAX_JOB_ATTEMPTS;` becomes:
 
 ```ts
-    // A 404, a disabled endpoint or a vanished delivery row cannot succeed on
-    // attempt five either — dead-letter it now rather than spending the budget
-    // to reach the same answer four failures later.
-    const dead = job.attempts >= MAX_ATTEMPTS || err instanceof PermanentDeliveryError;
+    // A 404, a disabled endpoint, an undecryptable secret or a vanished
+    // delivery row cannot succeed on attempt five either — dead-letter it now
+    // rather than spending the budget to reach the same answer four failures
+    // later. The delivery row is already DEAD in that case (deliver-webhook.ts
+    // marks it before throwing, which is what `permanent()` exists to
+    // guarantee), so the ledger and the job agree without a second write.
+    const dead = job.attempts >= MAX_JOB_ATTEMPTS || err instanceof PermanentDeliveryError;
 ```
 
-The delivery row is already `DEAD` in that case (the handler marked it before throwing), so the ledger
-and the job agree without a second write.
+- [x] **Step 4: Prove it end to end against a real receiver**
 
-- [ ] **Step 4: Prove it end to end against a real receiver**
+Nothing else in the suite POSTs anywhere, so this step is the only coverage this file has. **Print the
+signature and hope is not enough — the receiver must RECOMPUTE the HMAC**, or the test passes for a
+signer that produces well-formed garbage (Task 6's review demonstrated two such mutations). The throwaway
+receiver used here listens on 4999, verifies `t=…,v1=…` against the plaintext secret, and **also listens
+on 5000 as a redirect target that must stay silent.**
 
-The point of this step is that nothing else in the suite POSTs anywhere. Run a throwaway listener,
-create an endpoint through the UI in Task 8, then:
+Getting the plaintext secret without scraping the shown-once banner: create the endpoint from a script
+that calls the same `newSecret` / `encryptSecret(…, secretAad(id))` pair `createEndpoint` does, then emit
+through `emitWebhook` inside a real transaction. Keep such scripts under the gitignored `backups/` and
+delete them afterwards.
 
-```bash
-node -e "require('node:http').createServer((q,s)=>{let b='';q.on('data',c=>b+=c);q.on('end',()=>{console.log(q.headers['x-backroom-signature']);console.log(b);s.writeHead(200);s.end('ok')})}).listen(4999,()=>console.log('listening on 4999'))"
-```
+All seven cases were run:
 
-In a second shell, cause an `approval.executed` (approve any pending approval in `/approvals`), then:
+| case | expected | ledger | job |
+|---|---|---|---|
+| 200 | delivered, signature valid | `DELIVERED`, attempts 1, `deliveredAt` set | `DONE` |
+| **307 → :5000** | **:5000 never reached** | `DEAD` 1/5, "redirects are not followed" | `DEAD` |
+| 500 ×5 | mirror at every step | `RETRYING` 1–4 then **`DEAD` 5/5** | `PENDING` ×4, `DEAD` |
+| 404 | permanent, not 5 attempts | `DEAD` 1/5, "404 Not Found" | `DEAD` |
+| connection refused | retryable | `RETRYING`, "fetch failed" | `PENDING` |
+| endpoint disabled mid-flight | row marked, not just the job | `DEAD`, "…is disabled" | `DEAD` |
+| secret corrupted | row marked, real reason readable | `DEAD`, "could not be decrypted…" | `DEAD` |
 
-```bash
-npm run worker:once
-```
+Then confirm the chips the page will actually render — `deliveryStage(status, attempts)` gave
+`DELIVERED`, `DEAD · 1/5` and `DEAD · 5/5`. The `5/5` is the one that would have silently read
+`RETRYING · 5/5` before amendment 6.
 
-Expected: the listener prints an `sha256=…` signature and a single-line envelope with `id`, `event`,
-`occurredAt` and `data` — and nothing else. Then confirm the ledger agrees:
+**Delete the endpoints and deliveries afterwards.** The corrupted-secret case leaves a row that cannot
+deliver anything, and Task 12 seeds its own fixtures.
 
-```bash
-docker exec inventory-db-1 psql -U inventory -d inventory -c "SELECT status, attempts, \"deliveredAt\" IS NOT NULL AS landed FROM \"WebhookDelivery\";"
-```
-
-Expected: `DELIVERED | 1 | t`.
-
-Now point the endpoint at `http://localhost:4999/nope` with the listener stopped and repeat: the job
-retries, the delivery reads `RETRYING`, and `attempts` on the row matches the job's.
-
-- [ ] **Step 5: Typecheck, lint, commit**
+- [x] **Step 5: Typecheck, lint, commit**
 
 ```bash
 npx tsc --noEmit && npm run lint && npm run test
 git add src/worker/deliver-webhook.ts src/worker/index.ts
 git commit -m "feat(webhooks): the worker actually delivers, and the ledger mirrors the job"
 ```
+
+No unit tests: this file is `fetch` plus Prisma with no pure core worth extracting, and
+`src/worker/**` is reached by nothing in the unit suite (§6a rule 26). `npm run worker:once` against a
+real receiver is its only coverage, which is why Step 4 is as detailed as it is.
 
 ---
 
