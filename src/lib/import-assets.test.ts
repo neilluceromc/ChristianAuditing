@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { matchHeaders, planAssetRows, type AssetRefs, type ImportOptions } from "./import-assets";
+import {
+  cellText, matchHeaders, planAssetRows, refKey, tagKey, type AssetRefs, type ImportOptions,
+} from "./import-assets";
 
 // The real 14-column export header (`ASSET_EXPORT_COLUMNS`, export-columns.ts)
 // — not a 9-column subset. Task 7 shipped with a 9-column test fixture that
@@ -76,6 +78,39 @@ const OPTS: ImportOptions = {
   keepCurrentLifecycle: false,
   importUnheldAsSpare: false,
 };
+
+/**
+ * The three shared key rules. Each is used on BOTH sides of a lookup — the map
+ * built from the database and the sheet value that consults it — so a change
+ * to any of them that is not symmetric turns a match into a silent CREATE and
+ * a P2002 at write time. They were unpinned as of round 2: weakening
+ * `cellText`'s trim, or `refKey`'s collapse, left the whole suite green.
+ */
+describe("the shared lookup keys", () => {
+  it("cellText trims, and reads a blank cell and a non-string cell alike", () => {
+    expect(cellText("  BR-LT-0148  ")).toBe("BR-LT-0148");
+    expect(cellText(null)).toBe("");
+    expect(cellText(undefined)).toBe("");
+    expect(cellText("   ")).toBe("");
+    expect(cellText(12345)).toBe("12345");
+  });
+
+  it("refKey lower-cases and collapses internal whitespace, including a non-breaking space", () => {
+    expect(refKey("  Dell  Latitude ")).toBe("dell latitude");
+    // Written as the ESCAPE, not a literal U+00A0: a raw NBSP in source is
+    // invisible to a reader and one formatter away from becoming a plain space,
+    // which would silently turn this into a duplicate of the line above.
+    expect(refKey("Ramon\u00A0Cruz")).toBe("ramon cruz");
+    expect(refKey("RAMON CRUZ")).toBe("ramon cruz");
+  });
+
+  // Upper-case, because Postgres unique is case-sensitive and a missed match
+  // is a second record for one physical machine rather than an error.
+  it("tagKey trims and upper-cases", () => {
+    expect(tagKey(" br-lt-0148 ")).toBe("BR-LT-0148");
+    expect(tagKey(null)).toBe("");
+  });
+});
 
 describe("matchHeaders", () => {
   it("matches case- and space-insensitively, so '  asset tag ' still maps", () => {
@@ -456,6 +491,22 @@ describe("planAssetRows", () => {
   it("omits vendorId from an update patch when the vendor was dropped, instead of nulling out the stored vendor (NC-1)", () => {
     const row = [cells({ tag: "BR-LT-0148", model: "Dell XPS", category: "Laptops", vendor: "Nobody Corp" })];
     const dropped = plan(row, { ...OPTS, dropUnknownVendor: true });
+    const data = dropped.rows[0].kind === "update" ? dropped.rows[0].data : null;
+    expect(data).not.toBeNull();
+    expect(data && "vendorId" in data).toBe(false);
+  });
+
+  // The SAME omission, reached through the collision drop rather than the
+  // unknown drop. There are two `vendorDropped = true` assignments, and the
+  // test above only pins one of them: the collision path's was reachable only
+  // by a CREATE row, where `vendorId` is null whether the flag was set or not,
+  // so flipping it to `false` left the whole suite green. This is the
+  // destructive path — without the flag the patch writes `null` and erases the
+  // stored vendor on every matched row of a re-upload.
+  it("omits vendorId from an update patch when the vendor was dropped for a NAME COLLISION too", () => {
+    const refs: AssetRefs = { ...REFS, vendors: new Map([...REFS.vendors, ["dell corp", null]]) };
+    const row = [cells({ tag: "BR-LT-0148", model: "Dell XPS", category: "Laptops", vendor: "Dell Corp" })];
+    const dropped = planAssetRows(matchHeaders(HEADER), row, refs, { ...OPTS, dropUnknownVendor: true });
     const data = dropped.rows[0].kind === "update" ? dropped.rows[0].data : null;
     expect(data).not.toBeNull();
     expect(data && "vendorId" in data).toBe(false);

@@ -27,13 +27,18 @@ describe("rateDecision", () => {
   });
 
   // R-2 (round 2): the read-only dry-run stage gets its OWN kind, at the
-  // mutation budget (60/min) rather than the write's 10 — 9 events must
-  // still be allowed (proving it is not still sharing "import"'s 10 limit)
-  // and it must not confuse with "mutation" either, since they're stored
-  // under different `RateEvent.kind` strings.
+  // mutation budget (60/min) rather than the write's 10.
+  //
+  // The count here has to sit STRICTLY BETWEEN the two budgets or the test
+  // proves nothing — the first version used 9 and 60, and 9 is allowed under
+  // both 10 and 60 while 60 is refused under both, so it passed identically
+  // with `import_plan` set to 10. That is §6a rule 67's shape, in a test
+  // written to prove a budget: 30 is allowed at 60 and refused at 10, so it
+  // can only pass under the budget it names.
   it("import_plan kind uses its own 60/min budget, not the write's 10/min", () => {
-    const nineRecent = Array.from({ length: 9 }, (_, i) => secondsAgo(i));
-    expect(rateDecision(nineRecent, "import_plan", now).allowed).toBe(true);
+    const thirtyRecent = Array.from({ length: 30 }, (_, i) => secondsAgo(i));
+    expect(rateDecision(thirtyRecent, "import_plan", now).allowed).toBe(true);
+    expect(rateDecision(thirtyRecent, "import", now).allowed).toBe(false);
     const sixtyRecent = Array.from({ length: 60 }, (_, i) => secondsAgo(i * 0.5));
     expect(rateDecision(sixtyRecent, "import_plan", now).allowed).toBe(false);
   });

@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db/client";
-import { refKey } from "@/lib/import-assets";
+import { refKey, tagKey } from "@/lib/import-assets";
 import type { AssetRecordRef, AssetRefs, EmployeeRef } from "@/lib/import-assets";
 import type { EmploymentStatus } from "@prisma/client";
 
@@ -160,12 +160,16 @@ export function buildAssetRefs(
  * The tag and serial lookups are scoped to what the FILE mentions: importing
  * 50 rows must not pull 20,000 assets into memory to discover none of them
  * collide. Reference tables (categories/types/employees/vendors) are small
- * and fetched whole, each ordered by name (R-1, round 2) — determinism, not
- * correctness, once `buildAssetRefs`'s two-pass count is in place, but cheap
- * and asked-for regardless: without it, the SAME sheet's dry run and T10's
- * re-validation could each see a same-name pair in a different heap order,
- * which is exactly the kind of divergence scope decision 3 promises can't
- * happen between a verdict and the write it authorises.
+ * and fetched whole, each ordered by name.
+ *
+ * That `orderBy` is deliberately NOT load-bearing, and the comment here used
+ * to claim it was. R-1 (round 2) prescribed the ordering AND the collision
+ * guard as if both were needed; the guard subsumes it. `buildAssetRefs`
+ * counts keys before it assigns, so a key matching one row yields that row's
+ * id and a key matching several yields `null` — the same answer in any
+ * iteration order, which is why removing all four `orderBy` clauses leaves
+ * the suite green. It stays because it costs nothing at these row counts and
+ * makes debugging output stable, not because correctness rests on it.
  *
  * Tags are UPPER-CASED before the `in` query (and before they key `byTag`):
  * `createSchema`'s tag is `.toUpperCase().regex(/^BR-[A-Z]{2}-\d{4}$/)`, every
@@ -180,7 +184,7 @@ export function buildAssetRefs(
  * here either.
  */
 export async function resolveAssetRefs(tags: string[], serials: string[]): Promise<AssetRefs> {
-  const upperTags = tags.map((t) => t.trim().toUpperCase());
+  const upperTags = tags.map(tagKey);
 
   const [categories, types, employees, vendors, byTagRows, bySerialRows] = await Promise.all([
     prisma.assetCategory.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),

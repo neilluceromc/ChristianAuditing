@@ -256,7 +256,8 @@ const SPECS: Record<BlockCause, BlockSpec> = {
     explain:
       "Two categories in this system share this name, differing only in letter case — the database " +
       "allows that today, but this import can't tell which one you mean. An admin needs to rename one " +
-      "of them before rows naming this category can resolve.",
+      "of them — to something differing by more than letter case, or the rename lands on this same " +
+      "block — before rows naming this category can resolve.",
     fix: { kind: "link", label: "Rename a category", href: "/admin/asset-categories" },
   },
   "duplicate-type-name": {
@@ -264,7 +265,8 @@ const SPECS: Record<BlockCause, BlockSpec> = {
     explain:
       "Two types under this row's category share this name, differing only in letter case — the " +
       "database allows that today, but this import can't tell which one you mean. An admin needs to " +
-      "rename one of them before rows naming this type can resolve.",
+      "rename one of them — to something differing by more than letter case, or the rename lands on " +
+      "this same block — before rows naming this type can resolve.",
     fix: { kind: "link", label: "Rename a type", href: "/admin/asset-types" },
   },
   "duplicate-vendor-name": {

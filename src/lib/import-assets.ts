@@ -293,6 +293,24 @@ export function cellText(raw: unknown): string {
   return isBlank(raw) ? "" : String(raw).trim();
 }
 
+/**
+ * The tag lookup key, shared the same way and for the same reason. A tag is
+ * trimmed and UPPER-CASED because `createSchema` stores it that way
+ * (`actions.ts:147`, `.trim().toUpperCase()`) and every tag in the database
+ * is upper-case — while Postgres's unique index is case-sensitive, so a
+ * lower-cased sheet tag that misses the map does not error, it plans a CREATE
+ * and produces a SECOND record for one physical machine.
+ *
+ * This existed as two hand-written copies — one keying the `IN` query in
+ * `resolve.ts`, one keying the lookup in `planAssetRows` — which is the exact
+ * hazard `refKey` and `cellText` were extracted to remove, one level down.
+ * Two copies of a key rule agree until the day they don't, and the failure is
+ * silent on both sides.
+ */
+export function tagKey(raw: unknown): string {
+  return cellText(raw).toUpperCase();
+}
+
 function cellAt(headers: HeaderMatch, cells: unknown[], field: AssetField): unknown {
   const index = headers.map.get(field);
   return index === undefined ? undefined : cells[index];
@@ -437,7 +455,7 @@ export function planAssetRows(
     // too, so it would not even error). Blank → missing-tag. Wrong shape
     // (not BR-XX-0000) → bad-tag.
     const tagRaw = cellAt(headers, raw, "tag");
-    const tag = isBlank(tagRaw) ? "" : String(tagRaw).trim().toUpperCase();
+    const tag = tagKey(tagRaw);
     if (tag === "") {
       block("missing-tag", "");
       return;

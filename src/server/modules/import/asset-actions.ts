@@ -2,6 +2,7 @@
 
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 import { readGrid } from "@/server/import/read-sheet";
 import { cellText, matchHeaders, planAssetRows, type AssetPlan, type ImportOptions } from "@/lib/import-assets";
 import { groupByCause, IMPORT_OPTIONS, type CauseGroup } from "@/lib/import-vocabulary";
@@ -57,10 +58,18 @@ export async function planAssetImport(form: FormData): Promise<ActionResult<Plan
   if (!actor) return forbidden();
   const rate = await checkRate(actor.id, "import_plan");
   if (!rate.allowed) {
+    // The cap is INTERPOLATED, never retyped. The defect this override exists
+    // to fix was a hardcoded "60 changes" in the shared default that had
+    // stopped being true; writing 60 here by hand reproduces it one layer over,
+    // and tuning `import_plan` would make this sentence lie (§6a rules 16, 26).
+    // Note what this does NOT promise: nothing about the file still being
+    // selected. Whether the wizard survives a refusal with its file intact is
+    // T11's to guarantee, and a claim here would be a promise about a UI that
+    // does not exist yet.
     return rateLimited(
       rate.retryAfterSec,
-      "You've checked 60 files this minute — the cap. Each check writes nothing, but you'll need to " +
-        "choose your file again once the limit frees up.",
+      `You've checked ${RATE_LIMITS.import_plan.limit} files this minute — the cap. Nothing was ` +
+        "imported and nothing was changed; checking a file only reads it.",
     );
   }
 
