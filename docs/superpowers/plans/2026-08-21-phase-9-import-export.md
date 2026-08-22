@@ -2880,6 +2880,117 @@ git commit -m "feat(import): the asset commit, partial by construction and audit
 > render — confirm they read as sentences and not as raw `import-create` strings. Check the page at
 > **375px and in dark mode**, and run the axe helper: this is a new route with a form control, and the
 > e2e specs assert no serious/critical violations.
+>
+> ---
+>
+> ### ROUND TWO — the bones are right; the page can still tell an operator three things that are not true.
+> Gating is correct **and provably so** (demoting the rule below the general `/inventory` one fails
+> exactly viewer, purchasing_staff and finance_staff — I ran it). The fix vocabulary is fully rendered
+> and genuinely type-guarded: `const exhaustive: never = fix.kind` on the discriminant, all three arms
+> returning, so a fourth kind cannot compile. `unchanged` is treated as the headline it is. A fix
+> re-plans and never writes. The client/server boundary is clean in both directions — rule 66 not
+> triggered. What follows is the honesty layer, which is the one thing this page is *for*.
+>
+> **V-1. The divergence banner fires on the flagship happy path and blames a cause that did not occur.**
+> `AssetPlan.counts` is `{create, update, blocked}` — **there is no `unchanged` bucket, and there cannot
+> be**: the plan can't know a row is a no-op, because `AssetRecordRef` carries `id/tag/status/
+> assigneeId/categoryId/typeId` and not `model`/`serial`/`cost`. `unchanged` is discovered at write time
+> by `assetDiff`. So `created + updated` falls short of `create + update` by exactly the `unchanged`
+> count, and the predicate at `import-wizard.tsx:219-223` reads that as divergence. Re-upload an
+> unedited export — **the workflow W-6 says this feature exists for** — and the operator gets an
+> attention banner reading *"Something changed between Validate and Import — a category renamed, a
+> record edited"* over a write that changed nothing, with *"What actually happened is grouped below"*
+> above an empty `groups` array that renders nothing, while the toast simultaneously says *"25 rows
+> already matched — nothing needed changing."* **Two contradictory statements on one screen, and the
+> alarming one is the false one.** It is silent only on a 100%-creates file. The corrected predicate:
+> the loop guarantees `created + updated + unchanged + failed` equals the **re-plan's** `create + update`,
+> so compare *that* sum against the approved counts — which also stops per-row write failures (they have
+> their own panel) from masquerading as the world moving. And when a genuine divergence has no blocked
+> rows, do not promise groups "below" that do not exist.
+>
+> **V-2. The Import button's count can disagree with what the click will write.** `result` and `options`
+> are separate state, and apply sends the **live** options, not the ones that produced the displayed
+> verdict. Click "Update those assets instead" (`setOptions` fires before the re-plan), have the re-plan
+> refused — the `import_plan` cap is reachable by iterating fixes, or any rejection — and `run` leaves
+> `result` untouched. The screen still reads **"Import 12 rows"**; the click posts
+> `treatDuplicateSerialAsUpdate=1` and writes **30**, silently overwriting eighteen existing assets.
+> V-1's banner would report the mismatch afterwards, but the false number was shown at the moment of
+> confirmation, which is the moment that matters. **Bind them:** store `{plan, groups, unknownColumns,
+> options}` as one value set atomically by a successful re-plan, and have apply send `result.options`.
+> Reverting `options` on failure closes this instance and leaves the invariant unenforced; binding
+> enforces it.
+>
+> **V-3. Both of the server's carefully-worded rate-limit overrides are dead code, and the sentence that
+> reaches the screen is the false one they were written to replace.** `run` captures `retryAfterSec` and
+> **discards `res.message`**; `RateLimitNotice` accepts only `{retryAfterSec, onExpire}` and hardcodes
+> *"You've made 60 changes this minute — the cap"* and *"Nothing was lost: this form still holds your
+> input."* On a refused **apply** the real cap is `RATE_LIMITS.import.limit` = **10**, and nothing was
+> changed — so the page asserts a write that did not happen, with the wrong number. T9's R-2 and T10's
+> M-4 both exist to fix exactly these two sentences, and as of this commit neither can reach a screen.
+> Add an optional message override to `RateLimitNotice` (defaulted, so none of its ~30 other call sites
+> change) and pass `res.message` through.
+>
+> **V-4. A thrown action renders as absolutely nothing.** `run` has `try`/`finally` and **no `catch`**.
+> `bodySizeLimit` is 4 MB and nothing client-side checks it, so a 6 MB workbook — routine for a
+> formatted fleet sheet — rejects at the framework boundary: the promise rejects, `finally` re-enables
+> the button, and no banner, no toast, no error appears. There is no `error.tsx` anywhere under
+> `src/app`, so there is no fallback either. The same silence covers a dropped connection **during the
+> ~15-second apply**, after which an unknown number of assets and audit rows may already be committed
+> and a re-enabled button invites a second run. W-8 asked what happens if something imposes a shorter
+> timeout; the reciprocal — the call simply failing — went unhandled. Catch it, word the `apply` case to
+> name the uncertainty ("this import may have partially completed — check `/inventory/activity` before
+> retrying"), and add a client-side size check against a shared constant so the ceiling produces a named
+> refusal instead of a rejection. **Note `next.config.ts` cannot import a TS constant** — put the number
+> in `src/lib`, use it in the component, and leave the config literal with a comment pointing at it.
+>
+> **V-5. An empty sheet renders as a full green bar.** `readGrid` refuses only a completely empty grid,
+> so a header-only sheet (or one whose rows are all blank — `planAssetRows` rule 1 skips those) yields
+> `0/0/0`. `ProgressBar` computes `(0/0)*100` → `NaN`, sets `width: "NaN%"`, browsers discard it, and the
+> accent div inherits **full width**. The most confident element on the page, labelled "Rows that would
+> import", above "0 new · 0 updates · 0 blocked", with no Import button and no explanation. Add an
+> explicit empty-verdict branch, and guard `ProgressBar` against `max <= 0` independently — that one is
+> a fair standalone fix for every future caller.
+>
+> **V-6. The decisions riding on the write are invisible and one-way.** Options are only ever set to
+> `true`; nothing shows which are in force, and the only way to clear one is to re-pick the file, which
+> discards the verdict. After a fix, the group disappears and the button reads "Import 30 rows" while
+> saying nothing about eighteen of those being overwrites authorised three clicks ago. Show the applied
+> options with a remove affordance that re-plans. **Do this now rather than in T12** — T12 reuses this
+> component, so the alternative is doing it twice.
+>
+> **V-7. `KNOWN_UNIMPORTED_COLUMNS = ["RMA ref"]` reintroduces W-7 one layer over.** The two-wordings
+> split is right; the hand-typed literal is not. It is derivable — export labels minus every label
+> `ASSET_IMPORT_HEADERS` matches — and as written, renaming that column or adding a second export-only
+> one silently files a column this app itself wrote under "check for a typo in the header", which is the
+> exact defect W-7 exists to prevent. It is also case-sensitive against `matchHeaders`' `unknown`, which
+> preserves original casing, so "RMA Ref" from a re-saved sheet already takes the wrong wording. Derive
+> it with the same `normalizeHeader`, put it in a lib module, and **test that export and import cannot
+> diverge**. §6a rules 26/37/38 — the same shape as `IMPORT_OPTIONS` and `ASSET_STATUSES`, both already
+> fixed this way this phase.
+>
+> **The extraction, and why it is the real answer to "which tests pass on a wrong implementation".**
+> All 660 pass on this implementation, and this implementation contains V-1. The five new rows cover
+> gating, which is right as far as it goes. **Three genuinely pure functions are trapped inside the
+> component** where a node-environment vitest can never reach them: `applySummary`'s plural/zero/failed
+> matrix, the known-vs-unknown column split, and — the defect itself — **the divergence predicate, which
+> is pure arithmetic over two count objects**. A single case handing it `{create:0, update:25, blocked:0}`
+> and `{created:0, updated:0, unchanged:25, skipped:0, failed:0}` and asserting `false` would have caught
+> V-1 today, with no browser and no database. Extract all three to `src/lib/` and test them. This is the
+> third task in the phase whose defect lived in a function that could not be reached by a test —
+> `resolveAssetRefs` before `buildAssetRefs`, `assetDiff` before it left `"use server"`, and now this.
+>
+> **Minor, worth doing while in there:** the stepper never distinguishes "here's what would happen" from
+> "here's what happened" — it reaches Results on the verdict and stays there after the write. Applying a
+> fix from the divergence groups calls `validate`, which clears `applyOutcome` and destroys the only
+> on-screen record of the write that just happened, failures list included. And `value-out-of-range`'s
+> `detail` is a **column name**, so its group reads "e.g. Model, Notes" — field names presented as
+> example values (T7's vocabulary, not this page's, but the page is where it shows).
+>
+> **Recorded for T13, so it does not fall between tasks:** the world genuinely moving between
+> `planAssetImport` and `applyAssetImport` has no home today — vitest is node-only with no database, and
+> the page test cannot force it. Split it: the **decision** is a unit test once the predicate is pure
+> (do it now), the **render** is T13's e2e, and the **world moving** wants a DB-backed test that mutates
+> between the two calls. Say which of those T13 owns rather than leaving it implied.
 
 **Files:**
 - Create: `src/app/(app)/inventory/import/page.tsx`, `src/components/import/import-wizard.tsx`,
