@@ -2159,8 +2159,17 @@ git commit -m "feat(import): the sheet reader, schema-less by design"
 >    `dropUnknownAssignee`, `dropUnknownVendor`, `keepCurrentLifecycle`, `importUnheldAsSpare`. A missing
 >    key silently reads `false`, so an option the wizard offers would simply never take effect — and the
 >    failure is invisible, because the row just stays blocked and the operator assumes their file is
->    still wrong. `ImportOptions` is `Record<ImportOption, boolean>`, so **build it from the
->    `IMPORT_OPTIONS` array rather than by hand** and a sixth option cannot be forgotten here.
+>    still wrong.
+>
+>    **So do not hand-write the five keys here.** `ImportOption` is a bare union today, and the only
+>    enumeration of its members is a **hand-typed copy inside `import-vocabulary.test.ts:8`** — a list
+>    that will drift from the union the day a sixth option is added, in a test whose job is to assert
+>    every option is real. Promote it: export `IMPORT_OPTIONS` as an `as const` array from
+>    `src/lib/import-vocabulary.ts`, derive `export type ImportOption = (typeof IMPORT_OPTIONS)[number]`
+>    from it, have the test import it instead of retyping it, and build `optionsFrom` by folding over it.
+>    Then a sixth option is impossible to forget in any of the three places. This is the same defect
+>    §6a rules 26/37/38 describe, caught before it cost anything — and the same one the vocabulary test
+>    already fixed once for `ASSET_STATUSES`.
 >
 > **And a fifth thing the plan gets wrong, which is subtler and would have produced silent duplicate
 > assets: the tag lookup must be UPPERCASED.** T7's rule 2 trims and upper-cases a tag before consulting
