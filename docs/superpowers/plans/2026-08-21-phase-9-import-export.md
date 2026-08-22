@@ -66,6 +66,27 @@ These are settled. A task that needs to break one must say so and amend this lis
     with a "create it first" cause and a link, not silently creating taxonomy as a side effect of an
     asset upload. The brief's "Create category" fix button links to `/admin/asset-categories`; it does
     not create anything inline.
+13. **Import may set `status`/`assignee` on CREATE; on UPDATE it never moves them.** Added
+    2026-08-22, at Task 7's quality review, because the plan never asked the question and the shipped
+    draft answered it wrongly by default. Everywhere else in this app those two fields move only
+    through the approval queue: `updateSchema` (`src/server/modules/inventory/actions.ts:279`) excludes
+    both — *"tag is immutable; status/assignee move via approvals"* — and `creationPlan`
+    (`src/lib/asset-rules.ts:14`) always creates SPARE, turning a requested DEPLOYED into a
+    `lifecycle.assign` approval. A spreadsheet that wrote them directly would be the only surface in
+    the system able to flip 500 assets' status with no approval, no SLA and no `approval.requested`
+    trail. **Create honours the sheet** — an import's job is entering a fleet that is already deployed,
+    and all eight statuses are legitimate there; `CREATABLE_STATUSES` is an affordance of the New Asset
+    form, not a database invariant. **Update refuses the move**, blocking with `lifecycle-via-import`
+    and offering `keepCurrentLifecycle` to apply the row's other columns and leave the lifecycle alone.
+14. **Every block cause offers a fix the operator can act on inside the wizard.** The vocabulary always
+    asserted this; Task 7 shipped violating it, because `unknown-vendor` linked to `/admin/vendors`,
+    which does not exist — and `src/server/modules/admin/reference-actions.ts:15` is
+    `z.enum(["category","type","department"])`, so **no surface in this application can create a
+    `Vendor`**. So: a cause whose remedy is a screen we have links to it; a cause whose remedy is a
+    decision becomes an `ImportOption`; a cause whose only remedy is the sheet itself gets the
+    `reupload` fix kind, which T11 renders as the wizard's own restart rather than an anchor to the
+    page the operator is standing on. Nothing is left with a button that cannot work, and the test
+    asserts every href against the routes that exist.
 
 ---
 
@@ -1160,6 +1181,171 @@ git commit -m "feat(inventory): split-by-year chips, and an export that honours 
 ---
 
 ### Task 7: The import vocabulary and the asset row rules (TDD)
+
+> ### AMENDED — BEFORE IT SHIPS. **The plan below is wrong in seven ways, and `8c4e8c0` implemented it faithfully.**
+> `8c4e8c0` is this task verbatim, and a spec-compliance review passed it byte-for-byte. That is the
+> point: the code was never the problem. An opus review asked *"is the rule right?"* instead and found
+> **seven Critical defects, all of them in the plan text**, every one invisible to a green 542-test
+> suite. Same pattern as Tasks 1–5 — the plan's author reasoned outward from the vocabulary and never
+> opened `prisma/schema.prisma`, `src/lib/asset-rules.ts` or `src/server/modules/inventory/actions.ts`
+> to find what the rest of the application already guarantees. **This section is now the spec; the code
+> blocks further down are the superseded draft, kept because the diff against them is the lesson.**
+>
+> **The two defects that matter most, because they are this module's whole reason for existing.** The
+> dry run must issue a verdict the commit cannot contradict, and as written it does not:
+> - **C-1. A tag match skips the serial check** (`import-assets.ts:182`, `if (!updateAssetId && serial)`).
+>   A row whose tag is asset A's and whose serial is asset B's is reported as a clean update to A
+>   carrying B's serial. `Asset.serial` is `@unique`, so T10's write raises P2002 **on a row the
+>   operator was shown as fine**. The plan's own mutation #1 was a dud precisely because no fixture
+>   pairs a matching tag with a taken serial.
+> - **C-2. Intra-file duplicates are structurally invisible.** Both maps are built from the database and
+>   nothing accumulates what earlier rows in *this file* claimed, so two rows sharing a tag both plan as
+>   creates. That is the single likeliest real-world file shape: a copy-paste while editing an export.
+>
+> **Two settled decisions (user, 2026-08-22), which the plan never asked and which set the shapes
+> T8–T11 build against:**
+>
+> **D-A. Import may set `status`/`assignee` on CREATE; on UPDATE it never moves them.** Everywhere else
+> in this app those two fields move only through the approval queue — `updateSchema`
+> (`actions.ts:279`) excludes both, with the comment *"tag is immutable; status/assignee move via
+> approvals"*, and `creationPlan` (`asset-rules.ts:14`) always creates SPARE, turning a requested
+> DEPLOYED into a `lifecycle.assign` approval. Left as planned, a spreadsheet would be the only surface
+> in the system that can flip 500 assets' status with no approval, no SLA and no `approval.requested`
+> trail. **Create honours the sheet** because an import's job is entering a fleet that is *already*
+> deployed, and all eight statuses are legitimate there (`CREATABLE_STATUSES` is an affordance of the
+> New Asset form, not a database invariant — say so in a comment, since a later reader will otherwise
+> "fix" this to match). **Update refuses the move**: a Status or Assigned-to cell that disagrees with
+> the record is blocked, with an option to update the row's other fields and leave the lifecycle alone.
+>
+> **D-B. Every block cause keeps a fix the operator can act on right now.** The vocabulary asserts this
+> (`"offers a fix for every cause"`) and shipped violating it: **`unknown-vendor` links to
+> `/admin/vendors`, which does not exist** — `src/app/(app)/admin/` has no such directory, so the href
+> falls through to the `[...pending]` catch-all and renders a `PLANNED` empty state, and
+> `reference-actions.ts:15` is `z.enum(["category","type","department"])`, so **no surface in this
+> application can create a `Vendor` at all**. The test passed because it asserts non-null and checks
+> only the category's href. §6a rule 10's exact shape, now the sixth instance. Three further causes
+> link to `/inventory/import` — the page the operator is standing on, which does not exist until T11.
+>
+> **The amended vocabulary** (`src/lib/import-vocabulary.ts`):
+> - `ImportOption` becomes `"treatDuplicateSerialAsUpdate" | "dropUnknownAssignee" | "dropUnknownVendor" | "keepCurrentLifecycle"`.
+> - `BlockFix["kind"]` gains `"reupload"` — a fix with no href that T11 renders as the wizard's own
+>   restart. It is what `missing-tag`, `bad-tag`, `missing-model`, `bad-date`, `bad-number`,
+>   `duplicate-in-file`, `ambiguous-assignee` and `value-too-long` all honestly offer.
+> - `unknown-vendor`'s fix becomes `{ kind: "option", option: "dropUnknownVendor" }`, "Import without
+>   the vendor". `Asset.vendorId` is nullable and purely informational, and the edit form already has a
+>   vendor picker — so dropping it loses nothing unrecoverable. The current design has the asymmetry
+>   backwards: the semantically loaded `assignee` gets a drop option while the decorative field hard-
+>   blocks. **Its `explain` must also stop saying "create it first and re-upload", which is an
+>   instruction the operator cannot follow.**
+> - `bad-status`'s `explain` names all eight statuses inline from `ASSET_STATUSES`
+>   (`src/lib/inventory-list.ts:5`) rather than linking to `/inventory`, whose facet chips only show
+>   statuses currently in use — an operator cannot learn `DONATED` is legal from a list containing none.
+>   Rules 26/37/38: derive the list, never retype it.
+> - **New causes**, appended in this order (the order is the `groupByCause` tiebreak, so it is API):
+>   `bad-tag`, `missing-model`, `duplicate-in-file`, `ambiguous-assignee`, `inactive-assignee`,
+>   `deployed-without-holder`, `lifecycle-via-import`, `value-too-long`.
+> - The test's promise becomes real: **every `link` fix's href must be a route that exists**, and every
+>   `option` must be a member of `ImportOption`. Assert it over all of `BLOCK_CAUSES`, not one example.
+>
+> **The amended shapes** (`src/lib/import-assets.ts`) — these are the T9 contract, and the reason this
+> rework happens before T8 rather than after T11:
+> - `types: Map<string, { id: string; categoryId: string }>`. `AssetType` is
+>   **`@@unique([categoryId, name])`, not globally unique**, so a flat name→id map is lossy by
+>   construction, and both write paths already enforce `type.categoryId !== d.categoryId` →
+>   *"That type doesn't belong to the chosen category"* (`actions.ts:189` and `:296`). As planned, the
+>   import can pair `Laptops` with a `Furniture` type and produce **an asset its own edit form cannot
+>   save**. Resolve the type *after* the category and check the pair.
+> - `employees: Map<string, { id: string; employment: EmploymentStatus; ambiguous: boolean }>`.
+>   `Employee.name` is **not** unique (only `employeeNo` is), so a name matching two employees currently
+>   resolves to whichever T9 inserted last — a silent wrong assignment. A name key that matches more
+>   than one employee is `ambiguous` and blocks; an `employeeNo` key never is. `createAsset` also
+>   refuses a non-ACTIVE assignee (*"assignments are frozen"*, `actions.ts:196`) — so does this.
+> - `byTag: Map<string, { id: string; serial: string | null; status: AssetStatus; assigneeId: string | null }>`.
+>   The update branch cannot detect a lifecycle move (D-A) without the record's current values.
+> - **`AssetImportData` splits into `AssetCreateData` and `AssetUpdatePatch`.** One flat shape used for
+>   both branches is C-7: on an update row it emits `null` for every column the operator did not fill,
+>   which is a **destructive write**. Concretely — export 200 assets, delete the columns you don't care
+>   about (which `matchHeaders` actively encourages, since only Tag/Model/Category are required),
+>   re-upload, and wipe cost, purchase date, warranty, vendor and notes on 200 records. `updateAsset`
+>   goes to real trouble to avoid exactly this. The patch must distinguish **absent** (`undefined` — the
+>   sheet has no such column, leave it alone) from **explicitly blank** (`null` — a present column with
+>   an empty cell, an intentional clear). Per D-A the patch carries neither `status` nor `assigneeId`,
+>   and it never carries `tag`: the update-by-serial path as planned would **rename** the matched asset
+>   (`{kind:"update", assetId:"a-9", data:{tag:"BR-NEW-0001"}}`), against `updateAsset`'s explicit
+>   immutability rule.
+>
+> **The amended per-row rules, in application order.** First failing check still wins, one cause per row:
+> 1. Every cell blank → **skip**, counted nowhere.
+> 2. `tag`: trim **and upper-case** before anything (`createSchema` does; every tag in the DB is
+>    upper-case). Blank → `missing-tag`. Not `/^BR-[A-Z]{2}-\d{4}$/` → `bad-tag`. **Matching was
+>    case-sensitive**, so `br-lt-0148` planned as a *create* — and Postgres unique is case-sensitive
+>    too, so it would not even error: you get a second record for one physical machine.
+> 3. A tag already claimed by an **earlier row of this file** → `duplicate-in-file` (detail = the tag).
+> 4. `model` blank → `missing-model`. `required: true` on a header spec governs the **column**, not the
+>    cell; a blank Model planned as a create with `model: ""`, which `createSchema`'s `min(2)` forbids.
+> 5. `serial` (non-blank): claimed by an earlier row of this file → `duplicate-in-file`. Then, **whether
+>    or not the tag matched**, if it belongs to a *different* asset → `duplicate-serial`.
+>    `treatDuplicateSerialAsUpdate` rescues only the no-tag-match case; when tag→A and serial→B the two
+>    matches disagree about which asset the row *is*, and no option can resolve that (C-1).
+> 6. Tag in `byTag` → this row is an **update** of that id.
+> 7. `category` resolves, else `unknown-category`. `type` (non-blank) resolves **within that category**,
+>    else `unknown-type`. `vendor` (non-blank) resolves, else `unknown-vendor` — unless
+>    `dropUnknownVendor`, then `vendorId: null`.
+> 8. `assignee` (non-blank): `employeeNo` is authoritative, then name. Ambiguous name →
+>    `ambiguous-assignee`. Unresolved → `unknown-assignee`. Resolved but not ACTIVE →
+>    `inactive-assignee`. `dropUnknownAssignee` drops the last two to unassigned.
+> 9. `status`: blank → `SPARE` on create. Otherwise must be one of `ASSET_STATUSES` upper-cased, else
+>    `bad-status`.
+> 10. **Create only:** `DEPLOYED`/`TEMPORARY` with no assignee → `deployed-without-holder`. And when
+>     `dropUnknownAssignee` drops a holder, the status **downgrades to `SPARE`** — the option's label
+>     promises "leave as spare" and as planned it produced `{status:"DEPLOYED", assigneeId:null}`, a
+>     deployed-to-nobody asset from a button that said the opposite.
+> 11. **Update only (D-A):** a *present* Status column disagreeing with the record's status, or a
+>     *present* Assigned-to column resolving to someone other than the record's `assigneeId` →
+>     `lifecycle-via-import`, unless `keepCurrentLifecycle`, in which case both fields are simply
+>     omitted from the patch and the row's other columns still apply.
+> 12. Dates: a `Date` instance must be valid; `YYYY-MM-DD` text must **round-trip**
+>     (`d.toISOString().slice(0,10) === text`). The shape regex alone let `"2026-13-45"` through as an
+>     Invalid Date, and — worse, because nothing will ever flag it — `"2026-02-30"` through as **March 2**.
+>     UTC midnight is correct and matches `toDate()` (`actions.ts:172`); note in a comment that a
+>     UTC-midnight date renders as the same day at UTC+8, so Manila is safe *by arithmetic*, not by luck.
+> 13. Cost: **the numeric branch must obey the same contract as the string branch.** `typeof raw ===
+>     "number"` returned `String(raw)` unchecked, and Excel hands back `number` for every
+>     currency-formatted cell — so the guard covered the *rare* path. As planned: `-500` → accepted
+>     (`createSchema` is `.nonnegative()`), `51000.555` → silently rounded by `Decimal(12,2)`,
+>     `0.1+0.2` → `"0.30000000000000004"` (a float touching money, contradicting the file's own comment),
+>     `1e21` → a Prisma parse error. Require finite, `>= 0`, `<= 10_000_000`, at most two decimals
+>     (`Math.round(v * 100) / 100 === v`), then `v.toFixed(2)`. The string branch keeps `COST_SHAPE` and
+>     gains the same ceiling. The same value must not be accepted as a number and rejected as text.
+> 14. Ceilings the app already enforces and this module did not: `model` 2–120, `serial` ≤ 120,
+>     `notes` ≤ 2000 (`createSchema`, `actions.ts:145`). Over → `value-too-long`, detail naming the
+>     column. Individually minor; as a set, the difference between an import and a record the edit form
+>     refuses to save.
+>
+> **The test fixture is itself a defect.** `HEADER` in the draft below is **9 of the 12 supported
+> columns** — Vendor, Warranty until and Notes have no column, so those branches are dead in the entire
+> suite. Deleting the whole vendor block, never parsing `warrantyUntil`, and nulling `notes`/`model`
+> each leave **19/19 green**; `unknown-vendor` is produced by no test at all, which is most of why its
+> dead href survived. Three more pass on a wrong implementation: `examples.slice(0, 99)` (the "up to
+> three" test supplies only **two** distinct details), reversing the `BLOCK_CAUSES` tiebreak (the
+> "biggest first" test uses 2 vs 1, never a tie), and deleting `.filter(Boolean)` from `examples`.
+> **Use the real 14-column export header as the fixture** — `Tag, Model, Serial, Category, Type, Status,
+> Assigned to, Employee no, Purchased, Cost, Warranty until, Vendor, RMA ref, Notes` — which also
+> exercises the round trip the feature exists for, and add a distinguishing assertion for each of those
+> six.
+>
+> **And the gate that let all of this through:** the plan's Step 9 mutation pass is only a test of the
+> suite if the fixture exercises the mutated branch. Two of its four edits were duds — `parseFloat("PHP
+> 51,000")` is `NaN` under both branches, and the literal "swap rules 3 and 4" leaves the suite fully
+> green because the known-tag fixture's serial appears in no map. **Check that the branch is covered
+> before believing a mutation proved anything** (added to §6a).
+>
+> **Carried, not fixed:** `rmaRef` stays unimportable. The export emits an `RMA ref` column, so a round
+> trip drops it — but only from the *sheet*: an update writes only the patch's own fields, so the stored
+> value survives untouched. Making it writable is a new field, not an alias, and belongs in its own task
+> (§8). The `"employee no"` alias added in `8c4e8c0` stays and is correct, though it never fires on our
+> own export, where `Assigned to` is consumed first and `Employee no` falls out as an ignored unknown
+> column — T11 should not render "unrecognised column" warnings for columns this app itself wrote.
 
 **The heart of the phase.** Everything the operator reads, and every decision about a row, lives here —
 one pure module, no `src/server` imports, no database. Scope decision 2 exists so this can be tested
