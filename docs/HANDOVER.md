@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–5 of 14 committed, unmerged.** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, run at the Task 5 close: **514 unit tests / 32 files**, **102 e2e / 7.5 min**, `tsc` + `lint` + `build` clean, and `docker compose --profile prod build` verified at Task 1.
+**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–6 of 14 committed, unmerged. The EXPORT HALF IS DONE; the import half is untouched.** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, run at the Task 6 close: **514 unit tests / 32 files**, **103 e2e / 8.0 min**, `tsc` + `lint` + `build` clean, and `docker compose --profile prod build` verified at Task 1.
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,7 +13,7 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-1. **`git checkout phase-9-import-export`** — Phase 9 is mid-flight there, tasks 1–5 of 14
+1. **`git checkout phase-9-import-export`** — Phase 9 is mid-flight there, tasks 1–6 of 14
    committed. Phase 8 IS merged to `main` (`e5a5730`, `--no-ff`) and `phase-8-admin` is deleted, so
    `main` is a valid base; this branch forks from it. `git log --oneline main..HEAD` shows the phase so
    far and `git status` should be clean. **Don't trust a commit count written into this doc** — every
@@ -55,20 +55,30 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    and the **checklist in item 4 below is the distilled version**: run it against every task you
    execute, and read §6a's entry for whichever rules it points at. §6a is about how work goes wrong in
    THIS codebase; it did not stop being true when Phase 8 ended.
-4. **Resume at Task 6** of `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` with
-   `superpowers:subagent-driven-development`. Tasks 1–5 are committed; 6–14 remain. Task 6 is the
-   split-by-year chips — the last export-side task, and the smallest thing left before the import half
-   begins at Task 7.
+4. **Resume at Task 7** of `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` with
+   `superpowers:subagent-driven-development`. Tasks 1–6 are committed; 7–14 remain. **The export half
+   is finished; the import half has not been started.**
 
-   **What is done:** the two xlsx dependencies, installed with the Alpine lockfile regenerated (T1); the
-   one module that owns `write-excel-file` (T2); the shared cap/response helpers plus the assets export
-   converted to xlsx with `?ids=` now refusing instead of slicing (T3); the audit and employees export
-   routes (T4); the farewell-report route (T5). **All four export routes the brief requires now exist.**
-   `src/lib/csv.ts` is deleted.
+   **What is done:** the two xlsx dependencies with the Alpine lockfile regenerated (T1); the one module
+   that owns `write-excel-file` (T2); the shared cap/response helpers plus the assets export converted
+   to xlsx, with `?ids=` now refusing instead of silently slicing (T3); the audit and employees export
+   routes (T4); the farewell-report route (T5); split-by-year chips threaded through every consumer of
+   `buildAssetWhere` (T6). **All four export routes the brief requires now exist**, `src/lib/csv.ts` is
+   deleted, and `capRefusalText`'s promise that year chips exist is finally true.
 
-   **What remains:** Task 6 (year chips), then the import half — Task 7 is the pure rule module and is
-   the heart of the phase, Tasks 8–11 build the reader, the dry run, the commit and the wizard, Task 12
-   is the employee importer, Task 13 the e2e, Task 14 the battery and close-out.
+   **What remains — and Task 7 is the biggest single task in the phase.** T7 is the pure rule module:
+   the block-cause vocabulary and the asset row rules. TDD, no I/O, ~18 tests, plus a mutation pass. It
+   is the heart of the import half and every task after it reads from it. Then T8 the sheet reader, T9
+   the dry run, T10 the commit, T11 the wizard, T12 the employee importer, T13 e2e, T14 close-out.
+
+   **Three things to carry into T7 specifically.** It contains one of the **two remaining column specs**,
+   and §6a rule 64 records that all three written so far were defective the same way — write it from
+   `prisma/schema.prisma`, not from what the sheet ought to hold. Its whole design rests on **scope
+   decision 2**: `read-excel-file`'s schema mode returns *either* objects *or* errors, never both, so it
+   **cannot express partial success**, which is the brief's default — that is why the import reads a raw
+   grid and validates through this module, and it is exactly the kind of thing a later reader would
+   "simplify" straight back into a bug. And the module is **pure by design**: no `src/server` imports, no
+   database, so every rule is testable with plain arrays. Keep it that way; T9 is where Prisma enters.
 
    **THE SINGLE MOST USEFUL THING TO KNOW BEFORE YOU EXECUTE ANOTHER TASK: this plan has been wrong, in
    a way that mattered, in every one of the five tasks that has shipped.** Not stylistically wrong —
@@ -508,7 +518,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 9 — import / export (MID-FLIGHT, tasks 1–5 of 14 on `phase-9-import-export`)**
+**Phase 9 — import / export (MID-FLIGHT, tasks 1–6 of 14 on `phase-9-import-export`)**
 
 **All four export routes the brief requires now exist, as `.xlsx`.** `src/server/xlsx/write.ts` is the
 one module that imports `write-excel-file`, exposing `toXlsxBuffer(columns, rows)`; it builds the grid
@@ -523,6 +533,16 @@ export honours the page's search, facets AND policy-gaps filter through a shared
 `filteredEmployees` — the gaps cut is in-memory, so a bare `where` would have exported the candidate
 set. The farewell-report route reuses the report page's own `getWizard` plus a shared `decidedItems`,
 so the sheet and the printable page cannot disagree about which rows belong.
+
+**Split-by-year chips (T6)** make the cap refusal's own advice actionable. `purchaseYear` is threaded as
+an explicit second argument to `buildAssetWhere(state, purchaseYear)` rather than inside `ListState`,
+because `ListState` only round-trips `config.facets` and would have dropped it across the export link,
+the bulk drawer and the toolbar's navigation. All six consumers inherit it — the list, `repairStageIds`,
+the four facet groupBys, the export route, and `bulkRequestStatusChange`, which acts on *all matching*.
+`purchaseYearBuckets` deliberately omits it, because a facet's own count must not apply its own filter.
+Every `/inventory` URL is now built by one helper passed down from the page, so no component imports
+`serializeListState` and none can rebuild a URL that forgets the year — §6a rule 66 records the
+client-boundary constraint that shaped how that helper is handed over.
 
 **Phase 8 — Admin workspace (COMPLETE, all 14 tasks, MERGED to `main` as `e5a5730`)**
 (`docs/superpowers/plans/2026-08-19-phase-8-admin.md`): the user rules and the two mutations behind
@@ -692,11 +712,11 @@ pending-route table, so the split falls on a seam that already existed.
 - **Phase 8 — the Admin workspace. COMPLETE and MERGED** (`e5a5730`). What it delivered is §4; the
   invariants it established are §6a. Two things remain outstanding and neither is code: **the push
   decision, which is the user's and unmade**, and **two purely visual checks** listed at the end of §4.
-- **Phase 9 — import / export. MID-FLIGHT: tasks 1–5 of 14 done** on `phase-9-import-export`.
+- **Phase 9 — import / export. MID-FLIGHT: tasks 1–6 of 14 done** on `phase-9-import-export`.
   `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` (14 tasks, 12 recorded scope decisions,
-  every shipped task carrying an `AMENDED` banner). The export half is essentially finished — see §4.
-  **What remains is Task 6 (split-by-year chips) and the whole import half**: the pure rule module
-  (T7, the heart), the sheet reader (T8), the dry run (T9), the commit (T10), the wizard (T11), the
+  every shipped task carrying an `AMENDED` banner). **The export half is DONE — see §4.**
+  **What remains is the whole import half**: the pure rule module (T7, the heart and the biggest single
+  task in the phase), the sheet reader (T8), the dry run (T9), the commit (T10), the wizard (T11), the
   employee importer (T12), e2e (T13), close-out (T14).
 - **Phase 10 — polish. Not yet planned.** Split out of Phase 9 on 2026-08-21 because the two halves
   share almost no code: the printable 3×4 A4 label sheet with scan codes, USB-scanner polish so a scan
@@ -1425,6 +1445,7 @@ any task in the phase. All of them were fixtures that the running code could not
 - **Prisma throws; it doesn't return.** Without a `try`/`catch` a P2028 (transaction couldn't get a connection — reachable with just two concurrent transactions) escapes as a 500 instead of the designed conflict banner. Every actions module needs the mapping.
 - **Widening a path rule can leave an operation ungoverned.** Granting `/purchases` to the IT workspace made every role pass the path gate, so "who may create a request" stopped being answered by any layer until `DRAFT_ROLES` was added. When you widen a gate, ask which rule it was silently carrying.
 - **A client-side navigation currently leaves the previous page's DOM in the document** (a second `<table>` outside `<main>`). Reproducible between two Phase-3 pages, so it predates Phase 5; observed in dev only, not investigated.
+- **Three e2e assertions that sat close to the default 5s budget started failing during Phase 9, and the cause was NOT a large slowdown — measure before blaming one.** The clean full run went 7.5 → 8.0 minutes across the whole phase, about 7%. A *failing* run clocked 10.0 minutes, and reading that as a 33% regression was wrong: failures inflate a run with retries and artifact capture, so **never measure performance from a run that failed.** What did change is that three specific first-hit navigations and one hydration race were already marginal, and a modest growth in on-demand compilation was enough to tip them: More routes for `next dev` to compile on demand means every first-hit navigation in the suite costs more, and three assertions were sitting close enough to the default 5s budget to start losing: the offboarding wizard's first `/offboarding/[employeeId]` hit, the approvals queue's first `/approvals/[id]` hit, and `/admin/flags`' hydration race. **None was a product defect.** The remedy each time was headroom — await the URL separately from the heading, or retry a fill until it sticks — never a weaker assertion. **Expect this to recur as the app grows**, and treat "a full-suite failure that passes in isolation" as a budget problem to measure rather than a flake to re-run. One specific trap: asserting a server-rendered input's seeded value does NOT prove hydration has run, because the SSR'd HTML already carries that value.
 - **A long-lived dev server degrades the e2e suite into phantom failures.** After several full runs its resident memory climbed ~8.5GB → ~12.2GB and a different set of pre-existing specs failed each time, always as "clicked a link, the heading never arrived" — every one passing in isolation. Restart the preview before a confirmation run; the suite went 75/75 immediately afterwards.
 - **A seeded fixture that doesn't exercise its own design is a silent gap.** Phase 6 found two: every asset shared one purchase date (so the five-bucket age histogram was one bar and the 4y+ amber could never render) and nothing expired inside the 90-day warranty window (so the clustered pair the design is about never appeared). When a screen's designed state can't occur against the seed, fix the seed — that is what it is for.
 - **A Prisma filter cannot compare two columns.** A derived facet whose rule spans fields (repairs' `beyond-repair` = quote ≥ 60% of cost) either changes shape or narrows to a candidate set in SQL and gets its final cut in memory from the same pure function that renders it. Two rules for one concept is the failure mode.
