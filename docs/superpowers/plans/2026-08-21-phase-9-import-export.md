@@ -2426,6 +2426,93 @@ git commit -m "feat(import): the asset dry run, which writes nothing"
 
 ### Task 10: The asset commit
 
+> ### AMENDED BEFORE EXECUTION — the shape is right; six things in it are not, and one is a hole this phase opened itself.
+> **Keep the architecture.** Taking the FILE again and re-planning before writing is correct and is scope
+> decision 8's guard: the browser's plan is what the operator *saw*, this is what gets written, and the
+> two agree because the same pure function produced both. Per-row transactions are correct too — partial
+> import is the default (scope decision 4), so one bad row must not roll back the other 196, and each
+> row's write and its audit entry must land together or not at all. Both survive review. What follows
+> are the details.
+>
+> **A-1. THE RATE LIMIT IS NOW UNENFORCED ON THE WRITE PATH, and this phase did it to itself.** The code
+> comment says *"planAssetImport already gated the role and spent a rate token"* — true when it was
+> written, false since Task 9's round two. The dry run now spends **`import_plan` (60/min)**, and the
+> brief's **`import` (10/min)** kind is spent by **nothing at all**. So the stage that writes up to 2,000
+> assets plus 2,000 audit rows would be bounded at sixty calls a minute, and the one number the brief
+> actually states about importing would be enforced nowhere. **Call `checkRate(actor.id, "import")` in
+> the apply**, after the re-plan succeeds and before the first write, and pass a true message. This is
+> the second-order cost of a fix landing in a task whose caller did not exist yet — the R-2 note said "T10
+> should pass its own true message too" and this is the sharper half of that.
+>
+> **A-2. `actionRole("it_staff")` locks out admins** — the identical defect Task 9 carried, from the same
+> stale draft. `actionRole(...roles)` is a **set membership test, not a floor**. Use
+> `actionRole("admin", "it_staff")`, as `createAsset` and `updateAsset` do.
+>
+> **A-3. Every unchanged row still writes, bumping `updatedAt` on assets nothing touched — and the
+> HAPPY PATH is made entirely of those rows.** Task 9 proved the round trip this feature exists for:
+> export five assets, re-upload the file unedited, get **five clean updates**. Under the code below each
+> one runs an `updateMany` whose `data` changes nothing — and `@updatedAt` moves on every update
+> statement regardless — so five assets get a fresh `updatedAt`, no audit entry (correctly skipped, the
+> diff is empty), and therefore **a modification with no trail**. `updatedAt` drives "recently changed"
+> reads, and a re-upload would silently float every asset in the file to the top. **Compute the diff
+> FIRST; if it is empty, write nothing at all and count the row separately** — return `unchanged`
+> alongside `created`/`updated`, because "nothing needed doing" is a real and common verdict that the
+> operator should see rather than have counted as work.
+>
+> **A-4. The `cost` diff is a phantom on every update row.** `diffOf` normalises a `Prisma.Decimal` via
+> `toNumber()` but leaves a **string** alone (`src/lib/audit-diff.ts:7-12`), and `AssetUpdatePatch.cost`
+> is a decimal **string** by deliberate design — so `before.cost` normalises to `51000.5` and the patch
+> holds `"51000.50"`, `same()` says they differ, and **every** update row claims cost changed when it did
+> not. That is the exact defect an earlier phase's review caught as *"phantom audit entries on every
+> first edit of a seeded asset"*, arriving by a new road, and it compounds A-3: the phantom makes the
+> diff non-empty, so the no-op rule never fires and every one of those five round-trip rows writes an
+> audit entry announcing a change that did not happen, into an **append-only** table. Normalise the cost
+> for the COMPARISON only — the string exists to keep floats out of the **write**, and `diffOf` already
+> reduces the stored Decimal to a number, so comparing `Number(patch.cost)` is consistent and not a
+> reintroduction of float money. Say so in a comment or someone will "fix" it back.
+>
+> **A-5. The create's audit diff cannot show what the import actually did.** It records `tag` and `model`
+> as from-null. `createAsset` (`actions.ts:217`) records `tag`, `model` **and `status`** — and it can
+> afford to hardcode `"SPARE"` because `creationPlan` guarantees it. **Import cannot**: scope decision 13
+> is precisely that an import may create an asset **already DEPLOYED to a holder**, which no other
+> surface in this application can do. An audit trail that omits it cannot answer "how did this asset get
+> to DEPLOYED without an approval?" — the one question this decision guarantees someone will ask. Record
+> `status`, and `assigneeId` when it is set.
+>
+> **A-6. A failed row is counted and its reason is thrown away.** `catch { failed += 1 }` gives the
+> operator a number that does not add up and nothing to act on. §6a rule 59: a batch action must return
+> what it DID. **Collect the sheet row numbers that failed** (they are on the verdict) and enough of a
+> reason to be actionable, so T11 can say *"rows 14 and 92 failed"* rather than *"2 failed"*. Do not
+> quote a raw Prisma error at an operator; classify it.
+>
+> **Two smaller ones.** `revalidatePath("/inventory")` does **not** revalidate `/inventory/activity`,
+> which is a separate route and is exactly where these new entries are meant to appear — add it. And the
+> plan is right that `/inventory/activity` scopes to `entityType: "asset"`, so unlike Phase 7's four dead
+> cases these sentences **will** render: confirm `entityLabels` in `src/server/modules/audit/queries.ts`
+> and `AUDIT_ENTITY_TYPES` in `src/lib/audit-list.ts` already name `asset` (they do — no new entity type,
+> so rule 20 is satisfied without a change, which is worth stating rather than leaving implied).
+> `actionDot` needs explicit branches: `import-create` misses `action === "create"` because that is an
+> equality test, and neither name matches any `includes` branch, so both currently fall through to the
+> neutral `"SPARE"` default.
+>
+> **An accepted divergence, recorded rather than fixed.** Re-planning at apply time means the world can
+> move between Validate and Apply — an admin creates the missing category, someone edits an asset — so
+> the write can legitimately differ from the verdict the operator approved. That is the correct trade
+> (the alternative is writing a stale plan), but scope decision 3 promises the verdict and the write
+> cannot disagree, so **the result must carry the re-plan's own counts** and T11 must show actuals rather
+> than echoing what the browser was holding. A silent divergence is the thing to avoid; a reported one is
+> honest.
+>
+> **Verification, and measure the thing nobody has measured.** No unit test can see any of this. Verify
+> against the real database with a throwaway script under gitignored `backups/`, deleted after — and
+> because this is the first task that **writes**, restore what you touch or reseed and say which. At
+> minimum: the round trip writes **zero** audit entries and leaves `updatedAt` untouched (A-3 plus A-4
+> together — this is the single most important assertion in the task); a genuinely edited row writes
+> exactly one entry naming exactly the changed fields; a create records status; a blocked row writes
+> nothing; and the `updatedAt` guard actually fires when a row is edited underneath the import. **Time a
+> full-cap run** — 2,000 sequential transactions is 2,000 round trips, and if that takes minutes rather
+> than seconds T11 needs to know before it builds a button that waits on it.
+
 **Files:**
 - Modify: `src/server/modules/import/asset-actions.ts`, `src/lib/activity.ts`,
   `src/components/patterns/activity-feed.tsx`
