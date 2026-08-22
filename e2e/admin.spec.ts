@@ -149,14 +149,28 @@ test.describe("feature flags", () => {
     // overwritten the moment React takes over (same race class as HANDOVER
     // §7's "✓ Saved" flash), and a fill() that lands in that window is lost
     // with no error — the next assertion would just see the pre-hydration
-    // value and could pass for the wrong reason. Asserting the seeded value
-    // first proves the component is live before anything is typed into it.
+    // value and could pass for the wrong reason.
+    //
+    // Asserting the seeded value does NOT prove hydration has run, which is
+    // what the first version of this guard assumed: the server-rendered HTML
+    // already carries `value="thebackroomop.com"`, so that assertion passes
+    // against the pre-hydration DOM. It is kept only as a cheap "the field
+    // exists and is populated" check.
     await expect(field).toHaveValue("thebackroomop.com", { timeout: 20_000 });
 
-    await field.fill("someone@thebackroomop.com");
-    // Asserted BEFORE the click: this is what turns a lost keystroke into a
-    // clear failure here instead of a confusing one three lines down.
-    await expect(field).toHaveValue("someone@thebackroomop.com");
+    // So the fill is RETRIED until it sticks. `fill` writes the DOM; if React
+    // hydrates afterwards it rebinds the input to `draft[row.key]` and the
+    // typing is gone (§6a rule 61). There is no reliable "hydration finished"
+    // signal to await on this page, and the previous shape — fill once, then
+    // assert — correctly turned the lost keystroke into a failure but left the
+    // test failing whenever it lost the race, which it now does regularly on a
+    // dev server ten minutes into a full run. Retrying is headroom, not a
+    // weaker assertion: the value must still end up in the field, and a fill
+    // that can never stick still fails.
+    await expect(async () => {
+      await field.fill("someone@thebackroomop.com");
+      await expect(field).toHaveValue("someone@thebackroomop.com");
+    }).toPass({ timeout: 20_000 });
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText(/Just the domain, not a full address/)).toBeVisible({ timeout: 20_000 });
 
