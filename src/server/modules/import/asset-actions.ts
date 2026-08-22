@@ -1,16 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma } from "@prisma/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { RATE_LIMITS } from "@/lib/rate-limit";
 import { prisma } from "@/server/db/client";
 import { writeAudit } from "@/server/audit";
-import { diffOf, type AuditDiff } from "@/lib/audit-diff";
+import { type AuditDiff } from "@/lib/audit-diff";
+import { assetDiff } from "@/lib/asset-diff";
+import { classifyRowError, RowWriteError } from "@/lib/row-error";
 import { readGrid } from "@/server/import/read-sheet";
 import {
-  cellText, matchHeaders, planAssetRows, type AssetPlan, type AssetUpdatePatch, type ImportOptions,
+  cellText, matchHeaders, planAssetRows, type AssetPlan, type ImportOptions,
 } from "@/lib/import-assets";
 import { groupByCause, IMPORT_OPTIONS, type CauseGroup } from "@/lib/import-vocabulary";
 import { resolveAssetRefs } from "./resolve";
@@ -109,45 +110,6 @@ export async function planAssetImport(form: FormData): Promise<ActionResult<Plan
 }
 
 /**
- * A-4: `AssetUpdatePatch.cost` is a decimal STRING by deliberate design (the
- * string is what reaches Prisma, so no float ever touches the write — see
- * that type's own comment), but `diffOf`'s `normalize()` only unwraps a
- * `Prisma.Decimal` via `toNumber()` and leaves a string alone. Compared
- * as-is, the stored `before.cost` normalises to `51000.5` while the patch
- * holds `"51000.50"` — same value, and `same()` calls them different on
- * EVERY update row that carries a cost, which is the exact "phantom audit
- * entry on every first edit" defect an earlier phase's review already
- * caught, arriving by a new road. This builds a COMPARISON-ONLY copy with
- * `cost` coerced to a `Number` — `diffOf` already reduces the stored Decimal
- * to a number, so this is consistent with that, not a reintroduction of
- * float money. `row.data` itself — what actually gets written — is never
- * touched.
- */
-function patchForDiff(data: AssetUpdatePatch): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...data };
-  if (out.cost !== undefined && out.cost !== null) {
-    out.cost = Number(out.cost as string);
-  }
-  return out;
-}
-
-/** A row-local failure with an operator-facing reason, never a raw Prisma error. */
-class RowWriteError extends Error {}
-
-/**
- * A-6: the operator gets a number that adds up and a reason to act on, never
- * a raw Prisma error string (§6a rule 59 — never quote one at an operator).
- */
-function classifyRowError(err: unknown): string {
-  if (err instanceof RowWriteError) return err.message;
-  if (err instanceof Prisma.PrismaClientKnownRequestError) {
-    if (err.code === "P2002") return "would duplicate a tag or serial already on file";
-    if (err.code === "P2003") return "names a category, type or vendor that no longer exists";
-  }
-  return "could not be written — re-check this row and retry";
-}
-
-/**
  * Stage three. Takes the FILE again — not the plan the browser is holding —
  * and re-plans before writing (scope decision 8's guard): the browser's plan
  * is what the operator SAW; this is what gets written, and the two agree
@@ -165,7 +127,11 @@ function classifyRowError(err: unknown): string {
  * missing category, edits an asset — so the write can legitimately differ
  * from the verdict the operator approved a moment earlier. The counts this
  * returns are always the RE-PLAN's own — never an echo of what the browser
- * was holding — so a divergence is reported, not silently papered over.
+ * was holding — so a divergence is reported, not silently papered over. I-3
+ * (Task 10 round two): counts alone still can't explain a mass-block
+ * divergence (e.g. every row blocking because a category vanished between
+ * Validate and Apply, with no way to learn why) — `groups`, the SAME
+ * `CauseGroup[]` this re-plan computed for the dry run, rides along too.
  */
 export async function applyAssetImport(
   form: FormData,
@@ -177,10 +143,29 @@ export async function applyAssetImport(
     skipped: number;
     failed: number;
     failures: { row: number; reason: string }[];
+    groups: CauseGroup[];
   }>
 > {
   const planned = await planAssetImport(form);
-  if (!planned.ok) return planned;
+  if (!planned.ok) {
+    // M-4 (Task 10 round two): forwarding `planned` verbatim would hand the
+    // operator the DRY RUN's own refusal — "checking a file only reads it"
+    // — on the APPLY button, whenever `import_plan` (60/min) is what's
+    // exhausted. This re-plan spends that same kind, so the refusal is
+    // real; the sentence just needs to say so on the button that was
+    // actually clicked, not repeat the Check button's wording. Every other
+    // refusal from `planAssetImport` (no file, missing columns, ...) is
+    // unaffected by apply-time state and is left exactly as `planAssetImport`
+    // phrased it.
+    if (planned.kind === "rate_limited") {
+      return rateLimited(
+        planned.retryAfterSec ?? 0,
+        `You've checked ${RATE_LIMITS.import_plan.limit} files this minute — the cap. Applying re-checks ` +
+          "the file first, so nothing from it has been written; wait a moment and try Apply again.",
+      );
+    }
+    return planned;
+  }
   // `planAssetImport` already gated the role — re-reading the actor here
   // rather than trusting a role captured a moment ago keeps this call's own
   // permission check live, and `actionRole("admin", "it_staff")` matches
@@ -206,7 +191,7 @@ export async function applyAssetImport(
     );
   }
 
-  const { plan } = planned.data;
+  const { plan, groups } = planned.data;
   let created = 0;
   let updated = 0;
   let unchanged = 0;
@@ -215,7 +200,17 @@ export async function applyAssetImport(
   for (const row of plan.rows) {
     if (row.kind === "blocked") continue;
     try {
-      await prisma.$transaction(async (tx) => {
+      // I-1 (Task 10 round two): the outcome is RETURNED from the callback
+      // and counted only once `$transaction` has resolved — i.e. after the
+      // COMMIT actually succeeded. Incrementing a counter inside the
+      // callback (the pre-fix shape) counts a row whose commit then fails
+      // (P2028 timeout, pool hiccup, connection reset) as BOTH that outcome
+      // AND a failure below, so created+updated+unchanged+skipped+failed
+      // can exceed the row count — the exact "number that does not add up"
+      // A-6 exists to prevent, arriving through a narrower door.
+      // `createAsset` (`inventory/actions.ts`) shows the pattern: return the
+      // outcome, switch on it after it resolves.
+      const outcome = await prisma.$transaction(async (tx) => {
         if (row.kind === "create") {
           const asset = await tx.asset.create({ data: row.data });
           // A-5: `createAsset` can hardcode tag/model/status as a from-null
@@ -239,36 +234,26 @@ export async function applyAssetImport(
             action: "import-create",
             diff,
           });
-          created += 1;
-          return;
+          return { kind: "created" as const };
         }
 
         const before = await tx.asset.findUnique({ where: { id: row.assetId } });
         if (!before) throw new RowWriteError("that asset no longer exists");
 
-        // Found running Test 1 of this task's own verification against real
-        // (seeded/e2e) data, not named in the banner: `updateAsset` already
-        // carries the fix for this ("The form round-trips dates at DAY
-        // precision while seed/legacy rows carry time-of-day. Compare at day
-        // precision — otherwise every first edit of an old row writes
-        // phantom purchasedAt/warrantyUntil audit entries") — this path
-        // imports the same defect by a THIRD road (A-4's cost string being
-        // the second): `parseDateCell` always hands back UTC midnight
-        // (Task 8's pinned convention), but a seed/legacy `purchasedAt` or
-        // `warrantyUntil` can carry a real time-of-day. Diffed as-is, an
-        // unedited round trip of such a row normalises `before` to
-        // `…T07:59:47.133Z` and the patch to `…T00:00:00.000Z` — same
-        // calendar day, `same()` calls it a change — which is exactly the
-        // "happy path is made entirely of unchanged rows" case A-3 exists to
-        // protect. Truncated for the COMPARISON only, exactly as
-        // `updateAsset` does; `row.data.purchasedAt`/`warrantyUntil` — what
-        // actually gets WRITTEN — are untouched.
-        const toDay = (dt: Date | null) => (dt ? new Date(`${dt.toISOString().slice(0, 10)}T00:00:00Z`) : null);
-        const beforeForDiff = {
-          ...before,
-          purchasedAt: toDay(before.purchasedAt),
-          warrantyUntil: toDay(before.warrantyUntil),
-        };
+        // C-1 (Task 10 round two) + A-3/A-4: `assetDiff` (`src/lib/asset-diff.ts`)
+        // owns the day-precision and cost-string comparison normalisations
+        // AND returns `changed` — `row.data` filtered down to exactly the
+        // keys that actually differ. The pre-fix code took only HALF of
+        // `updateAsset`'s two-clause comment ("compare at day precision, AND
+        // write ONLY the changed fields") — it compared correctly but then
+        // wrote `row.data`, the WHOLE patch, so an edited re-import of a
+        // time-of-day row (every seeded asset carries one) silently
+        // truncated the untouched sibling date column to midnight with no
+        // audit entry, into a table a DB trigger makes append-only.
+        const { diff, changed } = assetDiff(
+          before as unknown as Record<string, unknown>,
+          row.data as unknown as Record<string, unknown>,
+        );
 
         // A-3: the diff is computed FIRST, against what this row would
         // actually write — not discovered after the fact by re-reading the
@@ -281,19 +266,20 @@ export async function applyAssetImport(
         // defect this task exists to close). Counted separately as
         // `unchanged`: "nothing needed doing" is a real, common verdict the
         // operator should see, not work.
-        const diff = diffOf(beforeForDiff as unknown as Record<string, unknown>, patchForDiff(row.data));
         if (Object.keys(diff).length === 0) {
-          unchanged += 1;
-          return;
+          return { kind: "unchanged" as const };
         }
 
-        // Guarded on `updatedAt`, which `@updatedAt` always moves — so an
-        // edit landing between the read just above and this write, inside
-        // this same transaction, loses rather than being silently
-        // overwritten (§6a rules 21, 29, 30).
+        // Guarded on `updatedAt`, which `@updatedAt` always moves — this is
+        // LAST-WRITER-WINS with the diff computed at write time, not the
+        // optimistic-concurrency contract (§6a rules 21/29/30) that name a
+        // client-supplied version token: the version is read inside this
+        // same row's own transaction, microseconds before the write, so an
+        // edit landing in that gap loses rather than being silently
+        // overwritten — a real guard, just not that particular contract.
         const written = await tx.asset.updateMany({
           where: { id: row.assetId, updatedAt: before.updatedAt },
-          data: row.data,
+          data: changed,
         });
         if (written.count === 0) {
           throw new RowWriteError("changed since this import was checked — re-check and retry");
@@ -306,12 +292,21 @@ export async function applyAssetImport(
           action: "import-update",
           diff,
         });
-        updated += 1;
+        return { kind: "updated" as const };
       });
+
+      if (outcome.kind === "created") created += 1;
+      else if (outcome.kind === "updated") updated += 1;
+      else unchanged += 1;
     } catch (err) {
       // A-6: the sheet row number (carried on the verdict) and a classified,
       // actionable reason — never swallowed into a total that doesn't add up.
-      failures.push({ row: row.row, reason: classifyRowError(err) });
+      // I-4: `row.kind` ("create" | "update" here — "blocked" rows already
+      // `continue`d above) tells `classifyRowError` whether a P2002 on this
+      // row could be a concurrent double-click racing itself (only possible
+      // on create — both calls plan CREATE for the same tag) so it can name
+      // that possibility instead of asserting the wrong cause.
+      failures.push({ row: row.row, reason: classifyRowError(err, row.kind) });
     }
   }
 
@@ -321,6 +316,14 @@ export async function applyAssetImport(
   // to show up.
   revalidatePath("/inventory/activity");
   revalidatePath("/audit");
+  // I-2: the first thing anyone does after an import is open one row to
+  // check it landed — exactly `/inventory/[id]` and its `/history` tab,
+  // neither revalidated before (unlike `updateAsset` and
+  // `completeOffboarding`, which do this per asset). Per-asset
+  // `revalidatePath` calls are wrong at up to 2,000 rows; Next 15's
+  // dynamic-segment form revalidates every matching page in one call.
+  revalidatePath("/inventory/[id]", "page");
+  revalidatePath("/inventory/[id]/history", "page");
   return ok({
     created,
     updated,
@@ -328,5 +331,6 @@ export async function applyAssetImport(
     skipped: plan.counts.blocked,
     failed: failures.length,
     failures,
+    groups,
   });
 }
