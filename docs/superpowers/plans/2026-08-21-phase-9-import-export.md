@@ -2709,9 +2709,11 @@ git commit -m "feat(import): the asset commit, partial by construction and audit
 > "de-duplicate" two things that only look alike. `ProgressBar`'s props ARE as the draft assumes —
 > `{ value, max?, label? }`, verified.
 >
-> **W-6. Read `applyAssetImport`'s ACTUAL return type — Task 10 changed it.** The draft destructures
-> `{ created, updated, failed }`. Task 10 adds at least `unchanged` and the failed rows' sheet numbers,
-> and reports the re-plan's own counts. **The `unchanged` count is not a detail, it is the happy path's
+> **W-6. `applyAssetImport`'s return type is not what the draft destructures.** It ships (`c32fe24`) as
+> `{ created, updated, unchanged, skipped, failed, failures: { row, reason }[] }`. The draft reads
+> `{ created, updated, failed }` — so it drops `unchanged` entirely and throws away the per-row
+> reasons that exist precisely so the Results step can name which rows failed instead of printing a
+> bare count. `failures` carries a **classified** reason, never a raw Prisma error; render it. **The `unchanged` count is not a detail, it is the happy path's
 > headline**: re-uploading an unedited export is the workflow this feature exists for, and every one of
 > its rows is an update that changes nothing. A toast reading *"Imported 0 new and 0 updated"* would tell
 > the operator their import failed when it did exactly the right thing. Say *"5 rows already matched —
