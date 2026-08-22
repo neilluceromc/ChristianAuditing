@@ -50,11 +50,25 @@ export interface AppliedCounts {
  * one.
  */
 export function hasDiverged(approved: ApprovedCounts, applied: AppliedCounts): boolean {
-  return (
+  const totalMoved =
     applied.created + applied.updated + applied.unchanged + applied.failed !==
-      approved.create + approved.update ||
-    applied.skipped !== approved.blocked
-  );
+      approved.create + approved.update || applied.skipped !== approved.blocked;
+  // The sums above are blind to a change in the MIX, and the swap they miss is
+  // the most consequential thing the world can do to an import: between
+  // Validate and Apply, another operator creates an asset carrying a tag this
+  // file planned to CREATE. The re-plan matches it by tag, the row becomes an
+  // UPDATE, and an existing record is overwritten where a new one was
+  // approved — while `created + updated` is unchanged, so the totals agree and
+  // the sums say nothing happened.
+  //
+  // `failed` is not split by row kind, so it is allowed to absorb a shortfall
+  // on either side; the comparison is therefore one-directional (`<`, never
+  // `!==`) and detects the swap exactly whenever nothing failed, which is the
+  // common case.
+  const createsBecameSomethingElse = applied.created + applied.failed < approved.create;
+  const updatesBecameSomethingElse =
+    applied.updated + applied.unchanged + applied.failed < approved.update;
+  return totalMoved || createsBecameSomethingElse || updatesBecameSomethingElse;
 }
 
 /** The counts `applySummary` needs — a subset of `AppliedCounts`. */
@@ -63,6 +77,14 @@ export interface ApplySummaryCounts {
   updated: number;
   unchanged: number;
   failed: number;
+  /**
+   * Needed only for the tone: a run where everything the operator approved
+   * blocked at re-plan wrote nothing of what they asked for, and a green
+   * "Nothing was imported" is the wrong register for that (round two review,
+   * Minor). Without it this function cannot tell "the file was empty" from
+   * "every approved row is now blocked".
+   */
+  skipped: number;
 }
 
 /**
@@ -86,5 +108,9 @@ export function applySummary(data: ApplySummaryCounts): { message: string; tone:
     message = "Nothing was imported";
   }
   if (data.failed > 0) message += ` — ${data.failed} failed, refresh and re-check`;
-  return { message, tone: data.failed > 0 ? "fault" : "settled" };
+  const wroteNothing = data.created + data.updated + data.unchanged === 0;
+  // "Nothing was imported" while rows were skipped is not a settled outcome —
+  // it is an import that did none of what was approved.
+  const tone = data.failed > 0 || (wroteNothing && data.skipped > 0) ? "fault" : "settled";
+  return { message, tone };
 }

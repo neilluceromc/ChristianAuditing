@@ -69,46 +69,96 @@ describe("hasDiverged", () => {
       ),
     ).toBe(true);
   });
+
+  // R-1 (round two review): the SUMS agree here and the mix does not. Between
+  // Validate and Apply another operator creates an asset carrying a tag this
+  // file planned to CREATE; the re-plan matches it by tag and the row becomes
+  // an UPDATE. An existing record was overwritten where a new one was
+  // approved — the most consequential thing the world can do to an import —
+  // and a totals-only predicate reports no divergence at all.
+  it("diverges when an approved CREATE was applied as an update instead", () => {
+    expect(
+      hasDiverged(
+        { create: 1, update: 4, blocked: 0 },
+        { created: 0, updated: 5, unchanged: 0, skipped: 0, failed: 0 },
+      ),
+    ).toBe(true);
+  });
+
+  // The mirror: an approved UPDATE that could not be matched and was created
+  // instead (the asset was deleted between the two calls).
+  it("diverges when an approved UPDATE was applied as a create instead", () => {
+    expect(
+      hasDiverged(
+        { create: 1, update: 4, blocked: 0 },
+        { created: 2, updated: 3, unchanged: 0, skipped: 0, failed: 0 },
+      ),
+    ).toBe(true);
+  });
+
+  // ...and the reason the per-bucket comparison is one-directional: `failed`
+  // is not split by row kind, so a failure on either side must be allowed to
+  // absorb the shortfall rather than reading as a swap.
+  it("does not call a per-row write failure a composition swap", () => {
+    expect(
+      hasDiverged(
+        { create: 2, update: 3, blocked: 0 },
+        { created: 1, updated: 3, unchanged: 0, skipped: 0, failed: 1 },
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("applySummary", () => {
   it("leads with unchanged when nothing else happened, rather than reading as a failure", () => {
-    expect(applySummary({ created: 0, updated: 0, unchanged: 25, failed: 0 })).toEqual({
+    expect(applySummary({ created: 0, updated: 0, unchanged: 25, failed: 0, skipped: 0 })).toEqual({
       message: "25 rows already matched — nothing needed changing",
       tone: "settled",
     });
   });
 
   it("uses the singular for exactly one unchanged row", () => {
-    expect(applySummary({ created: 0, updated: 0, unchanged: 1, failed: 0 })).toEqual({
+    expect(applySummary({ created: 0, updated: 0, unchanged: 1, failed: 0, skipped: 0 })).toEqual({
       message: "1 row already matched — nothing needed changing",
       tone: "settled",
     });
   });
 
   it("reports nothing imported when the file was entirely empty of eligible rows", () => {
-    expect(applySummary({ created: 0, updated: 0, unchanged: 0, failed: 0 })).toEqual({
+    expect(applySummary({ created: 0, updated: 0, unchanged: 0, failed: 0, skipped: 0 })).toEqual({
       message: "Nothing was imported",
       tone: "settled",
     });
   });
 
   it("folds unchanged in as a trailing detail once there is real work to report", () => {
-    expect(applySummary({ created: 3, updated: 2, unchanged: 20, failed: 0 })).toEqual({
+    expect(applySummary({ created: 3, updated: 2, unchanged: 20, failed: 0, skipped: 0 })).toEqual({
       message: "Imported 3 new and 2 updated · 20 already matched",
       tone: "settled",
     });
   });
 
   it("reports created alone without an 'and'", () => {
-    expect(applySummary({ created: 3, updated: 0, unchanged: 0, failed: 0 })).toEqual({
+    expect(applySummary({ created: 3, updated: 0, unchanged: 0, failed: 0, skipped: 0 })).toEqual({
       message: "Imported 3 new",
       tone: "settled",
     });
   });
 
+  // Round two review, Minor: "Nothing was imported" while rows were SKIPPED
+  // is not a settled outcome — every row the operator approved blocked at
+  // re-plan, so the import did none of what was asked. Same sentence, and it
+  // must not arrive in green. (The divergence banner fires alongside it; the
+  // toast contradicting that banner is what this pins.)
+  it("is not settled when nothing was written because everything skipped", () => {
+    expect(applySummary({ created: 0, updated: 0, unchanged: 0, failed: 0, skipped: 200 })).toEqual({
+      message: "Nothing was imported",
+      tone: "fault",
+    });
+  });
+
   it("appends failures and switches tone to fault, even on an otherwise happy import", () => {
-    expect(applySummary({ created: 0, updated: 0, unchanged: 24, failed: 1 })).toEqual({
+    expect(applySummary({ created: 0, updated: 0, unchanged: 24, failed: 1, skipped: 0 })).toEqual({
       message: "24 rows already matched — nothing needed changing — 1 failed, refresh and re-check",
       tone: "fault",
     });

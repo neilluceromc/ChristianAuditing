@@ -511,6 +511,19 @@ export function ImportWizard() {
             </div>
           )}
 
+          {/* R-1 (round two review): the approved counts stay on screen beside
+              the actuals. The preview panel is hidden once an outcome exists,
+              so without this the operator has nothing to compare against and
+              is relying entirely on the banner noticing for them. A predicate
+              can be blind to a composition swap; two numbers side by side
+              cannot. */}
+          {appliedForPlan && (
+            <span className="font-mono text-[11px] text-fg-muted">
+              approved {appliedForPlan.plan.counts.create} new · {appliedForPlan.plan.counts.update} updates ·{" "}
+              {appliedForPlan.plan.counts.blocked} blocked
+            </span>
+          )}
+
           {diverged && (
             <Banner tone="attention" title="The outcome differs from what Validate showed">
               Something changed between Validate and Import — a category renamed, a record edited — so
@@ -525,8 +538,21 @@ export function ImportWizard() {
                   "/inventory/activity for exactly what changed."}
             </Banner>
           )}
+          {/* R-2 (round two review): these fix buttons go read-only the moment
+              a newer plan exists, for the same reason `OptionChips` above
+              does. `applyFix` bases its new option set on `result.options` —
+              the PENDING plan — so once one exists, a click inside a panel
+              headed "what happened" would silently edit a plan that hasn't
+              happened, and a `reupload` fix would discard it outright. The
+              chips were guarded against exactly this and the groups eleven
+              lines below them were not. */}
           {diverged && (
-            <BlockedCauses groups={applyOutcome.groups} busy={busy} onApplyOption={applyFix} onReupload={startOver} />
+            <BlockedCauses
+              groups={applyOutcome.groups}
+              busy={busy}
+              onApplyOption={planPendingApply ? undefined : applyFix}
+              onReupload={planPendingApply ? undefined : startOver}
+            />
           )}
 
           <span>

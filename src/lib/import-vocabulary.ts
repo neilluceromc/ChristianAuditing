@@ -24,7 +24,20 @@ export function rowCapRefusal(count: number): string {
  * canonical copy, and `next.config.ts`'s literal carries a comment pointing
  * back here. Keep the two in sync by hand if either ever changes.
  */
-export const IMPORT_MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+/**
+ * The client-side upload ceiling, deliberately BELOW `next.config.ts`'s
+ * `bodySizeLimit` (R-4, Task 11 round two). Set to exactly the framework's
+ * limit, a file in the last few kilobytes passes this check and then dies at
+ * the boundary on multipart overhead — landing in the generic catch with
+ * "something went wrong" instead of the named, actionable refusal that exists
+ * for precisely this case. The margin makes the honest refusal always win.
+ * `import-limits.test.ts` asserts this stays under whatever the config says,
+ * so the two cannot drift apart in silence.
+ */
+export const IMPORT_MAX_UPLOAD_BYTES = 4 * 1024 * 1024 - 64 * 1024;
+
+/** Longest example value a cause group will carry to the browser. */
+const EXAMPLE_MAX_CHARS = 60;
 
 export function uploadTooLargeRefusal(bytes: number): string {
   const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
@@ -326,7 +339,15 @@ export interface CauseGroup {
   cause: BlockCause;
   count: number;
   rows: number[];
-  /** distinct offending values, capped at three, so a group can name examples */
+  /**
+   * Distinct offending values, capped at three AND clamped in length
+   * (R-3, Task 11 round two). `value-out-of-range`'s detail is an offending
+   * CELL, and one of the things that triggers it is a note over 2,000
+   * characters — so the detail is unbounded by construction, and an xlsx cell
+   * can legally hold 32,767 of them. Un-clamped, the whole cell crosses the
+   * wire and lands in the DOM three times over: `truncate` hides it visually
+   * while a screen reader still reads every character of it.
+   */
   examples: string[];
 }
 
@@ -347,7 +368,10 @@ export function groupByCause(blocked: BlockedRow[]): CauseGroup[] {
       cause,
       count: rows.length,
       rows: rows.map((r) => r.row),
-      examples: [...new Set(rows.map((r) => r.detail))].filter(Boolean).slice(0, 3),
+      examples: [...new Set(rows.map((r) => r.detail))]
+        .filter(Boolean)
+        .slice(0, 3)
+        .map((v) => (v.length > EXAMPLE_MAX_CHARS ? `${v.slice(0, EXAMPLE_MAX_CHARS)}…` : v)),
     }))
     .sort((a, b) => b.count - a.count || BLOCK_CAUSES.indexOf(a.cause) - BLOCK_CAUSES.indexOf(b.cause));
 }

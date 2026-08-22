@@ -262,10 +262,18 @@ describe("rowCapRefusal", () => {
 });
 
 describe("uploadTooLargeRefusal", () => {
+  // Both figures are DERIVED from the constant, not retyped. The first
+  // version hardcoded "5.0 MB" and "4.0 MB", so moving the ceiling by the
+  // multipart-overhead margin (R-4) failed this test for the wrong reason —
+  // the message was still correct, the expectation was just a stale copy of a
+  // number that has an owner. Same shape as the retyped status list and the
+  // hand-written IMPORT_OPTIONS, both fixed this phase.
   it("names the file's size and the limit in MB, and says nothing was written", () => {
-    const text = uploadTooLargeRefusal(IMPORT_MAX_UPLOAD_BYTES + 1024 * 1024);
-    expect(text).toContain("5.0 MB");
-    expect(text).toContain("4.0 MB");
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+    const oversize = IMPORT_MAX_UPLOAD_BYTES + 1024 * 1024;
+    const text = uploadTooLargeRefusal(oversize);
+    expect(text).toContain(`${mb(oversize)} MB`);
+    expect(text).toContain(`${mb(IMPORT_MAX_UPLOAD_BYTES)} MB`);
     expect(text).toContain("Nothing was imported");
   });
 });

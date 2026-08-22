@@ -20,8 +20,17 @@ function Fix({
 }: {
   fix: BlockFix;
   busy: boolean;
-  onApplyOption: (option: ImportOption) => void;
-  onReupload: () => void;
+  /**
+   * Both handlers are OPTIONAL, and their absence is the read-only signal
+   * (R-2, Task 11 round two). The outcome panel renders the groups of a write
+   * that already happened; once a newer plan is pending, a fix clicked there
+   * would edit that newer plan instead — so the caller withholds the handlers
+   * rather than passing a no-op, and the affordance disappears instead of
+   * lying. A `link` fix stays live either way: navigating to
+   * /admin/asset-categories is safe whatever plan is on screen.
+   */
+  onApplyOption?: (option: ImportOption) => void;
+  onReupload?: () => void;
 }) {
   switch (fix.kind) {
     case "link":
@@ -31,6 +40,7 @@ function Fix({
         </Link>
       );
     case "option":
+      if (!onApplyOption) return null;
       return (
         <Button
           size="sm"
@@ -48,6 +58,7 @@ function Fix({
       // is the page they're already standing on. This clears the current
       // file and verdict and returns to step 1 — a real action, not a dead
       // label or a link to nowhere.
+      if (!onReupload) return null;
       return (
         <Button size="sm" variant="secondary" disabled={busy} className="shrink-0" onClick={onReupload}>
           {fix.label}
@@ -68,8 +79,8 @@ export function BlockedCauses({
 }: {
   groups: CauseGroup[];
   busy: boolean;
-  onApplyOption: (option: ImportOption) => void;
-  onReupload: () => void;
+  onApplyOption?: (option: ImportOption) => void;
+  onReupload?: () => void;
 }) {
   if (groups.length === 0) return null;
   return (
