@@ -259,31 +259,36 @@ type DateResult = { ok: true; value: Date | null } | { ok: false; raw: string };
  * UTC-midnight instant renders as the same day at UTC+8 (Manila), so this is
  * safe by arithmetic (UTC+8 never crosses back a full day), not by luck.
  *
- * M5 (round 2): the Date branch used to return the cell's Date object AS
- * GIVEN, un-normalised. Several xlsx readers hand back a Date built from
- * LOCAL midnight of the intended calendar day — `new Date(2026, 0, 5)` — and
- * a local-midnight instant is NOT the same instant as UTC midnight unless
- * the process happens to be running in UTC. Rendered anywhere in UTC,
- * including this app's own export, that instant reads back as the day
- * BEFORE the sheet said (`2026-01-04T16:00:00Z` at UTC+8). The fix reads the
- * Date's own LOCAL year/month/day — whatever those are, that's the calendar
- * day the cell meant — and rebuilds it as UTC midnight of that same day.
+ * THE DATE CELL CONVENTION, MEASURED AND PINNED AT TASK 8 — do not change
+ * these getters to their local counterparts without re-running that probe.
+ * `readSheet` (`src/server/import/read-sheet.ts`, the only reader in the app)
+ * hands back a real `Date` for a date-formatted cell, and the instant is
+ * **UTC midnight**: a round trip through our own `ASSET_EXPORT_COLUMNS`
+ * returns `2026-01-05T00:00:00.000Z` byte-identical under `Asia/Manila`,
+ * `America/New_York` and `UTC`. Only the LOCAL calendar day read off that
+ * instant moves with the offset — `getDate()` is 5 at UTC+8 and 4 at UTC-5.
  *
- * What that does and does NOT buy, precisely, because the previous version of
- * this comment claimed timezone-independence and did not have it: a LOCAL
- * midnight Date (what several xlsx readers produce) lands on the right day at
- * any offset. A UTC-midnight Date lands on the right day only at a
- * NON-NEGATIVE offset — at UTC-5 its local calendar day is the day before,
- * and this reads that. Manila (UTC+8) is safe by arithmetic, so the
- * deployment cannot be bitten; a developer running the dev server in the US
- * can be. A bare `Date` genuinely cannot say which convention produced it,
- * so the fix is not here: T8 must pin what its reader hands over.
+ * So this reads the cell's **UTC** year/month/day. For the conforming input
+ * above that is a no-op, which is the point: the rule is now provably
+ * independent of the process timezone rather than accidentally correct at
+ * ours. It still does real work for a date cell carrying a time component,
+ * which becomes UTC midnight of the same UTC day.
+ *
+ * Round 2 got this backwards, and the mistake is instructive: it reasoned
+ * that "several xlsx readers hand back LOCAL midnight" and read local fields
+ * accordingly — safe at Manila (UTC+8) by arithmetic, wrong at any negative
+ * offset against the reader we actually have. A bare `Date` cannot say which
+ * convention produced it, so the answer was never derivable here; it took
+ * running the reader. **A local-midnight `Date` would now be read as the day
+ * before at UTC+8 — that shape cannot reach this function through
+ * `read-sheet.ts`, and if a second reader is ever added it must normalise to
+ * this convention at the boundary rather than teaching this branch to guess.**
  */
 function parseDateCell(raw: unknown): DateResult {
   if (isBlank(raw)) return { ok: true, value: null };
   if (raw instanceof Date) {
     if (Number.isNaN(raw.getTime())) return { ok: false, raw: String(raw) };
-    const normalized = new Date(Date.UTC(raw.getFullYear(), raw.getMonth(), raw.getDate()));
+    const normalized = new Date(Date.UTC(raw.getUTCFullYear(), raw.getUTCMonth(), raw.getUTCDate()));
     return { ok: true, value: normalized };
   }
   const text = String(raw).trim();

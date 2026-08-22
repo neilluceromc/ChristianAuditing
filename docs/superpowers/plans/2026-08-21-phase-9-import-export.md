@@ -2027,7 +2027,22 @@ git commit -m "feat(import): the cause vocabulary and the asset row rules, mutat
 
 ### Task 8: The sheet reader boundary
 
-> **ADDED AT TASK 7's CLOSE — pin the date convention this reader hands over, and say so out loud.**
+> ### ANSWERED — the reader returns **UTC midnight**, and T7 was reading local fields.
+> Measured, not inferred: a date written through our own `ASSET_EXPORT_COLUMNS`
+> (`{ type: Date, format: "yyyy-mm-dd" }`) and read back with `readSheet` comes out as a real `Date`
+> whose instant is `2026-01-05T00:00:00.000Z` — **byte-identical under `Asia/Manila`,
+> `America/New_York` and `UTC`**. Only the *local* calendar day read off it moves: `getDate()` is 5 at
+> UTC+8 and **4** at UTC−5. `parseDateCell` was reading local fields on the theory that xlsx readers
+> emit local midnight, so against the reader we actually have it was **one day early at every negative
+> offset** — right at the deployment by arithmetic, wrong for a developer running the dev server in the
+> US. Fixed by reading `getUTC*`, which for conforming input is a **no-op**: the rule is now provably
+> timezone-independent instead of accidentally correct at ours. The suite asserts it under all three
+> zones, and the old local-getter rule fails the New York case. A plain number cell still returns a
+> `number` and a text cell a `string`, both as the rules already assume. **If a second reader is ever
+> added it normalises at the boundary — this branch does not get taught to guess.**
+>
+> **ORIGINAL TASK-7-CLOSE BANNER, kept because it is why the probe happened:**
+> **pin the date convention this reader hands over, and say so out loud.**
 > `parseDateCell` (`src/lib/import-assets.ts`) normalises a `Date` cell by reading its **local**
 > year/month/day and rebuilding it as UTC midnight. That is right for a **local-midnight** `Date`, which
 > is what several xlsx readers produce, and it is right for a **UTC-midnight** `Date` only at a

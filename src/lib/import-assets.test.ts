@@ -457,14 +457,15 @@ describe("planAssetRows", () => {
   // readers produce — and forcing the process into a negative UTC offset
   // (America/New_York) makes that instant provably NOT UTC midnight, so this
   // fails without the fix regardless of the machine's own timezone.
-  // Forcing ONE timezone here was not enough, and the first version of this
-  // block picked the one that proves nothing: at America/New_York (UTC-5) a
-  // local-midnight instant falls on the same CALENDAR day in UTC, so the
-  // local and UTC getters agree and swapping them left all 86 tests green.
-  // Asia/Manila (UTC+8) is where they disagree — and it is the deployment.
-  // A test that forces an environment to make a case distinguishable has to
-  // be checked for actually distinguishing it.
-  describe.each(["Asia/Manila", "America/New_York"])("parseDateCell UTC normalization (%s)", (tz) => {
+  // The date convention is PINNED, not assumed: Task 8's probe read a date
+  // cell back through our own export and got UTC midnight, byte-identical
+  // under every timezone tried. These assert that contract, and they are
+  // parameterised because a single forced timezone has already fooled this
+  // suite once — America/New_York (UTC-5) is the offset where the local and
+  // UTC getters AGREE for a local-midnight instant, so the previous version
+  // of this block stayed green with the getters swapped. Manila (UTC+8) and
+  // UTC are what make the two readings distinguishable.
+  describe.each(["Asia/Manila", "America/New_York", "UTC"])("parseDateCell date convention (%s)", (tz) => {
     const originalTZ = process.env.TZ;
     beforeAll(() => {
       process.env.TZ = tz;
@@ -473,39 +474,32 @@ describe("planAssetRows", () => {
       process.env.TZ = originalTZ;
     });
 
-    it("normalizes a real Date cell to UTC midnight of its own local calendar day", () => {
+    // What `readSheet` actually hands over. Under local getters this reads
+    // the day BEFORE at any negative offset, which is the defect Task 8's
+    // probe caught — so this is the assertion that pins the fix.
+    it("reads the UTC-midnight Date the sheet reader produces as that same day", () => {
       const p = plan([
-        cells({ tag: "BR-LT-0945", model: "Dell", category: "Laptops", purchased: new Date(2026, 0, 5) }),
+        cells({ tag: "BR-LT-0945", model: "Dell", category: "Laptops", purchased: new Date("2026-01-05T00:00:00Z") }),
+      ]);
+      const value = p.rows[0].kind === "create" ? p.rows[0].data.purchasedAt : null;
+      expect(value?.toISOString()).toBe("2026-01-05T00:00:00.000Z");
+    });
+
+    // A date cell carrying a time component is where the normalisation still
+    // does real work rather than being a no-op.
+    it("flattens a Date with a time component to UTC midnight of its own UTC day", () => {
+      const p = plan([
+        cells({ tag: "BR-LT-0946", model: "Dell", category: "Laptops", purchased: new Date("2026-01-05T13:45:30Z") }),
       ]);
       const value = p.rows[0].kind === "create" ? p.rows[0].data.purchasedAt : null;
       expect(value?.toISOString()).toBe("2026-01-05T00:00:00.000Z");
     });
 
     it("leaves a YYYY-MM-DD string on its own calendar day whatever the process timezone", () => {
-      const p = plan([cells({ tag: "BR-LT-0946", model: "Dell", category: "Laptops", purchased: "2026-01-05" })]);
+      const p = plan([cells({ tag: "BR-LT-0947", model: "Dell", category: "Laptops", purchased: "2026-01-05" })]);
       const value = p.rows[0].kind === "create" ? p.rows[0].data.purchasedAt : null;
       expect(value?.toISOString()).toBe("2026-01-05T00:00:00.000Z");
     });
-  });
-
-  // A UTC-midnight Date is only unambiguous at a NON-NEGATIVE offset, which
-  // is why it is asserted here and not inside the `describe.each` above: at
-  // Manila (the deployment) local getters read it as the day the sheet meant,
-  // and at a negative offset they read the day before. A bare Date cannot say
-  // which convention produced it, so the real fix is T8 pinning what its
-  // reader hands over — see the T8 note in the plan.
-  it("reads a UTC-midnight Date cell as the day the sheet meant, at this deployment's offset", () => {
-    const originalTZ = process.env.TZ;
-    process.env.TZ = "Asia/Manila";
-    try {
-      const p = plan([
-        cells({ tag: "BR-LT-0947", model: "Dell", category: "Laptops", purchased: new Date("2026-01-05T00:00:00Z") }),
-      ]);
-      const value = p.rows[0].kind === "create" ? p.rows[0].data.purchasedAt : null;
-      expect(value?.toISOString()).toBe("2026-01-05T00:00:00.000Z");
-    } finally {
-      process.env.TZ = originalTZ;
-    }
   });
 
   it("blocks a cost that is not a plain number, naming the offending text", () => {

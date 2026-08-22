@@ -1587,13 +1587,16 @@ any task in the phase. All of them were fixtures that the running code could not
   produce. Declined on purpose, recorded here because the alternative is someone rediscovering it as a
   bug. **A CHECK constraint or a composite FK would make it exact and is the real fix if the pair ever
   matters more than it does today.**
-- **Phase 9, Task 7 — the date convention is inferred, not pinned, until T8 settles it.**
-  `parseDateCell` reads a `Date` cell's **local** calendar day and rebuilds it as UTC midnight. Correct
-  for a local-midnight `Date` at any offset, and correct for a UTC-midnight `Date` only at a
-  **non-negative** offset — Manila (UTC+8) is safe by arithmetic, a developer running the dev server in
-  the US is not. A bare `Date` cannot say which convention produced it. T8 carries an added banner
-  asking it to establish what `read-excel-file` actually returns and write it down; T7's suite already
-  forces **both** `Asia/Manila` and `America/New_York` and will hold whichever answer T8 pins.
+- **Phase 9, Task 8 — the date convention is now PINNED, and the answer reversed T7's rule.** Settled by
+  running the reader, not by reasoning: `readSheet` returns a real `Date` for a date-formatted cell and
+  the instant is **UTC midnight** — `2026-01-05T00:00:00.000Z` byte-identical under `Asia/Manila`,
+  `America/New_York` and `UTC`, with only the *local* day moving (5 at UTC+8, **4** at UTC−5).
+  `parseDateCell` had been reading **local** fields on the theory that xlsx readers emit local midnight,
+  so it was one day early at every negative offset. Now reads `getUTC*`, a no-op for conforming input,
+  asserted under all three zones. **Do not swap those getters back without re-running the probe** — the
+  round trip is `toXlsxBuffer(ASSET_EXPORT_COLUMNS, …)` → `readSheet`, about fifteen lines under
+  `backups/`. Nothing else in the app reads a spreadsheet; a second reader must normalise at its own
+  boundary rather than teaching the rule to guess.
 
 - **Phase 4 leftovers:** `/approvals` shows the first 50 rows of a tab with a "showing N of M" hint but no pagination; no admin surface LISTS the `Job` table — Phase 8 half-answered this: `/admin/webhooks/deliveries`
   reads `Job` to decide whether a delivery already has a live one (that is what makes its Replay
