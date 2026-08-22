@@ -2828,8 +2828,13 @@ git commit -m "feat(import): the asset commit, partial by construction and audit
 > "de-duplicate" two things that only look alike. `ProgressBar`'s props ARE as the draft assumes —
 > `{ value, max?, label? }`, verified.
 >
-> **W-6. `applyAssetImport`'s return type is not what the draft destructures.** It ships (`c32fe24`) as
-> `{ created, updated, unchanged, skipped, failed, failures: { row, reason }[] }`. The draft reads
+> **W-6. `applyAssetImport`'s return type is not what the draft destructures.** It ships (`5fbc538`) as
+> `{ created, updated, unchanged, skipped, failed, failures: { row, reason }[], groups: CauseGroup[] }`.
+> `groups` is the **re-plan's own** grouping and it exists specifically for you: the world can move
+> between Validate and Apply (an admin renames a category and all 200 rows block), and counts alone
+> cannot tell the operator why. **Render the returned groups when the apply's outcome differs from the
+> verdict they approved** — the same `BlockedCauses` component, fed from the result rather than the
+> plan. That divergence is accepted and recorded; reporting it is what makes it honest. The draft reads
 > `{ created, updated, failed }` — so it drops `unchanged` entirely and throws away the per-row
 > reasons that exist precisely so the Results step can name which rows failed instead of printing a
 > bare count. `failures` carries a **classified** reason, never a raw Prisma error; render it. **The `unchanged` count is not a detail, it is the happy path's
@@ -2854,6 +2859,19 @@ git commit -m "feat(import): the asset commit, partial by construction and audit
 > without re-picking. `file!` inside the Import handler is a non-null assertion that the JSX does not
 > actually guarantee; narrow it. And viewer must not see the **Import link** either — affordance absent,
 > not disabled, per the house rule.
+>
+> **W-8. Apply is a ~15-second operation at the cap, and it is measured, not guessed.** 2,000 rows is
+> 2,000 sequential transactions — ~15 s for the write loop alone, and that is a **floor**: the real
+> action also parses up to 4 MB of multipart, decodes the XLSX, resolves refs and plans 2,000 rows,
+> **twice**, because `applyAssetImport` calls `planAssetImport` internally to re-validate. So: a
+> `useTransition` pending state, **the button disabled from the first click**, and copy that sets the
+> expectation BEFORE the wait rather than explaining it after. The disabled button is also half of a
+> correctness fix — a concurrent double-click makes both calls plan CREATE for the same tags, and the
+> loser gets a P2002 whose reason now names that possibility (the server half, already shipped). A
+> disabled button is a courtesy, not a guarantee, so do not let it be the only thing standing there.
+> **And if anything between the browser and Node imposes a timeout shorter than the run, STOP and say
+> so** — turning this into a queued job with a poll is a plan-level decision, not something to
+> improvise mid-build.
 >
 > **Verification.** Step 5's by-hand check is right and should be done, but note the two things that
 > bite: an agent will not type a password into a login form, so a signed-in browser needs either the
