@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-21 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–6 of 14 committed, unmerged. The EXPORT HALF IS DONE; the import half is untouched.** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, run at the Task 6 close: **514 unit tests / 32 files**, **103 e2e / 8.0 min**, `tsc` + `lint` + `build` clean, and `docker compose --profile prod build` verified at Task 1.
+**Last updated:** 2026-08-22 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–7 of 14 committed, unmerged. The EXPORT HALF IS DONE; the import half has its RULE MODULES (T7) and nothing else.** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, **run in full at the Task 7 close**: **605 unit tests / 34 files**, **103 e2e / 7.7 min**, `tsc` + `lint` + `build` clean, 8 migrations none pending, DB freshly seeded, and `docker compose --profile prod build` verified at Task 1.
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -55,54 +55,60 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    and the **checklist in item 4 below is the distilled version**: run it against every task you
    execute, and read §6a's entry for whichever rules it points at. §6a is about how work goes wrong in
    THIS codebase; it did not stop being true when Phase 8 ended.
-4. **Resume at Task 7** of `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` with
-   `superpowers:subagent-driven-development`. Tasks 1–6 are committed; 7–14 remain. **The export half
-   is finished; the import half has not been started.**
+4. **Resume at Task 8** of `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` with
+   `superpowers:subagent-driven-development`. Tasks 1–7 are committed; 8–14 remain. **The export half is
+   finished, and the import half now has its rule modules and nothing else.**
 
-   **What is done:** the two xlsx dependencies with the Alpine lockfile regenerated (T1); the one module
-   that owns `write-excel-file` (T2); the shared cap/response helpers plus the assets export converted
-   to xlsx, with `?ids=` now refusing instead of silently slicing (T3); the audit and employees export
-   routes (T4); the farewell-report route (T5); split-by-year chips threaded through every consumer of
-   `buildAssetWhere` (T6). **All four export routes the brief requires now exist**, `src/lib/csv.ts` is
-   deleted, and `capRefusalText`'s promise that year chips exist is finally true.
+   **What Task 7 shipped, and why it took four commits.** `src/lib/import-vocabulary.ts` (19 block causes,
+   5 import options, `groupByCause`, the 2,000-row cap) and `src/lib/import-assets.ts` (`matchHeaders`,
+   `planAssetRows`, and the `AssetRefs` / `AssetCreateData` / `AssetUpdatePatch` contracts T9–T11 build
+   against). Both pure — no `src/server`, no Prisma runtime, no I/O. **91 tests across the two files.**
 
-   **What remains — and Task 7 is the biggest single task in the phase.** T7 is the pure rule module:
-   the block-cause vocabulary and the asset row rules. TDD, no I/O, ~18 tests, plus a mutation pass. It
-   is the heart of the import half and every task after it reads from it. Then T8 the sheet reader, T9
-   the dry run, T10 the commit, T11 the wizard, T12 the employee importer, T13 e2e, T14 close-out.
+   **It shipped once, correctly, and was wrong anyway.** `8c4e8c0` implemented the plan **verbatim**, and a
+   spec-compliance review passed it **byte-for-byte**. An opus review then asked *"is the rule right?"*
+   instead of *"does this match the plan?"* and found **seven Critical defects in the plan text**, none of
+   them visible to a green 542-test suite. A second round found **three more**. Read the two `AMENDED`
+   banners on Task 7 before you execute anything else — they are the sharpest available demonstration that
+   **a spec review and a quality review are not the same instrument**, and that in this project the second
+   one is where correctness actually comes from.
 
-   **Three things to carry into T7 specifically.** It contains one of the **two remaining column specs**,
-   and §6a rule 64 records that all three written so far were defective the same way — write it from
-   `prisma/schema.prisma`, not from what the sheet ought to hold. Its whole design rests on **scope
-   decision 2**: `read-excel-file`'s schema mode returns *either* objects *or* errors, never both, so it
-   **cannot express partial success**, which is the brief's default — that is why the import reads a raw
-   grid and validates through this module, and it is exactly the kind of thing a later reader would
-   "simplify" straight back into a bug. And the module is **pure by design**: no `src/server` imports, no
-   database, so every rule is testable with plain arrays. Keep it that way; T9 is where Prisma enters.
+   The ten, compressed, because the shapes recur: a tag match **skipped the serial check**, so a row whose
+   tag was asset A's and whose serial was asset B's planned as a clean update and would have raised P2002
+   at write. **Intra-file duplicates were invisible** — both maps came from the database and nothing
+   accumulated what earlier rows of the same file had claimed. The **numeric cost branch enforced nothing**,
+   and Excel returns `number` for every currency-formatted cell, so the guarded path was the rare one. A
+   date's **shape** was checked but not its **validity**, so `2026-02-30` became March 2 silently. The type
+   map was **keyed on name alone** though `AssetType` is unique per *category*. A blank cell on an update
+   row meant **`null`**, so re-uploading a trimmed export would have wiped cost, warranty, vendor and notes
+   on every row. And the import wrote `status`/`assigneeId` directly, which **no other surface in this app
+   can do** — everything else routes both through the approval queue.
 
-   **THE SINGLE MOST USEFUL THING TO KNOW BEFORE YOU EXECUTE ANOTHER TASK: this plan has been wrong, in
-   a way that mattered, in every one of the five tasks that has shipped.** Not stylistically wrong —
-   wrong in ways that would have shipped defects. In order: Task 1's stated hazard could not fire for
-   those packages; Task 2's code would have produced a **headerless sheet** on any zero-row export;
-   Task 3's column spec silently **dropped two real columns** the CSV emitted; Task 4's employees export
-   **ignored the page's filters** and would have exported ten rows against a screen showing three; Task
-   5's column spec **invented an approver and a timestamp** that exist nowhere in the codebase.
+   **Two scope decisions came out of it (13 and 14 in the plan), and they bind T9–T11.** Import may set
+   status/assignee on **create** — an import's job is entering a fleet that is already deployed — but on
+   **update** it refuses the move and offers `keepCurrentLifecycle`. And **every block cause offers a fix
+   the operator can act on**: a screen we have → a link, a decision → an `ImportOption`, the sheet itself →
+   the `reupload` kind. That second one exists because `unknown-vendor` shipped linking to
+   `/admin/vendors`, **which does not exist** — and `reference-actions.ts` accepts only
+   `category`/`type`/`department`, so **nothing in this application can create a `Vendor`**. Rule 10's
+   sixth instance, in the phase that had it written down in advance.
 
-   **Three of those five were column specs, and all three failed the same way** — written from what the
-   sheet ought to say rather than from what the source actually holds. Two column specs remain, in
-   Tasks 7 and 12. Read the source before you trust either.
+   **What remains.** T8 the sheet reader, T9 the dry run (where Prisma enters), T10 the commit, T11 the
+   wizard, T12 the employee importer, T13 e2e, T14 close-out.
 
-   So: **treat every code block in that plan as a draft to check, not a spec to follow.** Every
-   implementer prompt this session said so explicitly, and every implementer found something. When the
-   plan and the code disagree, the code wins and the plan gets amended — Tasks 1–5 all carry `AMENDED`
-   banners recording exactly what was wrong, and reading three of them is the fastest way to calibrate.
+   **Three things to carry into T8 specifically.** It has an **added banner** asking it to pin the date
+   convention `read-excel-file` actually returns — **run it, don't infer it** — because `parseDateCell`
+   reads a `Date` cell's *local* calendar day, which is right at Manila (UTC+8) and wrong at a negative
+   offset, and a bare `Date` cannot say which convention produced it. It must **refuse on
+   `headers.missing.length > 0`** before planning, or a sheet with no Category column produces 2,000
+   identical blocks instead of one refusal. And it owns `read-excel-file` alone, **schema-less by scope
+   decision 2** — the library's schema mode returns *either* objects *or* errors, never both, so it cannot
+   express partial success, which is the brief's default. That is the single most "simplifiable" thing in
+   the phase and simplifying it puts the bug straight back.
 
-   **A second thing, learned the hard way at the Task 5 close.** Five tasks shipped with `tsc`, `lint`,
-   the unit suite and `npm run build` green, and **an e2e test had been failing the whole time** —
-   `it-core.spec.ts` asserted `text/csv` on a route Task 3 converted to xlsx. Nobody ran Playwright,
-   including two code reviews. **Run the full e2e suite at least every few tasks**, not only at Task 14;
-   the unit suite cannot see a route's content type. Fixed in `139feef`, and the assertion is now a
-   round trip through the buffer rather than a header check.
+   **The other still-open item from T7's review, which is T9's:** the employee `name` key and the
+   `ambiguous` flag mean T9 must build `refs.employees` so that a name matching two employees is marked
+   ambiguous rather than resolving to whichever row it saw last. The rule is written and tested; the map
+   that feeds it is not built yet.
 
    **THE CHECKLIST — the single most useful thing in this doc.** Every one of the fourteen tasks executed
    so far has hit at least one of these, and **not one instance was caught by the unit suite** — several
@@ -181,6 +187,13 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    an imported row is, and item 3 applies to its diff: an import's audit diff is a from-null
    transition, never a from-equals-to.
 
+**The battery below is Phase 8's close, kept for the per-phase growth figures. The CURRENT numbers are
+the ones in this doc's header** — run in full at the Task 7 close, on this branch, on a freshly seeded
+database: `tsc` · `lint` · **605 unit tests / 34 files** · `build` · **103 e2e in 7.7 min, all passing**.
+Phase 9 has added **131 unit tests** so far, **91 of them in Task 7's two rule modules alone** — which is
+what a module reviewed three times looks like, not thoroughness for its own sake: the first version of
+that suite had 28 tests, was entirely green, and the module it covered carried ten defects.
+
 The branch is green end to end, and this is the FULL battery run at Phase 8's close, not a figure
 carried over from an earlier merge: `npx tsc --noEmit` · `npm run lint` · **474 unit tests across 30
 files**, up from 345 across 26 at the Phase 7 merge — so Phase 8 added **129**, most of them
@@ -231,18 +244,28 @@ the button still showing `"Loading" [disabled]` and an empty alert — nothing a
 at a timing race. It failed once in three full runs and was reproduced byte-for-byte by delaying
 `updateAsset` 7s. The fix is headroom on the assertion (20s), not a weaker assertion.
 
-**Nothing is half-finished in the code.** Every Phase 8 task ended on a green commit, and each one's
-plan text and §6a entry were updated in the same session it shipped. The next unit of work is a whole
-task — **Task 10** — not a fragment of anything. Every review finding was either fixed or recorded in
-§8; none was left silently open.
+**Nothing is half-finished in the code.** Every Phase 8 and Phase 9 task ended on a green commit, and
+each one's plan text and §6a entry were updated in the same session it shipped. The next unit of work is
+a whole task — **Task 8** — not a fragment of anything. Every review finding was either fixed or recorded
+in §8; none was left silently open.
 
-**State this session left behind:** working tree **clean**, **no dev server running** (verified: zero
-`node.exe` processes, and nothing listening on 3000/4999/5000), `inventory-db-1` **up**, **8 migrations,
-none pending** (`prisma migrate status` says "up to date"). `main` is **4 commits ahead of
-`origin/main`** and the branch is **54 ahead of `main`** — but count it rather than trusting that
-(`git rev-list --count main..HEAD`), because every correction to this line is itself a commit. **No scratch files anywhere in the repo** — the session's working scripts live in the
-harness scratchpad, outside the tree. Last verified green: `npx tsc --noEmit` · `npm run lint` ·
-**460 tests / 30 files** · `npm run build`.
+**State the Task 7 session left behind (2026-08-22):** working tree **clean**, **no dev server running**
+(verified: zero `node.exe` processes; only `TIME_WAIT` sockets on 3000 from the Playwright run's own
+server), `inventory-db-1` **up**, **8 migrations, none pending**. The branch is **29 commits ahead of
+`main`** and `main` is **72 ahead of `origin/main`** — count both rather than trusting these
+(`git rev-list --count main..HEAD`), because every correction to this line is itself a commit. **No
+scratch files anywhere in the repo** — the session's working scripts and the extracted task specs handed
+to subagents live in the harness scratchpad, outside the tree. Last verified green, all of it in one
+pass at the Task 7 close: `npx tsc --noEmit` · `npm run lint` · **605 tests / 34 files** ·
+`npm run build` · **`npx playwright test --workers=1` — 103 passed, 7.7 min**.
+
+**`npm run db:seed` was NOT blocked this session** — it ran directly, immediately before the e2e battery.
+Treat §3's classifier note as "may be blocked", not "is".
+
+**The database is NOT freshly seeded**, and that is normal after a battery rather than a problem: the
+full Playwright suite ran after the reseed, so what is in there is whatever `e2e/purchases.spec.ts` —
+alphabetically last — finished with (25 assets rather than the seed's 22, for instance). Reseed before
+trusting any fixture-dependent read.
 
 **THE DB IS FRESHLY SEEDED, with ONE known deviation.** Task 12's verification reseeded it via
 `npx playwright test e2e/auth-shell.spec.ts --workers=1` (15/15 passed), which cleared every piece of
@@ -518,7 +541,36 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 9 — import / export (MID-FLIGHT, tasks 1–6 of 14 on `phase-9-import-export`)**
+**Phase 9 — import / export (MID-FLIGHT, tasks 1–7 of 14 on `phase-9-import-export`)**
+
+**The import RULE MODULES exist (T7), and nothing else of the import half does.** Two pure files, 91
+tests, no `src/server`, no Prisma runtime, no I/O — every rule testable with plain arrays, which is
+scope decision 2's whole purpose. `src/lib/import-vocabulary.ts` owns the operator-facing vocabulary:
+**19 block causes**, each with a label, an explanation and a fix that is either a **link** to a screen
+that exists, an **`ImportOption`** (5 of them: `treatDuplicateSerialAsUpdate`, `dropUnknownAssignee`,
+`dropUnknownVendor`, `keepCurrentLifecycle`, `importUnheldAsSpare`) that re-plans the same file with one
+decision changed, or the **`reupload`** kind for causes only the sheet itself can fix; plus
+`groupByCause` (biggest group first, ties in `BLOCK_CAUSES` order, up to three de-duplicated examples)
+and the 2,000-row cap. `src/lib/import-assets.ts` owns `matchHeaders` and `planAssetRows`, and defines
+the three contracts T9–T11 build against: `AssetRefs` (with the composite `${categoryId}:${name}` type
+key and one unified `AssetRecordRef` behind both `byTag` and `bySerial`), `AssetCreateData`, and
+`AssetUpdatePatch` — where **`undefined` means the sheet has no such column, leave it alone** and
+**`null` means a present column with an empty cell, an intentional clear**. Collapsing those two is a
+destructive write on every trimmed re-upload, which is what the first version did.
+
+**Two scope decisions were added here (13, 14) and they bind the rest of the phase.** Import may set
+`status`/`assignee` on **create** but never moves them on **update** — everywhere else in this app both
+route through the approval queue, and a spreadsheet that wrote them directly would be the only surface
+able to flip 500 assets with no approval, no SLA and no `approval.requested` trail. And **every block
+cause offers a fix the operator can act on**, which is why `unknown-vendor` is a drop option rather than
+a link: `/admin/vendors` does not exist, and `reference-actions.ts` accepts only
+`category`/`type`/`department`, so **nothing in this application can create a `Vendor`**.
+
+**T7 took four commits and three review rounds, and that history is the most useful thing in the phase
+— see the two `AMENDED` banners on Task 7 and §6a rules 67–70.** `8c4e8c0` implemented the plan
+verbatim and passed a byte-for-byte spec review; an opus review asking *"is the rule right?"* then found
+**seven Critical defects in the plan text**, and a second round found three more. Ten in total, in a
+module whose 28-test suite was entirely green.
 
 **All four export routes the brief requires now exist, as `.xlsx`.** `src/server/xlsx/write.ts` is the
 one module that imports `write-excel-file`, exposing `toXlsxBuffer(columns, rows)`; it builds the grid
@@ -712,19 +764,15 @@ pending-route table, so the split falls on a seam that already existed.
 - **Phase 8 — the Admin workspace. COMPLETE and MERGED** (`e5a5730`). What it delivered is §4; the
   invariants it established are §6a. Two things remain outstanding and neither is code: **the push
   decision, which is the user's and unmade**, and **two purely visual checks** listed at the end of §4.
-- **Phase 9 — import / export. MID-FLIGHT: tasks 1–6 of 14 done** on `phase-9-import-export`.
-  `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` (14 tasks, 12 recorded scope decisions,
-  every shipped task carrying an `AMENDED` banner). **The export half is DONE — see §4.**
-  **What remains is the whole import half**: the pure rule module (T7, the heart and the biggest single
-  task in the phase), the sheet reader (T8), the dry run (T9), the commit (T10), the wizard (T11), the
+- **Phase 9 — import / export. MID-FLIGHT: tasks 1–7 of 14 done** on `phase-9-import-export`.
+  `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` (14 tasks, **14 recorded scope decisions**,
+  every shipped task carrying an `AMENDED` banner). **The export half is DONE and so are the import rule
+  modules — see §4.**
+  **What remains is the rest of the import half**: the sheet reader (T8), the dry run (T9), the commit (T10), the wizard (T11), the
   employee importer (T12), e2e (T13), close-out (T14).
 - **Phase 10 — polish. Not yet planned.** Split out of Phase 9 on 2026-08-21 because the two halves
   share almost no code: the printable 3×4 A4 label sheet with scan codes, USB-scanner polish so a scan
   ticks the matching offboarding wizard row, the deployment README, and the full axe pass.
-- **Phase 9 — import/export + polish. Not yet planned.** Import (3-step dry-run → commit, blocked rows
-  grouped by cause), export upgrade (real Excel + split-by-year chips, including the brief's
-  `farewell-report` route), printable label sheet, USB-scanner polish (a scan should tick the matching
-  wizard row), deployment README, full axe pass.
 - **Entra SSO is deferred, deliberately and on the record.** `src/server/auth/index.ts` registers the
   provider when three env vars are set but carries `TODO(sso-phase)`: there is **no `signIn` callback**
   mapping an Entra profile to a `User` row, so an Entra login would arrive with no role. That is why
@@ -795,7 +843,7 @@ shape, the label-sheet geometry and the scanner rules in more detail than is rep
 
 ---
 
-## 6a. What Phases 8 and 9 have established (66 rules — read before executing anything)
+## 6a. What Phases 8 and 9 have established (70 rules — read before executing anything)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break. **Phase 8 is finished, but this section is
@@ -1422,6 +1470,52 @@ any task in the phase. All of them were fixtures that the running code could not
     non-zero**, or say plainly in the report that you could not — which Task 5 did, and which is why the
     real assertion moved to the e2e that can create the state.
 
+67. **A mutation only tests the suite if the fixture exercises the branch you mutated — and a test's
+    NAME is not evidence that its INPUT reaches the branch the name claims.** Phase 9 Task 7 is the
+    case study: **seven inert assertions across three review rounds, and three of them were inside
+    tests written to close an earlier inert one.** The plan's own Step 9 mutation pass prescribed four
+    edits and two proved nothing — `parseFloat("PHP 51,000")` is `NaN` under both the strict and the
+    lenient branch, and the literal "swap rules 3 and 4" left the suite fully green because no fixture
+    paired a matching tag with a taken serial. Then the *replacement* cost-ceiling test, written
+    specifically to kill a dud, used `1e21` — which the **two-decimal** check catches first, making it
+    a second copy of the 2-dp test wearing the ceiling's name, with **both** ceiling branches still
+    deletable at 65/65 green. Then the date test, written to prove timezone-independence, forced
+    `America/New_York` — the one offset where the local and UTC getters **agree**, so swapping them
+    left 86/86 green. The root cause is identical every time: an accurate name over an input that
+    lands somewhere else. **So: before believing a mutation proved anything, confirm the fixture
+    reaches the mutated branch; and when a test forces an environment (a timezone, a locale, a clock)
+    to make a case distinguishable, confirm the forced value actually distinguishes it.** The cheapest
+    check is the one that found all seven — delete the code the test names and watch it fail.
+68. **A whole-object assertion is worth more than the spot checks you would otherwise write, and it
+    cannot rot.** Task 7's C-7 test asserted `"notes" in patch` and `"vendorId" in patch` — two of
+    seven optional fields, with `cost` (money) among the five unpinned, so "the patch always carries
+    `cost`" survived mutation on a test written to prevent exactly that class of destructive write.
+    One line — `expect(Object.keys(patch).sort()).toEqual([…])` — pins all seven forever and fails
+    loudly the day an eighth is added, which is the moment you want to be asked. Same family as rule
+    64 (the export column spec that dropped two columns while its "unique non-empty labels" assertion
+    passed happily): **an assertion over a SET is what catches an omission; an assertion over MEMBERS
+    only catches a corruption.**
+69. **A "structural guarantee" that rests on application code is a convention, and saying so in the
+    comment is the whole difference.** Task 7's `type-outside-category` infers "the stored type cannot
+    belong to the new category" from the record's `(categoryId, typeId)` pair having been consistent
+    to begin with — and **nothing in the database enforces that**: there is no FK or CHECK tying
+    `Asset.categoryId` to its type's category, only `createAsset` and `updateAsset` do, in application
+    code. So an asset already stored inconsistently is blocked even by the row that would REPAIR it,
+    and left alone by a row that keeps it broken. Both directions are safe here and the check was kept
+    deliberately — but the comment first claimed a guarantee, and a reader who takes that at face
+    value will not think to check. **Write down which invariant a shortcut depends on and who
+    maintains it.** Sibling of rule 16: a comment must not claim a property the code lacks — including
+    a property the *database* lacks.
+70. **A spec review and a quality review are different instruments, and passing the first says nothing
+    about the second.** Task 7 shipped as `8c4e8c0`, a byte-for-byte transcription of the plan, and a
+    spec-compliance review passed it — correctly, because it *was* compliant. An opus review then asked
+    *"is the rule right?"* and found **seven Critical defects in the plan text**; a second round found
+    **three more**. Everything the suite could see was green throughout: 542 tests, `tsc`, `lint`,
+    `build`. The pattern, five phases running, is that **the implementation is rarely the problem** —
+    §2 already says the reviews are where correctness comes from, and this is the sharpest instance:
+    the module's rules disagreed with `schema.prisma`, `asset-rules.ts` and `actions.ts`, three files
+    the plan's author never opened. **When a task is logic-critical, point a reviewer at the rule with
+    the domain facts in hand, and treat "the diff matches the plan" as the beginning of the review.**
 ---
 
 ## 7. Recurring gotchas that have cost real time
@@ -1473,6 +1567,33 @@ any task in the phase. All of them were fixtures that the running code could not
 - **A new audit `action` string needs a reader that will actually see it — check that BEFORE teaching the display layer, not after.** Phase 7 initially taught `auditSentence` four new cases and then reverted all four: the app's activity feeds each scope to one `entityType` (`employee` / `asset` / `purchase-request`), and `/audit` itself renders `listAudit`'s raw `action` string plus the diff's **key names** — it never calls `auditSentence` at all. So the four new cases were unreachable by any page in the app, and their tests were exercising dead code. Before adding a case for a new `entityType`, trace which surface would actually route it through the function you're editing.
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
+
+- **Phase 9, Task 7 — `rmaRef` is exported but not importable, deliberately.** `ASSET_EXPORT_COLUMNS`
+  emits an **`RMA ref`** column; `ASSET_IMPORT_HEADERS` does not recognise it, so it lands in
+  `HeaderMatch.unknown` and is ignored. **This is not data loss on a round trip** — an update writes
+  only the fields in `AssetUpdatePatch`, so an asset's stored `rmaRef` survives untouched, and a create
+  starts it null anyway. Making it importable means a **new writable field**, not a header alias, and it
+  drags in the rest of the repair block (`repairQuote`, `defectiveSince`) and the question of whether a
+  spreadsheet should drive the repair workflow at all. Its own task if it is ever wanted. Related: T11
+  should not render "unrecognised column" warnings for columns this app itself wrote — after T7's
+  `employeeNo` split, `RMA ref` is the only one left on our own export.
+- **Phase 9, Task 7 — `type-outside-category` is conservative, not exact, and there is no database
+  constraint behind it.** Nothing ties `Asset.categoryId` to its type's category — no FK, no CHECK —
+  only `createAsset` and `updateAsset` maintain the pair, in application code. So an asset already
+  stored inconsistently (seed, raw SQL, a future write path) is blocked by the import row that would
+  **repair** it, and left alone by one that keeps it broken. Both directions are safe and the block's
+  own advice resolves the false positive; catching it exactly would need the stored type's own
+  `categoryId` in `AssetRecordRef` — a T9 contract addition to detect a state the app cannot currently
+  produce. Declined on purpose, recorded here because the alternative is someone rediscovering it as a
+  bug. **A CHECK constraint or a composite FK would make it exact and is the real fix if the pair ever
+  matters more than it does today.**
+- **Phase 9, Task 7 — the date convention is inferred, not pinned, until T8 settles it.**
+  `parseDateCell` reads a `Date` cell's **local** calendar day and rebuilds it as UTC midnight. Correct
+  for a local-midnight `Date` at any offset, and correct for a UTC-midnight `Date` only at a
+  **non-negative** offset — Manila (UTC+8) is safe by arithmetic, a developer running the dev server in
+  the US is not. A bare `Date` cannot say which convention produced it. T8 carries an added banner
+  asking it to establish what `read-excel-file` actually returns and write it down; T7's suite already
+  forces **both** `Asia/Manila` and `America/New_York` and will hold whichever answer T8 pins.
 
 - **Phase 4 leftovers:** `/approvals` shows the first 50 rows of a tab with a "showing N of M" hint but no pagination; no admin surface LISTS the `Job` table — Phase 8 half-answered this: `/admin/webhooks/deliveries`
   reads `Job` to decide whether a delivery already has a live one (that is what makes its Replay
