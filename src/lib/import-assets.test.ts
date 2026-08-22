@@ -28,12 +28,15 @@ const REFS: AssetRefs = {
   categories: new Map([["laptops", "cat-1"], ["furniture", "cat-2"]]),
   // Composite key: `${categoryId}:${name}` — two categories each have a type
   // named differently on purpose, plus a same-named trap ("standard") under
-  // both, to prove a flat name key would be lossy.
+  // both, to prove a flat name key would be lossy. Values are plain ids
+  // (round 2 Minor: the dead `categoryId` the value used to also carry —
+  // nothing read it, the composite KEY already embeds it — is gone); `null`
+  // would mean a same-category case-collision (R-1), tested separately below.
   types: new Map([
-    ["cat-1:macbook pro", { id: "typ-1", categoryId: "cat-1" }],
-    ["cat-1:standard", { id: "typ-3", categoryId: "cat-1" }],
-    ["cat-2:ergo chair", { id: "typ-2", categoryId: "cat-2" }],
-    ["cat-2:standard", { id: "typ-4", categoryId: "cat-2" }],
+    ["cat-1:macbook pro", "typ-1"],
+    ["cat-1:standard", "typ-3"],
+    ["cat-2:ergo chair", "typ-2"],
+    ["cat-2:standard", "typ-4"],
   ]),
   employees: new Map([
     ["emp-0042", { id: "e-1", employment: "ACTIVE", ambiguous: false }],
@@ -317,6 +320,22 @@ describe("planAssetRows", () => {
     }
   });
 
+  // R-4 (round 2): `refKey()` collapses an internal whitespace RUN — not
+  // just an ordinary double space, but a non-breaking space (U+00A0), the
+  // routine artefact of pasting a name from Outlook or a web page into
+  // Excel. `trim()` alone strips a SURROUNDING NBSP but leaves one sitting
+  // BETWEEN "Marites" and "Bautista" untouched, and before this fix that
+  // name would block as `unknown-assignee` naming a value that reads
+  // letter-for-letter identical to a real employee, with no visible
+  // difference — and the offered fix, "Leave as spare", silently discards a
+  // valid assignment.
+  it("resolves an assignee whose name carries an internal non-breaking space or doubled space, via refKey (R-4)", () => {
+    for (const who of ["Marites\u00A0Bautista", "Marites  Bautista", "  marites   bautista  "]) {
+      const p = plan([cells({ tag: "BR-LT-0959", model: "Dell", category: "Laptops", assignedTo: who })]);
+      expect(p.rows[0]).toMatchObject({ kind: "create", data: { assigneeId: "e-1" } });
+    }
+  });
+
   it("blocks an unknown assignee, and drops it instead when that fix is picked", () => {
     const row = [cells({ tag: "BR-LT-0907", model: "Dell", category: "Laptops", assignedTo: "Nobody Here" })];
     expect(plan(row).rows[0]).toMatchObject({ kind: "blocked", cause: "unknown-assignee" });
@@ -389,6 +408,43 @@ describe("planAssetRows", () => {
   it("resolves a known vendor", () => {
     const p = plan([cells({ tag: "BR-LT-0911", model: "Dell", category: "Laptops", vendor: "ACME" })]);
     expect(p.rows[0]).toMatchObject({ kind: "create", data: { vendorId: "v-1" } });
+  });
+
+  // R-1 (round 2, consuming side): a `null` map entry means two rows share
+  // this name case-insensitively — the id is genuinely undecidable, so this
+  // must block with its OWN cause rather than being read as "falsy" and
+  // reported as unknown-category (a different, wrong, problem: the name IS
+  // known, twice).
+  it("blocks duplicate-category-name, distinctly from unknown-category, when the map records an ambiguous collision", () => {
+    const refs: AssetRefs = { ...REFS, categories: new Map([...REFS.categories, ["storage", null]]) };
+    const p = planAssetRows(
+      matchHeaders(HEADER),
+      [cells({ tag: "BR-ST-0100", model: "Shelf", category: "Storage" })],
+      refs,
+      OPTS,
+    );
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "duplicate-category-name", detail: "Storage" });
+  });
+
+  it("blocks duplicate-type-name, scoped to the row's own category, when the composite key records a collision", () => {
+    const refs: AssetRefs = { ...REFS, types: new Map([...REFS.types, ["cat-1:premium", null]]) };
+    const p = planAssetRows(
+      matchHeaders(HEADER),
+      [cells({ tag: "BR-LT-0960", model: "Dell", category: "Laptops", type: "Premium" })],
+      refs,
+      OPTS,
+    );
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "duplicate-type-name", detail: "Premium" });
+  });
+
+  it("blocks duplicate-vendor-name, and drops it instead when that fix is picked (same rescue as unknown-vendor)", () => {
+    const refs: AssetRefs = { ...REFS, vendors: new Map([...REFS.vendors, ["dell corp", null]]) };
+    const row = [cells({ tag: "BR-LT-0961", model: "Dell", category: "Laptops", vendor: "Dell Corp" })];
+    const blocked = planAssetRows(matchHeaders(HEADER), row, refs, OPTS);
+    expect(blocked.rows[0]).toMatchObject({ kind: "blocked", cause: "duplicate-vendor-name", detail: "Dell Corp" });
+    const dropped = planAssetRows(matchHeaders(HEADER), row, refs, { ...OPTS, dropUnknownVendor: true });
+    expect(dropped.rows[0]).toMatchObject({ kind: "create" });
+    expect(dropped.rows[0].kind === "create" && dropped.rows[0].data.vendorId).toBeNull();
   });
 
   // NC-1: a dropped vendor on an UPDATE must OMIT `vendorId` from the patch,

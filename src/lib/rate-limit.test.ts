@@ -25,4 +25,16 @@ describe("rateDecision", () => {
     const recent = Array.from({ length: 10 }, (_, i) => secondsAgo(i));
     expect(rateDecision(recent, "import", now).allowed).toBe(false);
   });
+
+  // R-2 (round 2): the read-only dry-run stage gets its OWN kind, at the
+  // mutation budget (60/min) rather than the write's 10 — 9 events must
+  // still be allowed (proving it is not still sharing "import"'s 10 limit)
+  // and it must not confuse with "mutation" either, since they're stored
+  // under different `RateEvent.kind` strings.
+  it("import_plan kind uses its own 60/min budget, not the write's 10/min", () => {
+    const nineRecent = Array.from({ length: 9 }, (_, i) => secondsAgo(i));
+    expect(rateDecision(nineRecent, "import_plan", now).allowed).toBe(true);
+    const sixtyRecent = Array.from({ length: 60 }, (_, i) => secondsAgo(i * 0.5));
+    expect(rateDecision(sixtyRecent, "import_plan", now).allowed).toBe(false);
+  });
 });

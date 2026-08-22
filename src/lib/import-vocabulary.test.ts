@@ -126,6 +126,31 @@ describe("BLOCK_CAUSES", () => {
     expect(spec.fix?.kind).toBe("reupload");
   });
 
+  // R-1 (round 2): a category/vendor/type name colliding case-insensitively
+  // is a DIFFERENT problem than "never seen" (unknown-*) — the name IS
+  // known, twice, and the id is genuinely undecidable. Distinct causes so
+  // the fix (rename one of the pair) is not confused with "create it first".
+  it("sends duplicate-category-name to the categories page, distinct from unknown-category", () => {
+    const spec = blockSpec("duplicate-category-name");
+    expect(spec.fix).toMatchObject({ kind: "link", href: "/admin/asset-categories" });
+    expect(spec.label.toLowerCase()).not.toBe(blockSpec("unknown-category").label.toLowerCase());
+  });
+
+  it("sends duplicate-type-name to the types page, distinct from unknown-type", () => {
+    const spec = blockSpec("duplicate-type-name");
+    expect(spec.fix).toMatchObject({ kind: "link", href: "/admin/asset-types" });
+    expect(spec.label.toLowerCase()).not.toBe(blockSpec("unknown-type").label.toLowerCase());
+  });
+
+  // Unlike the category/type pair, no admin surface can rename or create a
+  // Vendor at all (scope decision 14) — a link would be exactly the dead end
+  // D-B already forbade for unknown-vendor, so this reuses the same drop.
+  it("offers duplicate-vendor-name as a drop, not a link to a page that doesn't exist", () => {
+    const spec = blockSpec("duplicate-vendor-name");
+    expect(spec.fix).toMatchObject({ kind: "option", option: "dropUnknownVendor" });
+    expect(spec.explain).not.toMatch(/create it first/i);
+  });
+
   // NI-2 (round 2): reverting `bad-status` to a `/inventory` link left the
   // suite green under round 1, because no test pinned any cause's fix KIND
   // — only its internal consistency (a `link` fix must point somewhere
@@ -153,6 +178,9 @@ describe("BLOCK_CAUSES", () => {
       "value-out-of-range": "reupload",
       "missing-category": "reupload",
       "type-outside-category": "reupload",
+      "duplicate-category-name": "link",
+      "duplicate-type-name": "link",
+      "duplicate-vendor-name": "option",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);

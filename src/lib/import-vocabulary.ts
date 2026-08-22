@@ -44,6 +44,13 @@ export const BLOCK_CAUSES = [
   "value-out-of-range",
   "missing-category",
   "type-outside-category",
+  // R-1 (round 2): three, not one shared cause — the honest fix differs per
+  // entity (an admin can rename a category or type; nothing in this app can
+  // rename or create a Vendor at all), and a fix is defined PER CAUSE, not
+  // per row. Appended, per this array's own rule above.
+  "duplicate-category-name",
+  "duplicate-type-name",
+  "duplicate-vendor-name",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -243,6 +250,30 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "Add a Type column naming a type that belongs to the new category, or add it blank to clear the " +
       "type, and re-upload.",
     fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "duplicate-category-name": {
+    label: "Category name collides case-insensitively",
+    explain:
+      "Two categories in this system share this name, differing only in letter case — the database " +
+      "allows that today, but this import can't tell which one you mean. An admin needs to rename one " +
+      "of them before rows naming this category can resolve.",
+    fix: { kind: "link", label: "Rename a category", href: "/admin/asset-categories" },
+  },
+  "duplicate-type-name": {
+    label: "Type name collides case-insensitively",
+    explain:
+      "Two types under this row's category share this name, differing only in letter case — the " +
+      "database allows that today, but this import can't tell which one you mean. An admin needs to " +
+      "rename one of them before rows naming this type can resolve.",
+    fix: { kind: "link", label: "Rename a type", href: "/admin/asset-types" },
+  },
+  "duplicate-vendor-name": {
+    label: "Vendor name collides case-insensitively",
+    explain:
+      "Two vendors in this system share this name, differing only in letter case, so this import can't " +
+      "tell which one you mean. Vendor is optional and purely informational here — no page in this app " +
+      "can rename or create one — so you can import without it and set it later from the asset's edit form.",
+    fix: { kind: "option", label: "Import without the vendor", option: "dropUnknownVendor" },
   },
 };
 

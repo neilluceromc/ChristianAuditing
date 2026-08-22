@@ -38,13 +38,23 @@ export type AssetField = (typeof ASSET_IMPORT_HEADERS)[number]["key"];
 
 export interface HeaderMatch {
   map: Map<AssetField, number>;
-  /** `title`s of required headers with no column — reported all at once */
+  /**
+   * `title`s of required headers with no column — reported all at once. When
+   * a header accepts more than one spelling (round 2 Minor: "Asset tag" for
+   * Tag), the accepted spellings are named alongside the title — a refusal
+   * naming only "Tag" is TRUE but unhelpful if the operator doesn't know
+   * "Asset tag" would also have matched.
+   */
   missing: string[];
   unknown: string[];
 }
 
 function normalizeHeader(cell: unknown): string {
   return String(cell ?? "").trim().toLowerCase();
+}
+
+function missingColumnLabel(spec: (typeof ASSET_IMPORT_HEADERS)[number]): string {
+  return spec.labels.length > 1 ? `${spec.title} (accepted headers: ${spec.labels.join(", ")})` : spec.title;
 }
 
 export function matchHeaders(header: unknown[]): HeaderMatch {
@@ -59,7 +69,7 @@ export function matchHeaders(header: unknown[]): HeaderMatch {
     }
   }
   const missing = ASSET_IMPORT_HEADERS.filter((spec) => spec.required && !map.has(spec.key)).map(
-    (spec) => spec.title,
+    missingColumnLabel,
   );
   const unknown = header
     .map((cell, i) => ({ cell, i }))
@@ -102,28 +112,45 @@ export interface AssetRecordRef {
   typeId: string | null;
 }
 
-/** Reference data, pre-resolved by the server. Name keys are lower-cased. */
+/**
+ * Reference data, pre-resolved by the server. Name keys are `refKey()`'d
+ * (trimmed, lower-cased, internal whitespace runs collapsed — see `refKey`
+ * below). A map value of `null` (categories/types/vendors) means the key
+ * matched MORE THAN ONE row — R-1, round 2: `AssetCategory.name` and
+ * `Vendor.name` are `@unique`, and `AssetType` is `@@unique([categoryId,
+ * name])`, but Postgres unique is CASE-SENSITIVE and nothing else in this
+ * app checks case-insensitively, so the admin UI happily accepts "Laptop"
+ * and "laptop" as two distinct rows. Without this, every sheet row naming
+ * either resolved to whichever the unordered query returned last — no
+ * block, no error, no signal, just silently filed under the wrong id. `null`
+ * makes that undecidable state block instead of guessing.
+ */
 export interface AssetRefs {
-  categories: Map<string, string>;
+  categories: Map<string, string | null>;
   /**
-   * Keyed `${categoryId}:${lowercased type name}` — composite, not a flat
-   * name key. `AssetType` is `@@unique([categoryId, name])`, NOT globally
-   * unique, so two categories can each have their own "Standard" type; a flat
+   * Keyed `${categoryId}:${refKey(type name)}` — composite, not a flat name
+   * key. `AssetType` is `@@unique([categoryId, name])`, NOT globally unique,
+   * so two categories can each have their own "Standard" type; a flat
    * name→id map can hold only one of them and silently resolves to whichever
    * happened to be inserted last. The composite key is what makes "resolve
    * the type within the row's own category" (rule 7) actually correct rather
-   * than lossy by construction.
+   * than lossy by construction. The value carries only the id (round 2
+   * Minor: it used to also carry `categoryId`, which nothing read — the
+   * composite key already embeds it) or `null` for a same-category
+   * case-collision (R-1).
    */
-  types: Map<string, { id: string; categoryId: string }>;
+  types: Map<string, string | null>;
   /**
-   * employeeNo AND name, both lower-cased, both → an employee ref.
+   * employeeNo AND name, both `refKey()`'d, both → an employee ref.
    * `Employee.name` is NOT unique (only `employeeNo` is), so a name that
    * matches more than one employee is `ambiguous: true` and blocks rather
    * than silently resolving to whichever the map happened to keep; an
-   * employeeNo key is never ambiguous.
+   * employeeNo key is never ambiguous. Ambiguity is counted across ALL
+   * employees regardless of `employment` — deliberately (see
+   * `buildAssetRefs` in `resolve.ts`, where this is computed, for why).
    */
   employees: Map<string, EmployeeRef>;
-  vendors: Map<string, string>;
+  vendors: Map<string, string | null>;
   /** existing assets by EXACT tag — the update path. */
   byTag: Map<string, AssetRecordRef>;
   /**
@@ -227,8 +254,43 @@ export interface AssetPlan {
 
 export type ImportOptions = Record<ImportOption, boolean>;
 
+/**
+ * Shared identity for every NAME-keyed lookup (category, type, vendor,
+ * employee) — trims, lower-cases, AND collapses internal whitespace runs to
+ * one space (R-4, round 2). `trim()` alone strips a SURROUNDING U+00A0 (it's
+ * in the spec's WhiteSpace production, so padding was never the problem);
+ * an INTERNAL non-breaking space is not touched by `trim()` or
+ * `toLowerCase()` — and "Ramon Cruz" pasted from Outlook or a web page into
+ * Excel, carrying one, is a routine artefact, not an edge case. Left
+ * un-collapsed, that cell blocked as `unknown-assignee` naming a value that
+ * was letter-for-letter an employee already in the system, with no visible
+ * difference — the worst kind of silent failure, because the offered fix
+ * ("Leave as spare") reads as the natural response to a genuinely unknown
+ * name. `\s` in a JS RegExp matches U+00A0 (and the rest of Unicode's space
+ * separators), so collapsing on that class handles it with no NBSP-specific
+ * case. Used on BOTH sides of every lookup this module makes — the map
+ * BUILT from the database (`buildAssetRefs`, `resolve.ts`) and the sheet
+ * value that CONSULTS it (`planAssetRows` below); doing it on only one side
+ * would just trade the old key-shape mismatch for a new one.
+ */
+export function refKey(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function isBlank(v: unknown): boolean {
   return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+}
+
+/**
+ * A raw cell → trimmed text, blank/null/undefined all reading as "".
+ * Exported so a caller outside this module's row loop — the dry-run action
+ * building its tag/serial lookup arrays BEFORE headers are field-mapped —
+ * shares this exact rule instead of hand-rolling a twin (round 2: found
+ * drifting from this one in argument order, not behaviour, which is exactly
+ * how two copies of one rule quietly stop agreeing).
+ */
+export function cellText(raw: unknown): string {
+  return isBlank(raw) ? "" : String(raw).trim();
 }
 
 function cellAt(headers: HeaderMatch, cells: unknown[], field: AssetField): unknown {
@@ -237,8 +299,7 @@ function cellAt(headers: HeaderMatch, cells: unknown[], field: AssetField): unkn
 }
 
 function textAt(headers: HeaderMatch, cells: unknown[], field: AssetField): string {
-  const raw = cellAt(headers, cells, field);
-  return isBlank(raw) ? "" : String(raw).trim();
+  return cellText(cellAt(headers, cells, field));
 }
 
 const TAG_SHAPE = /^BR-[A-Z]{2}-\d{4}$/;
@@ -450,9 +511,16 @@ export function planAssetRows(
       block("missing-category", "");
       return;
     }
-    const categoryId = refs.categories.get(categoryRaw.toLowerCase());
-    if (!categoryId) {
+    const categoryId = refs.categories.get(refKey(categoryRaw));
+    if (categoryId === undefined) {
       block("unknown-category", categoryRaw);
+      return;
+    }
+    // R-1: two categories sharing this name case-insensitively — the id is
+    // genuinely undecidable (see AssetRefs's own comment), so this blocks
+    // rather than picking one.
+    if (categoryId === null) {
+      block("duplicate-category-name", categoryRaw);
       return;
     }
 
@@ -465,12 +533,17 @@ export function planAssetRows(
     const typeRaw = textAt(headers, raw, "type");
     let typeId: string | null = null;
     if (typeRaw) {
-      const resolvedType = refs.types.get(`${categoryId}:${typeRaw.toLowerCase()}`);
-      if (!resolvedType) {
+      const resolvedType = refs.types.get(`${categoryId}:${refKey(typeRaw)}`);
+      if (resolvedType === undefined) {
         block("unknown-type", typeRaw);
         return;
       }
-      typeId = resolvedType.id;
+      // R-1: two types under THIS category sharing the name case-insensitively.
+      if (resolvedType === null) {
+        block("duplicate-type-name", typeRaw);
+        return;
+      }
+      typeId = resolvedType;
     } else if (matched && matched.typeId && matched.categoryId !== categoryId && !headers.map.has("type")) {
       // NC-3 (round 2): this row moves an EXISTING asset to a new category
       // with no Type column in the sheet at all. Without this check, the
@@ -508,8 +581,21 @@ export function planAssetRows(
     // see AssetUpdatePatch's own comment on `vendorId` for why.
     let vendorDropped = false;
     if (vendorRaw) {
-      const resolvedVendor = refs.vendors.get(vendorRaw.toLowerCase());
-      if (!resolvedVendor) {
+      const resolvedVendor = refs.vendors.get(refKey(vendorRaw));
+      // R-1: two vendors sharing this name case-insensitively. Vendor is
+      // nullable and decorative (D-B), and `/admin/vendors` does not exist
+      // and nothing in this app can create or rename a Vendor — so, unlike
+      // the category/type collisions, there is no page to send the operator
+      // to. The rescue this cause needs already exists: the same drop that
+      // rescues an unresolved vendor name.
+      if (resolvedVendor === null) {
+        if (options.dropUnknownVendor) {
+          vendorDropped = true;
+        } else {
+          block("duplicate-vendor-name", vendorRaw);
+          return;
+        }
+      } else if (resolvedVendor === undefined) {
         if (options.dropUnknownVendor) {
           vendorDropped = true;
         } else {
@@ -543,7 +629,7 @@ export function planAssetRows(
     let assigneeId: string | null = null;
     let assigneeDropped = false;
     if (assigneeRaw) {
-      const resolved = refs.employees.get(assigneeRaw.toLowerCase());
+      const resolved = refs.employees.get(refKey(assigneeRaw));
       if (!resolved) {
         if (options.dropUnknownAssignee) {
           assigneeDropped = true;
