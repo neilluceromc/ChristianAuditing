@@ -1,3 +1,5 @@
+import { ASSET_STATUSES } from "./inventory-list";
+
 /**
  * Scope decision 5. An import writes one AuditEntry per row, so this cap bounds
  * an append-only table from a single click. Between BULK_MAX (200) and the
@@ -12,6 +14,12 @@ export function rowCapRefusal(count: number): string {
   );
 }
 
+/**
+ * Amended 2026-08-22 (Task 7 quality review): eight causes appended, in this
+ * exact order — the order IS the `groupByCause` tiebreak (equal-count groups
+ * sort by this array's index), so re-ordering it changes API behaviour a
+ * caller may already depend on.
+ */
 export const BLOCK_CAUSES = [
   "missing-tag",
   "duplicate-serial",
@@ -22,22 +30,47 @@ export const BLOCK_CAUSES = [
   "bad-status",
   "bad-date",
   "bad-number",
+  "bad-tag",
+  "missing-model",
+  "duplicate-in-file",
+  "ambiguous-assignee",
+  "inactive-assignee",
+  "deployed-without-holder",
+  "lifecycle-via-import",
+  "value-too-long",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
 
 /**
- * A fix is either a LINK out of the wizard (the operator has to create
- * something that does not exist — scope decision 12 refuses to create taxonomy
- * as a side effect of an upload) or an OPTION that re-plans the same file with
- * one decision changed. Nothing here mutates: an option flips a boolean and the
- * dry run happens again, so the operator sees the new verdict before anything
- * is written.
+ * A fix is one of three things:
+ * - LINK: out of the wizard, to a page that actually exists and can act on the
+ *   cause (scope decision 12 refuses to create taxonomy as a side effect of an
+ *   upload, so the operator goes create it themselves).
+ * - OPTION: re-plans the same file with one decision changed. Nothing here
+ *   mutates: an option flips a boolean and the dry run happens again, so the
+ *   operator sees the new verdict before anything is written.
+ * - REUPLOAD: the only real fix is editing the sheet itself. There is no admin
+ *   page to send the operator to (most of these causes are typos or shape
+ *   problems), and `/inventory/import` is the page the operator is already
+ *   standing on — linking to it would be a link to nowhere. T11 renders this
+ *   as the wizard's own restart affordance instead of an anchor tag.
+ *
+ * D-B (2026-08-22): every cause must resolve to a fix the operator can act on
+ * right now. `unknown-vendor` shipped violating this — it linked to
+ * `/admin/vendors`, which does not exist, and no surface in this application
+ * can create a Vendor at all (`reference-actions.ts`'s entity enum has no
+ * "vendor" member). Fixed by turning it into an option: Vendor is nullable
+ * and purely informational, so dropping it loses nothing unrecoverable.
  */
-export type ImportOption = "treatDuplicateSerialAsUpdate" | "dropUnknownAssignee";
+export type ImportOption =
+  | "treatDuplicateSerialAsUpdate"
+  | "dropUnknownAssignee"
+  | "dropUnknownVendor"
+  | "keepCurrentLifecycle";
 
 export interface BlockFix {
-  kind: "link" | "option";
+  kind: "link" | "option" | "reupload";
   label: string;
   href?: string;
   option?: ImportOption;
@@ -55,7 +88,7 @@ const SPECS: Record<BlockCause, BlockSpec> = {
     explain:
       "The Tag column is empty on these rows. A tag is how every other screen in this app names an " +
       "asset, so a row without one can be neither created nor matched to an existing record.",
-    fix: { kind: "link", label: "Fix the file", href: "/inventory/import" },
+    fix: { kind: "reupload", label: "Fix the file" },
   },
   "duplicate-serial": {
     label: "Duplicate serial",
@@ -74,8 +107,8 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   "unknown-type": {
     label: "Type doesn't exist",
     explain:
-      "These rows name an asset type this system has never seen. Same rule as categories: create it " +
-      "first, then re-upload.",
+      "These rows name an asset type this system has never seen, or one that belongs to a different " +
+      "category than the one on the row. Same rule as categories: create it first, then re-upload.",
     fix: { kind: "link", label: "Create type", href: "/admin/asset-types" },
   },
   "unknown-assignee": {
@@ -88,30 +121,90 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   "unknown-vendor": {
     label: "Vendor not found",
     explain:
-      "These rows name a vendor this system has never seen. Vendors are reference data, so create it " +
-      "first and re-upload.",
-    fix: { kind: "link", label: "Create vendor", href: "/admin/vendors" },
+      "These rows name a vendor this system has never seen. Vendor is optional and purely informational " +
+      "here, so you can import without it and set it later from the asset's edit form.",
+    fix: { kind: "option", label: "Import without the vendor", option: "dropUnknownVendor" },
   },
   "bad-status": {
     label: "Status not recognised",
     explain:
-      "These rows carry a status that is not one of this system's eight. Leave the column blank to get " +
-      "SPARE, or correct it to a listed value.",
-    fix: { kind: "link", label: "See the statuses", href: "/inventory" },
+      `These rows carry a status that is not one of this system's eight: ${ASSET_STATUSES.join(", ")}. ` +
+      "Leave the column blank to get SPARE, or correct it to one of those.",
+    fix: { kind: "reupload", label: "Fix the file" },
   },
   "bad-date": {
     label: "Date not readable",
     explain:
-      "A date cell on these rows is neither a real spreadsheet date nor YYYY-MM-DD text. Format the " +
-      "column as a date in the spreadsheet and re-upload.",
-    fix: { kind: "link", label: "Fix the file", href: "/inventory/import" },
+      "A date cell on these rows is neither a real spreadsheet date, YYYY-MM-DD text, nor a real " +
+      "calendar day (a shape like 2026-02-30 is not a date). Format the column as a date in the " +
+      "spreadsheet and re-upload.",
+    fix: { kind: "reupload", label: "Fix the file" },
   },
   "bad-number": {
     label: "Amount not readable",
     explain:
-      "A cost cell on these rows is not a number. Remove currency symbols and thousands separators — " +
-      "the cell should hold a plain amount.",
-    fix: { kind: "link", label: "Fix the file", href: "/inventory/import" },
+      "A cost cell on these rows is not a plain non-negative amount of at most two decimal places, or " +
+      "is too large. Remove currency symbols and thousands separators — the cell should hold a plain " +
+      "amount no bigger than 10,000,000.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "bad-tag": {
+    label: "Tag format not recognised",
+    explain:
+      "The Tag column on these rows isn't shaped like BR-XX-0000 — two letters and four digits after " +
+      "the prefix. Every tag in this app follows that pattern, so a differently shaped value can be " +
+      "neither matched to an existing asset nor safely created.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "missing-model": {
+    label: "No model",
+    explain:
+      "The Model column is empty on these rows. Every asset needs a model name to be created or " +
+      "updated, so the column being present in the sheet doesn't excuse a blank cell.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "duplicate-in-file": {
+    label: "Duplicate within this file",
+    explain:
+      "This tag or serial already appears on an earlier row of the same file. Each identifies one " +
+      "physical asset, so the file can't claim it twice — likely a copy-paste while editing an export.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "ambiguous-assignee": {
+    label: "Assignee name matches more than one employee",
+    explain:
+      "Employee names aren't unique here, and this name matches more than one record. Add an Employee " +
+      "no column (or fill it in) to say which one you mean, then re-upload.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "inactive-assignee": {
+    label: "Assignee is not active",
+    explain:
+      "These rows name an employee whose employment here is no longer ACTIVE. Assignments are frozen " +
+      "for anyone mid-offboarding or already gone, so this row can't hand equipment to them.",
+    fix: { kind: "option", label: "Leave as spare", option: "dropUnknownAssignee" },
+  },
+  "deployed-without-holder": {
+    label: "Deployed with no one holding it",
+    explain:
+      "These rows request a Deployed or Temporary status with no Assigned-to. Leave the Status column " +
+      "blank to get SPARE, or name who holds it.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "lifecycle-via-import": {
+    label: "Status or assignee would move without an approval",
+    explain:
+      "These rows are updates whose Status or Assigned-to disagrees with the current record. Everywhere " +
+      "else in this app those two fields move only through the approval queue, so an import can't move " +
+      "them either — apply the row's other columns and leave the lifecycle alone, or use the approval flow.",
+    fix: { kind: "option", label: "Keep the current status and assignee", option: "keepCurrentLifecycle" },
+  },
+  "value-too-long": {
+    label: "Value too long",
+    explain:
+      "A cell on these rows is outside the length this system allows for that column (Model needs 2–120 " +
+      "characters, Serial at most 120, Notes at most 2,000). Trim it and re-upload.",
+    fix: { kind: "reupload", label: "Fix the file" },
   },
 };
 
