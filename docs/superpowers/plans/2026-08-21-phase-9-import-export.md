@@ -2121,6 +2121,71 @@ git commit -m "feat(import): the sheet reader, schema-less by design"
 
 ### Task 9: The asset dry run
 
+> ### AMENDED BEFORE EXECUTION — the code below predates Task 7's three review rounds and builds the WRONG `AssetRefs`.
+> Task 7 shipped, was reviewed three times, and its contract moved substantially in the process. The
+> block below is the version written against T7's **first draft**; it would compile against none of the
+> current types and, where it would, it would be wrong. **This banner is the spec.** Read the exported
+> shapes in `src/lib/import-assets.ts` — they are commented with the reason for each, and the reasons are
+> the findings that produced them.
+>
+> **One defect that has nothing to do with T7, and would have shipped on its own: the role floor locks
+> out admins.** `actionRole(...roles)` (`src/server/auth/guards.ts:45`) returns the user **only if their
+> role is in the list** — it is not a floor, it is a set. So `actionRole("it_staff")` refuses `admin`,
+> the role that runs this app. Every sibling inventory action writes `actionRole("admin", "it_staff")`
+> (`createAsset`, `updateAsset`, the bulk actions). Use that. `viewer`, `finance_staff` and
+> `purchasing_staff` are refused, which is the intent.
+>
+> **The four `AssetRefs` members that changed shape, and why — do not "simplify" any of them back:**
+>
+> 1. **`types` is keyed `${categoryId}:${lowercased name}` and its value is `{ id, categoryId }`**, not
+>    `name → id`. `AssetType` is `@@unique([categoryId, name])`, **not globally unique**, so a flat name
+>    key can hold only one of two same-named types and silently resolves to whichever was inserted last.
+>    The query therefore needs `select: { id: true, name: true, categoryId: true }`.
+> 2. **`employees` is `Map<string, EmployeeRef>`** — `{ id, employment, ambiguous }`. `Employee.name` is
+>    **not unique** (only `employeeNo` is), so a name matching two people must arrive marked
+>    `ambiguous: true` and block, rather than resolving to whichever row the map kept. Build it in two
+>    passes: count lowercased names first, then set each name key with `ambiguous` set from that count.
+>    **`employeeNo` keys are never ambiguous** and must win over a name key that collides with one. The
+>    query needs `employment` selected — T7 blocks a non-ACTIVE assignee the way `createAsset` does
+>    (`actions.ts:196`, *"assignments are frozen"*).
+> 3. **`byTag` and `bySerial` both carry one `AssetRecordRef`** — `{ id, tag, status, assigneeId,
+>    categoryId, typeId }`. Not `{id, serial}`, and `bySerial` is **not** a bare id string. Rule 11's
+>    lifecycle check (scope decision 13) needs the record's current `status`/`assigneeId` no matter which
+>    map matched the row, including the `treatDuplicateSerialAsUpdate` rescue path; rule 7's
+>    `type-outside-category` check needs `categoryId`/`typeId`; and `assetTag` on an update verdict needs
+>    `tag`, so the wizard can say which asset a serial-rescued row will edit instead of naming a cuid.
+>    `serial` is **not** on the ref — nothing reads it.
+> 4. **`optionsFrom` must read all FIVE options**, not two: `treatDuplicateSerialAsUpdate`,
+>    `dropUnknownAssignee`, `dropUnknownVendor`, `keepCurrentLifecycle`, `importUnheldAsSpare`. A missing
+>    key silently reads `false`, so an option the wizard offers would simply never take effect — and the
+>    failure is invisible, because the row just stays blocked and the operator assumes their file is
+>    still wrong. `ImportOptions` is `Record<ImportOption, boolean>`, so **build it from the
+>    `IMPORT_OPTIONS` array rather than by hand** and a sixth option cannot be forgotten here.
+>
+> **And a fifth thing the plan gets wrong, which is subtler and would have produced silent duplicate
+> assets: the tag lookup must be UPPERCASED.** T7's rule 2 trims and upper-cases a tag before consulting
+> `byTag`, because `createSchema`'s tag is `.toUpperCase().regex(/^BR-[A-Z]{2}-\d{4}$/)` and every tag in
+> the database is upper-case. If this resolver queries with the sheet's raw text, a row reading
+> `br-lt-0148` fetches nothing, `byTag` has no entry, T7 plans a **create**, and Postgres — whose unique
+> index is case-sensitive — happily accepts a **second** record for the same physical machine. Uppercase
+> the tags before the `in` query. Serials are matched exactly as written (trimmed, not case-folded), the
+> same way T7 compares them.
+>
+> **What the plan gets RIGHT and should be kept:** six queries rather than six per row; scoping the tag
+> and serial lookups to what the file mentions rather than loading the whole fleet; fetching the small
+> reference tables whole; refusing on `headers.missing` **before** planning, with all missing columns
+> named at once (without it a sheet with no Category column produces one identical block per row instead
+> of one refusal); spending the `import` rate-limit kind on the dry run as well as the apply; and
+> **writing nothing at all** — no transaction, no row, no persisted plan (scope decisions 3 and 8).
+>
+> **Verification, since this is the first import task with a database.** The unit suite cannot see any of
+> this: the module is Prisma plus a pure call. Prove it against the real seeded data — a throwaway
+> `npx tsx` script under the gitignored `backups/` that calls `resolveAssetRefs` and prints the map sizes
+> and a couple of entries is the cheapest check, and §7 records it as the house pattern. Confirm
+> specifically: a known seeded tag resolves to a record carrying its real `status` and `categoryId`; the
+> two categories that share a type name resolve to **different** type ids under their own composite keys;
+> and an OFFBOARDED employee arrives with `employment` set so rule 8 can see it. Delete the script after.
+
 **Files:**
 - Create: `src/server/modules/import/resolve.ts`, `src/server/modules/import/asset-actions.ts`
 
