@@ -3172,7 +3172,10 @@ no gain, and a props-based split keeps each page's actions statically obvious.
 
 `await requireRole("it_staff")`, a `PageHeader` with a breadcrumb back to `/inventory`, a `Banner`
 stating the two things that surprise people (partial import is the default; the dry run writes
-nothing), then `<ImportWizard kind="asset" />`.
+nothing), then `<ImportWizard />` — **corrected at execution**: Step 2's own closing note forbids the
+`kind` prop ("pass the two server actions in as props rather than branching on a `kind` string") and
+this line contradicted it three paragraphs later. The note is right and the sample was wrong; the
+component takes no props today, and Task 12 gives it the two actions rather than a discriminator.
 
 - [ ] **Step 4: Nav and gating**
 
