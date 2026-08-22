@@ -451,12 +451,6 @@ describe("planAssetRows", () => {
     expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-date", detail: "2026-02-30" });
   });
 
-  // M5: a real Date cell must be normalised to UTC midnight of its LOCAL
-  // calendar day, not passed through as whatever instant it already is.
-  // `new Date(2026, 0, 5)` is LOCAL midnight — the shape several xlsx
-  // readers produce — and forcing the process into a negative UTC offset
-  // (America/New_York) makes that instant provably NOT UTC midnight, so this
-  // fails without the fix regardless of the machine's own timezone.
   // The date convention is PINNED, not assumed: Task 8's probe read a date
   // cell back through our own export and got UTC midnight, byte-identical
   // under every timezone tried. These assert that contract, and they are

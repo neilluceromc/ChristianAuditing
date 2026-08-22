@@ -26,7 +26,7 @@ export type ReadResult =
  * DATE CONVENTION (T8, pinned by running the round trip through our own
  * export — `toXlsxBuffer` / `ASSET_EXPORT_COLUMNS`, both writing
  * `{ type: Date, format: "yyyy-mm-dd" }` — and back through this `readSheet`,
- * under both `Asia/Manila` and `America/New_York`):
+ * under `Asia/Manila`, `America/New_York` and `UTC`):
  *
  * `readSheet` hands back a real `Date` instance for a date-formatted cell,
  * and that instant is **UTC midnight** of the calendar day the cell shows —
@@ -37,17 +37,23 @@ export type ReadResult =
  * New York, UTC-5: 2026-01-04 — one day early).
  *
  * That makes this reader's Date convention the OPPOSITE of what
- * `parseDateCell` (`src/lib/import-assets.ts`) currently assumes for a `Date`
- * cell: it reads the cell's LOCAL year/month/day and rebuilds it as UTC
- * midnight, which is correct for a local-midnight `Date` and correct for a
- * UTC-midnight `Date` only at a non-negative UTC offset. Fed a genuine
- * UTC-midnight `Date` — which is what this reader actually produces — that
- * rule reads the wrong calendar day at any negative offset. This is a T7
- * contract defect this task surfaced, not one this module can fix (a raw
- * `Date` value can't carry its own convention, and `read-sheet.ts` is not the
- * owner of `parseDateCell`); see the phase-9 handover for the pinned finding
- * and the fix it calls for on the T7 side (read the cell's UTC, not local,
- * year/month/day).
+ * `parseDateCell` (`src/lib/import-assets.ts`) assumed when this probe ran: it
+ * read the cell's LOCAL year/month/day, which is correct for a local-midnight
+ * `Date` and correct for a UTC-midnight one only at a non-negative UTC
+ * offset — so against this reader it was a day early everywhere west of
+ * Greenwich. **Fixed in the same breath as this module landed** (`df04742`):
+ * that branch now reads the cell's UTC year/month/day, which is a no-op for
+ * what this reader produces, and its suite asserts the contract under
+ * `Asia/Manila`, `America/New_York` and `UTC`.
+ *
+ * So the two sides agree, and they agree BY MEASUREMENT rather than by
+ * reasoning — which is the point, because three review rounds reasoned about
+ * that branch from first principles and settled on the wrong convention. **If
+ * this reader is ever swapped, or a second one is added, re-run the round trip
+ * before trusting `parseDateCell`**: it is about fifteen lines under the
+ * gitignored `backups/`, and a new reader that emits local midnight must
+ * normalise here, at the boundary, rather than teaching that branch to guess
+ * which convention it was handed.
  */
 export async function readGrid(file: File): Promise<ReadResult> {
   let grid: unknown[][];
