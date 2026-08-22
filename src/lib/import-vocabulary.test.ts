@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { ASSET_STATUSES } from "./inventory-list";
 import {
-  BLOCK_CAUSES, IMPORT_OPTIONS, IMPORT_ROW_CAP, blockSpec, groupByCause, rowCapRefusal,
+  BLOCK_CAUSES, IMPORT_MAX_UPLOAD_BYTES, IMPORT_OPTIONS, IMPORT_ROW_CAP, blockSpec, groupByCause,
+  optionLabel, rowCapRefusal, uploadTooLargeRefusal,
   type BlockCause, type BlockFix,
 } from "./import-vocabulary";
 
@@ -257,5 +258,30 @@ describe("rowCapRefusal", () => {
     expect(text).toContain("4100");
     expect(text).toContain(String(IMPORT_ROW_CAP));
     expect(text).toContain("Nothing was imported");
+  });
+});
+
+describe("uploadTooLargeRefusal", () => {
+  it("names the file's size and the limit in MB, and says nothing was written", () => {
+    const text = uploadTooLargeRefusal(IMPORT_MAX_UPLOAD_BYTES + 1024 * 1024);
+    expect(text).toContain("5.0 MB");
+    expect(text).toContain("4.0 MB");
+    expect(text).toContain("Nothing was imported");
+  });
+});
+
+describe("optionLabel", () => {
+  // Every option must have a real, human label — not the raw camelCase key —
+  // and that label must be the SAME wording as the fix button that turns it
+  // on (derived from BLOCK_CAUSES, not a second hand-typed map).
+  it("gives every option the same label as the fix button that sets it", () => {
+    for (const option of IMPORT_OPTIONS) {
+      const owningCause = BLOCK_CAUSES.find((c) => {
+        const fix = blockSpec(c).fix;
+        return fix?.kind === "option" && fix.option === option;
+      })!;
+      expect(optionLabel(option)).toBe(blockSpec(owningCause).fix!.label);
+      expect(optionLabel(option)).not.toBe(option);
+    }
   });
 });

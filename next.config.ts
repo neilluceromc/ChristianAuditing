@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
       // named refusal (never `rowCapRefusal`, never a `conflict` banner).
       // 4MB covers that worst legal file with room, while still bounding
       // the buffer — `readGrid` itself gets no size guard (T11's, if ever).
+      // Mirrored as `IMPORT_MAX_UPLOAD_BYTES` in `src/lib/import-vocabulary.ts`
+      // so the import wizard can refuse an oversized file by name before
+      // ever sending it — this file cannot import that TS constant, so the
+      // number is duplicated by necessity; keep the two in sync by hand.
       bodySizeLimit: "4mb",
     },
   },

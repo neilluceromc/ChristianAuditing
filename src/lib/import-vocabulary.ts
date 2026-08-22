@@ -15,6 +15,26 @@ export function rowCapRefusal(count: number): string {
 }
 
 /**
+ * Task 11 round two, V-4. `next.config.ts`'s `bodySizeLimit: "4mb"` (Next's
+ * compiled `bytes` package: "mb" is `1 << 20`, i.e. MiB, not decimal) is a
+ * hard ceiling nothing client-side checks — a workbook past it rejects at the
+ * framework boundary with no `catch` anywhere in this app to turn into a
+ * banner. `next.config.ts` cannot import a TS constant from `src/lib` (its
+ * own comment says so), so the number is duplicated by necessity: this is the
+ * canonical copy, and `next.config.ts`'s literal carries a comment pointing
+ * back here. Keep the two in sync by hand if either ever changes.
+ */
+export const IMPORT_MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+
+export function uploadTooLargeRefusal(bytes: number): string {
+  const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+  return (
+    `That file is ${mb(bytes)} MB, over the ${mb(IMPORT_MAX_UPLOAD_BYTES)} MB upload limit. ` +
+    "Split it and upload the parts. Nothing was imported."
+  );
+}
+
+/**
  * Amended 2026-08-22 (Task 7 quality review, both rounds): the order IS the
  * `groupByCause` tiebreak (equal-count groups sort by this array's index), so
  * re-ordering it changes API behaviour a caller may already depend on.
@@ -281,6 +301,23 @@ const SPECS: Record<BlockCause, BlockSpec> = {
 
 export function blockSpec(cause: BlockCause): BlockSpec {
   return SPECS[cause];
+}
+
+/**
+ * Task 11 round two, V-6: a human label for an option already in force, so
+ * the wizard can show which decisions are riding on the next write and offer
+ * to remove one. Derived from `SPECS` rather than a second hand-typed map —
+ * the same wording the fix button used to turn it on, so the two can never
+ * drift apart. Falls back to the raw key only if a future option is ever
+ * added with no cause routing a fix to it yet, which `import-vocabulary.test.ts`
+ * guards against for every member of `IMPORT_OPTIONS`.
+ */
+export function optionLabel(option: ImportOption): string {
+  for (const cause of BLOCK_CAUSES) {
+    const fix = blockSpec(cause).fix;
+    if (fix?.kind === "option" && fix.option === option) return fix.label;
+  }
+  return option;
 }
 
 export interface BlockedRow { row: number; cause: BlockCause; detail: string }

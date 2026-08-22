@@ -49,7 +49,14 @@ export interface HeaderMatch {
   unknown: string[];
 }
 
-function normalizeHeader(cell: unknown): string {
+/**
+ * Exported (Task 11 round two, V-7) so a column split done outside this
+ * module — `import-columns.ts`'s known-vs-unknown wording — can match a
+ * header the exact same way `matchHeaders` itself does, rather than hand-
+ * rolling a second, looser comparison that a differently-cased re-saved
+ * sheet could slip past.
+ */
+export function normalizeHeader(cell: unknown): string {
   return String(cell ?? "").trim().toLowerCase();
 }
 
@@ -756,17 +763,26 @@ export function planAssetRows(
     // NI-6 (round 2): this cause used to be named `value-too-long`, but it
     // also fires on a Model that is too SHORT — a label stating the opposite
     // of the actual problem. Renamed to `value-out-of-range`.
+    //
+    // Task 11 round two minor: `detail` is collected into `CauseGroup.examples`
+    // and rendered as "e.g. <value>" — every OTHER `block()` call in this
+    // function passes the offending cell's own value (the bad tag, the
+    // unreadable date, the raw cost text). This one used to pass the COLUMN
+    // NAME ("Model", "Serial", "Notes") instead, so the page read "e.g.
+    // Model, Notes" — field names presented as example values. Passing the
+    // actual value matches every sibling cause and the row numbers still let
+    // the operator find it in the file.
     const notesRaw = textAt(headers, raw, "notes");
     if (model.length < LENGTH_LIMITS.model[0] || model.length > LENGTH_LIMITS.model[1]) {
-      block("value-out-of-range", "Model");
+      block("value-out-of-range", model);
       return;
     }
     if (serial && serial.length > LENGTH_LIMITS.serial[1]) {
-      block("value-out-of-range", "Serial");
+      block("value-out-of-range", serial);
       return;
     }
     if (notesRaw.length > LENGTH_LIMITS.notes[1]) {
-      block("value-out-of-range", "Notes");
+      block("value-out-of-range", notesRaw);
       return;
     }
 

@@ -783,19 +783,25 @@ describe("planAssetRows", () => {
 
   // NI-6: renamed from `value-too-long` — this exact case (a model that is
   // too SHORT) is why: the old name stated the opposite of the problem.
+  // Task 11 round two minor: `detail` feeds the page's "e.g. <value>" line,
+  // and every other cause in this module passes the offending VALUE, never
+  // the column name — so these assert the actual cell content lands there,
+  // not "Model"/"Serial"/"Notes" (field names presented as example values).
   it("blocks a model shorter than 2 characters", () => {
     const p = plan([cells({ tag: "BR-LT-0930", model: "X", category: "Laptops" })]);
-    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: "Model" });
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: "X" });
   });
 
   it("blocks a serial over 120 characters", () => {
-    const p = plan([cells({ tag: "BR-LT-0931", model: "Dell", category: "Laptops", serial: "S".repeat(121) })]);
-    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: "Serial" });
+    const longSerial = "S".repeat(121);
+    const p = plan([cells({ tag: "BR-LT-0931", model: "Dell", category: "Laptops", serial: longSerial })]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: longSerial });
   });
 
   it("blocks notes over 2000 characters", () => {
-    const p = plan([cells({ tag: "BR-LT-0932", model: "Dell", category: "Laptops", notes: "N".repeat(2001) })]);
-    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: "Notes" });
+    const longNotes = "N".repeat(2001);
+    const p = plan([cells({ tag: "BR-LT-0932", model: "Dell", category: "Laptops", notes: longNotes })]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: longNotes });
   });
 
   // Partial import is the DEFAULT (scope decision 4): a bad row must not cost
