@@ -15,10 +15,14 @@ export function rowCapRefusal(count: number): string {
 }
 
 /**
- * Amended 2026-08-22 (Task 7 quality review): eight causes appended, in this
- * exact order — the order IS the `groupByCause` tiebreak (equal-count groups
- * sort by this array's index), so re-ordering it changes API behaviour a
- * caller may already depend on.
+ * Amended 2026-08-22 (Task 7 quality review, both rounds): the order IS the
+ * `groupByCause` tiebreak (equal-count groups sort by this array's index), so
+ * re-ordering it changes API behaviour a caller may already depend on.
+ * New causes are ALWAYS appended at the end — never inserted — so every
+ * existing cause keeps its index. `value-too-long` was renamed in place to
+ * `value-out-of-range` (NI-6, round 2): it fired on a model that was too
+ * SHORT, a label stating the opposite of the problem, so the string itself
+ * was wrong rather than merely misplaced.
  */
 export const BLOCK_CAUSES = [
   "missing-tag",
@@ -37,7 +41,9 @@ export const BLOCK_CAUSES = [
   "inactive-assignee",
   "deployed-without-holder",
   "lifecycle-via-import",
-  "value-too-long",
+  "value-out-of-range",
+  "missing-category",
+  "type-outside-category",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -67,7 +73,8 @@ export type ImportOption =
   | "treatDuplicateSerialAsUpdate"
   | "dropUnknownAssignee"
   | "dropUnknownVendor"
-  | "keepCurrentLifecycle";
+  | "keepCurrentLifecycle"
+  | "importUnheldAsSpare";
 
 export interface BlockFix {
   kind: "link" | "option" | "reupload";
@@ -188,8 +195,8 @@ const SPECS: Record<BlockCause, BlockSpec> = {
     label: "Deployed with no one holding it",
     explain:
       "These rows request a Deployed or Temporary status with no Assigned-to. Leave the Status column " +
-      "blank to get SPARE, or name who holds it.",
-    fix: { kind: "reupload", label: "Fix the file" },
+      "blank to get SPARE, name who holds it, or import these rows as spare instead.",
+    fix: { kind: "option", label: "Import as spare instead", option: "importUnheldAsSpare" },
   },
   "lifecycle-via-import": {
     label: "Status or assignee would move without an approval",
@@ -199,11 +206,28 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "them either — apply the row's other columns and leave the lifecycle alone, or use the approval flow.",
     fix: { kind: "option", label: "Keep the current status and assignee", option: "keepCurrentLifecycle" },
   },
-  "value-too-long": {
-    label: "Value too long",
+  "value-out-of-range": {
+    label: "Value out of range",
     explain:
       "A cell on these rows is outside the length this system allows for that column (Model needs 2–120 " +
-      "characters, Serial at most 120, Notes at most 2,000). Trim it and re-upload.",
+      "characters, Serial at most 120, Notes at most 2,000). Shorten or lengthen it to fit, and re-upload.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "missing-category": {
+    label: "No category",
+    explain:
+      "The Category column is empty on these rows. Every asset needs a category to be created or " +
+      "updated, so the column being present in the sheet doesn't excuse a blank cell.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "type-outside-category": {
+    label: "Type no longer matches the category",
+    explain:
+      "This row moves an existing asset to a new Category with no Type column to go with it. The " +
+      "asset's current type belongs to its OLD category, so leaving it untouched here would strand a " +
+      "type that no longer fits its category — the same thing this app's own edit form refuses to save. " +
+      "Add a Type column naming a type that belongs to the new category, or add it blank to clear the " +
+      "type, and re-upload.",
     fix: { kind: "reupload", label: "Fix the file" },
   },
 };

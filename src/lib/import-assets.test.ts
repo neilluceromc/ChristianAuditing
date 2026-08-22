@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { matchHeaders, planAssetRows, type AssetRefs, type ImportOptions } from "./import-assets";
 
 // The real 14-column export header (`ASSET_EXPORT_COLUMNS`, export-columns.ts)
@@ -43,13 +43,26 @@ const REFS: AssetRefs = {
     ["juan dela cruz", { id: "e-3", employment: "ACTIVE", ambiguous: true }],
   ]),
   vendors: new Map([["acme", "v-1"]]),
+  // AssetRecordRef (round 2, NC-1/NC-2/NC-3's unified shape): id, tag, status,
+  // assigneeId, categoryId, typeId. `tag` is the RECORD's own tag (not the
+  // sheet row's — they can differ on a serial rescue). a-1 carries a real
+  // typeId under cat-1 specifically so a category-changing row with no Type
+  // column can be shown stranding it (NC-3).
   byTag: new Map([
-    ["BR-LT-0148", { id: "a-1", serial: "SN-OLD", status: "SPARE", assigneeId: null }],
-    ["BR-LT-0200", { id: "a-2", serial: null, status: "DEPLOYED", assigneeId: "e-1" }],
+    ["BR-LT-0148", { id: "a-1", tag: "BR-LT-0148", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: "typ-1" }],
+    ["BR-LT-0200", { id: "a-2", tag: "BR-LT-0200", status: "DEPLOYED", assigneeId: "e-1", categoryId: "cat-1", typeId: null }],
+    // a-3: DEPLOYED to e-2, who is OFFBOARDED (not ACTIVE) — the export
+    // round-trip case NC-2 exists for: re-uploading this asset's own row
+    // unchanged must not block on its own already-recorded, non-ACTIVE holder.
+    ["BR-LT-0300", { id: "a-3", tag: "BR-LT-0300", status: "DEPLOYED", assigneeId: "e-2", categoryId: "cat-1", typeId: null }],
   ]),
   bySerial: new Map([
-    ["SN-TAKEN", { id: "a-9", status: "SPARE", assigneeId: null }],
-    ["SN-OLD", { id: "a-1", status: "SPARE", assigneeId: null }],
+    // Tag deliberately DIFFERENT from any sheet row used in the rescue tests
+    // below (BR-LT-0777, not BR-LT-0901/0952/etc.), so a test can assert the
+    // update verdict names the MATCHED asset, not the row's own tag (NI-4's
+    // legibility gap, closed by AssetRecordRef.tag).
+    ["SN-TAKEN", { id: "a-9", tag: "BR-LT-0777", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: null }],
+    ["SN-OLD", { id: "a-1", tag: "BR-LT-0148", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: "typ-1" }],
   ]),
 };
 
@@ -58,6 +71,7 @@ const OPTS: ImportOptions = {
   dropUnknownAssignee: false,
   dropUnknownVendor: false,
   keepCurrentLifecycle: false,
+  importUnheldAsSpare: false,
 };
 
 describe("matchHeaders", () => {
@@ -75,15 +89,21 @@ describe("matchHeaders", () => {
 
   // An unrecognised column is NOT an error: a client's own export carries
   // columns we don't want, and refusing the file over them is useless
-  // pedantry. "Employee no" and "RMA ref" are ALSO unconsumed here —
-  // "Assigned to" already claimed the assignee slot (so our own export's
-  // second assignee column falls out the same way a genuinely foreign column
-  // would; see the ASSET_IMPORT_HEADERS comment on this), and `rmaRef` has no
-  // import field at all (carried, not fixed — see the amended spec).
+  // pedantry. "RMA ref" is unconsumed because `rmaRef` has no import field at
+  // all (carried, not fixed — see the amended spec). "Employee no" is NOT in
+  // this list any more (NI-1, round 2): it is its own column now, consumed
+  // separately from "Assigned to" rather than falling out unconsumed.
   it("ignores columns it does not recognise, and reports them separately", () => {
     const m = matchHeaders([...HEADER, "Their internal ref"]);
     expect(m.missing).toEqual([]);
-    expect(m.unknown).toEqual(["Employee no", "RMA ref", "Their internal ref"]);
+    expect(m.unknown).toEqual(["RMA ref", "Their internal ref"]);
+  });
+
+  // NI-1 (round 2): "Employee no" is now matched as its own column.
+  it("matches Employee no as its own column, separate from Assigned to", () => {
+    const m = matchHeaders(HEADER);
+    expect(m.map.get("assignee")).toBe(COL.assignedTo);
+    expect(m.map.get("employeeNo")).toBe(COL.employeeNo);
   });
 });
 
@@ -137,6 +157,36 @@ describe("planAssetRows", () => {
     expect(p.rows[0]).toMatchObject({ kind: "update", assetId: "a-9" });
   });
 
+  // AssetRecordRef.tag (round 2): the update verdict must name the MATCHED
+  // asset's own tag (a-9 is "BR-LT-0777"), not the sheet row's tag
+  // ("BR-LT-0901", which matched nothing) — otherwise a rescued update names
+  // its target only by a cuid the operator has never seen anywhere in the
+  // app, and cannot check against the file at all.
+  it("surfaces the matched asset's own tag on a serial-rescued update, not the sheet row's tag", () => {
+    const p = plan(
+      [cells({ tag: "BR-LT-0901", model: "Dell", serial: "SN-TAKEN", category: "Laptops" })],
+      { ...OPTS, treatDuplicateSerialAsUpdate: true },
+    );
+    expect(p.rows[0]).toMatchObject({ kind: "update", assetId: "a-9", assetTag: "BR-LT-0777" });
+  });
+
+  // NI-4: rule 11's lifecycle check must compare against the RESCUED
+  // record's own status (a-9 is SPARE with no assignee), not against
+  // whatever the tag-matched lookup would have found (there isn't one
+  // here). Deleting the rescue assignment (`matched = existingBySerial`)
+  // would leave `matched` null, this row would plan as a CREATE instead —
+  // silently registering a second asset for one physical machine — and if
+  // that null instead reached a downstream `!` assertion it would throw.
+  // Requesting DEPLOYED with no holder on this rescued row must be treated
+  // as an update-lifecycle conflict, not the create-only "no holder" rule.
+  it("runs the lifecycle check against the RESCUED record on a serial-rescued row (NI-4)", () => {
+    const p = plan(
+      [cells({ tag: "BR-LT-0901", model: "Dell", serial: "SN-TAKEN", category: "Laptops", status: "DEPLOYED" })],
+      { ...OPTS, treatDuplicateSerialAsUpdate: true },
+    );
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "lifecycle-via-import" });
+  });
+
   // C-1: the plan's own mutation pass never caught this, because no fixture
   // paired a matching tag with a taken serial. Here the tag resolves to a-1
   // but the serial resolves to a-9 — the two matches disagree about which
@@ -172,6 +222,22 @@ describe("planAssetRows", () => {
     expect(p.rows[1]).toMatchObject({ kind: "blocked", cause: "duplicate-in-file", detail: "SN-DUP" });
   });
 
+  // M3: seenTags and seenSerials must be claimed at the SAME point in rule
+  // order — before this fix, the tag was claimed before the model check but
+  // the serial was claimed after it, so a row blocked for an unrelated
+  // reason (a blank Model, here) claimed its tag but NOT its serial. Row 1
+  // is blocked on `missing-model`; row 2 shares row 1's serial and must
+  // still be flagged `duplicate-in-file`, proving row 1 claimed it despite
+  // never planning as a create or update itself.
+  it("claims a row's serial before a later rule can block it, so a row blocked for an unrelated reason still occupies its serial (M3)", () => {
+    const p = plan([
+      cells({ tag: "BR-LT-0953", category: "Laptops", serial: "SN-CLAIM" }), // blank model -> missing-model
+      cells({ tag: "BR-LT-0954", model: "Dell", category: "Laptops", serial: "SN-CLAIM" }),
+    ]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "missing-model" });
+    expect(p.rows[1]).toMatchObject({ kind: "blocked", cause: "duplicate-in-file", detail: "SN-CLAIM" });
+  });
+
   it("blocks a missing tag, an unknown category, an unknown type and a missing model separately", () => {
     const p = plan([
       cells({ model: "Dell", category: "Laptops" }),
@@ -187,6 +253,15 @@ describe("planAssetRows", () => {
     ]);
   });
 
+  // NI-5: Category is the third required column, alongside Tag and Model —
+  // a blank CELL must not fall into `unknown-category` (whose detail would
+  // then be empty and get filtered out of `groupByCause`'s examples,
+  // leaving the operator a group header and no examples at all).
+  it("blocks a blank Category cell as missing-category, not unknown-category with an empty detail (NI-5)", () => {
+    const p = plan([cells({ tag: "BR-LT-0948", model: "Dell", category: "" })]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "missing-category", detail: "" });
+  });
+
   // The composite-key fix (amended AssetRefs shape): "Standard" exists under
   // BOTH categories, at different type ids. Asking for it under Furniture
   // while naming the Laptops category must resolve to the FURNITURE record,
@@ -200,6 +275,27 @@ describe("planAssetRows", () => {
     // "Ergo Chair" only exists under Furniture (cat-2); this row names Laptops.
     const p = plan([cells({ tag: "BR-LT-0905", model: "Dell", category: "Laptops", type: "Ergo Chair" })]);
     expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "unknown-type", detail: "Ergo Chair" });
+  });
+
+  // NC-3: a-1 (BR-LT-0148) is stored under cat-1 with typ-1. This trimmed
+  // sheet (Tag, Model, Category only — no Type column at all) moves it to
+  // Furniture (cat-2). With no Type column, the patch would carry no
+  // `typeId` key, Prisma would leave the STORED typ-1 untouched, and typ-1
+  // belongs to the OLD category — exactly the state `updateAsset`
+  // (actions.ts:294) itself refuses to save on its own edit form.
+  it("blocks a category change with no Type column that would strand the stored type outside the new category (NC-3)", () => {
+    const narrowHeaders = matchHeaders(["Tag", "Model", "Category"]);
+    const row = ["BR-LT-0148", "Dell XPS", "Furniture"];
+    const p = planAssetRows(narrowHeaders, [row], REFS, OPTS);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "type-outside-category", detail: "Furniture" });
+  });
+
+  // Contrast case: when the Type column IS present, even with a blank cell,
+  // the patch clears `typeId` to null instead of leaving the stale one in
+  // place — so there is nothing left to strand, and NC-3 must not fire.
+  it("does not block type-outside-category when a present Type column would clear the mismatched type instead", () => {
+    const p = plan([cells({ tag: "BR-LT-0148", model: "Dell XPS", category: "Furniture" })]);
+    expect(p.rows[0]).toMatchObject({ kind: "update", assetId: "a-1", data: { typeId: null } });
   });
 
   it("resolves an assignee by employee number OR by name, case-insensitively", () => {
@@ -227,6 +323,19 @@ describe("planAssetRows", () => {
     expect(plan(row, { ...OPTS, dropUnknownAssignee: true }).rows[0]).toMatchObject({ cause: "ambiguous-assignee" });
   });
 
+  // NI-1: `ambiguous-assignee`'s own explain tells the operator to fill in
+  // an Employee no column — this proves that actually works now, on the
+  // exact shape our own export writes (a name column AND an employee-no
+  // column together). Before the fix, "Assigned to" alone consumed the
+  // assignee slot and "Employee no" fell out unread, so this exact row
+  // would have stayed blocked no matter what the Employee no cell said.
+  it("resolves an ambiguous name when the Employee no column disambiguates it (NI-1)", () => {
+    const row = [
+      cells({ tag: "BR-LT-0908", model: "Dell", category: "Laptops", assignedTo: "Juan Dela Cruz", employeeNo: "EMP-0042" }),
+    ];
+    expect(plan(row).rows[0]).toMatchObject({ kind: "create", data: { assigneeId: "e-1" } });
+  });
+
   // `createAsset` itself refuses a non-ACTIVE assignee ("assignments are
   // frozen", actions.ts:196) — import honours the same rule. Unlike
   // ambiguous, dropUnknownAssignee DOES rescue this one (rule 8: "drops the
@@ -237,6 +346,25 @@ describe("planAssetRows", () => {
     const dropped = plan(row, { ...OPTS, dropUnknownAssignee: true });
     expect(dropped.rows[0]).toMatchObject({ kind: "create" });
     expect(dropped.rows[0].kind === "create" && dropped.rows[0].data.assigneeId).toBeNull();
+  });
+
+  // NC-2: BR-LT-0300 (a-3) is already DEPLOYED to e-2, who is OFFBOARDED —
+  // this is our own export re-uploaded with nothing about the holder
+  // changed. Before the fix, rule 8's ACTIVE check fired unconditionally and
+  // blocked this on `inactive-assignee`, even though the row makes no
+  // assignment at all: the sheet's holder already IS the record's holder.
+  it("does not block inactive-assignee on an update whose holder already matches the record's own (NC-2)", () => {
+    const p = plan([cells({ tag: "BR-LT-0300", model: "Dell", category: "Laptops", assignedTo: "Inactive Ida" })]);
+    expect(p.rows[0]).toMatchObject({ kind: "update", assetId: "a-3" });
+  });
+
+  // Regression guard alongside NC-2's fix: a row that names a DIFFERENT
+  // non-ACTIVE holder than the one already on record is still a real
+  // assignment move, and must still block.
+  it("still blocks inactive-assignee when an update would move the holder to a DIFFERENT non-ACTIVE employee", () => {
+    // BR-LT-0148 (a-1) currently has no assignee at all.
+    const p = plan([cells({ tag: "BR-LT-0148", model: "Dell XPS", category: "Laptops", assignedTo: "Inactive Ida" })]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "inactive-assignee" });
   });
 
   it("blocks an unknown vendor, and drops it instead when that fix is picked", () => {
@@ -250,6 +378,32 @@ describe("planAssetRows", () => {
   it("resolves a known vendor", () => {
     const p = plan([cells({ tag: "BR-LT-0911", model: "Dell", category: "Laptops", vendor: "ACME" })]);
     expect(p.rows[0]).toMatchObject({ kind: "create", data: { vendorId: "v-1" } });
+  });
+
+  // NC-1: a dropped vendor on an UPDATE must OMIT `vendorId` from the patch,
+  // not write `null` — `null` means "the cell was genuinely blank, clear
+  // it", and a dropped vendor is not a blank cell, it's a name this run
+  // could not resolve. Writing `null` here would erase whatever vendor the
+  // record already had on file, on every row naming an unresolved vendor
+  // across a whole re-upload.
+  it("omits vendorId from an update patch when the vendor was dropped, instead of nulling out the stored vendor (NC-1)", () => {
+    const row = [cells({ tag: "BR-LT-0148", model: "Dell XPS", category: "Laptops", vendor: "Nobody Corp" })];
+    const dropped = plan(row, { ...OPTS, dropUnknownVendor: true });
+    const data = dropped.rows[0].kind === "update" ? dropped.rows[0].data : null;
+    expect(data).not.toBeNull();
+    expect(data && "vendorId" in data).toBe(false);
+  });
+
+  // Contrast case for NC-1: a genuinely BLANK Vendor cell on the same asset
+  // still clears vendorId to null, exactly as C-7 requires — the drop and
+  // the blank cell must produce DIFFERENT patches even though both start
+  // from an unresolved/absent vendor value.
+  it("still clears vendorId on an update when the Vendor cell is genuinely blank", () => {
+    const row = [cells({ tag: "BR-LT-0148", model: "Dell XPS", category: "Laptops", vendor: "" })];
+    const p = plan(row);
+    const data = p.rows[0].kind === "update" ? p.rows[0].data : null;
+    expect(data && "vendorId" in data).toBe(true);
+    expect(data?.vendorId).toBeNull();
   });
 
   it("accepts a real Date cell and a YYYY-MM-DD string, and blocks anything else", () => {
@@ -284,6 +438,30 @@ describe("planAssetRows", () => {
   it("rejects a calendar-invalid date that JS Date silently rounds forward (2026-02-30 -> March 2)", () => {
     const p = plan([cells({ tag: "BR-LT-0916", model: "Dell", category: "Laptops", purchased: "2026-02-30" })]);
     expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-date", detail: "2026-02-30" });
+  });
+
+  // M5: a real Date cell must be normalised to UTC midnight of its LOCAL
+  // calendar day, not passed through as whatever instant it already is.
+  // `new Date(2026, 0, 5)` is LOCAL midnight — the shape several xlsx
+  // readers produce — and forcing the process into a negative UTC offset
+  // (America/New_York) makes that instant provably NOT UTC midnight, so this
+  // fails without the fix regardless of the machine's own timezone.
+  describe("parseDateCell UTC normalization (M5)", () => {
+    const originalTZ = process.env.TZ;
+    beforeAll(() => {
+      process.env.TZ = "America/New_York";
+    });
+    afterAll(() => {
+      process.env.TZ = originalTZ;
+    });
+
+    it("normalizes a real Date cell to UTC midnight of its own local calendar day", () => {
+      const p = plan([
+        cells({ tag: "BR-LT-0945", model: "Dell", category: "Laptops", purchased: new Date(2026, 0, 5) }),
+      ]);
+      const value = p.rows[0].kind === "create" ? p.rows[0].data.purchasedAt : null;
+      expect(value?.toISOString()).toBe("2026-01-05T00:00:00.000Z");
+    });
   });
 
   it("blocks a cost that is not a plain number, naming the offending text", () => {
@@ -328,6 +506,22 @@ describe("planAssetRows", () => {
     expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-number" });
   });
 
+  // NI-3: the test above uses 1e21, which the TWO-DECIMAL check catches
+  // first (1e21 * 100 does not round-trip through `Math.round`), so it never
+  // actually exercises the ceiling branch — a second copy of the 2dp test
+  // wearing the ceiling's name. 20,000,000 has exactly two decimal places
+  // and is still over COST_MAX, so only the ceiling check can catch it, in
+  // both the numeric and text branches.
+  it("blocks a numeric cost over the ceiling using a value the two-decimal check would not catch first (NI-3)", () => {
+    const p = plan([cells({ tag: "BR-LT-0946", model: "Dell", category: "Laptops", cost: 20_000_000 })]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-number" });
+  });
+
+  it("blocks a text cost over the ceiling using a value the two-decimal check would not catch first (NI-3)", () => {
+    const p = plan([cells({ tag: "BR-LT-0947", model: "Dell", category: "Laptops", cost: "20000000.00" })]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-number" });
+  });
+
   it("accepts a valid numeric cost the same way it accepts the equivalent text", () => {
     const p = plan([cells({ tag: "BR-LT-0924", model: "Dell", category: "Laptops", cost: 51000.5 })]);
     expect(p.rows[0].kind === "create" && p.rows[0].data.cost).toBe("51000.50");
@@ -362,6 +556,21 @@ describe("planAssetRows", () => {
     const p = plan(
       [cells({ tag: "BR-LT-0929", model: "Dell", category: "Laptops", status: "DEPLOYED", assignedTo: "Nobody Here" })],
       { ...OPTS, dropUnknownAssignee: true },
+    );
+    expect(p.rows[0]).toMatchObject({ kind: "create", data: { status: "SPARE", assigneeId: null } });
+  });
+
+  // The fifth option (round 2): a row with NO Assigned-to at all (not a drop
+  // — there was never anything to drop) hits the SAME "Deployed with no
+  // holder" end state. Before this option existed, that end state was
+  // hard-blocked here and auto-resolved to SPARE one branch above, differing
+  // only in WHY there's no holder — a legacy fleet import with a
+  // half-filled Assigned-to column would hit a wall on rows the system would
+  // cheerfully have made SPARE had a name merely failed to resolve instead.
+  it("downgrades to SPARE via importUnheldAsSpare when there was no holder to drop in the first place (fifth option)", () => {
+    const p = plan(
+      [cells({ tag: "BR-LT-0949", model: "Dell", category: "Laptops", status: "DEPLOYED" })],
+      { ...OPTS, importUnheldAsSpare: true },
     );
     expect(p.rows[0]).toMatchObject({ kind: "create", data: { status: "SPARE", assigneeId: null } });
   });
@@ -429,19 +638,21 @@ describe("planAssetRows", () => {
     expect(p.rows[0]).toMatchObject({ kind: "update", data: { notes: "Repaired keyboard" } });
   });
 
+  // NI-6: renamed from `value-too-long` — this exact case (a model that is
+  // too SHORT) is why: the old name stated the opposite of the problem.
   it("blocks a model shorter than 2 characters", () => {
     const p = plan([cells({ tag: "BR-LT-0930", model: "X", category: "Laptops" })]);
-    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-too-long", detail: "Model" });
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: "Model" });
   });
 
   it("blocks a serial over 120 characters", () => {
     const p = plan([cells({ tag: "BR-LT-0931", model: "Dell", category: "Laptops", serial: "S".repeat(121) })]);
-    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-too-long", detail: "Serial" });
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: "Serial" });
   });
 
   it("blocks notes over 2000 characters", () => {
     const p = plan([cells({ tag: "BR-LT-0932", model: "Dell", category: "Laptops", notes: "N".repeat(2001) })]);
-    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-too-long", detail: "Notes" });
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "value-out-of-range", detail: "Notes" });
   });
 
   // Partial import is the DEFAULT (scope decision 4): a bad row must not cost

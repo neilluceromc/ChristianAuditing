@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { ASSET_STATUSES } from "./inventory-list";
 import {
-  BLOCK_CAUSES, IMPORT_ROW_CAP, blockSpec, groupByCause, rowCapRefusal, type ImportOption,
+  BLOCK_CAUSES, IMPORT_ROW_CAP, blockSpec, groupByCause, rowCapRefusal,
+  type BlockCause, type BlockFix, type ImportOption,
 } from "./import-vocabulary";
 
 const IMPORT_OPTIONS: readonly ImportOption[] = [
   "treatDuplicateSerialAsUpdate", "dropUnknownAssignee", "dropUnknownVendor", "keepCurrentLifecycle",
+  "importUnheldAsSpare",
 ];
 
 // Routes this application actually serves, as of this task — cross-checked
@@ -75,17 +78,90 @@ describe("BLOCK_CAUSES", () => {
 
   // Rules 26/37/38: derive the list from ASSET_STATUSES, never retype it — a
   // hand-typed list silently drifts the day a ninth status is added.
+  //
+  // Minor (round 2): this test itself used to RETYPE the eight statuses it
+  // asserts are derived, directly under a comment saying never to — so it
+  // would not have caught the exact drift it warns about. Iterating
+  // ASSET_STATUSES closes that.
   it("names all eight statuses inline in bad-status's explanation, derived not retyped", () => {
     const explain = blockSpec("bad-status").explain;
-    for (const s of ["DEPLOYED", "SPARE", "DEFECTIVE", "DONATED", "TEMPORARY", "BUYOUT", "DISPOSE", "MISSING"]) {
-      expect(explain).toContain(s);
-    }
+    for (const s of ASSET_STATUSES) expect(explain).toContain(s);
   });
 
   it("offers lifecycle-via-import a way to keep applying the row's other columns", () => {
     const fix = blockSpec("lifecycle-via-import").fix!;
     expect(fix.kind).toBe("option");
     expect(fix.option).toBe("keepCurrentLifecycle");
+  });
+
+  // NI-6 (round 2): renamed from `value-too-long`, which fired on a Model
+  // that was too SHORT — a label stating the opposite of the problem, and
+  // the exact group header the brief's argument rests on.
+  it("names value-out-of-range without implying a value can only be too long", () => {
+    const spec = blockSpec("value-out-of-range");
+    expect(spec.label.toLowerCase()).not.toContain("too long");
+  });
+
+  // A fifth option (round 2): the identical end state — Deployed/Temporary
+  // requested with no holder available — must not be auto-resolved to SPARE
+  // on one path (dropUnknownAssignee) and hard-blocked on the other, when
+  // both differ only in WHY there's no holder.
+  it("offers deployed-without-holder a way to import as spare instead", () => {
+    const fix = blockSpec("deployed-without-holder").fix!;
+    expect(fix.kind).toBe("option");
+    expect(fix.option).toBe("importUnheldAsSpare");
+  });
+
+  // NI-5 (round 2): Category is the third required column (with Tag and
+  // Model), and a blank cell must get its own cause with a real detail —
+  // not `unknown-category` with an empty one that `groupByCause` then
+  // filters, leaving the operator a group header and no examples at all.
+  it("gives missing-category its own cause, distinct from unknown-category", () => {
+    const spec = blockSpec("missing-category");
+    expect(spec.label.toLowerCase()).not.toBe(blockSpec("unknown-category").label.toLowerCase());
+    expect(spec.fix?.kind).toBe("reupload");
+  });
+
+  // NC-3 (round 2): the type is KNOWN — it just no longer fits the row's new
+  // category. Must not reuse `unknown-type`, whose explain is about a type
+  // this system has never seen at all, a different problem.
+  it("gives type-outside-category its own cause, distinct from unknown-type", () => {
+    const spec = blockSpec("type-outside-category");
+    expect(spec.explain).not.toMatch(/never seen/i);
+    expect(spec.fix?.kind).toBe("reupload");
+  });
+
+  // NI-2 (round 2): reverting `bad-status` to a `/inventory` link left the
+  // suite green under round 1, because no test pinned any cause's fix KIND
+  // — only its internal consistency (a `link` fix must point somewhere
+  // real, an `option` fix must name a real option), which a wrong-but-valid
+  // kind still satisfies. This table has to be edited deliberately for any
+  // cause's fix kind to change, which is the point.
+  it("pins every cause's fix kind explicitly, so a silent kind change is caught", () => {
+    const expected: Record<BlockCause, BlockFix["kind"]> = {
+      "missing-tag": "reupload",
+      "duplicate-serial": "option",
+      "unknown-category": "link",
+      "unknown-type": "link",
+      "unknown-assignee": "option",
+      "unknown-vendor": "option",
+      "bad-status": "reupload",
+      "bad-date": "reupload",
+      "bad-number": "reupload",
+      "bad-tag": "reupload",
+      "missing-model": "reupload",
+      "duplicate-in-file": "reupload",
+      "ambiguous-assignee": "reupload",
+      "inactive-assignee": "option",
+      "deployed-without-holder": "option",
+      "lifecycle-via-import": "option",
+      "value-out-of-range": "reupload",
+      "missing-category": "reupload",
+      "type-outside-category": "reupload",
+    };
+    for (const c of BLOCK_CAUSES) {
+      expect(blockSpec(c).fix?.kind).toBe(expected[c]);
+    }
   });
 });
 
