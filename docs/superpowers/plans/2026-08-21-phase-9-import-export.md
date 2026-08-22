@@ -2512,6 +2512,125 @@ git commit -m "feat(import): the asset dry run, which writes nothing"
 > nothing; and the `updatedAt` guard actually fires when a row is edited underneath the import. **Time a
 > full-cap run** — 2,000 sequential transactions is 2,000 round trips, and if that takes minutes rather
 > than seconds T11 needs to know before it builds a button that waits on it.
+>
+> ---
+>
+> ### ROUND TWO — one write must not ship behind a button, and two of the banner's own instructions were wrong.
+> The shape survives: per-row transactions, re-planning from the file, diff-before-write, `unchanged` as
+> a first-class verdict, classified failures carrying sheet row numbers. **Sequential re-apply turns out
+> to be genuinely idempotent** — a retried file re-plans to updates, diffs empty, counts `unchanged` —
+> and that property fell out of doing A-3 properly rather than being designed in.
+>
+> **C-1. The date fix copied half of `updateAsset` and the missing half writes two columns with no audit
+> entry.** `updateAsset`'s comment has two clauses (`actions.ts:317-321`): compare at day precision,
+> *"**and write ONLY the changed fields, so untouched columns keep their stored timestamps instead of
+> being silently truncated to midnight**"* — and it implements the second at `actions.ts:326`
+> (`Object.fromEntries(Object.entries(data).filter(([key]) => key in diff))`). The import took the first
+> clause and writes `data: row.data`, the whole patch. So: export an asset whose `purchasedAt` is
+> `2024-09-01T07:59:47.133Z`, change its Model, re-upload. `toDay` correctly keeps `purchasedAt` out of
+> the diff; the audit entry says `{model}`; and `updateMany` writes `purchasedAt` and `warrantyUntil` to
+> **midnight anyway**. Two columns change with no record, in the one task whose job is the trail, into a
+> table a DB trigger makes append-only so the missing entry can never be added later. **Every one of the
+> 25 assets in the database carries a time-of-day `purchasedAt`** — verified — so this fires on the first
+> edited re-import of any of them, and it **self-conceals**: after run one the values are already
+> midnight and nothing ever disagrees again. One line, and it is the line the sibling already uses. Safe
+> against the absent-key contract, because `Object.entries` enumerates only present keys.
+>
+> **I-1. The counters are incremented INSIDE the transaction callback** (`asset-actions.ts:242, 286,
+> 309`), but the COMMIT happens after the callback resolves. A commit that fails — P2028 timeout, pool
+> hiccup, connection reset — rejects, the `catch` records a failure, and the row is counted **both**
+> created and failed. `created + updated + unchanged + skipped + failed` then exceeds the row count and
+> the operator is told 197 assets exist when 196 do: the exact "number that does not add up" A-6 exists to
+> prevent, through a narrower door. `createAsset` shows the pattern (`actions.ts:202`) — return the
+> outcome out of the transaction and switch on it after it resolves.
+>
+> **I-2. Nothing revalidates the asset detail or history pages.** `/inventory`, `/inventory/activity` and
+> `/audit` are revalidated; `/inventory/[id]` and `/inventory/[id]/history` are not — though both
+> `updateAsset` (`actions.ts:341`) and `completeOffboarding` do it per asset. The first thing anyone does
+> after an import is open one row to check it landed, and that is precisely the page that would show the
+> old model and an empty history. Per-asset calls are wrong at 2,000 rows; Next 15 takes
+> `revalidatePath("/inventory/[id]", "page")` for exactly this.
+>
+> **I-3. The divergence is reported as a bare number, and THE BANNER ASKED FOR THAT — wrongly.** Round
+> one said to return the re-plan's own counts. Counts cannot discharge the promise: if an admin renames a
+> category between Validate and Apply, all 200 rows block and the operator sees "200 skipped, nothing
+> written" with no way to learn why. The `CauseGroup[]` that answers it was computed one line earlier and
+> discarded (`asset-actions.ts:209` destructures only `plan`). **Return `groups` too** — T11 cannot render
+> an explanation it is never given, and adding the field after its only caller exists means changing the
+> contract twice.
+>
+> **I-5. `actionDot("import-update") === "COMPLETED"` is another wrong banner instruction, faithfully
+> executed.** `statusFamily` (`src/lib/status.ts:17,21`) maps **both** `DEPLOYED` and `COMPLETED` to
+> `"settled"`, so the two new branches render an identical dot and the second has no visible effect at
+> all. Worse: plain `"update"` falls through to `SPARE`/neutral, so **the same edit gets a grey dot by
+> hand and a green settled one by import** — and the green one is the path that produces fifty at a time.
+> The banner's premise ("silently reading as nothing happened") was false: `SPARE` is documented as
+> neutral and is what this app already uses for every ordinary update. `import-create → DEPLOYED` is
+> right (it matches `create`); **`import-update` should be explicitly neutral**, with a comment saying so,
+> or a future reviewer re-raises the same point. And the test locking it in is
+> `expect(actionDot("import-update")).not.toBe("SPARE")` (`activity.test.ts:71-76`) — a **negative**
+> assertion that passes on any value at all, encodes the wrong rule, and would block the correction.
+> Assert exact values.
+>
+> **I-6. A-5 is half-satisfied: the fact is recorded and never shown where A-5 said it mattered.** A-5's
+> purpose was that the trail can answer *"how did this asset reach DEPLOYED without an approval?"* The
+> diff records `status`, but `/inventory/activity` renders only `auditSentence`, and that sentence is
+> `"J. Sarmiento imported BR-LT-0148"` — on that feed an asset imported already DEPLOYED to a holder is
+> indistinguishable from one imported SPARE. `/audit`'s fields column does list it, but only for someone
+> who already knew to look, which is the opposite of the ask. One line: read `diff?.status?.to` and say
+> `imported ${label} as ${status}` when it is not SPARE. Round one treated the diff (A-5) and the
+> sentences (step 2) as independent items; they are one item.
+>
+> **I-4, split between here and T11.** Sequential re-apply is idempotent, so a retry is safe. A
+> **concurrent** double-click is not: both calls re-plan before either writes, both plan CREATE for the
+> same tags, and the loser gets P2002 → *"would duplicate a tag or serial already on file"*, which is a
+> **misattribution** — it sends the operator hunting for a problem in their spreadsheet that does not
+> exist, when the duplicate is their own second click. T11 owns disabling the button; a disabled button is
+> a courtesy, not a guarantee (a re-POST, a refresh, a second tab all bypass it). **Here: make the
+> create-side P2002 reason name the possibility** rather than asserting the wrong cause. A server-side
+> advisory lock was considered and is deliberately NOT being added — this is an authenticated,
+> role-gated, rate-limited action on a single-machine deployment the owner runs, and the honest reason
+> plus the disabled button is proportionate. Recorded so nobody has to re-derive that.
+>
+> **M-4.** An operator who exhausts `import_plan` while clicking **Apply** gets the dry run's refusal
+> verbatim — *"checking a file only reads it"* — on the write path. Accidentally true, confusing.
+>
+> **The refactor that makes all of this testable, and it is the highest-value change in the round.**
+> `asset-actions.ts` is `"use server"`, which permits only async exports — so `patchForDiff`,
+> `classifyRowError` and `toDay` are **structurally unreachable by any unit test**. That is the same
+> discovery Task 9 made about `resolveAssetRefs`, whose extraction into `buildAssetRefs` is the precedent
+> and whose comment says so. There are now **three** normalisation layers around one comparison —
+> `diffOf`'s own `normalize`, `patchForDiff` on the after side, and `toDay` on the before side, the last
+> being a verbatim copy of `actions.ts:322`. Two half-normalisers in two shapes, one duplicated across
+> modules: the drift shape, already drifting. **Extract a pure `src/lib/asset-diff.ts` exporting
+> `assetDiff(before, patch)` that owns both normalisations AND returns the changed subset** — which fixes
+> C-1 inside the same function — and **have `updateAsset` call it too**, so the two paths cannot diverge
+> again. `updateAsset` is heavily e2e-covered, so run the full battery including Playwright after.
+>
+> Then unit-test it, because this one function is where C-1, A-3, A-4 and the seventh defect all live:
+> a round-trip row (`purchasedAt` at `07:59:47.133`, `cost "11000.00"`) yields `{}`; a genuine day change
+> yields `purchasedAt` **only**; a present-null cost yields `{cost: {from: 11000, to: null}}`; and an
+> **absent** key never appears in the diff **nor in the write set** — the destructive-write regression
+> caught twice already with, today, zero tests standing between it and a third time. Add
+> `classifyRowError`'s four cases while it is reachable.
+>
+> **Recorded, not fixed:** one import puts 2,000 entries at the top of `/inventory/activity` (PAGE_SIZE
+> 50) and `buildAuditWhere` has no action facet, so nothing can filter them out — §8. A cleared date
+> reports a `from` that was never stored, pre-existing in `updateAsset`, worth a sentence not a fix. The
+> `updatedAt` guard's comment overstates it: the version is read inside the row's own transaction
+> microseconds before the write, so it is **last-writer-wins with the diff computed at write time**, not
+> the optimistic-concurrency contract §6a rules 21/29/30 describe — the trade is right, the comment
+> should say what it is. And an `unchanged` row still opens BEGIN/SELECT/COMMIT, which on the flagship
+> clean round trip is the entire cost; reading `before` outside the transaction would cut it by roughly
+> two thirds if the 15 s ever matters.
+>
+> **On that 15 s: it is a floor, not the wall clock.** The harness re-implemented the loop; the real
+> action also parses up to 4 MB of multipart, decodes the XLSX, resolves refs and plans 2,000 rows — and
+> `applyAssetImport` does all of that **a second time**, since it calls `planAssetImport` internally.
+> Nobody has timed that half. **T11 must not put a bare submit in front of it**: pending state, button
+> disabled from the first click, copy that sets the expectation before the wait. And if the deployment
+> cannot hold a 20–40 s request open, this becomes a job with a poll — a plan-level decision, not
+> something to discover mid-build.
 
 **Files:**
 - Modify: `src/server/modules/import/asset-actions.ts`, `src/lib/activity.ts`,
