@@ -109,6 +109,10 @@ export default async function InventoryPage({
             <ButtonLink href={"/inventory/export" + exportQS}>
               Export
             </ButtonLink>
+            {/* Affordance absent, not disabled, for a role that can't reach the
+                page — canMutate is exactly admin/it_staff, matching the
+                PATH_RULES entry that gates /inventory/import itself. */}
+            {canMutate && <ButtonLink href="/inventory/import">Import</ButtonLink>}
             {canMutate && <ButtonLink variant="primary" href="/inventory/new">New asset</ButtonLink>}
           </>
         }

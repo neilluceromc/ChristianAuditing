@@ -161,6 +161,13 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // purchasing user who can reference the inventory list can't reach /secrets.
   // MUST precede the general /inventory rule (first-match-wins).
   { test: /^\/inventory\/[^/]+\/secrets(\/|$)/, workspaces: ["it"] },
+  // Import writes up to 2,000 assets plus an audit row each — MUST precede
+  // the general /inventory rule (first-match-wins), exactly like the
+  // /secrets rule above, for the same reason: the general rule below admits
+  // viewer, purchasing_staff and finance_staff, none of whom may reach this
+  // write surface. `roles` additionally excludes viewer even within the IT
+  // workspace it shares with /admin/asset-categories and friends.
+  { test: /^\/inventory\/import(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
   // a dead end on the page built for that role. The secrets rule above still

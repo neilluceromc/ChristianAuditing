@@ -94,6 +94,20 @@ describe("pathAllowedForRole", () => {
     ["/inventory/abc/secrets", "it_staff", true],
     ["/inventory/abc/secrets", "purchasing_staff", false],
     ["/inventory/abc/secrets", "viewer", true],
+    // import: admin/it_staff only, even though viewer, purchasing_staff and
+    // finance_staff all share the IT workspace this route sits under. Every
+    // role asserted explicitly — not just the two that should pass — because
+    // PATH_RULES is first-match-wins and the general /inventory rule right
+    // after this one in the array would silently admit all three of the
+    // roles this rule exists to exclude if this one were ever removed or
+    // shadowed. This is the case a route left ungoverned by MISTAKE would
+    // still pass by matching the wrong, more permissive rule instead of
+    // failing default-deny.
+    ["/inventory/import", "admin", true],
+    ["/inventory/import", "it_staff", true],
+    ["/inventory/import", "viewer", false],
+    ["/inventory/import", "purchasing_staff", false],
+    ["/inventory/import", "finance_staff", false],
     // default-deny: unenumerated routes are forbidden for everyone, admin included
     ["/export/assets", "viewer", false],
     ["/api/export/audit", "finance_staff", false],
