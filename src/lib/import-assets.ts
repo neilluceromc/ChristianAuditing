@@ -267,8 +267,17 @@ type DateResult = { ok: true; value: Date | null } | { ok: false; raw: string };
  * including this app's own export, that instant reads back as the day
  * BEFORE the sheet said (`2026-01-04T16:00:00Z` at UTC+8). The fix reads the
  * Date's own LOCAL year/month/day — whatever those are, that's the calendar
- * day the cell meant — and rebuilds it as UTC midnight of that same day, so
- * the result no longer depends on the reader's (or this process's) timezone.
+ * day the cell meant — and rebuilds it as UTC midnight of that same day.
+ *
+ * What that does and does NOT buy, precisely, because the previous version of
+ * this comment claimed timezone-independence and did not have it: a LOCAL
+ * midnight Date (what several xlsx readers produce) lands on the right day at
+ * any offset. A UTC-midnight Date lands on the right day only at a
+ * NON-NEGATIVE offset — at UTC-5 its local calendar day is the day before,
+ * and this reads that. Manila (UTC+8) is safe by arithmetic, so the
+ * deployment cannot be bitten; a developer running the dev server in the US
+ * can be. A bare `Date` genuinely cannot say which convention produced it,
+ * so the fix is not here: T8 must pin what its reader hands over.
  */
 function parseDateCell(raw: unknown): DateResult {
   if (isBlank(raw)) return { ok: true, value: null };
@@ -466,6 +475,22 @@ export function planAssetRows(
       // state `updateAsset` (actions.ts:294) itself refuses to save. This
       // fires only when the Type column is wholly ABSENT: a present-but-blank
       // Type cell already clears `typeId` in the patch below, which is safe.
+      //
+      // This test is CONSERVATIVE, not exact, and the difference matters to
+      // whoever reads it next. It infers "the stored type cannot belong to
+      // the new category" from the record's own `(categoryId, typeId)` pair
+      // having been consistent to begin with — and NOTHING IN THE DATABASE
+      // ENFORCES THAT. There is no FK or CHECK tying `Asset.categoryId` to
+      // its type's category; only `createAsset` and `updateAsset` maintain
+      // it, in application code. So an asset already stored inconsistently
+      // (by seed, by raw SQL, by some future write path) is blocked even by
+      // the row that would REPAIR it, and is left alone by a row that keeps
+      // it broken. Both directions are safe — this module never writes an
+      // inconsistency, and the explain's advice (add a Type column naming a
+      // type of the new category) does resolve the false positive. Catching
+      // it exactly would need the stored type's own categoryId in
+      // `AssetRecordRef`: a T9 contract addition to detect a state this
+      // application cannot currently produce. Declined deliberately.
       block("type-outside-category", categoryRaw);
       return;
     }

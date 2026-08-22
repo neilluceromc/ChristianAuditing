@@ -298,6 +298,17 @@ describe("planAssetRows", () => {
     expect(p.rows[0]).toMatchObject({ kind: "update", assetId: "a-1", data: { typeId: null } });
   });
 
+  // The `matched.typeId &&` guard, which survived mutation until this test
+  // existed: an asset with NO type at all (a-2) has nothing to strand, so
+  // moving it to another category on the same trimmed sheet is a clean
+  // update. Dropping the guard blocks this row and tells the operator their
+  // asset's type no longer fits — about an asset that has no type.
+  it("does not block a category change on an asset that has no stored type to strand", () => {
+    const narrowHeaders = matchHeaders(["Tag", "Model", "Category"]);
+    const p = planAssetRows(narrowHeaders, [["BR-LT-0200", "Dell XPS", "Furniture"]], REFS, OPTS);
+    expect(p.rows[0]).toMatchObject({ kind: "update", assetId: "a-2", data: { categoryId: "cat-2" } });
+  });
+
   it("resolves an assignee by employee number OR by name, case-insensitively", () => {
     for (const who of ["EMP-0042", "marites bautista"]) {
       expect(
@@ -446,10 +457,17 @@ describe("planAssetRows", () => {
   // readers produce — and forcing the process into a negative UTC offset
   // (America/New_York) makes that instant provably NOT UTC midnight, so this
   // fails without the fix regardless of the machine's own timezone.
-  describe("parseDateCell UTC normalization (M5)", () => {
+  // Forcing ONE timezone here was not enough, and the first version of this
+  // block picked the one that proves nothing: at America/New_York (UTC-5) a
+  // local-midnight instant falls on the same CALENDAR day in UTC, so the
+  // local and UTC getters agree and swapping them left all 86 tests green.
+  // Asia/Manila (UTC+8) is where they disagree — and it is the deployment.
+  // A test that forces an environment to make a case distinguishable has to
+  // be checked for actually distinguishing it.
+  describe.each(["Asia/Manila", "America/New_York"])("parseDateCell UTC normalization (%s)", (tz) => {
     const originalTZ = process.env.TZ;
     beforeAll(() => {
-      process.env.TZ = "America/New_York";
+      process.env.TZ = tz;
     });
     afterAll(() => {
       process.env.TZ = originalTZ;
@@ -462,6 +480,32 @@ describe("planAssetRows", () => {
       const value = p.rows[0].kind === "create" ? p.rows[0].data.purchasedAt : null;
       expect(value?.toISOString()).toBe("2026-01-05T00:00:00.000Z");
     });
+
+    it("leaves a YYYY-MM-DD string on its own calendar day whatever the process timezone", () => {
+      const p = plan([cells({ tag: "BR-LT-0946", model: "Dell", category: "Laptops", purchased: "2026-01-05" })]);
+      const value = p.rows[0].kind === "create" ? p.rows[0].data.purchasedAt : null;
+      expect(value?.toISOString()).toBe("2026-01-05T00:00:00.000Z");
+    });
+  });
+
+  // A UTC-midnight Date is only unambiguous at a NON-NEGATIVE offset, which
+  // is why it is asserted here and not inside the `describe.each` above: at
+  // Manila (the deployment) local getters read it as the day the sheet meant,
+  // and at a negative offset they read the day before. A bare Date cannot say
+  // which convention produced it, so the real fix is T8 pinning what its
+  // reader hands over — see the T8 note in the plan.
+  it("reads a UTC-midnight Date cell as the day the sheet meant, at this deployment's offset", () => {
+    const originalTZ = process.env.TZ;
+    process.env.TZ = "Asia/Manila";
+    try {
+      const p = plan([
+        cells({ tag: "BR-LT-0947", model: "Dell", category: "Laptops", purchased: new Date("2026-01-05T00:00:00Z") }),
+      ]);
+      const value = p.rows[0].kind === "create" ? p.rows[0].data.purchasedAt : null;
+      expect(value?.toISOString()).toBe("2026-01-05T00:00:00.000Z");
+    } finally {
+      process.env.TZ = originalTZ;
+    }
   });
 
   it("blocks a cost that is not a plain number, naming the offending text", () => {
@@ -624,8 +668,12 @@ describe("planAssetRows", () => {
     const narrowRow = ["BR-LT-0148", "Dell XPS", "Laptops"];
     const p1 = planAssetRows(narrowHeaders, [narrowRow], REFS, OPTS);
     const data1 = p1.rows[0].kind === "update" ? p1.rows[0].data : null;
-    expect(data1 && "notes" in data1).toBe(false);
-    expect(data1 && "vendorId" in data1).toBe(false);
+    // The exact key set, not two spot checks: `notes` and `vendorId` were
+    // pinned while `cost`, `typeId`, `serial`, `purchasedAt` and
+    // `warrantyUntil` were not — and C-7 is a Critical about destructive
+    // writes, one of whose fields is money. This assertion cannot rot as
+    // fields are added.
+    expect(Object.keys(data1 ?? {}).sort()).toEqual(["categoryId", "model"]);
 
     const p2 = plan([cells({ tag: "BR-LT-0148", model: "Dell XPS", category: "Laptops", notes: "" })]);
     const data2 = p2.rows[0].kind === "update" ? p2.rows[0].data : null;

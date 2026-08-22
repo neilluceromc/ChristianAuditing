@@ -2027,6 +2027,22 @@ git commit -m "feat(import): the cause vocabulary and the asset row rules, mutat
 
 ### Task 8: The sheet reader boundary
 
+> **ADDED AT TASK 7's CLOSE — pin the date convention this reader hands over, and say so out loud.**
+> `parseDateCell` (`src/lib/import-assets.ts`) normalises a `Date` cell by reading its **local**
+> year/month/day and rebuilding it as UTC midnight. That is right for a **local-midnight** `Date`, which
+> is what several xlsx readers produce, and it is right for a **UTC-midnight** `Date` only at a
+> **non-negative** UTC offset — at UTC−5 the local calendar day of a UTC-midnight instant is the day
+> before, and the import would silently store the wrong day. Manila (UTC+8) is safe by arithmetic, so
+> the deployment cannot be bitten; a developer running the dev server in the US can be. **A bare `Date`
+> cannot say which convention produced it**, so T7 cannot fix this and deliberately does not try — the
+> first version of its comment claimed timezone-independence it did not have, and the test that was
+> supposed to prove the claim forced `America/New_York`, the one offset where both readings agree.
+> **T8's job: establish what `read-excel-file` actually returns for a date-formatted cell** — run it,
+> don't infer it — and either hand over a UTC-midnight `Date` (documented, at which point T7's rule
+> becomes provably offset-independent) or hand over `YYYY-MM-DD` text, which is unambiguous and already
+> the better-tested path. Whichever it is, write it down here; T7's suite now forces **both**
+> `Asia/Manila` and `America/New_York` and will hold whichever convention you pin.
+
 One module owns `read-excel-file`, schema-less by scope decision 2.
 
 **Files:**
