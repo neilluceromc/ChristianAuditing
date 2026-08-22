@@ -2648,6 +2648,100 @@ git commit -m "feat(import): the asset commit, partial by construction and audit
 
 ### Task 11: `/inventory/import` — the three-step wizard
 
+> ### AMENDED BEFORE EXECUTION — the layout is right; the gating is open, the fix vocabulary is two-thirds rendered, and two component signatures are wrong.
+> Upload → Validate → Results, a proportional bar rather than a climbing counter, blocked rows grouped
+> by cause with one fix each, a fix that RE-PLANS instead of writing, and a new file clearing the old
+> verdict — all correct, all kept. What follows is everything the draft assumes about code that has since
+> changed or that it never checked.
+>
+> **W-1. `/inventory/import` IS ALREADY REACHABLE by viewer, purchasing_staff and finance_staff — and
+> the step that was supposed to catch that cannot.** `PATH_RULES` is **first-match-wins**
+> (`src/lib/workspaces.ts:185`, `PATH_RULES.find`), and `{ test: /^\/inventory(\/|$)/, workspaces: ["it",
+> "purchasing", "finance"] }` already matches `/inventory/import`. `ROLE_WORKSPACES` gives **viewer**
+> `["it"]`, so every one of those roles passes. And `pathAllowedForRole` is what **`src/middleware.ts:35`
+> gates on** — this is the real boundary, not nav decoration. **The draft's claim that
+> "`workspaces.test.ts` will fail if the route is left ungoverned (default-deny)" is false**: the route is
+> not ungoverned, it is governed by the *wrong rule*, so default-deny never fires and the suite stays
+> green with the page open to three roles that must never reach it. Add the rule **BEFORE** the general
+> `/inventory` one — exactly as the `/inventory/[id]/secrets` rule does, which carries a comment saying
+> "MUST precede the general /inventory rule (first-match-wins)" for this precise reason — with
+> `workspaces: ["it"]` and `roles: ["admin", "it_staff"]`. Then **write the test that would have caught
+> it**: assert all five roles explicitly against this path, not just the two that should pass.
+>
+> **W-2. `requireRole("it_staff")` locks out admins, for the third surface running.** `requireRole(...roles)`
+> (`guards.ts:26`) is a **set membership test**, not a floor, and it `redirect`s. `admin` is the role that
+> runs this app. Use `requireRole("admin", "it_staff")`. Same defect as Task 9's and Task 10's
+> `actionRole`; the shape has now cost three tasks, which is why the checklist item is "read the guard,
+> don't infer it from its name".
+>
+> **W-3. `BlockedCauses` renders an action for two of the three fix kinds, so MOST groups get no
+> affordance at all.** It handles `link` and `option`. `BlockFix["kind"]` is now **`"link" | "option" |
+> "reupload"`**, and `reupload` is what the majority of the 22 causes carry — `missing-tag`, `bad-tag`,
+> `missing-model`, `missing-category`, `bad-date`, `bad-number`, `value-out-of-range`,
+> `duplicate-in-file`, `ambiguous-assignee`, `type-outside-category`. Under this draft each of those
+> renders a group with an explanation and **nothing to do**, which is precisely the wall the brief's whole
+> argument is against — *eighteen identical lines is a wall, one line with a button is a decision.*
+>
+> **This is §6a rule 10, the single most-repeated defect in this codebase — six instances, every task
+> that has ever paired a rule module with a page, including the one warned about in advance.** It is the
+> first item on the checklist for exactly this reason. Render all three kinds: `reupload` is the wizard's
+> own restart — the operator fixes the sheet and uploads again — so it is a button that clears the
+> current file and verdict and returns to step 1, not an anchor and not a dead label. **And do not write
+> a `default:` that silently renders nothing: switch exhaustively on the union so a fourth kind is a
+> TYPE ERROR here rather than an invisible hole in the page.**
+>
+> **W-4. The options state holds two of five.** `ImportOption` is now
+> `treatDuplicateSerialAsUpdate | dropUnknownAssignee | dropUnknownVendor | keepCurrentLifecycle |
+> importUnheldAsSpare`, and the draft initialises — and resets, in the file-picker's `onChange` — a
+> two-key literal. A missing key reads `false`, so three of the five fix buttons would set an option the
+> server then never sees, the row would stay blocked, and the operator would conclude the button is
+> broken. **Build the state from `IMPORT_OPTIONS`** (exported from `import-vocabulary.ts` in Task 9's
+> round two, precisely so no third site can hand-list them) in both places. Task 9's `optionsFrom` had
+> this same defect and was fixed the same way.
+>
+> **W-5. `WizardSteps` cannot be reused, and the draft's own hedge is the right instinct.** Its real
+> signature is `{ employeeId: string; current: StepId; unlocked: boolean }` — it renders `WIZARD_STEPS`
+> from `src/lib/offboarding.ts` as **navigable `<Link>`s** built from an employee id, with a lock rule
+> about undecided items. None of that exists here: import's three steps are progress indication, not
+> navigation, and there is no employee. Do not contort it and do not generalise it (that edits a shipped
+> offboarding surface for an unrelated feature). Build a small presentational stepper local to the import
+> component **and say in a comment why it is not the offboarding one**, so the next reader does not
+> "de-duplicate" two things that only look alike. `ProgressBar`'s props ARE as the draft assumes —
+> `{ value, max?, label? }`, verified.
+>
+> **W-6. Read `applyAssetImport`'s ACTUAL return type — Task 10 changed it.** The draft destructures
+> `{ created, updated, failed }`. Task 10 adds at least `unchanged` and the failed rows' sheet numbers,
+> and reports the re-plan's own counts. **The `unchanged` count is not a detail, it is the happy path's
+> headline**: re-uploading an unedited export is the workflow this feature exists for, and every one of
+> its rows is an update that changes nothing. A toast reading *"Imported 0 new and 0 updated"* would tell
+> the operator their import failed when it did exactly the right thing. Say *"5 rows already matched —
+> nothing needed changing"*. And when the apply's counts differ from the verdict the operator approved
+> (the world can move between Validate and Apply — that divergence is accepted and recorded in Task 10),
+> **show the actuals**; a silent divergence is the thing scope decision 3 forbids, a reported one is
+> honest.
+>
+> **W-7. "Ignored 1 column: RMA ref" appears on EVERY round trip of our own export.**
+> `ASSET_EXPORT_COLUMNS` writes an `RMA ref` column and `ASSET_IMPORT_HEADERS` deliberately has no field
+> for it, so `unknownColumns` is never empty on the happy path. A permanent warning about a column this
+> app itself wrote trains the operator to ignore the line that exists to warn them about a genuinely
+> misspelled header. Keep a known-but-not-imported list, or word the two cases differently.
+>
+> **Smaller, but each one real.** `setFile(null)` does **not** clear an `<input type="file">` — the
+> filename stays visible after a successful import; reset it with a `key` or a ref. The rate-limit
+> refusal message promises nothing about the file being retained, deliberately, because it is **this**
+> component's job to retain it — confirm a refusal leaves `file` in state so the operator can retry
+> without re-picking. `file!` inside the Import handler is a non-null assertion that the JSX does not
+> actually guarantee; narrow it. And viewer must not see the **Import link** either — affordance absent,
+> not disabled, per the house rule.
+>
+> **Verification.** Step 5's by-hand check is right and should be done, but note the two things that
+> bite: an agent will not type a password into a login form, so a signed-in browser needs either the
+> user or a throwaway `zz-*` Playwright spec (§7 records the pattern, and Task 13 will make it
+> permanent); and `/inventory/activity` scopes to `entityType: "asset"`, so the new sentences **do**
+> render — confirm they read as sentences and not as raw `import-create` strings. Check the page at
+> **375px and in dark mode**, and run the axe helper: this is a new route with a form control, and the
+> e2e specs assert no serious/critical violations.
+
 **Files:**
 - Create: `src/app/(app)/inventory/import/page.tsx`, `src/components/import/import-wizard.tsx`,
   `src/components/import/blocked-causes.tsx`
