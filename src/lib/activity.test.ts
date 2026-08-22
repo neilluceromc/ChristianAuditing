@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { auditSentence } from "./activity";
+import { actionDot } from "@/components/patterns/activity-feed";
 
 const base = { actorLabel: "J. Sarmiento", action: "update", diff: null as unknown, entityLabel: "BR-LT-0148" };
 
@@ -21,6 +22,18 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
   });
   it("unknown actions degrade to actor — action — entity", () => {
     expect(auditSentence({ ...base, action: "document.signed" })).toBe("J. Sarmiento document.signed BR-LT-0148");
+  });
+  it("import-create reads as an import, not a plain registration", () => {
+    expect(auditSentence({ ...base, action: "import-create" })).toBe("J. Sarmiento imported BR-LT-0148");
+  });
+  it("import-update names the fields and says it was by import", () => {
+    expect(
+      auditSentence({
+        ...base,
+        action: "import-update",
+        diff: { model: { from: "Old", to: "New" }, cost: { from: 100, to: 200 } },
+      }),
+    ).toBe("J. Sarmiento updated model, cost on BR-LT-0148 by import");
   });
   it("names the purchase transitions in the language of the handoff", () => {
     const pr = { ...base, actorLabel: "P. Reyes", entityLabel: "PR-0198", diff: null as unknown };
@@ -49,5 +62,14 @@ describe("offboarding.completed", () => {
     expect(auditSentence({
       actorLabel: "J. Sarmiento", action: "offboarding.completed", diff: null, entityLabel: "Dennis Ong",
     })).toBe("J. Sarmiento completed offboarding for Dennis Ong");
+  });
+});
+
+describe("actionDot — import actions get a deliberate colour, not the neutral default", () => {
+  it("import-create is not the neutral SPARE dot", () => {
+    expect(actionDot("import-create")).not.toBe("SPARE");
+  });
+  it("import-update is not the neutral SPARE dot", () => {
+    expect(actionDot("import-update")).not.toBe("SPARE");
   });
 });

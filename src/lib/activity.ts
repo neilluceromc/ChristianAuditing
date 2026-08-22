@@ -48,6 +48,12 @@ export function auditSentence(entry: ActivityEntryLike): string {
       return `${entry.actorLabel} commented on ${entry.entityLabel}`;
     case "unit-update":
       return `${entry.actorLabel} updated a unit on ${entry.entityLabel}`;
+    case "import-create":
+      return `${entry.actorLabel} imported ${entry.entityLabel}`;
+    case "import-update": {
+      const fields = diff ? Object.keys(diff).join(", ") : "fields";
+      return `${entry.actorLabel} updated ${fields} on ${entry.entityLabel} by import`;
+    }
     default:
       return `${entry.actorLabel} ${entry.action} ${entry.entityLabel}`;
   }

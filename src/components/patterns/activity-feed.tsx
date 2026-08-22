@@ -49,7 +49,16 @@ export function actionDot(action: string): string {
   // "endpoint-disable"/"endpoint-enable"/"endpoint-delete" specifically so it
   // doesn't become one more producer sharing this line's meaning by accident.
   if (action.includes("failed") || action === "delete" || action === "disable") return "DEFECTIVE"; // fault
-  if (action === "create" || action.includes("executed")) return "DEPLOYED"; // settled
+  // `action === "create"` is an equality test and does not catch
+  // "import-create" (nor does any `includes` branch above it match either
+  // new name) — both would otherwise fall through to the neutral default,
+  // silently reading as "nothing happened" on the one feed built to show
+  // exactly this new kind of event. Given explicit branches instead: a
+  // created-by-import row settles the same way a manual create does, and an
+  // updated-by-import row settles the same way completing something does —
+  // neither is the neutral "no opinion" dot.
+  if (action === "create" || action === "import-create" || action.includes("executed")) return "DEPLOYED"; // settled
+  if (action === "import-update") return "COMPLETED"; // settled
   if (action.includes("requested") || action === "claim") return "SUBMITTED"; // inflight
   return "SPARE"; // neutral
 }
