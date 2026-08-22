@@ -1346,6 +1346,127 @@ git commit -m "feat(inventory): split-by-year chips, and an export that honours 
 > (§8). The `"employee no"` alias added in `8c4e8c0` stays and is correct, though it never fires on our
 > own export, where `Assigned to` is consumed first and `Employee no` falls out as an ignored unknown
 > column — T11 should not render "unrecognised column" warnings for columns this app itself wrote.
+>
+> ---
+>
+> ### ROUND TWO — `7c60762` reworked against the above, and the re-review found three more contract-shaped defects.
+> The rework is real: **23 of 29 mutations caught**, against a suite that previously let four whole
+> fields be deleted without noticing, and all fourteen round-one findings are dead *under mutation*
+> rather than under a reassuring test name. D-A's create/update asymmetry has structural teeth —
+> `AssetUpdatePatch` cannot carry `status`, `assigneeId` or `tag`, and the test asserts their **absence**,
+> which survives a refactor that changes what the values would have been. What follows is the rest.
+>
+> **The three that block T8, all of them contract-shaped — which is the entire reason this rework
+> happens before T8 rather than after T11:**
+>
+> **NC-1. `dropUnknownVendor` on an UPDATE erases the stored vendor.** `import-assets.ts:391,536`.
+> The patch's own doc says `null` means "the column exists and this row's cell was empty — an
+> intentional clear". A dropped vendor is not an empty cell: it holds a name we could not resolve, and
+> the operator ticked a box labelled *"Import without the vendor"*. Both produce `null`, and they mean
+> opposite things. Re-upload 200 rows after one vendor is renamed in the database, tick the option to
+> clear the block, and **every row naming it wipes that asset's vendor** — `update: 200, blocked: 0`.
+> Track the drop the way `assigneeDropped` already is, and on the update branch **omit `vendorId`
+> entirely** when the null came from a drop rather than a blank cell. Rule 7's "then `vendorId: null`"
+> is the defective sentence — it was written without a create/update split, one rung below where the
+> plan was wrong last time.
+>
+> **NC-2. The ACTIVE check fires on updates that move nothing**, blocking the export round trip for any
+> asset held by a non-ACTIVE employee. `import-assets.ts:425-431`. An asset DEPLOYED to an OFFBOARDING
+> holder, re-uploaded from our own export with only Notes changed, blocks `inactive-assignee` — then,
+> with the drop ticked, blocks `lifecycle-via-import` — and needs **two** file-wide options set to
+> change a note. `createAsset`'s freeze (`actions.ts:196`) guards *making* an assignment; this row makes
+> none, because the sheet's holder is byte-for-byte the record's holder. **Rule 8 was written without
+> knowing rule 11 existed.** On the update branch, skip `inactive-assignee` when the resolved id equals
+> `record.assigneeId` — any *different* holder is already `lifecycle-via-import`, so nothing is lost.
+> This bites hardest exactly where the feature earns its keep: Phase 7's offboarding flow exists to move
+> assets held by people mid-departure, and those are the rows an operator most wants to bulk-edit.
+>
+> **NC-3. A category change with no Type column strands a `typeId` outside its category — C-5 again,
+> through the door this rework opened.** `import-assets.ts:530`. Headers `[Tag, Model, Category]`, a row
+> moving `BR-LT-0148` to a new category: the patch carries no `typeId` key, so Prisma leaves the stored
+> one — a type belonging to the *old* category. That is exactly the state `actions.ts:294` refuses with
+> *"That type doesn't belong to the chosen category"*, i.e. **an asset its own edit form cannot save**.
+> Rule 7 validates only the pairing the row *states*; nothing compares the record's stored type against
+> the newly written category. It is **the only finding that survives T10's re-validation** — a
+> re-validating commit re-runs the rules against the plan, and the plan is internally consistent; the
+> inconsistency lives between the patch and the record, which no rule looks at. It arises only on the
+> trimmed sheet, which `matchHeaders` actively encourages by requiring three columns. Fix belongs
+> **here**, not in T9/T10, or a row rule ends up outside the pure module scope decision 2 exists to
+> create, with the dry run's verdict split across two files: `AssetRecordRef` gains `categoryId`,
+> `typeId` and `tag`, and rule 7 gains a new cause **`type-outside-category`** (the type is known, it
+> just no longer fits — do not reuse `unknown-type`) with a `reupload` fix naming both real remedies.
+>
+> **And the shape those three converge on.** `byTag` and `bySerial` are now near-identical records whose
+> only difference is a field nothing reads — `byTag.serial` has no reader anywhere in the module, and had
+> none in `8c4e8c0` either. Unify both on one exported `AssetRecordRef` carrying
+> `{ id, tag, status, assigneeId, categoryId, typeId }`, drop `serial`, and **export `AssetRecordRef` and
+> `EmployeeRef`** — T9 builds `AssetRefs` and currently cannot name its own member types in a helper
+> signature. `tag` also closes a legibility gap: a serial-rescued row returns `{kind:"update",
+> assetId:"a-9"}` for a sheet row tagged `BR-LT-0999`, so T11 cannot say which asset it will edit,
+> naming it only by a cuid the operator has never seen.
+>
+> **The Importants, which do not constrain T8 but ship with it:**
+> - **NI-1. `ambiguous-assignee` instructs the operator to do something that cannot work on our own
+>   export.** Its explain says "Add an Employee no column (or fill it in)" — but on the unmodified export
+>   that column **is already there and already filled**, and `matchHeaders` consumes `Assigned to` first,
+>   so the alias never fires. The only thing that works is *deleting* a column this app generated, and
+>   the fix is `reupload`, so there is no option to fall back on. **D-B's own failure mode, reintroduced
+>   by a cause added to satisfy D-B.** Make `assignee` genuinely two-column: rule 8 already declares
+>   employeeNo authoritative, so make that true at the *column* level — when an `employee no` column
+>   exists and its cell is non-blank, resolve from it and fall back to `assigned to`. That is exactly
+>   what the export writes, it makes the round trip work, and it demotes `ambiguous-assignee` from a wall
+>   to a rarity.
+> - **NI-2. No test pins any cause's fix *kind*** — reverting `bad-status` to a `/inventory` link leaves
+>   the vocabulary suite 15/15 green, because the generic test only checks internal consistency and
+>   `/inventory` is a real route. That is how an undisclosed deviation shipped unnoticed. Add an explicit
+>   `Record<BlockCause, BlockFix["kind"]>` table and assert it across all seventeen: a table you have to
+>   edit deliberately is the point. (**The deviation itself was correct** — once the eight statuses are
+>   named inline, the link adds nothing and costs a context switch out of the wizard mid-fix, the same
+>   argument that killed the `/inventory/import` links. Correct, undisclosed, now pinned.)
+> - **NI-3. The cost ceiling is implemented, works, and is untested in both branches.** Deleting either
+>   ceiling check leaves 65/65 green: the test named *"blocks a numeric cost over the 10,000,000
+>   ceiling"* uses `1e21`, which the **two-decimal** check catches first — a second copy of the 2-dp test
+>   wearing the ceiling's name. **The §6a dud shape, inside a test written to close a §6a dud.** Use
+>   `20000000` and `"20000000.00"`. If it regressed, `Decimal(12,2)` tolerates up to 9,999,999,999.99, so
+>   the write succeeds and only the edit form later refuses. Rule 13's worked example was `1e21` and it
+>   propagated straight into the test — the plan's fault, not the implementer's.
+> - **NI-4. Rule 11's serial-rescue branch is correct but has zero coverage.** Deleting
+>   `matchedRecord = existingBySerial` leaves 65/65 green, and with it gone `const record = matchedRecord!`
+>   dereferences null — a TypeError in T9's dry run, behind a load-bearing unguarded assertion. Test it,
+>   and collapse the two parallel variables into one `matched: AssetRecordRef | null` with
+>   `updateAssetId` derived from it, so the pairing is structural instead of hand-maintained.
+> - **NI-5. A blank Category cell reports `unknown-category` with an empty detail.** Blank Tag and blank
+>   Model each got their own cause precisely because `required: true` governs the column, not the cell;
+>   Category is the third required column and did not. The operator gets a group headed "Category doesn't
+>   exist", an explain telling them to create it, and — because `groupByCause` filters blank details —
+>   **no examples at all**. Add `missing-category` alongside its two siblings.
+> - **NI-6. `value-too-long` fires on a model that is too *short*.** A one-character model routes to a
+>   cause whose label states the opposite of the problem, and the group header is the one string the
+>   brief's entire argument rests on. Rename to `value-out-of-range`, or route a short model to
+>   `missing-model`, whose explain nearly covers it already.
+> - **A fifth option, `importUnheldAsSpare`, and it is worth taking.** When `dropUnknownAssignee` removes
+>   the only holder, rule 10 downgrades to SPARE instead of blocking — so the identical end state
+>   (DEPLOYED requested, no holder available) is auto-resolved on one path and hard-blocked on the other,
+>   differing only in *why* there is no holder. An operator entering a legacy fleet with a half-filled
+>   Assigned-to column hits a wall on rows the system would cheerfully have made SPARE one branch
+>   earlier. Give `deployed-without-holder` the option and the two paths agree.
+>
+> **Minors, all worth doing in the same commit:** `resolvedType.categoryId !== categoryId`
+> (`import-assets.ts:379`) is unreachable, because the map key already embeds `categoryId` — delete it or
+> say in a comment that it guards a T9 bug, and test it with a malformed entry. The vocabulary test
+> **retypes the eight statuses it asserts are derived**, directly under a comment saying never to retype
+> them, so it will drift on the day it warns about — iterate `ASSET_STATUSES`. `seenTags` and
+> `seenSerials` are claimed at different points in the rule order (`:321` vs `:349`), so whether a
+> blocked row still claims its identifier depends on which rule killed it — claim both at one point and
+> state the semantics. `parseCostCell`'s string branch routes money through a float, which the function's
+> own comment says never happens: safe by arithmetic (10⁷ at 2dp is far inside 2⁵³) and it usefully
+> normalises `"00051000.5"` → `"51000.50"`, so amend the comment to "a float is used only to range-check
+> and normalise, never to represent". And `parseDateCell`'s `Date` branch does not normalise to UTC
+> midnight: `new Date(2026,0,5)` — local midnight, which several xlsx readers produce — is
+> `2026-01-04T16:00:00Z`, **a day earlier** than the sheet said to anything rendering in UTC, including
+> this app's own export. Whether it fires depends on T8's reader config, which does not exist yet, which
+> is the argument for closing it here rather than depending on it. (`updateAsset` compares dates at day
+> precision specifically because time-bearing values generate phantom audit diffs.)
 
 **The heart of the phase.** Everything the operator reads, and every decision about a row, lives here —
 one pure module, no `src/server` imports, no database. Scope decision 2 exists so this can be tested
