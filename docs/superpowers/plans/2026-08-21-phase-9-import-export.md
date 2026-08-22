@@ -2194,6 +2194,98 @@ git commit -m "feat(import): the sheet reader, schema-less by design"
 > specifically: a known seeded tag resolves to a record carrying its real `status` and `categoryId`; the
 > two categories that share a type name resolve to **different** type ids under their own composite keys;
 > and an OFFBOARDED employee arrives with `employment` set so rule 8 can see it. Delete the script after.
+>
+> ---
+>
+> ### ROUND TWO — `bd38c5c` is a sound input for T10, and five things should land before T11 is built around it.
+> The review confirmed the parts that matter against the **live database** rather than by reading: a
+> lower-cased sheet tag resolves to the right existing asset (so the duplicate-create hole is genuinely
+> closed), a lower-cased `emp-0042` in the Employee-no column resolves to a real `assigneeId`, and every
+> one of the six map keys matches what `planAssetRows` looks up with. Cost at the cap is **~15 ms** of
+> queries; a 2,000-element `IN` is nowhere near Postgres's 65,535 bind-parameter ceiling. Nothing below
+> blocks T10.
+>
+> **R-1. Three reference maps lower-case their keys with no ambiguity guard, and this one writes WRONG
+> DATA rather than refusing.** The banner reasoned about `employees` (not unique → needs `ambiguous`) and
+> `types` (per-category unique → needs a composite key) and stopped one step short. `AssetCategory.name`
+> and `Vendor.name` are `@unique` — **but Postgres unique is case-sensitive, and
+> `src/server/modules/admin/reference-actions.ts` has no case-insensitive check anywhere**, relying
+> purely on the constraint. So the admin UI accepts "Laptop" and "laptop" as two categories. Then: 1,800
+> rows reading "Laptop" all resolve to whichever row the **unordered** `findMany` returned last, and
+> every one is filed under the wrong category — no block, no P2002, no signal, verdict reads "1,800
+> creates". Worse than the tag case the banner fixed, which at least surfaced as a write-time error.
+> **And without `orderBy` the winner is non-deterministic across calls** (Postgres heap order changes
+> after any `UPDATE`), so the dry run can resolve "Laptop" to one id and T10's re-validation to another —
+> which **falsifies scope decision 3's guarantee that the verdict and the write cannot disagree.**
+> Latent today (zero collisions in the database, verified), and latent is where it should be fixed.
+> Add `orderBy: { name: "asc" }` to all four reference queries for determinism, **and** a collision guard
+> on the same two-pass model already built for employees. The root fix — a case-insensitive uniqueness
+> check in `reference-actions.ts` — is a separate task, tracked in §8.
+>
+> **R-2. The 10/min limit can strand an operator holding a finished plan, and its refusal text is false
+> three ways.** `checkRate` runs before the file is read, so every refusal spends a token doing zero
+> work. Counted against a realistic messy-file session — a bad header, a re-upload, five option flips,
+> one un-tick to compare, then apply — the operator lands **exactly on 10 with no slack**, and one extra
+> toggle locks them out for a minute *while holding a fully-planned import they cannot apply*. Separately,
+> `rateLimited()` (`src/server/action-result.ts:29`) hardcodes *"You've made 60 changes this minute — the
+> cap. Nothing was lost: this form still holds your input."* On this path the cap is **10** not 60, the
+> dry run made **zero** changes (it writes nothing, by design), and a **file input is not repopulated by
+> any browser** — three false claims in one sentence, §6a rules 16 and 35 exactly. **Fix: a separate
+> `RateKind` for the read-only stage** — not a longer window and not a bigger number. The dry run costs
+> ~15 ms and writes nothing; it does not need the budget that bounds a call writing 2,000 assets plus
+> 2,000 audit rows. `RateEvent.kind` is a plain `String`, so no migration. `rateLimited` takes an
+> optional message override and both import call sites pass something true.
+>
+> **R-3. The banner's claim that "the unit suite cannot see any of this" is wrong, and it is why the
+> composite key has no permanent test.** `resolveAssetRefs` is two things welded together: six Prisma
+> calls, and ~40 lines of pure map-building where **every defect in this review actually lives** — the
+> uppercase, the two-pass ambiguity, the composite key, the lower-casing, the employeeNo overwrite.
+> Extract `buildAssetRefs(categories, types, employees, vendors, byTagRows, bySerialRows): AssetRefs`,
+> leaving `resolveAssetRefs` as six queries and one call. ~10 lines of movement, and it gives permanent
+> homes to all of the above plus R-1's guard. **Note what is already covered and what is not:**
+> `import-assets.test.ts` hand-builds `cat-1:standard` and `cat-2:standard` as a same-name trap, so the
+> **consuming** side of the composite key has been pinned since T7 — it is the **producing** side, that
+> `resolveAssetRefs` emits keys in that exact shape, that has no test and can drift.
+>
+> **R-4. An internal non-breaking space turns a valid assignee into a silent DROP.** `lower()` trims and
+> lower-cases but does not collapse internal whitespace. `trim()` does strip a surrounding U+00A0, so
+> padding is fine; `"Ramon Cruz"` — a name pasted from Outlook or a web page into Excel, a routine
+> artifact — is not: it blocks as `unknown-assignee` with detail `"Ramon Cruz"`, a name that is
+> letter-for-letter an employee in the system, with no visible difference. **And the offered fix is a
+> button reading "Leave as spare", so the natural response silently discards a valid assignment.**
+> Categories, types and vendors share the gap but block with `reupload`, so they merely frustrate. Fix
+> with a shared `refKey()` exported from `import-assets.ts` and used on **both** sides — doing it on one
+> side only creates a new key-shape mismatch.
+>
+> **R-5. A legal 2,000-row file is rejected by Next before this action ever runs.** You asked what an
+> `it_staff` user can do with a 500 MB xlsx: nothing. Next 15 defaults `serverActions.bodySizeLimit` to
+> **1 MB** and `next.config.ts` sets no override, so the buffer is already bounded and `readGrid` needs no
+> size guard — **do not add one.** The defect is the inverse, measured with our own `toXlsxBuffer`: 2,000
+> rows with Notes at this module's own 2,000-character ceiling is **2.63 MB**, so a file legal by every
+> rule this module states dies at the framework boundary with an opaque error — never `rowCapRefusal`,
+> never a `conflict` banner, and `rowCapRefusal` meanwhile promises "Split it and upload the parts" for a
+> ceiling that is not the one they hit. Set the limit explicitly (4 MB covers the worst legal file and
+> still bounds the buffer). Surfacing the byte ceiling to the operator is T11's.
+>
+> **Minors:** `AssetRefs.types`'s value carries a `categoryId` **nothing reads** — the composite key
+> already embeds it, as rule 7's own comment says. That is the same dead-field defect round 2 removed
+> from `byTag`'s `serial`, the lesson applied to one map and not the other; drop it to
+> `Map<string, string>`. The missing-columns message names canonical titles when `matchHeaders` accepts
+> aliases ("Asset tag" for Tag, three spellings of Serial), so a sheet with a variant header gets a true
+> but unhelpful refusal. And ambiguity is counted across **all** employees regardless of employment —
+> which is **correct** (narrowing to ACTIVE would silently guess, and two records with one name may be
+> one person), but the comment does not say so, and the next reader will read it as an oversight and
+> "fix" it. **For T11, not now:** re-uploading our own export always reports `RMA ref` in
+> `unknownColumns`, so the happy path carries a permanent false alarm — word it "ignored columns", or
+> keep a known-but-not-imported list so genuinely unrecognised columns still stand out.
+>
+> **And one contract note for T10, which is the better decision made early:** the dry run's plan does not
+> need to round-trip through the browser. T10 **re-validates every row anyway** (scope decision 8), so it
+> gains nothing from receiving the plan and avoids needing a schema to un-mangle it. **Re-post the file
+> and the five option booleans instead** — `AssetUpdatePatch`'s absent-key-vs-`null` distinction survives
+> React Flight as a server-action argument, but stringified into `FormData` a `Date` silently becomes an
+> ISO string that Prisma happens to coerce, which is the kind of accidental correctness this phase has
+> spent three tasks removing.
 
 **Files:**
 - Create: `src/server/modules/import/resolve.ts`, `src/server/modules/import/asset-actions.ts`
