@@ -69,12 +69,26 @@ export type BlockCause = (typeof BLOCK_CAUSES)[number];
  * "vendor" member). Fixed by turning it into an option: Vendor is nullable
  * and purely informational, so dropping it loses nothing unrecoverable.
  */
-export type ImportOption =
-  | "treatDuplicateSerialAsUpdate"
-  | "dropUnknownAssignee"
-  | "dropUnknownVendor"
-  | "keepCurrentLifecycle"
-  | "importUnheldAsSpare";
+/**
+ * T9: promoted from a bare union to an `as const` array so this is the ONLY
+ * place all five options are enumerated. Before this, the sole enumeration
+ * was a hand-typed copy inside `import-vocabulary.test.ts` — a list that
+ * would silently drift from this union the day a sixth option is added, in a
+ * test whose entire job is to assert every option is real. The test now
+ * imports this array instead of retyping it, and `optionsFrom`
+ * (`asset-actions.ts`) folds over it too, so a sixth option is impossible to
+ * forget in any of the three places. The same defect §6a rules 26/37/38
+ * describe for `ASSET_STATUSES`, caught here before it cost anything.
+ */
+export const IMPORT_OPTIONS = [
+  "treatDuplicateSerialAsUpdate",
+  "dropUnknownAssignee",
+  "dropUnknownVendor",
+  "keepCurrentLifecycle",
+  "importUnheldAsSpare",
+] as const;
+
+export type ImportOption = (typeof IMPORT_OPTIONS)[number];
 
 export interface BlockFix {
   kind: "link" | "option" | "reupload";

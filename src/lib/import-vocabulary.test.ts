@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ASSET_STATUSES } from "./inventory-list";
 import {
-  BLOCK_CAUSES, IMPORT_ROW_CAP, blockSpec, groupByCause, rowCapRefusal,
-  type BlockCause, type BlockFix, type ImportOption,
+  BLOCK_CAUSES, IMPORT_OPTIONS, IMPORT_ROW_CAP, blockSpec, groupByCause, rowCapRefusal,
+  type BlockCause, type BlockFix,
 } from "./import-vocabulary";
-
-const IMPORT_OPTIONS: readonly ImportOption[] = [
-  "treatDuplicateSerialAsUpdate", "dropUnknownAssignee", "dropUnknownVendor", "keepCurrentLifecycle",
-  "importUnheldAsSpare",
-];
 
 // Routes this application actually serves, as of this task — cross-checked
 // against src/app/(app)/**. `/admin/vendors` and `/inventory/import` are
