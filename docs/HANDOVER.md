@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-22 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–7 of 14 committed, unmerged. The EXPORT HALF IS DONE; the import half has its RULE MODULES (T7) and nothing else.** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, **run in full at the Task 7 close**: **605 unit tests / 34 files**, **103 e2e / 7.7 min**, `tsc` + `lint` + `build` clean, 8 migrations none pending, DB freshly seeded, and `docker compose --profile prod build` verified at Task 1.
+**Last updated:** 2026-08-22 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **Phase 9 (import / export) is MID-FLIGHT on branch `phase-9-import-export` — tasks 1–8 of 14 committed, unmerged. The EXPORT HALF IS DONE; the import half has its RULE MODULES (T7) and its SHEET READER (T8).** · **NOTHING IS PUSHED: `main` is ~72 commits ahead of `origin/main` and the branch is ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery on the branch, **run in full at the Task 7 close**: **614 unit tests / 35 files**, **103 e2e / 7.7 min** (e2e last run at the T7 close; T8 touched no route), `tsc` + `lint` + `build` clean, 8 migrations none pending, and `docker compose --profile prod build` verified at Task 1.
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -55,8 +55,8 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    and the **checklist in item 4 below is the distilled version**: run it against every task you
    execute, and read §6a's entry for whichever rules it points at. §6a is about how work goes wrong in
    THIS codebase; it did not stop being true when Phase 8 ended.
-4. **Resume at Task 8** of `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` with
-   `superpowers:subagent-driven-development`. Tasks 1–7 are committed; 8–14 remain. **The export half is
+4. **Resume at Task 9** of `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` with
+   `superpowers:subagent-driven-development`. Tasks 1–8 are committed; 9–14 remain. **The export half is
    finished, and the import half now has its rule modules and nothing else.**
 
    **What Task 7 shipped, and why it took four commits.** `src/lib/import-vocabulary.ts` (19 block causes,
@@ -92,18 +92,25 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
    `category`/`type`/`department`, so **nothing in this application can create a `Vendor`**. Rule 10's
    sixth instance, in the phase that had it written down in advance.
 
-   **What remains.** T8 the sheet reader, T9 the dry run (where Prisma enters), T10 the commit, T11 the
-   wizard, T12 the employee importer, T13 e2e, T14 close-out.
+   **What remains.** T9 the dry run (where Prisma enters), T10 the commit, T11 the wizard, T12 the
+   employee importer, T13 e2e, T14 close-out.
 
-   **Three things to carry into T8 specifically.** It has an **added banner** asking it to pin the date
-   convention `read-excel-file` actually returns — **run it, don't infer it** — because `parseDateCell`
-   reads a `Date` cell's *local* calendar day, which is right at Manila (UTC+8) and wrong at a negative
-   offset, and a bare `Date` cannot say which convention produced it. It must **refuse on
-   `headers.missing.length > 0`** before planning, or a sheet with no Category column produces 2,000
-   identical blocks instead of one refusal. And it owns `read-excel-file` alone, **schema-less by scope
-   decision 2** — the library's schema mode returns *either* objects *or* errors, never both, so it cannot
-   express partial success, which is the brief's default. That is the single most "simplifiable" thing in
-   the phase and simplifying it puts the bug straight back.
+   **T8 is done (`36da034`), and its real output was an experiment, not a module.** `readGrid` in
+   `src/server/import/read-sheet.ts` is the only `read-excel-file` import in the app and is **schema-less
+   by scope decision 2** — the library's schema mode returns *either* objects *or* errors, never both, so
+   it cannot express partial success, which is the brief's default. That is the single most
+   "simplifiable" thing in the phase and simplifying it puts the bug straight back. Its banner asked it
+   to **pin the date convention rather than infer it**, and doing so **reversed a T7 rule that three
+   review rounds had reasoned their way into**: `readSheet` returns a `Date` at **UTC midnight**, not
+   local midnight, so `parseDateCell`'s local getters were a day early at every negative offset.
+   Fixed in `df04742`; the round trip that proves it is fifteen lines and is described in §8. **Five
+   tests were added against the plan's "no unit test here"** — correct about the library call, wrong
+   about the row cap and the catch, which a real buffer exercises with no mock at all.
+
+   **One thing T8 did NOT do, and T9 owns it:** nothing yet **refuses on `headers.missing.length > 0`**.
+   `readGrid` hands back a grid and `matchHeaders` reports what is missing, but no caller acts on it — so
+   a sheet with no Category column currently produces 2,000 identical `missing-category` blocks instead
+   of one refusal naming the column. Refuse before planning.
 
    **The other still-open item from T7's review, which is T9's:** the employee `name` key and the
    `ambiguous` flag mean T9 must build `refs.employees` so that a name matching two employees is marked
@@ -541,7 +548,24 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 9 — import / export (MID-FLIGHT, tasks 1–7 of 14 on `phase-9-import-export`)**
+**Phase 9 — import / export (MID-FLIGHT, tasks 1–8 of 14 on `phase-9-import-export`)**
+
+**The sheet reader exists (T8).** `readGrid` in `src/server/import/read-sheet.ts` is the **only**
+`read-excel-file` import in the app: it takes a `File`, returns `{ ok: true, header, rows }` or
+`{ ok: false, reason }`, enforces `IMPORT_ROW_CAP` **before** any row is examined, and swallows the
+library's stack-shaped errors for one sentence an operator can act on. **Schema-less by scope decision
+2**, which is load-bearing rather than stylistic. Nothing calls it yet — T9 does. Two behaviours are
+written down rather than left to be rediscovered: a header-only sheet is a clean zero-row success, and
+**wholly blank trailing rows count toward the cap here** even though `planAssetRows` skips them, since
+this module reads a grid and not a business rule. **Nothing yet refuses on `headers.missing.length > 0`
+— that is T9's, and without it a sheet missing the Category column produces 2,000 identical blocks
+instead of one refusal.**
+
+**T8's actual contribution was settling the date convention by running it, and the answer reversed a
+T7 rule.** See §8 — `readSheet` returns UTC midnight, `parseDateCell` was reading local fields, and
+three review rounds had reasoned their way to the wrong convention because a bare `Date` cannot carry
+one. Five tests were also added against the plan's "no unit test here, deliberately": right about the
+library call, wrong about the row cap and the catch, both of which a real buffer exercises with no mock.
 
 **The import RULE MODULES exist (T7), and nothing else of the import half does.** Two pure files, 91
 tests, no `src/server`, no Prisma runtime, no I/O — every rule testable with plain arrays, which is
@@ -764,11 +788,11 @@ pending-route table, so the split falls on a seam that already existed.
 - **Phase 8 — the Admin workspace. COMPLETE and MERGED** (`e5a5730`). What it delivered is §4; the
   invariants it established are §6a. Two things remain outstanding and neither is code: **the push
   decision, which is the user's and unmade**, and **two purely visual checks** listed at the end of §4.
-- **Phase 9 — import / export. MID-FLIGHT: tasks 1–7 of 14 done** on `phase-9-import-export`.
+- **Phase 9 — import / export. MID-FLIGHT: tasks 1–8 of 14 done** on `phase-9-import-export`.
   `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` (14 tasks, **14 recorded scope decisions**,
   every shipped task carrying an `AMENDED` banner). **The export half is DONE and so are the import rule
   modules — see §4.**
-  **What remains is the rest of the import half**: the sheet reader (T8), the dry run (T9), the commit (T10), the wizard (T11), the
+  **What remains is the rest of the import half**: the dry run (T9), the commit (T10), the wizard (T11), the
   employee importer (T12), e2e (T13), close-out (T14).
 - **Phase 10 — polish. Not yet planned.** Split out of Phase 9 on 2026-08-21 because the two halves
   share almost no code: the printable 3×4 A4 label sheet with scan codes, USB-scanner polish so a scan
