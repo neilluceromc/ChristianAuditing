@@ -1,11 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
+import { SEED_PASSWORD } from "../prisma/fixtures";
 
 async function login(page: Page, email: string) {
   await page.goto("/logout");
   await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill("ChangeMe123!");
+  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
@@ -60,7 +61,7 @@ test.describe.serial("users & roles", () => {
 
     await page.goto("/logout");
     await page.getByLabel(/Email/).fill("viewer@thebackroomop.com");
-    await page.getByLabel(/Password/).fill("ChangeMe123!");
+    await page.getByLabel(/Password/).fill(SEED_PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
     // Still on /login: authorize() refuses a disabled user.
     await expect(page).toHaveURL(/\/login/);
@@ -117,7 +118,7 @@ test.describe.serial("users & roles", () => {
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
 
     await page.getByLabel(/Email/).fill("it@thebackroomop.com");
-    await page.getByLabel(/Password/).fill("ChangeMe123!");
+    await page.getByLabel(/Password/).fill(SEED_PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/inventory/, { timeout: 20_000 });
   });

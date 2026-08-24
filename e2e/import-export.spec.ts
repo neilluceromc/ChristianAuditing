@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import { readSheet } from "read-excel-file/node";
 import { IDS_CAP, idsRefusalText } from "@/lib/export-columns";
 import { IMPORT_ROW_CAP, rowCapRefusal } from "@/lib/import-vocabulary";
+import { SEED_PASSWORD } from "../prisma/fixtures";
 
 /**
  * Phase 9, Task 13. Covers both halves of the feature — four export routes
@@ -55,7 +56,7 @@ test.afterAll(async () => {
 async function login(page: Page, email: string) {
   await page.goto("/logout");
   await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill("ChangeMe123!");
+  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }

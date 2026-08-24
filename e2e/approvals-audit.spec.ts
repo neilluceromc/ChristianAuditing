@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
+import { SEED_PASSWORD } from "../prisma/fixtures";
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login (see
@@ -8,7 +9,7 @@ async function login(page: Page, email: string) {
   // keeps this helper safe to call a second time mid-test to switch users.
   await page.goto("/logout");
   await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill("ChangeMe123!");
+  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }

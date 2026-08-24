@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
+import { SEED_PASSWORD } from "../prisma/fixtures";
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login — going there
@@ -8,7 +9,7 @@ async function login(page: Page, email: string) {
   // time mid-test to switch users (see auth-shell.spec.ts / approvals-audit.spec.ts).
   await page.goto("/logout");
   await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill("ChangeMe123!");
+  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
@@ -19,7 +20,7 @@ async function expectNoSeriousAxe(page: Page) {
 }
 
 // Seeded fixtures this file depends on (see prisma/seed.ts), all
-// @thebackroomop.com / ChangeMe123!:
+// @thebackroomop.com / SEED_PASSWORD:
 //   admin@ (admin) · it@ (J. Sarmiento, it_staff) · purchasing@ (A. Reyes,
 //   purchasing_staff) · finance@ (L. Domingo, finance_staff) · viewer@ (viewer)
 //   PR-0201 DRAFT — 1 unit, untouched by this file (used for the viewer check)

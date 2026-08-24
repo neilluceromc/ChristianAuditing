@@ -1,11 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
+import { SEED_PASSWORD } from "../prisma/fixtures";
 
 async function login(page: Page, email: string) {
   await page.goto("/login");
   await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill("ChangeMe123!");
+  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
@@ -28,7 +29,7 @@ test.describe("auth", () => {
     await page.goto("/employees");
     await expect(page).toHaveURL(/\/login\?next=%2Femployees|\/login\?next=\/employees/);
     await page.getByLabel(/Email/).fill("it@thebackroomop.com");
-    await page.getByLabel(/Password/).fill("ChangeMe123!");
+    await page.getByLabel(/Password/).fill(SEED_PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
     // Headroom, not a weaker assertion. This is the one place in the file that
     // signs in WITHOUT the `login` helper above — the helper uses

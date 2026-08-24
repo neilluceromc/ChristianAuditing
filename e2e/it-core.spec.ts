@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { readSheet } from "read-excel-file/node";
+import { SEED_PASSWORD } from "../prisma/fixtures";
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login (see
@@ -12,7 +13,7 @@ async function login(page: Page, email: string) {
   // (middleware.ts) and the Email field never appears.
   await page.goto("/logout");
   await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill("ChangeMe123!");
+  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }

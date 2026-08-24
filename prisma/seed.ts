@@ -2,6 +2,7 @@ import { PrismaClient, type AssetStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { encryptSecret } from "../src/server/crypto";
 import { secretAad } from "../src/server/webhooks/sign";
+import { SEED_PASSWORD } from "./fixtures";
 
 const prisma = new PrismaClient();
 
@@ -16,7 +17,7 @@ async function main() {
       "EquipmentPolicy", "Employee", "AssetType", "AssetCategory", "Vendor",
       "Department", "FeatureFlag", "User" CASCADE`);
 
-  const hash = await bcrypt.hash("ChangeMe123!", 10);
+  const hash = await bcrypt.hash(SEED_PASSWORD, 10);
 
   const [admin, itStaff, purchasing, finance] = await Promise.all([
     prisma.user.create({ data: { email: "admin@thebackroomop.com", name: "System Admin", role: "admin", isPermanentAdmin: true, passwordHash: hash } }),
