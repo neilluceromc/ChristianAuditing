@@ -3534,6 +3534,77 @@ git commit -m "feat(import): the employee importer, on the shared vocabulary"
 
 ### Task 13: E2E
 
+> ### AMENDED BEFORE EXECUTION — items 11 and 12 are the most valuable assertions in the phase and must survive; one fixture cannot be built as written; and the whole employee half is missing.
+> **Keep the shape, and keep items 11 and 12 above everything else.** They are the only possible guard
+> on two bugs this phase actually shipped and fixed — the farewell sheet that could only ever be verified
+> at zero (§6a rule 65: an equality that holds at zero is not evidence), and the filtered export that
+> returned the candidate set because the gaps cut happens in memory after the SQL `where`. Neither is
+> unit-testable, both hit Prisma, and **if this spec does not assert them nothing does.** If time runs
+> short, cut something else.
+>
+> **T-1. `assets-mixed.xlsx` cannot be built as specified: there are no seeded serials.** `SELECT
+> count(serial) FROM "Asset"` returns **0** across all 25 rows, and `prisma/seed.ts` never sets one — so
+> "1 duplicate serial taken from a seeded asset" has nothing to take, and item 5's re-plan
+> ("Update those assets instead") has no reachable path. **Do not add serials to the seed** — a dozen
+> specs lean on those fixtures. Build the state with the importer itself, inside the serial block: import
+> a row that HAS a serial, then upload a second file reusing it. That is a better test than the plan's
+> anyway, because the collision is one the running code created. Note while you are there that the
+> **entire `bySerial` map has never been exercised against real data by anything** — Task 9's review said
+> so explicitly — so this is its first real run, and `treatDuplicateSerialAsUpdate` alongside it.
+>
+> **T-2. The employee half does not appear in this spec at all**, because the plan predates Task 12's
+> real shape. `/employees/import` is a second wizard with its own causes, its own refs and **scope
+> decision 15**. Add, at minimum: `viewer` cannot reach `/employees/import` (the general `/employees`
+> rule matches it with no `roles` key, so this is the same live gap Task 11 closed for assets — assert
+> it, do not assume the rule); the employee round trip end to end; **an update row whose Employment cell
+> disagrees with the record BLOCKS rather than writing**; and **a create with `employment: OFFBOARDING`
+> stamps `offboardingAt`**. That last pair is decision 15, and it exists because a spreadsheet must not
+> be the one surface that can start or unwind an offboarding — the farewell report's whole window hangs
+> off that column.
+>
+> **T-3. Your axe assertions WILL flake unless you settle the pointer first, and this is measured, not
+> theoretical.** Task 11's review hit it twice: `Button variant="primary"` reports a **serious** 4.29
+> contrast when axe samples mid-transition or with the pointer resting on it (`#fdfefe` on `#487cb6`),
+> while at rest `--accent` is `#2563a8` and passes. The fix that worked was `mouse.move(0, 0)` plus a
+> ~700 ms settle before the scan. Put that in the shared helper, with a comment saying why, or the next
+> person to add an axe check rediscovers it as a mystery failure.
+>
+> **T-4. Assert the flagship case, which is currently proven only by scripts that were deleted.** Three
+> separate throwaway harnesses have now shown that re-uploading an unedited export writes **zero** audit
+> entries and leaves `updatedAt` untouched — and every one of them was deleted afterwards, so nothing in
+> the repository asserts it. It is the workflow the feature exists for, it is what Task 10's A-3 and A-4
+> and the day-precision fix all exist to protect, and it is one download plus one upload in Playwright.
+> **Assert the audit-row delta is 0 and that no `updatedAt` moved**, then assert the Results step says
+> "already matched" rather than reporting zeros as if something failed. Use a **delta**, never an
+> absolute count (§7: the audit table carries drift from earlier verification runs).
+>
+> **T-5. The divergence banner's RENDER is yours; say plainly what you do not cover.** Task 11 round two
+> split this three ways: the decision is now a pure unit test (`hasDiverged`, done), the render is this
+> spec's, and **the world genuinely moving between Validate and Apply** — someone renaming a category, or
+> creating an asset carrying a tag the file planned to create — has no home yet. You can reach it here if
+> you want it: validate, mutate the database directly via `psql` or a Prisma call inside the test, then
+> apply, and assert the banner names the difference and the approved counts still show beside the
+> actuals. If you judge that too fragile for the suite, **say so in the report and I will record it**
+> rather than let it fall silently between tasks.
+>
+> **T-6. Timing.** A 2,000-row apply is ~15 s of writes and the action re-plans the whole file
+> internally first, so anything that applies at scale needs an explicit `test.setTimeout`. The oversized
+> fixture is only ever *refused*, so it stays fast — but generating it means writing 2,001 rows through
+> `toXlsxBuffer`, which is fine at commit time and should not happen inside a test.
+>
+> **T-7. Assert the honesty layer, not just the happy path.** The Results step now shows `unchanged`,
+> the approved counts beside the actuals, classified per-row `failures`, "Not imported: RMA ref" worded
+> apart from a genuinely unrecognised column, removable option chips, and "Nothing to import" for an
+> empty sheet. Several of those exist *because* a review found the page saying something untrue. Pick the
+> ones a regression would most plausibly break — the `unchanged` wording and the ignored-vs-unrecognised
+> split are the two that a careless refactor flips.
+>
+> **On fixtures generally:** committing both the script and its output is right (§6a rule 51 in the good
+> direction — a fixture the app's own writer produced is one the running code could have made). Name the
+> generated files in the commit and keep `make.ts` runnable, so a future column change can regenerate
+> rather than hand-edit. And give the file input a real accessible label so `getByLabel(/Spreadsheet/)`
+> is a rule rather than a CSS guess — Task 11 already did, but assert it rather than trusting it.
+
 **Files:**
 - Create: `e2e/import-export.spec.ts`, `e2e/fixtures/make.ts`, and the generated fixtures
 
