@@ -66,6 +66,39 @@ These are settled. A task that needs to break one must say so and amend this lis
     with a "create it first" cause and a link, not silently creating taxonomy as a side effect of an
     asset upload. The brief's "Create category" fix button links to `/admin/asset-categories`; it does
     not create anything inline.
+13. **Import may set `status`/`assignee` on CREATE; on UPDATE it never moves them.** Added
+    2026-08-22, at Task 7's quality review, because the plan never asked the question and the shipped
+    draft answered it wrongly by default. Everywhere else in this app those two fields move only
+    through the approval queue: `updateSchema` (`src/server/modules/inventory/actions.ts:279`) excludes
+    both — *"tag is immutable; status/assignee move via approvals"* — and `creationPlan`
+    (`src/lib/asset-rules.ts:14`) always creates SPARE, turning a requested DEPLOYED into a
+    `lifecycle.assign` approval. A spreadsheet that wrote them directly would be the only surface in
+    the system able to flip 500 assets' status with no approval, no SLA and no `approval.requested`
+    trail. **Create honours the sheet** — an import's job is entering a fleet that is already deployed,
+    and all eight statuses are legitimate there; `CREATABLE_STATUSES` is an affordance of the New Asset
+    form, not a database invariant. **Update refuses the move**, blocking with `lifecycle-via-import`
+    and offering `keepCurrentLifecycle` to apply the row's other columns and leave the lifecycle alone.
+15. **The employee import may set `employment` on CREATE and never moves it on UPDATE.** Added
+    2026-08-22 at Task 12's amendment, as the direct analogue of decision 13 and for a sharper reason:
+    `employment` is not a plain column. `updateEmployee`
+    (`src/server/modules/employees/actions.ts:228-241`) maintains `offboardingAt` alongside every change
+    to it — entering `OFFBOARDING` stamps it, returning to `ACTIVE` clears it, `OFFBOARDED` keeps it —
+    because the offboarding wizard reads "this offboarding" as everything decided since that stamp, and
+    its own comment warns that otherwise *"a routine return from years ago lands on a farewell report."*
+    An import writing `employment` without that rule corrupts the window on every farewell report for
+    that person. So: a create honours the sheet **and stamps `offboardingAt` by the same three-branch
+    rule**; an update whose Employment cell disagrees with the record **blocks**, pointing at the
+    offboarding flow, exactly as `lifecycle-via-import` does for assets. A spreadsheet must not be the
+    one surface that can start or unwind an offboarding.
+14. **Every block cause offers a fix the operator can act on inside the wizard.** The vocabulary always
+    asserted this; Task 7 shipped violating it, because `unknown-vendor` linked to `/admin/vendors`,
+    which does not exist — and `src/server/modules/admin/reference-actions.ts:15` is
+    `z.enum(["category","type","department"])`, so **no surface in this application can create a
+    `Vendor`**. So: a cause whose remedy is a screen we have links to it; a cause whose remedy is a
+    decision becomes an `ImportOption`; a cause whose only remedy is the sheet itself gets the
+    `reupload` fix kind, which T11 renders as the wizard's own restart rather than an anchor to the
+    page the operator is standing on. Nothing is left with a button that cannot work, and the test
+    asserts every href against the routes that exist.
 
 ---
 
@@ -119,6 +152,22 @@ These are settled. A task that needs to break one must say so and amend this lis
 
 ### Task 1: The two dependencies, installed so the Alpine image still builds
 
+> ### AMENDED — as SHIPPED (`adaecca`). The procedure was right; its stated reason did not apply.
+> All five steps ran clean: the Alpine `docker compose --profile prod build` completed for both the
+> `web` and `migrate` targets, and the gates held at 474 tests.
+>
+> **But `git diff package-lock.json` contains no `os`/`cpu` entries at all** — not for either package
+> nor for any of their five transitive deps (`fflate`, `saxen`, `unzipper-esm`, `node-int64`,
+> `worker-f`). So there was nothing win32-only to drop, and the §7 hazard this task was built around
+> could not have fired for THESE packages. That is a consequence of scope decision 1 rather than luck:
+> choosing the pure-JS pair over `exceljs` (which pulls `archiver` and `unzipper`) is what made the
+> lockfile platform-neutral. **Keep Step 2 anyway** — it is cheap, it is the only way to know, and the
+> next dependency this project adds may not be pure JS.
+>
+> One side effect worth knowing: **`graceful-fs` lost its `"dev": true` flag**, because
+> `unzipper-esm` is a production dependency of `read-excel-file` and pulls it into the production tree.
+> Harmless, and the reason the prod image grew.
+
 This is a real task in this repo, not boilerplate. HANDOVER §7: installing any npm package **on
 Windows** drops the Linux optional-dependency trees from `package-lock.json`, which breaks the Alpine
 production image — and the failure appears at `docker compose --profile prod build`, not at
@@ -164,6 +213,43 @@ git commit -m "build: add write-excel-file and read-excel-file"
 ---
 
 ### Task 2: The workbook writer (TDD)
+
+> ### AMENDED — as SHIPPED (`b9d0f76`). The public shape is as planned; the internals are not.
+> **Both API details this task flagged as uncertain were right as written** — `read-excel-file/node`
+> does export `readSheet` as a NAMED export, and `write-excel-file/node`'s default export does take
+> `{ columns }` with per-column `cell` functions and does have `.toBuffer()`. (`{ schema }` was removed
+> from the library and now throws.) So the README-derived guesses held.
+>
+> **What the plan did NOT anticipate is a real bug: a zero-row export silently loses its header.**
+> `write-excel-file`'s own dispatcher cannot tell an empty *objects* array from a pre-built empty
+> *SheetData* — `node_modules/write-excel-file/commonjs/xlsx/generateXlsxFileContents.js:207` reads
+> `if (arg1.length === 0 || Array.isArray(arg1[0]))` and takes the raw-SheetData branch, so line 231
+> (the branch that calls `getSheetData` to build the header) never runs. With `rows: []` the emitted
+> sheet contains `<sheetData/>` — no header, not even the labels. **The plan's Step 3 code, run as
+> written, fails its own Step 1 test.** Verified independently by reading the dispatcher and by
+> unzipping a generated file.
+>
+> The fix is to build the grid ourselves with the library's own **public** `getSheetData(rows, columns)`
+> — declared in `node_modules/write-excel-file/node/index.d.ts:47`, so this is supported API and not an
+> internal — and hand the resulting grid to `writeExcelFile`'s raw-SheetData overload. The grid always
+> contains the header row, so it is never length-0 and the ambiguity cannot arise.
+>
+> **A comment in the plan also claimed something false about the library**, and it is corrected in the
+> shipped code rather than repeated: the plan said write-excel-file "writes an empty cell for undefined
+> and the literal for null". It does not. Its `row.js`'s `isEmpty()` treats `undefined`, `null` and `""`
+> identically, so both already produce an empty cell. The `value ?? undefined` coercion is still
+> required, but purely to satisfy the library's published TYPE (`CellObject.value` excludes `null`) —
+> it is a type-checker requirement, not a runtime fix. Rule 16's shape, caught before it shipped.
+>
+> The `XlsxColumn` type also now imports the library's real `Value` and `CellObject["type"]` rather
+> than the plan's `unknown` placeholders, adding only `| null` for this app's nullable columns — so the
+> boundary is provably compatible with the library's contract instead of opaque.
+>
+> **On the deliberate-breakage check**, which produced a finding of its own: removing `?? undefined` is
+> caught by `tsc`, NOT by the round-trip test — because null and undefined really are identical at
+> runtime. Stringifying null to `"null"` IS caught by the test. So the test guards the failure mode it
+> is named for, but the type system is what guards the coercion. Worth knowing before anyone
+> "simplifies" either one away.
 
 One module owns `write-excel-file`. Its test writes a real buffer and reads it back with
 `read-excel-file`, which is both a round-trip assertion and the cheapest possible proof that the two
@@ -233,13 +319,20 @@ Expected: FAIL — `Cannot find module './write'`.
 
 - [ ] **Step 3: Write the module**
 
+As shipped:
+
 ```ts
-import writeExcelFile from "write-excel-file/node";
+import writeExcelFile, { getSheetData } from "write-excel-file/node";
+import type { CellObject, Column, Value } from "write-excel-file/node";
 
 /**
- * One column of an export sheet. `cell` returns write-excel-file's cell object
- * so a caller can set `type` and `format` per column without this module
- * knowing anything about the domain.
+ * One column of an export sheet. `cell` returns almost write-excel-file's own
+ * cell shape (`Value`/`CellObject["type"]` come straight from the library, so
+ * a caller can set a real `type`/`format` without this module knowing
+ * anything about the domain) — except `value` may be `null`, because every
+ * nullable column in this app (cost, serial, assignee) needs to say "no
+ * value" and the library's own type only allows `undefined` for that. The
+ * translation happens once, below, rather than in every caller.
  *
  * The header is always bold: these files are opened in Excel by people, and a
  * sheet whose first row looks like data is one AutoFilter away from being
@@ -248,7 +341,7 @@ import writeExcelFile from "write-excel-file/node";
 export interface XlsxColumn<T> {
   label: string;
   width?: number;
-  cell: (row: T) => { value: unknown; type?: unknown; format?: string };
+  cell: (row: T) => { value: Value | null; type?: CellObject["type"]; format?: string };
 }
 
 /**
@@ -257,18 +350,32 @@ export interface XlsxColumn<T> {
  * HTTP downloads and nothing should touch the filesystem to serve one.
  */
 export async function toXlsxBuffer<T>(columns: XlsxColumn<T>[], rows: T[]): Promise<Buffer> {
-  return writeExcelFile(rows, {
-    columns: columns.map((c) => ({
-      // `value ?? undefined`: write-excel-file writes an empty cell for
-      // undefined and the literal for null, and every nullable column in this
-      // app would otherwise export the word "null".
-      header: { value: c.label, fontWeight: "bold" },
-      width: c.width,
-      cell: (row: T) => {
-        const out = c.cell(row);
-        return { ...out, value: out.value ?? undefined };
-      },
-    })),
+  const libColumns: Column<T>[] = columns.map((c) => ({
+    header: { value: c.label, fontWeight: "bold" as const },
+    width: c.width,
+    // `value ?? undefined`: at runtime write-excel-file treats `null` and
+    // `undefined` identically (both become an empty cell — see its
+    // `row.js`'s `isEmpty()`), but its published type only allows
+    // `undefined` in `CellObject.value`. This coercion exists to satisfy
+    // that type, not to work around a real behavioural difference — do not
+    // read it as one.
+    cell: (row: T): CellObject => {
+      const out = c.cell(row);
+      return { value: out.value ?? undefined, type: out.type, format: out.format };
+    },
+  }));
+
+  // `writeExcelFile(rows, { columns })` cannot tell an empty *objects* array
+  // apart from an already-empty *sheet*: its own dispatcher treats a
+  // zero-length first argument as pre-built SheetData and never calls
+  // `columns[].cell`/`header` at all, so a zero-row export would silently
+  // come out with no header row either. Building the grid ourselves with
+  // `getSheetData` sidesteps that ambiguity — the header row is always
+  // present, so the grid this hands to `writeExcelFile` is never actually
+  // empty, even when `rows` is.
+  const sheetData = getSheetData(rows, libColumns);
+  return writeExcelFile(sheetData, {
+    columns: libColumns.map((c) => ({ width: c.width })),
   }).toBuffer();
 }
 ```
@@ -288,6 +395,47 @@ git commit -m "feat(export): one xlsx writer, round-tripped by its own test"
 ---
 
 ### Task 3: The shared response helpers, and the assets export becomes xlsx
+
+> ### AMENDED — as SHIPPED (`f558c53`). **The plan's column spec silently dropped two columns.**
+> The CSV export this task converts emitted **fourteen** columns; the plan's `ASSET_EXPORT_COLUMNS`
+> listed twelve. Missing: **`Employee no`** (`assignee.employeeNo`) and **`RMA ref`** (`asset.rmaRef`) —
+> both real columns of the shipped CSV (see `git show f558c53~1:"src/app/(app)/inventory/export/route.ts"`,
+> the `toCsv` header). Nothing in the scope decisions authorised dropping data: decision 9 covers
+> deleting the CSV module and its formula-injection guard, not narrowing the sheet. Shipped with all
+> fourteen, in their original positions.
+>
+> **This is worth more than the fix.** A task framed as "convert the format" is one where a column list
+> retyped by hand looks complete and is not, and the plan's own tests could not catch it — they assert
+> unique non-empty labels and that Tag comes first, all of which a twelve-column spec satisfies. When
+> a task rewrites an existing output, **diff the old output's fields against the new spec** rather than
+> reviewing the new spec on its own merits. Same family as §6a rule 39 (copying a pattern but not all
+> of it), one layer up: this copied a route and not all of its columns.
+>
+> Everything else in the plan matched reality — the `toXlsxBuffer` signature, the `capRefusalText` /
+> `idsRefusalText` shapes, and the route's existing `repairStageIds` logic, which survives untouched.
+>
+> Verified without a browser, and the reason is worth recording: the implementer declined to type the
+> seeded fixture password into a login form (entering any password into a field is on its prohibited
+> list) and instead used §7's recommended route — a throwaway `tsx` script under the gitignored
+> `backups/`, calling the route's exact `buildAssetWhere` / `buildAssetOrderBy` / `toXlsxBuffer` path
+> against the live seeded database, then deleted. It confirmed 25 assets, a 5,091-byte buffer, the
+> fourteen-column header in order, 25 data rows, and a `Cost` cell round-tripping as a JS `number`
+> matching its source `Decimal` — which is the `.toNumber()` boundary working. **Unverified by eye:**
+> whether the header renders bold and Cost right-aligns in real Excel. Task 13's e2e covers the route;
+> the visual pass does not exist yet.
+>
+> **Two review fixes landed on top (`1cd405c`), both worth carrying into Tasks 4 and 5.**
+> `exportFilename` now enforces its own guarantee instead of asserting a caller-side convention: it
+> strips anything outside `[A-Za-z0-9_-]` from the prefix. The comment had claimed the filename is
+> "never from user input" — true of `"assets"`, and about to be false, because **Task 5 passes
+> `farewell-${report.employeeNo}` and `employeeNo` is `String @unique` with no format constraint
+> anywhere** (not in `prisma/schema.prisma:196`, not in any zod schema in `src/`). Reproduced before
+> fixing: a `"` yields `attachment; filename="farewell-EMP"0042.xlsx"`, breaking out of the quoted
+> attribute. CRLF is NOT exploitable — Node's `Headers` throws on it — so this was a malformed header,
+> not header splitting. Fixed in the one function that writes download headers, with 4 tests.
+> And `export-columns.test.ts` now pins the **full ordered 14-label list**, because the twelve-column
+> spec passed every assertion the file previously had. The regression that actually happened was caught
+> by diffing a deleted file; now the suite catches it.
 
 Scope decisions 9, 10 and 11. The cap message and the `?ids=` refusal get exactly one owner each,
 because four routes are about to want them.
@@ -388,10 +536,15 @@ export const ASSET_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Type", width: 18, cell: (r) => ({ value: r.typeName }) },
   { label: "Status", width: 14, cell: (r) => ({ value: r.status }) },
   { label: "Assigned to", width: 24, cell: (r) => ({ value: r.assigneeName }) },
+  // Employee no and RMA ref are NOT optional extras — the CSV this replaces
+  // emitted both, and leaving them out is a silent data loss dressed as a
+  // format change. See this task's AMENDED banner.
+  { label: "Employee no", width: 14, cell: (r) => ({ value: r.assigneeNo }) },
   { label: "Purchased", width: 13, cell: (r) => ({ value: r.purchasedAt, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Cost", width: 13, cell: (r) => ({ value: r.cost, type: Number, format: "#,##0.00" }) },
   { label: "Warranty until", width: 14, cell: (r) => ({ value: r.warrantyUntil, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Vendor", width: 20, cell: (r) => ({ value: r.vendorName }) },
+  { label: "RMA ref", width: 18, cell: (r) => ({ value: r.rmaRef }) },
   { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
 ];
 ```
@@ -433,9 +586,20 @@ export function xlsxResponse(filename: string, body: Buffer): Response {
   });
 }
 
-/** `assets-2026-08-21.xlsx` — sortable, and unambiguous in a downloads folder. */
+/**
+ * `assets-2026-08-21.xlsx` — sortable, and unambiguous in a downloads folder.
+ *
+ * The prefix is stripped to `[A-Za-z0-9_-]` HERE rather than trusted from the
+ * caller, because this is the one place a `content-disposition` is built and
+ * one caller already passes a value derived from the database:
+ * `farewell-${employeeNo}`, where `employeeNo` has no format constraint in the
+ * schema or in any zod validator. An unstripped `"` breaks out of the quoted
+ * filename attribute. (CRLF cannot: Node's `Headers` rejects it outright.) The
+ * safe set covers every prefix this app passes.
+ */
 export function exportFilename(prefix: string, now: Date): string {
-  return `${prefix}-${now.toISOString().slice(0, 10)}.xlsx`;
+  const safePrefix = prefix.replace(/[^A-Za-z0-9_-]/g, "");
+  return `${safePrefix}-${now.toISOString().slice(0, 10)}.xlsx`;
 }
 ```
 
@@ -524,6 +688,42 @@ git commit -m "feat(export): assets export is xlsx, and an oversized selection i
 ---
 
 ### Task 4: The audit and employees export routes
+
+> ### AMENDED — as SHIPPED (`6c2083d` + `15490e5`). Two plan errors, one of them a correctness bug.
+>
+> **1. There is no `/inventory/export` PATH_RULES entry to copy.** Step 5 said to add rules "beside the
+> existing `/inventory/export` rule". That rule has never existed — export routes ride the general
+> prefix rules (`/^\/inventory(\/|$)/`, and `/^\/(employees|audit|offboarding|reservations)(\/|$)/`
+> for these two), and `middleware.ts`'s matcher covers route handlers, so both new routes were already
+> governed. Shipped with **four pinning tests** in `workspaces.test.ts` instead of a redundant rule:
+> `/audit/export` passes for `it_staff` and is refused for `finance_staff`, `/employees/export`
+> likewise against `purchasing_staff`. Access matches each route's own page, which is the rule.
+>
+> **2. THE EMPLOYEES EXPORT IGNORED THE PAGE'S FILTERS.** The plan's route took no `req` and exported
+> the whole roster, while the audit route honoured its filter. `/employees` parses a full list state
+> (search, facets, sort) **plus** a separate `gaps=1` flag. So filtering to "Policy gaps only" and
+> clicking Export produced ten rows instead of three — a sheet contradicting the screen it was launched
+> from.
+>
+> This is **§8's candidate-set rule**, which the assets export already obeys and which the plan
+> silently broke for employees. The gaps cut cannot be expressed in SQL: `listEmployees` applies it in
+> memory, after `resolvePolicy`/`computeLoadout` run per employee, so `buildEmployeeWhere(state)` alone
+> yields the CANDIDATE set. §8: *"every consumer of that `where` needs the cut — not just the one that
+> renders the list."* And `listEmployees` paginates, so the export cannot simply call it.
+>
+> Fixed by mirroring `repairStageIds`: a shared `filteredEmployees(state, gapsOnly)` in
+> `src/server/modules/employees/queries.ts` owns the SQL fetch AND the in-memory cut;
+> `listEmployees` paginates it, `employeeExportRows` takes it whole. **The `missingRequired > 0`
+> expression now exists exactly once** (`queries.ts:67`, two callers at 81 and 117 — verified by grep,
+> not by assertion). The page's Export link carries the current list state through.
+>
+> **`/audit` genuinely has no in-memory cut** — `buildAuditWhere` is pure SQL (a `contains` OR plus an
+> `entityType` facet) and `AUDIT_LIST_CONFIG` declares no derived facets. So the asymmetry between the
+> two routes is real, not a second oversight.
+>
+> **This invariant has no unit test and cannot easily get one** — `filteredEmployees` hits Prisma, like
+> `listEmployees`, which has never had one either. Task 13's e2e is its only possible guard; the
+> assertion is written into that task.
 
 Scope decision 11 — these are a query and a column spec each.
 
@@ -716,6 +916,39 @@ git commit -m "feat(export): audit and employee sheets, on the shared cap guard"
 
 ### Task 5: The farewell-report export route
 
+> ### AMENDED — as SHIPPED (`7df3388`). **The plan invented two fields for the third time.**
+> `FAREWELL_EXPORT_COLUMNS` specified `decidedBy` and `decidedAt`. Neither exists: `Decision`
+> (`src/lib/offboarding.ts:113`) carries `refNo`, `outcome`, `state`, `reason` and nothing else, and
+> `grep -rn "decidedBy\|decidedAt" src/` returns nothing at all. Same mistake as Task 4's invented
+> `email` column and Task 3's two dropped columns — **three column specs, three defects, and the
+> pattern is always the same: a spec written from what the sheet ought to say rather than from what the
+> source actually holds.** Shipped instead with the real fields the report page's own columns already
+> show: `refNo` and `state` as **Request** and **Status**, and the plan's "Note" renamed **Reason** to
+> match the page's header. Final order: Tag, Model, Outcome, Reason, Value, Request, Status.
+>
+> **Widening `Decision` to carry an approver and a timestamp was considered and declined** — see §8.
+> Short version: "decided" is DERIVED from the approvals that exist (Phase 7 scope decision #3, no
+> wizard-state table), so those fields are a feature against `AuditEntry`, not two properties to add,
+> and adding them to a domain type for an export's benefit inverts the dependency.
+>
+> **The query is `getWizard(employeeId)`, not the plan's invented `getFarewellReport`** — already
+> extracted in Phase 7, so no extraction was needed. Better than asked for: the implementer noticed the
+> page and the route were both about to filter `WizardData.items` down to decided ones independently,
+> and extracted `decidedItems(items)` (`queries.ts:180`) so both call one expression. That is rule 47
+> pre-empted one layer down, and the page now calls the helper too.
+>
+> It also corrected a **stale promissory claim in the report's printed footer**, which said a real Excel
+> export would "land with Phase 8's export work". That became false the moment this task shipped, and it
+> is the exact §6a rule 52 shape — a promise is a defect from the moment it ships until the task it
+> names lands.
+>
+> **Verification was honest but thin, and that matters.** The live seeded database has **zero**
+> `lifecycle_return` approvals, so Dennis (EMP-0090) has three held items and no decided ones — the
+> page's count and the sheet's row count both came back 0 and "matched" at zero, which proves almost
+> nothing. A synthetic non-DB round trip confirmed the mapping, null-cost cells and outcome labels. **A
+> non-zero case is asserted in Task 13 instead**, where Phase 7's e2e already drives a full offboarding
+> and can create the state.
+
 The brief's fourth export. Phase 7 shipped the farewell report as a printable page
 (`src/app/(app)/offboarding/[employeeId]/report/page.tsx`); this is the same data as a sheet.
 
@@ -795,6 +1028,68 @@ git commit -m "feat(export): the farewell report as a sheet, from the report's o
 ---
 
 ### Task 6: Split-by-year chips
+
+> ### AMENDED — as SHIPPED (`cd2aff2`). Wider than planned, for a good reason.
+> **The plan said "add it to `buildAssetWhere` itself, not the page" and did not say HOW.** That matters:
+> `buildAssetWhere` takes a `ListState`, and `ListState` only round-trips `config.facets` through
+> `serializeListState`/`parseListState`. `purchaseYear` is deliberately **not** a facet (it is a
+> nav-destination single value, per the `?state=` precedent). So threading it inside `ListState` would
+> have seen it **silently dropped** across the export href, the bulk drawer's "act on all matching", and
+> the toolbar's own navigation — which is Task 4's employees `gaps=1` bug exactly.
+>
+> Shipped as an explicit second parameter, `buildAssetWhere(state, purchaseYear)`, threaded the way
+> `gapsOnly` is threaded through `listEmployees`/`employeeExportRows`, plus one owner
+> (`withPurchaseYearQS`) for splicing it back onto a serialized query string wherever one is rebuilt.
+> That touched six files rather than three — `actions.ts` and `page.tsx` included — and the extra
+> surface is the point: **all six consumers of that `where` now inherit the filter.** Verified caller by
+> caller: `listAssets`, `repairStageIds`, the four `facetOptions` groupBys (each via `without(facet)`),
+> the export route, and `bulkRequestStatusChange`, which parses `purchaseYear` off the same serialized
+> string it already reconstructs `state` from. `purchaseYearBuckets` deliberately passes NO
+> `purchaseYear` — it is the year facet's own count, so by the `without(facet)` rule it must not apply
+> its own filter, and clicking a chip therefore shows exactly the count printed on it.
+>
+> **`purchaseYear` needs no in-memory cut** — unlike the repair `stage` facet it is fully expressible in
+> SQL — so it is simpler than `repairStageIds`, not another instance of it. Said in a comment so nobody
+> later assumes otherwise.
+>
+> **Grouping is in memory** over a `purchasedAt`-only projection, because Prisma's `groupBy` cannot
+> extract a year and doing it in raw SQL would mean a second, driftable copy of `buildAssetWhere`.
+>
+> **The acceptance test passed on real data:** buckets `{2020:1, 2021:1, 2022:2, 2023:3, 2024:15,
+> 2026:3}` summing to 25/25; `?purchaseYear=2026` exporting exactly 3 rows, all 2026; `SPARE` 5 overall
+> and 2 within 2026, so it composes with other facets. `purchaseYear=none` produces `{purchasedAt: null}`
+> and runs clean but returns 0 — **the seed has no undated assets, so that case is carried by unit tests
+> only** (rule 65: an equality at zero is not evidence). `e2e/it-core.spec.ts` 20/20, including the
+> export test.
+>
+> **A review fix landed on top (`0c37a98`), and it is the finding worth keeping from this task.**
+> Two hrefs hand-rolled `serializeListState` and so **dropped the year**: `inventory-table.tsx`'s sort
+> handler (clicking ANY column header from a year-filtered list cleared the chip — zero preconditions,
+> the most routine interaction with the table) and `repair-chips.tsx`'s stage chips (two clicks away).
+> Not a data-integrity bug — the export and `bulkRequestStatusChange` both derive from the current URL,
+> so nothing ever acted on a set the screen was not showing — but it defeated the feature's stated
+> purpose, since `capRefusalText` promises these chips are the escape from a cap refusal and the escape
+> vanished on the next sort.
+>
+> **Fixed structurally rather than by patching two call sites**: the page's `href` builder is passed
+> down, so neither component knows the year exists and neither imports `serializeListState` — the
+> mistake became unavailable rather than merely corrected. Five places built an `/inventory` URL; three
+> were right, two were wrong, and nothing had prevented a sixth from being wrong too.
+>
+> **The controller's suggested one-liner did not survive contact, and the reason is worth recording:**
+> `InventoryTable` is a `"use client"` component, so it **cannot** take a raw function prop from a
+> Server Component page. It receives a precomputed `sortHrefs: Record<string, string>` instead;
+> `RepairChips`, a Server Component, does take the builder. **That failure mode is invisible to `tsc`,
+> `lint` AND `build`** — it only surfaces when the page renders, i.e. under Playwright. Worth knowing
+> before passing a callback across that boundary again.
+>
+> Guarded by a new e2e assertion (`e2e/it-core.spec.ts`: from `?purchaseYear=2024`, click Model, assert
+> BOTH `sort=model` and `purchaseYear=2024` survive) — the only kind of test that can see a client
+> navigation. 21/21. **`clearFilters` deliberately DOES drop the year**: it is the same start-over
+> gesture as clearing any other facet, matching the `gaps=1` precedent.
+>
+> Recorded, not fixed: **there is no "All years" chip**, so clearing just the year needs "Clear filters".
+> Matches the plan as written; a minor UX gap for Phase 10's polish pass.
 
 Brief `[5a]`: "offer split-by-year chips **sized to their counts**". They are the concrete escape from
 the cap refusal, which is why `capRefusalText` points at them.
@@ -898,6 +1193,292 @@ git commit -m "feat(inventory): split-by-year chips, and an export that honours 
 ---
 
 ### Task 7: The import vocabulary and the asset row rules (TDD)
+
+> ### AMENDED — BEFORE IT SHIPS. **The plan below is wrong in seven ways, and `8c4e8c0` implemented it faithfully.**
+> `8c4e8c0` is this task verbatim, and a spec-compliance review passed it byte-for-byte. That is the
+> point: the code was never the problem. An opus review asked *"is the rule right?"* instead and found
+> **seven Critical defects, all of them in the plan text**, every one invisible to a green 542-test
+> suite. Same pattern as Tasks 1–5 — the plan's author reasoned outward from the vocabulary and never
+> opened `prisma/schema.prisma`, `src/lib/asset-rules.ts` or `src/server/modules/inventory/actions.ts`
+> to find what the rest of the application already guarantees. **This section is now the spec; the code
+> blocks further down are the superseded draft, kept because the diff against them is the lesson.**
+>
+> **The two defects that matter most, because they are this module's whole reason for existing.** The
+> dry run must issue a verdict the commit cannot contradict, and as written it does not:
+> - **C-1. A tag match skips the serial check** (`import-assets.ts:182`, `if (!updateAssetId && serial)`).
+>   A row whose tag is asset A's and whose serial is asset B's is reported as a clean update to A
+>   carrying B's serial. `Asset.serial` is `@unique`, so T10's write raises P2002 **on a row the
+>   operator was shown as fine**. The plan's own mutation #1 was a dud precisely because no fixture
+>   pairs a matching tag with a taken serial.
+> - **C-2. Intra-file duplicates are structurally invisible.** Both maps are built from the database and
+>   nothing accumulates what earlier rows in *this file* claimed, so two rows sharing a tag both plan as
+>   creates. That is the single likeliest real-world file shape: a copy-paste while editing an export.
+>
+> **Two settled decisions (user, 2026-08-22), which the plan never asked and which set the shapes
+> T8–T11 build against:**
+>
+> **D-A. Import may set `status`/`assignee` on CREATE; on UPDATE it never moves them.** Everywhere else
+> in this app those two fields move only through the approval queue — `updateSchema`
+> (`actions.ts:279`) excludes both, with the comment *"tag is immutable; status/assignee move via
+> approvals"*, and `creationPlan` (`asset-rules.ts:14`) always creates SPARE, turning a requested
+> DEPLOYED into a `lifecycle.assign` approval. Left as planned, a spreadsheet would be the only surface
+> in the system that can flip 500 assets' status with no approval, no SLA and no `approval.requested`
+> trail. **Create honours the sheet** because an import's job is entering a fleet that is *already*
+> deployed, and all eight statuses are legitimate there (`CREATABLE_STATUSES` is an affordance of the
+> New Asset form, not a database invariant — say so in a comment, since a later reader will otherwise
+> "fix" this to match). **Update refuses the move**: a Status or Assigned-to cell that disagrees with
+> the record is blocked, with an option to update the row's other fields and leave the lifecycle alone.
+>
+> **D-B. Every block cause keeps a fix the operator can act on right now.** The vocabulary asserts this
+> (`"offers a fix for every cause"`) and shipped violating it: **`unknown-vendor` links to
+> `/admin/vendors`, which does not exist** — `src/app/(app)/admin/` has no such directory, so the href
+> falls through to the `[...pending]` catch-all and renders a `PLANNED` empty state, and
+> `reference-actions.ts:15` is `z.enum(["category","type","department"])`, so **no surface in this
+> application can create a `Vendor` at all**. The test passed because it asserts non-null and checks
+> only the category's href. §6a rule 10's exact shape, now the sixth instance. Three further causes
+> link to `/inventory/import` — the page the operator is standing on, which does not exist until T11.
+>
+> **The amended vocabulary** (`src/lib/import-vocabulary.ts`):
+> - `ImportOption` becomes `"treatDuplicateSerialAsUpdate" | "dropUnknownAssignee" | "dropUnknownVendor" | "keepCurrentLifecycle"`.
+> - `BlockFix["kind"]` gains `"reupload"` — a fix with no href that T11 renders as the wizard's own
+>   restart. It is what `missing-tag`, `bad-tag`, `missing-model`, `bad-date`, `bad-number`,
+>   `duplicate-in-file`, `ambiguous-assignee` and `value-too-long` all honestly offer.
+> - `unknown-vendor`'s fix becomes `{ kind: "option", option: "dropUnknownVendor" }`, "Import without
+>   the vendor". `Asset.vendorId` is nullable and purely informational, and the edit form already has a
+>   vendor picker — so dropping it loses nothing unrecoverable. The current design has the asymmetry
+>   backwards: the semantically loaded `assignee` gets a drop option while the decorative field hard-
+>   blocks. **Its `explain` must also stop saying "create it first and re-upload", which is an
+>   instruction the operator cannot follow.**
+> - `bad-status`'s `explain` names all eight statuses inline from `ASSET_STATUSES`
+>   (`src/lib/inventory-list.ts:5`) rather than linking to `/inventory`, whose facet chips only show
+>   statuses currently in use — an operator cannot learn `DONATED` is legal from a list containing none.
+>   Rules 26/37/38: derive the list, never retype it.
+> - **New causes**, appended in this order (the order is the `groupByCause` tiebreak, so it is API):
+>   `bad-tag`, `missing-model`, `duplicate-in-file`, `ambiguous-assignee`, `inactive-assignee`,
+>   `deployed-without-holder`, `lifecycle-via-import`, `value-too-long`.
+> - The test's promise becomes real: **every `link` fix's href must be a route that exists**, and every
+>   `option` must be a member of `ImportOption`. Assert it over all of `BLOCK_CAUSES`, not one example.
+>
+> **The amended shapes** (`src/lib/import-assets.ts`) — these are the T9 contract, and the reason this
+> rework happens before T8 rather than after T11:
+> - `types: Map<string, { id: string; categoryId: string }>`. `AssetType` is
+>   **`@@unique([categoryId, name])`, not globally unique**, so a flat name→id map is lossy by
+>   construction, and both write paths already enforce `type.categoryId !== d.categoryId` →
+>   *"That type doesn't belong to the chosen category"* (`actions.ts:189` and `:296`). As planned, the
+>   import can pair `Laptops` with a `Furniture` type and produce **an asset its own edit form cannot
+>   save**. Resolve the type *after* the category and check the pair.
+> - `employees: Map<string, { id: string; employment: EmploymentStatus; ambiguous: boolean }>`.
+>   `Employee.name` is **not** unique (only `employeeNo` is), so a name matching two employees currently
+>   resolves to whichever T9 inserted last — a silent wrong assignment. A name key that matches more
+>   than one employee is `ambiguous` and blocks; an `employeeNo` key never is. `createAsset` also
+>   refuses a non-ACTIVE assignee (*"assignments are frozen"*, `actions.ts:196`) — so does this.
+> - `byTag: Map<string, { id: string; serial: string | null; status: AssetStatus; assigneeId: string | null }>`.
+>   The update branch cannot detect a lifecycle move (D-A) without the record's current values.
+> - **`AssetImportData` splits into `AssetCreateData` and `AssetUpdatePatch`.** One flat shape used for
+>   both branches is C-7: on an update row it emits `null` for every column the operator did not fill,
+>   which is a **destructive write**. Concretely — export 200 assets, delete the columns you don't care
+>   about (which `matchHeaders` actively encourages, since only Tag/Model/Category are required),
+>   re-upload, and wipe cost, purchase date, warranty, vendor and notes on 200 records. `updateAsset`
+>   goes to real trouble to avoid exactly this. The patch must distinguish **absent** (`undefined` — the
+>   sheet has no such column, leave it alone) from **explicitly blank** (`null` — a present column with
+>   an empty cell, an intentional clear). Per D-A the patch carries neither `status` nor `assigneeId`,
+>   and it never carries `tag`: the update-by-serial path as planned would **rename** the matched asset
+>   (`{kind:"update", assetId:"a-9", data:{tag:"BR-NEW-0001"}}`), against `updateAsset`'s explicit
+>   immutability rule.
+>
+> **The amended per-row rules, in application order.** First failing check still wins, one cause per row:
+> 1. Every cell blank → **skip**, counted nowhere.
+> 2. `tag`: trim **and upper-case** before anything (`createSchema` does; every tag in the DB is
+>    upper-case). Blank → `missing-tag`. Not `/^BR-[A-Z]{2}-\d{4}$/` → `bad-tag`. **Matching was
+>    case-sensitive**, so `br-lt-0148` planned as a *create* — and Postgres unique is case-sensitive
+>    too, so it would not even error: you get a second record for one physical machine.
+> 3. A tag already claimed by an **earlier row of this file** → `duplicate-in-file` (detail = the tag).
+> 4. `model` blank → `missing-model`. `required: true` on a header spec governs the **column**, not the
+>    cell; a blank Model planned as a create with `model: ""`, which `createSchema`'s `min(2)` forbids.
+> 5. `serial` (non-blank): claimed by an earlier row of this file → `duplicate-in-file`. Then, **whether
+>    or not the tag matched**, if it belongs to a *different* asset → `duplicate-serial`.
+>    `treatDuplicateSerialAsUpdate` rescues only the no-tag-match case; when tag→A and serial→B the two
+>    matches disagree about which asset the row *is*, and no option can resolve that (C-1).
+> 6. Tag in `byTag` → this row is an **update** of that id.
+> 7. `category` resolves, else `unknown-category`. `type` (non-blank) resolves **within that category**,
+>    else `unknown-type`. `vendor` (non-blank) resolves, else `unknown-vendor` — unless
+>    `dropUnknownVendor`, then `vendorId: null`.
+> 8. `assignee` (non-blank): `employeeNo` is authoritative, then name. Ambiguous name →
+>    `ambiguous-assignee`. Unresolved → `unknown-assignee`. Resolved but not ACTIVE →
+>    `inactive-assignee`. `dropUnknownAssignee` drops the last two to unassigned.
+> 9. `status`: blank → `SPARE` on create. Otherwise must be one of `ASSET_STATUSES` upper-cased, else
+>    `bad-status`.
+> 10. **Create only:** `DEPLOYED`/`TEMPORARY` with no assignee → `deployed-without-holder`. And when
+>     `dropUnknownAssignee` drops a holder, the status **downgrades to `SPARE`** — the option's label
+>     promises "leave as spare" and as planned it produced `{status:"DEPLOYED", assigneeId:null}`, a
+>     deployed-to-nobody asset from a button that said the opposite.
+> 11. **Update only (D-A):** a *present* Status column disagreeing with the record's status, or a
+>     *present* Assigned-to column resolving to someone other than the record's `assigneeId` →
+>     `lifecycle-via-import`, unless `keepCurrentLifecycle`, in which case both fields are simply
+>     omitted from the patch and the row's other columns still apply.
+> 12. Dates: a `Date` instance must be valid; `YYYY-MM-DD` text must **round-trip**
+>     (`d.toISOString().slice(0,10) === text`). The shape regex alone let `"2026-13-45"` through as an
+>     Invalid Date, and — worse, because nothing will ever flag it — `"2026-02-30"` through as **March 2**.
+>     UTC midnight is correct and matches `toDate()` (`actions.ts:172`); note in a comment that a
+>     UTC-midnight date renders as the same day at UTC+8, so Manila is safe *by arithmetic*, not by luck.
+> 13. Cost: **the numeric branch must obey the same contract as the string branch.** `typeof raw ===
+>     "number"` returned `String(raw)` unchecked, and Excel hands back `number` for every
+>     currency-formatted cell — so the guard covered the *rare* path. As planned: `-500` → accepted
+>     (`createSchema` is `.nonnegative()`), `51000.555` → silently rounded by `Decimal(12,2)`,
+>     `0.1+0.2` → `"0.30000000000000004"` (a float touching money, contradicting the file's own comment),
+>     `1e21` → a Prisma parse error. Require finite, `>= 0`, `<= 10_000_000`, at most two decimals
+>     (`Math.round(v * 100) / 100 === v`), then `v.toFixed(2)`. The string branch keeps `COST_SHAPE` and
+>     gains the same ceiling. The same value must not be accepted as a number and rejected as text.
+> 14. Ceilings the app already enforces and this module did not: `model` 2–120, `serial` ≤ 120,
+>     `notes` ≤ 2000 (`createSchema`, `actions.ts:145`). Over → `value-too-long`, detail naming the
+>     column. Individually minor; as a set, the difference between an import and a record the edit form
+>     refuses to save.
+>
+> **The test fixture is itself a defect.** `HEADER` in the draft below is **9 of the 12 supported
+> columns** — Vendor, Warranty until and Notes have no column, so those branches are dead in the entire
+> suite. Deleting the whole vendor block, never parsing `warrantyUntil`, and nulling `notes`/`model`
+> each leave **19/19 green**; `unknown-vendor` is produced by no test at all, which is most of why its
+> dead href survived. Three more pass on a wrong implementation: `examples.slice(0, 99)` (the "up to
+> three" test supplies only **two** distinct details), reversing the `BLOCK_CAUSES` tiebreak (the
+> "biggest first" test uses 2 vs 1, never a tie), and deleting `.filter(Boolean)` from `examples`.
+> **Use the real 14-column export header as the fixture** — `Tag, Model, Serial, Category, Type, Status,
+> Assigned to, Employee no, Purchased, Cost, Warranty until, Vendor, RMA ref, Notes` — which also
+> exercises the round trip the feature exists for, and add a distinguishing assertion for each of those
+> six.
+>
+> **And the gate that let all of this through:** the plan's Step 9 mutation pass is only a test of the
+> suite if the fixture exercises the mutated branch. Two of its four edits were duds — `parseFloat("PHP
+> 51,000")` is `NaN` under both branches, and the literal "swap rules 3 and 4" leaves the suite fully
+> green because the known-tag fixture's serial appears in no map. **Check that the branch is covered
+> before believing a mutation proved anything** (added to §6a).
+>
+> **Carried, not fixed:** `rmaRef` stays unimportable. The export emits an `RMA ref` column, so a round
+> trip drops it — but only from the *sheet*: an update writes only the patch's own fields, so the stored
+> value survives untouched. Making it writable is a new field, not an alias, and belongs in its own task
+> (§8). The `"employee no"` alias added in `8c4e8c0` stays and is correct, though it never fires on our
+> own export, where `Assigned to` is consumed first and `Employee no` falls out as an ignored unknown
+> column — T11 should not render "unrecognised column" warnings for columns this app itself wrote.
+>
+> ---
+>
+> ### ROUND TWO — `7c60762` reworked against the above, and the re-review found three more contract-shaped defects.
+> The rework is real: **23 of 29 mutations caught**, against a suite that previously let four whole
+> fields be deleted without noticing, and all fourteen round-one findings are dead *under mutation*
+> rather than under a reassuring test name. D-A's create/update asymmetry has structural teeth —
+> `AssetUpdatePatch` cannot carry `status`, `assigneeId` or `tag`, and the test asserts their **absence**,
+> which survives a refactor that changes what the values would have been. What follows is the rest.
+>
+> **The three that block T8, all of them contract-shaped — which is the entire reason this rework
+> happens before T8 rather than after T11:**
+>
+> **NC-1. `dropUnknownVendor` on an UPDATE erases the stored vendor.** `import-assets.ts:391,536`.
+> The patch's own doc says `null` means "the column exists and this row's cell was empty — an
+> intentional clear". A dropped vendor is not an empty cell: it holds a name we could not resolve, and
+> the operator ticked a box labelled *"Import without the vendor"*. Both produce `null`, and they mean
+> opposite things. Re-upload 200 rows after one vendor is renamed in the database, tick the option to
+> clear the block, and **every row naming it wipes that asset's vendor** — `update: 200, blocked: 0`.
+> Track the drop the way `assigneeDropped` already is, and on the update branch **omit `vendorId`
+> entirely** when the null came from a drop rather than a blank cell. Rule 7's "then `vendorId: null`"
+> is the defective sentence — it was written without a create/update split, one rung below where the
+> plan was wrong last time.
+>
+> **NC-2. The ACTIVE check fires on updates that move nothing**, blocking the export round trip for any
+> asset held by a non-ACTIVE employee. `import-assets.ts:425-431`. An asset DEPLOYED to an OFFBOARDING
+> holder, re-uploaded from our own export with only Notes changed, blocks `inactive-assignee` — then,
+> with the drop ticked, blocks `lifecycle-via-import` — and needs **two** file-wide options set to
+> change a note. `createAsset`'s freeze (`actions.ts:196`) guards *making* an assignment; this row makes
+> none, because the sheet's holder is byte-for-byte the record's holder. **Rule 8 was written without
+> knowing rule 11 existed.** On the update branch, skip `inactive-assignee` when the resolved id equals
+> `record.assigneeId` — any *different* holder is already `lifecycle-via-import`, so nothing is lost.
+> This bites hardest exactly where the feature earns its keep: Phase 7's offboarding flow exists to move
+> assets held by people mid-departure, and those are the rows an operator most wants to bulk-edit.
+>
+> **NC-3. A category change with no Type column strands a `typeId` outside its category — C-5 again,
+> through the door this rework opened.** `import-assets.ts:530`. Headers `[Tag, Model, Category]`, a row
+> moving `BR-LT-0148` to a new category: the patch carries no `typeId` key, so Prisma leaves the stored
+> one — a type belonging to the *old* category. That is exactly the state `actions.ts:294` refuses with
+> *"That type doesn't belong to the chosen category"*, i.e. **an asset its own edit form cannot save**.
+> Rule 7 validates only the pairing the row *states*; nothing compares the record's stored type against
+> the newly written category. It is **the only finding that survives T10's re-validation** — a
+> re-validating commit re-runs the rules against the plan, and the plan is internally consistent; the
+> inconsistency lives between the patch and the record, which no rule looks at. It arises only on the
+> trimmed sheet, which `matchHeaders` actively encourages by requiring three columns. Fix belongs
+> **here**, not in T9/T10, or a row rule ends up outside the pure module scope decision 2 exists to
+> create, with the dry run's verdict split across two files: `AssetRecordRef` gains `categoryId`,
+> `typeId` and `tag`, and rule 7 gains a new cause **`type-outside-category`** (the type is known, it
+> just no longer fits — do not reuse `unknown-type`) with a `reupload` fix naming both real remedies.
+>
+> **And the shape those three converge on.** `byTag` and `bySerial` are now near-identical records whose
+> only difference is a field nothing reads — `byTag.serial` has no reader anywhere in the module, and had
+> none in `8c4e8c0` either. Unify both on one exported `AssetRecordRef` carrying
+> `{ id, tag, status, assigneeId, categoryId, typeId }`, drop `serial`, and **export `AssetRecordRef` and
+> `EmployeeRef`** — T9 builds `AssetRefs` and currently cannot name its own member types in a helper
+> signature. `tag` also closes a legibility gap: a serial-rescued row returns `{kind:"update",
+> assetId:"a-9"}` for a sheet row tagged `BR-LT-0999`, so T11 cannot say which asset it will edit,
+> naming it only by a cuid the operator has never seen.
+>
+> **The Importants, which do not constrain T8 but ship with it:**
+> - **NI-1. `ambiguous-assignee` instructs the operator to do something that cannot work on our own
+>   export.** Its explain says "Add an Employee no column (or fill it in)" — but on the unmodified export
+>   that column **is already there and already filled**, and `matchHeaders` consumes `Assigned to` first,
+>   so the alias never fires. The only thing that works is *deleting* a column this app generated, and
+>   the fix is `reupload`, so there is no option to fall back on. **D-B's own failure mode, reintroduced
+>   by a cause added to satisfy D-B.** Make `assignee` genuinely two-column: rule 8 already declares
+>   employeeNo authoritative, so make that true at the *column* level — when an `employee no` column
+>   exists and its cell is non-blank, resolve from it and fall back to `assigned to`. That is exactly
+>   what the export writes, it makes the round trip work, and it demotes `ambiguous-assignee` from a wall
+>   to a rarity.
+> - **NI-2. No test pins any cause's fix *kind*** — reverting `bad-status` to a `/inventory` link leaves
+>   the vocabulary suite 15/15 green, because the generic test only checks internal consistency and
+>   `/inventory` is a real route. That is how an undisclosed deviation shipped unnoticed. Add an explicit
+>   `Record<BlockCause, BlockFix["kind"]>` table and assert it across all seventeen: a table you have to
+>   edit deliberately is the point. (**The deviation itself was correct** — once the eight statuses are
+>   named inline, the link adds nothing and costs a context switch out of the wizard mid-fix, the same
+>   argument that killed the `/inventory/import` links. Correct, undisclosed, now pinned.)
+> - **NI-3. The cost ceiling is implemented, works, and is untested in both branches.** Deleting either
+>   ceiling check leaves 65/65 green: the test named *"blocks a numeric cost over the 10,000,000
+>   ceiling"* uses `1e21`, which the **two-decimal** check catches first — a second copy of the 2-dp test
+>   wearing the ceiling's name. **The §6a dud shape, inside a test written to close a §6a dud.** Use
+>   `20000000` and `"20000000.00"`. If it regressed, `Decimal(12,2)` tolerates up to 9,999,999,999.99, so
+>   the write succeeds and only the edit form later refuses. Rule 13's worked example was `1e21` and it
+>   propagated straight into the test — the plan's fault, not the implementer's.
+> - **NI-4. Rule 11's serial-rescue branch is correct but has zero coverage.** Deleting
+>   `matchedRecord = existingBySerial` leaves 65/65 green, and with it gone `const record = matchedRecord!`
+>   dereferences null — a TypeError in T9's dry run, behind a load-bearing unguarded assertion. Test it,
+>   and collapse the two parallel variables into one `matched: AssetRecordRef | null` with
+>   `updateAssetId` derived from it, so the pairing is structural instead of hand-maintained.
+> - **NI-5. A blank Category cell reports `unknown-category` with an empty detail.** Blank Tag and blank
+>   Model each got their own cause precisely because `required: true` governs the column, not the cell;
+>   Category is the third required column and did not. The operator gets a group headed "Category doesn't
+>   exist", an explain telling them to create it, and — because `groupByCause` filters blank details —
+>   **no examples at all**. Add `missing-category` alongside its two siblings.
+> - **NI-6. `value-too-long` fires on a model that is too *short*.** A one-character model routes to a
+>   cause whose label states the opposite of the problem, and the group header is the one string the
+>   brief's entire argument rests on. Rename to `value-out-of-range`, or route a short model to
+>   `missing-model`, whose explain nearly covers it already.
+> - **A fifth option, `importUnheldAsSpare`, and it is worth taking.** When `dropUnknownAssignee` removes
+>   the only holder, rule 10 downgrades to SPARE instead of blocking — so the identical end state
+>   (DEPLOYED requested, no holder available) is auto-resolved on one path and hard-blocked on the other,
+>   differing only in *why* there is no holder. An operator entering a legacy fleet with a half-filled
+>   Assigned-to column hits a wall on rows the system would cheerfully have made SPARE one branch
+>   earlier. Give `deployed-without-holder` the option and the two paths agree.
+>
+> **Minors, all worth doing in the same commit:** `resolvedType.categoryId !== categoryId`
+> (`import-assets.ts:379`) is unreachable, because the map key already embeds `categoryId` — delete it or
+> say in a comment that it guards a T9 bug, and test it with a malformed entry. The vocabulary test
+> **retypes the eight statuses it asserts are derived**, directly under a comment saying never to retype
+> them, so it will drift on the day it warns about — iterate `ASSET_STATUSES`. `seenTags` and
+> `seenSerials` are claimed at different points in the rule order (`:321` vs `:349`), so whether a
+> blocked row still claims its identifier depends on which rule killed it — claim both at one point and
+> state the semantics. `parseCostCell`'s string branch routes money through a float, which the function's
+> own comment says never happens: safe by arithmetic (10⁷ at 2dp is far inside 2⁵³) and it usefully
+> normalises `"00051000.5"` → `"51000.50"`, so amend the comment to "a float is used only to range-check
+> and normalise, never to represent". And `parseDateCell`'s `Date` branch does not normalise to UTC
+> midnight: `new Date(2026,0,5)` — local midnight, which several xlsx readers produce — is
+> `2026-01-04T16:00:00Z`, **a day earlier** than the sheet said to anything rendering in UTC, including
+> this app's own export. Whether it fires depends on T8's reader config, which does not exist yet, which
+> is the argument for closing it here rather than depending on it. (`updateAsset` compares dates at day
+> precision specifically because time-bearing values generate phantom audit diffs.)
 
 **The heart of the phase.** Everything the operator reads, and every decision about a row, lives here —
 one pure module, no `src/server` imports, no database. Scope decision 2 exists so this can be tested
@@ -1458,6 +2039,37 @@ git commit -m "feat(import): the cause vocabulary and the asset row rules, mutat
 
 ### Task 8: The sheet reader boundary
 
+> ### ANSWERED — the reader returns **UTC midnight**, and T7 was reading local fields.
+> Measured, not inferred: a date written through our own `ASSET_EXPORT_COLUMNS`
+> (`{ type: Date, format: "yyyy-mm-dd" }`) and read back with `readSheet` comes out as a real `Date`
+> whose instant is `2026-01-05T00:00:00.000Z` — **byte-identical under `Asia/Manila`,
+> `America/New_York` and `UTC`**. Only the *local* calendar day read off it moves: `getDate()` is 5 at
+> UTC+8 and **4** at UTC−5. `parseDateCell` was reading local fields on the theory that xlsx readers
+> emit local midnight, so against the reader we actually have it was **one day early at every negative
+> offset** — right at the deployment by arithmetic, wrong for a developer running the dev server in the
+> US. Fixed by reading `getUTC*`, which for conforming input is a **no-op**: the rule is now provably
+> timezone-independent instead of accidentally correct at ours. The suite asserts it under all three
+> zones, and the old local-getter rule fails the New York case. A plain number cell still returns a
+> `number` and a text cell a `string`, both as the rules already assume. **If a second reader is ever
+> added it normalises at the boundary — this branch does not get taught to guess.**
+>
+> **ORIGINAL TASK-7-CLOSE BANNER, kept because it is why the probe happened:**
+> **pin the date convention this reader hands over, and say so out loud.**
+> `parseDateCell` (`src/lib/import-assets.ts`) normalises a `Date` cell by reading its **local**
+> year/month/day and rebuilding it as UTC midnight. That is right for a **local-midnight** `Date`, which
+> is what several xlsx readers produce, and it is right for a **UTC-midnight** `Date` only at a
+> **non-negative** UTC offset — at UTC−5 the local calendar day of a UTC-midnight instant is the day
+> before, and the import would silently store the wrong day. Manila (UTC+8) is safe by arithmetic, so
+> the deployment cannot be bitten; a developer running the dev server in the US can be. **A bare `Date`
+> cannot say which convention produced it**, so T7 cannot fix this and deliberately does not try — the
+> first version of its comment claimed timezone-independence it did not have, and the test that was
+> supposed to prove the claim forced `America/New_York`, the one offset where both readings agree.
+> **T8's job: establish what `read-excel-file` actually returns for a date-formatted cell** — run it,
+> don't infer it — and either hand over a UTC-midnight `Date` (documented, at which point T7's rule
+> becomes provably offset-independent) or hand over `YYYY-MM-DD` text, which is unambiguous and already
+> the better-tested path. Whichever it is, write it down here; T7's suite now forces **both**
+> `Asia/Manila` and `America/New_York` and will hold whichever convention you pin.
+
 One module owns `read-excel-file`, schema-less by scope decision 2.
 
 **Files:**
@@ -1520,6 +2132,172 @@ git commit -m "feat(import): the sheet reader, schema-less by design"
 ---
 
 ### Task 9: The asset dry run
+
+> ### AMENDED BEFORE EXECUTION — the code below predates Task 7's three review rounds and builds the WRONG `AssetRefs`.
+> Task 7 shipped, was reviewed three times, and its contract moved substantially in the process. The
+> block below is the version written against T7's **first draft**; it would compile against none of the
+> current types and, where it would, it would be wrong. **This banner is the spec.** Read the exported
+> shapes in `src/lib/import-assets.ts` — they are commented with the reason for each, and the reasons are
+> the findings that produced them.
+>
+> **One defect that has nothing to do with T7, and would have shipped on its own: the role floor locks
+> out admins.** `actionRole(...roles)` (`src/server/auth/guards.ts:45`) returns the user **only if their
+> role is in the list** — it is not a floor, it is a set. So `actionRole("it_staff")` refuses `admin`,
+> the role that runs this app. Every sibling inventory action writes `actionRole("admin", "it_staff")`
+> (`createAsset`, `updateAsset`, the bulk actions). Use that. `viewer`, `finance_staff` and
+> `purchasing_staff` are refused, which is the intent.
+>
+> **The four `AssetRefs` members that changed shape, and why — do not "simplify" any of them back:**
+>
+> 1. **`types` is keyed `${categoryId}:${lowercased name}` and its value is `{ id, categoryId }`**, not
+>    `name → id`. `AssetType` is `@@unique([categoryId, name])`, **not globally unique**, so a flat name
+>    key can hold only one of two same-named types and silently resolves to whichever was inserted last.
+>    The query therefore needs `select: { id: true, name: true, categoryId: true }`.
+> 2. **`employees` is `Map<string, EmployeeRef>`** — `{ id, employment, ambiguous }`. `Employee.name` is
+>    **not unique** (only `employeeNo` is), so a name matching two people must arrive marked
+>    `ambiguous: true` and block, rather than resolving to whichever row the map kept. Build it in two
+>    passes: count lowercased names first, then set each name key with `ambiguous` set from that count.
+>    **`employeeNo` keys are never ambiguous** and must win over a name key that collides with one. The
+>    query needs `employment` selected — T7 blocks a non-ACTIVE assignee the way `createAsset` does
+>    (`actions.ts:196`, *"assignments are frozen"*).
+> 3. **`byTag` and `bySerial` both carry one `AssetRecordRef`** — `{ id, tag, status, assigneeId,
+>    categoryId, typeId }`. Not `{id, serial}`, and `bySerial` is **not** a bare id string. Rule 11's
+>    lifecycle check (scope decision 13) needs the record's current `status`/`assigneeId` no matter which
+>    map matched the row, including the `treatDuplicateSerialAsUpdate` rescue path; rule 7's
+>    `type-outside-category` check needs `categoryId`/`typeId`; and `assetTag` on an update verdict needs
+>    `tag`, so the wizard can say which asset a serial-rescued row will edit instead of naming a cuid.
+>    `serial` is **not** on the ref — nothing reads it.
+> 4. **`optionsFrom` must read all FIVE options**, not two: `treatDuplicateSerialAsUpdate`,
+>    `dropUnknownAssignee`, `dropUnknownVendor`, `keepCurrentLifecycle`, `importUnheldAsSpare`. A missing
+>    key silently reads `false`, so an option the wizard offers would simply never take effect — and the
+>    failure is invisible, because the row just stays blocked and the operator assumes their file is
+>    still wrong.
+>
+>    **So do not hand-write the five keys here.** `ImportOption` is a bare union today, and the only
+>    enumeration of its members is a **hand-typed copy inside `import-vocabulary.test.ts:8`** — a list
+>    that will drift from the union the day a sixth option is added, in a test whose job is to assert
+>    every option is real. Promote it: export `IMPORT_OPTIONS` as an `as const` array from
+>    `src/lib/import-vocabulary.ts`, derive `export type ImportOption = (typeof IMPORT_OPTIONS)[number]`
+>    from it, have the test import it instead of retyping it, and build `optionsFrom` by folding over it.
+>    Then a sixth option is impossible to forget in any of the three places. This is the same defect
+>    §6a rules 26/37/38 describe, caught before it cost anything — and the same one the vocabulary test
+>    already fixed once for `ASSET_STATUSES`.
+>
+> **And a fifth thing the plan gets wrong, which is subtler and would have produced silent duplicate
+> assets: the tag lookup must be UPPERCASED.** T7's rule 2 trims and upper-cases a tag before consulting
+> `byTag`, because `createSchema`'s tag is `.toUpperCase().regex(/^BR-[A-Z]{2}-\d{4}$/)` and every tag in
+> the database is upper-case. If this resolver queries with the sheet's raw text, a row reading
+> `br-lt-0148` fetches nothing, `byTag` has no entry, T7 plans a **create**, and Postgres — whose unique
+> index is case-sensitive — happily accepts a **second** record for the same physical machine. Uppercase
+> the tags before the `in` query. Serials are matched exactly as written (trimmed, not case-folded), the
+> same way T7 compares them.
+>
+> **What the plan gets RIGHT and should be kept:** six queries rather than six per row; scoping the tag
+> and serial lookups to what the file mentions rather than loading the whole fleet; fetching the small
+> reference tables whole; refusing on `headers.missing` **before** planning, with all missing columns
+> named at once (without it a sheet with no Category column produces one identical block per row instead
+> of one refusal); spending the `import` rate-limit kind on the dry run as well as the apply; and
+> **writing nothing at all** — no transaction, no row, no persisted plan (scope decisions 3 and 8).
+>
+> **Verification, since this is the first import task with a database.** The unit suite cannot see any of
+> this: the module is Prisma plus a pure call. Prove it against the real seeded data — a throwaway
+> `npx tsx` script under the gitignored `backups/` that calls `resolveAssetRefs` and prints the map sizes
+> and a couple of entries is the cheapest check, and §7 records it as the house pattern. Confirm
+> specifically: a known seeded tag resolves to a record carrying its real `status` and `categoryId`; the
+> two categories that share a type name resolve to **different** type ids under their own composite keys;
+> and an OFFBOARDED employee arrives with `employment` set so rule 8 can see it. Delete the script after.
+>
+> ---
+>
+> ### ROUND TWO — `bd38c5c` is a sound input for T10, and five things should land before T11 is built around it.
+> The review confirmed the parts that matter against the **live database** rather than by reading: a
+> lower-cased sheet tag resolves to the right existing asset (so the duplicate-create hole is genuinely
+> closed), a lower-cased `emp-0042` in the Employee-no column resolves to a real `assigneeId`, and every
+> one of the six map keys matches what `planAssetRows` looks up with. Cost at the cap is **~15 ms** of
+> queries; a 2,000-element `IN` is nowhere near Postgres's 65,535 bind-parameter ceiling. Nothing below
+> blocks T10.
+>
+> **R-1. Three reference maps lower-case their keys with no ambiguity guard, and this one writes WRONG
+> DATA rather than refusing.** The banner reasoned about `employees` (not unique → needs `ambiguous`) and
+> `types` (per-category unique → needs a composite key) and stopped one step short. `AssetCategory.name`
+> and `Vendor.name` are `@unique` — **but Postgres unique is case-sensitive, and
+> `src/server/modules/admin/reference-actions.ts` has no case-insensitive check anywhere**, relying
+> purely on the constraint. So the admin UI accepts "Laptop" and "laptop" as two categories. Then: 1,800
+> rows reading "Laptop" all resolve to whichever row the **unordered** `findMany` returned last, and
+> every one is filed under the wrong category — no block, no P2002, no signal, verdict reads "1,800
+> creates". Worse than the tag case the banner fixed, which at least surfaced as a write-time error.
+> **And without `orderBy` the winner is non-deterministic across calls** (Postgres heap order changes
+> after any `UPDATE`), so the dry run can resolve "Laptop" to one id and T10's re-validation to another —
+> which **falsifies scope decision 3's guarantee that the verdict and the write cannot disagree.**
+> Latent today (zero collisions in the database, verified), and latent is where it should be fixed.
+> Add `orderBy: { name: "asc" }` to all four reference queries for determinism, **and** a collision guard
+> on the same two-pass model already built for employees. The root fix — a case-insensitive uniqueness
+> check in `reference-actions.ts` — is a separate task, tracked in §8.
+>
+> **R-2. The 10/min limit can strand an operator holding a finished plan, and its refusal text is false
+> three ways.** `checkRate` runs before the file is read, so every refusal spends a token doing zero
+> work. Counted against a realistic messy-file session — a bad header, a re-upload, five option flips,
+> one un-tick to compare, then apply — the operator lands **exactly on 10 with no slack**, and one extra
+> toggle locks them out for a minute *while holding a fully-planned import they cannot apply*. Separately,
+> `rateLimited()` (`src/server/action-result.ts:29`) hardcodes *"You've made 60 changes this minute — the
+> cap. Nothing was lost: this form still holds your input."* On this path the cap is **10** not 60, the
+> dry run made **zero** changes (it writes nothing, by design), and a **file input is not repopulated by
+> any browser** — three false claims in one sentence, §6a rules 16 and 35 exactly. **Fix: a separate
+> `RateKind` for the read-only stage** — not a longer window and not a bigger number. The dry run costs
+> ~15 ms and writes nothing; it does not need the budget that bounds a call writing 2,000 assets plus
+> 2,000 audit rows. `RateEvent.kind` is a plain `String`, so no migration. `rateLimited` takes an
+> optional message override and both import call sites pass something true.
+>
+> **R-3. The banner's claim that "the unit suite cannot see any of this" is wrong, and it is why the
+> composite key has no permanent test.** `resolveAssetRefs` is two things welded together: six Prisma
+> calls, and ~40 lines of pure map-building where **every defect in this review actually lives** — the
+> uppercase, the two-pass ambiguity, the composite key, the lower-casing, the employeeNo overwrite.
+> Extract `buildAssetRefs(categories, types, employees, vendors, byTagRows, bySerialRows): AssetRefs`,
+> leaving `resolveAssetRefs` as six queries and one call. ~10 lines of movement, and it gives permanent
+> homes to all of the above plus R-1's guard. **Note what is already covered and what is not:**
+> `import-assets.test.ts` hand-builds `cat-1:standard` and `cat-2:standard` as a same-name trap, so the
+> **consuming** side of the composite key has been pinned since T7 — it is the **producing** side, that
+> `resolveAssetRefs` emits keys in that exact shape, that has no test and can drift.
+>
+> **R-4. An internal non-breaking space turns a valid assignee into a silent DROP.** `lower()` trims and
+> lower-cases but does not collapse internal whitespace. `trim()` does strip a surrounding U+00A0, so
+> padding is fine; `"Ramon Cruz"` — a name pasted from Outlook or a web page into Excel, a routine
+> artifact — is not: it blocks as `unknown-assignee` with detail `"Ramon Cruz"`, a name that is
+> letter-for-letter an employee in the system, with no visible difference. **And the offered fix is a
+> button reading "Leave as spare", so the natural response silently discards a valid assignment.**
+> Categories, types and vendors share the gap but block with `reupload`, so they merely frustrate. Fix
+> with a shared `refKey()` exported from `import-assets.ts` and used on **both** sides — doing it on one
+> side only creates a new key-shape mismatch.
+>
+> **R-5. A legal 2,000-row file is rejected by Next before this action ever runs.** You asked what an
+> `it_staff` user can do with a 500 MB xlsx: nothing. Next 15 defaults `serverActions.bodySizeLimit` to
+> **1 MB** and `next.config.ts` sets no override, so the buffer is already bounded and `readGrid` needs no
+> size guard — **do not add one.** The defect is the inverse, measured with our own `toXlsxBuffer`: 2,000
+> rows with Notes at this module's own 2,000-character ceiling is **2.63 MB**, so a file legal by every
+> rule this module states dies at the framework boundary with an opaque error — never `rowCapRefusal`,
+> never a `conflict` banner, and `rowCapRefusal` meanwhile promises "Split it and upload the parts" for a
+> ceiling that is not the one they hit. Set the limit explicitly (4 MB covers the worst legal file and
+> still bounds the buffer). Surfacing the byte ceiling to the operator is T11's.
+>
+> **Minors:** `AssetRefs.types`'s value carries a `categoryId` **nothing reads** — the composite key
+> already embeds it, as rule 7's own comment says. That is the same dead-field defect round 2 removed
+> from `byTag`'s `serial`, the lesson applied to one map and not the other; drop it to
+> `Map<string, string>`. The missing-columns message names canonical titles when `matchHeaders` accepts
+> aliases ("Asset tag" for Tag, three spellings of Serial), so a sheet with a variant header gets a true
+> but unhelpful refusal. And ambiguity is counted across **all** employees regardless of employment —
+> which is **correct** (narrowing to ACTIVE would silently guess, and two records with one name may be
+> one person), but the comment does not say so, and the next reader will read it as an oversight and
+> "fix" it. **For T11, not now:** re-uploading our own export always reports `RMA ref` in
+> `unknownColumns`, so the happy path carries a permanent false alarm — word it "ignored columns", or
+> keep a known-but-not-imported list so genuinely unrecognised columns still stand out.
+>
+> **And one contract note for T10, which is the better decision made early:** the dry run's plan does not
+> need to round-trip through the browser. T10 **re-validates every row anyway** (scope decision 8), so it
+> gains nothing from receiving the plan and avoids needing a schema to un-mangle it. **Re-post the file
+> and the five option booleans instead** — `AssetUpdatePatch`'s absent-key-vs-`null` distinction survives
+> React Flight as a server-action argument, but stringified into `FormData` a `Date` silently becomes an
+> ISO string that Prisma happens to coerce, which is the kind of accidental correctness this phase has
+> spent three tasks removing.
 
 **Files:**
 - Create: `src/server/modules/import/resolve.ts`, `src/server/modules/import/asset-actions.ts`
@@ -1660,6 +2438,212 @@ git commit -m "feat(import): the asset dry run, which writes nothing"
 
 ### Task 10: The asset commit
 
+> ### AMENDED BEFORE EXECUTION — the shape is right; six things in it are not, and one is a hole this phase opened itself.
+> **Keep the architecture.** Taking the FILE again and re-planning before writing is correct and is scope
+> decision 8's guard: the browser's plan is what the operator *saw*, this is what gets written, and the
+> two agree because the same pure function produced both. Per-row transactions are correct too — partial
+> import is the default (scope decision 4), so one bad row must not roll back the other 196, and each
+> row's write and its audit entry must land together or not at all. Both survive review. What follows
+> are the details.
+>
+> **A-1. THE RATE LIMIT IS NOW UNENFORCED ON THE WRITE PATH, and this phase did it to itself.** The code
+> comment says *"planAssetImport already gated the role and spent a rate token"* — true when it was
+> written, false since Task 9's round two. The dry run now spends **`import_plan` (60/min)**, and the
+> brief's **`import` (10/min)** kind is spent by **nothing at all**. So the stage that writes up to 2,000
+> assets plus 2,000 audit rows would be bounded at sixty calls a minute, and the one number the brief
+> actually states about importing would be enforced nowhere. **Call `checkRate(actor.id, "import")` in
+> the apply**, after the re-plan succeeds and before the first write, and pass a true message. This is
+> the second-order cost of a fix landing in a task whose caller did not exist yet — the R-2 note said "T10
+> should pass its own true message too" and this is the sharper half of that.
+>
+> **A-2. `actionRole("it_staff")` locks out admins** — the identical defect Task 9 carried, from the same
+> stale draft. `actionRole(...roles)` is a **set membership test, not a floor**. Use
+> `actionRole("admin", "it_staff")`, as `createAsset` and `updateAsset` do.
+>
+> **A-3. Every unchanged row still writes, bumping `updatedAt` on assets nothing touched — and the
+> HAPPY PATH is made entirely of those rows.** Task 9 proved the round trip this feature exists for:
+> export five assets, re-upload the file unedited, get **five clean updates**. Under the code below each
+> one runs an `updateMany` whose `data` changes nothing — and `@updatedAt` moves on every update
+> statement regardless — so five assets get a fresh `updatedAt`, no audit entry (correctly skipped, the
+> diff is empty), and therefore **a modification with no trail**. `updatedAt` drives "recently changed"
+> reads, and a re-upload would silently float every asset in the file to the top. **Compute the diff
+> FIRST; if it is empty, write nothing at all and count the row separately** — return `unchanged`
+> alongside `created`/`updated`, because "nothing needed doing" is a real and common verdict that the
+> operator should see rather than have counted as work.
+>
+> **A-4. The `cost` diff is a phantom on every update row.** `diffOf` normalises a `Prisma.Decimal` via
+> `toNumber()` but leaves a **string** alone (`src/lib/audit-diff.ts:7-12`), and `AssetUpdatePatch.cost`
+> is a decimal **string** by deliberate design — so `before.cost` normalises to `51000.5` and the patch
+> holds `"51000.50"`, `same()` says they differ, and **every** update row claims cost changed when it did
+> not. That is the exact defect an earlier phase's review caught as *"phantom audit entries on every
+> first edit of a seeded asset"*, arriving by a new road, and it compounds A-3: the phantom makes the
+> diff non-empty, so the no-op rule never fires and every one of those five round-trip rows writes an
+> audit entry announcing a change that did not happen, into an **append-only** table. Normalise the cost
+> for the COMPARISON only — the string exists to keep floats out of the **write**, and `diffOf` already
+> reduces the stored Decimal to a number, so comparing `Number(patch.cost)` is consistent and not a
+> reintroduction of float money. Say so in a comment or someone will "fix" it back.
+>
+> **A-5. The create's audit diff cannot show what the import actually did.** It records `tag` and `model`
+> as from-null. `createAsset` (`actions.ts:217`) records `tag`, `model` **and `status`** — and it can
+> afford to hardcode `"SPARE"` because `creationPlan` guarantees it. **Import cannot**: scope decision 13
+> is precisely that an import may create an asset **already DEPLOYED to a holder**, which no other
+> surface in this application can do. An audit trail that omits it cannot answer "how did this asset get
+> to DEPLOYED without an approval?" — the one question this decision guarantees someone will ask. Record
+> `status`, and `assigneeId` when it is set.
+>
+> **A-6. A failed row is counted and its reason is thrown away.** `catch { failed += 1 }` gives the
+> operator a number that does not add up and nothing to act on. §6a rule 59: a batch action must return
+> what it DID. **Collect the sheet row numbers that failed** (they are on the verdict) and enough of a
+> reason to be actionable, so T11 can say *"rows 14 and 92 failed"* rather than *"2 failed"*. Do not
+> quote a raw Prisma error at an operator; classify it.
+>
+> **Two smaller ones.** `revalidatePath("/inventory")` does **not** revalidate `/inventory/activity`,
+> which is a separate route and is exactly where these new entries are meant to appear — add it. And the
+> plan is right that `/inventory/activity` scopes to `entityType: "asset"`, so unlike Phase 7's four dead
+> cases these sentences **will** render: confirm `entityLabels` in `src/server/modules/audit/queries.ts`
+> and `AUDIT_ENTITY_TYPES` in `src/lib/audit-list.ts` already name `asset` (they do — no new entity type,
+> so rule 20 is satisfied without a change, which is worth stating rather than leaving implied).
+> `actionDot` needs explicit branches: `import-create` misses `action === "create"` because that is an
+> equality test, and neither name matches any `includes` branch, so both currently fall through to the
+> neutral `"SPARE"` default.
+>
+> **An accepted divergence, recorded rather than fixed.** Re-planning at apply time means the world can
+> move between Validate and Apply — an admin creates the missing category, someone edits an asset — so
+> the write can legitimately differ from the verdict the operator approved. That is the correct trade
+> (the alternative is writing a stale plan), but scope decision 3 promises the verdict and the write
+> cannot disagree, so **the result must carry the re-plan's own counts** and T11 must show actuals rather
+> than echoing what the browser was holding. A silent divergence is the thing to avoid; a reported one is
+> honest.
+>
+> **Verification, and measure the thing nobody has measured.** No unit test can see any of this. Verify
+> against the real database with a throwaway script under gitignored `backups/`, deleted after — and
+> because this is the first task that **writes**, restore what you touch or reseed and say which. At
+> minimum: the round trip writes **zero** audit entries and leaves `updatedAt` untouched (A-3 plus A-4
+> together — this is the single most important assertion in the task); a genuinely edited row writes
+> exactly one entry naming exactly the changed fields; a create records status; a blocked row writes
+> nothing; and the `updatedAt` guard actually fires when a row is edited underneath the import. **Time a
+> full-cap run** — 2,000 sequential transactions is 2,000 round trips, and if that takes minutes rather
+> than seconds T11 needs to know before it builds a button that waits on it.
+>
+> ---
+>
+> ### ROUND TWO — one write must not ship behind a button, and two of the banner's own instructions were wrong.
+> The shape survives: per-row transactions, re-planning from the file, diff-before-write, `unchanged` as
+> a first-class verdict, classified failures carrying sheet row numbers. **Sequential re-apply turns out
+> to be genuinely idempotent** — a retried file re-plans to updates, diffs empty, counts `unchanged` —
+> and that property fell out of doing A-3 properly rather than being designed in.
+>
+> **C-1. The date fix copied half of `updateAsset` and the missing half writes two columns with no audit
+> entry.** `updateAsset`'s comment has two clauses (`actions.ts:317-321`): compare at day precision,
+> *"**and write ONLY the changed fields, so untouched columns keep their stored timestamps instead of
+> being silently truncated to midnight**"* — and it implements the second at `actions.ts:326`
+> (`Object.fromEntries(Object.entries(data).filter(([key]) => key in diff))`). The import took the first
+> clause and writes `data: row.data`, the whole patch. So: export an asset whose `purchasedAt` is
+> `2024-09-01T07:59:47.133Z`, change its Model, re-upload. `toDay` correctly keeps `purchasedAt` out of
+> the diff; the audit entry says `{model}`; and `updateMany` writes `purchasedAt` and `warrantyUntil` to
+> **midnight anyway**. Two columns change with no record, in the one task whose job is the trail, into a
+> table a DB trigger makes append-only so the missing entry can never be added later. **Every one of the
+> 25 assets in the database carries a time-of-day `purchasedAt`** — verified — so this fires on the first
+> edited re-import of any of them, and it **self-conceals**: after run one the values are already
+> midnight and nothing ever disagrees again. One line, and it is the line the sibling already uses. Safe
+> against the absent-key contract, because `Object.entries` enumerates only present keys.
+>
+> **I-1. The counters are incremented INSIDE the transaction callback** (`asset-actions.ts:242, 286,
+> 309`), but the COMMIT happens after the callback resolves. A commit that fails — P2028 timeout, pool
+> hiccup, connection reset — rejects, the `catch` records a failure, and the row is counted **both**
+> created and failed. `created + updated + unchanged + skipped + failed` then exceeds the row count and
+> the operator is told 197 assets exist when 196 do: the exact "number that does not add up" A-6 exists to
+> prevent, through a narrower door. `createAsset` shows the pattern (`actions.ts:202`) — return the
+> outcome out of the transaction and switch on it after it resolves.
+>
+> **I-2. Nothing revalidates the asset detail or history pages.** `/inventory`, `/inventory/activity` and
+> `/audit` are revalidated; `/inventory/[id]` and `/inventory/[id]/history` are not — though both
+> `updateAsset` (`actions.ts:341`) and `completeOffboarding` do it per asset. The first thing anyone does
+> after an import is open one row to check it landed, and that is precisely the page that would show the
+> old model and an empty history. Per-asset calls are wrong at 2,000 rows; Next 15 takes
+> `revalidatePath("/inventory/[id]", "page")` for exactly this.
+>
+> **I-3. The divergence is reported as a bare number, and THE BANNER ASKED FOR THAT — wrongly.** Round
+> one said to return the re-plan's own counts. Counts cannot discharge the promise: if an admin renames a
+> category between Validate and Apply, all 200 rows block and the operator sees "200 skipped, nothing
+> written" with no way to learn why. The `CauseGroup[]` that answers it was computed one line earlier and
+> discarded (`asset-actions.ts:209` destructures only `plan`). **Return `groups` too** — T11 cannot render
+> an explanation it is never given, and adding the field after its only caller exists means changing the
+> contract twice.
+>
+> **I-5. `actionDot("import-update") === "COMPLETED"` is another wrong banner instruction, faithfully
+> executed.** `statusFamily` (`src/lib/status.ts:17,21`) maps **both** `DEPLOYED` and `COMPLETED` to
+> `"settled"`, so the two new branches render an identical dot and the second has no visible effect at
+> all. Worse: plain `"update"` falls through to `SPARE`/neutral, so **the same edit gets a grey dot by
+> hand and a green settled one by import** — and the green one is the path that produces fifty at a time.
+> The banner's premise ("silently reading as nothing happened") was false: `SPARE` is documented as
+> neutral and is what this app already uses for every ordinary update. `import-create → DEPLOYED` is
+> right (it matches `create`); **`import-update` should be explicitly neutral**, with a comment saying so,
+> or a future reviewer re-raises the same point. And the test locking it in is
+> `expect(actionDot("import-update")).not.toBe("SPARE")` (`activity.test.ts:71-76`) — a **negative**
+> assertion that passes on any value at all, encodes the wrong rule, and would block the correction.
+> Assert exact values.
+>
+> **I-6. A-5 is half-satisfied: the fact is recorded and never shown where A-5 said it mattered.** A-5's
+> purpose was that the trail can answer *"how did this asset reach DEPLOYED without an approval?"* The
+> diff records `status`, but `/inventory/activity` renders only `auditSentence`, and that sentence is
+> `"J. Sarmiento imported BR-LT-0148"` — on that feed an asset imported already DEPLOYED to a holder is
+> indistinguishable from one imported SPARE. `/audit`'s fields column does list it, but only for someone
+> who already knew to look, which is the opposite of the ask. One line: read `diff?.status?.to` and say
+> `imported ${label} as ${status}` when it is not SPARE. Round one treated the diff (A-5) and the
+> sentences (step 2) as independent items; they are one item.
+>
+> **I-4, split between here and T11.** Sequential re-apply is idempotent, so a retry is safe. A
+> **concurrent** double-click is not: both calls re-plan before either writes, both plan CREATE for the
+> same tags, and the loser gets P2002 → *"would duplicate a tag or serial already on file"*, which is a
+> **misattribution** — it sends the operator hunting for a problem in their spreadsheet that does not
+> exist, when the duplicate is their own second click. T11 owns disabling the button; a disabled button is
+> a courtesy, not a guarantee (a re-POST, a refresh, a second tab all bypass it). **Here: make the
+> create-side P2002 reason name the possibility** rather than asserting the wrong cause. A server-side
+> advisory lock was considered and is deliberately NOT being added — this is an authenticated,
+> role-gated, rate-limited action on a single-machine deployment the owner runs, and the honest reason
+> plus the disabled button is proportionate. Recorded so nobody has to re-derive that.
+>
+> **M-4.** An operator who exhausts `import_plan` while clicking **Apply** gets the dry run's refusal
+> verbatim — *"checking a file only reads it"* — on the write path. Accidentally true, confusing.
+>
+> **The refactor that makes all of this testable, and it is the highest-value change in the round.**
+> `asset-actions.ts` is `"use server"`, which permits only async exports — so `patchForDiff`,
+> `classifyRowError` and `toDay` are **structurally unreachable by any unit test**. That is the same
+> discovery Task 9 made about `resolveAssetRefs`, whose extraction into `buildAssetRefs` is the precedent
+> and whose comment says so. There are now **three** normalisation layers around one comparison —
+> `diffOf`'s own `normalize`, `patchForDiff` on the after side, and `toDay` on the before side, the last
+> being a verbatim copy of `actions.ts:322`. Two half-normalisers in two shapes, one duplicated across
+> modules: the drift shape, already drifting. **Extract a pure `src/lib/asset-diff.ts` exporting
+> `assetDiff(before, patch)` that owns both normalisations AND returns the changed subset** — which fixes
+> C-1 inside the same function — and **have `updateAsset` call it too**, so the two paths cannot diverge
+> again. `updateAsset` is heavily e2e-covered, so run the full battery including Playwright after.
+>
+> Then unit-test it, because this one function is where C-1, A-3, A-4 and the seventh defect all live:
+> a round-trip row (`purchasedAt` at `07:59:47.133`, `cost "11000.00"`) yields `{}`; a genuine day change
+> yields `purchasedAt` **only**; a present-null cost yields `{cost: {from: 11000, to: null}}`; and an
+> **absent** key never appears in the diff **nor in the write set** — the destructive-write regression
+> caught twice already with, today, zero tests standing between it and a third time. Add
+> `classifyRowError`'s four cases while it is reachable.
+>
+> **Recorded, not fixed:** one import puts 2,000 entries at the top of `/inventory/activity` (PAGE_SIZE
+> 50) and `buildAuditWhere` has no action facet, so nothing can filter them out — §8. A cleared date
+> reports a `from` that was never stored, pre-existing in `updateAsset`, worth a sentence not a fix. The
+> `updatedAt` guard's comment overstates it: the version is read inside the row's own transaction
+> microseconds before the write, so it is **last-writer-wins with the diff computed at write time**, not
+> the optimistic-concurrency contract §6a rules 21/29/30 describe — the trade is right, the comment
+> should say what it is. And an `unchanged` row still opens BEGIN/SELECT/COMMIT, which on the flagship
+> clean round trip is the entire cost; reading `before` outside the transaction would cut it by roughly
+> two thirds if the 15 s ever matters.
+>
+> **On that 15 s: it is a floor, not the wall clock.** The harness re-implemented the loop; the real
+> action also parses up to 4 MB of multipart, decodes the XLSX, resolves refs and plans 2,000 rows — and
+> `applyAssetImport` does all of that **a second time**, since it calls `planAssetImport` internally.
+> Nobody has timed that half. **T11 must not put a bare submit in front of it**: pending state, button
+> disabled from the first click, copy that sets the expectation before the wait. And if the deployment
+> cannot hold a 20–40 s request open, this becomes a job with a poll — a plan-level decision, not
+> something to discover mid-build.
+
 **Files:**
 - Modify: `src/server/modules/import/asset-actions.ts`, `src/lib/activity.ts`,
   `src/components/patterns/activity-feed.tsx`
@@ -1794,6 +2778,231 @@ git commit -m "feat(import): the asset commit, partial by construction and audit
 ---
 
 ### Task 11: `/inventory/import` — the three-step wizard
+
+> ### AMENDED BEFORE EXECUTION — the layout is right; the gating is open, the fix vocabulary is two-thirds rendered, and two component signatures are wrong.
+> Upload → Validate → Results, a proportional bar rather than a climbing counter, blocked rows grouped
+> by cause with one fix each, a fix that RE-PLANS instead of writing, and a new file clearing the old
+> verdict — all correct, all kept. What follows is everything the draft assumes about code that has since
+> changed or that it never checked.
+>
+> **W-1. `/inventory/import` IS ALREADY REACHABLE by viewer, purchasing_staff and finance_staff — and
+> the step that was supposed to catch that cannot.** `PATH_RULES` is **first-match-wins**
+> (`src/lib/workspaces.ts:185`, `PATH_RULES.find`), and `{ test: /^\/inventory(\/|$)/, workspaces: ["it",
+> "purchasing", "finance"] }` already matches `/inventory/import`. `ROLE_WORKSPACES` gives **viewer**
+> `["it"]`, so every one of those roles passes. And `pathAllowedForRole` is what **`src/middleware.ts:35`
+> gates on** — this is the real boundary, not nav decoration. **The draft's claim that
+> "`workspaces.test.ts` will fail if the route is left ungoverned (default-deny)" is false**: the route is
+> not ungoverned, it is governed by the *wrong rule*, so default-deny never fires and the suite stays
+> green with the page open to three roles that must never reach it. Add the rule **BEFORE** the general
+> `/inventory` one — exactly as the `/inventory/[id]/secrets` rule does, which carries a comment saying
+> "MUST precede the general /inventory rule (first-match-wins)" for this precise reason — with
+> `workspaces: ["it"]` and `roles: ["admin", "it_staff"]`. Then **write the test that would have caught
+> it**: assert all five roles explicitly against this path, not just the two that should pass.
+>
+> **W-2. `requireRole("it_staff")` locks out admins, for the third surface running.** `requireRole(...roles)`
+> (`guards.ts:26`) is a **set membership test**, not a floor, and it `redirect`s. `admin` is the role that
+> runs this app. Use `requireRole("admin", "it_staff")`. Same defect as Task 9's and Task 10's
+> `actionRole`; the shape has now cost three tasks, which is why the checklist item is "read the guard,
+> don't infer it from its name".
+>
+> **W-3. `BlockedCauses` renders an action for two of the three fix kinds, so MOST groups get no
+> affordance at all.** It handles `link` and `option`. `BlockFix["kind"]` is now **`"link" | "option" |
+> "reupload"`**, and `reupload` is what the majority of the 22 causes carry — `missing-tag`, `bad-tag`,
+> `missing-model`, `missing-category`, `bad-date`, `bad-number`, `value-out-of-range`,
+> `duplicate-in-file`, `ambiguous-assignee`, `type-outside-category`. Under this draft each of those
+> renders a group with an explanation and **nothing to do**, which is precisely the wall the brief's whole
+> argument is against — *eighteen identical lines is a wall, one line with a button is a decision.*
+>
+> **This is §6a rule 10, the single most-repeated defect in this codebase — six instances, every task
+> that has ever paired a rule module with a page, including the one warned about in advance.** It is the
+> first item on the checklist for exactly this reason. Render all three kinds: `reupload` is the wizard's
+> own restart — the operator fixes the sheet and uploads again — so it is a button that clears the
+> current file and verdict and returns to step 1, not an anchor and not a dead label. **And do not write
+> a `default:` that silently renders nothing: switch exhaustively on the union so a fourth kind is a
+> TYPE ERROR here rather than an invisible hole in the page.**
+>
+> **W-4. The options state holds two of five.** `ImportOption` is now
+> `treatDuplicateSerialAsUpdate | dropUnknownAssignee | dropUnknownVendor | keepCurrentLifecycle |
+> importUnheldAsSpare`, and the draft initialises — and resets, in the file-picker's `onChange` — a
+> two-key literal. A missing key reads `false`, so three of the five fix buttons would set an option the
+> server then never sees, the row would stay blocked, and the operator would conclude the button is
+> broken. **Build the state from `IMPORT_OPTIONS`** (exported from `import-vocabulary.ts` in Task 9's
+> round two, precisely so no third site can hand-list them) in both places. Task 9's `optionsFrom` had
+> this same defect and was fixed the same way.
+>
+> **W-5. `WizardSteps` cannot be reused, and the draft's own hedge is the right instinct.** Its real
+> signature is `{ employeeId: string; current: StepId; unlocked: boolean }` — it renders `WIZARD_STEPS`
+> from `src/lib/offboarding.ts` as **navigable `<Link>`s** built from an employee id, with a lock rule
+> about undecided items. None of that exists here: import's three steps are progress indication, not
+> navigation, and there is no employee. Do not contort it and do not generalise it (that edits a shipped
+> offboarding surface for an unrelated feature). Build a small presentational stepper local to the import
+> component **and say in a comment why it is not the offboarding one**, so the next reader does not
+> "de-duplicate" two things that only look alike. `ProgressBar`'s props ARE as the draft assumes —
+> `{ value, max?, label? }`, verified.
+>
+> **W-6. `applyAssetImport`'s return type is not what the draft destructures.** It ships (`5fbc538`) as
+> `{ created, updated, unchanged, skipped, failed, failures: { row, reason }[], groups: CauseGroup[] }`.
+> `groups` is the **re-plan's own** grouping and it exists specifically for you: the world can move
+> between Validate and Apply (an admin renames a category and all 200 rows block), and counts alone
+> cannot tell the operator why. **Render the returned groups when the apply's outcome differs from the
+> verdict they approved** — the same `BlockedCauses` component, fed from the result rather than the
+> plan. That divergence is accepted and recorded; reporting it is what makes it honest. The draft reads
+> `{ created, updated, failed }` — so it drops `unchanged` entirely and throws away the per-row
+> reasons that exist precisely so the Results step can name which rows failed instead of printing a
+> bare count. `failures` carries a **classified** reason, never a raw Prisma error; render it. **The `unchanged` count is not a detail, it is the happy path's
+> headline**: re-uploading an unedited export is the workflow this feature exists for, and every one of
+> its rows is an update that changes nothing. A toast reading *"Imported 0 new and 0 updated"* would tell
+> the operator their import failed when it did exactly the right thing. Say *"5 rows already matched —
+> nothing needed changing"*. And when the apply's counts differ from the verdict the operator approved
+> (the world can move between Validate and Apply — that divergence is accepted and recorded in Task 10),
+> **show the actuals**; a silent divergence is the thing scope decision 3 forbids, a reported one is
+> honest.
+>
+> **W-7. "Ignored 1 column: RMA ref" appears on EVERY round trip of our own export.**
+> `ASSET_EXPORT_COLUMNS` writes an `RMA ref` column and `ASSET_IMPORT_HEADERS` deliberately has no field
+> for it, so `unknownColumns` is never empty on the happy path. A permanent warning about a column this
+> app itself wrote trains the operator to ignore the line that exists to warn them about a genuinely
+> misspelled header. Keep a known-but-not-imported list, or word the two cases differently.
+>
+> **Smaller, but each one real.** `setFile(null)` does **not** clear an `<input type="file">` — the
+> filename stays visible after a successful import; reset it with a `key` or a ref. The rate-limit
+> refusal message promises nothing about the file being retained, deliberately, because it is **this**
+> component's job to retain it — confirm a refusal leaves `file` in state so the operator can retry
+> without re-picking. `file!` inside the Import handler is a non-null assertion that the JSX does not
+> actually guarantee; narrow it. And viewer must not see the **Import link** either — affordance absent,
+> not disabled, per the house rule.
+>
+> **W-8. Apply is a ~15-second operation at the cap, and it is measured, not guessed.** 2,000 rows is
+> 2,000 sequential transactions — ~15 s for the write loop alone, and that is a **floor**: the real
+> action also parses up to 4 MB of multipart, decodes the XLSX, resolves refs and plans 2,000 rows,
+> **twice**, because `applyAssetImport` calls `planAssetImport` internally to re-validate. So: a
+> `useTransition` pending state, **the button disabled from the first click**, and copy that sets the
+> expectation BEFORE the wait rather than explaining it after. The disabled button is also half of a
+> correctness fix — a concurrent double-click makes both calls plan CREATE for the same tags, and the
+> loser gets a P2002 whose reason now names that possibility (the server half, already shipped). A
+> disabled button is a courtesy, not a guarantee, so do not let it be the only thing standing there.
+> **And if anything between the browser and Node imposes a timeout shorter than the run, STOP and say
+> so** — turning this into a queued job with a poll is a plan-level decision, not something to
+> improvise mid-build.
+>
+> **Verification.** Step 5's by-hand check is right and should be done, but note the two things that
+> bite: an agent will not type a password into a login form, so a signed-in browser needs either the
+> user or a throwaway `zz-*` Playwright spec (§7 records the pattern, and Task 13 will make it
+> permanent); and `/inventory/activity` scopes to `entityType: "asset"`, so the new sentences **do**
+> render — confirm they read as sentences and not as raw `import-create` strings. Check the page at
+> **375px and in dark mode**, and run the axe helper: this is a new route with a form control, and the
+> e2e specs assert no serious/critical violations.
+>
+> ---
+>
+> ### ROUND TWO — the bones are right; the page can still tell an operator three things that are not true.
+> Gating is correct **and provably so** (demoting the rule below the general `/inventory` one fails
+> exactly viewer, purchasing_staff and finance_staff — I ran it). The fix vocabulary is fully rendered
+> and genuinely type-guarded: `const exhaustive: never = fix.kind` on the discriminant, all three arms
+> returning, so a fourth kind cannot compile. `unchanged` is treated as the headline it is. A fix
+> re-plans and never writes. The client/server boundary is clean in both directions — rule 66 not
+> triggered. What follows is the honesty layer, which is the one thing this page is *for*.
+>
+> **V-1. The divergence banner fires on the flagship happy path and blames a cause that did not occur.**
+> `AssetPlan.counts` is `{create, update, blocked}` — **there is no `unchanged` bucket, and there cannot
+> be**: the plan can't know a row is a no-op, because `AssetRecordRef` carries `id/tag/status/
+> assigneeId/categoryId/typeId` and not `model`/`serial`/`cost`. `unchanged` is discovered at write time
+> by `assetDiff`. So `created + updated` falls short of `create + update` by exactly the `unchanged`
+> count, and the predicate at `import-wizard.tsx:219-223` reads that as divergence. Re-upload an
+> unedited export — **the workflow W-6 says this feature exists for** — and the operator gets an
+> attention banner reading *"Something changed between Validate and Import — a category renamed, a
+> record edited"* over a write that changed nothing, with *"What actually happened is grouped below"*
+> above an empty `groups` array that renders nothing, while the toast simultaneously says *"25 rows
+> already matched — nothing needed changing."* **Two contradictory statements on one screen, and the
+> alarming one is the false one.** It is silent only on a 100%-creates file. The corrected predicate:
+> the loop guarantees `created + updated + unchanged + failed` equals the **re-plan's** `create + update`,
+> so compare *that* sum against the approved counts — which also stops per-row write failures (they have
+> their own panel) from masquerading as the world moving. And when a genuine divergence has no blocked
+> rows, do not promise groups "below" that do not exist.
+>
+> **V-2. The Import button's count can disagree with what the click will write.** `result` and `options`
+> are separate state, and apply sends the **live** options, not the ones that produced the displayed
+> verdict. Click "Update those assets instead" (`setOptions` fires before the re-plan), have the re-plan
+> refused — the `import_plan` cap is reachable by iterating fixes, or any rejection — and `run` leaves
+> `result` untouched. The screen still reads **"Import 12 rows"**; the click posts
+> `treatDuplicateSerialAsUpdate=1` and writes **30**, silently overwriting eighteen existing assets.
+> V-1's banner would report the mismatch afterwards, but the false number was shown at the moment of
+> confirmation, which is the moment that matters. **Bind them:** store `{plan, groups, unknownColumns,
+> options}` as one value set atomically by a successful re-plan, and have apply send `result.options`.
+> Reverting `options` on failure closes this instance and leaves the invariant unenforced; binding
+> enforces it.
+>
+> **V-3. Both of the server's carefully-worded rate-limit overrides are dead code, and the sentence that
+> reaches the screen is the false one they were written to replace.** `run` captures `retryAfterSec` and
+> **discards `res.message`**; `RateLimitNotice` accepts only `{retryAfterSec, onExpire}` and hardcodes
+> *"You've made 60 changes this minute — the cap"* and *"Nothing was lost: this form still holds your
+> input."* On a refused **apply** the real cap is `RATE_LIMITS.import.limit` = **10**, and nothing was
+> changed — so the page asserts a write that did not happen, with the wrong number. T9's R-2 and T10's
+> M-4 both exist to fix exactly these two sentences, and as of this commit neither can reach a screen.
+> Add an optional message override to `RateLimitNotice` (defaulted, so none of its ~30 other call sites
+> change) and pass `res.message` through.
+>
+> **V-4. A thrown action renders as absolutely nothing.** `run` has `try`/`finally` and **no `catch`**.
+> `bodySizeLimit` is 4 MB and nothing client-side checks it, so a 6 MB workbook — routine for a
+> formatted fleet sheet — rejects at the framework boundary: the promise rejects, `finally` re-enables
+> the button, and no banner, no toast, no error appears. There is no `error.tsx` anywhere under
+> `src/app`, so there is no fallback either. The same silence covers a dropped connection **during the
+> ~15-second apply**, after which an unknown number of assets and audit rows may already be committed
+> and a re-enabled button invites a second run. W-8 asked what happens if something imposes a shorter
+> timeout; the reciprocal — the call simply failing — went unhandled. Catch it, word the `apply` case to
+> name the uncertainty ("this import may have partially completed — check `/inventory/activity` before
+> retrying"), and add a client-side size check against a shared constant so the ceiling produces a named
+> refusal instead of a rejection. **Note `next.config.ts` cannot import a TS constant** — put the number
+> in `src/lib`, use it in the component, and leave the config literal with a comment pointing at it.
+>
+> **V-5. An empty sheet renders as a full green bar.** `readGrid` refuses only a completely empty grid,
+> so a header-only sheet (or one whose rows are all blank — `planAssetRows` rule 1 skips those) yields
+> `0/0/0`. `ProgressBar` computes `(0/0)*100` → `NaN`, sets `width: "NaN%"`, browsers discard it, and the
+> accent div inherits **full width**. The most confident element on the page, labelled "Rows that would
+> import", above "0 new · 0 updates · 0 blocked", with no Import button and no explanation. Add an
+> explicit empty-verdict branch, and guard `ProgressBar` against `max <= 0` independently — that one is
+> a fair standalone fix for every future caller.
+>
+> **V-6. The decisions riding on the write are invisible and one-way.** Options are only ever set to
+> `true`; nothing shows which are in force, and the only way to clear one is to re-pick the file, which
+> discards the verdict. After a fix, the group disappears and the button reads "Import 30 rows" while
+> saying nothing about eighteen of those being overwrites authorised three clicks ago. Show the applied
+> options with a remove affordance that re-plans. **Do this now rather than in T12** — T12 reuses this
+> component, so the alternative is doing it twice.
+>
+> **V-7. `KNOWN_UNIMPORTED_COLUMNS = ["RMA ref"]` reintroduces W-7 one layer over.** The two-wordings
+> split is right; the hand-typed literal is not. It is derivable — export labels minus every label
+> `ASSET_IMPORT_HEADERS` matches — and as written, renaming that column or adding a second export-only
+> one silently files a column this app itself wrote under "check for a typo in the header", which is the
+> exact defect W-7 exists to prevent. It is also case-sensitive against `matchHeaders`' `unknown`, which
+> preserves original casing, so "RMA Ref" from a re-saved sheet already takes the wrong wording. Derive
+> it with the same `normalizeHeader`, put it in a lib module, and **test that export and import cannot
+> diverge**. §6a rules 26/37/38 — the same shape as `IMPORT_OPTIONS` and `ASSET_STATUSES`, both already
+> fixed this way this phase.
+>
+> **The extraction, and why it is the real answer to "which tests pass on a wrong implementation".**
+> All 660 pass on this implementation, and this implementation contains V-1. The five new rows cover
+> gating, which is right as far as it goes. **Three genuinely pure functions are trapped inside the
+> component** where a node-environment vitest can never reach them: `applySummary`'s plural/zero/failed
+> matrix, the known-vs-unknown column split, and — the defect itself — **the divergence predicate, which
+> is pure arithmetic over two count objects**. A single case handing it `{create:0, update:25, blocked:0}`
+> and `{created:0, updated:0, unchanged:25, skipped:0, failed:0}` and asserting `false` would have caught
+> V-1 today, with no browser and no database. Extract all three to `src/lib/` and test them. This is the
+> third task in the phase whose defect lived in a function that could not be reached by a test —
+> `resolveAssetRefs` before `buildAssetRefs`, `assetDiff` before it left `"use server"`, and now this.
+>
+> **Minor, worth doing while in there:** the stepper never distinguishes "here's what would happen" from
+> "here's what happened" — it reaches Results on the verdict and stays there after the write. Applying a
+> fix from the divergence groups calls `validate`, which clears `applyOutcome` and destroys the only
+> on-screen record of the write that just happened, failures list included. And `value-out-of-range`'s
+> `detail` is a **column name**, so its group reads "e.g. Model, Notes" — field names presented as
+> example values (T7's vocabulary, not this page's, but the page is where it shows).
+>
+> **Recorded for T13, so it does not fall between tasks:** the world genuinely moving between
+> `planAssetImport` and `applyAssetImport` has no home today — vitest is node-only with no database, and
+> the page test cannot force it. Split it: the **decision** is a unit test once the predicate is pure
+> (do it now), the **render** is T13's e2e, and the **world moving** wants a DB-backed test that mutates
+> between the two calls. Say which of those T13 owns rather than leaving it implied.
 
 **Files:**
 - Create: `src/app/(app)/inventory/import/page.tsx`, `src/components/import/import-wizard.tsx`,
@@ -2086,7 +3295,10 @@ no gain, and a props-based split keeps each page's actions statically obvious.
 
 `await requireRole("it_staff")`, a `PageHeader` with a breadcrumb back to `/inventory`, a `Banner`
 stating the two things that surprise people (partial import is the default; the dry run writes
-nothing), then `<ImportWizard kind="asset" />`.
+nothing), then `<ImportWizard />` — **corrected at execution**: Step 2's own closing note forbids the
+`kind` prop ("pass the two server actions in as props rather than branching on a `kind` string") and
+this line contradicted it three paragraphs later. The note is right and the sample was wrong; the
+component takes no props today, and Task 12 gives it the two actions rather than a discriminator.
 
 - [ ] **Step 4: Nav and gating**
 
@@ -2112,6 +3324,114 @@ git commit -m "feat(import): the three-step asset import, partial and grouped by
 ---
 
 ### Task 12: The employee import
+
+> ### AMENDED BEFORE EXECUTION — the shape is right, and nine things in it are not. One of them is that this importer is the FIRST way to create an employee in this application.
+> Reusing the vocabulary, the wizard and the three-stage shape is correct and stays. So does the column
+> spec's basic content — `Employee` really has no email, `title` and `departmentId` really are required,
+> and the date really is `joinedAt`. Everything below is either a contract that moved under this task
+> while Tasks 7–11 were reviewed, or a fact about `Employee` the draft did not check.
+>
+> **E-1. NOTHING IN THIS APPLICATION CREATES AN EMPLOYEE.** `grep` for `employee.create` finds exactly
+> one hit and it is `prisma/seed.ts:80`. There is no `createEmployee` action, no New Employee form, no
+> route. So this importer is not "the second importer" in the sense the draft assumes — **it is the only
+> way an employee will ever enter this system**, and its validation *is* the creation contract rather
+> than a mirror of one. Three consequences the draft does not account for: there is no sibling schema to
+> copy ceilings from, so take them from `employeeSchema` (`src/server/modules/employees/actions.ts:199`)
+> — **name 2–120, title 2–120** — and say where they came from; `updateEmployee` deliberately excludes
+> `employeeNo` from its schema, so a number is set once at creation and is **identity, never editable**,
+> which this importer must respect on the update path; and there is no precedent to point at when the
+> reviewer asks why a field is or is not writable, so **write the reasoning down as you go.**
+>
+> **E-2. `employeeNo` has NO format constraint, so the asset tag rules do not transfer — and the case
+> question has to be decided, not inherited.** `Asset.tag` is `.toUpperCase().regex(/^BR-[A-Z]{2}-\d{4}$/)`
+> and `tagKey` exists because of that; `Employee.employeeNo` is a bare `String @unique`
+> (`src/server/export/respond.ts:32` says so in a comment, which is why the export sanitises it into a
+> filename). **There is therefore no `bad-tag` analogue and you must not invent one** — refusing
+> `E-12345` because it does not look like `EMP-0042` would be this module inventing a house rule the
+> database does not have. What you DO have to decide is matching: Postgres unique is case-sensitive, so
+> matching exactly means a sheet reading `emp-0042` fails to match `EMP-0042` and **creates a second
+> person** — the identical defect the asset importer shipped and fixed in Task 7 round one. **Match
+> case-insensitively via the existing `refKey`**, and state in a comment that the stored value keeps the
+> sheet's own casing because nothing normalises it on the way in.
+>
+> **E-3. `employment` cannot be written the way the draft implies, because `offboardingAt` is derived
+> from it.** `updateEmployee` (`actions.ts:228-241`) maintains a three-branch rule alongside every
+> employment change — entering `OFFBOARDING` stamps `offboardingAt` (`?? new Date()`), returning to
+> `ACTIVE` clears it to `null`, and `OFFBOARDED` keeps whatever is there — with a comment explaining
+> that the offboarding wizard reads "this offboarding" as everything decided since that moment, *"otherwise
+> a routine return from years ago lands on a farewell report."* An import that writes `employment` and
+> not `offboardingAt` corrupts the window on every farewell report for that person. **This is scope
+> decision 13's analogue and it is now recorded as scope decision 15: create may set `employment` and
+> must stamp `offboardingAt` by the same three-branch rule; an UPDATE never moves it, and a row whose
+> Employment cell disagrees with the record blocks** with a cause pointing at the offboarding flow —
+> the same shape as `lifecycle-via-import`, for the same reason. A spreadsheet must not be the one
+> surface that can start or unwind an offboarding.
+>
+> **E-4. Reusing `bad-status` would show an operator the eight ASSET statuses on an employee row.**
+> `bad-status`'s `explain` was rewritten in Task 7 round two to name all eight statuses inline, derived
+> from `ASSET_STATUSES`. `EmploymentStatus` is a different enum with three members. Add
+> **`bad-employment`**, deriving its list the same way from the Prisma enum, and leave `bad-status` to
+> the asset importer. This is §6a rules 16/35 — a sentence true in one branch and false in the branch
+> that renders it.
+>
+> **E-5. `missing-required`'s fix links to `/employees/import`, the page the operator is standing on.**
+> That is the defect the `reupload` kind was introduced to fix, and the draft predates it. Use
+> `{ kind: "reupload" }`, and give the cause a **detail naming the offending column** the way
+> `value-out-of-range` now does, so the group can say *which* required cell is blank rather than making
+> the operator open all five. Note the deliberate asymmetry with the asset importer, which has
+> per-field causes (`missing-tag`, `missing-model`, `missing-category`): one lumped cause is right here
+> because all five share a single fix, and **say so in a comment** or the next reader will "harmonise"
+> the two idioms in whichever direction they happen to prefer.
+>
+> **E-6. `unknown-department` needs the same case-collision guard `categories`/`types`/`vendors` got.**
+> `Department.name` is `@unique`, and `reference-actions.ts` accepts `department` — so an admin can
+> create "Finance" and "finance" exactly as they can with categories, and a name-keyed map resolves to
+> whichever row an unordered query returned last. That is R-1 from Task 9 round two, the only defect in
+> this phase that **wrote wrong data rather than refusing**, arriving on a new map. Build the department
+> map through the same `buildCollisionMap`, add `duplicate-department-name` with a link to
+> `/admin/departments` (which exists, and where a rename is genuinely possible), and word its `explain`
+> like the category one — including that the rename must differ by more than letter case.
+>
+> **E-7. The path rule has the Task 11 W-1 trap exactly.** `PATH_RULES` is first-match-wins and
+> `{ test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] }`
+> (`workspaces.ts:180`) already matches `/employees/import` **with no `roles` key at all** — so
+> `viewer`, whose workspaces are `["it"]`, passes. Put the new rule **before** it,
+> `roles: ["admin", "it_staff"]`, and assert **all five roles** in `workspaces.test.ts`. Do not rely on
+> default-deny; the route is not unenumerated, it is enumerated by the wrong rule.
+>
+> **E-8. The Files list still says "a second `kind`" and that decision was reversed.** Task 11's Step 2
+> note — *"pass the two server actions in as props rather than branching on a `kind` string"* — is the
+> settled answer, and Step 3's contradicting `<ImportWizard kind="asset" />` was corrected at execution.
+> `ImportWizard` takes no props today. **Parameterise it by passing the two actions in**, so each page's
+> actions stay statically obvious and neither importer's knowledge leaks into the other's file. Note the
+> wizard also holds asset-shaped strings today — the file label, the "Nothing to import" copy, the
+> ignored-columns wording that derives from `ASSET_EXPORT_COLUMNS` — so parameterising means finding
+> those, not only the two actions. **`KNOWN_UNIMPORTED_COLUMNS` in particular is asset-specific and
+> derived from the asset export**; the employee export has its own columns and its own answer.
+>
+> **E-9. Reuse the shared machinery; do not copy it.** This phase has removed four hand-written twins
+> already (`text()` vs `cellText`, two copies of the tag rule, two `toDay`s, a retyped
+> `IMPORT_OPTIONS`). `refKey`, `cellText`, the row cap, `groupByCause`, `blockSpec` and the
+> **UTC-midnight date convention Task 8 measured** are all shared already — the date rule in particular
+> is `parseDateCell`'s and it is currently private to `import-assets.ts`, so **export it rather than
+> writing a second one**, and a `joinedAt` that disagrees with `purchasedAt` about what a spreadsheet
+> date means is a defect waiting for a bug report. Same for the diff: `assetDiff`'s absent-key-vs-`null`
+> contract (`src/lib/asset-diff.ts`) is the shape an employee update patch needs too — an absent column
+> must leave a stored value alone, and a present-but-blank cell is an intentional clear.
+>
+> **And the structural rule this phase keeps re-learning:** put the pure parts where a test can reach
+> them. `buildAssetRefs` was extracted from `resolveAssetRefs` for this, `assetDiff` was extracted out of
+> a `"use server"` module for this, and `hasDiverged` was extracted from a component for this — three
+> tasks, three defects that lived in unreachable code. The employee resolver's map-building and the row
+> rules should be pure and unit-tested from the start rather than extracted after a review finds
+> something in them.
+>
+> **On the draft's own Step 2 list:** its thirteen assertions are good and should all survive, with #9
+> re-pointed at `bad-employment` and #7/#8 folded into `missing-required` carrying a column detail. Its
+> note that `m365Status` and `offboardingAt` are deliberately not importable is **right, and one of its
+> two reasons is wrong** — `m365Status` is not only written by the M365 sync path, the edit form writes
+> it too (`employeeSchema`). Keep the exclusion, fix the reason: it is a synced status whose authority
+> lives outside a spreadsheet, and `offboardingAt` is derived (E-3), not typed.
 
 The brief's second importer. It reuses `import-vocabulary` and the wizard; only the column spec, the
 refs and the write differ.
@@ -2214,8 +3534,139 @@ git commit -m "feat(import): the employee importer, on the shared vocabulary"
 
 ### Task 13: E2E
 
+> ### AMENDED BEFORE EXECUTION — items 11 and 12 are the most valuable assertions in the phase and must survive; one fixture cannot be built as written; and the whole employee half is missing.
+> **Keep the shape, and keep items 11 and 12 above everything else.** They are the only possible guard
+> on two bugs this phase actually shipped and fixed — the farewell sheet that could only ever be verified
+> at zero (§6a rule 65: an equality that holds at zero is not evidence), and the filtered export that
+> returned the candidate set because the gaps cut happens in memory after the SQL `where`. Neither is
+> unit-testable, both hit Prisma, and **if this spec does not assert them nothing does.** If time runs
+> short, cut something else.
+>
+> **T-1. `assets-mixed.xlsx` cannot be built as specified: there are no seeded serials.** `SELECT
+> count(serial) FROM "Asset"` returns **0** across all 25 rows, and `prisma/seed.ts` never sets one — so
+> "1 duplicate serial taken from a seeded asset" has nothing to take, and item 5's re-plan
+> ("Update those assets instead") has no reachable path. **Do not add serials to the seed** — a dozen
+> specs lean on those fixtures. Build the state with the importer itself, inside the serial block: import
+> a row that HAS a serial, then upload a second file reusing it. That is a better test than the plan's
+> anyway, because the collision is one the running code created. Note while you are there that the
+> **entire `bySerial` map has never been exercised against real data by anything** — Task 9's review said
+> so explicitly — so this is its first real run, and `treatDuplicateSerialAsUpdate` alongside it.
+>
+> **T-2. The employee half does not appear in this spec at all**, because the plan predates Task 12's
+> real shape. `/employees/import` is a second wizard with its own causes, its own refs and **scope
+> decision 15**. Add, at minimum: `viewer` cannot reach `/employees/import` (the general `/employees`
+> rule matches it with no `roles` key, so this is the same live gap Task 11 closed for assets — assert
+> it, do not assume the rule); the employee round trip end to end; **an update row whose Employment cell
+> disagrees with the record BLOCKS rather than writing**; and **a create with `employment: OFFBOARDING`
+> stamps `offboardingAt`**. That last pair is decision 15, and it exists because a spreadsheet must not
+> be the one surface that can start or unwind an offboarding — the farewell report's whole window hangs
+> off that column.
+>
+> **T-3. Your axe assertions WILL flake unless you settle the pointer first, and this is measured, not
+> theoretical.** Task 11's review hit it twice: `Button variant="primary"` reports a **serious** 4.29
+> contrast when axe samples mid-transition or with the pointer resting on it (`#fdfefe` on `#487cb6`),
+> while at rest `--accent` is `#2563a8` and passes. The fix that worked was `mouse.move(0, 0)` plus a
+> ~700 ms settle before the scan. Put that in the shared helper, with a comment saying why, or the next
+> person to add an axe check rediscovers it as a mystery failure.
+>
+> **T-4. Assert the flagship case, which is currently proven only by scripts that were deleted.** Three
+> separate throwaway harnesses have now shown that re-uploading an unedited export writes **zero** audit
+> entries and leaves `updatedAt` untouched — and every one of them was deleted afterwards, so nothing in
+> the repository asserts it. It is the workflow the feature exists for, it is what Task 10's A-3 and A-4
+> and the day-precision fix all exist to protect, and it is one download plus one upload in Playwright.
+> **Assert the audit-row delta is 0 and that no `updatedAt` moved**, then assert the Results step says
+> "already matched" rather than reporting zeros as if something failed. Use a **delta**, never an
+> absolute count (§7: the audit table carries drift from earlier verification runs).
+>
+> **T-5. The divergence banner's RENDER is yours; say plainly what you do not cover.** Task 11 round two
+> split this three ways: the decision is now a pure unit test (`hasDiverged`, done), the render is this
+> spec's, and **the world genuinely moving between Validate and Apply** — someone renaming a category, or
+> creating an asset carrying a tag the file planned to create — has no home yet. You can reach it here if
+> you want it: validate, mutate the database directly via `psql` or a Prisma call inside the test, then
+> apply, and assert the banner names the difference and the approved counts still show beside the
+> actuals. If you judge that too fragile for the suite, **say so in the report and I will record it**
+> rather than let it fall silently between tasks.
+>
+> **T-6. Timing.** A 2,000-row apply is ~15 s of writes and the action re-plans the whole file
+> internally first, so anything that applies at scale needs an explicit `test.setTimeout`. The oversized
+> fixture is only ever *refused*, so it stays fast — but generating it means writing 2,001 rows through
+> `toXlsxBuffer`, which is fine at commit time and should not happen inside a test.
+>
+> **T-7. Assert the honesty layer, not just the happy path.** The Results step now shows `unchanged`,
+> the approved counts beside the actuals, classified per-row `failures`, "Not imported: RMA ref" worded
+> apart from a genuinely unrecognised column, removable option chips, and "Nothing to import" for an
+> empty sheet. Several of those exist *because* a review found the page saying something untrue. Pick the
+> ones a regression would most plausibly break — the `unchanged` wording and the ignored-vs-unrecognised
+> split are the two that a careless refactor flips.
+>
+> **On fixtures generally:** committing both the script and its output is right (§6a rule 51 in the good
+> direction — a fixture the app's own writer produced is one the running code could have made). Name the
+> generated files in the commit and keep `make.ts` runnable, so a future column change can regenerate
+> rather than hand-edit. And give the file input a real accessible label so `getByLabel(/Spreadsheet/)`
+> is a rule rather than a CSS guess — Task 11 already did, but assert it rather than trusting it.
+
+> ### AMENDED AFTER EXECUTION (`644f1c0`, `af6d564`, `8e7fc80`) — what shipped, and the three things the plan got wrong.
+> **Shipped: 20 tests, ten fixtures, and two neighbouring spec files repaired.** All 123 e2e tests
+> pass. Every item 1–12 landed, plus the employee half (T-2), an empty-sheet branch, the divergence
+> render (T-5) and an audit-export assertion the plan's item list omitted — see A-4.
+>
+> **A-1. Three fixtures became ten, and item 4's "four verdicts" became three verdicts plus two
+> block causes.** T-1 already established that `assets-mixed.xlsx` could not carry a duplicate serial;
+> what the banner did not say is that removing that row leaves the mixed file with only ONE block
+> cause, and "groups the blocked ones biggest-first" is then unassertable — one group is trivially
+> first. So the mixed file carries two `bad-status` rows and one `unknown-category` row, giving two
+> groups of different sizes, and the ordering assertion is a real `toHaveText([...])` on the sequence
+> rather than two independent visibility checks. The serial case moved to its own PAIR of fixtures
+> (`assets-serial-new.xlsx`, `assets-serial-clash.xlsx`), applied in that order, exactly as T-1
+> directed. Added beyond the plan: `assets-empty.xlsx` (V-5's "Nothing to import" branch, which
+> nothing else reaches), `assets-divergence.xlsx` (T-5), and three employee fixtures (T-2).
+>
+> **A-2. `getByRole("alert")` is unusable in this application, on any page.** Next mounts a
+> permanently present, normally empty `#__next-route-announcer__` carrying `role="alert"`, so an
+> alert-role query always resolves to two elements and dies of strict mode before it ever sees the
+> banner it was written for. The row-cap refusal is matched by TEXT instead — through
+> `rowCapRefusal(IMPORT_ROW_CAP + 1)`, never a literal, so the sentence cannot drift from the cap.
+> Same for `idsRefusalText(IDS_CAP + 1)` on the 413. Worth knowing before the next spec reaches for
+> an alert role.
+>
+> **A-3. The plan never said to mutation-test this task, and it should have.** Nine inert assertions
+> were found in this phase and three of them were inside tests written to close earlier inert ones, so
+> "the test passes" was never going to be enough. Five mutations were run, each reverted after:
+> both filtered exports reduced to their `where`-only cut (10 rows against a screen showing 3, and 7
+> against 3 — the shipped bug's exact signature, on both halves); the no-op early return in
+> `applyAssetImport` removed; `updatedAt` floated with the counts left honest and no audit row (which
+> is what proved the `updatedAt` leg specifically, since the audit-delta assertion fires first); the
+> `offboardingAt` stamp dropped; and the mid-flight Prisma create removed from the divergence test.
+> All five failed in the expected place. **Any future task adding an assertion this phase's reviews
+> would have called load-bearing should do the same — the plan should ask for it explicitly.**
+>
+> **A-4. The plan's item list covers three of the four export routes.** Items 8–12 assert assets,
+> employees and the farewell report; `/audit/export` appears nowhere, even though the plan's own
+> header counts four routes. Added as a fifth export test, matched the same way as the other two
+> filtered ones: `/audit?q=import-create`'s on-screen count against `/audit/export?q=import-create`'s
+> row count. It is a weaker guard than items 11 and 12 (the audit cut IS expressible in SQL, so both
+> sides share `buildAuditWhere` and cannot diverge the way `filteredEmployees` did) — recorded so the
+> next reader knows it is cheap insurance, not a second instance of that bug class.
+>
+> **A-5. Two neighbouring spec files needed repair, and one of them proves §6a rule 61 wrong.**
+> Inserting a 3.3-minute spec file fifth of nine surfaced three latent races in `it-core.spec.ts`, all
+> of which passed standalone. Two were ordinary headroom. The third is the interesting one: **rule
+> 61's stated fix — "wait for the field's expected INITIAL value, which proves the controlled
+> component is mounted from props" — is not a hydration signal at all**, because the server renders
+> that same value into the HTML. Two further proxies were measured and also pass pre-hydration: the
+> FILLED value (`fill()` writes the DOM directly), and the filled value SURVIVING a beat (nothing
+> rebinds the input until hydration runs). That last one produced the worst possible outcome — the
+> click submitted the ORIGINAL value, `updateAsset` no-op'd, the button flashed "✓ Saved", and
+> `/history` said "No changes recorded": a green pass over a silently lost edit. Replaced with
+> React's own `__reactFiber$…` key, probed on the INPUT rather than its ancestor form (hydration walks
+> parent-to-child, so a hydrated `<form>` does not imply a hydrated `<input>`, and it is the input's
+> fiber that delegated `onChange` dispatch looks up). Separately, `auth-shell.spec.ts`'s one
+> non-helper sign-in was on the 5s expect budget rather than the 30s navigation budget; not
+> positional, and fixed with headroom.
+
 **Files:**
 - Create: `e2e/import-export.spec.ts`, `e2e/fixtures/make.ts`, and the generated fixtures
+- Also modified (A-5): `e2e/it-core.spec.ts`, `e2e/auth-shell.spec.ts`
 
 - [ ] **Step 1: Generate the fixtures with the app's own writer**
 
@@ -2250,6 +3701,21 @@ Copy the `login` and `expectNoSeriousAxe` helpers from `e2e/admin.spec.ts`. Asse
 9. `/inventory/export?ids=` with 501 ids returns **413**. Build the URL from `Array(501)`; the refusal
    precedes the query, so the ids need not exist.
 10. The year chips render with counts, and `?purchaseYear=` narrows both the list and the export.
+11. **The farewell sheet matches the printed report, with rows in it.** Drive an offboarding far
+    enough to decide at least two items (Phase 7's `e2e/offboarding.spec.ts` already does this — reuse
+    its steps), then assert the printable report shows N decided items and
+    `/offboarding/<id>/report/export` downloads a sheet with N data rows. **Task 5 could only verify
+    this at zero**, because the seeded database has no `lifecycle_return` approvals, and an equality
+    that holds at zero is not evidence. This is the assertion that makes reusing `decidedItems` mean
+    something.
+12. **A filtered export matches its screen.** `/employees?gaps=1` and `/employees/export?gaps=1` must
+    agree on their row count, and that count must be strictly smaller than the unfiltered one. This is
+    the ONLY possible guard on the bug Task 4 shipped and fixed: the gaps cut happens in memory after
+    the SQL `where`, so an export that used the `where` alone returned the candidate set — ten rows
+    against a screen showing three. `filteredEmployees` is not unit-testable (it hits Prisma, as
+    `listEmployees` does), so if this spec does not assert it, nothing does. Assert the same way for
+    `/inventory?stage=…` against `/inventory/export?stage=…`, which is the identical pattern via
+    `repairStageIds` and equally untested.
 
 **Wrap the upload chain in `test.describe.serial`** — steps 2→5 share database state, and both
 `e2e/admin.spec.ts:24` and `offboarding.spec.ts:75` establish that idiom for this shape. Without it one
@@ -2277,6 +3743,37 @@ git commit -m "test(e2e): import and export, including every refusal"
 ---
 
 ### Task 14: Full battery and close-out
+
+> ### AMENDED AFTER EXECUTION — the real numbers, and the e2e suite no longer fits one foreground run.
+> **`tsc` clean · `lint` clean · 759 unit tests / 44 files · `build` clean · 123 e2e, all passing ·
+> `docker compose --profile prod build` clean.** Task 13 added 20 e2e tests (103 → 123) and zero unit
+> tests, correctly: it is the e2e task, and its subject matter — a wizard's rendered verdicts, a
+> download's row count against a screen's — is exactly what `vitest.config.ts` says is Playwright's
+> job. Unit stayed at 759, the figure Task 12 closed on.
+>
+> **The e2e suite now takes ~16.5 minutes and cannot be run in one foreground invocation here.** The
+> plan's Step 1 assumes `npx playwright test --workers=1` in one go; §7's estimate of "~5 minutes" is
+> two phases stale (Task 10 measured 8.2, this is 16.5). A single run exceeds the 10-minute ceiling on
+> a foreground command in this environment, and §7 is explicit that backgrounding a Playwright run is
+> the wrong answer — an unreaped run races its own `beforeAll` reseed against yours. **Run it in
+> three parts, each with `--global-timeout` so Playwright ends and cleans up after itself rather than
+> being killed mid-flight:**
+>
+> ```bash
+> npx playwright test e2e/admin.spec.ts e2e/approvals-audit.spec.ts e2e/auth-shell.spec.ts e2e/home-finance.spec.ts --workers=1 --global-timeout=540000
+> npx playwright test e2e/import-export.spec.ts e2e/it-core.spec.ts e2e/kitchen-sink.spec.ts --workers=1 --global-timeout=540000
+> npx playwright test e2e/offboarding.spec.ts e2e/purchases.spec.ts --workers=1 --global-timeout=540000
+> ```
+>
+> 51 + 46 + 26 = 123. Splitting is safe **because every spec file reseeds in its own `beforeAll`** —
+> that is what makes them order-independent, and it is the same property that lets them run
+> alphabetically today. **Say plainly what the split costs**: it does not prove the suite green in one
+> process, and the compile-warmth profile differs from a single run — which is precisely the axis the
+> headroom failures in A-5 live on. A split run that passes is weaker evidence than a single run that
+> passes. If a future environment can hold a 20-minute foreground command, prefer one run.
+>
+> **Do not read `--global-timeout` as a per-test timeout.** It bounds the whole run; a run that hits
+> it reports "N did not run" and exits, which reads like a pass at a glance. Check the count.
 
 - [ ] **Step 1: The battery**
 

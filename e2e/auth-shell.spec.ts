@@ -30,7 +30,15 @@ test.describe("auth", () => {
     await page.getByLabel(/Email/).fill("it@thebackroomop.com");
     await page.getByLabel(/Password/).fill("ChangeMe123!");
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(/\/employees/);
+    // Headroom, not a weaker assertion. This is the one place in the file that
+    // signs in WITHOUT the `login` helper above — the helper uses
+    // `waitForURL`, which gets the 30s navigation budget, while a bare
+    // `toHaveURL` gets the 5s expect budget. Those 5s have to cover the
+    // credentials POST, the session write, the bounce back to `?next=`, and a
+    // cold render of /employees; it doesn't always, and it failed here in the
+    // Task 13 battery with the browser still sitting on /login. Same class as
+    // §6a rule 61's neighbours in it-core.spec.ts.
+    await expect(page).toHaveURL(/\/employees/, { timeout: 30_000 });
   });
 
   test("wrong password shows an inline error", async ({ page }) => {

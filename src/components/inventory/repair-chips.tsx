@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
-import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { REPAIR_STAGES, REPAIR_STAGE_LABEL, isRepairStage, withRepairStage } from "@/lib/repairs";
-import { serializeListState, type ListState } from "@/lib/url-state";
+import type { ListState } from "@/lib/url-state";
 
 /**
  * Stage chips write the URL rather than filtering the page, because one of them
@@ -12,9 +11,22 @@ import { serializeListState, type ListState } from "@/lib/url-state";
  * `withFilter(state, "stage", …)` directly would keep the saved view's
  * `status=DEFECTIVE` pin and compose to a query matching nothing.
  */
-export function RepairChips({ state }: { state: ListState }) {
+export function RepairChips({
+  state,
+  href,
+}: {
+  state: ListState;
+  /**
+   * Builds an `/inventory` URL for a next `ListState` — passed down from the
+   * page rather than built here with `serializeListState`, because the page
+   * is the only place that knows `?purchaseYear=` exists (see
+   * `InventoryTable`'s identical `href` prop for the full reasoning). This
+   * component never imports `serializeListState`, so it cannot silently
+   * drop the year the way it used to.
+   */
+  href: (next: ListState) => string;
+}) {
   const active = (state.filters.stage ?? []).filter(isRepairStage);
-  const href = (next: ListState) => "/inventory" + serializeListState(next, INVENTORY_LIST_CONFIG);
   const chipClass = (on: boolean) =>
     cn(
       "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",

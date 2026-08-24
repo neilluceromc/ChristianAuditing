@@ -19,6 +19,10 @@ export default async function EmployeesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
+  // Matches the PATH_RULES entry that gates /employees/import itself
+  // (workspaces.ts, E-7) — the same canMutate the inventory list page uses
+  // for its own Import button.
+  const canMutate = user.role === "admin" || user.role === "it_staff";
   const sp = toSearchParams(await searchParams);
   const state = parseListState(sp, EMPLOYEES_LIST_CONFIG);
   const gapsOnly = sp.get("gaps") === "1";
@@ -28,9 +32,9 @@ export default async function EmployeesPage({
     employeeFacetOptions(state),
   ]);
 
-  const href = (s: typeof state, gaps = gapsOnly) => {
+  const href = (s: typeof state, gaps = gapsOnly, base = "/employees") => {
     const qs = serializeListState(s, EMPLOYEES_LIST_CONFIG);
-    return "/employees" + (gaps ? (qs ? `${qs}&gaps=1` : "?gaps=1") : qs);
+    return base + (gaps ? (qs ? `${qs}&gaps=1` : "?gaps=1") : qs);
   };
   const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0 || gapsOnly;
 
@@ -39,6 +43,19 @@ export default async function EmployeesPage({
       <PageHeader
         title="Employees"
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
+        actions={
+          <>
+            {/* Carries the same q/facets/gaps as the list — the export
+                honours "Policy gaps only" exactly like listEmployees does,
+                via the shared filteredEmployees cut, so the sheet matches
+                what's on screen. */}
+            <ButtonLink href={href(state, gapsOnly, "/employees/export")}>Export</ButtonLink>
+            {/* Absent, not disabled, for a role that can't reach the page —
+                canMutate is exactly admin/it_staff, matching the PATH_RULES
+                entry that gates /employees/import itself (E-7). */}
+            {canMutate && <ButtonLink href="/employees/import">Import</ButtonLink>}
+          </>
+        }
       />
       <div className="flex flex-col gap-2">
         <EmployeesToolbar state={state} total={total} facets={facets} gapsOnly={gapsOnly} />
@@ -113,7 +130,8 @@ export default async function EmployeesPage({
         ) : (
           <EmptyState
             title="No employees yet"
-            description="Employees arrive via import (Phase 8) or the seed — there is no create form by design."
+            description="Employees arrive via import or the seed — there is no create form by design."
+            actions={canMutate ? <ButtonLink href="/employees/import">Import</ButtonLink> : undefined}
           />
         )}
       </div>

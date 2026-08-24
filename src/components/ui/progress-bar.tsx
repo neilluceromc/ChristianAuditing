@@ -7,7 +7,12 @@ export function ProgressBar({
   max?: number;
   label?: string;
 }) {
-  const pct = Math.min(100, Math.max(0, (value / max) * 100));
+  // Task 11 round two, V-5: `max <= 0` used to fall through to `(value/max)*100`
+  // → `NaN` → `width: "NaN%"`, which every browser discards, leaving the
+  // accent div at its default full width — the most confident-looking
+  // element on a page reporting zero of zero. Guarded here rather than only
+  // at each call site, since any future caller can hand this a `max` of 0.
+  const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
   return (
     <div
       role="progressbar"

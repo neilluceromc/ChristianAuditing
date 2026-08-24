@@ -11,12 +11,14 @@ import { createApproval, newSlaAt, OPEN_APPROVAL_STATES, openApprovalForAsset } 
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
-import { ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
+import {
+  ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
+} from "@/lib/inventory-list";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
-import { diffOf } from "@/lib/audit-diff";
+import { assetDiff } from "@/lib/asset-diff";
 
 const bulkSchema = z
   .object({
@@ -53,14 +55,20 @@ export async function bulkRequestStatusChange(
   if (ids?.length) {
     where = { id: { in: ids } };
   } else {
-    const state: ListState = parseListState(new URLSearchParams(filters), INVENTORY_LIST_CONFIG);
+    const filterParams = new URLSearchParams(filters);
+    const state: ListState = parseListState(filterParams, INVENTORY_LIST_CONFIG);
+    // purchaseYear rides outside the config's facets (it's a nav-destination
+    // value, not a multi-select — see parsePurchaseYear), so it has to be
+    // read off the same serialized filters string separately, same as the
+    // stage cut just below has to be resolved separately from the state.
+    const purchaseYear = parsePurchaseYear(filterParams.get("purchaseYear"));
     // `stage` is a derived facet — buildAssetWhere only narrows to the repair
     // CANDIDATE set in SQL (beyond-repair compares repairQuote against cost,
     // which no Prisma filter can express). Acting on that candidate set
     // directly would mean the drawer's "all N matching" acts on more rows
     // than the screen shows. Resolve to the exact cut ids first.
-    const cutIds = await repairStageIds(state);
-    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state);
+    const cutIds = await repairStageIds(state, purchaseYear);
+    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear);
   }
 
   let created = 0;
@@ -310,12 +318,11 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   // time-of-day. Compare at day precision — otherwise every first edit of an
   // old row writes phantom purchasedAt/warrantyUntil audit entries — and
   // write ONLY the changed fields, so untouched columns keep their stored
-  // timestamps instead of being silently truncated to midnight.
-  const toDay = (dt: Date | null) => (dt ? new Date(`${dt.toISOString().slice(0, 10)}T00:00:00Z`) : null);
-  const before = { ...asset, purchasedAt: toDay(asset.purchasedAt), warrantyUntil: toDay(asset.warrantyUntil) };
-  const diff = diffOf(before as unknown as Record<string, unknown>, data);
+  // timestamps instead of being silently truncated to midnight. Shared with
+  // `applyAssetImport` via `assetDiff` (`src/lib/asset-diff.ts`, C-1, Task 10
+  // round two) so the two paths cannot drift apart the way they already had.
+  const { diff, changed } = assetDiff(asset as unknown as Record<string, unknown>, data);
   if (Object.keys(diff).length === 0) return ok({ id: asset.id }); // no audit noise for no-ops
-  const changed = Object.fromEntries(Object.entries(data).filter(([key]) => key in diff));
 
   try {
     await prisma.$transaction(async (tx) => {

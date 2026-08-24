@@ -82,7 +82,14 @@ test.describe("approvals — finance read-only", () => {
     await expect(page.getByText("J/K move")).toHaveCount(0);
 
     await page.getByRole("link", { name: "APR-2041" }).click();
-    await expect(page.getByRole("heading", { name: "APR-2041" })).toBeVisible();
+    // Headroom, and the URL awaited separately from the heading (§7). This is
+    // the FIRST hit of /approvals/[id] in the suite, so the click covers a cold
+    // compile; it began failing as "the heading never arrived" once Phase 9's
+    // added routes pushed the full run from 7.5 to 10 minutes. Splitting the
+    // two assertions is what makes a real failure say which half broke rather
+    // than blaming the heading for a navigation that never happened.
+    await expect(page).toHaveURL(/\/approvals\/[^/]+$/, { timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "APR-2041" })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("button", { name: "Claim" })).toHaveCount(0);
   });
 });

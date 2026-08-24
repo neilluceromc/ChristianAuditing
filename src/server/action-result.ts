@@ -26,11 +26,19 @@ export const forbidden = (): ActionResult<never> => ({
   message: "You don't have permission to do that.",
 });
 
-export const rateLimited = (retryAfterSec: number): ActionResult<never> => ({
+/**
+ * `message` is an optional override (R-2, round 2): the default sentence
+ * hardcodes "60 changes" and "this form still holds your input", both false
+ * on a path whose cap isn't 60 or whose input isn't a form a browser
+ * repopulates (a `<input type="file">` never re-shows a chosen file) — every
+ * OTHER caller keeps the default unchanged.
+ */
+export const rateLimited = (retryAfterSec: number, message?: string): ActionResult<never> => ({
   ok: false,
   kind: "rate_limited",
   retryAfterSec,
-  message: "You've made 60 changes this minute — the cap. Nothing was lost: this form still holds your input.",
+  message:
+    message ?? "You've made 60 changes this minute — the cap. Nothing was lost: this form still holds your input.",
 });
 
 export const validationError = (fieldErrors: Record<string, string>): ActionResult<never> => ({

@@ -49,7 +49,27 @@ export function actionDot(action: string): string {
   // "endpoint-disable"/"endpoint-enable"/"endpoint-delete" specifically so it
   // doesn't become one more producer sharing this line's meaning by accident.
   if (action.includes("failed") || action === "delete" || action === "disable") return "DEFECTIVE"; // fault
-  if (action === "create" || action.includes("executed")) return "DEPLOYED"; // settled
+  // `action === "create"` is an equality test and does not catch
+  // "import-create" (nor does any `includes` branch above it match either
+  // new name) — both would otherwise fall through to the neutral default.
+  // For "import-create" that WOULD be wrong: a created-by-import row
+  // settles the same way a manual create does, so it needs the same
+  // explicit branch create already gets.
+  if (action === "create" || action === "import-create" || action.includes("executed")) return "DEPLOYED"; // settled
+  // I-5 (Task 10 round two): "import-update" is deliberately EXPLICIT here
+  // rather than left to fall through to the neutral default below — not
+  // because the default would be wrong, but so a future reader sees the
+  // decision instead of re-deriving it. A round-one draft of this line
+  // mapped it to "COMPLETED" on the theory that falling through read as
+  // "nothing happened"; that theory was false. `statusFamily` maps
+  // COMPLETED to the same "settled" family as DEPLOYED, so that branch
+  // painted a plain field edit with the SAME green dot as a newly-deployed
+  // asset — and worse, gave an import-driven edit a DIFFERENT colour than
+  // the identical edit made by hand through `updateAsset` (plain "update"
+  // falls through to SPARE, neutral). An edit is an edit regardless of who
+  // typed it: SPARE is what this app already uses for every ordinary
+  // update, so import-update gets it explicitly, matching by hand.
+  if (action === "import-update") return "SPARE"; // neutral, same as a hand-typed "update"
   if (action.includes("requested") || action === "claim") return "SUBMITTED"; // inflight
   return "SPARE"; // neutral
 }

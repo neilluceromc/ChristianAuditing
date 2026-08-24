@@ -161,11 +161,29 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // purchasing user who can reference the inventory list can't reach /secrets.
   // MUST precede the general /inventory rule (first-match-wins).
   { test: /^\/inventory\/[^/]+\/secrets(\/|$)/, workspaces: ["it"] },
+  // Import writes up to 2,000 assets plus an audit row each — MUST precede
+  // the general /inventory rule (first-match-wins), exactly like the
+  // /secrets rule above, for the same reason: the general rule below admits
+  // viewer, purchasing_staff and finance_staff, none of whom may reach this
+  // write surface. `roles` additionally excludes viewer even within the IT
+  // workspace it shares with /admin/asset-categories and friends.
+  { test: /^\/inventory\/import(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
   // a dead end on the page built for that role. The secrets rule above still
   // precedes this one, so finance gains the record, never the credentials.
   { test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing", "finance"] },
+  // Task 12, E-7: the W-1 trap exactly. The general /employees rule below
+  // has NO `roles` key at all, so `viewer` — whose workspaces are `["it"]`,
+  // same as it_staff — passes it. Import writes up to 2,000 employees plus
+  // an audit row each, the identical write-surface hazard `/inventory/
+  // import` already guards above; this MUST precede the general rule
+  // (first-match-wins), for the same reason.
+  { test: /^\/employees\/import(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+  // Covers /employees/export and /audit/export too (prefix + "(\/|$)"): an
+  // export route intentionally has no separate rule of its own — like
+  // /inventory/export above, it matches its list page's access exactly
+  // because it IS that page's data, just downloaded instead of rendered.
   { test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
   { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance"] },
   // Brief §6.1 is a three-party handoff: purchasing drafts, IT specs it,
