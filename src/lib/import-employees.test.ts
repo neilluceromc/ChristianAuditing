@@ -113,6 +113,19 @@ describe("planEmployeeRows", () => {
     expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "missing-required" });
   });
 
+  // Review I-3: emptying the detail left all 757 tests green — and the detail
+  // is the entire justification for lumping five required columns into ONE
+  // cause (E-5). Without it the group says "a required column is empty" and
+  // the operator opens all five to find out which. This pins the bargain.
+  it("names WHICH required columns are blank, which is why one lumped cause is acceptable", () => {
+    const row = [cells({ employeeNo: "EMP-0100", department: "IT", joined: "2026-01-05" })];
+    const plan = planEmployeeRows(headers, row, REFS, OPTS);
+    const blocked = plan.rows[0] as { cause: string; detail: string };
+    expect(blocked.cause).toBe("missing-required");
+    expect(blocked.detail).toContain("Name");
+    expect(blocked.detail).toContain("Title");
+  });
+
   // 8. A blank employeeNo is blocked missing-required too — no missing-tag
   // equivalent, and reusing an asset-shaped cause name would read wrong here.
   it("blocks a blank employeeNo as missing-required, not a distinct cause", () => {
@@ -279,6 +292,19 @@ describe("planEmployeeRows", () => {
       expect(data.offboardingAt).toBeInstanceOf(Date);
     });
 
+    // Review I-2: this branch survived an 18-mutant battery untested —
+    // changing it to stamp `new Date()` left all 757 green. It is the one
+    // branch of decision 15's rule that had to be REINTERPRETED rather than
+    // transcribed (updateEmployee's "keep whatever is there" has no "there"
+    // on a create), which makes it the branch most worth pinning.
+    it("a create with employment OFFBOARDED leaves offboardingAt null, inventing no window", () => {
+      const row = [cells({ employeeNo: "EMP-0101", name: "Nina Robles", department: "IT", title: "Analyst", joined: "2026-01-05", employment: "OFFBOARDED" })];
+      const plan = planEmployeeRows(headers, row, REFS, OPTS);
+      const data = (plan.rows[0] as { data: { employment: string; offboardingAt: Date | null } }).data;
+      expect(data.employment).toBe("OFFBOARDED");
+      expect(data.offboardingAt).toBeNull();
+    });
+
     it("a create with no Employment cell (ACTIVE default) leaves offboardingAt null", () => {
       const row = [cells({ employeeNo: "EMP-0100", name: "Nina Robles", department: "IT", title: "Analyst", joined: "2026-01-05" })];
       const plan = planEmployeeRows(headers, row, REFS, OPTS);
@@ -297,17 +323,12 @@ describe("planEmployeeRows", () => {
     // reason on the SAME row (a row that's a valid update but would also,
     // say, fail a department check the update path doesn't need to re-run
     // department validation for... this test instead pins the case that
-    // actually distinguishes the two orderings on this schema: employeeNo
-    // resolution must happen even though nothing else about ordering
-    // matters, since it doesn't gate any other check.
-    it("resolves a known employeeNo as an update even when other columns would be blank on a lesser row", () => {
-      // A minimal but complete row — this exists mainly so a reviewer
-      // reverting rule order sees update vs create flip, not to test one
-      // specific ordering interaction (there isn't one on this schema).
-      const row = [cells({ employeeNo: "EMP-0042", name: "Marites Bautista", department: "Finance", title: "Accountant", joined: "2020-01-01" })];
-      const plan = planEmployeeRows(headers, row, REFS, OPTS);
-      expect(plan.rows[0]).toMatchObject({ kind: "update", employeeId: "e-1" });
-    });
+    // The draft's Step 3 named a mutation — "swap the known-employeeNo check
+    // after the required-field check" — that describes the SHIPPED order, so
+    // there is nothing to swap. A verbatim duplicate of the update test above
+    // used to sit here claiming to cover it; removed (review M-1) rather than
+    // left looking like coverage. The blank-employeeNo case below is the real
+    // ordering assertion.
 
     // The draft's own Step 3: employment defaulting to OFFBOARDED instead of
     // ACTIVE must fail this test.

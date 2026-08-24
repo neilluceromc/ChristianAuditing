@@ -62,7 +62,14 @@ export interface EmployeeRecordRef {
  */
 export interface EmployeeRefs {
   departments: Map<string, string | null>;
-  byEmployeeNo: Map<string, EmployeeRecordRef>;
+  /**
+   * `null` means the key matched MORE THAN ONE stored employee — two rows
+   * whose `employeeNo` differs only by case, which two concurrent applies can
+   * produce because the unique index is case-sensitive and nothing
+   * upper-cases this column. Undecidable, so it blocks rather than updating
+   * whichever record was read last (review I-1).
+   */
+  byEmployeeNo: Map<string, EmployeeRecordRef | null>;
 }
 
 /**
@@ -124,7 +131,21 @@ export interface EmployeeImportOptions {
   keepCurrentEmployment: boolean;
 }
 
-const LENGTH_LIMITS = { name: [2, 120], title: [2, 120] } as const;
+/**
+ * `name` and `title` come from `employeeSchema` (`employees/actions.ts`), the
+ * only other code that writes them.
+ *
+ * `employeeNo` has no schema anywhere to copy — E-2 forbids inventing a
+ * FORMAT rule for a column the database leaves unconstrained, and that is
+ * still right, but a ceiling is not a format (review I-4). It needs one
+ * because an xlsx cell holds up to 32,767 characters and this value reaches
+ * further than the record: `src/server/export/respond.ts` builds the
+ * farewell-report download's filename out of it, and its sanitiser strips
+ * illegal characters without clamping length — so an unbounded number becomes
+ * an unbounded `content-disposition`. 60 matches `m365Status`'s ceiling and
+ * is far above anything real (`EMP-0042` is eight).
+ */
+const LENGTH_LIMITS = { name: [2, 120], title: [2, 120], employeeNo: [1, 60] } as const;
 
 function cellAt(headers: HeaderMatch<EmployeeField>, cells: unknown[], field: EmployeeField): unknown {
   const index = headers.map.get(field);
@@ -146,14 +167,29 @@ function isBlank(v: unknown): boolean {
  * prior anchor stamps `new Date()` directly (there is nothing to fall back
  * to via `??`, so this collapses to the same outcome `employee.offboardingAt
  * ?? new Date()` would if `employee.offboardingAt` were null); ACTIVE clears
- * it; OFFBOARDED — reachable only by creating someone ALREADY offboarded,
- * with no anchor this importer could honestly invent — is left `null` rather
- * than stamped with an arbitrary "now" that would misrepresent when their
- * offboarding actually happened. This IS `updateEmployee`'s own rule, not a
- * parallel one: calling it with `current = null` (there is no employee yet)
- * produces exactly its OFFBOARDING and ACTIVE branches; only its OFFBOARDED
- * branch ("keep whatever is there") has no "there" on a create, and null is
- * the honest answer to that.
+ * it; OFFBOARDED is left `null`.
+ *
+ * The argument for that last branch is not "honesty" — it is two checkable
+ * facts (review I-2, which found the original wording arguing a preference
+ * where a proof was available). First, THIS STATE IS ALREADY REACHABLE
+ * WITHOUT ANY IMPORT: `updateEmployee`'s own ACTIVE → OFFBOARDED path keeps a
+ * null anchor, so the edit form produces exactly it. Second, THE DOWNSTREAM
+ * READER TREATS NULL AS AN EMPTY WINDOW, which is the safe direction —
+ * `candidatesFor` (`offboarding/queries.ts`) reads a null anchor as "nothing
+ * historical is decided", and `listOffboarding` only ever surfaces
+ * OFFBOARDING people, so an imported-already-OFFBOARDED person with a null
+ * anchor is never surfaced at all. For a freshly created record an empty
+ * farewell window is not merely safe, it is correct: there is no history to
+ * bound.
+ *
+ * This IS `updateEmployee`'s own rule rather than a parallel one — called
+ * with `current = null`, its three branches collapse to exactly `new Date()`
+ * / `null` / `null`.
+ *
+ * Note `prisma/seed.ts` DOES stamp `day(-3)` for its OFFBOARDED fixtures, so
+ * the seed and this importer disagree, deliberately: the seed is fabricating
+ * a history it wants the offboarding screens to show, and an import has none
+ * to fabricate.
  */
 function offboardingAtForCreate(employment: EmploymentStatus): Date | null {
   if (employment === "OFFBOARDING") return new Date();
@@ -215,13 +251,26 @@ export function planEmployeeRows(
     // same identity hazard the asset importer's tag rule guards, one layer
     // over. A row already claimed by an earlier row of THIS file blocks
     // before any other check gets a chance to run (C-2).
+    if (employeeNoRaw.length > LENGTH_LIMITS.employeeNo[1]) {
+      block("name-or-title-length", employeeNoRaw);
+      return;
+    }
     const employeeNoKey = refKey(employeeNoRaw);
     if (seenEmployeeNos.has(employeeNoKey)) {
       block("duplicate-in-file", employeeNoRaw);
       return;
     }
     seenEmployeeNos.add(employeeNoKey);
-    const matched = refs.byEmployeeNo.get(employeeNoKey) ?? null;
+    const stored = refs.byEmployeeNo.get(employeeNoKey);
+    // Two stored employees whose numbers differ only by case: which one this
+    // row means is undecidable, and guessing writes to the wrong person.
+    // `duplicate-in-file`'s wording is entity-neutral and says exactly this
+    // — the value identifies one record here — so it needs no 23rd cause.
+    if (stored === null) {
+      block("duplicate-in-file", employeeNoRaw);
+      return;
+    }
+    const matched = stored ?? null;
 
     // Rule 4: department must resolve to reference data — never created as
     // a side effect of an upload (scope decision 12, the same rule

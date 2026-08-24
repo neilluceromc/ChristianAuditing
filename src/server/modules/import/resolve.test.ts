@@ -197,11 +197,14 @@ describe("buildEmployeeRefs", () => {
     expect(refs.byEmployeeNo.get(refKey("emp-0042"))).toMatchObject({ id: "e-1", employment: "ACTIVE" });
   });
 
-  // Deliberately NOT collision-guarded (see buildEmployeeRefs's own comment
-  // for why): two employeeNos differing only by case both resolve, whichever
-  // the array holds last — pinned here so a future "fix" that guards this
-  // too is a deliberate choice, not an unnoticed behaviour change.
-  it("has no case-collision guard for employeeNo — the last row in the array wins the shared key", () => {
+  // Review I-1: this used to assert the OPPOSITE — that the last row silently
+  // wins — on the argument that nothing could create two case-variants. Two
+  // concurrent applies can: neither row exists yet so both plan a CREATE, each
+  // writes in its own transaction, and the unique index is case-sensitive so
+  // neither insert collides. Whichever record was read second would then
+  // absorb every later row naming that number, which is a wrong write rather
+  // than a refusal.
+  it("marks an employeeNo claimed by two case-variants as a collision, rather than letting one win", () => {
     const refs = buildEmployeeRefs(
       [],
       [
@@ -209,7 +212,12 @@ describe("buildEmployeeRefs", () => {
         { id: "e-2", employeeNo: "emp-0042", employment: "OFFBOARDED" },
       ],
     );
-    expect(refs.byEmployeeNo.get(refKey("EMP-0042"))).toMatchObject({ id: "e-2" });
+    expect(refs.byEmployeeNo.get(refKey("EMP-0042"))).toBeNull();
+  });
+
+  it("still resolves an employeeNo that only one record claims", () => {
+    const refs = buildEmployeeRefs([], [{ id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" }]);
+    expect(refs.byEmployeeNo.get(refKey("emp-0042"))).toMatchObject({ id: "e-1" });
   });
 
   it("carries employment on the employeeNo ref, for the update-time employment-conflict check", () => {

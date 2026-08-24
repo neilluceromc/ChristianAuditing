@@ -236,27 +236,42 @@ interface EmployeeIdentityRow {
  * but Postgres's unique index is case-sensitive, and `reference-actions.ts`'s
  * `createRefRow` never checks case, so "Finance" and "finance" can coexist.
  *
- * `byEmployeeNo` is a PLAIN map, deliberately with no `buildCollisionMap`
- * guard: unlike a Department name, there is no live path in this app that
- * creates a SECOND `employeeNo` differing from an existing one only by case.
- * `Employee.employeeNo` is `@unique` and case-sensitive at the database
- * level, same as `Department.name`, but E-1 established that nothing except
- * `prisma/seed.ts` and this importer ever creates an Employee at all — and
- * this importer's OWN case-insensitive match (`refKey`, E-2) is what would
- * resolve a differently-cased sheet row to the SAME existing employee as an
- * UPDATE rather than a second CREATE. So the collision this guard exists to
- * catch for categories/types/vendors/departments — an admin UI that lets two
- * case-variants of one name coexist — has no equivalent creation path for
- * employeeNo, and adding the guard anyway would be solving a problem this
- * app cannot currently produce.
+ * `byEmployeeNo` gets the SAME collision guard, and the argument for leaving
+ * it off did not survive review. That argument was: nothing but the seed and
+ * this importer creates an Employee, and this importer's own case-insensitive
+ * match resolves a differently-cased row to an UPDATE, so no second variant
+ * can arise. It is self-referential, and there is a live path it misses —
+ * TWO CONCURRENT APPLIES. File A carries `EMP-0100`, file B carries
+ * `emp-0100`, neither exists yet, so both plans say CREATE. Each row writes
+ * in its own transaction (scope decision 4), and `Employee.employeeNo`'s
+ * unique index is CASE-SENSITIVE, so neither insert collides and no P2002 is
+ * raised. The database now holds two case-variants, and from then on a plain
+ * map keys both to one entry and the last row read silently wins — every
+ * later row naming that number updates whichever person the query happened to
+ * return second. That is a wrong WRITE rather than a refusal, which is the
+ * one defect class this phase ranks worst.
+ *
+ * The asset importer is immune only because `tagKey` upper-cases, so the
+ * database index catches the race for it. Nothing upper-cases `employeeNo` —
+ * E-2 forbids inventing a format rule for a column that has none — so the
+ * guard is what stands in for the index here.
  */
 export function buildEmployeeRefs(
   departments: DepartmentRow[],
   employees: EmployeeIdentityRow[],
 ): EmployeeRefs {
-  const byEmployeeNo = new Map<string, EmployeeRecordRef>();
+  // Same two-pass shape as `buildCollisionMap`: count the keys first, so a
+  // key claimed by more than one row resolves to `null` (collision) rather
+  // than to whichever row was read last.
+  const counts = new Map<string, number>();
   for (const e of employees) {
-    byEmployeeNo.set(refKey(e.employeeNo), { id: e.id, employment: e.employment });
+    const key = refKey(e.employeeNo);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const byEmployeeNo = new Map<string, EmployeeRecordRef | null>();
+  for (const e of employees) {
+    const key = refKey(e.employeeNo);
+    byEmployeeNo.set(key, (counts.get(key) ?? 0) > 1 ? null : { id: e.id, employment: e.employment });
   }
   return {
     departments: buildCollisionMap(departments, (d) => refKey(d.name)),
