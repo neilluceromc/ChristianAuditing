@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { refKey } from "@/lib/import-assets";
-import { buildAssetRefs } from "./resolve";
+import { buildAssetRefs, buildEmployeeRefs } from "./resolve";
 
 /** A minimal AssetRecordRef-shaped row, overridable per test. */
 const record = (over: Partial<{
@@ -169,5 +169,54 @@ describe("buildAssetRefs", () => {
   it("resolves a category name carrying an internal non-breaking space via refKey", () => {
     const refs = buildAssetRefs([{ id: "cat-1", name: "Spare Parts" }], [], [], [], [], []);
     expect(refs.categories.get(refKey("Spare Parts"))).toBe("cat-1");
+  });
+});
+
+describe("buildEmployeeRefs", () => {
+  it("resolves a department name to its id when there is exactly one match", () => {
+    const refs = buildEmployeeRefs([{ id: "dept-1", name: "Finance" }], []);
+    expect(refs.departments.get(refKey("Finance"))).toBe("dept-1");
+  });
+
+  // E-6: the same R-1 guard categories/types/vendors already have —
+  // Department.name is @unique but Postgres's index is case-sensitive, and
+  // createRefRow never checks case, so "Finance"/"finance" can coexist.
+  it("resolves a case-colliding department name to null, not silently to one of the two ids", () => {
+    const refs = buildEmployeeRefs(
+      [{ id: "dept-1", name: "Finance" }, { id: "dept-2", name: "finance" }],
+      [],
+    );
+    expect(refs.departments.get(refKey("Finance"))).toBeNull();
+  });
+
+  it("keys byEmployeeNo via refKey, so a differently-cased sheet value still matches", () => {
+    const refs = buildEmployeeRefs(
+      [],
+      [{ id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" }],
+    );
+    expect(refs.byEmployeeNo.get(refKey("emp-0042"))).toMatchObject({ id: "e-1", employment: "ACTIVE" });
+  });
+
+  // Deliberately NOT collision-guarded (see buildEmployeeRefs's own comment
+  // for why): two employeeNos differing only by case both resolve, whichever
+  // the array holds last — pinned here so a future "fix" that guards this
+  // too is a deliberate choice, not an unnoticed behaviour change.
+  it("has no case-collision guard for employeeNo — the last row in the array wins the shared key", () => {
+    const refs = buildEmployeeRefs(
+      [],
+      [
+        { id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" },
+        { id: "e-2", employeeNo: "emp-0042", employment: "OFFBOARDED" },
+      ],
+    );
+    expect(refs.byEmployeeNo.get(refKey("EMP-0042"))).toMatchObject({ id: "e-2" });
+  });
+
+  it("carries employment on the employeeNo ref, for the update-time employment-conflict check", () => {
+    const refs = buildEmployeeRefs(
+      [],
+      [{ id: "e-1", employeeNo: "EMP-0090", employment: "OFFBOARDING" }],
+    );
+    expect(refs.byEmployeeNo.get(refKey("EMP-0090"))?.employment).toBe("OFFBOARDING");
   });
 });

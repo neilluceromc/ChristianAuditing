@@ -22,17 +22,44 @@ export class RowWriteError extends Error {}
  * the fix here; disabling the Apply button is T11's, and is a courtesy, not
  * a guarantee (a re-POST, a refresh, a second tab all bypass it), which is
  * why this can't be "fixed" by a lock instead.
+ *
+ * `subject` names WHAT collided / vanished — asset-shaped by default
+ * (`ASSET_ROW_SUBJECT`, unchanged from every call site before Task 12) so
+ * every existing caller's wording stays byte-identical. The employee
+ * importer passes `EMPLOYEE_ROW_SUBJECT` (`employee-actions.ts`): "would
+ * duplicate a tag or serial already on file" is simply false on an employee
+ * row (the unique column there is `employeeNo`; the FK that can vanish
+ * mid-import is `departmentId`, not category/type/vendor) — the same
+ * "sentence true in one branch, false in the other" hazard §6a rules 16/35
+ * name, one layer down in a shared error classifier rather than a shared
+ * vocabulary cause.
  */
-export function classifyRowError(err: unknown, kind: "create" | "update"): string {
+export interface RowErrorSubject {
+  /** what a P2002 (unique constraint) names */
+  unique: string;
+  /** what a P2003 (foreign key constraint) names */
+  fk: string;
+}
+
+export const ASSET_ROW_SUBJECT: RowErrorSubject = {
+  unique: "a tag or serial already on file",
+  fk: "a category, type or vendor that no longer exists",
+};
+
+export function classifyRowError(
+  err: unknown,
+  kind: "create" | "update",
+  subject: RowErrorSubject = ASSET_ROW_SUBJECT,
+): string {
   if (err instanceof RowWriteError) return err.message;
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === "P2002") {
       return kind === "create"
-        ? "would duplicate a tag or serial already on file — or this same file may have just been " +
-            "applied twice at once (a second click, tab, or retry)"
-        : "would duplicate a tag or serial already on file";
+        ? `would duplicate ${subject.unique} — or this same file may have just been applied twice at ` +
+            "once (a second click, tab, or retry)"
+        : `would duplicate ${subject.unique}`;
     }
-    if (err.code === "P2003") return "names a category, type or vendor that no longer exists";
+    if (err.code === "P2003") return `names ${subject.fk}`;
   }
   return "could not be written — re-check this row and retry";
 }

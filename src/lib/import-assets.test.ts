@@ -77,6 +77,10 @@ const OPTS: ImportOptions = {
   dropUnknownVendor: false,
   keepCurrentLifecycle: false,
   importUnheldAsSpare: false,
+  // Task 12: the employee importer's own option, never read by
+  // `planAssetRows` — carried here only because `ImportOptions` is the one
+  // shared `Record<ImportOption, boolean>` shape.
+  keepCurrentEmployment: false,
 };
 
 /**

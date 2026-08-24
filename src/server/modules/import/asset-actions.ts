@@ -11,9 +11,9 @@ import { assetDiff } from "@/lib/asset-diff";
 import { classifyRowError, RowWriteError } from "@/lib/row-error";
 import { readGrid } from "@/server/import/read-sheet";
 import {
-  cellText, matchHeaders, planAssetRows, type AssetPlan, type ImportOptions,
+  cellText, matchHeaders, planAssetRows, type AssetPlan,
 } from "@/lib/import-assets";
-import { groupByCause, IMPORT_OPTIONS, type CauseGroup } from "@/lib/import-vocabulary";
+import { groupByCause, optionsFromForm, type CauseGroup } from "@/lib/import-vocabulary";
 import { resolveAssetRefs } from "./resolve";
 import { conflict, forbidden, ok, rateLimited, type ActionResult } from "@/server/action-result";
 
@@ -21,19 +21,6 @@ export interface PlanResult {
   plan: AssetPlan;
   groups: CauseGroup[];
   unknownColumns: string[];
-}
-
-/**
- * Folds over `IMPORT_OPTIONS` rather than hand-listing the five keys: a
- * hand-written literal silently reads a forgotten key as `false`, and the
- * failure is invisible to the operator — the row just stays blocked and they
- * assume their file is still wrong. Folding means a sixth option added to
- * `IMPORT_OPTIONS` is read here automatically.
- */
-function optionsFrom(form: FormData): ImportOptions {
-  const out = {} as ImportOptions;
-  for (const key of IMPORT_OPTIONS) out[key] = form.get(key) === "1";
-  return out;
 }
 
 /**
@@ -104,7 +91,7 @@ export async function planAssetImport(form: FormData): Promise<ActionResult<Plan
   const serials = serialAt === undefined ? [] : read.rows.map((r) => cellText(r[serialAt])).filter(Boolean);
 
   const refs = await resolveAssetRefs(tags, serials);
-  const plan = planAssetRows(headers, read.rows, refs, optionsFrom(form));
+  const plan = planAssetRows(headers, read.rows, refs, optionsFromForm(form));
   const blocked = plan.rows.flatMap((r) => (r.kind === "blocked" ? [r] : []));
   return ok({ plan, groups: groupByCause(blocked), unknownColumns: headers.unknown });
 }

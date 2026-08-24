@@ -7,8 +7,17 @@ import { diffOf, type AuditDiff } from "@/lib/audit-diff";
  * midnight. Left at full precision, comparing `before` against either
  * would call every unedited row of such an asset "changed". Non-Date
  * values (including `null`) pass through untouched.
+ *
+ * Exported (Task 12, E-9): `employee-diff.ts`'s `employeeDiff` needs the
+ * exact same day-precision comparison for `joinedAt` — the seed's own
+ * `day()` helper stamps a real time-of-day (`Date.now()` shifted, never
+ * truncated to midnight), and the importer's `parseDateCell` always
+ * produces UTC midnight, so an un-truncated comparison would call every
+ * unedited re-uploaded row "changed" the same way an asset's `purchasedAt`
+ * used to. Shared rather than a second hand-written `toDay` — the exact
+ * class of twin this phase has removed three times already.
  */
-function toDay(value: unknown): unknown {
+export function toDay(value: unknown): unknown {
   return value instanceof Date ? new Date(`${value.toISOString().slice(0, 10)}T00:00:00Z`) : value;
 }
 

@@ -36,8 +36,23 @@ export const ASSET_IMPORT_HEADERS = [
 
 export type AssetField = (typeof ASSET_IMPORT_HEADERS)[number]["key"];
 
-export interface HeaderMatch {
-  map: Map<AssetField, number>;
+/**
+ * The shape `ASSET_IMPORT_HEADERS` and `EMPLOYEE_IMPORT_HEADERS`
+ * (`import-employees.ts`) both already had, made explicit (Task 12) so
+ * `matchHeaders` below can be generic over either instead of the employee
+ * importer hand-rolling a second header-matching loop — the exact class of
+ * twin this phase keeps finding and removing (`text()`/`cellText`, two tag
+ * rules, two `toDay`s, a retyped `IMPORT_OPTIONS`).
+ */
+export interface HeaderSpec<F extends string> {
+  key: F;
+  labels: readonly string[];
+  required: boolean;
+  title: string;
+}
+
+export interface HeaderMatch<F extends string = AssetField> {
+  map: Map<F, number>;
   /**
    * `title`s of required headers with no column — reported all at once. When
    * a header accepts more than one spelling (round 2 Minor: "Asset tag" for
@@ -60,14 +75,37 @@ export function normalizeHeader(cell: unknown): string {
   return String(cell ?? "").trim().toLowerCase();
 }
 
-function missingColumnLabel(spec: (typeof ASSET_IMPORT_HEADERS)[number]): string {
+function missingColumnLabel<F extends string>(spec: HeaderSpec<F>): string {
   return spec.labels.length > 1 ? `${spec.title} (accepted headers: ${spec.labels.join(", ")})` : spec.title;
 }
 
-export function matchHeaders(header: unknown[]): HeaderMatch {
-  const map = new Map<AssetField, number>();
+/**
+ * Generic over the header spec array (Task 12, E-9): every existing call
+ * site passes no second argument and gets `ASSET_IMPORT_HEADERS` exactly as
+ * before (the default), so this is a behaviour-preserving widening, not a
+ * rewrite. `import-employees.ts` calls this with `EMPLOYEE_IMPORT_HEADERS`
+ * instead of hand-rolling a second copy of the same consume-as-you-match
+ * loop — the employee sheet has no email column and a different required
+ * set, but the MATCHING algorithm (case/space-insensitive, first-match-wins,
+ * each sheet column consumed at most once) is identical.
+ */
+export function matchHeaders<F extends string = AssetField>(
+  header: unknown[],
+  headers?: readonly HeaderSpec<F>[],
+): HeaderMatch<F> {
+  // A default VALUE (`headers: ... = ASSET_IMPORT_HEADERS`) is checked
+  // against the generic `HeaderSpec<F>[]` at the declaration site, where `F`
+  // is unresolved — that fails to typecheck even though every call site
+  // resolves `F` concretely. An optional parameter defaulted inside the body
+  // (with an explicit assertion, since TS cannot otherwise know
+  // `ASSET_IMPORT_HEADERS`'s literal-keyed shape matches whatever `F` a
+  // caller infers when it omits this argument entirely — which only ever
+  // happens when `F` is `AssetField`, its own declared default) keeps every
+  // existing single-argument call site byte-identical.
+  const specs = headers ?? (ASSET_IMPORT_HEADERS as unknown as readonly HeaderSpec<F>[]);
+  const map = new Map<F, number>();
   const consumed = new Set<number>();
-  for (const spec of ASSET_IMPORT_HEADERS) {
+  for (const spec of specs) {
     const labels: readonly string[] = spec.labels;
     const index = header.findIndex((cell, i) => !consumed.has(i) && labels.includes(normalizeHeader(cell)));
     if (index !== -1) {
@@ -75,9 +113,7 @@ export function matchHeaders(header: unknown[]): HeaderMatch {
       consumed.add(index);
     }
   }
-  const missing = ASSET_IMPORT_HEADERS.filter((spec) => spec.required && !map.has(spec.key)).map(
-    missingColumnLabel,
-  );
+  const missing = specs.filter((spec) => spec.required && !map.has(spec.key)).map(missingColumnLabel);
   const unknown = header
     .map((cell, i) => ({ cell, i }))
     .filter(({ i }) => !consumed.has(i))
@@ -331,7 +367,7 @@ const TAG_SHAPE = /^BR-[A-Z]{2}-\d{4}$/;
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
-type DateResult = { ok: true; value: Date | null } | { ok: false; raw: string };
+export type DateResult = { ok: true; value: Date | null } | { ok: false; raw: string };
 
 /**
  * A real Date cell, or YYYY-MM-DD text that ROUND-TRIPS. The shape regex
@@ -369,8 +405,17 @@ type DateResult = { ok: true; value: Date | null } | { ok: false; raw: string };
  * before at UTC+8 — that shape cannot reach this function through
  * `read-sheet.ts`, and if a second reader is ever added it must normalise to
  * this convention at the boundary rather than teaching this branch to guess.**
+ *
+ * Exported (Task 12, E-9): the employee importer's `joinedAt` is a date cell
+ * read by the exact same `readSheet` this comment measured, so it needs the
+ * exact same convention — a second, independently-reasoned `parseDateCell`
+ * for `joinedAt` is precisely the class of twin (two `toDay`s, two tag rules)
+ * this phase has spent three tasks removing, and a date rule that disagreed
+ * with this one would be a bug report waiting to happen the day someone
+ * compares an asset's `purchasedAt` against an employee's `joinedAt` in the
+ * same spreadsheet round trip.
  */
-function parseDateCell(raw: unknown): DateResult {
+export function parseDateCell(raw: unknown): DateResult {
   if (isBlank(raw)) return { ok: true, value: null };
   if (raw instanceof Date) {
     if (Number.isNaN(raw.getTime())) return { ok: false, raw: String(raw) };

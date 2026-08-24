@@ -173,6 +173,13 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // a dead end on the page built for that role. The secrets rule above still
   // precedes this one, so finance gains the record, never the credentials.
   { test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing", "finance"] },
+  // Task 12, E-7: the W-1 trap exactly. The general /employees rule below
+  // has NO `roles` key at all, so `viewer` — whose workspaces are `["it"]`,
+  // same as it_staff — passes it. Import writes up to 2,000 employees plus
+  // an audit row each, the identical write-surface hazard `/inventory/
+  // import` already guards above; this MUST precede the general rule
+  // (first-match-wins), for the same reason.
+  { test: /^\/employees\/import(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   // Covers /employees/export and /audit/export too (prefix + "(\/|$)"): an
   // export route intentionally has no separate rule of its own — like
   // /inventory/export above, it matches its list page's access exactly

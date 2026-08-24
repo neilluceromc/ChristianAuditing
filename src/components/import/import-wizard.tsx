@@ -9,34 +9,73 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { BlockedCauses } from "./blocked-causes";
 import {
-  IMPORT_MAX_UPLOAD_BYTES, IMPORT_OPTIONS, optionLabel, uploadTooLargeRefusal, type ImportOption,
+  IMPORT_MAX_UPLOAD_BYTES, IMPORT_OPTIONS, optionLabel, uploadTooLargeRefusal,
+  type CauseGroup, type ImportOption,
 } from "@/lib/import-vocabulary";
-import { splitUnknownColumns } from "@/lib/import-columns";
 import { applySummary, hasDiverged } from "@/lib/import-outcome";
+import { splitColumns } from "@/lib/import-columns";
 import type { ActionResult } from "@/server/action-result";
-import { applyAssetImport, planAssetImport, type PlanResult } from "@/server/modules/import/asset-actions";
 
 const STEPS = ["Upload", "Validate", "Results"] as const;
 
-/** The shape `applyAssetImport` resolves to on success — not exported by the
- * server module (it inlines the object type), so derived here rather than
- * hand-retyped, which would silently drift the day a field is added there. */
-type ApplyOutcome = Extract<Awaited<ReturnType<typeof applyAssetImport>>, { ok: true }>["data"];
-
 /**
- * Task 11 round two, V-2: `plan`, `groups`, `unknownColumns` and the OPTIONS
- * that produced them are bound into one value, set atomically by a
- * successful re-plan. Before this, `options` was a separate piece of state
- * that could change (a fix ticks a box) before the re-plan it triggered had
- * come back, so the Import button's displayed count and the options it was
- * about to send could disagree — and if that re-plan was then refused (the
- * `import_plan` cap, or any other refusal), nothing rolled the live options
- * back, so the NEXT click sent options the screen never showed a verdict
- * for. There is now no live `options` state to drift: the only options this
- * component knows about are the ones riding inside the most recent
- * successful `Verdict`.
+ * Task 12, E-8: this wizard used to import `planAssetImport`/
+ * `applyAssetImport` directly, and `splitUnknownColumns` (asset-only —
+ * derived from `ASSET_EXPORT_COLUMNS`) — making it structurally the ASSET
+ * importer's wizard with a second `kind` prop once contemplated and then
+ * reversed (Task 11's own Step 2 note, corrected at execution: "pass the two
+ * server actions in as props rather than branching on a `kind` string"). The
+ * employee importer needs the exact same three-step shape and none of that
+ * asset-specific wiring, so all three — the two server actions AND the
+ * known/unimported-column split — are passed in as props. Everything else
+ * below (`OptionChips`, `BlockedCauses`, `IMPORT_OPTIONS`, `applySummary`,
+ * `hasDiverged`) was already entity-agnostic.
+ *
+ * `WizardPlanResult`/`WizardApplyOutcome` are the minimal STRUCTURAL shapes
+ * this component actually reads — never the asset importer's own
+ * `PlanResult` (which also carries `AssetPlan`'s `.rows`, something this
+ * component never touches) — so both `planAssetImport`/`applyAssetImport`
+ * and `planEmployeeImport`/`applyEmployeeImport` satisfy them without either
+ * server module needing to know this component exists.
  */
-type Verdict = PlanResult & { options: Record<ImportOption, boolean> };
+export interface WizardPlanResult {
+  plan: { counts: { create: number; update: number; blocked: number } };
+  groups: CauseGroup[];
+  unknownColumns: string[];
+}
+
+export interface WizardApplyOutcome {
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  failed: number;
+  failures: { row: number; reason: string }[];
+  groups: CauseGroup[];
+}
+
+export interface ImportWizardProps<P extends WizardPlanResult, A extends WizardApplyOutcome> {
+  planAction: (form: FormData) => Promise<ActionResult<P>>;
+  applyAction: (form: FormData) => Promise<ActionResult<A>>;
+  /**
+   * `KNOWN_UNIMPORTED_COLUMNS` (asset) / `EMPLOYEE_KNOWN_UNIMPORTED_COLUMNS`
+   * (employee) — each page's own answer to "which unrecognised columns are
+   * this app's own export, not a typo" (`import-columns.ts`). Plain DATA,
+   * not the split FUNCTION: this component is a Client Component, and a
+   * Server Component page can only pass a function across that boundary
+   * when it is itself a `"use server"` action — passing `splitUnknownColumns`
+   * (a plain function) here failed at runtime with exactly that React error.
+   * The split ALGORITHM (`splitColumns`, imported directly above) is shared;
+   * only the per-entity known-list varies, and a `string[]` is ordinary
+   * JSON-serialisable props data.
+   */
+  knownUnimportedColumns: readonly string[];
+  /** `/inventory/activity` or `/employees/activity` — the one other
+   * asset-shaped string this component held (found while parameterising it,
+   * E-8): the two places it tells an operator where to go check what an
+   * import actually did. */
+  activityHref: string;
+}
 
 /**
  * A small presentational stepper local to this wizard — NOT
@@ -162,9 +201,9 @@ function OptionChips({
  * the countdown even when it computes the same number of seconds.
  *
  * Task 11 round two, V-3: the rate-limit refusal's own `message` is captured
- * alongside the deadline and threaded to `RateLimitNotice` — both
- * `planAssetImport` and `applyAssetImport` already build the true sentence
- * (the real cap, and a true claim about what was or wasn't written) via
+ * alongside the deadline and threaded to `RateLimitNotice` — the two server
+ * actions passed in as props already build the true sentence for their own
+ * entity (the real cap, and a true claim about what was or wasn't written) via
  * `rateLimited(..., message)`; before this it was read off `res` and then
  * discarded, so the screen fell back to `RateLimitNotice`'s hardcoded
  * default, which names the wrong cap and a promise about a `<form>` this
@@ -237,7 +276,13 @@ function useRunner() {
   };
 }
 
-export function ImportWizard() {
+export function ImportWizard<P extends WizardPlanResult, A extends WizardApplyOutcome>({
+  planAction,
+  applyAction,
+  knownUnimportedColumns,
+  activityHref,
+}: ImportWizardProps<P, A>) {
+  type Verdict = P & { options: Record<ImportOption, boolean> };
   const router = useRouter();
   const toast = useToast();
   const { busy, acting, error, setError, retryAfterSec, retryMessage, clearRetry, run } = useRunner();
@@ -246,10 +291,21 @@ export function ImportWizard() {
   // does not clear an `<input type="file">` — the filename stays on screen —
   // so this remounts the input instead.
   const [fileInputKey, setFileInputKey] = useState(0);
+  // Task 11 round two, V-2: `plan`, `groups`, `unknownColumns` and the OPTIONS
+  // that produced them are bound into one value, set atomically by a
+  // successful re-plan. Before this, `options` was a separate piece of state
+  // that could change (a fix ticks a box) before the re-plan it triggered had
+  // come back, so the Import button's displayed count and the options it was
+  // about to send could disagree — and if that re-plan was then refused (the
+  // `import_plan` cap, or any other refusal), nothing rolled the live options
+  // back, so the NEXT click sent options the screen never showed a verdict
+  // for. There is now no live `options` state to drift: the only options this
+  // component knows about are the ones riding inside the most recent
+  // successful `Verdict`.
   const [result, setResult] = useState<Verdict | null>(null);
-  const [applyOutcome, setApplyOutcome] = useState<ApplyOutcome | null>(null);
-  // Task 11 round two minor: the specific `Verdict` that was ACTUALLY sent to
-  // `applyAssetImport` — kept distinct from `result`, which can move on to a
+  const [applyOutcome, setApplyOutcome] = useState<A | null>(null);
+  // Task 11 round two minor: the specific verdict that was ACTUALLY sent to
+  // `applyAction` — kept distinct from `result`, which can move on to a
   // fresher re-plan afterwards (a fix applied from the divergence groups
   // below). Comparing `result !== appliedForPlan` by reference is what tells
   // the render below whether there is a NEW plan still waiting on an Import
@@ -301,7 +357,7 @@ export function ImportWizard() {
     }
     run(
       "validate",
-      () => planAssetImport(body(f, opts)),
+      () => planAction(body(f, opts)),
       (data) => setResult({ ...data, options: opts }),
       "Something went wrong checking that file. Nothing was imported — try again.",
     );
@@ -337,7 +393,7 @@ export function ImportWizard() {
   }
 
   const { known: knownUnimported, unknown: genuinelyUnknown } = result
-    ? splitUnknownColumns(result.unknownColumns)
+    ? splitColumns(knownUnimportedColumns, result.unknownColumns)
     : { known: [], unknown: [] };
 
   const totalRows = result
@@ -436,8 +492,8 @@ export function ImportWizard() {
                 <div className="flex flex-col gap-1.5">
                   {/* Set BEFORE the wait, not explained after it: Apply is
                       measured at ~15s for 2,000 rows even before counting
-                      the upload, the parse, and the fact that
-                      applyAssetImport plans the whole file twice. */}
+                      the upload, the parse, and the fact that the apply
+                      action re-plans the whole file before writing. */}
                   <p className="text-[11px] text-fg-muted">
                     A full file can take up to 15 seconds — this re-checks everything before writing, one
                     row at a time. The button disables the moment you click it; wait for it rather than
@@ -453,7 +509,7 @@ export function ImportWizard() {
                         const verdict = result;
                         run(
                           "apply",
-                          () => applyAssetImport(body(file, verdict.options)),
+                          () => applyAction(body(file, verdict.options)),
                           (data) => {
                             const { message, tone } = applySummary(data);
                             toast(message, tone);
@@ -462,7 +518,7 @@ export function ImportWizard() {
                             router.refresh();
                           },
                           "Something went wrong sending the import — this import may have partially " +
-                            "completed. Check /inventory/activity before retrying, rather than clicking " +
+                            `completed. Check ${activityHref} before retrying, rather than clicking ` +
                             "Import again right away.",
                         );
                       }}
@@ -535,7 +591,7 @@ export function ImportWizard() {
               {applyOutcome.groups.length > 0
                 ? " What actually happened is grouped below, the same way Validate grouped its own verdict."
                 : " None of the rows that differ are blocked right now — check the counts above, and " +
-                  "/inventory/activity for exactly what changed."}
+                  `${activityHref} for exactly what changed.`}
             </Banner>
           )}
           {/* R-2 (round two review): these fix buttons go read-only the moment

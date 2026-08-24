@@ -108,6 +108,15 @@ describe("pathAllowedForRole", () => {
     ["/inventory/import", "viewer", false],
     ["/inventory/import", "purchasing_staff", false],
     ["/inventory/import", "finance_staff", false],
+    // Task 12, E-7: the identical trap, one route over. /employees/import
+    // sits under the general /employees rule (workspaces: ["it"], no
+    // `roles` key), which viewer shares with it_staff — every role asserted
+    // explicitly, not just the two that should pass, for the same reason.
+    ["/employees/import", "admin", true],
+    ["/employees/import", "it_staff", true],
+    ["/employees/import", "viewer", false],
+    ["/employees/import", "purchasing_staff", false],
+    ["/employees/import", "finance_staff", false],
     // default-deny: unenumerated routes are forbidden for everyone, admin included
     ["/export/assets", "viewer", false],
     ["/api/export/audit", "finance_staff", false],

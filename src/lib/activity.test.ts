@@ -41,6 +41,24 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
       auditSentence({ ...base, action: "import-create", diff: { status: { from: null, to: "DEPLOYED" } } }),
     ).toBe("J. Sarmiento imported BR-LT-0148 as DEPLOYED");
   });
+  it("import-create names a non-ACTIVE employment the same way it names a non-SPARE status (Task 12)", () => {
+    expect(
+      auditSentence({
+        ...base, action: "import-create", entityLabel: "Nina Robles",
+        diff: { employment: { from: null, to: "OFFBOARDING" } },
+      }),
+    ).toBe("J. Sarmiento imported Nina Robles as OFFBOARDING");
+  });
+
+  it("import-create names an employee created ACTIVE silently (no suffix)", () => {
+    expect(
+      auditSentence({
+        ...base, action: "import-create", entityLabel: "Nina Robles",
+        diff: { employment: { from: null, to: "ACTIVE" } },
+      }),
+    ).toBe("J. Sarmiento imported Nina Robles");
+  });
+
   it("import-update names the fields and says it was by import", () => {
     expect(
       auditSentence({

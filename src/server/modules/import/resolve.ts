@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { refKey, tagKey } from "@/lib/import-assets";
 import type { AssetRecordRef, AssetRefs, EmployeeRef } from "@/lib/import-assets";
+import type { EmployeeRecordRef, EmployeeRefs } from "@/lib/import-employees";
 import type { EmploymentStatus } from "@prisma/client";
 
 /** Every field `AssetRecordRef` needs, straight off the Prisma select. */
@@ -212,4 +213,73 @@ export async function resolveAssetRefs(tags: string[], serials: string[]): Promi
   ]);
 
   return buildAssetRefs(categories, types, employees, vendors, byTagRows, bySerialRows);
+}
+
+interface DepartmentRow {
+  id: string;
+  name: string;
+}
+interface EmployeeIdentityRow {
+  id: string;
+  employeeNo: string;
+  employment: EmploymentStatus;
+}
+
+/**
+ * The pure half of employee-ref resolution (Task 12, mirroring
+ * `buildAssetRefs`'s own extraction — unit-testable with hand-built arrays
+ * from the start, rather than found unreachable by a review later, the
+ * single most repeated structural defect this phase keeps finding).
+ *
+ * `departments` reuses `buildCollisionMap` (E-6) — the SAME R-1 guard
+ * categories/types/vendors already have: `Department.name` is `@unique`,
+ * but Postgres's unique index is case-sensitive, and `reference-actions.ts`'s
+ * `createRefRow` never checks case, so "Finance" and "finance" can coexist.
+ *
+ * `byEmployeeNo` is a PLAIN map, deliberately with no `buildCollisionMap`
+ * guard: unlike a Department name, there is no live path in this app that
+ * creates a SECOND `employeeNo` differing from an existing one only by case.
+ * `Employee.employeeNo` is `@unique` and case-sensitive at the database
+ * level, same as `Department.name`, but E-1 established that nothing except
+ * `prisma/seed.ts` and this importer ever creates an Employee at all — and
+ * this importer's OWN case-insensitive match (`refKey`, E-2) is what would
+ * resolve a differently-cased sheet row to the SAME existing employee as an
+ * UPDATE rather than a second CREATE. So the collision this guard exists to
+ * catch for categories/types/vendors/departments — an admin UI that lets two
+ * case-variants of one name coexist — has no equivalent creation path for
+ * employeeNo, and adding the guard anyway would be solving a problem this
+ * app cannot currently produce.
+ */
+export function buildEmployeeRefs(
+  departments: DepartmentRow[],
+  employees: EmployeeIdentityRow[],
+): EmployeeRefs {
+  const byEmployeeNo = new Map<string, EmployeeRecordRef>();
+  for (const e of employees) {
+    byEmployeeNo.set(refKey(e.employeeNo), { id: e.id, employment: e.employment });
+  }
+  return {
+    departments: buildCollisionMap(departments, (d) => refKey(d.name)),
+    byEmployeeNo,
+  };
+}
+
+/**
+ * Both reference tables are fetched WHOLE, not scoped to the file — the same
+ * convention `resolveAssetRefs` already uses for categories/types/vendors
+ * (and, notably, for employees too: the asset importer's own assignee
+ * resolution already pulls every Employee row for its ambiguous-name check).
+ * An organisation's headcount and department count are both small relative
+ * to the asset fleet, so there is no analogue of the tag/serial scoping that
+ * matters at thousands of rows.
+ */
+export async function resolveEmployeeRefs(): Promise<EmployeeRefs> {
+  const [departments, employees] = await Promise.all([
+    prisma.department.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.employee.findMany({
+      select: { id: true, employeeNo: true, employment: true },
+      orderBy: { employeeNo: "asc" },
+    }),
+  ]);
+  return buildEmployeeRefs(departments, employees);
 }

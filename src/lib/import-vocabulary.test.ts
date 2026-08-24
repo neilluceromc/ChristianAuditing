@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ASSET_STATUSES } from "./inventory-list";
+import { EMPLOYMENT_STATUSES } from "./employees-list";
 import {
   BLOCK_CAUSES, IMPORT_MAX_UPLOAD_BYTES, IMPORT_OPTIONS, IMPORT_ROW_CAP, blockSpec, groupByCause,
-  optionLabel, rowCapRefusal, uploadTooLargeRefusal,
+  optionLabel, optionsFromForm, rowCapRefusal, uploadTooLargeRefusal,
   type BlockCause, type BlockFix,
 } from "./import-vocabulary";
 
@@ -10,8 +11,12 @@ import {
 // against src/app/(app)/**. `/admin/vendors` and `/inventory/import` are
 // deliberately absent: the former does not exist and never will (no surface
 // creates a Vendor), the latter is T11's own page (the wizard doesn't link to
-// itself; a "reupload" fix renders as its own restart instead).
-const REAL_ROUTES = ["/admin/asset-categories", "/admin/asset-types", "/inventory"];
+// itself; a "reupload" fix renders as its own restart instead). `/admin/
+// departments` was added in Task 12 — it exists, and unlike `/admin/vendors`
+// a rename there is genuinely possible (E-6).
+const REAL_ROUTES = [
+  "/admin/asset-categories", "/admin/asset-types", "/admin/departments", "/inventory",
+];
 
 describe("BLOCK_CAUSES", () => {
   it("gives every cause a distinct label and a real explanation", () => {
@@ -182,9 +187,90 @@ describe("BLOCK_CAUSES", () => {
       "duplicate-category-name": "link",
       "duplicate-type-name": "link",
       "duplicate-vendor-name": "option",
+      "unknown-department": "link",
+      "duplicate-department-name": "link",
+      "bad-employment": "reupload",
+      "missing-required": "reupload",
+      "employment-via-import": "option",
+      "name-or-title-length": "reupload",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);
+    }
+  });
+
+  // Task 12, E-6: the department name collision guard, on the SAME link the
+  // category one uses — a real page where a rename is genuinely possible.
+  it("sends unknown-department to the page that creates one, not to a dead end", () => {
+    const fix = blockSpec("unknown-department").fix!;
+    expect(fix.kind).toBe("link");
+    expect(fix.href).toBe("/admin/departments");
+  });
+
+  it("sends duplicate-department-name to the departments page, distinct from unknown-department", () => {
+    const spec = blockSpec("duplicate-department-name");
+    expect(spec.fix).toMatchObject({ kind: "link", href: "/admin/departments" });
+    expect(spec.label.toLowerCase()).not.toBe(blockSpec("unknown-department").label.toLowerCase());
+  });
+
+  // Task 12, E-4: must NOT reuse bad-status's explain, which names all eight
+  // ASSET statuses — actively wrong information on an employee row. Derived
+  // from EMPLOYMENT_STATUSES, never retyped, the same discipline bad-status
+  // itself is held to.
+  it("names all three employment statuses inline in bad-employment's explanation, derived not retyped", () => {
+    const explain = blockSpec("bad-employment").explain;
+    for (const s of EMPLOYMENT_STATUSES) expect(explain).toContain(s);
+    // And not the asset vocabulary's own statuses — the exact defect this
+    // cause exists to avoid, the other way round.
+    for (const s of ASSET_STATUSES) {
+      if (!(EMPLOYMENT_STATUSES as readonly string[]).includes(s)) expect(explain).not.toContain(s);
+    }
+  });
+
+  // Task 12, E-5: one lumped cause for five required columns, and a
+  // "reupload" fix — NOT a link to /employees/import, the page the operator
+  // is already standing on.
+  it("gives missing-required a reupload fix, not a link to the page it's rendered on", () => {
+    const spec = blockSpec("missing-required");
+    expect(spec.fix?.kind).toBe("reupload");
+    expect(spec.explain).toMatch(/employee number/i);
+  });
+
+  // Task 12, E-3 (scope decision 15): the employee analogue of
+  // lifecycle-via-import — same shape (an option to keep applying the row's
+  // other columns), a different reason named in its own words.
+  it("offers employment-via-import a way to keep applying the row's other columns", () => {
+    const fix = blockSpec("employment-via-import").fix!;
+    expect(fix.kind).toBe("option");
+    expect(fix.option).toBe("keepCurrentEmployment");
+    expect(blockSpec("employment-via-import").explain).not.toMatch(/approval queue/i);
+  });
+
+  // Task 12, E-1: ceilings from employeeSchema (2–120), not a reuse of
+  // value-out-of-range — that cause names Model/Serial/Notes, asset-only
+  // nouns that would be wrong on an employee row.
+  it("gives name-or-title-length its own cause, not a reuse of value-out-of-range's asset wording", () => {
+    const spec = blockSpec("name-or-title-length");
+    expect(spec.fix?.kind).toBe("reupload");
+    expect(spec.explain).not.toMatch(/model|serial|notes/i);
+  });
+
+  // Task 12: softened to be entity-neutral — the employee importer's own
+  // employeeNo-in-file check reuses this exact cause, and "one physical
+  // asset" would be false on an employee row.
+  it("keeps duplicate-in-file entity-neutral, since the employee importer reuses it", () => {
+    expect(blockSpec("duplicate-in-file").explain).not.toMatch(/asset/i);
+  });
+});
+
+describe("optionsFromForm", () => {
+  it("reads only the options present and set to \"1\", folding over every member of IMPORT_OPTIONS", () => {
+    const form = new FormData();
+    form.set("dropUnknownVendor", "1");
+    form.set("importUnheldAsSpare", "0");
+    const opts = optionsFromForm(form);
+    for (const o of IMPORT_OPTIONS) {
+      expect(opts[o]).toBe(o === "dropUnknownVendor");
     }
   });
 });

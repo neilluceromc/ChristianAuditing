@@ -1,4 +1,5 @@
 import { ASSET_STATUSES } from "./inventory-list";
+import { EMPLOYMENT_STATUSES } from "./employees-list";
 
 /**
  * Scope decision 5. An import writes one AuditEntry per row, so this cap bounds
@@ -84,6 +85,19 @@ export const BLOCK_CAUSES = [
   "duplicate-category-name",
   "duplicate-type-name",
   "duplicate-vendor-name",
+  // Task 12: the employee importer's own causes. `Employee` has no analogue
+  // of the tag-format rule (E-2 — `employeeNo` has no format constraint at
+  // all, so inventing a `bad-employeeNo` would be this module inventing a
+  // house rule the database does not have) and no per-field missing-* causes
+  // (E-5 — all five required columns share one fix, so one lumped cause is
+  // honest here where the asset importer's five separate ones are not).
+  // Appended, per this array's own rule above — never inserted.
+  "unknown-department",
+  "duplicate-department-name",
+  "bad-employment",
+  "missing-required",
+  "employment-via-import",
+  "name-or-title-length",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -126,6 +140,13 @@ export const IMPORT_OPTIONS = [
   "dropUnknownVendor",
   "keepCurrentLifecycle",
   "importUnheldAsSpare",
+  // Task 12, E-3 (scope decision 15): the employee analogue of
+  // `keepCurrentLifecycle` — an update whose Employment cell disagrees with
+  // the record blocks by default (a spreadsheet must not be the surface that
+  // starts or unwinds an offboarding), and this lets the operator apply the
+  // row's OTHER columns anyway rather than losing the whole row over one
+  // field that a different flow owns.
+  "keepCurrentEmployment",
 ] as const;
 
 export type ImportOption = (typeof IMPORT_OPTIONS)[number];
@@ -226,9 +247,14 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   },
   "duplicate-in-file": {
     label: "Duplicate within this file",
+    // Task 12: softened from "this tag or serial ... one physical asset" —
+    // now shared with the employee importer's own employeeNo check, where
+    // a row identifies one PERSON, not one asset. Genuinely entity-neutral
+    // rather than a second cause, since the fix and the reason are identical
+    // either way: an identifying column claimed twice in one file.
     explain:
-      "This tag or serial already appears on an earlier row of the same file. Each identifies one " +
-      "physical asset, so the file can't claim it twice — likely a copy-paste while editing an export.",
+      "This value already appears on an earlier row of the same file. It identifies one record here, " +
+      "so the file can't claim it twice — likely a copy-paste while editing an export.",
     fix: { kind: "reupload", label: "Fix the file" },
   },
   "ambiguous-assignee": {
@@ -310,10 +336,115 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "can rename or create one — so you can import without it and set it later from the asset's edit form.",
     fix: { kind: "option", label: "Import without the vendor", option: "dropUnknownVendor" },
   },
+
+  // Task 12: the employee importer's own causes, from here down.
+  "unknown-department": {
+    label: "Department doesn't exist",
+    explain:
+      "These rows name a department this system has never seen. Departments are reference data, so " +
+      "create it first and re-upload — an import will not invent one.",
+    fix: { kind: "link", label: "Create department", href: "/admin/departments" },
+  },
+  // E-6: the same R-1 case-collision guard categories/types/vendors already
+  // have, on a new map — Department.name is @unique but Postgres's unique
+  // index is case-sensitive, and reference-actions.ts's createRefRow never
+  // checks case, so "Finance" and "finance" can coexist exactly as two
+  // categories can.
+  "duplicate-department-name": {
+    label: "Department name collides case-insensitively",
+    explain:
+      "Two departments in this system share this name, differing only in letter case — the database " +
+      "allows that today, but this import can't tell which one you mean. An admin needs to rename one " +
+      "of them — to something differing by more than letter case, or the rename lands on this same " +
+      "block — before rows naming this department can resolve.",
+    fix: { kind: "link", label: "Rename a department", href: "/admin/departments" },
+  },
+  // E-4: NOT a reuse of `bad-status` — that cause's explain names all eight
+  // ASSET statuses inline, which would be actively wrong information shown
+  // on an employee row. `EmploymentStatus` is a different, three-member enum,
+  // derived the same way (never retyped) so a fourth member added there is
+  // reflected here automatically.
+  "bad-employment": {
+    label: "Employment not recognised",
+    explain:
+      `These rows carry an employment value that is not one of this system's three: ${EMPLOYMENT_STATUSES.join(", ")}. ` +
+      "Leave the column blank to get ACTIVE, or correct it to one of those.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  // E-5: one lumped cause for all five required columns, deliberately unlike
+  // the asset importer's per-field `missing-tag`/`missing-model`/
+  // `missing-category` — every one of these five shares the exact same fix
+  // (fill in the blank cell and re-upload), so five separate causes would be
+  // five copies of one idea. A future reader: do not "harmonise" this with
+  // the asset importer's shape in either direction — the asymmetry is
+  // deliberate, not an oversight. The `reupload` kind (not `link`) is the
+  // amendment over the original draft: a `link` to `/employees/import`
+  // would point at the page the operator is already standing on, the exact
+  // defect the `reupload` kind exists to avoid.
+  "missing-required": {
+    label: "A required column is empty",
+    explain:
+      "Employee number, name, title, department and joined date are all required on every row. These " +
+      "rows leave at least one of them blank.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  // E-3 / scope decision 15: the employee analogue of `lifecycle-via-import`,
+  // and NOT a reuse of it — that cause's explain names "Status or
+  // Assigned-to" and "the approval queue", neither of which exists on an
+  // employee row; employment moves through the offboarding flow instead.
+  // An update whose Employment cell disagrees with the record blocks so a
+  // spreadsheet can never silently start or unwind an offboarding — that
+  // column's own comment (`schema.prisma`) says `offboardingAt` bounds
+  // "this offboarding", and writing employment without it would corrupt
+  // every farewell report's window for that person.
+  "employment-via-import": {
+    label: "Employment would move outside the offboarding flow",
+    explain:
+      "This row is an update whose Employment cell disagrees with the record's current employment. " +
+      "Starting or ending an offboarding here is done through that flow, not a spreadsheet cell, so this " +
+      "import can't move it either — apply the row's other columns and leave employment alone, or use " +
+      "the offboarding flow.",
+    fix: { kind: "option", label: "Keep the current employment", option: "keepCurrentEmployment" },
+  },
+  // E-1: ceilings taken from `employeeSchema` (`employees/actions.ts:199`) —
+  // there is no createEmployee schema to copy from, since this importer's
+  // validation IS the creation contract. Not a reuse of `value-out-of-range`:
+  // that cause's explain names "Model", "Serial" and "Notes" — asset columns
+  // that do not exist on an employee row, the identical hazard E-4 names for
+  // `bad-status`/`bad-employment`, one cause over.
+  "name-or-title-length": {
+    label: "Name or title out of range",
+    explain:
+      "The Name or Title column on these rows is outside the length this system allows for that column " +
+      "— 2 to 120 characters, the same rule the edit form enforces. Shorten or lengthen it to fit, and " +
+      "re-upload.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
 };
 
 export function blockSpec(cause: BlockCause): BlockSpec {
   return SPECS[cause];
+}
+
+/**
+ * Extracted out of `asset-actions.ts` (Task 12, E-9) — `employee-actions.ts`
+ * needs the exact same fold, and a hand-written second copy is exactly the
+ * hazard this function's own original comment warned about: a literal list
+ * of keys silently reads a forgotten one as `false`, invisibly to the
+ * operator, who just sees the row stay blocked. Folding over `IMPORT_OPTIONS`
+ * means a new option is read here automatically by BOTH callers, and neither
+ * importer's `optionsFrom` needs to change when the other adds one — an
+ * employee-only option like `keepCurrentEmployment` shows up as an always-
+ * `false`, never-read key on the asset side, and vice versa, which costs
+ * nothing. Returns the same `Record<ImportOption, boolean>` shape
+ * `import-assets.ts` names `ImportOptions` — not re-imported here to avoid a
+ * needless import cycle between the two modules; the shape is what matters,
+ * and TypeScript checks it structurally either way.
+ */
+export function optionsFromForm(form: FormData): Record<ImportOption, boolean> {
+  const out = {} as Record<ImportOption, boolean>;
+  for (const key of IMPORT_OPTIONS) out[key] = form.get(key) === "1";
+  return out;
 }
 
 /**
