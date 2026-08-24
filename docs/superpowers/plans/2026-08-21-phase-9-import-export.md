@@ -78,6 +78,18 @@ These are settled. A task that needs to break one must say so and amend this lis
     and all eight statuses are legitimate there; `CREATABLE_STATUSES` is an affordance of the New Asset
     form, not a database invariant. **Update refuses the move**, blocking with `lifecycle-via-import`
     and offering `keepCurrentLifecycle` to apply the row's other columns and leave the lifecycle alone.
+15. **The employee import may set `employment` on CREATE and never moves it on UPDATE.** Added
+    2026-08-22 at Task 12's amendment, as the direct analogue of decision 13 and for a sharper reason:
+    `employment` is not a plain column. `updateEmployee`
+    (`src/server/modules/employees/actions.ts:228-241`) maintains `offboardingAt` alongside every change
+    to it — entering `OFFBOARDING` stamps it, returning to `ACTIVE` clears it, `OFFBOARDED` keeps it —
+    because the offboarding wizard reads "this offboarding" as everything decided since that stamp, and
+    its own comment warns that otherwise *"a routine return from years ago lands on a farewell report."*
+    An import writing `employment` without that rule corrupts the window on every farewell report for
+    that person. So: a create honours the sheet **and stamps `offboardingAt` by the same three-branch
+    rule**; an update whose Employment cell disagrees with the record **blocks**, pointing at the
+    offboarding flow, exactly as `lifecycle-via-import` does for assets. A spreadsheet must not be the
+    one surface that can start or unwind an offboarding.
 14. **Every block cause offers a fix the operator can act on inside the wizard.** The vocabulary always
     asserted this; Task 7 shipped violating it, because `unknown-vendor` linked to `/admin/vendors`,
     which does not exist — and `src/server/modules/admin/reference-actions.ts:15` is
@@ -3312,6 +3324,114 @@ git commit -m "feat(import): the three-step asset import, partial and grouped by
 ---
 
 ### Task 12: The employee import
+
+> ### AMENDED BEFORE EXECUTION — the shape is right, and nine things in it are not. One of them is that this importer is the FIRST way to create an employee in this application.
+> Reusing the vocabulary, the wizard and the three-stage shape is correct and stays. So does the column
+> spec's basic content — `Employee` really has no email, `title` and `departmentId` really are required,
+> and the date really is `joinedAt`. Everything below is either a contract that moved under this task
+> while Tasks 7–11 were reviewed, or a fact about `Employee` the draft did not check.
+>
+> **E-1. NOTHING IN THIS APPLICATION CREATES AN EMPLOYEE.** `grep` for `employee.create` finds exactly
+> one hit and it is `prisma/seed.ts:80`. There is no `createEmployee` action, no New Employee form, no
+> route. So this importer is not "the second importer" in the sense the draft assumes — **it is the only
+> way an employee will ever enter this system**, and its validation *is* the creation contract rather
+> than a mirror of one. Three consequences the draft does not account for: there is no sibling schema to
+> copy ceilings from, so take them from `employeeSchema` (`src/server/modules/employees/actions.ts:199`)
+> — **name 2–120, title 2–120** — and say where they came from; `updateEmployee` deliberately excludes
+> `employeeNo` from its schema, so a number is set once at creation and is **identity, never editable**,
+> which this importer must respect on the update path; and there is no precedent to point at when the
+> reviewer asks why a field is or is not writable, so **write the reasoning down as you go.**
+>
+> **E-2. `employeeNo` has NO format constraint, so the asset tag rules do not transfer — and the case
+> question has to be decided, not inherited.** `Asset.tag` is `.toUpperCase().regex(/^BR-[A-Z]{2}-\d{4}$/)`
+> and `tagKey` exists because of that; `Employee.employeeNo` is a bare `String @unique`
+> (`src/server/export/respond.ts:32` says so in a comment, which is why the export sanitises it into a
+> filename). **There is therefore no `bad-tag` analogue and you must not invent one** — refusing
+> `E-12345` because it does not look like `EMP-0042` would be this module inventing a house rule the
+> database does not have. What you DO have to decide is matching: Postgres unique is case-sensitive, so
+> matching exactly means a sheet reading `emp-0042` fails to match `EMP-0042` and **creates a second
+> person** — the identical defect the asset importer shipped and fixed in Task 7 round one. **Match
+> case-insensitively via the existing `refKey`**, and state in a comment that the stored value keeps the
+> sheet's own casing because nothing normalises it on the way in.
+>
+> **E-3. `employment` cannot be written the way the draft implies, because `offboardingAt` is derived
+> from it.** `updateEmployee` (`actions.ts:228-241`) maintains a three-branch rule alongside every
+> employment change — entering `OFFBOARDING` stamps `offboardingAt` (`?? new Date()`), returning to
+> `ACTIVE` clears it to `null`, and `OFFBOARDED` keeps whatever is there — with a comment explaining
+> that the offboarding wizard reads "this offboarding" as everything decided since that moment, *"otherwise
+> a routine return from years ago lands on a farewell report."* An import that writes `employment` and
+> not `offboardingAt` corrupts the window on every farewell report for that person. **This is scope
+> decision 13's analogue and it is now recorded as scope decision 15: create may set `employment` and
+> must stamp `offboardingAt` by the same three-branch rule; an UPDATE never moves it, and a row whose
+> Employment cell disagrees with the record blocks** with a cause pointing at the offboarding flow —
+> the same shape as `lifecycle-via-import`, for the same reason. A spreadsheet must not be the one
+> surface that can start or unwind an offboarding.
+>
+> **E-4. Reusing `bad-status` would show an operator the eight ASSET statuses on an employee row.**
+> `bad-status`'s `explain` was rewritten in Task 7 round two to name all eight statuses inline, derived
+> from `ASSET_STATUSES`. `EmploymentStatus` is a different enum with three members. Add
+> **`bad-employment`**, deriving its list the same way from the Prisma enum, and leave `bad-status` to
+> the asset importer. This is §6a rules 16/35 — a sentence true in one branch and false in the branch
+> that renders it.
+>
+> **E-5. `missing-required`'s fix links to `/employees/import`, the page the operator is standing on.**
+> That is the defect the `reupload` kind was introduced to fix, and the draft predates it. Use
+> `{ kind: "reupload" }`, and give the cause a **detail naming the offending column** the way
+> `value-out-of-range` now does, so the group can say *which* required cell is blank rather than making
+> the operator open all five. Note the deliberate asymmetry with the asset importer, which has
+> per-field causes (`missing-tag`, `missing-model`, `missing-category`): one lumped cause is right here
+> because all five share a single fix, and **say so in a comment** or the next reader will "harmonise"
+> the two idioms in whichever direction they happen to prefer.
+>
+> **E-6. `unknown-department` needs the same case-collision guard `categories`/`types`/`vendors` got.**
+> `Department.name` is `@unique`, and `reference-actions.ts` accepts `department` — so an admin can
+> create "Finance" and "finance" exactly as they can with categories, and a name-keyed map resolves to
+> whichever row an unordered query returned last. That is R-1 from Task 9 round two, the only defect in
+> this phase that **wrote wrong data rather than refusing**, arriving on a new map. Build the department
+> map through the same `buildCollisionMap`, add `duplicate-department-name` with a link to
+> `/admin/departments` (which exists, and where a rename is genuinely possible), and word its `explain`
+> like the category one — including that the rename must differ by more than letter case.
+>
+> **E-7. The path rule has the Task 11 W-1 trap exactly.** `PATH_RULES` is first-match-wins and
+> `{ test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] }`
+> (`workspaces.ts:180`) already matches `/employees/import` **with no `roles` key at all** — so
+> `viewer`, whose workspaces are `["it"]`, passes. Put the new rule **before** it,
+> `roles: ["admin", "it_staff"]`, and assert **all five roles** in `workspaces.test.ts`. Do not rely on
+> default-deny; the route is not unenumerated, it is enumerated by the wrong rule.
+>
+> **E-8. The Files list still says "a second `kind`" and that decision was reversed.** Task 11's Step 2
+> note — *"pass the two server actions in as props rather than branching on a `kind` string"* — is the
+> settled answer, and Step 3's contradicting `<ImportWizard kind="asset" />` was corrected at execution.
+> `ImportWizard` takes no props today. **Parameterise it by passing the two actions in**, so each page's
+> actions stay statically obvious and neither importer's knowledge leaks into the other's file. Note the
+> wizard also holds asset-shaped strings today — the file label, the "Nothing to import" copy, the
+> ignored-columns wording that derives from `ASSET_EXPORT_COLUMNS` — so parameterising means finding
+> those, not only the two actions. **`KNOWN_UNIMPORTED_COLUMNS` in particular is asset-specific and
+> derived from the asset export**; the employee export has its own columns and its own answer.
+>
+> **E-9. Reuse the shared machinery; do not copy it.** This phase has removed four hand-written twins
+> already (`text()` vs `cellText`, two copies of the tag rule, two `toDay`s, a retyped
+> `IMPORT_OPTIONS`). `refKey`, `cellText`, the row cap, `groupByCause`, `blockSpec` and the
+> **UTC-midnight date convention Task 8 measured** are all shared already — the date rule in particular
+> is `parseDateCell`'s and it is currently private to `import-assets.ts`, so **export it rather than
+> writing a second one**, and a `joinedAt` that disagrees with `purchasedAt` about what a spreadsheet
+> date means is a defect waiting for a bug report. Same for the diff: `assetDiff`'s absent-key-vs-`null`
+> contract (`src/lib/asset-diff.ts`) is the shape an employee update patch needs too — an absent column
+> must leave a stored value alone, and a present-but-blank cell is an intentional clear.
+>
+> **And the structural rule this phase keeps re-learning:** put the pure parts where a test can reach
+> them. `buildAssetRefs` was extracted from `resolveAssetRefs` for this, `assetDiff` was extracted out of
+> a `"use server"` module for this, and `hasDiverged` was extracted from a component for this — three
+> tasks, three defects that lived in unreachable code. The employee resolver's map-building and the row
+> rules should be pure and unit-tested from the start rather than extracted after a review finds
+> something in them.
+>
+> **On the draft's own Step 2 list:** its thirteen assertions are good and should all survive, with #9
+> re-pointed at `bad-employment` and #7/#8 folded into `missing-required` carrying a column detail. Its
+> note that `m365Status` and `offboardingAt` are deliberately not importable is **right, and one of its
+> two reasons is wrong** — `m365Status` is not only written by the M365 sync path, the edit form writes
+> it too (`employeeSchema`). Keep the exclusion, fix the reason: it is a synced status whose authority
+> lives outside a spreadsheet, and `offboardingAt` is derived (E-3), not typed.
 
 The brief's second importer. It reuses `import-vocabulary` and the wizard; only the column spec, the
 refs and the write differ.
