@@ -3605,8 +3605,68 @@ git commit -m "feat(import): the employee importer, on the shared vocabulary"
 > rather than hand-edit. And give the file input a real accessible label so `getByLabel(/Spreadsheet/)`
 > is a rule rather than a CSS guess — Task 11 already did, but assert it rather than trusting it.
 
+> ### AMENDED AFTER EXECUTION (`644f1c0`, `af6d564`, `8e7fc80`) — what shipped, and the three things the plan got wrong.
+> **Shipped: 20 tests, ten fixtures, and two neighbouring spec files repaired.** All 123 e2e tests
+> pass. Every item 1–12 landed, plus the employee half (T-2), an empty-sheet branch, the divergence
+> render (T-5) and an audit-export assertion the plan's item list omitted — see A-4.
+>
+> **A-1. Three fixtures became ten, and item 4's "four verdicts" became three verdicts plus two
+> block causes.** T-1 already established that `assets-mixed.xlsx` could not carry a duplicate serial;
+> what the banner did not say is that removing that row leaves the mixed file with only ONE block
+> cause, and "groups the blocked ones biggest-first" is then unassertable — one group is trivially
+> first. So the mixed file carries two `bad-status` rows and one `unknown-category` row, giving two
+> groups of different sizes, and the ordering assertion is a real `toHaveText([...])` on the sequence
+> rather than two independent visibility checks. The serial case moved to its own PAIR of fixtures
+> (`assets-serial-new.xlsx`, `assets-serial-clash.xlsx`), applied in that order, exactly as T-1
+> directed. Added beyond the plan: `assets-empty.xlsx` (V-5's "Nothing to import" branch, which
+> nothing else reaches), `assets-divergence.xlsx` (T-5), and three employee fixtures (T-2).
+>
+> **A-2. `getByRole("alert")` is unusable in this application, on any page.** Next mounts a
+> permanently present, normally empty `#__next-route-announcer__` carrying `role="alert"`, so an
+> alert-role query always resolves to two elements and dies of strict mode before it ever sees the
+> banner it was written for. The row-cap refusal is matched by TEXT instead — through
+> `rowCapRefusal(IMPORT_ROW_CAP + 1)`, never a literal, so the sentence cannot drift from the cap.
+> Same for `idsRefusalText(IDS_CAP + 1)` on the 413. Worth knowing before the next spec reaches for
+> an alert role.
+>
+> **A-3. The plan never said to mutation-test this task, and it should have.** Nine inert assertions
+> were found in this phase and three of them were inside tests written to close earlier inert ones, so
+> "the test passes" was never going to be enough. Five mutations were run, each reverted after:
+> both filtered exports reduced to their `where`-only cut (10 rows against a screen showing 3, and 7
+> against 3 — the shipped bug's exact signature, on both halves); the no-op early return in
+> `applyAssetImport` removed; `updatedAt` floated with the counts left honest and no audit row (which
+> is what proved the `updatedAt` leg specifically, since the audit-delta assertion fires first); the
+> `offboardingAt` stamp dropped; and the mid-flight Prisma create removed from the divergence test.
+> All five failed in the expected place. **Any future task adding an assertion this phase's reviews
+> would have called load-bearing should do the same — the plan should ask for it explicitly.**
+>
+> **A-4. The plan's item list covers three of the four export routes.** Items 8–12 assert assets,
+> employees and the farewell report; `/audit/export` appears nowhere, even though the plan's own
+> header counts four routes. Added as a fifth export test, matched the same way as the other two
+> filtered ones: `/audit?q=import-create`'s on-screen count against `/audit/export?q=import-create`'s
+> row count. It is a weaker guard than items 11 and 12 (the audit cut IS expressible in SQL, so both
+> sides share `buildAuditWhere` and cannot diverge the way `filteredEmployees` did) — recorded so the
+> next reader knows it is cheap insurance, not a second instance of that bug class.
+>
+> **A-5. Two neighbouring spec files needed repair, and one of them proves §6a rule 61 wrong.**
+> Inserting a 3.3-minute spec file fifth of nine surfaced three latent races in `it-core.spec.ts`, all
+> of which passed standalone. Two were ordinary headroom. The third is the interesting one: **rule
+> 61's stated fix — "wait for the field's expected INITIAL value, which proves the controlled
+> component is mounted from props" — is not a hydration signal at all**, because the server renders
+> that same value into the HTML. Two further proxies were measured and also pass pre-hydration: the
+> FILLED value (`fill()` writes the DOM directly), and the filled value SURVIVING a beat (nothing
+> rebinds the input until hydration runs). That last one produced the worst possible outcome — the
+> click submitted the ORIGINAL value, `updateAsset` no-op'd, the button flashed "✓ Saved", and
+> `/history` said "No changes recorded": a green pass over a silently lost edit. Replaced with
+> React's own `__reactFiber$…` key, probed on the INPUT rather than its ancestor form (hydration walks
+> parent-to-child, so a hydrated `<form>` does not imply a hydrated `<input>`, and it is the input's
+> fiber that delegated `onChange` dispatch looks up). Separately, `auth-shell.spec.ts`'s one
+> non-helper sign-in was on the 5s expect budget rather than the 30s navigation budget; not
+> positional, and fixed with headroom.
+
 **Files:**
 - Create: `e2e/import-export.spec.ts`, `e2e/fixtures/make.ts`, and the generated fixtures
+- Also modified (A-5): `e2e/it-core.spec.ts`, `e2e/auth-shell.spec.ts`
 
 - [ ] **Step 1: Generate the fixtures with the app's own writer**
 
@@ -3683,6 +3743,37 @@ git commit -m "test(e2e): import and export, including every refusal"
 ---
 
 ### Task 14: Full battery and close-out
+
+> ### AMENDED AFTER EXECUTION — the real numbers, and the e2e suite no longer fits one foreground run.
+> **`tsc` clean · `lint` clean · 759 unit tests / 44 files · `build` clean · 123 e2e, all passing ·
+> `docker compose --profile prod build` clean.** Task 13 added 20 e2e tests (103 → 123) and zero unit
+> tests, correctly: it is the e2e task, and its subject matter — a wizard's rendered verdicts, a
+> download's row count against a screen's — is exactly what `vitest.config.ts` says is Playwright's
+> job. Unit stayed at 759, the figure Task 12 closed on.
+>
+> **The e2e suite now takes ~16.5 minutes and cannot be run in one foreground invocation here.** The
+> plan's Step 1 assumes `npx playwright test --workers=1` in one go; §7's estimate of "~5 minutes" is
+> two phases stale (Task 10 measured 8.2, this is 16.5). A single run exceeds the 10-minute ceiling on
+> a foreground command in this environment, and §7 is explicit that backgrounding a Playwright run is
+> the wrong answer — an unreaped run races its own `beforeAll` reseed against yours. **Run it in
+> three parts, each with `--global-timeout` so Playwright ends and cleans up after itself rather than
+> being killed mid-flight:**
+>
+> ```bash
+> npx playwright test e2e/admin.spec.ts e2e/approvals-audit.spec.ts e2e/auth-shell.spec.ts e2e/home-finance.spec.ts --workers=1 --global-timeout=540000
+> npx playwright test e2e/import-export.spec.ts e2e/it-core.spec.ts e2e/kitchen-sink.spec.ts --workers=1 --global-timeout=540000
+> npx playwright test e2e/offboarding.spec.ts e2e/purchases.spec.ts --workers=1 --global-timeout=540000
+> ```
+>
+> 51 + 46 + 26 = 123. Splitting is safe **because every spec file reseeds in its own `beforeAll`** —
+> that is what makes them order-independent, and it is the same property that lets them run
+> alphabetically today. **Say plainly what the split costs**: it does not prove the suite green in one
+> process, and the compile-warmth profile differs from a single run — which is precisely the axis the
+> headroom failures in A-5 live on. A split run that passes is weaker evidence than a single run that
+> passes. If a future environment can hold a 20-minute foreground command, prefer one run.
+>
+> **Do not read `--global-timeout` as a per-test timeout.** It bounds the whole run; a run that hits
+> it reports "N did not run" and exits, which reads like a pass at a glance. Check the count.
 
 - [ ] **Step 1: The battery**
 
