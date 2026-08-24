@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-24 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **PHASE 9 (import / export) IS CODE-COMPLETE on branch `phase-9-import-export` — all 14 tasks done, UNMERGED. Both halves ship: all four export routes, the whole import chain, and 20 e2e tests over them.** · **NOTHING IS PUSHED: `main` is 72 commits ahead of `origin/main` and the branch is 61 ahead of that — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted — the branch is finished and waiting on that call.** · Battery, all green at the phase close: `tsc` · `lint` · **759 unit tests / 44 files** · `build` · **123 e2e** · `docker compose --profile prod build`. 8 migrations, none pending. **⚠ THE E2E SUITE NO LONGER FITS ONE FOREGROUND RUN — ~16.5 minutes now, up from 8.2 at Task 10. Run it in three parts; the exact commands and why splitting is safe are in §0 item 7.**
+**Last updated:** 2026-08-24 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **PHASE 9 (import / export) IS COMPLETE AND MERGED to `main`** (`--no-ff`, `7284c10`); `phase-9-import-export` deleted. Both halves ship: all four export routes, the whole import chain, and 20 e2e tests over them. · **NOTHING IS PUSHED: `main` is ~135 commits ahead of `origin/main` — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Pushing is the user's decision and is UNMADE; never push unprompted.** · Battery, all green at the phase close: `tsc` · `lint` · **759 unit tests / 44 files** · `build` · **123 e2e** · `docker compose --profile prod build`. 8 migrations, none pending. **⚠ THE E2E SUITE NO LONGER FITS ONE FOREGROUND RUN — ~16.5 minutes now, up from 8.2 at Task 10. Run it in three parts; the exact commands and why splitting is safe are in §0 item 7.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -16,14 +16,16 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 **Phase 9 is finished. The next unit of work is PLANNING Phase 10** — there is no half-done task
 anywhere, and nothing to pick up mid-flight.
 
-1. **The branch is code-complete and waiting on a decision that is not yours.**
-   `phase-9-import-export` holds all 14 tasks, green, **61 commits ahead of `main`**, and `main` is
-   **72 ahead of `origin/main`**. **Count both** (`git rev-list --count origin/main..main`) rather than
-   trusting these numbers — every correction to this line is itself a commit, so the figure chases
-   itself. Nothing has been pushed since the Phase 1–7 merge on 2026-08-19; that is not a problem, it
-   is a standing decision. **The user treats merging and publishing as separate choices and asks for
-   each explicitly — never push or merge unprompted.** The repo is public: never commit `.env` or any
-   real secret.
+1. **`main` holds everything, and one decision is still outstanding: the push.**
+   Phase 9 was merged `--no-ff` as **`7284c10`** and `phase-9-import-export` is deleted, exactly as
+   Phase 8 closed. There is no feature branch — **start Phase 10 by cutting a fresh one from `main`.**
+   `main` is roughly **135 commits ahead of `origin/main`**; **count it**
+   (`git rev-list --count origin/main..main`) rather than trusting that number, since every correction
+   to this line is itself a commit and the figure chases itself. Nothing has been pushed since the
+   Phase 1–7 merge on 2026-08-19. That is not a problem, it is a standing decision: the user treats
+   merging and publishing as separate choices and asks for each explicitly. **Merging Phase 9 was
+   asked for; pushing has not been — never push unprompted.** The repo is public: never commit `.env`
+   or any real secret.
 
 2. **Bring the environment up:** `docker compose up -d db` → `npx prisma migrate deploy` →
    `npm run db:seed` → `preview_start` name `app-dev`. **8 migrations, none pending.** Phase 9 added
@@ -98,9 +100,11 @@ anywhere, and nothing to pick up mid-flight.
      inert ones.** Task 13 answered this by mutation-testing its five load-bearing assertions — see
      rule 78 for the method, and use it.)
 
-6. **State this session left behind (2026-08-24, Task 14's close):** working tree **clean**, **no dev
-   server running** (zero `node.exe` processes), `inventory-db-1` **up**, **8 migrations, none
-   pending**. **No scratch files anywhere in the repo**; `backups/` holds only the unrelated
+6. **State this session left behind (2026-08-24, Phase 9's merge):** on **`main`**, working tree
+   **clean**, no feature branch, **no dev server running** (zero `node.exe` processes),
+   `inventory-db-1` **up**, **8 migrations, none pending**. The merged tree is byte-identical to the
+   branch tip it came from (`git diff` empty), which is why the 123-test e2e result was not re-run
+   after the merge — `tsc`, `lint`, the 759 unit tests and `build` were. **No scratch files anywhere in the repo**; `backups/` holds only the unrelated
    pre-existing `inventory-20260814-071255.dump`. `test-results/` and `playwright-report/` are
    gitignored and may hold artifacts from the last run.
 
@@ -236,7 +240,7 @@ the farewell-sheet e2e both drive — and every non-ACTIVE employee carries `off
 (This sentence used to begin "On the Phase 7 branch"; that branch is deleted and its seed is now the
 only seed, so the qualifier was stale and is dropped.)
 
-## 4. What's DONE (Phases 1–8 on `main`; Phase 9 complete on `phase-9-import-export`)
+## 4. What's DONE (Phases 1–9, all on `main`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -360,7 +364,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 9 — import / export (COMPLETE, all 14 tasks on `phase-9-import-export`, UNMERGED)**
+**Phase 9 — import / export (COMPLETE, all 14 tasks, MERGED to `main` as `7284c10`)**
 
 **THE IMPORT CHAIN IS COMPLETE, from uploaded file to written row, on two entities.** Read it in order,
 because each stage exists to make the next one honest:
@@ -593,11 +597,11 @@ minute:
 - **Phase 8 — the Admin workspace. COMPLETE and MERGED** (`e5a5730`). What it delivered is §4; the
   invariants it established are §6a. Two things remain outstanding and neither is code: **the push
   decision, which is the user's and unmade**, and **two purely visual checks** listed at the end of §4.
-- **Phase 9 — import / export. COMPLETE, all 14 tasks, on `phase-9-import-export`. UNMERGED.**
+- **Phase 9 — import / export. COMPLETE and MERGED** (`--no-ff`, `7284c10`); `phase-9-import-export` deleted.
   `docs/superpowers/plans/2026-08-21-phase-9-import-export.md` (14 tasks, **15 recorded scope
   decisions**, every shipped task carrying an `AMENDED` banner, several carrying two or three). Both
-  halves ship — see §4. **Nothing about the feature is outstanding; what is outstanding is the merge
-  and push decision, which is the user's.**
+  halves ship — see §4. **Nothing about the feature is outstanding; what is outstanding is the push
+  decision, which is the user's and unmade.**
 - **Phase 10 — polish. NOT YET PLANNED, and it is next.** Split out of Phase 9 on 2026-08-21 because
   the two halves share almost no code. Four items: the printable 3×4 A4 label sheet with scan codes,
   USB-scanner polish so a scan ticks the matching offboarding wizard row, the deployment README, and
