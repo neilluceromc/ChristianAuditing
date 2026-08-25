@@ -121,8 +121,13 @@ export function LabelSheet({ rows }: { rows: LabelRow[] }) {
               297mm, so a fifth row would push this onto a second sheet and
               a ruler on a different sheet proves nothing about this one. */}
           <div style={{ position: "absolute", left: `${PAGE_MARGIN_MM}mm`, bottom: "2.5mm", display: "flex", alignItems: "center", gap: "2mm", fontSize: "2.4mm", color: "#667085" }}>
-            <span style={{ display: "block", width: `${CALIBRATION_MM}mm`, height: "1.5mm", background: "#101828" }} />
-            <span>
+            {/* flexShrink: 0 is load-bearing: without it, the flex container
+                shrinks this bar to make room for the text sibling and the
+                bar quietly measures short of CALIBRATION_MM. A ruler that
+                lies about its own length is worse than no ruler — it tells
+                an operator to "fix" a scaling problem that doesn't exist. */}
+            <span style={{ display: "block", width: `${CALIBRATION_MM}mm`, height: "1.5mm", flexShrink: 0, background: "#101828" }} />
+            <span style={{ minWidth: 0 }}>
               this bar is exactly {CALIBRATION_MM}mm &mdash; measure it. If it is short, the print
               dialog is scaling: set Scale 100% and Margins None.
             </span>
