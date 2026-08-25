@@ -95,7 +95,19 @@ export function LabelSheet({ rows }: { rows: LabelRow[] }) {
                   flexDirection: "column",
                   justifyContent: "space-between",
                   overflow: "hidden",
-                  border: "0.2mm dashed #C4CAD4",
+                  // OUTLINE, not border: a border participates in the box
+                  // model, so `LABEL_USABLE_MM` (cell width minus padding
+                  // only) would be 0.4mm wider than this cell's real content
+                  // box and the widest barcodes would clip against
+                  // `overflow: hidden` — an unscannable code that looks
+                  // finished. An outline paints outside the box without
+                  // consuming layout space, so the content box is exactly
+                  // `LABEL_CELL_MM.width - 2 * LABEL_PADDING_MM`, matching
+                  // what `label-geometry.ts` already assumes. The grid has
+                  // no gaps, so adjacent cells' outlines coincide on the
+                  // shared edge — a slightly bolder shared guide line, not a
+                  // doubled one, which is the desired look here.
+                  outline: "0.2mm dashed #C4CAD4",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5mm", minWidth: 0 }}>
@@ -119,17 +131,48 @@ export function LabelSheet({ rows }: { rows: LabelRow[] }) {
               ABSOLUTELY POSITIONED, inside the page's own bottom margin --
               NOT a grid row: 4 rows x 69.25mm + 20mm padding is exactly
               297mm, so a fifth row would push this onto a second sheet and
-              a ruler on a different sheet proves nothing about this one. */}
-          <div style={{ position: "absolute", left: `${PAGE_MARGIN_MM}mm`, bottom: "2.5mm", display: "flex", alignItems: "center", gap: "2mm", fontSize: "2.4mm", color: "#667085" }}>
+              a ruler on a different sheet proves nothing about this one.
+              BUDGET: this box's total height must never exceed
+              PAGE_MARGIN_MM (10mm) minus its own `bottom` offset (2.5mm) =
+              7.5mm — that is the exact clearance between this box's bottom
+              edge and the first row of label cells above it. maxHeight +
+              overflow: hidden enforce that budget no matter how many lines
+              the caption wraps to under a different fallback font; a wider
+              font that used to wrap the caption to 2 lines could wrap it to
+              3 under body's line-height and land inside the grid instead of
+              being absorbed by leading. A caption edit must stay inside the
+              budget or accept truncation — never remove the cap. */}
+          <div
+            style={{
+              position: "absolute",
+              left: `${PAGE_MARGIN_MM}mm`,
+              bottom: "2.5mm",
+              maxHeight: "7.5mm",
+              overflow: "hidden",
+              display: "flex",
+              alignItems: "center",
+              gap: "2mm",
+              fontSize: "2.4mm",
+              lineHeight: 1.3,
+              color: "#667085",
+            }}
+          >
             {/* flexShrink: 0 is load-bearing: without it, the flex container
                 shrinks this bar to make room for the text sibling and the
                 bar quietly measures short of CALIBRATION_MM. A ruler that
                 lies about its own length is worse than no ruler — it tells
                 an operator to "fix" a scaling problem that doesn't exist. */}
             <span style={{ display: "block", width: `${CALIBRATION_MM}mm`, height: "1.5mm", flexShrink: 0, background: "#101828" }} />
+            {/* "Printed at 100%" scopes the claim to the printed sheet: a
+                CSS millimetre is not a physical millimetre on screen, where
+                display DPI and browser zoom both move it — the on-screen
+                banner already says "on the sheet" for the same reason. The
+                remedy also names paper size, not just scale: a short bar
+                can equally mean Letter was selected for an A4 sheet, whose
+                fix is choosing A4, not Scale 100%. */}
             <span style={{ minWidth: 0 }}>
-              this bar is exactly {CALIBRATION_MM}mm &mdash; measure it. If it is short, the print
-              dialog is scaling: set Scale 100% and Margins None.
+              Printed at 100%, this bar is exactly {CALIBRATION_MM}mm &mdash; measure it. If it is
+              short, check Scale 100%, Margins None and A4 paper in the print dialog.
             </span>
           </div>
         </div>

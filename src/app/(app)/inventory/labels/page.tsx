@@ -6,7 +6,7 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { PrintButton } from "@/components/ui/print-button";
 import { LabelSheet } from "@/components/inventory/label-sheet";
 import { BULK_MAX } from "@/lib/inventory-list";
-import { labelPages } from "@/lib/label-geometry";
+import { CALIBRATION_MM, labelPages } from "@/lib/label-geometry";
 
 export default async function LabelsPage({
   searchParams,
@@ -64,15 +64,19 @@ export default async function LabelsPage({
             {rows.length} label{rows.length === 1 ? "" : "s"} · {sheets} sheet{sheets === 1 ? "" : "s"}
           </p>
           {/* A stale selection must not silently print fewer stickers than the
-              operator counted. */}
+              operator counted. Cause-neutral (A-13's class): `ids.length -
+              assets.length` also counts an id that never existed, e.g. a
+              hand-edited `?ids=` — "no longer exist" would be false for
+              that case, "not found" is exact either way. */}
           {missing > 0 && (
-            <Banner tone="attention" title={`${missing} selected asset${missing === 1 ? "" : "s"} no longer exist${missing === 1 ? "s" : ""} and ${missing === 1 ? "was" : "were"} skipped.`} />
+            <Banner tone="attention" title={`${missing} selected asset${missing === 1 ? "" : "s"} ${missing === 1 ? "was" : "were"} not found and skipped.`} />
           )}
           <Banner tone="neutral" title="Before you print">
-            Set <span className="font-mono">Scale: 100%</span> and{" "}
-            <span className="font-mono">Margins: None</span> in the print dialog. Then measure the
-            100mm bar on the sheet — if it is short, the browser scaled the page and the stickers will
-            not line up.
+            Set <span className="font-mono">Scale: 100%</span>,{" "}
+            <span className="font-mono">Margins: None</span>, and{" "}
+            <span className="font-mono">Paper size: A4</span> in the print dialog. Then measure the{" "}
+            {CALIBRATION_MM}mm bar on the sheet — if it is short, one of those three settings is
+            wrong and the stickers will not line up.
           </Banner>
         </div>
       </div>
