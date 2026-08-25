@@ -4,7 +4,7 @@
 
 **Goal:** Ship the printable 3×4 A4 asset-label sheet with real scannable barcodes, make a USB scan tick the matching row in the offboarding wizard, sweep every route with axe, and write a deployment README that has actually been executed.
 
-**Architecture:** Four independent items. The label sheet is a pure encoder (`src/lib/code128.ts`) plus pure geometry (`src/lib/labels.ts`) plus a Server-Component print route that reuses the two existing print surfaces' pattern. The scanner is a pure verdict function (`src/lib/scan.ts`) plus a thin client listener and a context that lets `ItemDecision` react. The axe work is two one-component fixes plus a route-table sweep spec. The README is a verification task, not a writing task.
+**Architecture:** Four independent items. The label sheet is a pure encoder (`src/lib/code128.ts`) plus pure geometry (`src/lib/label-geometry.ts`) plus a Server-Component print route that reuses the two existing print surfaces' pattern. The scanner is a pure verdict function (`src/lib/scan.ts`) plus a thin client listener and a context that lets `ItemDecision` react. The axe work is two one-component fixes plus a route-table sweep spec. The README is a verification task, not a writing task.
 
 **Tech Stack:** Next.js 15 App Router · React 19 · Prisma 6 / Postgres 16 · Tailwind v4 · vitest (node-only) · Playwright · `@axe-core/playwright`. **No new dependencies** — the Code 128 encoder is hand-rolled precisely to avoid §7's npm-on-Windows lockfile hazard.
 
@@ -50,8 +50,8 @@ npx tsc --noEmit && npm run lint && npm run test && npm run build
 |---|---|---|
 | `src/lib/code128.ts` | create | Pure Code 128-B encoder. Module widths only; knows nothing about mm, SVG or assets. |
 | `src/lib/code128.test.ts` | create | Hand-verified vectors, charset bounds, the `11n + 35` identity. |
-| `src/lib/labels.ts` | create | Pure sheet geometry: mm constants, pagination into 12-up pages, fit-to-width module sizing. |
-| `src/lib/labels.test.ts` | create | Pagination boundaries, module fit, the scan-quality floor. |
+| `src/lib/label-geometry.ts` | create | Pure sheet geometry: mm constants, pagination into 12-up pages, fit-to-width module sizing. |
+| `src/lib/label-geometry.test.ts` | create | Pagination boundaries, module fit, the scan-quality floor. |
 | `src/components/inventory/label-sheet.tsx` | create | Server Component: the 3×4 grid, inline SVG barcodes, calibration ruler. |
 | `src/app/(app)/inventory/labels/page.tsx` | create | Role guard, `?ids=` parse, three refusals, fetch, render. |
 | `src/components/ui/print-button.tsx` | create (move) | Moved from `src/components/employees/print-button.tsx`. |
@@ -73,6 +73,63 @@ npx tsc --noEmit && npm run lint && npm run test && npm run build
 ---
 
 ### Task 1: The Code 128-B encoder (TDD)
+
+> ### AMENDED AFTER REVIEW — the mutation table below MISSED THE MUTATION THAT MATTERS, plus six smaller findings.
+> Task 1 shipped as `c9fb99f` and both reviews passed it on spec, but the quality review then
+> **demonstrated a live mutant that leaves all 8 tests green**: weighting the checksum from the right
+> (`sum += values[i] * (values.length - i)`) coincides exactly with the correct weighting for the
+> one-character `"A"` fixture, and for `BR-LT-0148` it yields checksum 8 instead of 17 — invisible to a
+> run-count assertion and to a module sum that is **145 for any checksum value**, because every Code 128
+> pattern sums to 11 modules by construction. Weighting from the wrong end is one of the two classic
+> Code 128 checksum bugs; every printed label would carry a bad check digit and no test could see it.
+>
+> **A-1 (fix): assert the checksum group for the real tag.** Add to the real-tag test:
+> `expect(mods.slice(-13, -7)).toEqual([1, 2, 3, 2, 2, 1]);` — checksum value 17, hand-computed from the
+> symbology alone (`104 + 34*1 + 50*2 + 13*3 + 44*4 + 52*5 + 13*6 + 16*7 + 17*8 + 20*9 + 24*10 = 1459`;
+> `1459 % 103 = 17`; `PATTERNS[17] = "123221"`). Negative indices deliberately: STOP is always the last
+> 7 runs, so `-13..-7` is the checksum group whatever the tag's length. **Add this mutation to the table
+> below.** Asserting the whole 79-element array instead would assert the implementation against itself
+> and prove far less.
+>
+> **A-2 (correction to my own justification):** that assertion does **not** pin the ten `PATTERNS` rows
+> the tag's characters use. The checksum is computed from character *values* (`code - 32`) and their
+> weights, never from those rows. It pins the ten value mappings, the weight sequence across ten
+> positions, the mod-103 reduction, and `PATTERNS[17]`. Do not overstate it.
+>
+> **A-3 (fix): the test name overstates.** "encodes a real asset tag to the measured width" reads as
+> encoding correctness while asserting two scalars invariant under every checksum value. With A-1 added
+> the name becomes honest; without A-1 it should say "sizes", not "encodes".
+>
+> **A-4 (fix): `code128ModuleCount` and `code128Modules` disagree about their domain.**
+> `code128Modules("")` throws, but `code128ModuleCount(0)` returns 35, `(-1)` returns 24 and `(1.5)`
+> returns 51.5. Task 2 divides `LABEL_USABLE_MM` by the result and then blesses it as `encodable`, so an
+> empty tag would pass the geometry and throw in the encoder — the checklist's own "a rule and its
+> surface that only partly agree". Guard `charCount` to an integer >= 1.
+>
+> **A-5 (fix): make the charset test assert the range it names.** It checks two endpoints. Loop
+> `c = 32..126`, asserting each single-character symbol is 25 runs summing to 46. That exercises
+> `PATTERNS` rows 0-95 plus each checksum row — **96 of 107 rows** — turning a one-time hand
+> verification of the table into a property a future typo cannot survive.
+>
+> **A-6 (fix): the out-of-charset message is unreadable for invisible characters.** A TAB renders as
+> `"<tab>" cannot be encoded`. Interpolate the code point as well, and make the empty-string message say
+> "Code 128-B" like its sibling.
+>
+> **A-7 (note, no change): the second test is a strict subset of the first.** `slice(12, 18)` on `"A"`
+> is contained in the whole-array assertion above it, so it kills no mutant the first test misses. Keep
+> it as documentation of where the checksum lives; do not count it as coverage.
+>
+> **A-8 (note for Task 3): both throw paths are unreachable from the label route** — every write path
+> validates `/^BR-[A-Z]{2}-\d{4}$/` (`inventory/actions.ts:147`, `import-assets.ts:366`). **But no DB
+> CHECK constraint enforces it**, so that is an application invariant rather than a guarantee. State the
+> reasoning in Task 3 rather than leaving the page looking under-defended, and note the blast radius: a
+> throw inside a Server Component rendering up to 200 labels **500s the entire sheet** rather than
+> dropping one barcode. Task 3's renderer must treat an unencodable tag the same soft way it treats a
+> too-fine one.
+>
+> **A-9 (note): this repo is CRLF.** A mutation applied with `\n`-based patterns can silently fail to
+> apply, and a mutation that did not apply looks exactly like a passing suite. Assert the file actually
+> changed before trusting a mutation result. This bit the spec reviewer once already.
 
 **Files:**
 - Create: `src/lib/code128.ts`
@@ -248,23 +305,33 @@ git commit -m "feat(labels): a hand-rolled Code 128-B encoder, verified against 
 ### Task 2: Sheet geometry and pagination (TDD)
 
 **Files:**
-- Create: `src/lib/labels.ts`
-- Test: `src/lib/labels.test.ts`
+- Create: `src/lib/label-geometry.ts`
+- Test: `src/lib/label-geometry.test.ts`
 
-**The decision this task encodes.** A *fixed* module width caps tag length at 11 characters — one more
-than today's `BR-XX-0000` — which is a cliff, not headroom. So the module width is **computed to fit**
-the usable label width, with a floor below which a barcode stops being readable and is omitted
-entirely rather than printed unscannable.
+**The decision this task encodes, with its rationale corrected.** An earlier draft justified
+fit-to-width as avoiding an 11-character cliff. **That argument is moot**: `TAG_SHAPE`
+(`/^BR-[A-Z]{2}-\d{4}$/`) fixes every tag at exactly **10** characters on both write paths, so a fixed
+0.33 mm module would always fit and the shrink branch is unreachable through the application.
+
+Two better reasons to keep it anyway, and be honest that these are the reasons. First, **no database
+CHECK constraint enforces the tag format** — it is an application invariant, so a longer tag is
+unproducible but not impossible. Second, and decisively, *some* width check is needed regardless: with
+no check at all a 13-character tag renders 57.9 mm into a 53.3 mm cell and silently overflows the
+die-cut. Fit-to-width is barely more code than refuse-if-too-wide and degrades gracefully instead.
+
+**So the shrink and floor branches are DEFENSIVE, not routine.** Their tests reach them only through
+inputs (`"A".repeat(16)`, `"A".repeat(40)`) that no storable tag can be. Say so in the module's own
+comment, so a later reader does not mistake unreachable branches for live ones.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// src/lib/labels.test.ts
+// src/lib/label-geometry.test.ts
 import { describe, expect, it } from "vitest";
 import {
   LABELS_PER_PAGE, LABEL_CELL_MM, LABEL_USABLE_MM, MIN_MODULE_MM, PREFERRED_MODULE_MM,
   barcodeFit, labelPages,
-} from "./labels";
+} from "./label-geometry";
 
 describe("sheet geometry", () => {
   it("is a 3x4 grid on A4 inside a 10mm page margin", () => {
@@ -339,13 +406,13 @@ describe("barcodeFit", () => {
 
 - [ ] **Step 2: Run it and confirm it fails**
 
-Run: `npx vitest run src/lib/labels.test.ts`
-Expected: FAIL — cannot resolve `./labels`.
+Run: `npx vitest run src/lib/label-geometry.test.ts`
+Expected: FAIL — cannot resolve `./label-geometry`.
 
 - [ ] **Step 3: Write the implementation**
 
 ```ts
-// src/lib/labels.ts
+// src/lib/label-geometry.ts
 import { code128ModuleCount } from "./code128";
 
 /**
@@ -415,7 +482,7 @@ export function barcodeFit(tag: string): BarcodeFit {
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-Run: `npx vitest run src/lib/labels.test.ts`
+Run: `npx vitest run src/lib/label-geometry.test.ts`
 Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Mutation-test (rule 78)**
@@ -430,7 +497,7 @@ Expected: PASS, 11 tests.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/lib/labels.ts src/lib/labels.test.ts
+git add src/lib/label-geometry.ts src/lib/label-geometry.test.ts
 git commit -m "feat(labels): sheet geometry, pagination, and a module width computed to fit"
 ```
 
@@ -484,7 +551,7 @@ import { code128Modules } from "@/lib/code128";
 import {
   CALIBRATION_MM, LABEL_CELL_MM, LABEL_COLUMNS, LABEL_PADDING_MM, LABEL_USABLE_MM,
   PAGE_MARGIN_MM, PAGE_MM, barcodeFit, labelPages,
-} from "@/lib/labels";
+} from "@/lib/label-geometry";
 
 export interface LabelRow {
   tag: string;
@@ -624,7 +691,7 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { PrintButton } from "@/components/ui/print-button";
 import { LabelSheet } from "@/components/inventory/label-sheet";
 import { BULK_MAX } from "@/lib/inventory-list";
-import { labelPages } from "@/lib/labels";
+import { labelPages } from "@/lib/label-geometry";
 
 export default async function LabelsPage({
   searchParams,

@@ -59,8 +59,8 @@ brief** — deliberately, with reasons.
 |---|---|---|
 | `src/lib/code128.ts` | pure | `code128Modules(text): number[]` — bar/space module widths, plus the module-width constant. No DOM, no React, no Prisma. |
 | `src/lib/code128.test.ts` | unit | Known-good vectors, checksum, charset bounds, mutation-checked. |
-| `src/lib/labels.ts` | pure | Sheet geometry + pagination: `labelPages(tags)` → pages of ≤12, and the mm constants. |
-| `src/lib/labels.test.ts` | unit | Pagination at 0, 1, 12, 13, 200. |
+| `src/lib/label-geometry.ts` | pure | Sheet geometry + pagination: `labelPages(tags)` → pages of ≤12, and the mm constants. |
+| `src/lib/label-geometry.test.ts` | unit | Pagination at 0, 1, 12, 13, 200. |
 | `src/components/inventory/label-sheet.tsx` | Server Component | The 3×4 grid, inline SVG barcodes, calibration ruler. |
 | `src/app/(app)/inventory/labels/page.tsx` | route | Role guard, `?ids=` parse, cap refusal, fetch, render. |
 | `src/components/ui/print-button.tsx` | moved | From `src/components/employees/print-button.tsx`. |
@@ -69,6 +69,11 @@ brief** — deliberately, with reasons.
 already has two unrelated callers (the farewell report and the accountability form) and lives under
 `components/employees/`. This phase adds a third, in `inventory`. Both existing imports are updated in
 the same commit. Nothing about its behaviour changes.
+
+**Naming, corrected during planning.** This module is `label-geometry.ts`, **not** `labels.ts`:
+`src/lib/labels.ts` already exists, holds `M365_CANONICAL` and `APPROVAL_TYPE_LABEL`, and has eight
+importers across the app. An earlier draft of this spec and of the plan both said `labels.ts`, which
+would have had a verbatim implementer clobber it.
 
 ### 1.2 The encoder
 
@@ -101,15 +106,18 @@ cannot double up.
 **The module width is COMPUTED to fit, not fixed.** Code 128-B costs exactly `11n + 35` modules for an
 n-character string (verified by hand against the symbology: start 11 + checksum 11 + stop 13, and
 `BR-LT-0148` measures 145 for n=10). A *fixed* 0.33 mm module would cap tags at
-`(53.3 / 0.33 - 35) / 11 = 11` characters — one character of headroom over today's 10-character
-`BR-XX-0000` format, which is a cliff, not headroom. **Corrected during planning: an earlier draft of
-this spec said 14 characters, which was an arithmetic error.**
+`(53.3 / 0.33 - 35) / 11 = 11` characters. **Corrected twice during planning:** an earlier draft said
+14, which was an arithmetic error; and the "one character of headroom is a cliff" argument that
+replaced it is **moot**, because `TAG_SHAPE` (`/^BR-[A-Z]{2}-\d{4}$/`) fixes every tag at exactly 10
+characters on both write paths. The real reasons to compute the width are that **no DB CHECK constraint
+enforces that format** (it is an application invariant) and that some width check is needed regardless
+— with none, a 13-character tag overflows the cell silently.
 
-So `labels.ts` computes `moduleMm = min(PREFERRED_MODULE_MM, usableMm / modules)` per label. Any tag
+So `label-geometry.ts` computes `moduleMm = min(PREFERRED_MODULE_MM, usableMm / modules)` per label. Any tag
 length then degrades gracefully instead of overflowing the cell. It also needs a **floor**: below about
 0.19 mm (7.5 mil) a cheap handheld stops reading reliably, so a tag long enough to force the module
 under that gets **no barcode and a visible "tag too long to encode" note on the label** rather than a
-printed code nobody can scan. Both bounds are asserted in `labels.test.ts`, so the geometry constants
+printed code nobody can scan. Both bounds are asserted in `label-geometry.test.ts`, so the geometry constants
 and the encoder cannot drift apart.
 
 **The calibration ruler.** A 100 mm scale bar prints on every sheet, labelled. It exists because no
