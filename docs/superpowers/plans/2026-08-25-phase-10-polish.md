@@ -586,6 +586,46 @@ git commit -m "feat(labels): sheet geometry, pagination, and a module width comp
 
 ### Task 3: The label sheet component, the print route, and the PrintButton move
 
+> ### AMENDED BEFORE EXECUTION — `BarcodeFit` is now a discriminated union, and the drafted refusal text is wrong.
+> **A-12. `barcodeFit` returns a discriminated union**, changed during Task 2's review:
+>
+> ```ts
+> export type BarcodeFit =
+>   | { encodable: true; moduleMm: number; widthMm: number }
+>   | { encodable: false };
+> ```
+>
+> The reason is worth knowing rather than working around: the previous shape documented
+> `moduleMm`/`widthMm` as "zero when `encodable` is false", **which was false on the floor branch** —
+> a too-fine tag came back with a real 53.33 mm width and a 0.11 mm module. Anyone who trusted that
+> doc and guarded on `if (fit.widthMm > 0)` would have rendered a full-width, unscannable barcode: the
+> exact "the sticker looks finished" failure `MIN_MODULE_MM` exists to prevent. The union makes
+> `fit.widthMm` fail to typecheck until `fit.encodable` has been narrowed, so **rule 10 is enforced by
+> `tsc` rather than by a comment**.
+>
+> The drafted `Barcode` component below already early-returns on `!fit.encodable`, which narrows
+> correctly — **so its structure needs no change**. What must change is the wording.
+>
+> **A-13. "tag too long to encode" is wrong, because `encodable: false` has three causes.** It covers a
+> too-fine module (a very long tag), a tag with characters Code 128-B cannot encode, and an empty tag.
+> Two of those are not about length. A label that says "too long" about a tag holding a stray character
+> is §6a rule 16 printed onto adhesive paper. Use a cause-neutral line — **"no scannable code"** — and
+> keep it visibly different from a normal label so nobody mistakes it for a finished sticker. The tag
+> text itself still prints: a human can read and type it even when no scanner can.
+>
+> **A-14. Do not add a charset refusal to the page.** Every write path validates
+> `/^BR-[A-Z]{2}-\d{4}$/` (`src/server/modules/inventory/actions.ts:147` and `TAG_SHAPE` at
+> `src/lib/import-assets.ts:366`), so a tag that fails `canEncode128` cannot be created through this
+> application. **But no DB CHECK constraint enforces that**, so it is an application invariant rather
+> than a guarantee — which is exactly why `barcodeFit` is total and the renderer degrades one label
+> instead of throwing. **Write that reasoning into the component**, so a later reader does not mistake
+> the absence of a refusal banner for an oversight.
+>
+> **A-15. `CALIBRATION_MM` must be consumed by this task.** Task 2 exported it and nothing imports it;
+> it is the only constant in `label-geometry.ts` with neither a consumer nor a test. The calibration bar
+> below is its one and only consumer, and if this task ships without it the constant is dead code that
+> reads like an oversight.
+
 **Files:**
 - Create: `src/components/inventory/label-sheet.tsx`
 - Create: `src/app/(app)/inventory/labels/page.tsx`
@@ -649,9 +689,13 @@ function Barcode({ tag }: { tag: string }) {
   const fit = barcodeFit(tag);
   if (!fit.encodable) {
     // An unscannable code is worse than none: the sticker would look finished.
+    // Cause-NEUTRAL wording (A-13): `encodable: false` covers a too-fine
+    // module, a character Code 128-B cannot encode, AND an empty tag, so
+    // "too long" would be false for two of the three. The tag text above
+    // still prints — a human can read and type what no scanner can.
     return (
       <span style={{ fontSize: "2.4mm", color: "#B42318", fontFamily: "monospace" }}>
-        tag too long to encode
+        no scannable code
       </span>
     );
   }
