@@ -1593,6 +1593,41 @@ git commit -m "feat(scan): a scan preselects Returned in the offboarding wizard,
 
 ### Task 7: Scanner e2e
 
+> ### AMENDED BEFORE EXECUTION — one verdict is unreachable in the seed, the collect step has never been axe-scanned, and the guard has a second direction.
+> **A-26. The `blocked` verdict cannot be reached with seeded data.** Measured: zero blocked cards render
+> in the collect step. Dennis Ong's three assets (`BR-LT-0166`, `BR-PH-0312`, `BR-HS-0510`) have no open
+> approvals; the seeded blocker `APR-2039` sits on `BR-LT-0148`, owned by ACTIVE `EMP-0042`; and
+> `APR-2040` has `assetId: null` by design. So the fourth verdict — the one §6a rule 10 exists for, and
+> the one a design card never mentions — is untestable as the seed stands.
+>
+> **This spec must manufacture the blocker**, the same way `e2e/import-export.spec.ts` manufactures its
+> duplicate-serial state rather than adding to the seed: create a `PENDING lifecycle_change_status`
+> approval on one of Dennis's assets through Prisma inside the test, assert the `blocked` banner names
+> its refNo, then let the file's `beforeAll` reseed clean up. **Do not add a fixture to `prisma/seed.ts`**
+> — a dozen specs lean on those three assets being decidable, and Phase 9's T-1 established that
+> building the state with the running code is the better test anyway. (Verified by hand during Task 6's
+> review: inserting such an approval does make the verdict render correctly.)
+>
+> **A-27. No spec has ever run axe on the collect step.** `e2e/offboarding.spec.ts`'s axe calls cover the
+> review step, reservations and policies — never `?step=collect`. Task 6 just added a banner, a live
+> region and a per-card outline to that step, none of which any accessibility check has seen. It happens
+> to be clean right now (0 serious, 0 critical; one pre-existing `heading-order` moderate), so **lock
+> that in** rather than leaving the new DOM unchecked. Reuse `expectNoSeriousAxe` and the pointer-park
+> settle — §6a rule 79's phantom contrast violation applies here as everywhere.
+>
+> **A-28. Assert the focus guard in BOTH directions.** Task 6 shipped a guard that correctly protected
+> the Reason textarea and **silently killed the scanner** whenever focus sat on a `SegmentedControl`
+> radio — which is where focus lands after the ordinary act of clicking an outcome. The same three lines
+> caused both. So one assertion is not enough:
+>
+> - typing into the Reason textarea must stay in the textarea and move no card (the direction the
+>   implementer reasoned about), **and**
+> - **clicking an outcome and then scanning another held tag must still work** (the direction they did
+>   not). This is the regression that shipped; it must have a test.
+>
+> Add a mutation to this task's table: restore the blanket `if (tag === "INPUT") return` and confirm the
+> second test fails. If it does not, the test is not exercising the radio-focus path.
+
 **Files:**
 - Create: `e2e/scanner.spec.ts`
 
