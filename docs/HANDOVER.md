@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-25 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **PHASE 9 (import / export) IS COMPLETE AND MERGED to `main`** (`--no-ff`, `7284c10`); `phase-9-import-export` deleted. Both halves ship: all four export routes, the whole import chain, and 20 e2e tests over them. · **NOTHING IS PUSHED: `main` is ~135 commits ahead of `origin/main` — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Pushing is the user's decision and is UNMADE; never push unprompted.** · Battery, all green at the phase close: `tsc` · `lint` · **759 unit tests / 44 files** · `build` · **123 e2e** · `docker compose --profile prod build`. 8 migrations, none pending. **⚠ THE E2E SUITE NO LONGER FITS ONE FOREGROUND RUN — ~16.5 minutes now, up from 8.2 at Task 10. Run it in three parts; the exact commands and why splitting is safe are in §0 item 7.**
+**Last updated:** 2026-08-25 (Phase 10, Task 9) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS MID-FLIGHT on branch `phase-10-polish` — tasks 1–9 of 11 committed, unmerged. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes.** · **What remains is Task 10 (the deployment README, verified by execution) and Task 11 (battery and close-out).** · **NOTHING IS PUSHED: the branch is 27 ahead of `main`, `main` is 140 ahead of `origin/main` — 167 total. Count it (`git rev-list --count origin/main..HEAD`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery: `tsc` · `lint` · **797 unit / 47 files** · **147 e2e / 12 files**. 8 migrations, none pending. **⚠ `npm run build` and `docker compose --profile prod build` have NOT been re-run since Task 3 — Task 11 owns both.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,157 +13,115 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-**Phase 9 is finished and PHASE 10 IS NOW SPECCED.** The next unit of work is writing Phase 10's
-IMPLEMENTATION PLAN from `docs/superpowers/specs/2026-08-25-phase-10-polish-design.md` (brainstormed
-and approved 2026-08-25, ~10 tasks). There is no half-done task anywhere and nothing to pick up
-mid-flight. **Read the spec before §6** — §6 is the raw entry criteria the spec was built from, and
-where the two disagree the spec wins, because it settled two things the brief got wrong (see its §0).
+**Phase 10 is MID-FLIGHT on `phase-10-polish`: tasks 1–9 of 11 are committed, tasks 10 and 11 remain.**
+Nothing is half-finished — every task ended on a green commit with its plan amended in the same
+session. The next unit of work is a whole task, **Task 10**.
 
-1. **`main` holds everything, and one decision is still outstanding: the push.**
-   Phase 9 was merged `--no-ff` as **`7284c10`** and `phase-9-import-export` is deleted, exactly as
-   Phase 8 closed. There is no feature branch — **start Phase 10 by cutting a fresh one from `main`.**
-   `main` is roughly **135 commits ahead of `origin/main`**; **count it**
-   (`git rev-list --count origin/main..main`) rather than trusting that number, since every correction
-   to this line is itself a commit and the figure chases itself. Nothing has been pushed since the
-   Phase 1–7 merge on 2026-08-19. That is not a problem, it is a standing decision: the user treats
-   merging and publishing as separate choices and asks for each explicitly. **Merging Phase 9 was
-   asked for; pushing has not been — never push unprompted.** The repo is public: never commit `.env`
-   or any real secret.
+1. **`git checkout phase-10-polish`.** It is **27 commits ahead of `main`**, and `main` is **140 ahead
+   of `origin/main`** — 167 total unpushed. **Count them** (`git rev-list --count origin/main..HEAD`)
+   rather than trusting those numbers; every correction to this line is itself a commit. Nothing has
+   been pushed since the Phase 1–7 merge on 2026-08-19, deliberately: **the user treats merging and
+   publishing as separate decisions and asks for each explicitly. Never push or merge unprompted.** The
+   repo is public — never commit `.env` or any real secret.
 
 2. **Bring the environment up:** `docker compose up -d db` → `npx prisma migrate deploy` →
-   `npm run db:seed` → `preview_start` name `app-dev`. **8 migrations, none pending.** Phase 9 added
-   exactly one (Task 9) and it is applied.
+   `npm run db:seed`. **8 migrations, none pending**; Phase 10 adds none. `npm run db:seed` runs freely.
 
-   **`npm run db:seed` ran freely all through Phase 9** — several times a session, never blocked. §3's
-   classifier note reads "is blocked"; treat it as "may be". If it ever is, the cheap in-session route
-   to a fresh database is `npx playwright test e2e/auth-shell.spec.ts --workers=1` (~60s, 15 tests,
-   reseeding via `execSync` in `beforeAll`, which is never blocked).
+   ⚠️ **Docker Desktop cannot be started from a terminal.** It needs the interactive desktop session and
+   an elevation prompt. If `docker info` fails with
+   `npipe:////./pipe/dockerDesktopLinuxEngine … cannot find the file specified`, **ask the user to start
+   it** — `Start-Process "Docker Desktop.exe"` launches and silently exits. This cost twenty minutes.
 
-   **Two dependencies came in at Task 1** (`write-excel-file`, `read-excel-file`) with the lockfile
-   regenerated inside Alpine per §7's procedure. If `node_modules` looks stale, `npm ci` — an
-   `npm install` on Windows is what §7's hazard is about.
+3. **Read `docs/superpowers/plans/2026-08-25-phase-10-polish.md`, Task 10, and its spec
+   (`docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`).** Every task carries an `AMENDED`
+   banner — **A-1 through A-33** — recording what the plan got wrong. Read the banner before the task
+   body; in several cases the banner reverses the body.
 
-3. **Read §6 for Phase 10's entry criteria**, then §6a. §6 is four items and two of them have **no
-   server surface at all**, which is exactly what makes them easy to under-plan. §6a is now 80 rules;
-   the **checklist in item 5 below is the distilled version** — run it against every task you execute
-   and read §6a's entry for whichever rule it points at.
+4. **Resume at Task 10 (the deployment README), then Task 11 (battery and close-out).**
 
-4. **Brainstorming is DONE; go straight to `superpowers:writing-plans`** against
-   `docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`. Phases 8 and 9 were both planned
-   this way and both plans were wrong in ways the reviews caught; that is the process working, not
-   failing. **Still read the brief cards (`1m`, `7g`) and the actual source files before writing each
-   task** — Phase 9's plan invented fields that do not exist **three separate times** because it was
-   written from memory of the schema rather than the schema, and the spec caught a fourth instance of
-   the same thing in the brief itself (a label-sheet entry point whose data model does not exist).
+   **Task 10 is a VERIFICATION task, not a writing task**, and the plan says so because §6 predicted it
+   would slip otherwise. Write `README.md` (currently two lines, and the public face of a public repo),
+   then **prove it from a clean state**: fresh `git clone` into a temp dir, fresh `.env` from
+   `.env.example` with newly generated secrets, `docker compose --profile prod build`, `up`, migrate,
+   seed, sign in, tear down. Use a **different compose project name** (`docker compose -p inv-readme-test …`)
+   so it cannot touch the working database, and `down -v` afterwards. Anything that does not work gets
+   fixed **in the README**, not footnoted.
 
-   **The one number to carry into planning:** in Phase 9, **every single one of the fourteen tasks'
-   plan texts was wrong in a way that would have shipped a defect** — fourteen for fourteen — and the
-   reviews, not the implementations, are where correctness came from. In five consecutive tasks an
-   implementer caught something wrong in an AMENDMENT written to fix an earlier error. **Say so in
-   every implementer prompt: treat the instructions, including the banners, as a draft to check.** The
-   tasks whose prompts said that are the tasks that found things.
+   Facts it must carry, all currently true and scattered: the compose profile · the loopback-only db ·
+   secret generation including `SECRET_ENCRYPTION_KEY` · additive SQL migration dirs (**`prisma migrate
+   reset` is blocked and unnecessary**; `npm run db:seed` is the sanctioned reset) · the worker service ·
+   the seeded accounts pointing at `SEED_PASSWORD` in `prisma/fixtures.ts`, **stating it is `admin123`,
+   that it is 8 characters where signup requires 10, and that it must change before the app is reachable
+   from anywhere but localhost** · the npm-on-Windows lockfile hazard with its exact Alpine command ·
+   troubleshooting, **including "Docker Desktop is not running"** · and **plainly, that Entra SSO does
+   not work** (the provider registers when three env vars are set but no `signIn` callback maps a
+   profile to a `User`, so a successful login arrives with no role).
 
-5. **THE CHECKLIST — the single most useful thing in this doc.** Every one of Phase 8's and Phase 9's
-   twenty-eight tasks hit at least one of these, and **almost none was caught by the unit suite** —
-   most were found by a fresh reviewer reading a sibling function, or by running the real thing against
-   a real database. The root cause is nearly always the same: **a rule and its surface that only partly
-   agree.** Rules 15 and 8 were each reproduced on a NEW page *after* being written down here, which is
-   why this is a checklist to run rather than a lesson to have absorbed.
+5. **Execution mode: subagent-driven, and the user asked for it explicitly.** `superpowers:subagent-driven-development`.
+   Fresh implementer per task, then review. Tasks 1–4 used two reviewers; 5–9 used one, escalating only
+   if the first found something structural. **The reviews are where correctness came from** — see item 7.
 
-   - **Does the page consume EVERY refusal its rule module can return** — not just the one the design
-     card names? (rule 10 — **five instances, and it is the rule Phase 9 broke in every single task
-     that paired a rule with a page**. Phase 9 Task 13's e2e is the first thing that actually asserts
-     the inverse: the import Results step is now checked against block causes the design card never
-     mentions.)
-   - **Does the rule permit the SAFE direction?** (rule 14. Turning a dangerous thing off is never the
-     dangerous direction.)
-   - **Is any context being smuggled into an audit diff as a from-equals-to key?** (rules 8 and 19.
-     `/audit` renders diff **key names** into an append-only table. Context goes in the entity label.
-     An import's audit diff is a from-null transition, never a from-equals-to.)
-   - **Can `/audit` NAME the entity type this task introduces?** (rule 20. `entityLabels` in
-     `src/server/modules/audit/queries.ts` **and** `AUDIT_ENTITY_TYPES` in `src/lib/audit-list.ts` are
-     two separate places. Three Phase 8 tasks running needed a new branch and the plan scheduled none.)
-   - **Is every write guarded on a column the write actually moves** — or on `updatedAt`? (rules 21,
-     29, 30. Guarding an unchanged column can never fire.)
-   - **Does a comment claim a property the code doesn't have?** (rule 16, **six instances now** —
-     rule 61's own text was the sixth, see rule 76. It applies to user-facing prose exactly as much as
-     to comments, and to THIS DOCUMENT: rule 75.)
-   - **Could this fixture have been produced by the running code?** (rules 51, 52, and now **77** for
-     the good direction — Phase 9 Task 13's fixtures are written by the app's own export column specs
-     precisely so the answer is yes by construction.)
-   - **Does a SUMMARY surface recompute a state that a detail surface already computes properly?**
-     (rule 47. Find that page's expression and call it; don't re-derive it.)
-   - **When two rows must agree, do they agree on the LAST step as well as the middle?** (rule 43. A
-     mirror that agrees on four steps out of five looks authoritative and is wrong exactly when
-     someone is looking.)
-   - **When copying an existing pattern, did you copy ALL of it?** (rules 39, 27.)
-   - **Is a number or a contract string in the UI defined anywhere else?** (rules 26, 37, 38. Task
-     13's spec imports `rowCapRefusal` and `idsRefusalText` rather than retyping either sentence, for
-     exactly this reason.)
-   - **Does the test's fixture actually REACH the branch the test is named after?** (rules 65, 78.
-     **Nine inert assertions were found in Phase 9, three of them inside tests written to close earlier
-     inert ones.** Task 13 answered this by mutation-testing its five load-bearing assertions — see
-     rule 78 for the method, and use it.)
+6. **THE CHECKLIST — run it against every task before calling it done.** Unchanged from Phase 9 and
+   still earning its keep; §0 item 5 of the previous revision has the full list, and §6a is the detail.
+   The four that bit hardest in Phase 10:
+   - **Does the surface consume EVERY refusal its rule can return?** (rule 10.) `barcodeFit` guarded
+     length but not charset, so one bad tag would have 500'd a 200-label sheet.
+   - **Does the test's input reach the branch its name claims?** (rules 65/78.) Four inert assertions
+     this phase, one of them guarding the scanner's central promise.
+   - **Is a number or contract string defined twice?** (rules 26/37/38.) `CALIBRATION_MM` was hardcoded
+     in a banner beside the constant that owns it.
+   - **Does a comment claim a property the code doesn't have?** (rule 16.) Six instances, two of them
+     printed onto adhesive paper, and one that justified a correct decision with an impossible scenario.
 
-6. **State this session left behind (2026-08-24, Phase 9's merge):** on **`main`**, working tree
-   **clean**, no feature branch, **no dev server running** (zero `node.exe` processes),
-   `inventory-db-1` **up**, **8 migrations, none pending**. The merged tree is byte-identical to the
-   branch tip it came from (`git diff` empty), which is why the 123-test e2e result was not re-run
-   after the merge — `tsc`, `lint`, the 759 unit tests and `build` were. **No scratch files anywhere in the repo**; `backups/` holds only the unrelated
-   pre-existing `inventory-20260814-071255.dump`. `test-results/` and `playwright-report/` are
-   gitignored and may hold artifacts from the last run.
+7. **What Phase 10 has cost, and what it bought — read this before deciding how much review to run.**
+   **Thirty-three defects were caught across nine tasks. SIXTEEN of them were in the plan I wrote**, not
+   in the implementations: a module name that would have clobbered `src/lib/labels.ts` and its ten
+   importers, a global `@page` rule that would have regressed two live print surfaces, a test helper
+   that does not exist, **three mutation-table predictions that were simply false**, a scope line that
+   would have shipped a red suite, and a helper that made the test I had asked for impossible to write.
 
-   **The database is NOT pristine — it holds `e2e/purchases.spec.ts`'s leftovers**, because that file
-   is alphabetically last and the final battery run ended there. Measured: **25 assets, 10 employees,
-   9 audit rows** (the seed writes 3), **0 `import-*` audit rows**, **6 purchase requests** (the seed
-   writes 5, so the seed's one-PR-per-state property is gone), 7 approvals, 2 webhook endpoints, 5
-   deliveries, 1 job. That is normal after a battery, not damage. **Reseed before trusting any
-   fixture-dependent read**, and prefer **delta** assertions over absolute audit counts in any new e2e
-   — `AuditEntry` cannot be deleted (a DB trigger forbids it), so that table only ever accumulates.
+   **Not one of the thirty-three would have failed a green test suite.** And **five were findable only
+   by rendering the thing and putting a number on it**: a barcode checksum weighted from the wrong end
+   (all 8 tests green), a calibration ruler measuring 89.38 mm against a declared 100 mm, a barcode
+   clipped 0.4 mm by a border nobody accounted for, a scanner that **silently died** the moment an
+   operator clicked an outcome by hand, and four serious axe violations on routes no spec had ever
+   visited. **Budget for measurement, not just for tests.**
 
-7. **Running the e2e suite, which changed at this phase's close.** It is **123 tests / ~16.5 minutes**
-   and **no longer fits one foreground invocation** here (the ceiling is 10 minutes). §7 is explicit
-   that **backgrounding a Playwright run is the wrong answer** — an unreaped run races its own
-   `beforeAll` reseed against yours and produces FK/unique errors plus a cascade of unrelated timeouts
-   in specs that pass in isolation. Run it in three parts instead, each with `--global-timeout` so
-   Playwright ends and cleans up **after itself** rather than being killed mid-flight:
+8. **State this session left behind (2026-08-25):** on `phase-10-polish`, working tree **clean**, **8
+   migrations none pending**, `inventory-db-1` up. **The database holds `e2e/axe-sweep.spec.ts`'s
+   leftovers** — that file sorts last and reseeds itself, so this is normal drift, not damage. Reseed
+   before trusting any fixture-dependent read. No scratch files in the repo; `backups/` holds only the
+   pre-existing dump.
+
+   ⚠️ **Restart the dev server before any confirmation run.** The one this session used accumulated
+   **3.2 hours of CPU** and a Task 9 agent's sweep stalled against it. §6's Phase 6 lesson is real:
+   a long-lived dev server degrades the suite into phantom failures. Use `preview_stop`/`preview_start`,
+   never raw Bash.
+
+9. **Running the e2e suite — the numbers moved again.** It is now **147 tests across 12 files** (Phase
+   10 added `labels`, `scanner` and `axe-sweep`). It does **not** fit one foreground run. Split it, each
+   part with `--global-timeout` so Playwright reaps itself rather than being killed:
 
    ```bash
    npx playwright test e2e/admin.spec.ts e2e/approvals-audit.spec.ts e2e/auth-shell.spec.ts e2e/home-finance.spec.ts --workers=1 --global-timeout=540000
-   npx playwright test e2e/import-export.spec.ts e2e/it-core.spec.ts e2e/kitchen-sink.spec.ts --workers=1 --global-timeout=540000
-   npx playwright test e2e/offboarding.spec.ts e2e/purchases.spec.ts --workers=1 --global-timeout=540000
+   npx playwright test e2e/import-export.spec.ts e2e/it-core.spec.ts e2e/kitchen-sink.spec.ts e2e/labels.spec.ts --workers=1 --global-timeout=540000
+   npx playwright test e2e/offboarding.spec.ts e2e/purchases.spec.ts e2e/scanner.spec.ts --workers=1 --global-timeout=540000
+   npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
    ```
 
-   51 + 46 + 26 = 123. **Splitting is safe because every spec file reseeds in its own `beforeAll`** —
-   that property is what makes them order-independent in the first place. **Say plainly what it
-   costs:** a split run does not prove the suite green in one process, and its compile-warmth profile
-   differs from a single run — which is the exact axis the headroom failures in rules 76 and 79 live
-   on. A split run that passes is weaker evidence than a single run that passes. If a future
-   environment can hold a 20-minute foreground command, prefer one run.
+   Splitting is safe **because every spec file reseeds in its own `beforeAll`**. Say plainly what it
+   costs: a split run does not prove the suite green in one process, and its compile-warmth profile
+   differs — the axis every headroom failure in this project lives on.
 
-   **`--global-timeout` is not a per-test timeout.** It bounds the whole run, and a run that hits it
-   prints "N did not run" and exits — which reads like a pass at a glance. **Check the count.**
+   ⚠️ **`--global-timeout` is not a per-test timeout.** A run that hits it prints "N did not run" and
+   exits, and its tail reads like a pass. **Check the count.**
 
-8. **Two e2e isolation gotchas that will otherwise cost you an hour.** `-g "some test name"` is **not**
-   a valid isolation for `offboarding.spec.ts` or `import-export.spec.ts`: both have
-   `test.describe.serial` blocks whose tests depend on state earlier tests in the same file create,
-   and only `beforeAll` reseeds. Filtering with `-g` makes the same test fail at a *different, earlier*
-   assertion, which reads like a second bug and is not one. **Run the whole spec file.** And
-   `test-results/` is **wiped by the next run**, so read `error-context.md` before re-running — Task 13
-   lost one failure's error text exactly that way and had to reproduce it from scratch.
+   ⚠️ **NEVER background a Playwright run.** A Task 9 agent did, stalled, and left the controller
+   guessing. An unreaped run races its own `beforeAll` reseed against yours.
 
-9. **Nothing is half-finished in the code.** Every Phase 8 and Phase 9 task ended on a green commit,
-   and each one's plan text and §6a entry were updated in the same session it shipped. Every review
-   finding was either fixed or recorded in §8; none was left silently open.
-
-**Battery growth, for the per-phase figures.** Phase 7 merge: 345 unit / 26 files, 89 e2e. Phase 8
-close: 474 unit / 30 files, 102 e2e in 7.4 min. Phase 9 close: **759 unit / 44 files, 123 e2e in
-~16.5 min** — so Phase 9 added **285 unit tests and 21 e2e**. **91 of those unit tests are in Task 7's
-two rule modules alone**, which is what a module reviewed three times looks like rather than
-thoroughness for its own sake: the first version of that suite had 28 tests, was entirely green, and
-the module it covered carried ten defects. Task 13 added **20 e2e and zero unit tests**, correctly —
-its subject matter (a wizard's rendered verdicts, a download's row count against a screen's) is
-precisely what `vitest.config.ts` says is Playwright's job.
+**Battery at this session's close:** `tsc` · `lint` · **797 unit tests / 47 files** · **147 e2e / 12
+files** (`axe-sweep` 5 tests in 3.8 min; `labels` 9; `scanner` 8). `npm run build` **not** re-run since
+Task 3 — Task 11 owns it, along with `docker compose --profile prod build`.
 
 ---
 
@@ -231,7 +189,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Dev app:** never via Bash — use the Browser-pane preview (`preview_start` name `app-dev`, port 3000). The controller owns this server; subagents must not start one.
 - **Worker:** `npm run worker` (poll loop) or `npm run worker:once` (drain and exit — what e2e uses). In prod it's the compose `worker` service.
 - **NEVER run `npm run build` while a dev server is running** — they share `.next` and it bricks the dev server.
-- **Full battery:** `npx tsc --noEmit && npm run lint && npm run test && npm run build`, then `docker compose --profile prod build` to prove the production image, then the e2e suite. **The e2e half no longer fits one command** — 123 tests, ~16.5 minutes as of Phase 9's close (it was ~5 when this line was written, and 8.2 at Task 10). **The three-part split and the reasoning are in §0 item 7; use those commands.** Whatever you do, **run Playwright in the foreground.** A backgrounded run that is never reaped keeps its own `beforeAll` reseed racing yours, which produces FK/unique errors and a cascade of unrelated timeouts in specs that pass in isolation — diagnose by listing live `node.exe` command lines, not by editing assertions.
+- **Full battery:** `npx tsc --noEmit && npm run lint && npm run test && npm run build`, then `docker compose --profile prod build` to prove the production image, then the e2e suite. **The e2e half no longer fits one command** — **147 tests across 12 files** as of Phase 10 Task 9 (123 at Phase 9's close, 8.2 minutes at Phase 9 Task 10, ~5 when this line was first written). **The split (now FOUR parts, 147 tests across 12 files) and the reasoning are in §0 item 9; use those commands.** Whatever you do, **run Playwright in the foreground.** A backgrounded run that is never reaped keeps its own `beforeAll` reseed racing yours, which produces FK/unique errors and a cascade of unrelated timeouts in specs that pass in isolation — diagnose by listing live `node.exe` command lines, not by editing assertions.
 - **Seeded accounts** (all `@thebackroomop.com`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer). **The password is `SEED_PASSWORD` in `prisma/fixtures.ts` — one owner, imported by `prisma/seed.ts` and by every e2e `login` helper.** It was `ChangeMe123!` hardcoded in fourteen places until 2026-08-24; the user changed it to **`admin123`** for their own local deployment. **Do not hardcode it anywhere** (rules 26/37/38) — a missed copy fails as "wrong email or password", not as the edit it was. **And note the asymmetry:** `signupUser` refuses anything under **10 characters**, so the seeded value is one the app's own signup would reject. Sign-in is unaffected (`authorize` does a plain `bcrypt.compare` with no length rule, which is the right place for that asymmetry — a policy change must never lock out existing accounts), but do not read `SEED_PASSWORD` as evidence of what the policy permits, and do not reuse it as the fixture for a signup test.
 - **Seed contents:** **25 assets** (all 8 statuses; **not one of them has a `serial` — `count(serial)` is 0, and `prisma/seed.ts` never sets one**, which is why Phase 9 Task 13's duplicate-serial fixture had to be built by the importer itself rather than taken from the seed), 10 employees (one equipment policy, "Finance standard", targeting the Finance department — so **three** employees currently have policy gaps: EMP-0042, EMP-0088, EMP-0097. Marites EMP-0042 holds 4 items against that policy and is short **1** required slot; do not read her "1 gap" as the seed's total, which is what misled a Phase 9 task; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **As of Phase 8 Task 12: 2 `WebhookEndpoint` rows** (`hooks.thebackroomop.com/inventory`
 active, subscribed to `approval.executed` + `offboarding.completed`; `legacy.thebackroomop.com/erp-bridge`
@@ -245,7 +203,7 @@ the farewell-sheet e2e both drive — and every non-ACTIVE employee carries `off
 (This sentence used to begin "On the Phase 7 branch"; that branch is deleted and its seed is now the
 only seed, so the qualifier was stale and is dropped.)
 
-## 4. What's DONE (Phases 1–9, all on `main`)
+## 4. What's DONE (Phases 1–9 on `main`; Phase 10 tasks 1–9 on `phase-10-polish`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -368,6 +326,50 @@ scoped feed, so the only one showing the domain pill).
   real product bug: the wizard's locked step-bar entries rendered at 2.4:1 contrast (`text-fg-faint`
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
+
+**Phase 10 — polish (MID-FLIGHT, tasks 1–9 of 11 on `phase-10-polish`, UNMERGED)**
+
+- **T1 · `src/lib/code128.ts`** — a hand-rolled Code 128-B encoder, no dependency. Pure module widths;
+  knows nothing of millimetres, SVG or assets. Its table was verified against an independent
+  from-first-principles enumeration of the legal pattern space, and its checksum is pinned by a
+  hand-computed vector — because weighting it from the wrong end left all 8 tests green.
+- **T2 · `src/lib/label-geometry.ts`** — A4/grid constants, `labelPages`, and `barcodeFit`, which is
+  **total by construction**: `encodable` is the renderer's single guard and covers every reason the
+  encoder would refuse, so one bad tag degrades one label instead of 500ing a 200-label sheet.
+- **T3 · `src/components/inventory/label-sheet.tsx` + `/inventory/labels`** — the printable 3×4 A4
+  sheet. Real inline-SVG barcodes, a **100 mm calibration ruler** (measured at 377.94 px = 100.00 mm on
+  screen, under print emulation, and in a generated PDF), and a named `@page` so the two pre-existing
+  print surfaces keep their margins. `PrintButton` moved to `components/ui/` on its third caller.
+- **T4 · the gate and the entry point** — a `PATH_RULES` entry for `/inventory/labels` **before** the
+  general `/inventory` rule (which admits purchasing and finance), a "Print labels" link in the bulk
+  drawer for an explicit selection only, and `e2e/labels.spec.ts` (9 tests) which **measures** the bar,
+  the page box and the two-sheet break rather than asserting visibility.
+- **T5 · `src/lib/scan.ts`** — the pure four-way scan verdict (`match` / `unknown` / `already-decided` /
+  `blocked`, plus `ignored`), over a minimal structural `ScanItem` rather than the wizard's own type.
+- **T6 · the scanner wiring** — `ScanProvider` (a document keydown buffer, a focus guard, a `{tag,
+  nonce}` context, and a banner for every verdict) plus `ItemDecision` reacting to its own tag. A scan
+  scrolls, highlights, focuses the **card container** (not the Confirm button — an operator's stray
+  Enter on an empty buffer would otherwise file an approval nobody clicked), preselects `RETURNED`,
+  clears the previous reason, **and writes nothing**. Step 0 hoisted `cellText`/`refKey`/`tagKey` into
+  `src/lib/tag-key.ts` so the client bundle stops carrying 873 lines of sheet parsing.
+- **T7 · `e2e/scanner.spec.ts`** (8 tests) — every verdict including a **manufactured** blocker (the
+  seed cannot produce one), the guard asserted in **both** directions, and "writes nothing" proved by a
+  Prisma count delta rather than the absence of a toast.
+- **T8 · the two known moderates** — `CardHeader` is an `h2` (measured: `/` went 1 → 0 heading-order
+  violations), and `SegmentedControl` announces its error. Fifteen e2e assertions hard-coded `level: 3`
+  and had to move with it.
+- **T9 · `e2e/axe-sweep.spec.ts`** — 46 of 47 page routes, grouped by lowest-privilege role, each
+  asserting it **landed** on the intended path before scanning. Found **four serious violations on
+  routes no spec had ever visited**: an `aria-label` on a role-less `<span>`, a 2.57:1 footer, 1.71–1.93:1
+  history cells, and colour-only links in prose. Moderates counted, not fixed (§8).
+
+**What remains: T10 (the deployment README, verified from a clean clone) and T11 (battery, plan
+amendments, handover, close the branch).**
+
+**The number worth carrying out of this phase.** Thirty-three defects across nine tasks, **sixteen of
+them in the plan rather than the implementations**, and **not one would have failed a green suite**.
+Five were findable only by rendering the thing and measuring it. The reviews, not the implementations,
+are again where correctness came from — see §0 item 7.
 
 **Phase 9 — import / export (COMPLETE, all 14 tasks, MERGED to `main` as `7284c10`)**
 
@@ -607,7 +609,15 @@ minute:
   decisions**, every shipped task carrying an `AMENDED` banner, several carrying two or three). Both
   halves ship — see §4. **Nothing about the feature is outstanding; what is outstanding is the push
   decision, which is the user's and unmade.**
-- **Phase 10 — polish. SPECCED (`docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`), plan not yet written. It is next.** Split out of Phase 9 on 2026-08-21 because
+- **Phase 10 — polish. MID-FLIGHT: tasks 1–9 of 11 done** on `phase-10-polish`, unmerged.
+  Spec: `docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`. Plan:
+  `docs/superpowers/plans/2026-08-25-phase-10-polish.md` (11 tasks, **33 amendments A-1…A-33**,
+  every executed task carrying a banner). **Shipped:** the printable 3×4 A4 label sheet with real
+  Code 128-B barcodes and a measured calibration ruler; an IT-only route rule and a bulk-drawer
+  entry point; the offboarding scanner (a scan preselects Returned and writes nothing); the two
+  known moderate axe fixes; and an axe sweep over 46 of 47 routes that found four serious
+  violations on pages no spec had ever visited. **Remaining: Task 10 (deployment README, verified
+  from a clean clone) and Task 11 (battery, plan amendments, handover, close the branch).** Split out of Phase 9 on 2026-08-21 because
   the two halves share almost no code. Four items: the printable 3×4 A4 label sheet with scan codes,
   USB-scanner polish so a scan ticks the matching offboarding wizard row, the deployment README, and
   the full axe pass. **Entry criteria are §6.**
@@ -681,7 +691,7 @@ the battery is unrunnable in one sitting.
 
 ---
 
-## 6a. What Phases 8 and 9 have established (80 rules — read before executing anything)
+## 6a. What Phases 8, 9 and 10 have established (88 rules — read before executing anything)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break. **Phase 8 is finished, but this section is
@@ -1405,6 +1415,58 @@ any task in the phase. All of them were fixtures that the running code could not
     that closes a finding, run the original mutation against it** — that is the only check that
     distinguishes a fix from a re-enactment (rule 67's corollary, and it needed its own entry because
     knowing rule 67 did not prevent any of the three).
+81. **Some defects are only findable by rendering the thing and measuring it, and Phase 10 produced
+    five.** A Code 128 checksum weighted from the wrong end left **all 8 tests green** (the one-character
+    fixture makes both weightings coincide, and every pattern sums to 11 modules so the total is
+    identical for any checksum). A calibration ruler declaring `100mm` rendered at **89.38 mm** because
+    it was a flex item with default `flex-shrink: 1` beside a long caption — valid CSS, correct declared
+    width, and a printed instruction telling the operator to measure it. A barcode overflowed its cell by
+    **0.4 mm** because `LABEL_USABLE_MM` did not account for a `0.2mm` border, clipping part of STOP's
+    trailing bar. A scanner **silently died** the moment an outcome was clicked by hand. And four serious
+    axe violations sat on routes no spec had ever visited. **None would have failed a green suite; none
+    was visible in a code read.** Budget for measurement — render the page, query the DOM, print the PDF,
+    put a number on it — not just for tests.
+82. **Defense in depth makes a layer-1 regression invisible to an outcome assertion.** `/inventory/labels`
+    is guarded by a `PATH_RULES` entry AND the page's own `requireRole`, and `requireRole` redirects to
+    the **same** `ROLE_LANDING` middleware uses. So "finance cannot reach it" passes identically whether
+    the middleware rule is correct, misordered, or deleted — proved by mutation. Two people concluded the
+    blind spot was structural; it is not. **Probe a path the rule covers where no page exists**
+    (`/inventory/labels/no-such-page`): `requireRole` cannot run there, so only middleware can answer, and
+    a misordered rule returns 200 with zero redirect hops. Otherwise **say in the test's name that it is
+    an outcome guard, not a rule guard** — never write "asserted rather than assumed" over an assertion
+    that cannot tell the difference. Phase 9's import specs had this exact overstatement; both are fixed.
+83. **A locator whose role does not exist on the page under test is worse than no assertion.**
+    `expect(getByRole("row", { name: /BR-LT-0166/ })).toHaveCount(0)` guarded the scanner's central
+    promise on a page that renders `Card`s and has no `row` role anywhere. It cannot fail, in any state,
+    and its name says it is guarding something. `toHaveCount(0)` on a vacuous locator is the purest inert
+    assertion there is. **Delete such a locator rather than leaving it as decoration.**
+84. **"Nothing was written" cannot be asserted from the absence of a UI signal.** The UI shows what the
+    happy path renders; a write arriving by another route renders nothing to be absent. The scanner's
+    guard also checked for a toast that only `submit()` fires — so a direct `decideItem()` call produced
+    none and the absence proved nothing. **Assert against the database, as a delta.** And note the second
+    layer: the first fix still passed, because it read the count before the fire-and-forget write landed.
+    A correct assertion can still be inert if it races — settle first (`waitForLoadState("networkidle")`).
+85. **A guard that decides what to IGNORE needs tests in both directions.** The scanner's focus guard
+    correctly protected the Reason textarea and **silently killed the scanner** whenever focus sat on a
+    `SegmentedControl`'s `sr-only` radio — which is exactly where focus lands after clicking an outcome,
+    the ordinary first step of the workflow. **The same three lines caused both**, and only one direction
+    had a test. Whenever a guard bails, ask what it must NOT bail on, and assert that too.
+86. **`@page` is global to every print job in the app.** A drafted `@page { size: A4; margin: 0 }` in
+    `globals.css` would have stripped the page margin from the farewell report and the accountability
+    form, neither of which overrides it. Scope it: `@page name { … }` plus `.thing { page: name }`.
+    Verified in this app — Chromium supports the `page` property, Tailwind v4's pipeline preserves the
+    named at-rule verbatim, and `getComputedStyle(body).page` stays `auto` elsewhere.
+87. **Verify a sweep's coverage against the filesystem, not against its own list.** `e2e/axe-sweep.spec.ts`
+    swept every route it knew about and passed — and `/signup`, a public unauthenticated page, had never
+    been axe-checked by anything, while `/login` had been since Phase 2. Found by diffing the spec's
+    routes against `find src/app -name page.tsx`. **A sweep that passes proves its list is clean, not
+    that the app is.** Same shape as rule 62, one level up. Also: assert each scan LANDED on the intended
+    path — an under-privileged role redirects silently and axe then passes a page you never scanned.
+88. **The muted tokens are already the dimmest tier that clears 4.5:1, so any opacity on top of them
+    fails contrast by construction.** `opacity-40` on `--text-muted` table cells measured **1.71–1.93:1**.
+    There is no lighter compliant shade to retreat to — the fix is full contrast, not a dimmer variant of
+    the same idea. If a design calls for de-emphasis below that tier, it needs a different mechanism
+    (weight, size, position), not transparency.
 75. **This document is a surface, and rule 16 applies to it exactly as it applies to a comment.** §6a
     rule 61 told three tasks to prove hydration by waiting for a server-rendered field's initial value,
     which proves nothing (rule 76). §7's own bullet on the same subject already said the opposite — "a
@@ -1476,6 +1538,9 @@ any task in the phase. All of them were fixtures that the running code could not
 ## 7. Recurring gotchas that have cost real time
 
 - **A fresh dev server has no session, and an agent will not type the seeded password into the login form.** It happened twice in one session. Any check that needs a signed-in browser therefore needs **you** to sign in once at `http://localhost:3000` (`admin@thebackroomop.com`), after which the agent can drive the page normally. **Two workarounds that need no browser at all, and are often better:** call the page's own query directly (`npx tsx` a throwaway script under the gitignored `backups/` that imports e.g. `adminHome()` and prints its output — this is how Task 11's data assertions were verified, and it checks the numbers rather than the pixels); or, for anything the DB can answer, `docker exec inventory-db-1 psql -U inventory -d inventory -c "…"` (note **`-U inventory`**, not `postgres` — that role does not exist and the error is unhelpful). Delete the scratch script afterwards. **A third route, and the best one for behaviour: write a throwaway Playwright spec.** The e2e harness logs in by filling the seed's fixture password (`ChangeMe123!`) from a script — that is the suite's own established mechanism, not an agent typing a human's password — so a temporary spec under `e2e/` can drive a signed-in browser, assert through the DOM, and be deleted afterwards. This is how Task 13 verified its click path, its refusal-by-absence, and its audit row. Name it `zz-*` so it sorts last and cannot perturb the files after it, and remember that **tests in one file share a database and only `beforeAll` reseeds** — Task 13's second test failed purely because its first had already consumed the fixture. Reserve the manual browser for what only the eye shows: layout, contrast, focus order, axe.
+- **A long-lived dev server degrades into stalls, and Phase 10 hit it again.** The server this session used accumulated **3.2 hours of CPU**, and a Task 9 agent's axe sweep stalled against it — the agent then backgrounded the run and ended its turn waiting, leaving nothing reaped. Restarting via `preview_stop`/`preview_start` and re-running took **3.8 minutes**. This is §6's Phase 6 lesson (memory climbed 8.5→12.2 GB, a different set of specs failed each run, all passing in isolation) recurring on a different axis. **Restart the preview before any confirmation run**, and never start or stop a server with raw Bash.
+- **A mutation applied with a `\n`-based pattern can silently fail to apply on this CRLF repo, and a mutation that never applied looks exactly like a passing suite.** This caught three separate agents in Phase 10. **Confirm the file on disk actually changed** (`grep -c` the mutated substring) before trusting any mutation result. Note also that `sed -i` on this setup rewrites the whole file to LF; revert with `git checkout --` rather than un-sedding, and check `file <path>` afterwards.
+- **Playwright's `keyboard.type` produces real trusted key events; a browser-automation `type` action may not.** One agent found `e.key` came back empty from the latter and fell back to `dispatchEvent`, which carries no trusted-event semantics and proves less about a real listener. Use Playwright's own keyboard API for anything testing a key handler, and **say so** if you substitute synthetic dispatch.
 - **The e2e suite no longer fits one foreground run, and the workaround has a sharp edge.** 123 tests, ~16.5 minutes, against a 10-minute ceiling on a foreground command here. **The three-part split, the exact commands, and why splitting is safe are in §0 item 7 — read them there rather than reinventing them here** (rule 75: one owner per fact). The sharp edge is `--global-timeout`: it bounds the whole RUN, not a test, and a run that hits it prints "N did not run" and exits **with a passing-looking tail**. Phase 9's close hit it at test 71 of 123 and the last lines read like a clean finish. **Check the count against 123.** And do not reach for `run_in_background` to get around the ceiling — an unreaped Playwright run races its own `beforeAll` reseed against yours, which produces FK/unique errors and a cascade of unrelated timeouts in specs that pass in isolation.
 - **`test-results/` is wiped by the next Playwright run, so read the artifact before re-running.** `error-context.md` under `test-results/<slug>/` carries the failure message AND a full accessibility snapshot of the page at the moment it failed — which is what identified the lost-keystroke bug in rule 76 (the Model box holding its stored value was the whole tell). Phase 9's close lost one failure's error text by re-running first and had to reproduce it from scratch, at six minutes a go. The directory is gitignored, and the slug is truncated and hashed, so `ls test-results/` rather than guessing the path from the test name.
 - **Browser-pane synthetic clicks often miss React handlers.** A `computer` click at page coordinates can land nowhere because the screenshot frame is scaled (a 1400×900 viewport screenshots at 800×514, so page coords are ~1.75× too large). Dispatching from `javascript_tool` is reliable: `el.click()` on the real element works for buttons AND for React-controlled checkboxes; for text inputs use the native value setter plus an `input` event, since assigning `.value` alone does not notify React. Also: the `Menu` primitive closes on **mousedown** outside, so `document.body.click()` does NOT close it — the next trigger click then toggles it shut and your menu item is gone.
@@ -1549,6 +1614,25 @@ any task in the phase. All of them were fixtures that the running code could not
   is not fragile: the mutation is a single Prisma call between two Playwright actions in one test, and
   removing it was one of Task 13's five mutation checks (the assertions fail without it). It also
   covers the V-1 branch that must NOT promise groups "below" when there are none.
+
+- **Phase 10 — the recorded accessibility debt, counted and deliberately NOT fixed.** The axe sweep
+  (`e2e/axe-sweep.spec.ts`) fails on serious/critical and **counts** everything below that bar. As of
+  Task 9, across 46 of 47 page routes: **`empty-table-header` ×9, `page-has-heading-one` ×2,
+  `landmark-unique` ×1.** Decision 5 of the spec is why these are recorded rather than fixed — the count
+  was unknown when the phase was planned, and committing to fix an uncounted set is how a polish phase
+  stops being polish. The sweep prints this table on every run, so the number is always current. **Any
+  future pass should start by re-reading it rather than trusting these figures.**
+
+- **Phase 10 — link underlining is deliberately inconsistent, and the reason is WCAG.** Seven links in
+  prose now carry a permanent underline; **thirty-seven standalone and in-table links still underline on
+  hover only.** axe's `link-in-text-block` fires only where a link sits inside a block of text and colour
+  is the sole distinguisher — a standalone link or a table cell is not flagged and does not need it.
+  That split is conventional and correct, but it is **visible**, and the design handover has no opinion
+  on it. Recorded so it is not "fixed" into uniformity in either direction without a decision.
+
+- **Phase 10 — `/bootstrap` is the one page route the axe sweep does not cover**, because it 404s once
+  any user exists (asserted in `e2e/auth-shell.spec.ts`). There is nothing to scan in any seeded state.
+  Not a gap; recorded so the 46-of-47 figure is not mistaken for one.
 
 - **Phase 10 spec — purchase → asset receiving does not exist, and it blocks half of the brief's
   label-sheet story.** `design_handover/README.md` card `1m` says labels print "straight from a bulk
