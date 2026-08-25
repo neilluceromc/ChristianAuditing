@@ -13,3 +13,4 @@ uploads/
 /coverage
 *.log
 .DS_Store
+.superpowers/
