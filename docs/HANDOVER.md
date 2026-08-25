@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-24 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **PHASE 9 (import / export) IS COMPLETE AND MERGED to `main`** (`--no-ff`, `7284c10`); `phase-9-import-export` deleted. Both halves ship: all four export routes, the whole import chain, and 20 e2e tests over them. · **NOTHING IS PUSHED: `main` is ~135 commits ahead of `origin/main` — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Pushing is the user's decision and is UNMADE; never push unprompted.** · Battery, all green at the phase close: `tsc` · `lint` · **759 unit tests / 44 files** · `build` · **123 e2e** · `docker compose --profile prod build`. 8 migrations, none pending. **⚠ THE E2E SUITE NO LONGER FITS ONE FOREGROUND RUN — ~16.5 minutes now, up from 8.2 at Task 10. Run it in three parts; the exact commands and why splitting is safe are in §0 item 7.**
+**Last updated:** 2026-08-25 · **Phases 1–7 merged to `main`; `phase-7-offboarding` deleted** · **Phase 8 is MERGED to `main`** (`--no-ff`, `e5a5730`); `phase-8-admin` deleted. · **PHASE 9 (import / export) IS COMPLETE AND MERGED to `main`** (`--no-ff`, `7284c10`); `phase-9-import-export` deleted. Both halves ship: all four export routes, the whole import chain, and 20 e2e tests over them. · **NOTHING IS PUSHED: `main` is ~135 commits ahead of `origin/main` — count it (`git rev-list --count origin/main..main`), don't trust a number in this doc.** · **Pushing is the user's decision and is UNMADE; never push unprompted.** · Battery, all green at the phase close: `tsc` · `lint` · **759 unit tests / 44 files** · `build` · **123 e2e** · `docker compose --profile prod build`. 8 migrations, none pending. **⚠ THE E2E SUITE NO LONGER FITS ONE FOREGROUND RUN — ~16.5 minutes now, up from 8.2 at Task 10. Run it in three parts; the exact commands and why splitting is safe are in §0 item 7.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,8 +13,11 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-**Phase 9 is finished. The next unit of work is PLANNING Phase 10** — there is no half-done task
-anywhere, and nothing to pick up mid-flight.
+**Phase 9 is finished and PHASE 10 IS NOW SPECCED.** The next unit of work is writing Phase 10's
+IMPLEMENTATION PLAN from `docs/superpowers/specs/2026-08-25-phase-10-polish-design.md` (brainstormed
+and approved 2026-08-25, ~10 tasks). There is no half-done task anywhere and nothing to pick up
+mid-flight. **Read the spec before §6** — §6 is the raw entry criteria the spec was built from, and
+where the two disagree the spec wins, because it settled two things the brief got wrong (see its §0).
 
 1. **`main` holds everything, and one decision is still outstanding: the push.**
    Phase 9 was merged `--no-ff` as **`7284c10`** and `phase-9-import-export` is deleted, exactly as
@@ -45,11 +48,13 @@ anywhere, and nothing to pick up mid-flight.
    the **checklist in item 5 below is the distilled version** — run it against every task you execute
    and read §6a's entry for whichever rule it points at.
 
-4. **Plan Phase 10 with `superpowers:brainstorming` first, then `superpowers:writing-plans`.** Phases
-   8 and 9 were both planned that way and both plans were wrong in ways the reviews caught; that is
-   the process working, not failing. Read the brief cards §6 names (`1m`, `7g`) before writing a task —
-   Phase 9's plan invented fields that do not exist **three separate times** because it was written
-   from memory of the schema rather than the schema.
+4. **Brainstorming is DONE; go straight to `superpowers:writing-plans`** against
+   `docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`. Phases 8 and 9 were both planned
+   this way and both plans were wrong in ways the reviews caught; that is the process working, not
+   failing. **Still read the brief cards (`1m`, `7g`) and the actual source files before writing each
+   task** — Phase 9's plan invented fields that do not exist **three separate times** because it was
+   written from memory of the schema rather than the schema, and the spec caught a fourth instance of
+   the same thing in the brief itself (a label-sheet entry point whose data model does not exist).
 
    **The one number to carry into planning:** in Phase 9, **every single one of the fourteen tasks'
    plan texts was wrong in a way that would have shipped a defect** — fourteen for fourteen — and the
@@ -602,7 +607,7 @@ minute:
   decisions**, every shipped task carrying an `AMENDED` banner, several carrying two or three). Both
   halves ship — see §4. **Nothing about the feature is outstanding; what is outstanding is the push
   decision, which is the user's and unmade.**
-- **Phase 10 — polish. NOT YET PLANNED, and it is next.** Split out of Phase 9 on 2026-08-21 because
+- **Phase 10 — polish. SPECCED (`docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`), plan not yet written. It is next.** Split out of Phase 9 on 2026-08-21 because
   the two halves share almost no code. Four items: the printable 3×4 A4 label sheet with scan codes,
   USB-scanner polish so a scan ticks the matching offboarding wizard row, the deployment README, and
   the full axe pass. **Entry criteria are §6.**
@@ -616,9 +621,13 @@ minute:
 
 ---
 
-## 6. Phase 10 entry criteria (not yet planned — this is what the plan must cover)
+## 6. Phase 10 entry criteria (superseded in part by the SPEC — read that first)
 
-**No plan exists yet.** These four items are what the brief and the current state of the code commit
+**A SPEC NOW EXISTS: `docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`.** It was
+brainstormed and approved on 2026-08-25 and it OVERRIDES this section wherever they disagree — most
+importantly it **drops item 1's "or a completed purchase"** (no data model exists for it) and settles
+the scan code as 1-D Code 128, the axe bar, and how the README gets verified. This section is kept as
+the raw entry criteria the spec was reasoned from. **No implementation plan exists yet.** These four items are what the brief and the current state of the code commit
 the next plan to. Source: `design_handover/README.md` cards **`1m`** (label sheet geometry) and **`7g`**
 (scanner rules) — **re-read them**; they carry more detail than is repeated here, and Phase 9's plan
 invented non-existent fields three separate times because it was written from memory of the schema
@@ -1540,6 +1549,17 @@ any task in the phase. All of them were fixtures that the running code could not
   is not fragile: the mutation is a single Prisma call between two Playwright actions in one test, and
   removing it was one of Task 13's five mutation checks (the assertions fail without it). It also
   covers the V-1 branch that must NOT promise groups "below" when there are none.
+
+- **Phase 10 spec — purchase → asset receiving does not exist, and it blocks half of the brief's
+  label-sheet story.** `design_handover/README.md` card `1m` says labels print "straight from a bulk
+  selection **or a completed purchase**". The second is unbuildable: `PurchaseUnit`
+  (`prisma/schema.prisma:326`) carries `description`, `qty` and `unitPrice` and has **no relation to
+  `Asset`**, nothing anywhere creates an Asset from a purchase, and `complete` only flips the request
+  to `COMPLETED`. So a completed purchase has nothing with a tag to put on a sticker. Building it
+  means deciding how many assets a `qty: 5` unit becomes, where their tags come from, what category
+  they land in, and whether it needs an approval — a real feature with schema, actions and audit
+  implications, not polish. **Dropped from Phase 10 by decision, not oversight** (spec §0.2). If it is
+  ever built, the label sheet already accepts `?ids=` and needs no change.
 
 - **Phase 9, Task 13 — what the e2e suite does NOT cover, named so nobody reads 123 green tests as
   "import is fully exercised".** Six gaps, all deliberate, none a defect:
