@@ -34,20 +34,30 @@ const STOP = 106;
 export const CODE128_MODULES_PER_CHAR = 11;
 export const CODE128_FIXED_MODULES = 35;
 
-/** Module count for an n-character string, without encoding it. */
+/**
+ * Module count for an n-character string, without encoding it. Task 2 divides
+ * a physical width by this to decide whether a barcode fits, so it must reject
+ * exactly the inputs `code128Modules` would refuse to produce a symbol for.
+ */
 export function code128ModuleCount(charCount: number): number {
+  if (!Number.isInteger(charCount) || charCount < 1) {
+    throw new Error(`code128ModuleCount expects a positive integer character count, got ${charCount}.`);
+  }
   return CODE128_MODULES_PER_CHAR * charCount + CODE128_FIXED_MODULES;
 }
 
 export function code128Modules(text: string): number[] {
-  if (text.length === 0) throw new Error("Cannot encode an empty string as Code 128.");
+  if (text.length === 0) throw new Error("Cannot encode an empty string as Code 128-B.");
   const values: number[] = [START_B];
   for (const ch of text) {
     const code = ch.codePointAt(0)!;
     // Code 128-B covers ASCII 32..126. Anything else would index past the
     // pattern table and emit a symbol that scans as garbage or not at all.
     if (code < 32 || code > 126) {
-      throw new Error(`"${ch}" cannot be encoded in Code 128-B (only ASCII 32-126).`);
+      const hex = code.toString(16).toUpperCase().padStart(4, "0");
+      throw new Error(
+        `Character U+${hex} (${JSON.stringify(ch)}) cannot be encoded in Code 128-B (only ASCII 32-126).`,
+      );
     }
     values.push(code - 32);
   }

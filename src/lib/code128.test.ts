@@ -10,15 +10,26 @@ describe("code128Modules", () => {
     ]);
   });
 
+  // A strict subset of the whole-array assertion above: it kills no mutant
+  // that test doesn't already kill. Kept only for a localised failure
+  // message when the checksum window specifically breaks — not for coverage.
   it("puts the checksum before STOP, and it is modulo 103", () => {
     // checksum for "A" = (104 + 33*1) % 103 = 34 -> pattern "131123"
     expect(code128Modules("A").slice(12, 18)).toEqual([1, 3, 1, 1, 2, 3]);
   });
 
-  it("encodes a real asset tag to the measured width", () => {
+  it("encodes a real asset tag, checksum included", () => {
     const mods = code128Modules("BR-LT-0148");
     expect(mods).toHaveLength(6 * 10 + 19);
     expect(mods.reduce((a, b) => a + b, 0)).toBe(145);
+    // Hand-computed from the symbology, independent of the implementation:
+    // values (code-32) are B=34 R=50 -=13 L=44 T=52 -=13 0=16 1=17 4=20 8=24.
+    // checksum = (104 + 34*1 + 50*2 + 13*3 + 44*4 + 52*5 + 13*6 + 16*7 + 17*8
+    //   + 20*9 + 24*10) % 103 = 1459 % 103 = 17 -> pattern "123221".
+    // Every pattern sums to 11 modules regardless of which one it is, so the
+    // length/sum assertions above are invariant under checksum value and
+    // can't catch a wrong-direction weighting; this can.
+    expect(mods.slice(-13, -7)).toEqual([1, 2, 3, 2, 2, 1]);
   });
 
   it("always ends with STOP", () => {
@@ -37,9 +48,25 @@ describe("code128Modules", () => {
     }
   });
 
+  it("refuses a character count code128Modules could not have produced a symbol for", () => {
+    expect(() => code128ModuleCount(0)).toThrow();
+    expect(() => code128ModuleCount(-1)).toThrow();
+    expect(() => code128ModuleCount(1.5)).toThrow();
+    expect(() => code128ModuleCount(1)).not.toThrow();
+  });
+
+  // Every single-character symbol is START(6) + char(6) + checksum(6) + STOP(7)
+  // = 25 runs summing to 11+11+11+13 = 46 modules, whichever of the 96
+  // characters and whichever of the 96 checksum rows is involved. Looping the
+  // whole range turns the one-time hand verification of PATTERNS into a
+  // property a future typo in the table can't survive.
   it("accepts the whole printable ASCII range Code 128-B covers", () => {
-    expect(() => code128Modules(" ")).not.toThrow();   // 32, the first
-    expect(() => code128Modules("~")).not.toThrow();   // 126, the last
+    for (let code = 32; code <= 126; code++) {
+      const ch = String.fromCharCode(code);
+      const mods = code128Modules(ch);
+      expect(mods).toHaveLength(25);
+      expect(mods.reduce((a, b) => a + b, 0)).toBe(46);
+    }
   });
 
   // Refuse rather than silently mis-encode: an out-of-charset character would
