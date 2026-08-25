@@ -1,4 +1,4 @@
-import { tagKey } from "./import-assets";
+import { tagKey } from "./tag-key";
 
 /**
  * The offboarding wizard's scan rule. Pure, and deliberately outside the

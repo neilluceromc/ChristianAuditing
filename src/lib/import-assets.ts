@@ -1,6 +1,19 @@
 import type { AssetStatus, EmploymentStatus } from "@prisma/client";
 import { ASSET_STATUSES } from "./inventory-list";
 import type { BlockCause, BlockedRow, ImportOption } from "./import-vocabulary";
+import { cellText, isBlank, refKey, tagKey } from "./tag-key";
+
+/**
+ * Re-exported so every existing caller of `cellText`/`refKey`/`tagKey` from
+ * THIS module keeps working unedited — `import-employees.ts`,
+ * `server/modules/import/asset-actions.ts`, `server/modules/import/resolve.ts`
+ * and this module's own test file all import them from here. The real
+ * definitions moved to `./tag-key` (no imports of its own) so `scan.ts` — the
+ * offboarding wizard's client-side scan rule — can depend on three lines
+ * instead of dragging this whole 873-line sheet-import module onto the
+ * client bundle.
+ */
+export { cellText, refKey, tagKey } from "./tag-key";
 
 /**
  * Sheet header label → canonical field key. Extra sheet columns are ignored.
@@ -297,62 +310,8 @@ export interface AssetPlan {
 
 export type ImportOptions = Record<ImportOption, boolean>;
 
-/**
- * Shared identity for every NAME-keyed lookup (category, type, vendor,
- * employee) — trims, lower-cases, AND collapses internal whitespace runs to
- * one space (R-4, round 2). `trim()` alone strips a SURROUNDING U+00A0 (it's
- * in the spec's WhiteSpace production, so padding was never the problem);
- * an INTERNAL non-breaking space is not touched by `trim()` or
- * `toLowerCase()` — and "Ramon Cruz" pasted from Outlook or a web page into
- * Excel, carrying one, is a routine artefact, not an edge case. Left
- * un-collapsed, that cell blocked as `unknown-assignee` naming a value that
- * was letter-for-letter an employee already in the system, with no visible
- * difference — the worst kind of silent failure, because the offered fix
- * ("Leave as spare") reads as the natural response to a genuinely unknown
- * name. `\s` in a JS RegExp matches U+00A0 (and the rest of Unicode's space
- * separators), so collapsing on that class handles it with no NBSP-specific
- * case. Used on BOTH sides of every lookup this module makes — the map
- * BUILT from the database (`buildAssetRefs`, `resolve.ts`) and the sheet
- * value that CONSULTS it (`planAssetRows` below); doing it on only one side
- * would just trade the old key-shape mismatch for a new one.
- */
-export function refKey(raw: string): string {
-  return raw.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function isBlank(v: unknown): boolean {
-  return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
-}
-
-/**
- * A raw cell → trimmed text, blank/null/undefined all reading as "".
- * Exported so a caller outside this module's row loop — the dry-run action
- * building its tag/serial lookup arrays BEFORE headers are field-mapped —
- * shares this exact rule instead of hand-rolling a twin (round 2: found
- * drifting from this one in argument order, not behaviour, which is exactly
- * how two copies of one rule quietly stop agreeing).
- */
-export function cellText(raw: unknown): string {
-  return isBlank(raw) ? "" : String(raw).trim();
-}
-
-/**
- * The tag lookup key, shared the same way and for the same reason. A tag is
- * trimmed and UPPER-CASED because `createSchema` stores it that way
- * (`actions.ts:147`, `.trim().toUpperCase()`) and every tag in the database
- * is upper-case — while Postgres's unique index is case-sensitive, so a
- * lower-cased sheet tag that misses the map does not error, it plans a CREATE
- * and produces a SECOND record for one physical machine.
- *
- * This existed as two hand-written copies — one keying the `IN` query in
- * `resolve.ts`, one keying the lookup in `planAssetRows` — which is the exact
- * hazard `refKey` and `cellText` were extracted to remove, one level down.
- * Two copies of a key rule agree until the day they don't, and the failure is
- * silent on both sides.
- */
-export function tagKey(raw: unknown): string {
-  return cellText(raw).toUpperCase();
-}
+// cellText / refKey / tagKey moved to `./tag-key` (Phase 10 Task 6, Step 0) —
+// re-exported above so nothing here or in any other caller had to change.
 
 function cellAt(headers: HeaderMatch, cells: unknown[], field: AssetField): unknown {
   const index = headers.map.get(field);
