@@ -1628,6 +1628,40 @@ git commit -m "feat(scan): a scan preselects Returned in the offboarding wizard,
 > Add a mutation to this task's table: restore the blanket `if (tag === "INPUT") return` and confirm the
 > second test fails. If it does not, the test is not exercising the radio-focus path.
 
+> ### AMENDED AFTER EXECUTION — "a scan writes nothing" was asserted with two locators that could not fail.
+> **A-29. The feature's central claim was guarded by an inert assertion, and it took a dedicated
+> inertness audit to see it.** The drafted test asserted "writes nothing" two ways:
+>
+> ```ts
+> await expect(page.getByText(/APR-\d+ created/)).toHaveCount(0);
+> await expect(page.getByRole("row", { name: /BR-LT-0166/ })).toHaveCount(0);
+> ```
+>
+> An auditor made the scan-match effect actually call `decideItem(...)`. A real approval was created —
+> and **both assertions passed.** The first looks for a toast only `submit()` ever fires, so a direct
+> call produces none and its absence proves nothing. The second looks for a **`row` role on a page that
+> renders `Card`s, not a table** — that locator is **structurally vacuous**: it matches nothing on this
+> page in any state, so it passes with zero mutation. The test failed only at its axe line, and only
+> incidentally, because the write's revalidation happened to re-render a contrast-failing link.
+>
+> **Two transferable rules.**
+>
+> 1. **A locator whose role does not exist on the page under test is worse than no assertion**, because
+>    it reads as coverage. `toHaveCount(0)` on a vacuous locator is the purest form of inert assertion
+>    there is — it can never fail, and its name says it is guarding something.
+> 2. **"Nothing was written" cannot be asserted from the absence of a UI signal.** The UI shows what the
+>    happy path renders; a write that arrives by another route renders nothing to be absent. Assert it
+>    against the database, as a **delta** (`e2e/import-export.spec.ts` already does exactly this for its
+>    audit-row count, for exactly this reason). Fixed here with a `db.approval.count({ where: { assetId } })`
+>    before and after, and the vacuous locator **deleted rather than left as decoration**.
+>
+> **Also cleared by the same audit, recorded so nobody re-opens them:** the
+> `blocked`-before-`already-decided` precedence swap is caught by `src/lib/scan.test.ts` rather than any
+> e2e, which is the correct division of labour and not a gap; the manufactured `APR-SCANTEST-BLOCK-1`
+> fixture does not leak, because `scanner.spec.ts` sorts last of all spec files under `--workers=1` and
+> its own `beforeAll` reseeds; and the already-decided test's "wait for the decided card's group to
+> unmount" gate survived `--repeat-each=3`.
+
 **Files:**
 - Create: `e2e/scanner.spec.ts`
 
