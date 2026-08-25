@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { fmtDate } from "@/lib/format";
-import { PrintButton } from "@/components/employees/print-button";
+import { PrintButton } from "@/components/ui/print-button";
 
 const STRIPES = "repeating-linear-gradient(135deg, #EEF1F5 0 6px, #F7F9FB 6px 12px)";
 

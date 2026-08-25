@@ -3,7 +3,7 @@ import { requireUser } from "@/server/auth/guards";
 import { decidedItems, getWizard } from "@/server/modules/offboarding/queries";
 import { OUTCOME_LABEL, OUTCOME_STATUS } from "@/lib/offboarding";
 import { fmtDate, fmtMoney } from "@/lib/format";
-import { PrintButton } from "@/components/employees/print-button";
+import { PrintButton } from "@/components/ui/print-button";
 import { ButtonLink } from "@/components/ui/button-link";
 
 const STRIPES = "repeating-linear-gradient(135deg, #EEF1F5 0 6px, #F7F9FB 6px 12px)";
