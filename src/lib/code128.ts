@@ -46,6 +46,19 @@ export function code128ModuleCount(charCount: number): number {
   return CODE128_MODULES_PER_CHAR * charCount + CODE128_FIXED_MODULES;
 }
 
+/** Whether `code128Modules` would succeed. Exported so callers can refuse a
+ * string BEFORE encoding it rather than catching a throw — the label sheet
+ * renders up to 200 labels in one Server Component, where an escaping throw
+ * costs the whole sheet rather than one sticker. */
+export function canEncode128(text: string): boolean {
+  if (text.length === 0) return false;
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    if (code < 32 || code > 126) return false;
+  }
+  return true;
+}
+
 export function code128Modules(text: string): number[] {
   if (text.length === 0) throw new Error("Cannot encode an empty string as Code 128-B.");
   const values: number[] = [START_B];
@@ -53,7 +66,8 @@ export function code128Modules(text: string): number[] {
     const code = ch.codePointAt(0)!;
     // Code 128-B covers ASCII 32..126. Anything else would index past the
     // pattern table and emit a symbol that scans as garbage or not at all.
-    if (code < 32 || code > 126) {
+    // The range test itself lives in canEncode128 so the two can never disagree.
+    if (!canEncode128(ch)) {
       const hex = code.toString(16).toUpperCase().padStart(4, "0");
       throw new Error(
         `Character U+${hex} (${JSON.stringify(ch)}) cannot be encoded in Code 128-B (only ASCII 32-126).`,
