@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CODE128_FIXED_MODULES, CODE128_MODULES_PER_CHAR, code128Modules, code128ModuleCount } from "./code128";
+import {
+  CODE128_FIXED_MODULES, CODE128_MODULES_PER_CHAR, canEncode128, code128Modules, code128ModuleCount,
+} from "./code128";
 
 describe("code128Modules", () => {
   // Hand-verified against the symbology: START B (211214) + 'A' (111323)
@@ -78,5 +80,19 @@ describe("code128Modules", () => {
 
   it("refuses an empty string rather than emitting a bodyless symbol", () => {
     expect(() => code128Modules("")).toThrow(/empty/i);
+  });
+});
+
+describe("canEncode128", () => {
+  // The 32..126 sweep and the café/tab cases above never sit AT the edge.
+  // `code < 32` mutated to `code < 31` leaves every other test in this file
+  // green, and then barcodeFit would report encodable:true for a tag
+  // code128Modules refuses to encode — the exact 500-the-whole-sheet failure
+  // this module exists to prevent. Pin both boundaries directly.
+  it("pins the charset floor and ceiling exactly", () => {
+    expect(canEncode128(String.fromCharCode(31))).toBe(false); // one below the floor
+    expect(canEncode128(" ")).toBe(true); // 32, the floor itself
+    expect(canEncode128("~")).toBe(true); // 126, the ceiling
+    expect(canEncode128(String.fromCharCode(127))).toBe(false); // one above (DEL)
   });
 });

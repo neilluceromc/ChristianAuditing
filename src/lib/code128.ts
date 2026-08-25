@@ -8,8 +8,9 @@
  * the structural lesson §6a states three times over.
  *
  * Returns MODULE WIDTHS, alternating bar-first: [bar, space, bar, space, ...].
- * It deliberately knows nothing about millimetres, SVG or assets — `labels.ts`
- * owns the physical geometry and `label-sheet.tsx` owns the rendering.
+ * It deliberately knows nothing about millimetres, SVG or assets — the label
+ * geometry module owns the physical geometry and `label-sheet.tsx` owns the
+ * rendering.
  */
 
 /** 107 symbol patterns, index = symbol value. Each is 6 runs except STOP (7). */
@@ -35,9 +36,10 @@ export const CODE128_MODULES_PER_CHAR = 11;
 export const CODE128_FIXED_MODULES = 35;
 
 /**
- * Module count for an n-character string, without encoding it. Task 2 divides
- * a physical width by this to decide whether a barcode fits, so it must reject
- * exactly the inputs `code128Modules` would refuse to produce a symbol for.
+ * Module count for an n-character string, without encoding it. The label
+ * geometry divides a physical width by this to decide whether a barcode fits,
+ * so it must reject exactly the inputs `code128Modules` would refuse to
+ * produce a symbol for.
  */
 export function code128ModuleCount(charCount: number): number {
   if (!Number.isInteger(charCount) || charCount < 1) {
@@ -46,17 +48,20 @@ export function code128ModuleCount(charCount: number): number {
   return CODE128_MODULES_PER_CHAR * charCount + CODE128_FIXED_MODULES;
 }
 
+/**
+ * Code 128-B covers ASCII 32..126 (conservative: set B does encode DEL/127,
+ * but nothing this codebase produces needs it, so the ceiling stays at 126).
+ * The single owner of the charset range test — `canEncode128` and
+ * `code128Modules` both defer to it so they can never disagree.
+ */
+const isCode128BChar = (code: number): boolean => code >= 32 && code <= 126;
+
 /** Whether `code128Modules` would succeed. Exported so callers can refuse a
  * string BEFORE encoding it rather than catching a throw — the label sheet
  * renders up to 200 labels in one Server Component, where an escaping throw
  * costs the whole sheet rather than one sticker. */
 export function canEncode128(text: string): boolean {
-  if (text.length === 0) return false;
-  for (const ch of text) {
-    const code = ch.codePointAt(0)!;
-    if (code < 32 || code > 126) return false;
-  }
-  return true;
+  return text.length > 0 && [...text].every((ch) => isCode128BChar(ch.codePointAt(0)!));
 }
 
 export function code128Modules(text: string): number[] {
@@ -64,10 +69,9 @@ export function code128Modules(text: string): number[] {
   const values: number[] = [START_B];
   for (const ch of text) {
     const code = ch.codePointAt(0)!;
-    // Code 128-B covers ASCII 32..126. Anything else would index past the
-    // pattern table and emit a symbol that scans as garbage or not at all.
-    // The range test itself lives in canEncode128 so the two can never disagree.
-    if (!canEncode128(ch)) {
+    // Anything outside the charset would index past the pattern table and
+    // emit a symbol that scans as garbage or not at all.
+    if (!isCode128BChar(code)) {
       const hex = code.toString(16).toUpperCase().padStart(4, "0");
       throw new Error(
         `Character U+${hex} (${JSON.stringify(ch)}) cannot be encoded in Code 128-B (only ASCII 32-126).`,

@@ -44,14 +44,17 @@ export function labelPages(tags: readonly string[]): string[][] {
   return pages;
 }
 
-export interface BarcodeFit {
-  /** Module width to render at, in mm. Zero when `encodable` is false. */
-  moduleMm: number;
-  /** Total symbol width in mm at that module. Zero when `encodable` is false. */
-  widthMm: number;
-  /** False when this tag must render NO barcode at all. */
-  encodable: boolean;
-}
+/**
+ * A discriminated union rather than a flat shape with nullable-by-convention
+ * fields: when `encodable` is false there is no width or module to read, and
+ * making that a type error (rather than a doc comment saying "zero when...")
+ * means a caller can't accidentally render a full-width, unscannable barcode
+ * for a tag that was refused. `fit.widthMm` won't typecheck until `encodable`
+ * is narrowed to `true`.
+ */
+export type BarcodeFit =
+  | { encodable: true; moduleMm: number; widthMm: number }
+  | { encodable: false };
 
 /**
  * Fit-to-width rather than a fixed module.
@@ -63,17 +66,18 @@ export interface BarcodeFit {
  * the whole sheet rather than dropping one barcode.
  *
  * NOTE the shrink and floor branches are DEFENSIVE, not routine: the asset-tag
- * shape (`/^BR-[A-Z]{2}-\d{4}$/`, enforced in `src/lib/import-assets.ts` and
- * `src/server/modules/inventory/actions.ts`) fixes every tag at exactly 10
+ * shape enforced in `src/lib/import-assets.ts` and
+ * `src/server/modules/inventory/actions.ts` fixes every tag at exactly 10
  * characters on both write paths, so nothing the application itself can store
  * reaches them. They exist because no DB CHECK constraint enforces that
- * format — a longer tag is unproducible through the app but not impossible —
+ * shape — a longer tag is unproducible through the app but not impossible —
  * and because without any width check at all a 13-character tag would
  * silently overflow the die-cut.
  */
 export function barcodeFit(tag: string): BarcodeFit {
-  if (!canEncode128(tag)) return { moduleMm: 0, widthMm: 0, encodable: false };
+  if (!canEncode128(tag)) return { encodable: false };
   const modules = code128ModuleCount(tag.length);
   const moduleMm = Math.min(PREFERRED_MODULE_MM, LABEL_USABLE_MM / modules);
-  return { moduleMm, widthMm: modules * moduleMm, encodable: moduleMm >= MIN_MODULE_MM };
+  if (moduleMm < MIN_MODULE_MM) return { encodable: false };
+  return { encodable: true, moduleMm, widthMm: modules * moduleMm };
 }

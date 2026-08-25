@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  LABELS_PER_PAGE, LABEL_CELL_MM, LABEL_USABLE_MM, MIN_MODULE_MM, PREFERRED_MODULE_MM,
+  LABELS_PER_PAGE, LABEL_CELL_MM, LABEL_USABLE_MM,
   barcodeFit, labelPages,
 } from "./label-geometry";
 
@@ -50,36 +50,56 @@ describe("labelPages", () => {
 });
 
 describe("barcodeFit", () => {
-  it("uses the preferred module for a normal tag and stays inside the label", () => {
+  // Every literal below (0.33, 47.85, 0.1925, 22/23) is pinned by hand, not
+  // derived from PREFERRED_MODULE_MM/MIN_MODULE_MM: comparing against the
+  // live constants under test is self-referential — mutating the constant
+  // moves both sides of the assertion together and the test stays green. See
+  // the sibling finding on LABEL_USABLE_MM/LABEL_PADDING_MM above.
+  it("uses a 0.33mm module for a normal tag and stays inside the label", () => {
     const fit = barcodeFit("BR-LT-0148");
-    expect(fit.moduleMm).toBeCloseTo(PREFERRED_MODULE_MM, 6);
+    expect(fit.encodable).toBe(true);
+    if (!fit.encodable) return;
+    expect(fit.moduleMm).toBeCloseTo(0.33, 6);
     expect(fit.widthMm).toBeLessThanOrEqual(LABEL_USABLE_MM);
-    expect(fit.widthMm).toBeCloseTo(145 * PREFERRED_MODULE_MM, 3);
+    expect(fit.widthMm).toBeCloseTo(47.85, 3); // 145 modules * 0.33mm
   });
 
   it("never exceeds the usable width, however long the tag", () => {
     for (const n of [11, 12, 16, 20]) {
       const fit = barcodeFit("A".repeat(n));
+      expect(fit.encodable).toBe(true);
+      if (!fit.encodable) continue;
       expect(fit.widthMm).toBeLessThanOrEqual(LABEL_USABLE_MM + 1e-9);
     }
   });
 
   it("shrinks the module rather than overflowing once the tag is long", () => {
-    expect(barcodeFit("A".repeat(16)).moduleMm).toBeLessThan(PREFERRED_MODULE_MM);
+    const fit = barcodeFit("A".repeat(16));
+    expect(fit.encodable).toBe(true);
+    if (!fit.encodable) return;
+    expect(fit.moduleMm).toBeLessThan(0.33);
+  });
+
+  // The real floor boundary, pinned to literals rather than to the constants
+  // under test: 22 chars (277 modules) fit at 53.333/277 = 0.1925mm, 23 chars
+  // (288 modules) need 53.333/288 = 0.1852mm and get no barcode. Nothing
+  // lands exactly ON 0.19 (that needs 280.7 modules), so >= vs > is
+  // behaviourally unreachable — this pins the number, not the operator.
+  it("encodes at 22 characters and refuses at 23", () => {
+    const fitsOk = barcodeFit("A".repeat(22));
+    expect(fitsOk.encodable).toBe(true);
+    if (fitsOk.encodable) expect(fitsOk.moduleMm).toBeCloseTo(0.1925, 4);
+
+    const fitsBad = barcodeFit("A".repeat(23));
+    expect(fitsBad.encodable).toBe(false);
   });
 
   // The honest refusal: a code too fine to scan is worse than no code, because
-  // it looks like a working sticker.
-  it("omits the barcode when fitting it would go below the scannable floor", () => {
+  // it looks like a working sticker. The numeric boundary is pinned above;
+  // this just confirms the well-past-the-floor case reports unencodable.
+  it("reports unencodable once fitting the tag would fall well below the scannable floor", () => {
     const fit = barcodeFit("A".repeat(40));
-    expect(fit.moduleMm).toBeLessThan(MIN_MODULE_MM);
     expect(fit.encodable).toBe(false);
-  });
-
-  it("still encodes at exactly the floor", () => {
-    const fit = barcodeFit("BR-LT-0148");
-    expect(fit.encodable).toBe(true);
-    expect(fit.moduleMm).toBeGreaterThanOrEqual(MIN_MODULE_MM);
   });
 
   it("refuses an empty tag instead of throwing", () => {
@@ -87,17 +107,30 @@ describe("barcodeFit", () => {
     expect(barcodeFit("").encodable).toBe(false);
   });
 
-  // Storable via raw SQL: no DB CHECK constraint enforces TAG_SHAPE. If this
-  // returned encodable:true, the renderer would throw and take the whole
-  // 200-label sheet down with it.
+  // Storable via raw SQL: no DB CHECK constraint enforces the asset-tag shape.
+  // If this returned encodable:true, the renderer would throw and take the
+  // whole 200-label sheet down with it.
   it("refuses a tag with characters Code 128-B cannot encode, instead of throwing", () => {
     expect(() => barcodeFit("BR-LT-01é")).not.toThrow();
     expect(barcodeFit("BR-LT-01é").encodable).toBe(false);
   });
 
-  it("never throws for any input a database could hold", () => {
-    for (const t of ["", " ", "\t", "BR-LT-0148", "A".repeat(40), "😀"]) {
+  // The two cases above (empty, out-of-charset) and the below-floor and
+  // preferred-module cases each have a dedicated test already; the two
+  // inputs here that aren't covered elsewhere are " " and "\t", so this
+  // checks their actual verdicts rather than only that nothing throws.
+  it("never throws for any input a database could hold, and reports the right verdict", () => {
+    const cases: Array<[string, boolean]> = [
+      ["", false],
+      [" ", true],
+      ["\t", false],
+      ["BR-LT-0148", true],
+      ["A".repeat(40), false],
+      ["😀", false],
+    ];
+    for (const [t, expected] of cases) {
       expect(() => barcodeFit(t)).not.toThrow();
+      expect(barcodeFit(t).encodable).toBe(expected);
     }
   });
 });
