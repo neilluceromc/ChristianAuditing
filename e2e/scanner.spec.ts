@@ -117,9 +117,24 @@ async function openCollect(page: Page) {
 // though the repo convention (and this file's own instructions) is
 // `--workers=1` anyway.
 test.describe.serial("offboarding scanner", () => {
-  test("a scan preselects Returned on the matching item, writes nothing, and the step passes axe", async ({
+  test("a scan preselects Returned on the matching item, files no approval, and the step passes axe", async ({
     page,
   }) => {
+    // The write guard, through Prisma — the house pattern for a fact no
+    // screen reliably shows (e2e/import-export.spec.ts does the same for its
+    // audit-row delta). A DELTA, not an absolute: this file reseeds, but the
+    // approval table still carries seeded rows, so an absolute count would
+    // be brittle. Scoped to this one asset so the assertion means something.
+    //
+    // Two DOM checks were tried here first and both turned out inert: a
+    // toast-absence check (a direct decideItem() call, bypassing submit(),
+    // never fires the toast either way) and a getByRole("row", ...) check
+    // (the collect step renders Cards, not a table — there is no `row` role
+    // on this page at all, so that locator can never match ANYTHING,
+    // mutation or not). Neither would catch a scan that quietly wrote.
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0166" } });
+    const before = await db.approval.count({ where: { assetId: asset.id } });
+
     await login(page, "it@thebackroomop.com");
     await openCollect(page);
 
@@ -127,10 +142,28 @@ test.describe.serial("offboarding scanner", () => {
     await waitForHydration(card.getByRole("radiogroup"));
     await scan(page, "BR-LT-0166");
 
-    // Preselected, not confirmed: the radio is checked and no approval exists.
+    // Preselected, not confirmed: the radio is checked...
     await expect(card.getByRole("radio", { name: "Returned" })).toBeChecked();
+
+    // Give any request the scan might have fired time to actually land
+    // before checking the database. This isn't defensive — verified by hand
+    // with the mutation below (a scan-match effect that fires a real,
+    // un-awaited decideItem()): without this wait, the count check below
+    // raced the write and READ THE "before" STATE, passing on a mutant that
+    // truly does write, with the failure only surfacing later, incidentally,
+    // on the axe check once the revalidated UI landed. A page reload is not
+    // available here (it would lose the in-memory scan state this test is
+    // asserting on), so this waits for the network itself to go quiet
+    // instead — deterministic, unlike a fixed sleep (e2e/auth-shell.spec.ts
+    // uses the same wait for the same reason: to let something fire-and-forget
+    // actually land before asserting on it).
+    await page.waitForLoadState("networkidle");
+
+    // ...and, as a UI-level signal only (not the write guard — see below),
+    // the toast that Confirm's own submit() fires is absent.
     await expect(page.getByText(/APR-\d+ created/)).toHaveCount(0);
-    await expect(page.getByRole("row", { name: /BR-LT-0166/ })).toHaveCount(0);
+    // The write guard itself: no approval was actually filed for this asset.
+    expect(await db.approval.count({ where: { assetId: asset.id } })).toBe(before);
 
     // A-27: nothing has ever run axe on this step. Checked here, with the
     // banner, the aria-live "match" text and the scanned card's outline all
