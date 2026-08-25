@@ -1002,10 +1002,17 @@ git commit -m "feat(labels): the 3x4 A4 label sheet and its print route"
 > });
 > ```
 >
-> Import `CALIBRATION_MM` from `@/lib/label-geometry` rather than writing 377.95 — the pixel figure is
-> derived, but the millimetre figure has an owner (rules 26/37/38). **`toBeCloseTo(…, 1)`** is deliberate:
-> sub-pixel layout rounding is real, a 10% shrink is not subtle, and a tighter tolerance would make this
-> test flaky for no gain.
+> Import `CALIBRATION_MM` from `@/lib/label-geometry` rather than writing 377.95, and import `PAGE_MM`
+> for the page-box assertion rather than retyping 210/297 — the pixel figures are derived, the
+> millimetre figures have an owner (rules 26/37/38).
+>
+> **Correction to this amendment's own text:** it originally justified `toBeCloseTo(…, 1)` as a loose
+> allowance because "a tighter tolerance would make this test flaky". That is backwards — **precision 1
+> means a tolerance of 0.05 px**, which is *tighter* than precision 0's 0.5 px. Measured actuals on
+> Chromium at DSF 1 sit ~0.015 px off (bar 377.9375, page 793.6875 × 1122.515625), so precision 1 passes
+> with ~3× headroom and is not flaky — Chrome's 1/64-px `LayoutUnit` snapping is deterministic. Either
+> precision is defensible; what is not defensible is a comment that describes the tolerance backwards.
+> **State the real numbers and the real headroom.**
 >
 > **Mutation to add to this task's table:** remove `flexShrink: 0` from the bar in
 > `label-sheet.tsx` — this test must fail. If it does not, it is not measuring the bar.
@@ -1021,6 +1028,42 @@ git commit -m "feat(labels): the 3x4 A4 label sheet and its print route"
 > A ruler on only the first sheet proves nothing about the second, which is the whole reason it is
 > absolutely positioned per page rather than rendered once. Verified on the real render: 13 barcodes,
 > "13 labels · 2 sheets", two page boxes.
+
+> ### AMENDED AFTER EXECUTION — the e2e role-gate assertion could not see the rule it was written for.
+> **A-24. Defense in depth makes a layer-1 regression invisible to an outcome assertion, and this
+> plan asserted otherwise.** The label route carries BOTH a `PATH_RULES` entry (middleware, layer 1) and
+> its own `requireRole("admin","it_staff")` (layer 2). `requireRole` redirects to
+> `ROLE_LANDING[user.role]` — **the same destination** middleware uses when `pathAllowedForRole` fails.
+> So "finance cannot reach the label sheet" passes identically whether the middleware rule is correct,
+> misordered, or deleted. Proved by mutation: moving the rule failed the unit test and left the e2e
+> green under `--repeat-each=3`.
+>
+> This plan's mutation table predicted that e2e would fail. **It was wrong**, and the first two people
+> to look at it — the implementer and me — both concluded the blind spot was structural and unclosable.
+> **It is not.** A third reviewer found two discriminators and measured both:
+>
+> - **The redirect happens at a different time and in a different place.** Middleware emits a real
+>   **307 with `Location` before anything renders**; the page guard's `redirect()` lands *after* Next
+>   flushes the streamed shell and the router then navigates **client-side**. The reason the assertion
+>   was blind is therefore precise: `expect(page).not.toHaveURL(…)` is a **negated web-first
+>   assertion**, so it waits out the late client-side settle. A non-retrying read taken the instant
+>   `goto` resolves distinguishes the layers.
+> - **Better, and immune to Next's semantics changing: probe a path the rule covers where no page
+>   exists.** The rule's `(\/|$)` matches `/inventory/labels/no-such-page`; there is no page file
+>   there, so `requireRole` structurally cannot run and only middleware can answer. Measured with the
+>   rule misordered: **200, zero redirect hops, URL unchanged**, for finance and viewer alike.
+>
+> **The general rule, which matters beyond this task:** when two layers refuse the same thing the same
+> way, an outcome assertion cannot attribute the refusal, so it cannot detect one layer failing while
+> the other holds. Either assert the layer in isolation (a unit test on the rule, or a path where only
+> that layer exists) or **say in the test's name and comment that it is an outcome guard, not a rule
+> guard.** Do not write "asserted rather than assumed" over an assertion that cannot tell the
+> difference.
+>
+> **This is a pre-existing pattern, not a new defect.** `e2e/import-export.spec.ts:438-452` has the
+> identical blind spot for the identical reason (both import pages call `requireRole`), and Phase 9's
+> plan claimed that assertion proved the rule. Corrected in the same pass, because leaving one fixed
+> and one wrong is worse than leaving both — the next reader trusts the wrong one.
 
 **Files:**
 - Modify: `src/lib/workspaces.ts`
