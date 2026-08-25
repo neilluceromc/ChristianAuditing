@@ -304,6 +304,87 @@ git commit -m "feat(labels): a hand-rolled Code 128-B encoder, verified against 
 
 ### Task 2: Sheet geometry and pagination (TDD)
 
+> ### AMENDED BEFORE EXECUTION — `barcodeFit` as drafted lets a throwing tag reach the renderer, and that 500s the whole sheet.
+> **A-10.** `code128Modules` has **three** throw paths: empty string, a character outside ASCII 32-126,
+> and (via `code128ModuleCount`, added by Task 1's fix A-4) a character count below 1 or non-integer.
+> The drafted `barcodeFit` derives `encodable` from the **fitted module width alone**, so it covers only
+> the length-driven case. A tag containing an out-of-charset character — storable, because **no DB CHECK
+> constraint enforces `TAG_SHAPE`** — would come back `encodable: true`, and `code128Modules` would then
+> throw inside a Server Component rendering up to 200 labels. **One bad tag would 500 the entire sheet
+> instead of dropping one barcode.** That is §6a rule 10 in its exact classic form: the surface consumes
+> one of the refusals its rule can return.
+>
+> **Two changes follow.**
+>
+> **(a) `code128.ts` gains a predicate, so the charset rule keeps ONE owner.** Add and export:
+>
+> ```ts
+> /** Whether `code128Modules` would succeed. Exported so callers can refuse a
+>  * string BEFORE encoding it rather than catching a throw — the label sheet
+>  * renders up to 200 labels in one Server Component, where an escaping throw
+>  * costs the whole sheet rather than one sticker. */
+> export function canEncode128(text: string): boolean {
+>   if (text.length === 0) return false;
+>   for (const ch of text) {
+>     const code = ch.codePointAt(0)!;
+>     if (code < 32 || code > 126) return false;
+>   }
+>   return true;
+> }
+> ```
+>
+> Then have `code128Modules` **use it** for its own guards rather than re-testing the range, so the two
+> can never disagree — but keep `code128Modules`' throws (they name the offending character, which a
+> boolean cannot). Adding `canEncode128` to `code128.ts` is an in-scope amendment to Task 1's file; note
+> it in this task's commit.
+>
+> **(b) `barcodeFit` becomes TOTAL — it never throws, for any input.** It must return
+> `encodable: false` for an empty tag, for a tag `canEncode128` rejects, and for a fitted module below
+> `MIN_MODULE_MM`; and it must not call `code128ModuleCount` at all when the tag is unencodable, since
+> that now throws for a zero count:
+>
+> ```ts
+> export function barcodeFit(tag: string): BarcodeFit {
+>   // Total by construction: `encodable: false` is the renderer's ONE guard, so
+>   // it has to cover every reason `code128Modules` would refuse, not just the
+>   // width. See A-10.
+>   if (!canEncode128(tag)) return { moduleMm: 0, widthMm: 0, encodable: false };
+>   const modules = code128ModuleCount(tag.length);
+>   const moduleMm = Math.min(PREFERRED_MODULE_MM, LABEL_USABLE_MM / modules);
+>   return { moduleMm, widthMm: modules * moduleMm, encodable: moduleMm >= MIN_MODULE_MM };
+> }
+> ```
+>
+> **Add these tests** to the `barcodeFit` block below:
+>
+> ```ts
+> it("refuses an empty tag instead of throwing", () => {
+>   expect(() => barcodeFit("")).not.toThrow();
+>   expect(barcodeFit("").encodable).toBe(false);
+> });
+>
+> // Storable via raw SQL: no DB CHECK constraint enforces TAG_SHAPE. If this
+> // returned encodable:true, the renderer would throw and take the whole
+> // 200-label sheet down with it.
+> it("refuses a tag with characters Code 128-B cannot encode, instead of throwing", () => {
+>   expect(() => barcodeFit("BR-LT-01é")).not.toThrow();
+>   expect(barcodeFit("BR-LT-01é").encodable).toBe(false);
+> });
+>
+> it("never throws for any input a database could hold", () => {
+>   for (const t of ["", " ", "\t", "BR-LT-0148", "A".repeat(40), "\u{1f600}"]) {
+>     expect(() => barcodeFit(t)).not.toThrow();
+>   }
+> });
+> ```
+>
+> **And add to the mutation table:** replacing `if (!canEncode128(tag))` with `if (false)` must fail the
+> out-of-charset test. If it does not, `encodable` is not actually the renderer's guard.
+>
+> **A-11 (naming).** This module is **`src/lib/label-geometry.ts`**, not `labels.ts`. `src/lib/labels.ts`
+> already exists, holds `M365_CANONICAL` and `APPROVAL_TYPE_LABEL`, and has **eight importers**. Do not
+> create, move or touch it.
+
 **Files:**
 - Create: `src/lib/label-geometry.ts`
 - Test: `src/lib/label-geometry.test.ts`
