@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, reasonRequired, type Outcome } from "@/lib/offboarding";
+import { useScan } from "./scan-provider";
 import { decideItem } from "@/server/modules/offboarding/actions";
 
 /**
@@ -39,6 +40,25 @@ export function ItemDecision({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [scanned, setScanned] = useState(false);
+  const scan = useScan();
+
+  // Acts only on this card's own tag. `nonce` is in the dependency list so
+  // scanning the same tag twice re-triggers (e.g. after changing your mind
+  // and re-scanning). Deliberately does NOT focus the Confirm button: a
+  // scanner sends Enter right after the payload, and if that Enter reached a
+  // Confirm button already focused from THIS card's own scan, or an earlier
+  // one, a native <button> activates on a focused Enter keypress — which
+  // would file an approval from a scan, exactly what this design forbids.
+  // Scroll + highlight give the operator the same "look here" signal without
+  // ever moving focus onto something Enter can activate.
+  useEffect(() => {
+    if (scan.tag !== tag) return;
+    setOutcome("RETURNED");
+    setScanned(true);
+    rootRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [scan.tag, scan.nonce, tag]);
 
   const picked = (OUTCOMES as readonly string[]).includes(outcome) ? (outcome as Outcome) : null;
 
@@ -69,7 +89,15 @@ export function ItemDecision({
   return (
     // named group: one row's controls are addressable on their own, by a
     // screen reader and by the e2e spec alike
-    <div role="group" aria-label={`Decide ${tag}`} className="flex flex-col gap-2">
+    <div
+      ref={rootRef}
+      role="group"
+      aria-label={`Decide ${tag}`}
+      className={
+        "flex flex-col gap-2 rounded-(--radius-card) transition-shadow " +
+        (scanned ? "outline-2 outline-offset-4 outline-accent" : "")
+      }
+    >
       {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
       {error && <Banner tone="fault" title={error} />}
       <div className="flex flex-wrap items-center gap-2">

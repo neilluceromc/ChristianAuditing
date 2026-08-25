@@ -19,6 +19,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { AccountsPanel } from "@/components/offboarding/accounts-panel";
 import { CompleteButton } from "@/components/offboarding/complete-button";
 import { ItemDecision } from "@/components/offboarding/item-decision";
+import { ScanProvider } from "@/components/offboarding/scan-provider";
 import { WizardSteps } from "@/components/offboarding/wizard-steps";
 
 export default async function OffboardingWizardPage({
@@ -219,7 +220,16 @@ export default async function OffboardingWizardPage({
       )}
 
       {step === "collect" && (
-        <div className="flex flex-col gap-4">
+        <ScanProvider
+          items={items
+            .filter((i) => i.held)
+            .map((i) => ({
+              assetId: i.assetId,
+              tag: i.tag,
+              decided: !!i.decision,
+              blockedBy: i.blockedBy?.refNo ?? null,
+            }))}
+        >
           <Banner tone="neutral" title="Each decision is recorded the moment you confirm it">
             Every item becomes its own <span className="font-mono">lifecycle.return</span> request, so a
             half-finished offboarding is still N correct records. Nothing moves until the approval
@@ -320,7 +330,7 @@ export default async function OffboardingWizardPage({
               </>
             )}
           </div>
-        </div>
+        </ScanProvider>
       )}
 
       {step === "accounts" && (
