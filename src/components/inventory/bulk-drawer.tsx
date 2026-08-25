@@ -97,8 +97,20 @@ export function BulkDrawer({
             : `/inventory/export?ids=${selectedIds.join(",")}`}
           className="text-xs text-accent hover:underline"
         >
-          Export this selection as CSV
+          Export this selection as a spreadsheet
         </a>
+        {/* Labels come from an explicit selection only: "all matching" would
+            make one click a 17-sheet print job, and labelling a whole filtered
+            fleet is not a real intent. Absent, not disabled, when there is no
+            selection — the house rule for affordances that cannot act. */}
+        {!allMatching && selectedIds.length > 0 && (
+          <a
+            href={`/inventory/labels?ids=${selectedIds.join(",")}`}
+            className="text-xs text-accent hover:underline"
+          >
+            Print labels for {selectedIds.length} selected
+          </a>
+        )}
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title={error} />}
         <FormField label="Target status" required error={fieldErrors.to}>

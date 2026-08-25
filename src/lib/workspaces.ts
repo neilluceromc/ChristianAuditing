@@ -168,6 +168,11 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // write surface. `roles` additionally excludes viewer even within the IT
   // workspace it shares with /admin/asset-categories and friends.
   { test: /^\/inventory\/import(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+  // Same shape and same reason as /inventory/import's rule directly above:
+  // this MUST precede the general /inventory rule (first-match-wins), because
+  // that rule admits purchasing and finance, and a label sheet is an IT
+  // artifact. Asserted in workspaces.test.ts and in e2e/labels.spec.ts.
+  { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
   // a dead end on the page built for that role. The secrets rule above still
