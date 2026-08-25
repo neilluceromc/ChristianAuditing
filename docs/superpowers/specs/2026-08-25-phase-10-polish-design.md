@@ -98,12 +98,19 @@ Inside each cell: the `BR` mark and model name, the tag in mono, and the barcode
 `@page { size: A4; margin: 0 }`; the grid carries its own margin so the browser's own page margin
 cannot double up.
 
-**The barcode width is a function of tag length, so it has a bound.** Code 128-B costs 11 modules per
-character plus 35 for start/checksum/stop. At 0.33 mm and 53.3 mm of usable width the ceiling is 14
-characters; every tag this app produces is 10 (`BR-XX-0000`, enforced by `TAG_SHAPE` in
-`import-assets.ts`), so there is real headroom — but `labels.ts` must **compute** the width and, if a
-tag ever exceeds the usable area, narrow the module for that label rather than overflowing the cell
-silently. Assert the ceiling in the unit test so the constant and the geometry cannot drift apart.
+**The module width is COMPUTED to fit, not fixed.** Code 128-B costs exactly `11n + 35` modules for an
+n-character string (verified by hand against the symbology: start 11 + checksum 11 + stop 13, and
+`BR-LT-0148` measures 145 for n=10). A *fixed* 0.33 mm module would cap tags at
+`(53.3 / 0.33 - 35) / 11 = 11` characters — one character of headroom over today's 10-character
+`BR-XX-0000` format, which is a cliff, not headroom. **Corrected during planning: an earlier draft of
+this spec said 14 characters, which was an arithmetic error.**
+
+So `labels.ts` computes `moduleMm = min(PREFERRED_MODULE_MM, usableMm / modules)` per label. Any tag
+length then degrades gracefully instead of overflowing the cell. It also needs a **floor**: below about
+0.19 mm (7.5 mil) a cheap handheld stops reading reliably, so a tag long enough to force the module
+under that gets **no barcode and a visible "tag too long to encode" note on the label** rather than a
+printed code nobody can scan. Both bounds are asserted in `labels.test.ts`, so the geometry constants
+and the encoder cannot drift apart.
 
 **The calibration ruler.** A 100 mm scale bar prints on every sheet, labelled. It exists because no
 automated test can detect that Chrome printed at 96% "fit to printable area" — the operator measures it
