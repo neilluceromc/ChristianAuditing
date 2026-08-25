@@ -157,7 +157,7 @@ export function LoadoutView({
       {frozen && (
         <Banner tone="attention" title="Offboarding in progress — slots are frozen">
           No new assignments for a leaver.{" "}
-          <Link href={`/offboarding/${employeeId}`} className="text-accent hover:underline">
+          <Link href={`/offboarding/${employeeId}`} className="text-accent underline hover:text-accent-hover">
             Open the offboarding wizard
           </Link>{" "}
           to collect equipment back.

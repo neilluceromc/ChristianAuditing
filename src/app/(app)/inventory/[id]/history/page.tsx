@@ -34,9 +34,22 @@ export default async function AssetHistoryPage({ params }: { params: Promise<{ i
       <TBody>
         {rows.map((row) => (
           <Tr key={row.key}>
-            <Td mono className={row.first ? "" : "opacity-40"}>{fmtDate(row.at)}</Td>
-            <Td className={row.first ? "" : "opacity-40"}>{row.actor}</Td>
-            <Td mono className={row.first ? "text-[10.5px]" : "text-[10.5px] opacity-40"}>{row.action}</Td>
+            {/*
+              row.first used to drop these three cells to opacity-40 on the
+              repeat rows of a multi-field entry, purely to de-emphasize the
+              duplicate timestamp/actor/action. axe's color-contrast rule
+              caught it as a SERIOUS violation (1.71–1.93:1 against the
+              required 4.5:1) on a route no other spec scanned — and there is
+              no headroom to fix it with a lighter compliant token instead:
+              --text-muted/--text-faint are already the palette's dimmest
+              tier that still clears 4.5:1 on this background (see the
+              tiering note in globals.css), so any opacity on top of them
+              fails. Rendering at full contrast on every row is the fix,
+              not a lighter shade of the same idea.
+            */}
+            <Td mono>{fmtDate(row.at)}</Td>
+            <Td>{row.actor}</Td>
+            <Td mono className="text-[10.5px]">{row.action}</Td>
             <Td mono>{row.field}</Td>
             <Td>
               <span className="font-mono text-xs">

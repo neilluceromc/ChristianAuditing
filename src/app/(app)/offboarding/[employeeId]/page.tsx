@@ -81,13 +81,13 @@ export default async function OffboardingWizardPage({
           >
             {employee.employment === "OFFBOARDED" ? (
               <>Every decision below stays readable, and so does the{" "}
-                <Link href={`/offboarding/${employeeId}/report`} className="text-accent hover:underline">
+                <Link href={`/offboarding/${employeeId}/report`} className="text-accent underline hover:text-accent-hover">
                   farewell report
                 </Link>.
               </>
             ) : (
               <>Set their employment to <span className="font-mono">OFFBOARDING</span> on the{" "}
-                <Link href={`/employees/${employeeId}/edit`} className="text-accent hover:underline">
+                <Link href={`/employees/${employeeId}/edit`} className="text-accent underline hover:text-accent-hover">
                   employee record
                 </Link>{" "}
                 before collecting equipment.
@@ -355,7 +355,7 @@ export default async function OffboardingWizardPage({
                         both by a rejection re-opening a decided item AND by the
                         ?step= URL before anything was decided at all */}
                     {undecided} item{undecided === 1 ? "" : "s"} still undecided — go back to{" "}
-                    <Link href={href("collect")} className="text-accent hover:underline">Collect items</Link>{" "}
+                    <Link href={href("collect")} className="text-accent underline hover:text-accent-hover">Collect items</Link>{" "}
                     before finishing. You can still close the account here.
                   </>
                 )}

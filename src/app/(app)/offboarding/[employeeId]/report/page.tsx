@@ -38,7 +38,12 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
               </p>
             </div>
           </div>
-          <span aria-label="scan code placeholder" className="h-10 w-24" style={{ background: STRIPES }} />
+          {/* aria-label on a bare <span> (no role) is prohibited — SERIOUS
+              under axe, caught on a route no spec scanned before this sweep.
+              role="img" is what actually makes the label legal here, and it
+              matches what this element visually is: a graphic placeholder,
+              not text. */}
+          <span role="img" aria-label="scan code placeholder" className="h-10 w-24" style={{ background: STRIPES }} />
         </header>
 
         <dl className="grid grid-cols-2 gap-x-8 gap-y-1 text-[13px]">
@@ -156,7 +161,12 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
           </div>
         </div>
 
-        <p className="font-mono text-[8.5px] text-[#98A2B3]">
+        {/* #98A2B3 measured 2.57:1 on white — SERIOUS under axe, caught on a
+            route no spec scanned before this sweep. #667085 is the same
+            "quietest compliant tier" already used for every other muted line
+            on this printed sheet (dt labels, table header, empty state) —
+            there is no lighter shade of it that still clears 4.5:1. */}
+        <p className="font-mono text-[8.5px] text-[#667085]">
           {employee.employeeNo} · {decided.length} decision(s) · the HR email is a future handoff, not yet built
         </p>
       </div>

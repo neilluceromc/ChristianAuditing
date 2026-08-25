@@ -49,7 +49,7 @@ export default async function AssetRecordLayout({
         {asset.assignee && (
           <>
             {" · held by "}
-            <a href={`/employees/${asset.assignee.id}`} className="text-accent hover:underline">
+            <a href={`/employees/${asset.assignee.id}`} className="text-accent underline hover:text-accent-hover">
               {asset.assignee.name}
             </a>
           </>
