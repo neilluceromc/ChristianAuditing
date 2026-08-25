@@ -46,7 +46,7 @@ test.describe("home — IT dashboard leads with work, not KPIs", () => {
 
     // Scoped to <main> — the sidebar's nav groups are h3s too ("Overview",
     // "Tracking", …) and would otherwise pollute this list.
-    const headings = page.locator("main").getByRole("heading", { level: 3 });
+    const headings = page.locator("main").getByRole("heading", { level: 2 });
     await expect(headings).toHaveText([
       "Your shift", "Claimed by you", "Fleet", "Age", "Warranty runway", "Jump to",
     ]);
@@ -55,7 +55,7 @@ test.describe("home — IT dashboard leads with work, not KPIs", () => {
     // card is literally the first child of the page's content column (the
     // h1 "Hello, …" lives in a sibling <header>, not this container).
     const firstCard = page.locator("main > div > *").first();
-    await expect(firstCard.getByRole("heading", { level: 3 })).toHaveText("Your shift");
+    await expect(firstCard.getByRole("heading", { level: 2 })).toHaveText("Your shift");
   });
 });
 
@@ -90,12 +90,12 @@ test.describe("home — claims sit above the pool", () => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/");
 
-    const texts = await page.locator("main").getByRole("heading", { level: 3 }).allTextContents();
+    const texts = await page.locator("main").getByRole("heading", { level: 2 }).allTextContents();
     expect(texts.indexOf("Claimed by you")).toBeGreaterThanOrEqual(0);
     expect(texts.indexOf("Claimed by you")).toBeLessThan(texts.indexOf("Fleet"));
 
     const claimsCard = page.locator("main > div > *").filter({
-      has: page.getByRole("heading", { name: "Claimed by you", level: 3 }),
+      has: page.getByRole("heading", { name: "Claimed by you", level: 2 }),
     });
     await expect(claimsCard).toContainText("APR-2039");
   });
@@ -107,9 +107,9 @@ test.describe("home — viewer is read-only", () => {
     await page.goto("/");
 
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Your shift", level: 3 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Your shift", level: 2 })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^Clear "/ })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Fleet", level: 3 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toBeVisible();
   });
 });
 
@@ -283,12 +283,12 @@ test.describe("home — dismissal and focus mode (mutating, serial)", () => {
     await page.getByRole("button", { name: "Focus" }).click();
     await expect(page.getByRole("button", { name: "Show everything" })).toBeVisible({ timeout: 15_000 });
 
-    await expect(page.getByRole("heading", { name: "Your shift", level: 3 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Claimed by you", level: 3 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Fleet", level: 3 })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Age", level: 3 })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Warranty runway", level: 3 })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Jump to", level: 3 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Your shift", level: 2 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Claimed by you", level: 2 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Age", level: 2 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Warranty runway", level: 2 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Jump to", level: 2 })).toHaveCount(0);
     expect(page.url()).not.toContain("focus");
 
     await expectNoSeriousAxe(page);
@@ -296,11 +296,11 @@ test.describe("home — dismissal and focus mode (mutating, serial)", () => {
     // A cookie, not component state — must survive a real reload.
     await page.reload();
     await expect(page.getByRole("button", { name: "Show everything" })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: "Fleet", level: 3 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
     expect(page.url()).not.toContain("focus");
 
     await page.getByRole("button", { name: "Show everything" }).click();
     await expect(page.getByRole("button", { name: "Focus" })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: "Fleet", level: 3 })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toBeVisible({ timeout: 15_000 });
   });
 });

@@ -43,6 +43,7 @@ export function ItemDecision({
   const rootRef = useRef<HTMLDivElement>(null);
   const [scanned, setScanned] = useState(false);
   const scan = useScan();
+  const outcomeErrorId = "outcome-error-" + assetId;
 
   // Acts only on this card's own tag. `nonce` is in the dependency list so
   // scanning the same tag twice re-triggers (e.g. after changing your mind
@@ -119,6 +120,8 @@ export function ItemDecision({
       <div className="flex flex-wrap items-center gap-2">
         <SegmentedControl
           aria-label={`Outcome for ${tag}`}
+          aria-describedby={fieldErrors.outcome ? outcomeErrorId : undefined}
+          aria-invalid={!!fieldErrors.outcome}
           options={OUTCOMES.map((o) => ({ value: o, label: OUTCOME_LABEL[o] }))}
           value={outcome}
           onChange={setOutcome}
@@ -130,7 +133,7 @@ export function ItemDecision({
           {picked ? `creates a lifecycle.return → ${OUTCOME_STATUS[picked]}` : "creates its own request the moment you confirm"}
         </span>
       </div>
-      <FormError>{fieldErrors.outcome}</FormError>
+      <FormError id={outcomeErrorId}>{fieldErrors.outcome}</FormError>
       <FormField
         label="Reason"
         required={picked ? reasonRequired(picked) : false}
