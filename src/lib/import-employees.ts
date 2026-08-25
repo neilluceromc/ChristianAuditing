@@ -1,6 +1,7 @@
 import type { EmploymentStatus } from "@prisma/client";
 import { EMPLOYMENT_STATUSES } from "./employees-list";
 import { cellText, parseDateCell, refKey, type HeaderMatch } from "./import-assets";
+import { isBlank } from "./tag-key";
 import type { BlockCause, BlockedRow } from "./import-vocabulary";
 
 /**
@@ -154,10 +155,6 @@ function cellAt(headers: HeaderMatch<EmployeeField>, cells: unknown[], field: Em
 
 function textAt(headers: HeaderMatch<EmployeeField>, cells: unknown[], field: EmployeeField): string {
   return cellText(cellAt(headers, cells, field));
-}
-
-function isBlank(v: unknown): boolean {
-  return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
 }
 
 /**

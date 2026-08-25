@@ -221,6 +221,7 @@ export default async function OffboardingWizardPage({
 
       {step === "collect" && (
         <ScanProvider
+          canDecide={canDecide}
           items={items
             .filter((i) => i.held)
             .map((i) => ({

@@ -19,7 +19,9 @@
  * cannot be moved without it, and `import-assets.ts`'s `parseDateCell` /
  * `parseCostCell` need this exact rule too. Exporting it here rather than
  * leaving a second copy behind is the same anti-twin reasoning as the three
- * functions below.
+ * functions below — and it is not hypothetical: `import-employees.ts` held a
+ * byte-identical private copy until it was folded onto this one export, so
+ * this comment's claim is actually true rather than aspirational.
  */
 export function isBlank(v: unknown): boolean {
   return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
