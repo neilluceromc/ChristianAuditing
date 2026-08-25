@@ -1364,6 +1364,39 @@ git commit -m "feat(scan): the offboarding scan verdict, pure and four-way"
 
 ### Task 6: Wire the scanner into the wizard
 
+> ### AMENDED BEFORE EXECUTION — hoist the string helpers first, or this task drags 873 lines of sheet parsing across the client boundary.
+> **A-25.** Task 5's `src/lib/scan.ts` reuses `tagKey` from `src/lib/import-assets.ts`, which is right —
+> it is the app's canonical trim-and-upper-case rule, and four hand-written twins of existing rules were
+> removed in the previous phase after every one of them drifted. But `import-assets.ts` is **873 lines**
+> of sheet-header matching, row planning and block-cause vocabulary, and **this task is what puts
+> `scan.ts` on the client side of the boundary** (`ScanProvider` is `"use client"`).
+>
+> A reviewer traced every transitive import and found **nothing server-only and no runtime Prisma** —
+> the Prisma references are `import type`, erased at compile time — so this is not a correctness
+> problem and it does not block anything. It is a "a client bundle carries 873 lines of import
+> machinery to get a three-line helper" problem, and it is far cheaper to fix before the wiring lands
+> than after.
+>
+> **Step 0, before anything else in this task.** Move the three pure string helpers —
+> `cellText`, `refKey`, `tagKey` — out of `import-assets.ts` into a new `src/lib/tag-key.ts`. They are
+> one family, they have **no imports at all**, and they are the only things anything outside the import
+> feature wants from that module.
+>
+> **Then re-export them from `import-assets.ts`** so every existing caller keeps working with no edit:
+> `import-employees.ts`, `server/modules/import/asset-actions.ts`,
+> `server/modules/import/resolve.ts`, and three test files all import them from there today. A
+> re-export makes this a **zero-behaviour-change move**, which is what keeps it safe to do mid-phase.
+>
+> Then point `scan.ts` at `./tag-key` directly.
+>
+> **Verify it changed nothing:** `import-assets.test.ts`'s existing assertions on `cellText`, `refKey`
+> and `tagKey` must pass **untouched** — they are the proof. Do not move those tests; a passing test
+> that never moved is stronger evidence than a passing test you also edited. Full suite must stay at
+> 797+.
+>
+> Commit Step 0 **separately** from the wiring, so the refactor and the feature can be reviewed and
+> reverted independently.
+
 **Files:**
 - Create: `src/components/offboarding/scan-provider.tsx`
 - Modify: `src/components/offboarding/item-decision.tsx`
