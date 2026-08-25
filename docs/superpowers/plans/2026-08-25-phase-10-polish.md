@@ -1805,6 +1805,33 @@ git commit -m "test(e2e): the scanner, including the keystrokes it must not stea
 
 ### Task 8: The two known moderate axe violations
 
+> ### AMENDED AFTER EXECUTION — the stated scope was wrong, and so was the commit command.
+> **A-30. Changing `CardHeader`'s heading level broke 15 e2e assertions the plan did not account for.**
+> `e2e/home-finance.spec.ts` (14) and `e2e/admin.spec.ts` (1) hard-code
+> `getByRole("heading", { level: 3 })` against headings `CardHeader` renders — "Your shift", "Fleet",
+> "Age", "Claimed by you", "Warranty runway", "Jump to". This task's **Files** list said four
+> components and "Nothing else", and its Step 5 command was `git add src/components`, which would have
+> staged the component change **without** the spec updates and shipped a red suite. Both specs re-run
+> green (24 passed) after updating the levels. The plan *did* ask the implementer to check for exactly
+> this — the lesson is that the check found a real hazard, so the scope line was the thing that was
+> wrong, not the check.
+>
+> **A-31. `h3 → h2` fixes `heading-order` rather than relocating it, and the reason is worth writing
+> down.** Measured with axe on real pages: `/` went **1 → 0**; `/inventory` and `/purchases` stayed at
+> **0**. The app still renders `<h3>` in the sidebar nav (`nav-list.tsx`) and the command palette
+> (`command-palette.tsx`), and those are **not** flagged — because they precede the `<h1>` in DOM order
+> and axe's `heading-order` permits going UP a level, only never skipping down. So the document reads
+> h3(nav) → h1(page) → h2(card), which is legal, where it previously read h3 → h1 → **h3**, which skips.
+>
+> **A-32. The plan's suggested verification page was a bad example.** It named `/admin/users`, which
+> renders no `CardHeader` at all (a `Banner` plus a table), so it measured 0 violations before *and*
+> after and proved nothing. `/`, `/inventory` and `/purchases` are the pages that actually exercise the
+> component. **When a plan names a page to verify against, check that the page exercises the thing.**
+>
+> **A-33.** The CSV wording this task also listed was already fixed earlier in the phase (Task 4's
+> pass), so `bulk-drawer.tsx` needed no change. Worth noting the plan carried the same item in two
+> tasks.
+
 **Files:**
 - Modify: `src/components/ui/card.tsx`
 - Modify: `src/components/ui/segmented-control.tsx`
