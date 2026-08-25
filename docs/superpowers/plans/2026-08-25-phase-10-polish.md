@@ -933,6 +933,53 @@ git commit -m "feat(labels): the 3x4 A4 label sheet and its print route"
 
 ### Task 4: The role gate, the entry point, and the e2e
 
+> ### AMENDED BEFORE EXECUTION — the e2e must MEASURE the calibration bar, because it silently shrank once already.
+> **A-16.** Task 3 shipped the calibration bar as a flex item with `width: 100mm` and default
+> `flex-shrink: 1`, inside an absolutely-positioned shrink-to-fit flex container whose sibling is a long
+> text span. It rendered at **89.38 mm — 10.6% short** — while the text beside it read "this bar is
+> exactly 100mm". Fixed in Task 3 with `flexShrink: 0`, but **nothing prevents it happening again**, and
+> the failure mode is the worst kind: a ruler that lies makes an operator "correct" a scaling problem
+> that does not exist, or calibrate against a wrong reference. It was found only by rendering the page
+> and measuring it in the browser.
+>
+> **So this task's spec must measure it.** 100 mm at 96 dpi CSS is **377.95 px**. Add:
+>
+> ```ts
+> test("the calibration bar really is 100mm, because a ruler that lies is worse than none", async ({ page }) => {
+>   await login(page, "it@thebackroomop.com");
+>   const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
+>   await page.goto(`/inventory/labels?ids=${asset.id}`);
+>   await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+>   // The bar is the only 1.5mm-tall span with a background on the sheet.
+>   const widths = await page.evaluate(() =>
+>     [...document.querySelectorAll("span[style*='background']")]
+>       .filter((s) => (s as HTMLElement).style.height === "1.5mm")
+>       .map((s) => s.getBoundingClientRect().width));
+>   expect(widths.length).toBeGreaterThan(0);
+>   for (const w of widths) expect(w).toBeCloseTo((CALIBRATION_MM * 96) / 25.4, 1);
+> });
+> ```
+>
+> Import `CALIBRATION_MM` from `@/lib/label-geometry` rather than writing 377.95 — the pixel figure is
+> derived, but the millimetre figure has an owner (rules 26/37/38). **`toBeCloseTo(…, 1)`** is deliberate:
+> sub-pixel layout rounding is real, a 10% shrink is not subtle, and a tighter tolerance would make this
+> test flaky for no gain.
+>
+> **Mutation to add to this task's table:** remove `flexShrink: 0` from the bar in
+> `label-sheet.tsx` — this test must fail. If it does not, it is not measuring the bar.
+>
+> **A-17. Also assert the page box, since it is free and it is the other half of the geometry.** A4 is
+> 210 × 297 mm → **793.7 × 1122.5 px**. `document.querySelectorAll(".label-page")` should report exactly
+> that for every page, and that assertion is what catches a future change to `PAGE_MM`,
+> `PAGE_MARGIN_MM` or the grid template silently breaking the die-cut fit. Measured on the real render:
+> `{w: 793.69, h: 1122.52}`.
+>
+> **A-18. Assert the page BREAK, not just the label count.** 13 ids must produce **two** `.label-page`
+> elements with 12 labels on the first and 1 on the second, and **two** calibration bars — one per sheet.
+> A ruler on only the first sheet proves nothing about the second, which is the whole reason it is
+> absolutely positioned per page rather than rendered once. Verified on the real render: 13 barcodes,
+> "13 labels · 2 sheets", two page boxes.
+
 **Files:**
 - Modify: `src/lib/workspaces.ts`
 - Modify: `src/lib/workspaces.test.ts`
