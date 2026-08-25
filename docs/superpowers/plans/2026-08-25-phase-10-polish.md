@@ -626,6 +626,48 @@ git commit -m "feat(labels): sheet geometry, pagination, and a module width comp
 > below is its one and only consumer, and if this task ships without it the constant is dead code that
 > reads like an oversight.
 
+> ### AMENDED AFTER EXECUTION — four findings, two of them defects in this task's own drafted text.
+> **A-19. The drafted global `@page` would have regressed two existing print surfaces.** The draft put
+> `@page { size: A4; margin: 0 }` in `globals.css`. `@page` is global to every print job in the app, so
+> it would also have stripped the page margin from the farewell report and the accountability form,
+> neither of which has an `@page` override — they rely on the browser's default margin plus `print:p-0`.
+> The implementer escalated instead of shipping it and scoped it to a **named page**
+> (`@page label-sheet` + `.label-sheets { page: label-sheet }`). Verified: Chromium reports
+> `CSS.supports("page","label-sheet")`, the rule survives Tailwind v4's pipeline verbatim in the served
+> `layout.css`, there is **no bare `@page {`** rule, and `getComputedStyle(body).page` is `auto` on
+> non-label pages. A real Chromium PDF confirmed a MediaBox of 209.94 × 297.01 mm and exactly two pages
+> for a 14-label sheet.
+>
+> **A-20. The calibration bar rendered 89.38 mm against a declared 100 mm** — a flex item with default
+> `flex-shrink: 1` beside a long text sibling. Fixed with `flexShrink: 0` (and `minWidth: 0` on the
+> text so it wraps instead of competing). Re-measured at 377.94 px = 100.00 mm on screen, under print
+> emulation, and in the PDF. **Found only by rendering the page and measuring it** — the CSS was valid
+> and the declared width correct, so no type, lint, unit test or code read could have seen it. Task 4's
+> spec now measures it permanently (A-16).
+>
+> **A-21. The ruler did not fit the margin it claimed to occupy.** Its caption wraps to two lines, so
+> the container measured 7.92 mm at `bottom: 2.5mm` = 10.42 mm against a 10 mm margin, putting its top
+> edge 0.42 mm inside the last row of cells. No glyph collision, but **font-metric dependent** — a
+> wider fallback font wrapping to three lines would put text ~4 mm inside the stickers. Constrained so
+> it cannot grow into the grid, with the budget stated in the comment.
+>
+> **A-22. `LABEL_USABLE_MM` ignored the cell's 0.2 mm border**, so the barcode column overflowed its
+> content box by 0.4 mm and `overflow: hidden` clipped it. Invisible for every producible tag (47.85 mm
+> against 52.93 mm), but on the **defensive ≥12-character branch** the symbol fills the full 53.33 mm
+> and the clipped 0.4 mm is part of STOP's trailing bar — an unscannable code that looks finished, the
+> same failure `MIN_MODULE_MM` exists to prevent, arriving through a different door. Fixed in the
+> COMPONENT (the cut-guide no longer participates in layout), never in `label-geometry.ts`, whose
+> `cell − 2 × padding` arithmetic is correct and pinned by Task 2's tests.
+>
+> **A-23. Two of the four were defects in this task's drafted PROSE, and both were printed on adhesive
+> paper.** The draft hardcoded "100mm" in the on-screen banner while `CALIBRATION_MM` owns that number
+> (rules 26/37/38), and it asserted a single diagnosis — "if it is short, the print dialog is scaling" —
+> when the **wrong paper size** produces the same symptom with a different remedy. It also claimed "this
+> bar is exactly 100mm" in a caption that renders **on screen**, where a CSS millimetre is not a
+> physical one. And "N selected assets no longer exist" counted ids that never existed. All four are the
+> rule-16 shape the A-13 amendment corrected one element over, which is worth noting: **the same class
+> recurred in the same file after being fixed there once.**
+
 **Files:**
 - Create: `src/components/inventory/label-sheet.tsx`
 - Create: `src/app/(app)/inventory/labels/page.tsx`
