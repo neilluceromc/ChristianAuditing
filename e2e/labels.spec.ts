@@ -2,7 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { BULK_MAX } from "@/lib/inventory-list";
-import { CALIBRATION_MM } from "@/lib/label-geometry";
+import { CALIBRATION_MM, PAGE_MM } from "@/lib/label-geometry";
+import { ROLE_LANDING } from "@/lib/workspaces";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 
 /**
@@ -34,10 +35,10 @@ async function login(page: Page, email: string) {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
-/** 96 CSS dpi. Used only to sanity-check the derivation in the comments below
- * — the assertions themselves compare against measured px, not this constant,
- * because CALIBRATION_MM and PAGE_MM are the owned mm figures (rules 26/37/38)
- * and everything else is derived. */
+/** 96 CSS dpi — the only unowned number in this file. CALIBRATION_MM and
+ * PAGE_MM are the owned mm figures (rules 26/37/38); every pixel assertion
+ * below multiplies one of THEM by this constant rather than retyping a
+ * derived pixel figure (377.95, 793.7, 1122.5, …) as a literal. */
 const MM_TO_PX = 96 / 25.4;
 
 test.describe("label sheet", () => {
@@ -55,10 +56,10 @@ test.describe("label sheet", () => {
 
     // A-17, since it's free on a page we've already loaded: the page box
     // itself, which catches a future change to PAGE_MM, PAGE_MARGIN_MM or the
-    // grid template silently breaking the die-cut fit. A4 is 210x297mm.
+    // grid template silently breaking the die-cut fit.
     const box = await page.locator(".label-page").boundingBox();
-    expect(box?.width).toBeCloseTo(210 * MM_TO_PX, 1);
-    expect(box?.height).toBeCloseTo(297 * MM_TO_PX, 1);
+    expect(box?.width).toBeCloseTo(PAGE_MM.width * MM_TO_PX, 1);
+    expect(box?.height).toBeCloseTo(PAGE_MM.height * MM_TO_PX, 1);
   });
 
   // A-16. Fixed once already (flexShrink: 0) after shipping at 89.38mm against
@@ -76,9 +77,11 @@ test.describe("label sheet", () => {
         .filter((s) => (s as HTMLElement).style.height === "1.5mm")
         .map((s) => s.getBoundingClientRect().width));
     expect(widths.length).toBeGreaterThan(0);
-    // toBeCloseTo(…, 1) is deliberate: sub-pixel layout rounding is real, a
-    // 10% shrink is not subtle, and a tighter tolerance would be flaky for no
-    // gain.
+    // toBeCloseTo(…, 1) accepts up to 0.05px of slack. That's not a loose
+    // tolerance chosen to avoid flakiness — measured actuals sit ~0.015px off
+    // the exact figure, well inside it — it's simply precise enough: the bug
+    // this guards was a 72px shrink (10.6% of 100mm), roughly 1000x this
+    // tolerance, so there is no realistic regression this precision misses.
     for (const w of widths) expect(w).toBeCloseTo((CALIBRATION_MM * 96) / 25.4, 1);
   });
 
@@ -105,11 +108,13 @@ test.describe("label sheet", () => {
     // A-17 again, for both sheets this time: the page box holds at A4 on
     // every page, not just the first.
     for (const box of await pages.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
-      expect(box.width).toBeCloseTo(210 * MM_TO_PX, 1);
-      expect(box.height).toBeCloseTo(297 * MM_TO_PX, 1);
+      expect(box.width).toBeCloseTo(PAGE_MM.width * MM_TO_PX, 1);
+      expect(box.height).toBeCloseTo(PAGE_MM.height * MM_TO_PX, 1);
     }
 
-    // Two calibration bars — one per sheet — each still measuring 100mm.
+    // Two calibration bars — one per sheet — each still measuring 100mm
+    // (0.05px slack; see the dedicated test above for why that's precise
+    // enough rather than merely loose).
     const widths = await page.evaluate(() =>
       [...document.querySelectorAll("span[style*='background']")]
         .filter((s) => (s as HTMLElement).style.height === "1.5mm")
@@ -140,11 +145,28 @@ test.describe("label sheet", () => {
     await expect(page.getByRole("link", { name: "Back to inventory" })).toBeVisible();
   });
 
-  // The E-7/W-1 trap, asserted rather than assumed: the general /inventory
-  // rule admits both of these workspaces, so without the dedicated
-  // /inventory/labels rule ahead of it in PATH_RULES, both would reach this
-  // page.
-  test("finance and viewer cannot reach the label sheet at all", async ({ page }) => {
+  // Rule 10: a stale selection (an id that no longer/never existed mixed in
+  // with a real one) is the fourth outcome, and the one an operator hits most
+  // realistically — not "everything's gone" but "most of it's still there".
+  test("a partially stale selection prints what it can, and says what it skipped", async ({ page }) => {
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
+    await login(page, "it@thebackroomop.com");
+    await page.goto(`/inventory/labels?ids=${asset.id},nope1`);
+    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("1 selected asset was not found and skipped.")).toBeVisible();
+    await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toBeVisible();
+  });
+
+  // This assertion is a real guard — it would catch labels/page.tsx's own
+  // requireRole("admin", "it_staff") being deleted — but it CANNOT attribute
+  // a refusal to either layer: that page-level guard redirects
+  // finance/viewer to the identical ROLE_LANDING destination that PATH_RULES's
+  // own rejection would, which is why the test is named for what it proves
+  // rather than for the rule this task added. Confirmed by mutation: moving
+  // the /inventory/labels PATH_RULES entry after the general /inventory rule
+  // left THIS test green (see the mutation table). The probe below is the one
+  // e2e that actually observes the PATH_RULES layer on its own.
+  test("finance and viewer never see a label sheet (either layer may be the one that refuses)", async ({ page }) => {
     await login(page, "finance@thebackroomop.com");
     await page.goto("/inventory/labels?ids=whatever");
     await expect(page).not.toHaveURL(/\/inventory\/labels/, { timeout: 30_000 });
@@ -154,21 +176,51 @@ test.describe("label sheet", () => {
     await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
   });
 
-  // The entry point Step 3 adds. The banner above tells an operator to "select
-  // rows, then choose Print labels from Bulk actions" — so that sentence is
-  // only true if the drawer really offers it, and only for an explicit
-  // selection (never "all matching": one click must not become a 17-sheet
-  // print job).
-  test("the bulk drawer offers Print labels only for an explicit, non-empty selection", async ({ page }) => {
+  // The actual PATH_RULES probe. No page file exists at
+  // /inventory/labels/no-such-page — the rule's `(\/|$)` still matches the
+  // path, but there is nothing for labels/page.tsx's requireRole to run FROM,
+  // so only middleware can answer here. A misordered or deleted rule shows up
+  // as a 200 with no redirect at all, which this test caught when the rule
+  // was moved after the general /inventory rule (see the mutation table).
+  // Non-retrying assertions on the RESPONSE, not a polling assertion on the
+  // page: middleware's redirect is a real 307 before anything renders, and a
+  // negated `toHaveURL` would politely wait out a client-side settle that
+  // never actually happens on this path, hiding the very layer it's meant to
+  // isolate.
+  test("PATH_RULES itself refuses /inventory/labels/* before any page renders", async ({ page }) => {
+    for (const [email, landing] of [
+      ["finance@thebackroomop.com", ROLE_LANDING.finance_staff],
+      ["viewer@thebackroomop.com", ROLE_LANDING.viewer],
+    ] as const) {
+      await login(page, email);
+      const res = await page.goto("/inventory/labels/no-such-page");
+      expect(res?.request().redirectedFrom()?.url()).toContain("/inventory/labels/no-such-page");
+      expect(new URL(res!.url()).pathname).toBe(landing);
+    }
+  });
+
+  test("the bulk drawer offers Print labels for an explicit, non-empty selection", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
-    const firstRow = page.getByRole("row").nth(1);
-    await firstRow.getByRole("checkbox").check();
+    // A named anchor, not a position: page.getByRole("row").nth(1) would
+    // silently retarget if a header or filter row were ever added above the
+    // body.
+    await page.getByRole("row", { name: /BR-LT-0148/ }).getByRole("checkbox").check();
     await page.getByRole("button", { name: /^Bulk actions/ }).click();
     await expect(page.getByRole("link", { name: /^Print labels for 1 selected$/ })).toBeVisible();
     await expect(page.getByRole("link", { name: "Export this selection as a spreadsheet" })).toBeVisible();
     // The route has served xlsx since Phase 9 — the drawer must not still
     // call it CSV.
     await expect(page.getByRole("link", { name: /Export this selection as CSV/ })).toHaveCount(0);
+    // NOT covered here, and worth saying rather than leaving silent: neither
+    // of BulkDrawer's two negative branches is reachable through this UI in
+    // the seeded environment. "Bulk actions…" only renders once
+    // selected.size > 0 (inventory-table.tsx:123), so the drawer can't be
+    // open with an empty, non-allMatching selection; and "Select all N
+    // matching" needs total > rows.length (:130), which the seed's 25 assets
+    // on a single 25-row page never satisfies. The allMatching branch ("Labels
+    // need an explicit selection") is the one that actually matters — it's
+    // the guard against turning one click into a 17-sheet print job — and it
+    // has no e2e coverage right now for exactly that reason.
   });
 });

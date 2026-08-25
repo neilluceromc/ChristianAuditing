@@ -171,7 +171,15 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Same shape and same reason as /inventory/import's rule directly above:
   // this MUST precede the general /inventory rule (first-match-wins), because
   // that rule admits purchasing and finance, and a label sheet is an IT
-  // artifact. Asserted in workspaces.test.ts and in e2e/labels.spec.ts.
+  // artifact. The ORDERING is asserted only in workspaces.test.ts — the
+  // page at /inventory/labels carries its own requireRole("admin",
+  // "it_staff") which redirects finance/purchasing/viewer to that same
+  // role's ROLE_LANDING, so an e2e hitting that page still "passes" even if
+  // this rule is deleted or moved after the general rule below. The one e2e
+  // that actually observes THIS layer is the /inventory/labels/no-such-page
+  // probe in e2e/labels.spec.ts, precisely because no page file exists there
+  // for requireRole to run from — only middleware can answer for a path like
+  // that, so a misordered rule shows up as a 200 with no redirect at all.
   { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
