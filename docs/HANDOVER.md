@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-25 (Phase 10, Task 9) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS MID-FLIGHT on branch `phase-10-polish` — tasks 1–9 of 11 committed, unmerged. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes.** · **What remains is Task 10 (the deployment README, verified by execution) and Task 11 (battery and close-out).** · **NOTHING IS PUSHED: the branch is 27 ahead of `main`, `main` is 140 ahead of `origin/main` — 167 total. Count it (`git rev-list --count origin/main..HEAD`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.** · Battery: `tsc` · `lint` · **797 unit / 47 files** · **147 e2e / 12 files**. 8 migrations, none pending. **⚠ `npm run build` and `docker compose --profile prod build` have NOT been re-run since Task 3 — Task 11 owns both.**
+**Last updated:** 2026-08-26 (Phase 10, Tasks 10 and 11) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS CODE-COMPLETE on branch `phase-10-polish` — all 11 tasks committed, unmerged.** The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **NOTHING IS PUSHED: the branch is 35 ahead of `main`, `main` is 140 ahead of `origin/main` — 175 total. Count it (`git rev-list --count origin/main..HEAD`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,12 +13,12 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-**Phase 10 is MID-FLIGHT on `phase-10-polish`: tasks 1–9 of 11 are committed, tasks 10 and 11 remain.**
-Nothing is half-finished — every task ended on a green commit with its plan amended in the same
-session. The next unit of work is a whole task, **Task 10**.
+**Phase 10 is CODE-COMPLETE on `phase-10-polish`: all 11 tasks are committed and the battery is green.
+This was the last planned phase, so there is no next task to pick up — what remains are decisions that
+belong to the user, plus one measurement no agent can take.** Read items 1–4 below, then stop and ask.
 
-1. **`git checkout phase-10-polish`.** It is **27 commits ahead of `main`**, and `main` is **140 ahead
-   of `origin/main`** — 167 total unpushed. **Count them** (`git rev-list --count origin/main..HEAD`)
+1. **`git checkout phase-10-polish`.** It is **35 commits ahead of `main`**, and `main` is **140 ahead
+   of `origin/main`** — 175 total unpushed. **Count them** (`git rev-list --count origin/main..HEAD`)
    rather than trusting those numbers; every correction to this line is itself a commit. Nothing has
    been pushed since the Phase 1–7 merge on 2026-08-19, deliberately: **the user treats merging and
    publishing as separate decisions and asks for each explicitly. Never push or merge unprompted.** The
@@ -34,28 +34,34 @@ session. The next unit of work is a whole task, **Task 10**.
 
 3. **Read `docs/superpowers/plans/2026-08-25-phase-10-polish.md`, Task 10, and its spec
    (`docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`).** Every task carries an `AMENDED`
-   banner — **A-1 through A-33** — recording what the plan got wrong. Read the banner before the task
+   banner — **A-1 through A-44** — recording what the plan got wrong. Read the banner before the task
    body; in several cases the banner reverses the body.
 
-4. **Resume at Task 10 (the deployment README), then Task 11 (battery and close-out).**
+4. **There is no next task. What is left is four things, and three of them are the user's to decide.**
 
-   **Task 10 is a VERIFICATION task, not a writing task**, and the plan says so because §6 predicted it
-   would slip otherwise. Write `README.md` (currently two lines, and the public face of a public repo),
-   then **prove it from a clean state**: fresh `git clone` into a temp dir, fresh `.env` from
-   `.env.example` with newly generated secrets, `docker compose --profile prod build`, `up`, migrate,
-   seed, sign in, tear down. Use a **different compose project name** (`docker compose -p inv-readme-test …`)
-   so it cannot touch the working database, and `down -v` afterwards. Anything that does not work gets
-   fixed **in the README**, not footnoted.
+   **(a) The one open entry criterion: print a sheet and measure it.** Task 11 Step 4 asks for a real
+   label sheet printed and the 100 mm calibration bar measured with a tape measure, with the browser and
+   print settings recorded in §8. **No agent can do this** — it needs a printer and a human. Everything
+   else about the label sheet is proven in software: the bar measured 100.0 mm in the rendered DOM
+   (Task 4's e2e measures it, after it silently shrank to 89.38 mm once). If the physical bar comes up
+   short, the PDF escape hatch in spec §5 stops being speculative and becomes justified.
 
-   Facts it must carry, all currently true and scattered: the compose profile · the loopback-only db ·
-   secret generation including `SECRET_ENCRYPTION_KEY` · additive SQL migration dirs (**`prisma migrate
-   reset` is blocked and unnecessary**; `npm run db:seed` is the sanctioned reset) · the worker service ·
-   the seeded accounts pointing at `SEED_PASSWORD` in `prisma/fixtures.ts`, **stating it is `admin123`,
-   that it is 8 characters where signup requires 10, and that it must change before the app is reachable
-   from anywhere but localhost** · the npm-on-Windows lockfile hazard with its exact Alpine command ·
-   troubleshooting, **including "Docker Desktop is not running"** · and **plainly, that Entra SSO does
-   not work** (the provider registers when three env vars are set but no `signIn` callback maps a
-   profile to a `User`, so a successful login arrives with no role).
+   **(b) Merging.** `superpowers:finishing-a-development-branch`. The branch is green and code-complete.
+   Present options; **do not merge unprompted.**
+
+   **(c) Pushing.** 175 commits unpushed, deliberately, since 2026-08-19. Separate decision from
+   merging — the user asks for each explicitly. **Never push unprompted.** The repo is public.
+
+   **(d) Two deferred items, both real, neither blocking.** **Entra SSO does not work** — the provider
+   registers when three env vars are set but no `signIn` callback maps an Entra profile to a `User`, so
+   a successful login arrives with no role (`src/server/auth/index.ts`, and its own TODO says so). It is
+   documented in `README.md` under "What does not work". And **`./uploads` is not covered by the daily
+   `pg_dump`** — asset documents are plain host files bind-mounted into `web`, so a database backup
+   alone does not restore them.
+
+   **If the user wants more work rather than a decision, there is no plan for it.** Start with
+   `superpowers:brainstorming`, then `superpowers:writing-plans` for a Phase 11 — do not improvise
+   changes onto a branch that is being held for a merge decision.
 
 5. **Execution mode: subagent-driven, and the user asked for it explicitly.** `superpowers:subagent-driven-development`.
    Fresh implementer per task, then review. Tasks 1–4 used two reviewers; 5–9 used one, escalating only
@@ -74,32 +80,44 @@ session. The next unit of work is a whole task, **Task 10**.
      printed onto adhesive paper, and one that justified a correct decision with an impossible scenario.
 
 7. **What Phase 10 has cost, and what it bought — read this before deciding how much review to run.**
-   **Thirty-three defects were caught across nine tasks. SIXTEEN of them were in the plan I wrote**, not
+   **Forty-four defects were caught across eleven tasks. TWENTY of them were in the plan I wrote**, not
    in the implementations: a module name that would have clobbered `src/lib/labels.ts` and its ten
    importers, a global `@page` rule that would have regressed two live print surfaces, a test helper
    that does not exist, **three mutation-table predictions that were simply false**, a scope line that
-   would have shipped a red suite, and a helper that made the test I had asked for impossible to write.
+   would have shipped a red suite, a helper that made the test I had asked for impossible to write,
+   and — in Task 10 alone — a dev quickstart that could not run from the clean clone the same task
+   mandated, a prod description that undercounted its own services by two, and a sentence that was true
+   of the agent harness and false of the human it was addressed to.
 
-   **Not one of the thirty-three would have failed a green test suite.** And **five were findable only
-   by rendering the thing and putting a number on it**: a barcode checksum weighted from the wrong end
+   **Not one of the forty-four would have failed a green test suite.** **Five were findable only by
+   rendering the thing and putting a number on it**: a barcode checksum weighted from the wrong end
    (all 8 tests green), a calibration ruler measuring 89.38 mm against a declared 100 mm, a barcode
    clipped 0.4 mm by a border nobody accounted for, a scanner that **silently died** the moment an
    operator clicked an outcome by hand, and four serious axe violations on routes no spec had ever
-   visited. **Budget for measurement, not just for tests.**
+   visited. **And three more were findable only by RUNNING the documentation** — chief among them a
+   `/` in a generated password that breaks the deployment outright, in roughly 40% of attempts.
+   **Budget for measurement and for execution, not just for tests.**
 
-8. **State this session left behind (2026-08-25):** on `phase-10-polish`, working tree **clean**, **8
-   migrations none pending**, `inventory-db-1` up. **The database holds `e2e/axe-sweep.spec.ts`'s
-   leftovers** — that file sorts last and reseeds itself, so this is normal drift, not damage. Reseed
-   before trusting any fixture-dependent read. No scratch files in the repo; `backups/` holds only the
-   pre-existing dump.
+8. **State this session left behind (2026-08-26):** on `phase-10-polish`, working tree **clean**, **8
+   migrations none pending**, `inventory-db-1` up and healthy. **The database holds
+   `e2e/axe-sweep.spec.ts`'s leftovers** — that file sorts last and reseeds itself, so this is normal
+   drift, not damage. Reseed before trusting any fixture-dependent read. No scratch files in the repo;
+   `backups/` holds only the pre-existing dump; `uploads/` holds its usual 57 files. **`.next` currently
+   holds a DEV build** (the e2e suite rebuilt it after `npm run build`) — see the warning in item 9.
+   Two throwaway compose projects were used this session, `inv-readme-test` and `inv-fix-test`; **both
+   were `down -v`'d and neither left a container, volume or network behind.** The live `inventory` db
+   was stopped twice to free port 5432 and restarted both times.
 
    ⚠️ **Restart the dev server before any confirmation run.** The one this session used accumulated
    **3.2 hours of CPU** and a Task 9 agent's sweep stalled against it. §6's Phase 6 lesson is real:
    a long-lived dev server degrades the suite into phantom failures. Use `preview_stop`/`preview_start`,
    never raw Bash.
 
-9. **Running the e2e suite — the numbers moved again.** It is now **147 tests across 12 files** (Phase
-   10 added `labels`, `scanner` and `axe-sweep`). It does **not** fit one foreground run. Split it, each
+9. **Running the e2e suite — 147 tests across 12 files, and the split below is MEASURED, not estimated.**
+   Task 11 ran all four parts: **51 in 4.1m · 56 in 5.1m · 34 in 3.9m · 6 in 3.9m = 147.** No
+   re-balancing was needed. Note the correction: a previous revision of this doc recorded `axe-sweep` as
+   **5** tests and it is **6** — the total was right while one of its components was wrong, which is
+   exactly what a total is worst at catching. It does **not** fit one foreground run. Split it, each
    part with `--global-timeout` so Playwright reaps itself rather than being killed:
 
    ```bash
@@ -119,9 +137,22 @@ session. The next unit of work is a whole task, **Task 10**.
    ⚠️ **NEVER background a Playwright run.** A Task 9 agent did, stalled, and left the controller
    guessing. An unreaped run races its own `beforeAll` reseed against yours.
 
-**Battery at this session's close:** `tsc` · `lint` · **797 unit tests / 47 files** · **147 e2e / 12
-files** (`axe-sweep` 5 tests in 3.8 min; `labels` 9; `scanner` 8). `npm run build` **not** re-run since
-Task 3 — Task 11 owns it, along with `docker compose --profile prod build`.
+   ⚠️ **NEW, and it cost a real failure: running the battery IN ORDER makes the e2e suite maximally
+   cold.** `npm run build` and `next dev` share `.next` and their outputs are incompatible, so clearing
+   `.next` after the build is the honest move — and then Playwright's dev server compiles every route
+   from nothing. Under that, `it-core.spec.ts:126` failed on a 5s default. **The tell is worth
+   memorising: `inventory/loading.tsx` renders only `Skeleton` divs, which carry no text and no roles,
+   so an aria snapshot of a loading page is an EMPTY `main`.** Empty `main` means "waiting on a server
+   render" — it is not a lost keypress (which would leave the server-rendered table in `main`) and not
+   data drift. Fixed with headroom, **after** `git diff main..HEAD` proved the route's page and queries
+   were byte-identical to `main`; that check is what separates headroom from a papered-over regression.
+   If you clear `.next`, expect the first run to be slow and do not read slowness as breakage.
+
+**Battery at this session's close — ALL GREEN, run in full on 2026-08-26:** `tsc` · `lint` · **797 unit
+tests / 47 files** (5.1s) · `npm run build` · `docker compose --profile prod build` (**3** images —
+`worker` now builds too) · **147 e2e / 12 files** in the four measured parts above. `labels` 9;
+`scanner` 8; `axe-sweep` **6**. The axe sweep's moderate/minor tally, none serious or critical:
+`empty-table-header` **9** · `page-has-heading-one` **2** · `landmark-unique` **1**.
 
 ---
 
@@ -203,7 +234,7 @@ the farewell-sheet e2e both drive — and every non-ACTIVE employee carries `off
 (This sentence used to begin "On the Phase 7 branch"; that branch is deleted and its seed is now the
 only seed, so the qualifier was stale and is dropped.)
 
-## 4. What's DONE (Phases 1–9 on `main`; Phase 10 tasks 1–9 on `phase-10-polish`)
+## 4. What's DONE (Phases 1–9 on `main`; ALL of Phase 10 on `phase-10-polish`)
 
 **Phase 1 — Foundation:** design tokens (light/dark, motion, reduced-motion kill switch); six-family
 status system (`src/lib/status.ts`; `MISSING` is the 8th AssetStatus → fault); full Prisma schema
@@ -327,7 +358,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 10 — polish (MID-FLIGHT, tasks 1–9 of 11 on `phase-10-polish`, UNMERGED)**
+**Phase 10 — polish (CODE-COMPLETE, all 11 tasks on `phase-10-polish`, UNMERGED, battery green)**
 
 - **T1 · `src/lib/code128.ts`** — a hand-rolled Code 128-B encoder, no dependency. Pure module widths;
   knows nothing of millimetres, SVG or assets. Its table was verified against an independent
@@ -363,13 +394,32 @@ scoped feed, so the only one showing the domain pill).
   routes no spec had ever visited**: an `aria-label` on a role-less `<span>`, a 2.57:1 footer, 1.71–1.93:1
   history cells, and colour-only links in prose. Moderates counted, not fixed (§8).
 
-**What remains: T10 (the deployment README, verified from a clean clone) and T11 (battery, plan
-amendments, handover, close the branch).**
+- **T10 · `README.md`, executed rather than written** — the public face of a public repo, proven from a
+  fresh clone: the production path (build → `up -d` → `migrate` exit 0 → seed inside the `web` container
+  → a real Auth.js credentials POST returning `{"role":"admin"}`) and the dev path (`npm ci` →
+  `prisma generate` → `migrate deploy` → seed → `worker:once` → `npm run dev` → `/login` 200), both
+  under a throwaway compose project. **Execution found three things prose could not:** a `/` in a
+  base64 `POSTGRES_PASSWORD` breaks the unescaped container `DATABASE_URL` (`P1013`, `migrate` exits 1)
+  in ~40% of generated passwords; the plan's own dev quickstart could not run from a clean clone; and
+  `npm ci` alone leaves `@prisma/client` ungenerated despite the postinstall hook existing.
+- **T10b · the two compose fixes T10 uncovered** — `web` bind-mounts `./uploads:/app/uploads`, and
+  `worker` declares `build: .`. Verified by writing as uid 1000 into the mount and surviving a
+  `--force-recreate`, and by `build` reporting three images where it had reported two. README moved in
+  the same commit, because the fix falsified its own caveat.
+- **T11 · the battery, green in full** — `tsc` · `lint` · 797 unit · `npm run build` ·
+  `docker compose --profile prod build` · 147 e2e in four measured parts. One failure, diagnosed and
+  fixed with headroom **after** proving the route was byte-identical to `main` (§6a rules 90 and 91).
 
-**The number worth carrying out of this phase.** Thirty-three defects across nine tasks, **sixteen of
+**What remains is not code: the physical print-and-measure (§0 item 4a), and the merge and push
+decisions, which are the user's.**
+
+**The number worth carrying out of this phase.** **Forty-four defects across eleven tasks, twenty of
 them in the plan rather than the implementations**, and **not one would have failed a green suite**.
-Five were findable only by rendering the thing and measuring it. The reviews, not the implementations,
-are again where correctness came from — see §0 item 7.
+Five were findable only by rendering the thing and measuring it — and Task 10 added a sixth category:
+**three findable only by RUNNING the documentation**, including a password character that breaks the
+deployment outright. The reviews, not the implementations, are again where correctness came from —
+see §0 item 7. **Task 10's own lesson generalises past documentation: prose about a system is a claim
+about the system, and the only thing that tests it is execution.**
 
 **Phase 9 — import / export (COMPLETE, all 14 tasks, MERGED to `main` as `7284c10`)**
 
@@ -599,7 +649,9 @@ minute:
 
 ## 5. What REMAINS
 
-**Phase 10 is the last planned phase, and it is not yet planned.**
+**Phase 10 was the last planned phase and it is now code-complete. Nothing here is a coding task.**
+What is left is one physical measurement, two user decisions (merge, push), and the deferred list
+below. §0 item 4 is the actionable version of this section.
 
 - **Phase 8 — the Admin workspace. COMPLETE and MERGED** (`e5a5730`). What it delivered is §4; the
   invariants it established are §6a. Two things remain outstanding and neither is code: **the push
@@ -609,18 +661,20 @@ minute:
   decisions**, every shipped task carrying an `AMENDED` banner, several carrying two or three). Both
   halves ship — see §4. **Nothing about the feature is outstanding; what is outstanding is the push
   decision, which is the user's and unmade.**
-- **Phase 10 — polish. MID-FLIGHT: tasks 1–9 of 11 done** on `phase-10-polish`, unmerged.
+- **Phase 10 — polish. CODE-COMPLETE: all 11 tasks done** on `phase-10-polish`, unmerged, battery green.
   Spec: `docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`. Plan:
-  `docs/superpowers/plans/2026-08-25-phase-10-polish.md` (11 tasks, **33 amendments A-1…A-33**,
+  `docs/superpowers/plans/2026-08-25-phase-10-polish.md` (11 tasks, **44 amendments A-1…A-44**,
   every executed task carrying a banner). **Shipped:** the printable 3×4 A4 label sheet with real
   Code 128-B barcodes and a measured calibration ruler; an IT-only route rule and a bulk-drawer
   entry point; the offboarding scanner (a scan preselects Returned and writes nothing); the two
-  known moderate axe fixes; and an axe sweep over 46 of 47 routes that found four serious
-  violations on pages no spec had ever visited. **Remaining: Task 10 (deployment README, verified
-  from a clean clone) and Task 11 (battery, plan amendments, handover, close the branch).** Split out of Phase 9 on 2026-08-21 because
-  the two halves share almost no code. Four items: the printable 3×4 A4 label sheet with scan codes,
-  USB-scanner polish so a scan ticks the matching offboarding wizard row, the deployment README, and
-  the full axe pass. **Entry criteria are §6.**
+  known moderate axe fixes; an axe sweep over 46 of 47 routes that found four serious
+  violations on pages no spec had ever visited; **a deployment `README.md` proven by executing both
+  its production and its dev path from a fresh clone**; and **two `docker-compose.yml` fixes that
+  proving the README uncovered** — `web` now bind-mounts `./uploads` (asset documents were destroyed
+  on every container recreate) and `worker` now declares `build: .` (it consumed an image tag
+  published to no registry). Split out of Phase 9 on 2026-08-21 because
+  the two halves share almost no code. **Entry criteria are §6, and exactly one is still open: the
+  physical print-and-measure of the calibration bar (§0 item 4a), which needs a printer and a human.**
 - **Entra SSO is deferred, deliberately and on the record.** `src/server/auth/index.ts` registers the
   provider when three env vars are set but carries `TODO(sso-phase)`: there is **no `signIn` callback**
   mapping an Entra profile to a `User` row, so an Entra login would arrive with no role. That is why
@@ -691,7 +745,7 @@ the battery is unrunnable in one sitting.
 
 ---
 
-## 6a. What Phases 8, 9 and 10 have established (88 rules — read before executing anything)
+## 6a. What Phases 8, 9 and 10 have established (93 rules — read before executing anything)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break. **Phase 8 is finished, but this section is
@@ -1467,6 +1521,34 @@ any task in the phase. All of them were fixtures that the running code could not
     There is no lighter compliant shade to retreat to — the fix is full contrast, not a dimmer variant of
     the same idea. If a design calls for de-emphasis below that tier, it needs a different mechanism
     (weight, size, position), not transparency.
+89. **A fact is only true for an audience, and moving it between documents changes the audience.**
+    "`prisma migrate reset` is blocked" is true of the harness classifier that runs agents in this repo.
+    The Task 10 plan told the README to say it, an implementer copied it verbatim, and in a deployment
+    document read by a human operator it is simply false — worse, *reassuring*: it tells someone a
+    destructive command is guarded when nothing in the repo guards it. **Before copying a line out of
+    this handover into anything user-facing, ask who the new reader is and whether the sentence survives
+    the move.**
+90. **An empty `main` in a Playwright aria snapshot means "waiting on a server render", not "wrong
+    page".** Every `loading.tsx` in this app renders only `Skeleton`/`SkeletonRow` divs, which carry no
+    text and no roles, so a loading page snapshots as a bare `- main`. This one signal distinguishes the
+    three failures that look identical from the assertion message alone: a slow render (empty `main`), a
+    keypress lost before hydration (`main` full of the server-rendered content), and data drift (`main`
+    full, with an empty-state message). Read the snapshot before forming a hypothesis.
+91. **Before answering a timing failure with headroom, prove the path did not change.** Headroom and a
+    papered-over regression are the same edit; only the diff tells them apart. For `it-core.spec.ts:126`
+    the check was `git diff main..HEAD` over the route's `page.tsx`, its `queries.ts` and its toolbar —
+    all three byte-identical to the last green `main`, which is what made 20s a fix rather than a
+    cover-up. **Name the files you diffed in the commit message**, so the next reader can audit the
+    judgement instead of trusting it.
+92. **A total that matches is not evidence that its components do.** This doc recorded the e2e suite as
+    147 tests and, separately, `axe-sweep` as 5 of them. The total was right for a whole phase while that
+    component was wrong (it is 6). Totals are the last number to drift and the worst at catching drift.
+    **When you write a breakdown, measure every line of it, not the sum.**
+93. **When a fix makes a document false, the document moves in the SAME commit.** Fixing the missing
+    `uploads` volume turned README's "uploaded documents are ephemeral" from a true caveat into a lie.
+    Shipping the compose change alone would have left the repo's public face contradicting its own
+    behaviour — the exact drift this project has now caught in comments (rule 16), in plans (A-30…A-44)
+    and here in prose. Grep the docs for what a fix invalidates *before* committing it.
 75. **This document is a surface, and rule 16 applies to it exactly as it applies to a comment.** §6a
     rule 61 told three tasks to prove hydration by waiting for a server-rendered field's initial value,
     which proves nothing (rule 76). §7's own bullet on the same subject already said the opposite — "a
@@ -1590,6 +1672,20 @@ any task in the phase. All of them were fixtures that the running code could not
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
 
+- **`./uploads` is not backed up, and the daily `pg_dump` will not save you.** Since Phase 10, asset
+  documents persist correctly — `web` bind-mounts `./uploads:/app/uploads`, so they survive container
+  recreation. But they are plain host files with no replication, and the compose `backup` service dumps
+  **only the database**. Restoring from a backup therefore restores every document *row* with no file
+  behind it. Either add `./uploads` to whatever backs up the machine, or extend the `backup` service.
+  Stated in `README.md` under "What does not work" so an operator meets it before an incident does.
+- **The physical print measurement (Phase 10, Task 11 Step 4) was never taken.** The calibration bar
+  measures 100.0 mm in the rendered DOM and Task 4's e2e asserts it (it silently shrank to 89.38 mm
+  once, which is why that assertion exists). **Nobody has printed a sheet and put a tape measure on it.**
+  Record the browser and the print settings alongside the number when someone does. If it comes up
+  short, the PDF escape hatch in spec §5 stops being speculative.
+- **The axe sweep's moderate/minor tail, none serious or critical** (as printed on 2026-08-26):
+  `empty-table-header` **9** · `page-has-heading-one` **2** · `landmark-unique` **1**. The sweep passes;
+  these are recorded so a future pass can tell a new violation from an inherited one.
 - **Phase 9, Tasks 9–12 — recorded and deliberately NOT fixed.** `reference-actions.ts` has **no
   case-insensitive uniqueness check** on create *or* rename, so "Laptop" and "laptop" can both exist as
   categories (and the same for types, vendors, departments). The importers now *block* on that collision
