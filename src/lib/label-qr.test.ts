@@ -54,9 +54,28 @@ describe("qrBase", () => {
       "http://127.0.0.1:3000",
       "http://127.1.2.3:3000",
       "http://[::1]:3000",
+      "http://0.0.0.0:3000",
+      "http://[::]:3000",
+      "http://dev.localhost:3000",
     ]) {
       expect(qrBase(base), base).toEqual({ ok: false, reason: "loopback" });
     }
+  });
+
+  // The prefix-matching bug: all three are ordinary domain names that merely
+  // begin with "127." — 127.co is a real purchasable domain.
+  it("does not mistake a domain that starts with 127. for loopback", () => {
+    for (const base of ["http://127.co", "http://127.evil.com", "http://127.0.0.1.evil.com"]) {
+      expect(qrBase(base), base).toEqual({ ok: true, prefix: base });
+    }
+  });
+
+  // A host that merely CONTAINS "localhost" is a different machine entirely.
+  it("accepts a real host whose name contains localhost", () => {
+    expect(qrBase("http://localhost.evil.com")).toEqual({
+      ok: true,
+      prefix: "http://localhost.evil.com",
+    });
   });
 });
 

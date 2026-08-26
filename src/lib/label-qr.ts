@@ -19,10 +19,32 @@ export type QrBase =
   | { ok: true; prefix: string }
   | { ok: false; reason: "unset" | "not-absolute" | "loopback" | "bad-url" };
 
-/** Every spelling of "this machine". A QR built from any of them scans
- *  perfectly on the developer's laptop and is dead on every phone — which is
- *  the whole reason this validation exists rather than a default value. */
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+/**
+ * Hosts that mean "the machine running the server", which is the one value
+ * that must never reach a printed label: a QR built from it scans perfectly in
+ * the office and is dead on every phone.
+ *
+ * `0.0.0.0` is here for a specific reason — `docker ps` renders this project's
+ * own web service as `0.0.0.0:3000->3000/tcp`, so it is the value an operator
+ * is most likely to copy by mistake.
+ *
+ * NOT exhaustive, and deliberately so: IPv6 has more spellings of loopback
+ * than are worth normalising here (`http://[::ffff:127.0.0.1]` is accepted,
+ * for instance, because the URL parser rewrites it to `[::ffff:7f00:1]`).
+ * This covers what a human types into a `.env` file. The refusal is a guard
+ * against a plausible mistake, not a security boundary.
+ */
+const UNREACHABLE_HOSTS = new Set(["localhost", "[::1]", "[::]", "0.0.0.0"]);
+
+/** True for a dotted-quad IPv4 literal inside 127.0.0.0/8 — parsed as four
+ *  octets rather than string-matched, so `127.co` and `127.0.0.1.evil.com`
+ *  (both ordinary domain names) are not mistaken for loopback. */
+function isLoopbackIpv4(host: string): boolean {
+  const octets = host.split(".");
+  if (octets.length !== 4) return false;
+  if (!octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)) return false;
+  return octets[0] === "127";
+}
 
 export function qrBase(baseUrl: string | undefined): QrBase {
   const raw = (baseUrl ?? "").trim();
@@ -40,10 +62,12 @@ export function qrBase(baseUrl: string | undefined): QrBase {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return { ok: false, reason: "not-absolute" };
   }
-  if (url.hostname === "") return { ok: false, reason: "bad-url" };
-
   const host = url.hostname.toLowerCase();
-  if (LOOPBACK_HOSTS.has(host) || host.startsWith("127.")) {
+  // RFC 6761 reserves `.localhost` for loopback, so `dev.localhost` counts —
+  // but `localhost.evil.com` does NOT, which is why this is a suffix test and
+  // not a substring one.
+  const isLocalhostName = host === "localhost" || host.endsWith(".localhost");
+  if (UNREACHABLE_HOSTS.has(host) || isLocalhostName || isLoopbackIpv4(host)) {
     return { ok: false, reason: "loopback" };
   }
 
