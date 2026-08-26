@@ -75,11 +75,9 @@ docker compose --profile prod build
 docker compose --profile prod up -d
 ```
 
-Build first, in both directions. `up -d` builds only when a tag is *missing*, so a machine that
-already has an `inventory-app` image will silently run a stale one until you rebuild. And on a
-genuinely clean clone the tag does not exist at all — which `worker` cannot recover from on its own:
-it has no `build:` stanza in `docker-compose.yml` (unlike `migrate` and `web`) and simply consumes
-whatever is tagged `inventory-app`, a name published to no registry.
+Build first. `up -d` builds only when a tag is *missing*, so a machine that already has an
+`inventory-app` image will silently run a stale one until you rebuild. `migrate`, `web` and `worker`
+all share that one image and all three declare `build: .`, so a single `build` covers them.
 
 `--profile prod up -d` starts five containers: `db` (no `profiles:` entry of its own — it comes up
 because all four profile-`prod` services depend on it) and those four —
@@ -185,9 +183,8 @@ docker run --rm -v "$PWD:/app" -w /app node:22-alpine sh -c "npm i -g npm@11 && 
   `AUTH_MICROSOFT_ENTRA_ID_ISSUER` are all set, but there is no `signIn` callback that maps an Entra
   profile to a `User` row. A successful Entra login currently arrives with no role and cannot use the
   app. Do not set those three variables in a real deployment expecting SSO to work — it will not.
-- **Uploaded asset documents (`uploads/`) do not survive recreating the `web` container.**
-  `document-actions.ts` writes them to `process.cwd()/uploads` inside the container, but
-  `docker-compose.yml`'s `web` service declares no volume for that path, unlike `backup`'s
-  `./backups` mount. Every `docker compose --profile prod up` that recreates `web` (an image rebuild,
-  `docker compose down` + `up`, etc.) discards whatever was uploaded. Until `web` gets a bind mount for
-  `uploads/`, treat uploaded documents as ephemeral.
+- **There is no object storage.** Uploaded asset documents are plain files on the host, bind-mounted
+  into `web` at `./uploads:/app/uploads`. That makes them survive container recreation, but it also
+  means they are not replicated anywhere and the daily `pg_dump` into `./backups` does **not** include
+  them. Back up `./uploads` alongside the database, or an asset's documents will outlive its row only
+  by accident.
