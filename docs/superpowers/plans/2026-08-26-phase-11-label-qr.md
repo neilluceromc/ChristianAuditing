@@ -24,6 +24,36 @@ bars. `label-sheet.tsx` renders the QR **below** the barcode. The QR encodes
 
 ## Read this before Task 1
 
+> ### AMENDED DURING EXECUTION — B-1 and B-2, both defects in this plan rather than in the implementations.
+> **B-1. Task 2 Step 1's command was DESTRUCTIVE to the working environment.** As drafted it was
+> `docker run … node:22-alpine sh -c "npm i -g npm@11 && npm install nayuki-qr-code-generator@1.8.0"` —
+> a full install inside a container with the repo bind-mounted, which replaced `node_modules` with
+> **Linux** binaries and broke the Windows host outright (`Cannot find module
+> '@rollup/rollup-win32-x64-msvc'`). `README.md` documents this command **with `--package-lock-only`**
+> for exactly that reason and the plan dropped the flag. A second consequence followed: npm 11's script
+> allowlist skipped `@prisma/client`'s postinstall, leaving a stub client whose missing type exports
+> broke `tsc --noEmit` across ~15 unrelated files. Recovery was `npm ci` then `npx prisma generate`.
+> Step 1 now carries all three commands and says what each is for. **The lesson generalises past npm:
+> a bind-mounted container writing anything other than the file you intended is a footgun, and "the
+> README already documents this" is not the same as "the plan copied it correctly".**
+>
+> **B-2. Task 1's loopback guard accepted `0.0.0.0`, which is the one value an operator will actually
+> paste.** The plan specified `LOOPBACK_HOSTS = {localhost, 127.0.0.1, ::1, [::1]}` plus
+> `host.startsWith("127.")`, and a review found two holes, both reproduced by running the shipped code:
+> `http://0.0.0.0:3000` returned `{ok: true}` — a QR that prints cleanly and is dead on every phone,
+> which is the single failure the module exists to prevent — and **`docker ps` renders this project's
+> own web service as `0.0.0.0:3000->3000/tcp`, so it is the likeliest wrong value in existence here.**
+> Separately, `startsWith("127.")` is a string test standing in for a CIDR check: it refused `127.co`
+> (a real purchasable domain), `127.evil.com` and `127.0.0.1.evil.com`. That direction fails safe, so it
+> was the lesser bug. Fixed with a parsed dotted-quad check, an `UNREACHABLE_HOSTS` set including
+> `0.0.0.0` and `[::]`, and `.localhost` handled per RFC 6761 as a suffix — so `dev.localhost` is
+> refused while `localhost.evil.com`, a different machine entirely, is not. Two unreachable branches the
+> review also caught (a bare `"::1"` that `url.hostname` never produces, since the parser always
+> brackets IPv6, and an empty-hostname check the scheme test already intercepts) were deleted, and the
+> comment claiming "every spelling of this machine" was rewritten to state what it does **not** cover:
+> IPv6 has more spellings of loopback than are worth normalising for a sticker guard, and this is a
+> guard against a plausible mistake, not a security boundary.
+
 **Conventions for every task:** branch `phase-11-label-qr` (already exists); run
 `npx tsc --noEmit && npm run lint` before each commit; **NEVER run `npm run build` while a dev server is
 running** (they share `.next`); no new migrations this phase. DB via `docker compose up -d db`, seed via
@@ -144,9 +174,12 @@ describe("qrBase", () => {
     for (const base of [
       "http://localhost:3000",
       "http://LOCALHOST:3000",
+      "http://dev.localhost:3000",
       "http://127.0.0.1:3000",
       "http://127.1.2.3:3000",
       "http://[::1]:3000",
+      "http://[::]:3000",
+      "http://0.0.0.0:3000",
     ]) {
       expect(qrBase(base), base).toEqual({ ok: false, reason: "loopback" });
     }
@@ -202,10 +235,32 @@ export type QrBase =
   | { ok: true; prefix: string }
   | { ok: false; reason: "unset" | "not-absolute" | "loopback" | "bad-url" };
 
-/** Every spelling of "this machine". A QR built from any of them scans
- *  perfectly on the developer's laptop and is dead on every phone — which is
- *  the whole reason this validation exists rather than a default value. */
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+/**
+ * Hosts that mean "the machine running the server", which is the one value
+ * that must never reach a printed label: a QR built from it scans perfectly in
+ * the office and is dead on every phone.
+ *
+ * `0.0.0.0` is here for a specific reason — `docker ps` renders this project's
+ * own web service as `0.0.0.0:3000->3000/tcp`, so it is the value an operator
+ * is most likely to copy by mistake.
+ *
+ * NOT exhaustive, and deliberately so: IPv6 has more spellings of loopback
+ * than are worth normalising here (`http://[::ffff:127.0.0.1]` is accepted,
+ * for instance, because the URL parser rewrites it to `[::ffff:7f00:1]`).
+ * This covers what a human types into a `.env` file. The refusal is a guard
+ * against a plausible mistake, not a security boundary.
+ */
+const UNREACHABLE_HOSTS = new Set(["localhost", "[::1]", "[::]", "0.0.0.0"]);
+
+/** True for a dotted-quad IPv4 literal inside 127.0.0.0/8 — parsed as four
+ *  octets rather than string-matched, so `127.co` and `127.0.0.1.evil.com`
+ *  (both ordinary domain names) are not mistaken for loopback. */
+function isLoopbackIpv4(host: string): boolean {
+  const octets = host.split(".");
+  if (octets.length !== 4) return false;
+  if (!octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)) return false;
+  return octets[0] === "127";
+}
 
 export function qrBase(baseUrl: string | undefined): QrBase {
   const raw = (baseUrl ?? "").trim();
@@ -223,10 +278,12 @@ export function qrBase(baseUrl: string | undefined): QrBase {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return { ok: false, reason: "not-absolute" };
   }
-  if (url.hostname === "") return { ok: false, reason: "bad-url" };
-
   const host = url.hostname.toLowerCase();
-  if (LOOPBACK_HOSTS.has(host) || host.startsWith("127.")) {
+  // RFC 6761 reserves `.localhost` for loopback, so `dev.localhost` counts —
+  // but `localhost.evil.com` does NOT, which is why this is a suffix test and
+  // not a substring one.
+  const isLocalhostName = host === "localhost" || host.endsWith(".localhost");
+  if (UNREACHABLE_HOSTS.has(host) || isLocalhostName || isLoopbackIpv4(host)) {
     return { ok: false, reason: "loopback" };
   }
 
@@ -256,14 +313,21 @@ export function qrUrlFor(tag: string, base: { prefix: string }): string {
 npx vitest run src/lib/label-qr.test.ts
 ```
 
-Expected: PASS, 10 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Mutation-test the loopback guard**
 
-Per §6a, a new pure rule gets its tests mutation-tested before they are trusted. Temporarily change
-`host.startsWith("127.")` to `host === "127.0.0.1"` and re-run. **Expected: the `http://127.1.2.3:3000`
-case FAILS.** Revert the mutation. If the suite stayed green, the test is inert and must be fixed
-before moving on.
+Per §6a, a new pure rule gets its tests mutation-tested before they are trusted. Run all three and
+report the actual failure output for each:
+
+- delete `"0.0.0.0"` from `UNREACHABLE_HOSTS` → the loopback test must fail on that case;
+- change `host.endsWith(".localhost")` to `host.includes("localhost")` → the
+  `localhost.evil.com` test must fail;
+- change `octets[0] === "127"` to `octets[0].startsWith("127")` → **must still pass.** It is a genuine
+  no-op: `octets[0]` has already cleared `/^\d{1,3}$/` and `<= 255`, so no valid octet can carry
+  `"127"` as a proper prefix. If it FAILS, the implementation differs from this plan — say so.
+
+Revert each after observing it. A green suite under mutation 1 or 2 means that test is inert.
 
 - [ ] **Step 6: Commit**
 
@@ -282,22 +346,36 @@ git commit -m "feat(labels): where a scanned label sends a phone, and every way 
 - Create: `src/lib/qr.ts`
 - Test: `src/lib/qr.test.ts`
 
-- [ ] **Step 1: Add the dependency — on Windows, INSIDE a Linux container**
+- [ ] **Step 1: Add the dependency — lockfile in a Linux container, `node_modules` on the host**
 
-`package-lock.json` is consumed by the Docker build. A lockfile rewritten by Windows npm breaks that
-build, which is why `README.md` documents this exact command. Run it from Git Bash or WSL:
+`package-lock.json` is consumed by the Docker build, and a lockfile rewritten by Windows npm breaks
+that build. But the container must write **only the lockfile**: the repo is bind-mounted, so a full
+`npm install` in there replaces `node_modules` with **Linux** binaries and breaks the Windows host —
+vitest dies immediately with `Cannot find module '@rollup/rollup-win32-x64-msvc'`. `--package-lock-only`
+is what keeps it to the lockfile, and it is why `README.md` documents the flag.
+
+Three commands, in order, from Git Bash or WSL:
 
 ```bash
-docker run --rm -v "$PWD:/app" -w /app node:22-alpine sh -c "npm i -g npm@11 && npm install nayuki-qr-code-generator@1.8.0"
+docker run --rm -v "$PWD:/app" -w /app node:22-alpine sh -c "npm i -g npm@11 && npm install --package-lock-only nayuki-qr-code-generator@1.8.0"
+npm ci
+npx prisma generate
 ```
+
+`npm ci` installs from the freshly-updated lockfile with host-platform binaries and never rewrites the
+lockfile. `npx prisma generate` is not optional housekeeping: npm 11's script allowlist can skip
+`@prisma/client`'s postinstall, leaving a stub client whose missing type exports break `tsc --noEmit`
+across roughly fifteen unrelated files. It is pure codegen from `schema.prisma` — no database access.
 
 Then confirm what landed, and that it brought nothing with it:
 
 ```bash
 npm ls nayuki-qr-code-generator
+git diff --stat package.json package-lock.json
 ```
 
-Expected: `nayuki-qr-code-generator@1.8.0` with no child dependencies.
+Expected: `nayuki-qr-code-generator@1.8.0` with no child dependencies, and **only those two files**
+changed. If `git status` shows anything else, stop and report it.
 
 - [ ] **Step 2: Write the failing test**
 
