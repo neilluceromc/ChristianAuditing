@@ -75,19 +75,52 @@ URL construction and base-URL validation. No React, no Prisma, no `next/*` — t
 `label-geometry.ts` follows, so the string printed onto a sticker is unit-testable without a browser.
 
 ```
-export type QrTarget =
-  | { ok: true; url: string }
+export type QrBase =
+  | { ok: true; prefix: string }
   | { ok: false; reason: "unset" | "not-absolute" | "loopback" | "bad-url" };
 
-export function qrTargetFor(tag: string, baseUrl: string | undefined): QrTarget;
+export function qrBase(baseUrl: string | undefined): QrBase;
+export function qrUrlFor(tag: string, base: { prefix: string }): string;
 ```
 
-A discriminated union for the same reason `BarcodeFit` is one: a caller must not be able to render a
-QR with no URL. `fit.url` should not typecheck until `ok` is narrowed to `true`.
+**Split in two deliberately.** Whether the base URL is usable never depends on the tag, so it is
+validated **once per sheet** and the per-label URL is then pure concatenation. That is what lets the
+sheet render a single explanatory note instead of repeating the same refusal on all twelve labels.
 
-Validation, in order: unset/empty → `unset`; unparseable → `bad-url`; scheme not `http:`/`https:` →
-`not-absolute`; hostname `localhost`, `127.0.0.1`, `::1`, or any `127.0.0.0/8` → `loopback`. A trailing
-slash on the base is normalised rather than refused.
+A discriminated union for the same reason `BarcodeFit` is one: a caller must not be able to read a
+`prefix` that was never validated. `base.prefix` should not typecheck until `ok` is narrowed to `true`.
+
+Validation, in order: unset/blank → `unset`; unparseable or empty host → `bad-url`; scheme not
+`http:`/`https:` → `not-absolute` (this is what catches a bare `inventory.local:3000`, which parses as
+scheme `inventory.local:` with path `3000`); hostname `localhost`, `127.0.0.1`, `::1`, or any
+`127.0.0.0/8` → `loopback`. Trailing slashes are stripped rather than refused — the likeliest human
+input — while a base path is **preserved**, so a sub-path deployment still resolves. Any query or
+fragment on the base is dropped, since the prefix gets its own `?q=`.
+
+### `src/lib/qr.ts` — the only file that imports the dependency, new
+
+A three-line surface over the encoder:
+
+```
+export interface QrMatrix {
+  readonly size: number;     // modules per side, excluding the quiet zone
+  readonly version: number;  // 1-40, derived by the encoder, never chosen here
+  isDark(x: number, y: number): boolean;
+}
+
+export function qrMatrix(text: string): QrMatrix;
+```
+
+**Why a wrapper at all:** decision 6 accepts a dependency, and this is the containment. The encoder's
+API touches exactly one file, so a future swap is one edit answerable by one test — and `qr.test.ts`
+pins a **measured** vector (the 59-byte example encodes to version 4, size 33, mask 2, 559 dark modules
+of 1089; observed by running it, not predicted) so a replacement has to encode identically or say why.
+
+ECC level **MEDIUM** (~15% recoverable), not LOW: these are stickers on hardware that gets handled, and
+a scuffed label with error correction still reads.
+
+Mirrors the existing split — `code128.ts` (encoder) feeds `label-geometry.ts` (`barcodeFit`); `qr.ts`
+(encoder) feeds `label-geometry.ts` (`qrFit`).
 
 ### `src/lib/label-geometry.ts` — extended
 
@@ -104,7 +137,7 @@ byte-mode capacity, ECC level M (ISO/IEC 18004):
   v4  33x33   62 bytes   FITS  <- 3 bytes of headroom
   v5  37x37   84 bytes   fits
 
-v4 at 20 mm  ->  0.606 mm per module   (PREFERRED_MODULE_MM is 0.33)
+v4 sized by qrFit below -> 0.500 mm per module, 16.5 mm dark, 20.5 mm footprint
 ```
 
 **The version MUST be derived from the encoded byte length, never assumed** — and the reason is in that
@@ -112,16 +145,27 @@ table: the realistic example clears version 4 by **three bytes**. A hostname fou
 tips it to version 5, 37×37, and the module size shrinks with it. Hardcoding a version here would be a
 bug that appears only for customers with longer hostnames.
 
-Also budget the **4-module quiet zone** QR requires on all sides: v4 is 33 + 8 = 41 module-widths of
-footprint, ~24.8 mm at 0.606 mm modules. That is what competes with the barcode for the 53.33 mm of
-`LABEL_USABLE_MM`, not the 20 mm of dark modules alone.
+Also budget the **4-module quiet zone** QR requires on all sides: v4 is 33 + 8 = 41 module-widths, so
+**20.5 mm of footprint for 16.5 mm of dark area**. The footprint is what competes for space, not the
+dark area alone.
 
-Refuse, rather than shrink, if modules fall below a QR-specific floor. Phone cameras tolerate less than
-a dedicated laser scanner, so this floor is **not** `MIN_MODULE_MM` (0.19 mm, set for handheld lasers).
-**Target `QR_PREFERRED_MODULE_MM = 0.5`, refuse below `QR_MIN_MODULE_MM = 0.4`.** These two numbers are
-the least certain in this spec: they are a judgement about phone optics at arm's length, not a measured
-result, and the physical read test in §4 is what validates or corrects them. Record the outcome against
-these constants so a future change has a measurement to argue with rather than a guess to inherit.
+Phone cameras tolerate less than a dedicated laser scanner, so the floor here is **not**
+`MIN_MODULE_MM` (0.19 mm, set for handheld lasers). `qrFit` takes **exactly the shape `barcodeFit`
+already has** — the preferred module size unless the symbol outgrows its budget, then a refusal:
+
+```
+moduleMm = min(QR_PREFERRED_MODULE_MM, QR_MAX_DARK_MM / modules)   // 0.5, 24
+refuse if moduleMm < QR_MIN_MODULE_MM                              // 0.4
+
+v4  (33 mod)  0.500 mm  dark 16.5 mm  footprint 20.5 mm   <- the real case
+v10 (57 mod)  0.421 mm  dark 24.0 mm  footprint 27.4 mm   <- last accepted
+v11 (61 mod)  0.393 mm                                    <- REFUSED
+```
+
+`QR_PREFERRED_MODULE_MM` and `QR_MIN_MODULE_MM` are the least certain numbers in this spec: a judgement
+about phone optics at arm's length, not a measured result. The physical read test in §4 validates or
+corrects them. Record the outcome against these constants so a future change has a measurement to argue
+with rather than a guess to inherit.
 
 ### `src/components/inventory/label-sheet.tsx` — extended
 
@@ -146,7 +190,7 @@ A QR placed beside the barcode leaves it ~28 mm, which is *within 0.003 mm* of t
 `barcodeFit` returns `encodable: false` and the label prints "no scannable code" instead. One extra
 character in a tag tips it. **Vertical is where the room is:** the cell's content box is
 69.25 − 10 = 59.25 mm tall and currently uses roughly 19 mm (chip row, tag, 9 mm barcode), leaving
-~40 mm. A 20 mm QR plus its quiet zone fits below the barcode with slack to spare, and the barcode
+~40 mm. A 20.5 mm QR footprint fits below the barcode with slack to spare, and the barcode
 keeps its full preferred module size.
 
 **This is the risky edit in the phase.** The sheet's vertical budget was tightened once already —
@@ -239,9 +283,10 @@ same way:** the phone, the print scale, and whether it read first time.
 ## 6. Task order
 
 1. `label-qr.ts` + its unit tests (TDD; pure, no deps on anything below).
-2. The QR dependency, added via the Alpine lockfile command, plus geometry sizing + tests.
-3. The label-sheet layout edit, then **re-measure** the page box and calibration bar.
-4. The refusal surface and its e2e.
-5. `.env.example`, and the README section introducing the QR with §3's password prerequisite.
-6. Decision 7's one-line prose fix on the accountability form.
-7. Battery, plan amendments, handover.
+2. The QR dependency, added via the Alpine lockfile command, plus `qr.ts` and its pinned test.
+3. `qrFit` in `label-geometry.ts` + tests.
+4. The label-sheet layout edit, then **re-measure** the page box and calibration bar.
+5. The refusal surface and its e2e.
+6. `.env.example`, and the README section introducing the QR with §3's password prerequisite.
+7. Decision 7's one-line prose fix on the accountability form.
+8. Battery, plan amendments, handover.
