@@ -81,3 +81,51 @@ export function barcodeFit(tag: string): BarcodeFit {
   if (moduleMm < MIN_MODULE_MM) return { encodable: false };
   return { encodable: true, moduleMm, widthMm: modules * moduleMm };
 }
+
+/** QR mandates 4 clear modules on every side. This is not padding to taste —
+ *  a reader may fail without it, and it is what actually competes for space
+ *  on the label: the footprint is `modules + 8`, not `modules`. */
+export const QR_QUIET_MODULES = 4;
+
+/**
+ * Phone-camera module sizes, and the two least certain numbers in this feature.
+ *
+ * NOT `MIN_MODULE_MM` (0.19), which was chosen for a handheld laser scanner —
+ * a phone camera at arm's length tolerates less. These are a judgement about
+ * optics, not a measured result: the physical read test (spec §4) is what
+ * validates or corrects them, and the outcome should be recorded against
+ * these constants so a future change argues with a measurement.
+ */
+export const QR_PREFERRED_MODULE_MM = 0.5;
+export const QR_MIN_MODULE_MM = 0.4;
+
+/** The cap on the dark area's edge, past which the module shrinks instead of
+ *  the symbol growing. The cell has roughly 40mm of spare height, so this
+ *  leaves comfortable room (worst case footprint is ~27.9mm at version 8). */
+export const QR_MAX_DARK_MM = 24;
+
+export type QrFit =
+  | { renderable: true; moduleMm: number; sizeMm: number }
+  | { renderable: false };
+
+/**
+ * Deliberately the same shape as `barcodeFit`: take the preferred module size
+ * unless the symbol is too big for its budget, then refuse below the floor.
+ * Reading the two side by side should show one idea, not two.
+ *
+ * `modules` comes from the encoder (`qrMatrix().size`), never from a guess —
+ * the realistic label URL clears version 4's capacity by three bytes, so a
+ * hardcoded version would be a bug that only appears for longer hostnames.
+ *
+ * Legal QR sizes are 21 + 4n for versions 1–40, i.e. 21…177.
+ */
+export function qrFit(modules: number): QrFit {
+  const legal =
+    Number.isInteger(modules) && modules >= 21 && modules <= 177 && (modules - 21) % 4 === 0;
+  if (!legal) return { renderable: false };
+
+  const moduleMm = Math.min(QR_PREFERRED_MODULE_MM, QR_MAX_DARK_MM / modules);
+  if (moduleMm < QR_MIN_MODULE_MM) return { renderable: false };
+
+  return { renderable: true, moduleMm, sizeMm: (modules + 2 * QR_QUIET_MODULES) * moduleMm };
+}
