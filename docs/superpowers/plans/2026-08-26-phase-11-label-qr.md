@@ -53,6 +53,18 @@ bars. `label-sheet.tsx` renders the QR **below** the barcode. The QR encodes
 > comment claiming "every spelling of this machine" was rewritten to state what it does **not** cover:
 > IPv6 has more spellings of loopback than are worth normalising for a sticker guard, and this is a
 > guard against a plausible mistake, not a security boundary.
+>
+> **B-3. `localhost.` with a trailing dot slipped past the fixed guard too, and the cause is a URL-parser
+> asymmetry worth knowing.** Found by the re-review after B-2 was closed. `new URL` **canonicalises** an
+> IPv4 literal, so `http://0.0.0.0.:3000` arrives as hostname `0.0.0.0` and was already caught — but it
+> leaves a **domain name** alone, so `http://localhost.:3000` arrives as `localhost.` and was accepted,
+> returning `ok: true` for a host that is the same address as `localhost` to every resolver. Tools like
+> `hostname -f` and `dig` emit the dotted form, so it is not exotic. Fixed by stripping a single
+> trailing dot before the comparisons, and **verified by mutation** — removing the strip fails the
+> loopback test on exactly `http://localhost.:3000`. The four trailing-dot cases are now pinned,
+> including the two that already passed, so a future change to normalisation cannot quietly reintroduce
+> half of it. **Three findings on one 70-line pure module, none of which a green suite would have shown:
+> that is the argument for reviewing the rule rather than the diff, restated.**
 
 **Conventions for every task:** branch `phase-11-label-qr` (already exists); run
 `npx tsc --noEmit && npm run lint` before each commit; **NEVER run `npm run build` while a dev server is
@@ -180,6 +192,13 @@ describe("qrBase", () => {
       "http://[::1]:3000",
       "http://[::]:3000",
       "http://0.0.0.0:3000",
+      // Trailing DNS root dot. `new URL` canonicalises it away for an IPv4
+      // literal but keeps it on a domain name, so these two slipped past the
+      // guard while `http://0.0.0.0.:3000` never did.
+      "http://localhost.:3000",
+      "http://dev.localhost.:3000",
+      "http://0.0.0.0.:3000",
+      "http://127.0.0.1.:3000",
     ]) {
       expect(qrBase(base), base).toEqual({ ok: false, reason: "loopback" });
     }
@@ -278,7 +297,13 @@ export function qrBase(baseUrl: string | undefined): QrBase {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return { ok: false, reason: "not-absolute" };
   }
-  const host = url.hostname.toLowerCase();
+  // A trailing dot is the DNS root anchor: `localhost.` and `localhost` are the
+  // same address to every resolver. It has to be stripped here because the URL
+  // parser is asymmetric about it — it canonicalises an IPv4 literal, so
+  // `0.0.0.0.` arrives as `0.0.0.0`, but it leaves a domain name alone, so
+  // `localhost.` arrives with the dot still on and slipped past this guard
+  // until it was normalised.
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
   // RFC 6761 reserves `.localhost` for loopback, so `dev.localhost` counts —
   // but `localhost.evil.com` does NOT, which is why this is a suffix test and
   // not a substring one.
