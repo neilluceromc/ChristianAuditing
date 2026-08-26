@@ -125,9 +125,29 @@ these constants so a future change has a measurement to argue with rather than a
 
 ### `src/components/inventory/label-sheet.tsx` — extended
 
-The QR renders beside the barcode within the existing 53.33 mm usable width
-(`LABEL_USABLE_MM`), as an `<svg role="img">` with an accessible name, matching how the barcode is
-already asserted by role rather than by text.
+The QR renders **BELOW the barcode as a fourth child of the cell's column flex**, as an
+`<svg role="img">` with an accessible name, matching how the barcode is already asserted by role rather
+than by text.
+
+**Corrected while planning — the first draft of this spec said "beside the barcode", and that would
+have broken the barcode.** The horizontal budget is nearly spent:
+
+```
+LABEL_USABLE_MM                    53.33 mm
+'BR-LT-0166' = 10 chars = 145 modules
+  at PREFERRED_MODULE_MM (0.33)    47.85 mm  <- barcode's actual width
+  horizontal slack                  5.48 mm  <- all there is
+
+barcode squeezed to 28 mm  ->  0.193 mm/module
+MIN_MODULE_MM                   0.19  mm     <- refuses just below this
+```
+
+A QR placed beside the barcode leaves it ~28 mm, which is *within 0.003 mm* of the width at which
+`barcodeFit` returns `encodable: false` and the label prints "no scannable code" instead. One extra
+character in a tag tips it. **Vertical is where the room is:** the cell's content box is
+69.25 − 10 = 59.25 mm tall and currently uses roughly 19 mm (chip row, tag, 9 mm barcode), leaving
+~40 mm. A 20 mm QR plus its quiet zone fits below the barcode with slack to spare, and the barcode
+keeps its full preferred module size.
 
 **This is the risky edit in the phase.** The sheet's vertical budget was tightened once already —
 `A-16` records the calibration ruler silently shipping at 89.38 mm against a declared 100 mm after a
@@ -198,6 +218,12 @@ same way:** the phone, the print scale, and whether it read first time.
 
 1. **The layout edit re-tips the sheet's vertical budget.** Highest-likelihood failure. Mitigated by
    the existing page-box and calibration-bar assertions, which must be run and read, not assumed green.
+   Note the direction of the danger has moved: because the QR goes *below* the barcode (§1) it consumes
+   the vertical budget, which is the same budget `A-16`'s `flex-shrink` bug raided. The cell is a column
+   flex with `justifyContent: space-between` and `overflow: hidden`, so an over-tall QR does not
+   overflow visibly — **it silently compresses its siblings, exactly as the calibration ruler was
+   silently compressed to 89.38 mm.** Give the QR `flexShrink: 0` for the same reason the ruler has it,
+   and assert the rendered barcode height, not just its presence.
 2. **A long hostname overflows the assumed QR version.** Not hypothetical: the realistic example clears
    version 4 by **three bytes** (§1). Mitigated by deriving the version from the encoded payload length,
    and by a test that uses a deliberately long base URL rather than only the convenient one.
