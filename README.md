@@ -35,8 +35,9 @@ source of truth, not this paragraph:
   (`postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}`). A password
   containing `/` breaks the URL — it terminates the authority section early, and Prisma fails with
   `P1013: invalid port number in database URL`, which makes the `migrate` service exit 1. `+` and `=`
-  are legal there and will not cause that error, but strip them anyway as a precaution (they are still
-  base64 punctuation, not password entropy): `openssl rand -base64 24 | tr -d '/+='`.
+  are legal there and will not cause that error, but strip them anyway as a precaution — the loss is
+  a couple of characters out of 32, and what remains is ample:
+  `openssl rand -base64 24 | tr -d '/+='`.
 - `AUTH_SECRET` — Auth.js's session-signing secret. `.env.example` suggests `npx auth secret` to
   generate one (or use `openssl rand -base64 24`, same shape as the Postgres password — this one is
   never interpolated into a URL, so it does not need the same character stripping).
@@ -60,7 +61,7 @@ npm run dev
 ```
 
 `npm ci` installs from the committed `package-lock.json` — a fresh clone has no `node_modules`, and
-this is the one npm invocation in this document that is safe to run on Windows (see the lockfile
+this is the one npm *install* command in this document that is safe to run on Windows (see the lockfile
 hazard in Troubleshooting: the hazard is *regenerating* the lockfile, not installing from it).
 `npx prisma generate` is required even though `@prisma/client` is a dependency: its own postinstall
 hook does not reliably leave a working client behind, and skipping this step fails later with
@@ -74,13 +75,14 @@ docker compose --profile prod build
 docker compose --profile prod up -d
 ```
 
-The `build` step matters even on a machine that already has an `inventory-app` image: `worker`
-(`docker-compose.yml`) has no `build:` stanza of its own and reuses whatever is tagged `inventory-app`
-from `migrate` or `web`'s build — on a genuinely clean clone that tag exists only because you just
-built it, and it is in no registry.
+Build first, in both directions. `up -d` builds only when a tag is *missing*, so a machine that
+already has an `inventory-app` image will silently run a stale one until you rebuild. And on a
+genuinely clean clone the tag does not exist at all — which `worker` cannot recover from on its own:
+it has no `build:` stanza in `docker-compose.yml` (unlike `migrate` and `web`) and simply consumes
+whatever is tagged `inventory-app`, a name published to no registry.
 
 `--profile prod up -d` starts five containers: `db` (no `profiles:` entry of its own — it comes up
-because `migrate`, `web` and `worker` all depend on it) and the four profile-`prod` services —
+because all four profile-`prod` services depend on it) and those four —
 `migrate` (runs `prisma migrate deploy` once and exits 0), `web`, `worker` (executes approved
 lifecycle changes and delivers webhooks — see "The worker" below), and `backup` (takes a daily
 `pg_dump` into `./backups`, keeping the newest 14). `web` and `worker` both wait for `migrate` to
