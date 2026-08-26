@@ -13,7 +13,7 @@ story, no object storage, and (see "What does not work" below) no working SSO ye
 
 ## Prerequisites
 
-- Docker Desktop (with the Docker Engine it ships, currently tested against server 29.6.1)
+- Docker Desktop (verified against Docker Engine 29.6.1 on 2026-08-26)
 - Node.js >= 22
 - npm >= 11
 
@@ -32,10 +32,11 @@ source of truth, not this paragraph:
   container's `initdb` on its **first** boot only; changing `.env` later does not change a running
   database's password (`.env.example` has the `\password` command to rotate it).
   **`docker-compose.yml` splices this value unescaped into the container `DATABASE_URL`**
-  (`postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}`), so a password
-  containing `/` or `+` breaks the URL — Prisma fails with `P1013: invalid port number in database
-  URL` and the `migrate` service exits 1. Strip those characters from the generated value:
-  `openssl rand -base64 24 | tr -d '/+='`.
+  (`postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}`). A password
+  containing `/` breaks the URL — it terminates the authority section early, and Prisma fails with
+  `P1013: invalid port number in database URL`, which makes the `migrate` service exit 1. `+` and `=`
+  are legal there and will not cause that error, but strip them anyway as a precaution (they are still
+  base64 punctuation, not password entropy): `openssl rand -base64 24 | tr -d '/+='`.
 - `AUTH_SECRET` — Auth.js's session-signing secret. `.env.example` suggests `npx auth secret` to
   generate one (or use `openssl rand -base64 24`, same shape as the Postgres password — this one is
   never interpolated into a URL, so it does not need the same character stripping).
@@ -51,30 +52,47 @@ the password in both places in sync regardless, since local dev needs it directl
 
 ```bash
 docker compose up -d db
+npm ci
+npx prisma generate
 npx prisma migrate deploy
 npm run db:seed
 npm run dev
 ```
 
-This starts only the database in Docker and runs the app on the host with hot reload. `npm run dev`
-serves on `http://localhost:3000`.
+`npm ci` installs from the committed `package-lock.json` — a fresh clone has no `node_modules`, and
+this is the one npm invocation in this document that is safe to run on Windows (see the lockfile
+hazard in Troubleshooting: the hazard is *regenerating* the lockfile, not installing from it).
+`npx prisma generate` is required even though `@prisma/client` is a dependency: its own postinstall
+hook does not reliably leave a working client behind, and skipping this step fails later with
+`@prisma/client did not initialize yet`. This starts only the database in Docker and runs the app on
+the host with hot reload. `npm run dev` serves on `http://localhost:3000`.
 
 ## Production deploy
 
 ```bash
+docker compose --profile prod build
 docker compose --profile prod up -d
 ```
 
-This brings up three services: `db`, `migrate` (runs `prisma migrate deploy` once and exits 0), and
-`web`. `web` waits for `migrate` to complete successfully before it starts. A fourth profile-`prod`
-service, `backup`, also comes up and takes a daily `pg_dump` into `./backups`, keeping the newest 14.
+The `build` step matters even on a machine that already has an `inventory-app` image: `worker`
+(`docker-compose.yml`) has no `build:` stanza of its own and reuses whatever is tagged `inventory-app`
+from `migrate` or `web`'s build — on a genuinely clean clone that tag exists only because you just
+built it, and it is in no registry.
+
+`--profile prod up -d` starts five containers: `db` (no `profiles:` entry of its own — it comes up
+because `migrate`, `web` and `worker` all depend on it) and the four profile-`prod` services —
+`migrate` (runs `prisma migrate deploy` once and exits 0), `web`, `worker` (executes approved
+lifecycle changes and delivers webhooks — see "The worker" below), and `backup` (takes a daily
+`pg_dump` into `./backups`, keeping the newest 14). `web` and `worker` both wait for `migrate` to
+complete successfully before they start.
 
 The database is bound to **127.0.0.1 only** (`docker-compose.yml`'s `db.ports`), deliberately — it is
 never reachable from outside the host, prod or dev.
 
-Seed the production database (there is no `node_modules` inside the `web` image's dev
-dependencies, but `tsx` is a regular dependency and `prisma/` is copied in, so run it inside the
-container):
+Seed the production database. A fresh clone's *host* has no `node_modules` at all, so run it inside
+the `web` container instead, where it already has what it needs: `Dockerfile` builds the runtime tree
+with `npm ci --omit=dev` and copies it in, `tsx` is a regular dependency (survives `--omit=dev`), and
+`prisma/` is copied in alongside it:
 
 ```bash
 docker compose --profile prod exec web node_modules/.bin/tsx prisma/seed.ts
@@ -88,9 +106,10 @@ Migrations are hand-written, additive SQL directories under `prisma/migrations/`
 npx prisma migrate deploy
 ```
 
-(the `migrate` service runs exactly this command in prod). **`prisma migrate reset` is blocked** and
-is not the way to get a clean database anyway — `npm run db:seed` is: it `TRUNCATE`s the seeded tables
-and reinserts fixture data, and is the sanctioned way to reset local/dev state.
+(the `migrate` service runs the same operation in prod, via the image's own
+`node_modules/.bin/prisma`, not `npx`). `prisma migrate reset` is destructive and unnecessary here —
+`npm run db:seed` is the sanctioned reset: it `TRUNCATE`s the seeded tables and reinserts fixture
+data.
 
 ## The worker
 
@@ -119,9 +138,9 @@ running deployment.)
 | `viewer@thebackroomop.com`      | `viewer`            |
 
 That password is `admin123` — **8 characters**, deliberately shorter than the 10-character minimum
-the app's own signup form enforces (sign-in has no length rule; only signup does). It is a fixture for
-a loopback-only dev database in a public repo, not a real credential. **Change every seeded password
-before the app is reachable from anywhere but localhost.**
+`src/server/auth/actions.ts` enforces on signup (sign-in has no length rule; only signup does). It is
+a fixture for a loopback-only dev database in a public repo, not a real credential. **Change every
+seeded password before the app is reachable from anywhere but localhost.**
 
 ## Troubleshooting
 
@@ -131,8 +150,8 @@ launched from a terminal; open it from the Start menu and wait for it to report 
 retrying.
 
 **`migrate` exits 1 with `Error: P1013: ... invalid port number in database URL`** —
-`POSTGRES_PASSWORD` contains a `/` or `+` that breaks the unescaped `DATABASE_URL` compose builds for
-the container (see Secrets above). Regenerate the password without those characters,
+`POSTGRES_PASSWORD` contains a `/` that breaks the unescaped `DATABASE_URL` compose builds for the
+container (see Secrets above). Regenerate the password without that character,
 `docker compose -p <project> down -v` to drop the volume `initdb` already used the bad password on,
 and start over.
 
@@ -146,8 +165,12 @@ clearing `.next` produces confusing errors or a broken dev server. Delete `.next
 you actually want.
 
 **`npm install` / lockfile changes on Windows** — `package-lock.json` is generated by CI on Linux, and
-running `npm install` on Windows can rewrite it in ways that break the Linux Docker build. If you need
-to update the lockfile, do it inside a Linux container instead of on the host:
+running `npm install` on Windows can rewrite it in ways that break the Linux Docker build. This is
+about *regenerating* the lockfile, not installing from it: `npm ci` (as used in the dev quickstart
+above) installs strictly from the committed lockfile and never rewrites it, so it is safe on Windows.
+Only reach for the command below if you actually need to add, remove, or update a dependency and
+therefore change `package-lock.json` — do it inside a Linux container instead of on the host (run this
+from Git Bash or WSL; PowerShell needs `"${PWD}:/app"` instead of `"$PWD:/app"`):
 
 ```bash
 docker run --rm -v "$PWD:/app" -w /app node:22-alpine sh -c "npm i -g npm@11 && npm install --package-lock-only"
