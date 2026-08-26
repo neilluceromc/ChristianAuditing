@@ -57,6 +57,13 @@ describe("qrBase", () => {
       "http://0.0.0.0:3000",
       "http://[::]:3000",
       "http://dev.localhost:3000",
+      // Trailing DNS root dot. `new URL` canonicalises it away for an IPv4
+      // literal but keeps it on a domain name, so these two slipped past the
+      // guard while `http://0.0.0.0.:3000` never did.
+      "http://localhost.:3000",
+      "http://dev.localhost.:3000",
+      "http://0.0.0.0.:3000",
+      "http://127.0.0.1.:3000",
     ]) {
       expect(qrBase(base), base).toEqual({ ok: false, reason: "loopback" });
     }

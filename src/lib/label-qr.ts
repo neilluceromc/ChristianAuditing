@@ -62,7 +62,13 @@ export function qrBase(baseUrl: string | undefined): QrBase {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return { ok: false, reason: "not-absolute" };
   }
-  const host = url.hostname.toLowerCase();
+  // A trailing dot is the DNS root anchor: `localhost.` and `localhost` are the
+  // same address to every resolver. It has to be stripped here because the URL
+  // parser is asymmetric about it — it canonicalises an IPv4 literal, so
+  // `0.0.0.0.` arrives as `0.0.0.0`, but it leaves a domain name alone, so
+  // `localhost.` arrives with the dot still on and slipped past this guard
+  // until it was normalised.
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
   // RFC 6761 reserves `.localhost` for loopback, so `dev.localhost` counts —
   // but `localhost.evil.com` does NOT, which is why this is a suffix test and
   // not a substring one.
