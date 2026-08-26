@@ -1679,11 +1679,24 @@ any task in the phase. All of them were fixtures that the running code could not
   **only the database**. Restoring from a backup therefore restores every document *row* with no file
   behind it. Either add `./uploads` to whatever backs up the machine, or extend the `backup` service.
   Stated in `README.md` under "What does not work" so an operator meets it before an incident does.
-- **The physical print measurement (Phase 10, Task 11 Step 4) was never taken.** The calibration bar
-  measures 100.0 mm in the rendered DOM and Task 4's e2e asserts it (it silently shrank to 89.38 mm
-  once, which is why that assertion exists). **Nobody has printed a sheet and put a tape measure on it.**
-  Record the browser and the print settings alongside the number when someone does. If it comes up
-  short, the PDF escape hatch in spec §5 stops being speculative.
+- **The physical print measurement (Phase 10, Task 11 Step 4) was never taken — but the software half
+  of it is now proven one leg further than the e2e goes.** The suite measures the bar in the **DOM under
+  print emulation** (377.95 CSS px). On 2026-08-26 the bar was additionally measured **inside a real PDF
+  produced by Chrome's own print pipeline** (`page.pdf({ preferCSSPageSize: true })` against
+  `/inventory/labels`), which exercises the `@page` rule and the print stylesheet rather than emulating
+  them. Results: Chrome wrote the **MediaBox at 209.89 × 297.01 mm** (A4), and the bar rectangle came
+  out at **378.000 × 6.000 px** in a 794 × 1123 px page space — **100.0125 mm** by the 96 dpi
+  conversion, and **99.9748 mm** measured as a fraction of the page box, which is immune to any
+  transform in the content stream. **The bar is correct to within 0.03 mm; the integer values are the
+  PDF writer rounding, not app error.**
+
+  **What is therefore still untested is exactly one thing, and it is the one that actually bites: the
+  printer driver.** Browsers default to "Fit to printable area", which silently scales a page down by
+  roughly 4–6% — enough to make a 100 mm bar print at ~94 mm while every number above stays perfect.
+  **So the physical test is not a test of the app any more; it is a test of the print dialog.** Whoever
+  does it must set **Scale = 100% (NOT "Fit to page")**, **Paper = A4**, and **Margins = None/Default**,
+  then measure with a tape and record the browser, the driver and all three settings next to the number.
+  If it is short *at 100% scale*, the PDF escape hatch in spec §5 stops being speculative.
 - **The axe sweep's moderate/minor tail, none serious or critical** (as printed on 2026-08-26):
   `empty-table-header` **9** · `page-has-heading-one` **2** · `landmark-unique` **1**. The sweep passes;
   these are recorded so a future pass can tell a new violation from an inherited one.
