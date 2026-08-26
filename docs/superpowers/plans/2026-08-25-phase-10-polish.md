@@ -2174,6 +2174,49 @@ git commit -m "docs: a deployment README that has actually been run"
 
 ### Task 11: Full battery and close-out
 
+> ### AMENDED AFTER EXECUTION — the battery's own ORDER tips a latent failure, and two compose defects were fixed here rather than in Task 10.
+> **A-40. `npm run build` immediately before the e2e suite makes the suite maximally cold, and that tipped
+> a headroom failure the warm suite had never shown.** Step 1 runs `npm run build` and then the e2e
+> parts. `build` and `next dev` share `.next` and their outputs are incompatible, so the honest thing is
+> to clear `.next` in between — which means Playwright's dev server compiles every route from nothing.
+> Under that, `it-core.spec.ts:126` ("an exact tag search opens the record (scanner contract)") failed on
+> a 5s default while the page sat in `inventory/loading.tsx`. **The diagnosis was in the snapshot:
+> `loading.tsx` renders only `Skeleton` divs, which carry no text and no roles, so an aria snapshot of
+> the loading state is an EMPTY `main`** — the signature of waiting on a server render, and the thing
+> that ruled out both a lost keypress (which would have left the server-rendered table in `main`) and
+> data drift. One keypress there is **two** server renders: a client `router.push` to `/inventory?q=…`,
+> then `page.tsx:39`'s `redirect()` to `/inventory/<id>`. Isolated and cold it passes in 12.6s. Fixed
+> with headroom (20s, matching the hydration helper already in that file), and **verified by re-running
+> the part-2 file list cold rather than warm** — 56 passed where the same command had given 55/1.
+> **Before adding headroom, `git diff main..HEAD` was run over `inventory/page.tsx`, `queries.ts` and
+> `inventory-toolbar.tsx`: all three are byte-identical to `main`, so the headroom is not hiding a
+> Phase 10 regression.** That check is the difference between headroom and a papered-over bug.
+>
+> **A-41. The e2e numbers: 147 across 12 files, but the per-file tally in HANDOVER was off by one.**
+> Measured this battery: part 1 (admin, approvals-audit, auth-shell, home-finance) **51 in 4.1m** ·
+> part 2 (import-export, it-core, kitchen-sink, labels) **56 in 5.1m** · part 3 (offboarding,
+> purchases, scanner) **34 in 3.9m** · part 4 (axe-sweep) **6 in 3.9m**. Total **147**, which matches
+> the handover's total — but the handover recorded `axe-sweep` as **5** tests, and it is **6**. The
+> total was right and a component of it was wrong, which is the failure mode a total is worst at
+> catching. The four-part split needed no re-balancing.
+>
+> **A-42. Two `docker-compose.yml` defects found by Task 10 were fixed here, at the user's instruction.**
+> Task 10's `Files:` line permitted only `README.md`, so both shipped as documented caveats. The user
+> asked for them fixed before this task. `web` now bind-mounts `./uploads:/app/uploads` (asset documents
+> were written to the container's writable layer and destroyed on every recreate), and `worker` now
+> declares `build: .` like its siblings (it consumed an `inventory-app` tag published to no registry).
+> Proven under compose project `inv-fix-test`: three images built where two built before; the `node`
+> user (uid 1000) writes into the mount; the container sees the host's real 57 files; a probe survives
+> `up -d --force-recreate web`. **README.md was edited in the same commit** — its "what does not work"
+> entry claiming uploads are ephemeral would otherwise have become false the moment the fix landed.
+>
+> **A-43. Step 4 (print a sheet and measure the 100mm bar with a tape measure) CANNOT be done from this
+> session** — it needs a physical printer and a human with a tape measure. It is the one entry criterion
+> no agent can close. Left open for the user.
+>
+> **A-44. The moderate/minor axe counts the sweep printed, for §8:** `empty-table-header` **9** ·
+> `page-has-heading-one` **2** · `landmark-unique` **1**. None are serious or critical; the sweep passes.
+
 - [ ] **Step 1: The battery**
 
 ```bash
