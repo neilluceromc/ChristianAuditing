@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-26 (Phase 10, Tasks 10 and 11) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS CODE-COMPLETE on branch `phase-10-polish` — all 11 tasks committed, unmerged.** The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **NOTHING IS PUSHED: the branch is 35 ahead of `main`, `main` is 140 ahead of `origin/main` — 175 total. Count it (`git rev-list --count origin/main..HEAD`), don't trust a number in this doc.** · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-08-26 (Phase 10, Tasks 10 and 11) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS CODE-COMPLETE on branch `phase-10-polish` — all 11 tasks committed, unmerged.** The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **NOTHING IS PUSHED: the branch is 36 ahead of `main`, `main` is 140 ahead of `origin/main` — 176 total, counted immediately after the commit that wrote this line. It rises by one every time this sentence is corrected, which is precisely why you count it yourself: `git rev-list --count origin/main..HEAD`.** · **Merging and pushing are the user's decisions; do neither unprompted.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -17,8 +17,9 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 This was the last planned phase, so there is no next task to pick up — what remains are decisions that
 belong to the user, plus one measurement no agent can take.** Read items 1–4 below, then stop and ask.
 
-1. **`git checkout phase-10-polish`.** It is **35 commits ahead of `main`**, and `main` is **140 ahead
-   of `origin/main`** — 175 total unpushed. **Count them** (`git rev-list --count origin/main..HEAD`)
+1. **`git checkout phase-10-polish`.** It is **36 commits ahead of `main`**, and `main` is **140 ahead
+   of `origin/main`** — 176 total unpushed, counted just after this line was committed.
+   **Count them again** (`git rev-list --count origin/main..HEAD`)
    rather than trusting those numbers; every correction to this line is itself a commit. Nothing has
    been pushed since the Phase 1–7 merge on 2026-08-19, deliberately: **the user treats merging and
    publishing as separate decisions and asks for each explicitly. Never push or merge unprompted.** The
