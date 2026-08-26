@@ -2059,6 +2059,58 @@ git commit -m "test(e2e): sweep every route with axe, and count what sits below 
 
 ### Task 10: The deployment README, proven from a clean state
 
+> ### AMENDED AFTER EXECUTION — six findings, and FOUR of them were defects in this task's own bullet list.
+> **A-34. "`prisma migrate reset` is blocked" is false for the only reader this document has.** The
+> plan mandated that wording verbatim, and the implementer copied it verbatim. Nothing in the repo
+> blocks it — no npm guard, no schema restriction, and the append-only triggers
+> (`20260814084417_append_only_triggers`) fire only on row-level `UPDATE`/`DELETE` of `AuditEntry` and
+> `NoteEntry`. `migrate reset` appears nowhere in the code or config; it appears only in `docs/`. The
+> fact's real owner is `docs/HANDOVER.md:188`, which says it is blocked **by the harness classifier** —
+> true of an agent working in this session, false of the human operator a deployment README addresses.
+> The README now says "destructive and unnecessary here". **A fact copied out of the handover into a
+> user-facing document changes audience, and the audience is part of the claim.**
+>
+> **A-35. The prod description undercounts by two services and omits the build step.** The plan says
+> `--profile prod up -d` "brings up `db`, `migrate` … and `web`". Four services carry
+> `profiles: ["prod"]` — `migrate`, `web`, `worker`, `backup` — and `db` carries **none**, coming up as
+> a healthcheck dependency. Five containers start, and `db` is not a profile-`prod` service at all.
+> Worse, the plan never mentions `docker compose --profile prod build`, which the clean-state run had
+> to issue first: `worker` (`docker-compose.yml:58-60`) declares `image: inventory-app` with **no
+> `build:` stanza**, unlike `migrate` and `web`, and that tag exists in no registry.
+>
+> **A-36. The plan's dev quickstart is unrunnable from the clean clone the plan itself mandates.**
+> Step 1 prescribes `docker compose up -d db` → `npx prisma migrate deploy` → `npm run db:seed` →
+> `npm run dev`; Step 2 requires proving it from a fresh `git clone`. `node_modules/` is gitignored, so
+> every one of those commands fails with "not found". `npm ci` was missing — and the document's only
+> mentions of `npm install` are the Windows lockfile hazard, which tells the reader **not** to run it.
+> **And `npm ci` alone is not enough:** `npm run db:seed` then fails with "@prisma/client did not
+> initialize yet", so `npx prisma generate` is required too. That was established by running it, not
+> by reasoning about postinstall hooks — the first round assumed the hook covered it and was wrong.
+>
+> **A-37. Section order deviates deliberately: secrets moved from position five to position three.**
+> The plan bolded and capitalised the order, but you cannot run the dev quickstart without `.env`
+> existing first. The README ships intro · prerequisites · **secrets** · dev quickstart · production
+> deploy · migrations · worker · seeded accounts · troubleshooting · what does not work. Everything
+> else is in the specified order.
+>
+> **A-38. A base64 password breaks the deployment, and only execution could have found it.**
+> `docker-compose.yml` splices `POSTGRES_PASSWORD` **unescaped** into the container `DATABASE_URL`
+> (`postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}`). `openssl rand -base64 24`
+> emits 32 base64 characters, each a 1-in-64 chance of being `/`, so **roughly 40% of generated
+> passwords contain one** — and a `/` terminates the URL authority. Prisma fails with
+> `P1013: invalid port number in database URL` and `migrate` exits 1. The README now generates with
+> `| tr -d '/+='`. **The first draft also claimed `+` breaks it; it does not** — `+` and `=` are legal
+> in userinfo, and that claim was asserted rather than reproduced. Stripping them is a precaution, and
+> the README now says so rather than blaming them.
+>
+> **A-39. Two deployment defects were found that this task's scope could only document, not fix.**
+> `web` declares no volume for `uploads/` (confirmed by `docker inspect … .Mounts` returning `[]`)
+> while `src/server/modules/inventory/document-actions.ts` writes uploaded asset documents to
+> `process.cwd()/uploads` — so every recreation of the container discards them. And `worker` has no
+> `build:` stanza (A-35). Both are in the README's "what does not work"/build-first guidance; **both
+> want a one-line `docker-compose.yml` change that Task 10's `Files:` line does not permit.** Raised
+> with the user rather than smuggled in.
+
 **Files:**
 - Modify: `README.md`
 
