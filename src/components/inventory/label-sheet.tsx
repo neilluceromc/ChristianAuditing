@@ -1,7 +1,9 @@
 import { code128Modules } from "@/lib/code128";
+import { qrBase, qrUrlFor, type QrBase } from "@/lib/label-qr";
+import { qrMatrix } from "@/lib/qr";
 import {
   CALIBRATION_MM, LABEL_CELL_MM, LABEL_COLUMNS, LABEL_PADDING_MM, LABEL_USABLE_MM,
-  PAGE_MARGIN_MM, PAGE_MM, barcodeFit, labelPages,
+  PAGE_MARGIN_MM, PAGE_MM, QR_QUIET_MODULES, barcodeFit, labelPages, qrFit,
 } from "@/lib/label-geometry";
 
 export interface LabelRow {
@@ -62,8 +64,73 @@ function Barcode({ tag }: { tag: string }) {
   );
 }
 
-export function LabelSheet({ rows }: { rows: LabelRow[] }) {
+/**
+ * The quiet zone is drawn as a white rect inside the viewBox rather than left
+ * to CSS margin: it is part of the symbol, and a margin could be collapsed or
+ * overridden by a print stylesheet without anything looking wrong.
+ */
+function Qr({ url }: { url: string }) {
+  const matrix = qrMatrix(url);
+  const fit = qrFit(matrix.size);
+  // Cause-neutral, and consistent with Barcode's refusal above: a code too
+  // fine for a phone to read is worse than no code, because the sticker looks
+  // finished either way. The tag text on the label is still human-readable.
+  if (!fit.renderable) {
+    return (
+      <span style={{ fontSize: "2.4mm", color: "#B42318", fontFamily: "monospace" }}>
+        no scannable QR
+      </span>
+    );
+  }
+
+  const total = matrix.size + 2 * QR_QUIET_MODULES;
+  const dark: React.ReactElement[] = [];
+  for (let y = 0; y < matrix.size; y++) {
+    for (let x = 0; x < matrix.size; x++) {
+      if (matrix.isDark(x, y)) {
+        dark.push(
+          <rect
+            key={`${x}-${y}`}
+            x={x + QR_QUIET_MODULES}
+            y={y + QR_QUIET_MODULES}
+            width={1}
+            height={1}
+            fill="#000"
+          />,
+        );
+      }
+    }
+  }
+
+  return (
+    <svg
+      width={`${fit.sizeMm}mm`}
+      height={`${fit.sizeMm}mm`}
+      viewBox={`0 0 ${total} ${total}`}
+      role="img"
+      aria-label={`QR ${url}`}
+      shapeRendering="crispEdges"
+    >
+      <rect x={0} y={0} width={total} height={total} fill="#fff" />
+      {dark}
+    </svg>
+  );
+}
+
+/** Named per cause, because "QR unavailable" would send someone hunting the
+ *  wrong thing — a loopback base URL and a missing one need different fixes. */
+const QR_NOTE: Record<Exclude<QrBase, { ok: true }>["reason"], string> = {
+  unset: "No QR: APP_BASE_URL is not set.",
+  "not-absolute": "No QR: APP_BASE_URL needs an http:// or https:// scheme.",
+  loopback: "No QR: APP_BASE_URL points at this machine, which no phone can reach.",
+  "bad-url": "No QR: APP_BASE_URL is not a valid URL.",
+};
+
+export function LabelSheet({ rows, baseUrl }: { rows: LabelRow[]; baseUrl?: string }) {
   const byTag = new Map(rows.map((r) => [r.tag, r]));
+  // Validated ONCE: the reason a base URL is unusable never depends on the tag,
+  // so this is one note per sheet rather than the same refusal on twelve labels.
+  const base = qrBase(baseUrl);
   return (
     <div className="label-sheets">
       {labelPages(rows.map((r) => r.tag)).map((page, p) => (
@@ -121,9 +188,19 @@ export function LabelSheet({ rows }: { rows: LabelRow[] }) {
                 <div style={{ fontFamily: "monospace", fontSize: "4.6mm", fontWeight: 700, letterSpacing: "0.02em" }}>
                   {tag}
                 </div>
-                <div style={{ width: `${LABEL_USABLE_MM}mm` }}>
+                {/* flexShrink: 0 on BOTH, for the reason the calibration bar
+                    carries it: this cell is a column flex with overflow
+                    hidden, so an over-tall child is not clipped visibly — it
+                    silently squeezes its siblings, which is how the ruler
+                    once measured 89.38mm against a declared 100mm. */}
+                <div style={{ width: `${LABEL_USABLE_MM}mm`, flexShrink: 0 }}>
                   <Barcode tag={tag} />
                 </div>
+                {base.ok && (
+                  <div style={{ flexShrink: 0, lineHeight: 0 }}>
+                    <Qr url={qrUrlFor(tag, base)} />
+                  </div>
+                )}
               </div>
             );
           })}
@@ -174,6 +251,14 @@ export function LabelSheet({ rows }: { rows: LabelRow[] }) {
               Printed at 100%, this bar is exactly {CALIBRATION_MM}mm &mdash; measure it. If it is
               short, check Scale 100%, Margins None and A4 paper in the print dialog.
             </span>
+            {!base.ok && (
+              /* Rule 10: every refusal the rule can return gets a surface. A
+                 sheet that silently omits QR codes looks finished and is not
+                 — an operator would stick 200 labels before noticing. */
+              <span style={{ minWidth: 0, color: "#B42318" }}>
+                {QR_NOTE[base.reason]}
+              </span>
+            )}
           </div>
         </div>
       ))}
