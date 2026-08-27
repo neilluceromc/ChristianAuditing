@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-26 (Phase 10, Tasks 10 and 11) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS CODE-COMPLETE on branch `phase-10-polish` — all 11 tasks committed, unmerged.** The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **NOTHING IS PUSHED: the branch is 36 ahead of `main`, `main` is 140 ahead of `origin/main` — 176 total, counted immediately after the commit that wrote this line. It rises by one every time this sentence is corrected, which is precisely why you count it yourself: `git rev-list --count origin/main..HEAD`.** · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-08-27 (Phase 10 close-out; **Phase 11 exists and is PARKED — see §0 item 4e**) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS CODE-COMPLETE on branch `phase-10-polish` — all 11 tasks committed, unmerged.** The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **NOTHING IS PUSHED: the branch is 36 ahead of `main`, `main` is 140 ahead of `origin/main` — 176 total, counted immediately after the commit that wrote this line. It rises by one every time this sentence is corrected, which is precisely why you count it yourself: `git rev-list --count origin/main..HEAD`.** · **Merging and pushing are the user's decisions; do neither unprompted.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -60,9 +60,29 @@ belong to the user, plus one measurement no agent can take.** Read items 1–4 b
    `pg_dump`** — asset documents are plain host files bind-mounted into `web`, so a database backup
    alone does not restore them.
 
-   **If the user wants more work rather than a decision, there is no plan for it.** Start with
-   `superpowers:brainstorming`, then `superpowers:writing-plans` for a Phase 11 — do not improvise
-   changes onto a branch that is being held for a merge decision.
+   **(e) PHASE 11 EXISTS AND IS PARKED. Do not be surprised by it.** On 2026-08-26 the user asked for
+   a phone-scannable QR on the asset label, so `phase-11-label-qr` was cut **from `phase-10-polish`**
+   (not from `main` — the label sheet it extends only exists here). It is brainstormed, specced, planned
+   and **three of its nine tasks are committed**: `src/lib/label-qr.ts` (the URL a QR encodes),
+   `src/lib/qr.ts` (the encoder behind a three-line surface), and `qrFit` in `label-geometry.ts`. That
+   branch is **10 commits ahead of this one, green at 818 unit tests**, and **nothing imports the new
+   modules yet** — they are self-contained, so the branch is parked mid-plan without anything
+   half-wired. On 2026-08-27 the user said to leave the QR and close Phase 10 out first.
+
+   Spec: `docs/superpowers/specs/2026-08-26-label-qr-design.md`. Plan:
+   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, **resume at Task 4**, which is the risky
+   one — it spends the same vertical budget that let the calibration ruler ship at 89.38 mm.
+   Amendments `B-1…B-3`, and **all three were defects in the plan rather than the implementations**;
+   B-1 was worse than that, a command that broke the working environment.
+
+   ⚠️ **Phase 11 stacks on unmerged work, which makes the merge question below about both branches.**
+   Merging `phase-10-polish` into `main` is safe and independent. But **deleting** `phase-10-polish`
+   after a merge would leave `phase-11-label-qr` dangling off a deleted branch — rebase it onto `main`
+   first, or keep `phase-10-polish` until Phase 11 lands.
+
+   **If the user wants different work rather than a decision, there is no plan for it.** Start with
+   `superpowers:brainstorming`, then `superpowers:writing-plans` — do not improvise changes onto a
+   branch that is being held for a merge decision.
 
 5. **Execution mode: subagent-driven, and the user asked for it explicitly.** `superpowers:subagent-driven-development`.
    Fresh implementer per task, then review. Tasks 1–4 used two reviewers; 5–9 used one, escalating only
