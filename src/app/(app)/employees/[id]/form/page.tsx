@@ -95,8 +95,18 @@ export default async function AccountabilityFormPage({ params }: { params: Promi
             "quietest compliant tier" already used for every other muted line
             on this printed sheet (dt labels, table header, empty state) —
             there is no lighter shade of it that still clears 4.5:1. */}
+        {/* "scan the code to open this record" was removed, not reworded:
+            THIS SHEET CARRIES NO CODE. It renders no barcode and no QR — the
+            file imports neither — so the clause instructed an operator to scan
+            something that has never been on the page. The remaining "signed
+            scan" is a different sense of the word and is true: it means the
+            signed paper, scanned and uploaded, which `uploadDocument` in
+            src/server/modules/inventory/document-actions.ts really does.
+            Putting a real code here is a separate piece of work, not a
+            reword — a different sheet, a different payload and a different
+            reader from the asset label's. */}
         <p className="font-mono text-[8.5px] text-[#667085]">
-          {employee.employeeNo} · scan the code to open this record · the signed scan uploads back into the equipment&apos;s documents
+          {employee.employeeNo} · the signed scan uploads back into the equipment&apos;s documents
         </p>
       </div>
     </div>
