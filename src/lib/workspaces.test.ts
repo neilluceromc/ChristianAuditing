@@ -108,6 +108,17 @@ describe("pathAllowedForRole", () => {
     ["/inventory/import", "viewer", false],
     ["/inventory/import", "purchasing_staff", false],
     ["/inventory/import", "finance_staff", false],
+    // Task 4 (Phase 10), the identical E-7/W-1 trap one route over: /inventory
+    // sits right below this in PATH_RULES with workspaces ["it", "purchasing",
+    // "finance"], so without a dedicated rule ahead of it a finance or
+    // purchasing user could print asset labels. Every role asserted
+    // explicitly, not just the two that should pass, for the same reason as
+    // /inventory/import above.
+    ["/inventory/labels", "admin", true],
+    ["/inventory/labels", "it_staff", true],
+    ["/inventory/labels", "viewer", false],
+    ["/inventory/labels", "purchasing_staff", false],
+    ["/inventory/labels", "finance_staff", false],
     // Task 12, E-7: the identical trap, one route over. /employees/import
     // sits under the general /employees rule (workspaces: ["it"], no
     // `roles` key), which viewer shares with it_staff — every role asserted

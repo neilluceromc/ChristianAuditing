@@ -19,6 +19,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { AccountsPanel } from "@/components/offboarding/accounts-panel";
 import { CompleteButton } from "@/components/offboarding/complete-button";
 import { ItemDecision } from "@/components/offboarding/item-decision";
+import { ScanProvider } from "@/components/offboarding/scan-provider";
 import { WizardSteps } from "@/components/offboarding/wizard-steps";
 
 export default async function OffboardingWizardPage({
@@ -80,13 +81,13 @@ export default async function OffboardingWizardPage({
           >
             {employee.employment === "OFFBOARDED" ? (
               <>Every decision below stays readable, and so does the{" "}
-                <Link href={`/offboarding/${employeeId}/report`} className="text-accent hover:underline">
+                <Link href={`/offboarding/${employeeId}/report`} className="text-accent underline hover:text-accent-hover">
                   farewell report
                 </Link>.
               </>
             ) : (
               <>Set their employment to <span className="font-mono">OFFBOARDING</span> on the{" "}
-                <Link href={`/employees/${employeeId}/edit`} className="text-accent hover:underline">
+                <Link href={`/employees/${employeeId}/edit`} className="text-accent underline hover:text-accent-hover">
                   employee record
                 </Link>{" "}
                 before collecting equipment.
@@ -219,7 +220,17 @@ export default async function OffboardingWizardPage({
       )}
 
       {step === "collect" && (
-        <div className="flex flex-col gap-4">
+        <ScanProvider
+          canDecide={canDecide}
+          items={items
+            .filter((i) => i.held)
+            .map((i) => ({
+              assetId: i.assetId,
+              tag: i.tag,
+              decided: !!i.decision,
+              blockedBy: i.blockedBy?.refNo ?? null,
+            }))}
+        >
           <Banner tone="neutral" title="Each decision is recorded the moment you confirm it">
             Every item becomes its own <span className="font-mono">lifecycle.return</span> request, so a
             half-finished offboarding is still N correct records. Nothing moves until the approval
@@ -320,7 +331,7 @@ export default async function OffboardingWizardPage({
               </>
             )}
           </div>
-        </div>
+        </ScanProvider>
       )}
 
       {step === "accounts" && (
@@ -344,7 +355,7 @@ export default async function OffboardingWizardPage({
                         both by a rejection re-opening a decided item AND by the
                         ?step= URL before anything was decided at all */}
                     {undecided} item{undecided === 1 ? "" : "s"} still undecided — go back to{" "}
-                    <Link href={href("collect")} className="text-accent hover:underline">Collect items</Link>{" "}
+                    <Link href={href("collect")} className="text-accent underline hover:text-accent-hover">Collect items</Link>{" "}
                     before finishing. You can still close the account here.
                   </>
                 )}

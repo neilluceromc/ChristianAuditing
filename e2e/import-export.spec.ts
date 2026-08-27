@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import { readSheet } from "read-excel-file/node";
 import { IDS_CAP, idsRefusalText } from "@/lib/export-columns";
 import { IMPORT_ROW_CAP, rowCapRefusal } from "@/lib/import-vocabulary";
+import { ROLE_LANDING } from "@/lib/workspaces";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 
 /**
@@ -434,14 +435,20 @@ test.describe.serial("the asset import wizard", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Phase 10, Task 4's finding, fixed here as a narrow, deliberate scope
+// extension: both import pages carry their own page-level
+// requireRole("admin", "it_staff") (src/app/(app)/inventory/import/page.tsx,
+// src/app/(app)/employees/import/page.tsx). That guard redirects viewer to
+// the exact same ROLE_LANDING("/inventory") that PATH_RULES's own rejection
+// would, so the test below proves SOMETHING refuses viewer — it cannot prove
+// PATH_RULES is the thing doing it, and would stay green even if that rule
+// were deleted or moved after the general /inventory and /employees rules
+// (unlike the comment this replaced claimed). The probe that follows is the
+// one e2e that actually observes that layer.
 test.describe("import — the role gate is on the route, not the button", () => {
-  test("a viewer can reach neither importer, and is offered neither", async ({ page }) => {
+  test("a viewer can reach neither importer, and is offered neither (either layer may be the one that refuses)", async ({ page }) => {
     await login(page, "viewer@thebackroomop.com");
 
-    // PATH_RULES gates both with `roles: ["admin", "it_staff"]`. Asserted
-    // rather than assumed: the general /employees rule carries no `roles` key,
-    // so /employees/import needs its own entry ahead of it (Task 12, E-7) —
-    // the identical live gap Task 11 closed for assets.
     await page.goto("/inventory/import");
     await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
     await expect(page.getByRole("link", { name: "Import" })).toHaveCount(0);
@@ -450,6 +457,24 @@ test.describe("import — the role gate is on the route, not the button", () => 
     await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
     await page.goto("/employees");
     await expect(page.getByRole("link", { name: "Import" })).toHaveCount(0);
+  });
+
+  // The actual PATH_RULES probe. No page file exists at either */no-such-page
+  // — each rule's `(\/|$)` still matches the path, but there is nothing for
+  // the page-level requireRole to run FROM, so only middleware can answer
+  // here. A misordered or deleted rule shows up as a 200 with no redirect at
+  // all. Non-retrying assertions on the RESPONSE, not a polling assertion on
+  // the page, for the same reason as e2e/labels.spec.ts's equivalent probe:
+  // middleware's redirect is a real 307 before anything renders, and a
+  // negated `toHaveURL` would politely wait out a client-side settle that
+  // never actually happens on this path.
+  test("PATH_RULES itself refuses both import routes' subpaths before any page renders", async ({ page }) => {
+    await login(page, "viewer@thebackroomop.com");
+    for (const path of ["/inventory/import/no-such-page", "/employees/import/no-such-page"]) {
+      const res = await page.goto(path);
+      expect(res?.request().redirectedFrom()?.url()).toContain(path);
+      expect(new URL(res!.url()).pathname).toBe(ROLE_LANDING.viewer);
+    }
   });
 });
 

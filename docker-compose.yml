@@ -43,6 +43,12 @@ services:
       HOSTNAME: 0.0.0.0
     ports:
       - "3000:3000"
+    # Asset documents are written to process.cwd()/uploads (= /app/uploads, the
+    # run stage's WORKDIR). Without this mount they live in the container's
+    # writable layer and are destroyed on every recreate. Only `web` writes
+    # them; the worker never touches uploads.
+    volumes:
+      - ./uploads:/app/uploads
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -58,6 +64,7 @@ services:
   worker:
     profiles: ["prod"]
     image: inventory-app
+    build: .
     restart: unless-stopped
     command: ["node_modules/.bin/tsx", "src/worker/index.ts"]
     stop_grace_period: 30s

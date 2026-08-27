@@ -4,7 +4,7 @@
 
 **Goal:** Ship the printable 3×4 A4 asset-label sheet with real scannable barcodes, make a USB scan tick the matching row in the offboarding wizard, sweep every route with axe, and write a deployment README that has actually been executed.
 
-**Architecture:** Four independent items. The label sheet is a pure encoder (`src/lib/code128.ts`) plus pure geometry (`src/lib/labels.ts`) plus a Server-Component print route that reuses the two existing print surfaces' pattern. The scanner is a pure verdict function (`src/lib/scan.ts`) plus a thin client listener and a context that lets `ItemDecision` react. The axe work is two one-component fixes plus a route-table sweep spec. The README is a verification task, not a writing task.
+**Architecture:** Four independent items. The label sheet is a pure encoder (`src/lib/code128.ts`) plus pure geometry (`src/lib/label-geometry.ts`) plus a Server-Component print route that reuses the two existing print surfaces' pattern. The scanner is a pure verdict function (`src/lib/scan.ts`) plus a thin client listener and a context that lets `ItemDecision` react. The axe work is two one-component fixes plus a route-table sweep spec. The README is a verification task, not a writing task.
 
 **Tech Stack:** Next.js 15 App Router · React 19 · Prisma 6 / Postgres 16 · Tailwind v4 · vitest (node-only) · Playwright · `@axe-core/playwright`. **No new dependencies** — the Code 128 encoder is hand-rolled precisely to avoid §7's npm-on-Windows lockfile hazard.
 
@@ -50,8 +50,8 @@ npx tsc --noEmit && npm run lint && npm run test && npm run build
 |---|---|---|
 | `src/lib/code128.ts` | create | Pure Code 128-B encoder. Module widths only; knows nothing about mm, SVG or assets. |
 | `src/lib/code128.test.ts` | create | Hand-verified vectors, charset bounds, the `11n + 35` identity. |
-| `src/lib/labels.ts` | create | Pure sheet geometry: mm constants, pagination into 12-up pages, fit-to-width module sizing. |
-| `src/lib/labels.test.ts` | create | Pagination boundaries, module fit, the scan-quality floor. |
+| `src/lib/label-geometry.ts` | create | Pure sheet geometry: mm constants, pagination into 12-up pages, fit-to-width module sizing. |
+| `src/lib/label-geometry.test.ts` | create | Pagination boundaries, module fit, the scan-quality floor. |
 | `src/components/inventory/label-sheet.tsx` | create | Server Component: the 3×4 grid, inline SVG barcodes, calibration ruler. |
 | `src/app/(app)/inventory/labels/page.tsx` | create | Role guard, `?ids=` parse, three refusals, fetch, render. |
 | `src/components/ui/print-button.tsx` | create (move) | Moved from `src/components/employees/print-button.tsx`. |
@@ -73,6 +73,63 @@ npx tsc --noEmit && npm run lint && npm run test && npm run build
 ---
 
 ### Task 1: The Code 128-B encoder (TDD)
+
+> ### AMENDED AFTER REVIEW — the mutation table below MISSED THE MUTATION THAT MATTERS, plus six smaller findings.
+> Task 1 shipped as `c9fb99f` and both reviews passed it on spec, but the quality review then
+> **demonstrated a live mutant that leaves all 8 tests green**: weighting the checksum from the right
+> (`sum += values[i] * (values.length - i)`) coincides exactly with the correct weighting for the
+> one-character `"A"` fixture, and for `BR-LT-0148` it yields checksum 8 instead of 17 — invisible to a
+> run-count assertion and to a module sum that is **145 for any checksum value**, because every Code 128
+> pattern sums to 11 modules by construction. Weighting from the wrong end is one of the two classic
+> Code 128 checksum bugs; every printed label would carry a bad check digit and no test could see it.
+>
+> **A-1 (fix): assert the checksum group for the real tag.** Add to the real-tag test:
+> `expect(mods.slice(-13, -7)).toEqual([1, 2, 3, 2, 2, 1]);` — checksum value 17, hand-computed from the
+> symbology alone (`104 + 34*1 + 50*2 + 13*3 + 44*4 + 52*5 + 13*6 + 16*7 + 17*8 + 20*9 + 24*10 = 1459`;
+> `1459 % 103 = 17`; `PATTERNS[17] = "123221"`). Negative indices deliberately: STOP is always the last
+> 7 runs, so `-13..-7` is the checksum group whatever the tag's length. **Add this mutation to the table
+> below.** Asserting the whole 79-element array instead would assert the implementation against itself
+> and prove far less.
+>
+> **A-2 (correction to my own justification):** that assertion does **not** pin the ten `PATTERNS` rows
+> the tag's characters use. The checksum is computed from character *values* (`code - 32`) and their
+> weights, never from those rows. It pins the ten value mappings, the weight sequence across ten
+> positions, the mod-103 reduction, and `PATTERNS[17]`. Do not overstate it.
+>
+> **A-3 (fix): the test name overstates.** "encodes a real asset tag to the measured width" reads as
+> encoding correctness while asserting two scalars invariant under every checksum value. With A-1 added
+> the name becomes honest; without A-1 it should say "sizes", not "encodes".
+>
+> **A-4 (fix): `code128ModuleCount` and `code128Modules` disagree about their domain.**
+> `code128Modules("")` throws, but `code128ModuleCount(0)` returns 35, `(-1)` returns 24 and `(1.5)`
+> returns 51.5. Task 2 divides `LABEL_USABLE_MM` by the result and then blesses it as `encodable`, so an
+> empty tag would pass the geometry and throw in the encoder — the checklist's own "a rule and its
+> surface that only partly agree". Guard `charCount` to an integer >= 1.
+>
+> **A-5 (fix): make the charset test assert the range it names.** It checks two endpoints. Loop
+> `c = 32..126`, asserting each single-character symbol is 25 runs summing to 46. That exercises
+> `PATTERNS` rows 0-95 plus each checksum row — **96 of 107 rows** — turning a one-time hand
+> verification of the table into a property a future typo cannot survive.
+>
+> **A-6 (fix): the out-of-charset message is unreadable for invisible characters.** A TAB renders as
+> `"<tab>" cannot be encoded`. Interpolate the code point as well, and make the empty-string message say
+> "Code 128-B" like its sibling.
+>
+> **A-7 (note, no change): the second test is a strict subset of the first.** `slice(12, 18)` on `"A"`
+> is contained in the whole-array assertion above it, so it kills no mutant the first test misses. Keep
+> it as documentation of where the checksum lives; do not count it as coverage.
+>
+> **A-8 (note for Task 3): both throw paths are unreachable from the label route** — every write path
+> validates `/^BR-[A-Z]{2}-\d{4}$/` (`inventory/actions.ts:147`, `import-assets.ts:366`). **But no DB
+> CHECK constraint enforces it**, so that is an application invariant rather than a guarantee. State the
+> reasoning in Task 3 rather than leaving the page looking under-defended, and note the blast radius: a
+> throw inside a Server Component rendering up to 200 labels **500s the entire sheet** rather than
+> dropping one barcode. Task 3's renderer must treat an unencodable tag the same soft way it treats a
+> too-fine one.
+>
+> **A-9 (note): this repo is CRLF.** A mutation applied with `\n`-based patterns can silently fail to
+> apply, and a mutation that did not apply looks exactly like a passing suite. Assert the file actually
+> changed before trusting a mutation result. This bit the spec reviewer once already.
 
 **Files:**
 - Create: `src/lib/code128.ts`
@@ -247,24 +304,115 @@ git commit -m "feat(labels): a hand-rolled Code 128-B encoder, verified against 
 
 ### Task 2: Sheet geometry and pagination (TDD)
 
-**Files:**
-- Create: `src/lib/labels.ts`
-- Test: `src/lib/labels.test.ts`
+> ### AMENDED BEFORE EXECUTION — `barcodeFit` as drafted lets a throwing tag reach the renderer, and that 500s the whole sheet.
+> **A-10.** `code128Modules` has **three** throw paths: empty string, a character outside ASCII 32-126,
+> and (via `code128ModuleCount`, added by Task 1's fix A-4) a character count below 1 or non-integer.
+> The drafted `barcodeFit` derives `encodable` from the **fitted module width alone**, so it covers only
+> the length-driven case. A tag containing an out-of-charset character — storable, because **no DB CHECK
+> constraint enforces `TAG_SHAPE`** — would come back `encodable: true`, and `code128Modules` would then
+> throw inside a Server Component rendering up to 200 labels. **One bad tag would 500 the entire sheet
+> instead of dropping one barcode.** That is §6a rule 10 in its exact classic form: the surface consumes
+> one of the refusals its rule can return.
+>
+> **Two changes follow.**
+>
+> **(a) `code128.ts` gains a predicate, so the charset rule keeps ONE owner.** Add and export:
+>
+> ```ts
+> /** Whether `code128Modules` would succeed. Exported so callers can refuse a
+>  * string BEFORE encoding it rather than catching a throw — the label sheet
+>  * renders up to 200 labels in one Server Component, where an escaping throw
+>  * costs the whole sheet rather than one sticker. */
+> export function canEncode128(text: string): boolean {
+>   if (text.length === 0) return false;
+>   for (const ch of text) {
+>     const code = ch.codePointAt(0)!;
+>     if (code < 32 || code > 126) return false;
+>   }
+>   return true;
+> }
+> ```
+>
+> Then have `code128Modules` **use it** for its own guards rather than re-testing the range, so the two
+> can never disagree — but keep `code128Modules`' throws (they name the offending character, which a
+> boolean cannot). Adding `canEncode128` to `code128.ts` is an in-scope amendment to Task 1's file; note
+> it in this task's commit.
+>
+> **(b) `barcodeFit` becomes TOTAL — it never throws, for any input.** It must return
+> `encodable: false` for an empty tag, for a tag `canEncode128` rejects, and for a fitted module below
+> `MIN_MODULE_MM`; and it must not call `code128ModuleCount` at all when the tag is unencodable, since
+> that now throws for a zero count:
+>
+> ```ts
+> export function barcodeFit(tag: string): BarcodeFit {
+>   // Total by construction: `encodable: false` is the renderer's ONE guard, so
+>   // it has to cover every reason `code128Modules` would refuse, not just the
+>   // width. See A-10.
+>   if (!canEncode128(tag)) return { moduleMm: 0, widthMm: 0, encodable: false };
+>   const modules = code128ModuleCount(tag.length);
+>   const moduleMm = Math.min(PREFERRED_MODULE_MM, LABEL_USABLE_MM / modules);
+>   return { moduleMm, widthMm: modules * moduleMm, encodable: moduleMm >= MIN_MODULE_MM };
+> }
+> ```
+>
+> **Add these tests** to the `barcodeFit` block below:
+>
+> ```ts
+> it("refuses an empty tag instead of throwing", () => {
+>   expect(() => barcodeFit("")).not.toThrow();
+>   expect(barcodeFit("").encodable).toBe(false);
+> });
+>
+> // Storable via raw SQL: no DB CHECK constraint enforces TAG_SHAPE. If this
+> // returned encodable:true, the renderer would throw and take the whole
+> // 200-label sheet down with it.
+> it("refuses a tag with characters Code 128-B cannot encode, instead of throwing", () => {
+>   expect(() => barcodeFit("BR-LT-01é")).not.toThrow();
+>   expect(barcodeFit("BR-LT-01é").encodable).toBe(false);
+> });
+>
+> it("never throws for any input a database could hold", () => {
+>   for (const t of ["", " ", "\t", "BR-LT-0148", "A".repeat(40), "\u{1f600}"]) {
+>     expect(() => barcodeFit(t)).not.toThrow();
+>   }
+> });
+> ```
+>
+> **And add to the mutation table:** replacing `if (!canEncode128(tag))` with `if (false)` must fail the
+> out-of-charset test. If it does not, `encodable` is not actually the renderer's guard.
+>
+> **A-11 (naming).** This module is **`src/lib/label-geometry.ts`**, not `labels.ts`. `src/lib/labels.ts`
+> already exists, holds `M365_CANONICAL` and `APPROVAL_TYPE_LABEL`, and has **eight importers**. Do not
+> create, move or touch it.
 
-**The decision this task encodes.** A *fixed* module width caps tag length at 11 characters — one more
-than today's `BR-XX-0000` — which is a cliff, not headroom. So the module width is **computed to fit**
-the usable label width, with a floor below which a barcode stops being readable and is omitted
-entirely rather than printed unscannable.
+**Files:**
+- Create: `src/lib/label-geometry.ts`
+- Test: `src/lib/label-geometry.test.ts`
+
+**The decision this task encodes, with its rationale corrected.** An earlier draft justified
+fit-to-width as avoiding an 11-character cliff. **That argument is moot**: `TAG_SHAPE`
+(`/^BR-[A-Z]{2}-\d{4}$/`) fixes every tag at exactly **10** characters on both write paths, so a fixed
+0.33 mm module would always fit and the shrink branch is unreachable through the application.
+
+Two better reasons to keep it anyway, and be honest that these are the reasons. First, **no database
+CHECK constraint enforces the tag format** — it is an application invariant, so a longer tag is
+unproducible but not impossible. Second, and decisively, *some* width check is needed regardless: with
+no check at all a 13-character tag renders 57.9 mm into a 53.3 mm cell and silently overflows the
+die-cut. Fit-to-width is barely more code than refuse-if-too-wide and degrades gracefully instead.
+
+**So the shrink and floor branches are DEFENSIVE, not routine.** Their tests reach them only through
+inputs (`"A".repeat(16)`, `"A".repeat(40)`) that no storable tag can be. Say so in the module's own
+comment, so a later reader does not mistake unreachable branches for live ones.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// src/lib/labels.test.ts
+// src/lib/label-geometry.test.ts
 import { describe, expect, it } from "vitest";
 import {
   LABELS_PER_PAGE, LABEL_CELL_MM, LABEL_USABLE_MM, MIN_MODULE_MM, PREFERRED_MODULE_MM,
   barcodeFit, labelPages,
-} from "./labels";
+} from "./label-geometry";
 
 describe("sheet geometry", () => {
   it("is a 3x4 grid on A4 inside a 10mm page margin", () => {
@@ -339,13 +487,13 @@ describe("barcodeFit", () => {
 
 - [ ] **Step 2: Run it and confirm it fails**
 
-Run: `npx vitest run src/lib/labels.test.ts`
-Expected: FAIL — cannot resolve `./labels`.
+Run: `npx vitest run src/lib/label-geometry.test.ts`
+Expected: FAIL — cannot resolve `./label-geometry`.
 
 - [ ] **Step 3: Write the implementation**
 
 ```ts
-// src/lib/labels.ts
+// src/lib/label-geometry.ts
 import { code128ModuleCount } from "./code128";
 
 /**
@@ -415,7 +563,7 @@ export function barcodeFit(tag: string): BarcodeFit {
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-Run: `npx vitest run src/lib/labels.test.ts`
+Run: `npx vitest run src/lib/label-geometry.test.ts`
 Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Mutation-test (rule 78)**
@@ -430,13 +578,95 @@ Expected: PASS, 11 tests.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/lib/labels.ts src/lib/labels.test.ts
+git add src/lib/label-geometry.ts src/lib/label-geometry.test.ts
 git commit -m "feat(labels): sheet geometry, pagination, and a module width computed to fit"
 ```
 
 ---
 
 ### Task 3: The label sheet component, the print route, and the PrintButton move
+
+> ### AMENDED BEFORE EXECUTION — `BarcodeFit` is now a discriminated union, and the drafted refusal text is wrong.
+> **A-12. `barcodeFit` returns a discriminated union**, changed during Task 2's review:
+>
+> ```ts
+> export type BarcodeFit =
+>   | { encodable: true; moduleMm: number; widthMm: number }
+>   | { encodable: false };
+> ```
+>
+> The reason is worth knowing rather than working around: the previous shape documented
+> `moduleMm`/`widthMm` as "zero when `encodable` is false", **which was false on the floor branch** —
+> a too-fine tag came back with a real 53.33 mm width and a 0.11 mm module. Anyone who trusted that
+> doc and guarded on `if (fit.widthMm > 0)` would have rendered a full-width, unscannable barcode: the
+> exact "the sticker looks finished" failure `MIN_MODULE_MM` exists to prevent. The union makes
+> `fit.widthMm` fail to typecheck until `fit.encodable` has been narrowed, so **rule 10 is enforced by
+> `tsc` rather than by a comment**.
+>
+> The drafted `Barcode` component below already early-returns on `!fit.encodable`, which narrows
+> correctly — **so its structure needs no change**. What must change is the wording.
+>
+> **A-13. "tag too long to encode" is wrong, because `encodable: false` has three causes.** It covers a
+> too-fine module (a very long tag), a tag with characters Code 128-B cannot encode, and an empty tag.
+> Two of those are not about length. A label that says "too long" about a tag holding a stray character
+> is §6a rule 16 printed onto adhesive paper. Use a cause-neutral line — **"no scannable code"** — and
+> keep it visibly different from a normal label so nobody mistakes it for a finished sticker. The tag
+> text itself still prints: a human can read and type it even when no scanner can.
+>
+> **A-14. Do not add a charset refusal to the page.** Every write path validates
+> `/^BR-[A-Z]{2}-\d{4}$/` (`src/server/modules/inventory/actions.ts:147` and `TAG_SHAPE` at
+> `src/lib/import-assets.ts:366`), so a tag that fails `canEncode128` cannot be created through this
+> application. **But no DB CHECK constraint enforces that**, so it is an application invariant rather
+> than a guarantee — which is exactly why `barcodeFit` is total and the renderer degrades one label
+> instead of throwing. **Write that reasoning into the component**, so a later reader does not mistake
+> the absence of a refusal banner for an oversight.
+>
+> **A-15. `CALIBRATION_MM` must be consumed by this task.** Task 2 exported it and nothing imports it;
+> it is the only constant in `label-geometry.ts` with neither a consumer nor a test. The calibration bar
+> below is its one and only consumer, and if this task ships without it the constant is dead code that
+> reads like an oversight.
+
+> ### AMENDED AFTER EXECUTION — four findings, two of them defects in this task's own drafted text.
+> **A-19. The drafted global `@page` would have regressed two existing print surfaces.** The draft put
+> `@page { size: A4; margin: 0 }` in `globals.css`. `@page` is global to every print job in the app, so
+> it would also have stripped the page margin from the farewell report and the accountability form,
+> neither of which has an `@page` override — they rely on the browser's default margin plus `print:p-0`.
+> The implementer escalated instead of shipping it and scoped it to a **named page**
+> (`@page label-sheet` + `.label-sheets { page: label-sheet }`). Verified: Chromium reports
+> `CSS.supports("page","label-sheet")`, the rule survives Tailwind v4's pipeline verbatim in the served
+> `layout.css`, there is **no bare `@page {`** rule, and `getComputedStyle(body).page` is `auto` on
+> non-label pages. A real Chromium PDF confirmed a MediaBox of 209.94 × 297.01 mm and exactly two pages
+> for a 14-label sheet.
+>
+> **A-20. The calibration bar rendered 89.38 mm against a declared 100 mm** — a flex item with default
+> `flex-shrink: 1` beside a long text sibling. Fixed with `flexShrink: 0` (and `minWidth: 0` on the
+> text so it wraps instead of competing). Re-measured at 377.94 px = 100.00 mm on screen, under print
+> emulation, and in the PDF. **Found only by rendering the page and measuring it** — the CSS was valid
+> and the declared width correct, so no type, lint, unit test or code read could have seen it. Task 4's
+> spec now measures it permanently (A-16).
+>
+> **A-21. The ruler did not fit the margin it claimed to occupy.** Its caption wraps to two lines, so
+> the container measured 7.92 mm at `bottom: 2.5mm` = 10.42 mm against a 10 mm margin, putting its top
+> edge 0.42 mm inside the last row of cells. No glyph collision, but **font-metric dependent** — a
+> wider fallback font wrapping to three lines would put text ~4 mm inside the stickers. Constrained so
+> it cannot grow into the grid, with the budget stated in the comment.
+>
+> **A-22. `LABEL_USABLE_MM` ignored the cell's 0.2 mm border**, so the barcode column overflowed its
+> content box by 0.4 mm and `overflow: hidden` clipped it. Invisible for every producible tag (47.85 mm
+> against 52.93 mm), but on the **defensive ≥12-character branch** the symbol fills the full 53.33 mm
+> and the clipped 0.4 mm is part of STOP's trailing bar — an unscannable code that looks finished, the
+> same failure `MIN_MODULE_MM` exists to prevent, arriving through a different door. Fixed in the
+> COMPONENT (the cut-guide no longer participates in layout), never in `label-geometry.ts`, whose
+> `cell − 2 × padding` arithmetic is correct and pinned by Task 2's tests.
+>
+> **A-23. Two of the four were defects in this task's drafted PROSE, and both were printed on adhesive
+> paper.** The draft hardcoded "100mm" in the on-screen banner while `CALIBRATION_MM` owns that number
+> (rules 26/37/38), and it asserted a single diagnosis — "if it is short, the print dialog is scaling" —
+> when the **wrong paper size** produces the same symptom with a different remedy. It also claimed "this
+> bar is exactly 100mm" in a caption that renders **on screen**, where a CSS millimetre is not a
+> physical one. And "N selected assets no longer exist" counted ids that never existed. All four are the
+> rule-16 shape the A-13 amendment corrected one element over, which is worth noting: **the same class
+> recurred in the same file after being fixed there once.**
 
 **Files:**
 - Create: `src/components/inventory/label-sheet.tsx`
@@ -484,7 +714,7 @@ import { code128Modules } from "@/lib/code128";
 import {
   CALIBRATION_MM, LABEL_CELL_MM, LABEL_COLUMNS, LABEL_PADDING_MM, LABEL_USABLE_MM,
   PAGE_MARGIN_MM, PAGE_MM, barcodeFit, labelPages,
-} from "@/lib/labels";
+} from "@/lib/label-geometry";
 
 export interface LabelRow {
   tag: string;
@@ -501,9 +731,13 @@ function Barcode({ tag }: { tag: string }) {
   const fit = barcodeFit(tag);
   if (!fit.encodable) {
     // An unscannable code is worse than none: the sticker would look finished.
+    // Cause-NEUTRAL wording (A-13): `encodable: false` covers a too-fine
+    // module, a character Code 128-B cannot encode, AND an empty tag, so
+    // "too long" would be false for two of the three. The tag text above
+    // still prints — a human can read and type what no scanner can.
     return (
       <span style={{ fontSize: "2.4mm", color: "#B42318", fontFamily: "monospace" }}>
-        tag too long to encode
+        no scannable code
       </span>
     );
   }
@@ -624,7 +858,7 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { PrintButton } from "@/components/ui/print-button";
 import { LabelSheet } from "@/components/inventory/label-sheet";
 import { BULK_MAX } from "@/lib/inventory-list";
-import { labelPages } from "@/lib/labels";
+import { labelPages } from "@/lib/label-geometry";
 
 export default async function LabelsPage({
   searchParams,
@@ -740,6 +974,96 @@ git commit -m "feat(labels): the 3x4 A4 label sheet and its print route"
 ---
 
 ### Task 4: The role gate, the entry point, and the e2e
+
+> ### AMENDED BEFORE EXECUTION — the e2e must MEASURE the calibration bar, because it silently shrank once already.
+> **A-16.** Task 3 shipped the calibration bar as a flex item with `width: 100mm` and default
+> `flex-shrink: 1`, inside an absolutely-positioned shrink-to-fit flex container whose sibling is a long
+> text span. It rendered at **89.38 mm — 10.6% short** — while the text beside it read "this bar is
+> exactly 100mm". Fixed in Task 3 with `flexShrink: 0`, but **nothing prevents it happening again**, and
+> the failure mode is the worst kind: a ruler that lies makes an operator "correct" a scaling problem
+> that does not exist, or calibrate against a wrong reference. It was found only by rendering the page
+> and measuring it in the browser.
+>
+> **So this task's spec must measure it.** 100 mm at 96 dpi CSS is **377.95 px**. Add:
+>
+> ```ts
+> test("the calibration bar really is 100mm, because a ruler that lies is worse than none", async ({ page }) => {
+>   await login(page, "it@thebackroomop.com");
+>   const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
+>   await page.goto(`/inventory/labels?ids=${asset.id}`);
+>   await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+>   // The bar is the only 1.5mm-tall span with a background on the sheet.
+>   const widths = await page.evaluate(() =>
+>     [...document.querySelectorAll("span[style*='background']")]
+>       .filter((s) => (s as HTMLElement).style.height === "1.5mm")
+>       .map((s) => s.getBoundingClientRect().width));
+>   expect(widths.length).toBeGreaterThan(0);
+>   for (const w of widths) expect(w).toBeCloseTo((CALIBRATION_MM * 96) / 25.4, 1);
+> });
+> ```
+>
+> Import `CALIBRATION_MM` from `@/lib/label-geometry` rather than writing 377.95, and import `PAGE_MM`
+> for the page-box assertion rather than retyping 210/297 — the pixel figures are derived, the
+> millimetre figures have an owner (rules 26/37/38).
+>
+> **Correction to this amendment's own text:** it originally justified `toBeCloseTo(…, 1)` as a loose
+> allowance because "a tighter tolerance would make this test flaky". That is backwards — **precision 1
+> means a tolerance of 0.05 px**, which is *tighter* than precision 0's 0.5 px. Measured actuals on
+> Chromium at DSF 1 sit ~0.015 px off (bar 377.9375, page 793.6875 × 1122.515625), so precision 1 passes
+> with ~3× headroom and is not flaky — Chrome's 1/64-px `LayoutUnit` snapping is deterministic. Either
+> precision is defensible; what is not defensible is a comment that describes the tolerance backwards.
+> **State the real numbers and the real headroom.**
+>
+> **Mutation to add to this task's table:** remove `flexShrink: 0` from the bar in
+> `label-sheet.tsx` — this test must fail. If it does not, it is not measuring the bar.
+>
+> **A-17. Also assert the page box, since it is free and it is the other half of the geometry.** A4 is
+> 210 × 297 mm → **793.7 × 1122.5 px**. `document.querySelectorAll(".label-page")` should report exactly
+> that for every page, and that assertion is what catches a future change to `PAGE_MM`,
+> `PAGE_MARGIN_MM` or the grid template silently breaking the die-cut fit. Measured on the real render:
+> `{w: 793.69, h: 1122.52}`.
+>
+> **A-18. Assert the page BREAK, not just the label count.** 13 ids must produce **two** `.label-page`
+> elements with 12 labels on the first and 1 on the second, and **two** calibration bars — one per sheet.
+> A ruler on only the first sheet proves nothing about the second, which is the whole reason it is
+> absolutely positioned per page rather than rendered once. Verified on the real render: 13 barcodes,
+> "13 labels · 2 sheets", two page boxes.
+
+> ### AMENDED AFTER EXECUTION — the e2e role-gate assertion could not see the rule it was written for.
+> **A-24. Defense in depth makes a layer-1 regression invisible to an outcome assertion, and this
+> plan asserted otherwise.** The label route carries BOTH a `PATH_RULES` entry (middleware, layer 1) and
+> its own `requireRole("admin","it_staff")` (layer 2). `requireRole` redirects to
+> `ROLE_LANDING[user.role]` — **the same destination** middleware uses when `pathAllowedForRole` fails.
+> So "finance cannot reach the label sheet" passes identically whether the middleware rule is correct,
+> misordered, or deleted. Proved by mutation: moving the rule failed the unit test and left the e2e
+> green under `--repeat-each=3`.
+>
+> This plan's mutation table predicted that e2e would fail. **It was wrong**, and the first two people
+> to look at it — the implementer and me — both concluded the blind spot was structural and unclosable.
+> **It is not.** A third reviewer found two discriminators and measured both:
+>
+> - **The redirect happens at a different time and in a different place.** Middleware emits a real
+>   **307 with `Location` before anything renders**; the page guard's `redirect()` lands *after* Next
+>   flushes the streamed shell and the router then navigates **client-side**. The reason the assertion
+>   was blind is therefore precise: `expect(page).not.toHaveURL(…)` is a **negated web-first
+>   assertion**, so it waits out the late client-side settle. A non-retrying read taken the instant
+>   `goto` resolves distinguishes the layers.
+> - **Better, and immune to Next's semantics changing: probe a path the rule covers where no page
+>   exists.** The rule's `(\/|$)` matches `/inventory/labels/no-such-page`; there is no page file
+>   there, so `requireRole` structurally cannot run and only middleware can answer. Measured with the
+>   rule misordered: **200, zero redirect hops, URL unchanged**, for finance and viewer alike.
+>
+> **The general rule, which matters beyond this task:** when two layers refuse the same thing the same
+> way, an outcome assertion cannot attribute the refusal, so it cannot detect one layer failing while
+> the other holds. Either assert the layer in isolation (a unit test on the rule, or a path where only
+> that layer exists) or **say in the test's name and comment that it is an outcome guard, not a rule
+> guard.** Do not write "asserted rather than assumed" over an assertion that cannot tell the
+> difference.
+>
+> **This is a pre-existing pattern, not a new defect.** `e2e/import-export.spec.ts:438-452` has the
+> identical blind spot for the identical reason (both import pages call `requireRole`), and Phase 9's
+> plan claimed that assertion proved the rule. Corrected in the same pass, because leaving one fixed
+> and one wrong is worse than leaving both — the next reader trusts the wrong one.
 
 **Files:**
 - Modify: `src/lib/workspaces.ts`
@@ -1040,6 +1364,39 @@ git commit -m "feat(scan): the offboarding scan verdict, pure and four-way"
 
 ### Task 6: Wire the scanner into the wizard
 
+> ### AMENDED BEFORE EXECUTION — hoist the string helpers first, or this task drags 873 lines of sheet parsing across the client boundary.
+> **A-25.** Task 5's `src/lib/scan.ts` reuses `tagKey` from `src/lib/import-assets.ts`, which is right —
+> it is the app's canonical trim-and-upper-case rule, and four hand-written twins of existing rules were
+> removed in the previous phase after every one of them drifted. But `import-assets.ts` is **873 lines**
+> of sheet-header matching, row planning and block-cause vocabulary, and **this task is what puts
+> `scan.ts` on the client side of the boundary** (`ScanProvider` is `"use client"`).
+>
+> A reviewer traced every transitive import and found **nothing server-only and no runtime Prisma** —
+> the Prisma references are `import type`, erased at compile time — so this is not a correctness
+> problem and it does not block anything. It is a "a client bundle carries 873 lines of import
+> machinery to get a three-line helper" problem, and it is far cheaper to fix before the wiring lands
+> than after.
+>
+> **Step 0, before anything else in this task.** Move the three pure string helpers —
+> `cellText`, `refKey`, `tagKey` — out of `import-assets.ts` into a new `src/lib/tag-key.ts`. They are
+> one family, they have **no imports at all**, and they are the only things anything outside the import
+> feature wants from that module.
+>
+> **Then re-export them from `import-assets.ts`** so every existing caller keeps working with no edit:
+> `import-employees.ts`, `server/modules/import/asset-actions.ts`,
+> `server/modules/import/resolve.ts`, and three test files all import them from there today. A
+> re-export makes this a **zero-behaviour-change move**, which is what keeps it safe to do mid-phase.
+>
+> Then point `scan.ts` at `./tag-key` directly.
+>
+> **Verify it changed nothing:** `import-assets.test.ts`'s existing assertions on `cellText`, `refKey`
+> and `tagKey` must pass **untouched** — they are the proof. Do not move those tests; a passing test
+> that never moved is stronger evidence than a passing test you also edited. Full suite must stay at
+> 797+.
+>
+> Commit Step 0 **separately** from the wiring, so the refactor and the feature can be reviewed and
+> reverted independently.
+
 **Files:**
 - Create: `src/components/offboarding/scan-provider.tsx`
 - Modify: `src/components/offboarding/item-decision.tsx`
@@ -1236,6 +1593,75 @@ git commit -m "feat(scan): a scan preselects Returned in the offboarding wizard,
 
 ### Task 7: Scanner e2e
 
+> ### AMENDED BEFORE EXECUTION — one verdict is unreachable in the seed, the collect step has never been axe-scanned, and the guard has a second direction.
+> **A-26. The `blocked` verdict cannot be reached with seeded data.** Measured: zero blocked cards render
+> in the collect step. Dennis Ong's three assets (`BR-LT-0166`, `BR-PH-0312`, `BR-HS-0510`) have no open
+> approvals; the seeded blocker `APR-2039` sits on `BR-LT-0148`, owned by ACTIVE `EMP-0042`; and
+> `APR-2040` has `assetId: null` by design. So the fourth verdict — the one §6a rule 10 exists for, and
+> the one a design card never mentions — is untestable as the seed stands.
+>
+> **This spec must manufacture the blocker**, the same way `e2e/import-export.spec.ts` manufactures its
+> duplicate-serial state rather than adding to the seed: create a `PENDING lifecycle_change_status`
+> approval on one of Dennis's assets through Prisma inside the test, assert the `blocked` banner names
+> its refNo, then let the file's `beforeAll` reseed clean up. **Do not add a fixture to `prisma/seed.ts`**
+> — a dozen specs lean on those three assets being decidable, and Phase 9's T-1 established that
+> building the state with the running code is the better test anyway. (Verified by hand during Task 6's
+> review: inserting such an approval does make the verdict render correctly.)
+>
+> **A-27. No spec has ever run axe on the collect step.** `e2e/offboarding.spec.ts`'s axe calls cover the
+> review step, reservations and policies — never `?step=collect`. Task 6 just added a banner, a live
+> region and a per-card outline to that step, none of which any accessibility check has seen. It happens
+> to be clean right now (0 serious, 0 critical; one pre-existing `heading-order` moderate), so **lock
+> that in** rather than leaving the new DOM unchecked. Reuse `expectNoSeriousAxe` and the pointer-park
+> settle — §6a rule 79's phantom contrast violation applies here as everywhere.
+>
+> **A-28. Assert the focus guard in BOTH directions.** Task 6 shipped a guard that correctly protected
+> the Reason textarea and **silently killed the scanner** whenever focus sat on a `SegmentedControl`
+> radio — which is where focus lands after the ordinary act of clicking an outcome. The same three lines
+> caused both. So one assertion is not enough:
+>
+> - typing into the Reason textarea must stay in the textarea and move no card (the direction the
+>   implementer reasoned about), **and**
+> - **clicking an outcome and then scanning another held tag must still work** (the direction they did
+>   not). This is the regression that shipped; it must have a test.
+>
+> Add a mutation to this task's table: restore the blanket `if (tag === "INPUT") return` and confirm the
+> second test fails. If it does not, the test is not exercising the radio-focus path.
+
+> ### AMENDED AFTER EXECUTION — "a scan writes nothing" was asserted with two locators that could not fail.
+> **A-29. The feature's central claim was guarded by an inert assertion, and it took a dedicated
+> inertness audit to see it.** The drafted test asserted "writes nothing" two ways:
+>
+> ```ts
+> await expect(page.getByText(/APR-\d+ created/)).toHaveCount(0);
+> await expect(page.getByRole("row", { name: /BR-LT-0166/ })).toHaveCount(0);
+> ```
+>
+> An auditor made the scan-match effect actually call `decideItem(...)`. A real approval was created —
+> and **both assertions passed.** The first looks for a toast only `submit()` ever fires, so a direct
+> call produces none and its absence proves nothing. The second looks for a **`row` role on a page that
+> renders `Card`s, not a table** — that locator is **structurally vacuous**: it matches nothing on this
+> page in any state, so it passes with zero mutation. The test failed only at its axe line, and only
+> incidentally, because the write's revalidation happened to re-render a contrast-failing link.
+>
+> **Two transferable rules.**
+>
+> 1. **A locator whose role does not exist on the page under test is worse than no assertion**, because
+>    it reads as coverage. `toHaveCount(0)` on a vacuous locator is the purest form of inert assertion
+>    there is — it can never fail, and its name says it is guarding something.
+> 2. **"Nothing was written" cannot be asserted from the absence of a UI signal.** The UI shows what the
+>    happy path renders; a write that arrives by another route renders nothing to be absent. Assert it
+>    against the database, as a **delta** (`e2e/import-export.spec.ts` already does exactly this for its
+>    audit-row count, for exactly this reason). Fixed here with a `db.approval.count({ where: { assetId } })`
+>    before and after, and the vacuous locator **deleted rather than left as decoration**.
+>
+> **Also cleared by the same audit, recorded so nobody re-opens them:** the
+> `blocked`-before-`already-decided` precedence swap is caught by `src/lib/scan.test.ts` rather than any
+> e2e, which is the correct division of labour and not a gap; the manufactured `APR-SCANTEST-BLOCK-1`
+> fixture does not leak, because `scanner.spec.ts` sorts last of all spec files under `--workers=1` and
+> its own `beforeAll` reseeds; and the already-decided test's "wait for the decided card's group to
+> unmount" gate survived `--repeat-each=3`.
+
 **Files:**
 - Create: `e2e/scanner.spec.ts`
 
@@ -1378,6 +1804,33 @@ git commit -m "test(e2e): the scanner, including the keystrokes it must not stea
 ---
 
 ### Task 8: The two known moderate axe violations
+
+> ### AMENDED AFTER EXECUTION — the stated scope was wrong, and so was the commit command.
+> **A-30. Changing `CardHeader`'s heading level broke 15 e2e assertions the plan did not account for.**
+> `e2e/home-finance.spec.ts` (14) and `e2e/admin.spec.ts` (1) hard-code
+> `getByRole("heading", { level: 3 })` against headings `CardHeader` renders — "Your shift", "Fleet",
+> "Age", "Claimed by you", "Warranty runway", "Jump to". This task's **Files** list said four
+> components and "Nothing else", and its Step 5 command was `git add src/components`, which would have
+> staged the component change **without** the spec updates and shipped a red suite. Both specs re-run
+> green (24 passed) after updating the levels. The plan *did* ask the implementer to check for exactly
+> this — the lesson is that the check found a real hazard, so the scope line was the thing that was
+> wrong, not the check.
+>
+> **A-31. `h3 → h2` fixes `heading-order` rather than relocating it, and the reason is worth writing
+> down.** Measured with axe on real pages: `/` went **1 → 0**; `/inventory` and `/purchases` stayed at
+> **0**. The app still renders `<h3>` in the sidebar nav (`nav-list.tsx`) and the command palette
+> (`command-palette.tsx`), and those are **not** flagged — because they precede the `<h1>` in DOM order
+> and axe's `heading-order` permits going UP a level, only never skipping down. So the document reads
+> h3(nav) → h1(page) → h2(card), which is legal, where it previously read h3 → h1 → **h3**, which skips.
+>
+> **A-32. The plan's suggested verification page was a bad example.** It named `/admin/users`, which
+> renders no `CardHeader` at all (a `Banner` plus a table), so it measured 0 violations before *and*
+> after and proved nothing. `/`, `/inventory` and `/purchases` are the pages that actually exercise the
+> component. **When a plan names a page to verify against, check that the page exercises the thing.**
+>
+> **A-33.** The CSV wording this task also listed was already fixed earlier in the phase (Task 4's
+> pass), so `bulk-drawer.tsx` needed no change. Worth noting the plan carried the same item in two
+> tasks.
 
 **Files:**
 - Modify: `src/components/ui/card.tsx`
@@ -1606,6 +2059,58 @@ git commit -m "test(e2e): sweep every route with axe, and count what sits below 
 
 ### Task 10: The deployment README, proven from a clean state
 
+> ### AMENDED AFTER EXECUTION — six findings, and FOUR of them were defects in this task's own bullet list.
+> **A-34. "`prisma migrate reset` is blocked" is false for the only reader this document has.** The
+> plan mandated that wording verbatim, and the implementer copied it verbatim. Nothing in the repo
+> blocks it — no npm guard, no schema restriction, and the append-only triggers
+> (`20260814084417_append_only_triggers`) fire only on row-level `UPDATE`/`DELETE` of `AuditEntry` and
+> `NoteEntry`. `migrate reset` appears nowhere in the code or config; it appears only in `docs/`. The
+> fact's real owner is `docs/HANDOVER.md:188`, which says it is blocked **by the harness classifier** —
+> true of an agent working in this session, false of the human operator a deployment README addresses.
+> The README now says "destructive and unnecessary here". **A fact copied out of the handover into a
+> user-facing document changes audience, and the audience is part of the claim.**
+>
+> **A-35. The prod description undercounts by two services and omits the build step.** The plan says
+> `--profile prod up -d` "brings up `db`, `migrate` … and `web`". Four services carry
+> `profiles: ["prod"]` — `migrate`, `web`, `worker`, `backup` — and `db` carries **none**, coming up as
+> a healthcheck dependency. Five containers start, and `db` is not a profile-`prod` service at all.
+> Worse, the plan never mentions `docker compose --profile prod build`, which the clean-state run had
+> to issue first: `worker` (`docker-compose.yml:58-60`) declares `image: inventory-app` with **no
+> `build:` stanza**, unlike `migrate` and `web`, and that tag exists in no registry.
+>
+> **A-36. The plan's dev quickstart is unrunnable from the clean clone the plan itself mandates.**
+> Step 1 prescribes `docker compose up -d db` → `npx prisma migrate deploy` → `npm run db:seed` →
+> `npm run dev`; Step 2 requires proving it from a fresh `git clone`. `node_modules/` is gitignored, so
+> every one of those commands fails with "not found". `npm ci` was missing — and the document's only
+> mentions of `npm install` are the Windows lockfile hazard, which tells the reader **not** to run it.
+> **And `npm ci` alone is not enough:** `npm run db:seed` then fails with "@prisma/client did not
+> initialize yet", so `npx prisma generate` is required too. That was established by running it, not
+> by reasoning about postinstall hooks — the first round assumed the hook covered it and was wrong.
+>
+> **A-37. Section order deviates deliberately: secrets moved from position five to position three.**
+> The plan bolded and capitalised the order, but you cannot run the dev quickstart without `.env`
+> existing first. The README ships intro · prerequisites · **secrets** · dev quickstart · production
+> deploy · migrations · worker · seeded accounts · troubleshooting · what does not work. Everything
+> else is in the specified order.
+>
+> **A-38. A base64 password breaks the deployment, and only execution could have found it.**
+> `docker-compose.yml` splices `POSTGRES_PASSWORD` **unescaped** into the container `DATABASE_URL`
+> (`postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}`). `openssl rand -base64 24`
+> emits 32 base64 characters, each a 1-in-64 chance of being `/`, so **roughly 40% of generated
+> passwords contain one** — and a `/` terminates the URL authority. Prisma fails with
+> `P1013: invalid port number in database URL` and `migrate` exits 1. The README now generates with
+> `| tr -d '/+='`. **The first draft also claimed `+` breaks it; it does not** — `+` and `=` are legal
+> in userinfo, and that claim was asserted rather than reproduced. Stripping them is a precaution, and
+> the README now says so rather than blaming them.
+>
+> **A-39. Two deployment defects were found that this task's scope could only document, not fix.**
+> `web` declares no volume for `uploads/` (confirmed by `docker inspect … .Mounts` returning `[]`)
+> while `src/server/modules/inventory/document-actions.ts` writes uploaded asset documents to
+> `process.cwd()/uploads` — so every recreation of the container discards them. And `worker` has no
+> `build:` stanza (A-35). Both are in the README's "what does not work"/build-first guidance; **both
+> want a one-line `docker-compose.yml` change that Task 10's `Files:` line does not permit.** Raised
+> with the user rather than smuggled in.
+
 **Files:**
 - Modify: `README.md`
 
@@ -1668,6 +2173,49 @@ git commit -m "docs: a deployment README that has actually been run"
 ---
 
 ### Task 11: Full battery and close-out
+
+> ### AMENDED AFTER EXECUTION — the battery's own ORDER tips a latent failure, and two compose defects were fixed here rather than in Task 10.
+> **A-40. `npm run build` immediately before the e2e suite makes the suite maximally cold, and that tipped
+> a headroom failure the warm suite had never shown.** Step 1 runs `npm run build` and then the e2e
+> parts. `build` and `next dev` share `.next` and their outputs are incompatible, so the honest thing is
+> to clear `.next` in between — which means Playwright's dev server compiles every route from nothing.
+> Under that, `it-core.spec.ts:126` ("an exact tag search opens the record (scanner contract)") failed on
+> a 5s default while the page sat in `inventory/loading.tsx`. **The diagnosis was in the snapshot:
+> `loading.tsx` renders only `Skeleton` divs, which carry no text and no roles, so an aria snapshot of
+> the loading state is an EMPTY `main`** — the signature of waiting on a server render, and the thing
+> that ruled out both a lost keypress (which would have left the server-rendered table in `main`) and
+> data drift. One keypress there is **two** server renders: a client `router.push` to `/inventory?q=…`,
+> then `page.tsx:39`'s `redirect()` to `/inventory/<id>`. Isolated and cold it passes in 12.6s. Fixed
+> with headroom (20s, matching the hydration helper already in that file), and **verified by re-running
+> the part-2 file list cold rather than warm** — 56 passed where the same command had given 55/1.
+> **Before adding headroom, `git diff main..HEAD` was run over `inventory/page.tsx`, `queries.ts` and
+> `inventory-toolbar.tsx`: all three are byte-identical to `main`, so the headroom is not hiding a
+> Phase 10 regression.** That check is the difference between headroom and a papered-over bug.
+>
+> **A-41. The e2e numbers: 147 across 12 files, but the per-file tally in HANDOVER was off by one.**
+> Measured this battery: part 1 (admin, approvals-audit, auth-shell, home-finance) **51 in 4.1m** ·
+> part 2 (import-export, it-core, kitchen-sink, labels) **56 in 5.1m** · part 3 (offboarding,
+> purchases, scanner) **34 in 3.9m** · part 4 (axe-sweep) **6 in 3.9m**. Total **147**, which matches
+> the handover's total — but the handover recorded `axe-sweep` as **5** tests, and it is **6**. The
+> total was right and a component of it was wrong, which is the failure mode a total is worst at
+> catching. The four-part split needed no re-balancing.
+>
+> **A-42. Two `docker-compose.yml` defects found by Task 10 were fixed here, at the user's instruction.**
+> Task 10's `Files:` line permitted only `README.md`, so both shipped as documented caveats. The user
+> asked for them fixed before this task. `web` now bind-mounts `./uploads:/app/uploads` (asset documents
+> were written to the container's writable layer and destroyed on every recreate), and `worker` now
+> declares `build: .` like its siblings (it consumed an `inventory-app` tag published to no registry).
+> Proven under compose project `inv-fix-test`: three images built where two built before; the `node`
+> user (uid 1000) writes into the mount; the container sees the host's real 57 files; a probe survives
+> `up -d --force-recreate web`. **README.md was edited in the same commit** — its "what does not work"
+> entry claiming uploads are ephemeral would otherwise have become false the moment the fix landed.
+>
+> **A-43. Step 4 (print a sheet and measure the 100mm bar with a tape measure) CANNOT be done from this
+> session** — it needs a physical printer and a human with a tape measure. It is the one entry criterion
+> no agent can close. Left open for the user.
+>
+> **A-44. The moderate/minor axe counts the sweep printed, for §8:** `empty-table-header` **9** ·
+> `page-has-heading-one` **2** · `landmark-unique` **1**. None are serious or critical; the sweep passes.
 
 - [ ] **Step 1: The battery**
 

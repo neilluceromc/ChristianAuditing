@@ -128,7 +128,15 @@ test.describe("inventory list", () => {
     await page.goto("/inventory");
     await page.getByLabel("Search assets").fill("BR-LT-0148");
     await page.getByLabel("Search assets").press("Enter");
-    await expect(page.getByRole("heading", { name: "BR-LT-0148" })).toBeVisible();
+    // Enter is a client-side router.push to /inventory?q=…; the server component
+    // there resolves the exact tag and redirect()s on to /inventory/<id>. That is
+    // TWO server renders behind one keypress, and `inventory/loading.tsx` covers
+    // both — so a slow render shows an all-Skeleton `main` with no accessible
+    // content, which is what the 5s default caught against a cold dev server
+    // (measured: 12.6s for this test alone with `.next` deleted). Headroom, not a
+    // weaker assertion: landing on the record with this exact heading is still
+    // the whole contract. 20s matches the hydration helper above.
+    await expect(page.getByRole("heading", { name: "BR-LT-0148" })).toBeVisible({ timeout: 20_000 });
   });
 
   test("viewer is read-only: no checkboxes, no New asset, badge shown", async ({ page }) => {

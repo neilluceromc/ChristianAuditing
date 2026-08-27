@@ -305,6 +305,6 @@ test.describe("admin home", () => {
     await expect(page.getByText("unavailable")).toBeVisible();
     // The IT Home's sections must NOT be here — that was the bug.
     await expect(page.getByText("Your shift")).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Fleet", level: 3 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
   });
 });

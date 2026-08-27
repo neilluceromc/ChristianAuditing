@@ -291,3 +291,29 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Asset label sheet. Absolute mm and no page margin, because the grid
+   carries its own — otherwise the browser's margin doubles up and the 3x4
+   grid stops matching the die-cut. Scoped to a NAMED page rather than the
+   bare `@page` selector: an unscoped `@page { margin: 0 }` is global to every
+   print job in the app, which would also strip the page margin the farewell
+   report and the accountability form rely on (they print with `print:p-0`
+   and no @page override today, so they depend on the browser's own margin).
+   `page: label-sheet` opts only `.label-sheets` into the custom page box. */
+@page label-sheet {
+  size: A4;
+  margin: 0;
+}
+
+.label-sheets {
+  page: label-sheet;
+}
+
+@media print {
+  .label-page {
+    break-after: page;
+  }
+  .label-page:last-child {
+    break-after: auto;
+  }
+}

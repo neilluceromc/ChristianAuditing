@@ -8,12 +8,16 @@ export function SegmentedControl({
   value,
   onChange,
   "aria-label": ariaLabel,
+  "aria-describedby": ariaDescribedBy,
+  "aria-invalid": ariaInvalid,
   className,
 }: {
   options: Array<{ value: string; label: string }>;
   value: string;
   onChange: (value: string) => void;
   "aria-label": string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
   className?: string;
 }) {
   const id = useId();
@@ -25,6 +29,8 @@ export function SegmentedControl({
     <div
       role="radiogroup"
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
+      aria-invalid={ariaInvalid || undefined}
       className={cn(
         "relative inline-grid auto-cols-fr grid-flow-col rounded-(--radius-btn) border border-border-strong bg-surface-subtle p-0.5",
         className,

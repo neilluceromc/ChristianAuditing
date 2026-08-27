@@ -97,8 +97,33 @@ export function BulkDrawer({
             : `/inventory/export?ids=${selectedIds.join(",")}`}
           className="text-xs text-accent hover:underline"
         >
-          Export this selection as CSV
+          Export this selection as a spreadsheet
         </a>
+        {/* Labels come from an explicit selection only: "all matching" would
+            make one click a 17-sheet print job, and labelling a whole filtered
+            fleet is not a real intent. `selectedIds.length > 0` is
+            belt-and-braces rather than a live branch today — the drawer only
+            opens via "Bulk actions…" in inventory-table.tsx, which itself
+            requires selected.size > 0, so this component can't currently be
+            rendered with an empty, non-allMatching selection. Kept anyway so
+            the link stays ABSENT, not disabled, if that caller ever changes —
+            the house rule for affordances that cannot act. */}
+        {!allMatching && selectedIds.length > 0 && (
+          <a
+            href={`/inventory/labels?ids=${selectedIds.join(",")}`}
+            className="text-xs text-accent hover:underline"
+          >
+            Print labels for {selectedIds.length} selected
+          </a>
+        )}
+        {/* The branch that actually matters: "all matching" has no id list to
+            build a ?ids= from, and printing a whole filtered fleet was never
+            a real intent (see above) — so under this state the affordance is
+            silently absent rather than merely disabled. That silence needs a
+            sentence, the same way every other unreachable-affordance case in
+            this app gets one, because the alternative is an operator staring
+            at a drawer with no explanation for why Print labels isn't there. */}
+        {allMatching && <p className="text-xs text-fg-faint">Labels need an explicit selection.</p>}
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title={error} />}
         <FormField label="Target status" required error={fieldErrors.to}>
