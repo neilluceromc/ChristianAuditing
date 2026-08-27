@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-27 (**PHASE 10 IS MERGED TO `main`**; Phase 11 exists and is PARKED — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **NOTHING IS PUSHED: `main` is 180 ahead of `origin/main`, counted immediately after the merge. It rises by one every time this sentence is corrected, which is precisely why you count it yourself: `git rev-list --count origin/main..main`.** · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-08-27 (**PHASE 10 IS MERGED TO `main`**; Phase 11 exists and is PARKED — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -17,9 +17,8 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 merged result. It was the last planned phase.** What remains is the push decision, one measurement no
 agent can take, and a parked Phase 11. Read items 1–4 below, then stop and ask.
 
-1. **`git checkout main`.** Phase 10 is already merged into it. `main` is **180 ahead of
-   `origin/main`**, counted just after this line was committed.
-   **Count it again** (`git rev-list --count origin/main..main`)
+1. **`git checkout main`.** Phase 10 is merged into it and it is **pushed** — level with
+   `origin/main`. **Count it yourself anyway** (`git rev-list --count origin/main..main`)
    rather than trusting those numbers; every correction to this line is itself a commit. Nothing has
    been pushed since the Phase 1–7 merge on 2026-08-19, deliberately: **the user treats merging and
    publishing as separate decisions and asks for each explicitly. Never push or merge unprompted.** The
@@ -52,8 +51,13 @@ agent can take, and a parked Phase 11. Read items 1–4 below, then stop and ask
    the merged result and the merged tree is byte-identical to the branch. **The branch ref was kept.**
    Deleting it now would strand nothing — its tip is reachable from `main` — but there is no need.
 
-   **(c) Pushing.** 175 commits unpushed, deliberately, since 2026-08-19. Separate decision from
-   merging — the user asks for each explicitly. **Never push unprompted.** The repo is public.
+   **(c) Pushing — DONE.** 180 commits went up on 2026-08-27, the user having asked for it separately
+   from the merge, as this project always does. **A secret scan ran first and is worth repeating before
+   any future push, because this repo is PUBLIC:** no `.env` was ever committed in those 180 commits, no
+   `uploads/`/`backups/` content leaked in, the only `.sql` files are legitimate migrations, and no
+   secret-shaped assignment appears in any added line. The one credential that IS public is
+   `SEED_PASSWORD = "admin123"` (`prisma/fixtures.ts:31`) — deliberate, documented in `README.md`, and
+   safe only while the app stays on localhost. **Never push unprompted; still ask each time.**
 
    **(d) Two deferred items, both real, neither blocking.** **Entra SSO does not work** — the provider
    registers when three env vars are set but no `signIn` callback maps an Entra profile to a `User`, so
