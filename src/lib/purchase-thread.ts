@@ -21,6 +21,7 @@ export const NOTE_CHIP: Record<NoteKind, string> = {
   REQUEST_INFO: "SENT BACK",
   CANCEL: "CANCELLED",
   COMPLETE: "COMPLETED",
+  RECEIVE: "RECEIVED",
 };
 
 export interface BounceBack {
