@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1 and C-2. Both are defects in this plan, both caught by an implementer who stopped instead of guessing.
+> ### AMENDED DURING EXECUTION — C-1 through C-3. All are defects in this plan; two were caught by implementers who stopped instead of guessing, one by reading the helpers' signatures before dispatch.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -68,7 +68,21 @@ written until submit.
 >
 > **Rejected:** widening the pinning test to also assert a run ending past the ceiling. That is exactly
 > what the overflow test already asserts — it would be duplicate coverage dressed as a stronger test,
-> and it would blur what the pinning test is for.
+> and it would blur what the pinning test is for.>
+> **C-3. Three signature errors in Task 4's given code, found by the controller before dispatch rather
+> than by an implementer after.** All three would have failed `tsc` — so they were survivable — but a
+> plan that says "implement as written" and then does not compile wastes the implementer's turn and
+> teaches it to distrust the text.
+>
+> - `checkRate` takes a **bare userId** and returns `{ allowed, retryAfterSec }`, not a boolean. The
+>   plan passed a composite key (``receive:${user.id}``) and treated the result as truthy. Corrected to
+>   the two-line form `purchases/actions.ts:74-75` already uses.
+> - `rateLimited` requires `retryAfterSec`. The plan called it with no argument.
+> - `forbidden` takes **no arguments** — it is `(): ActionResult<never>`. The plan passed it a message.
+>
+> **The pattern across C-1, C-2 and C-3 is one thing, not three:** every defect came from writing code
+> against a remembered API instead of a read one. The fix is not more care — it is reading the signature
+> of every helper a task calls before writing the call, which is what caught these three.
 >
 > **This is the fourth defect in this plan** (after the contradictory scope line, the nonexistent
 > `SYSTEM` enum member, and the deliberately-wrong test expectation I removed at self-review). All four
@@ -634,8 +648,12 @@ export async function highestTagNumber(prefix: string): Promise<number | null> {
 
 export async function receiveUnits(input: unknown): Promise<ActionResult<Received>> {
   const user = await actionRole("admin", "it_staff");
-  if (!user) return forbidden("Only IT can receive a purchase.");
-  if (!(await checkRate(`receive:${user.id}`))) return rateLimited();
+  if (!user) return forbidden();
+  // checkRate takes a bare userId and returns { allowed, retryAfterSec } — it
+  // is NOT a boolean, and the kind defaults to "mutation". This is the exact
+  // shape purchases/actions.ts:74-75 uses; do not invent a composite key.
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
   const parsed = receiveSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
