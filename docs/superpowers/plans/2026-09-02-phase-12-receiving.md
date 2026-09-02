@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1 through C-5. Four were defects in this plan; C-5 is a change of PREMISE from the user that replaced Tasks 5 and 6 wholesale. C-4 would have corrupted the asset register and no test in the plan as written could have caught it.
+> ### AMENDED DURING EXECUTION — C-1 through C-6. Five were defects in this plan; C-5 is a change of PREMISE from the user that replaced Tasks 5-7. C-4 would have corrupted the asset register and no test in the plan as written could have caught it.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -169,6 +169,24 @@ written until submit.
 > that Phase 13 then has to reconcile or replace — the precise mistake §9 warns about, where B and D
 > each invent their own answer because A had not landed yet. The confirmation flag ships now because it
 > is orthogonal to class; the tabs wait because they *are* class.
+>
+> **C-6. Task 5 told the implementer to reuse `toCost`, and it cannot be reused.** Verified after the
+> implementer flagged it: `src/server/modules/inventory/actions.ts` begins with a module-level
+> `"use server"`, and `toCost` is a **non-exported synchronous arrow** at line 174. Next.js requires
+> every top-level export from a `"use server"` module to be an **async function**, so exporting it would
+> break the build — and its signature `(c: number | "" | undefined)` does not match a
+> `z.string().optional()` field regardless.
+>
+> The plan reached for DRY (rules 26/37/38, the same instinct that justified Task 1) without checking
+> whether the thing could be shared at all. **The implementer kept the string pass-through, commented why,
+> and flagged that `toCost`/`toDate` would first have to move to a non-`"use server"` lib module to be
+> shareable.** That is the correct answer and the correct place to stop.
+>
+> **The lesson generalises past this helper: a `"use server"` module is not a library.** Anything in one is
+> reachable only as an async server action, so "extract the shared helper" is not always available — and
+> a plan that assumes it is will send an implementer into a build error. Check the directive before
+> proposing reuse across that boundary. Worth noting the cost was near zero here because the implementer
+> stopped; the same instruction followed literally would have failed the build.
 
 **Conventions for every task:** stay on `phase-12-receiving`; run `npx tsc --noEmit && npm run lint`
 before each commit; **NEVER run `npm run build` while a dev server is running** (they share `.next`).
