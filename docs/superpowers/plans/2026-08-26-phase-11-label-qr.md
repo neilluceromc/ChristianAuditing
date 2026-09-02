@@ -1185,3 +1185,351 @@ unmerged, so the merge question is about both.
 - **No HTTPS work.** Task 7 documents the exposure; closing it is its own phase.
 - **No change to Code 128, the calibration bar, the grid, or pagination.** If any of those numbers move,
   something has gone wrong — Task 6 Step 2 is the guard.
+
+---
+
+## Added 2026-09-02 — Tasks 10–12, after spec decision 8 reversed decision 3
+
+The QR reads on paper (confirmed by the user on a printed sheet), but it lands on the full inventory
+record, which answers "who holds this" only after everything else. These three tasks add a compact scan
+card and repoint the QR at it. **The `/inventory?q=TAG` redirect is NOT touched** — it is the desk
+scanner's contract and `e2e/it-core.spec.ts:126` guards it.
+
+---
+
+### Task 10: The scan card
+
+**Files:**
+- Create: `src/app/(app)/inventory/scan/[tag]/page.tsx`
+- Modify: `e2e/labels.spec.ts`
+
+**No unit test.** This is a Server Component doing one Prisma read; vitest here is `environment: "node"`
+and this project covers component behaviour with Playwright by design. Do not invent a component test.
+
+- [ ] **Step 1: Write the page**
+
+Create `src/app/(app)/inventory/scan/[tag]/page.tsx`:
+
+```tsx
+import { prisma } from "@/server/db/client";
+import { requireUser } from "@/server/auth/guards";
+import { fmtDate } from "@/lib/format";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatusPill } from "@/components/ui/status";
+import { Banner } from "@/components/ui/banner";
+import { ButtonLink } from "@/components/ui/button-link";
+
+/**
+ * Where a scanned label QR lands. Deliberately NOT the full record: a phone
+ * held next to a device should answer "whose is this, and is it healthy?"
+ * without scrolling.
+ *
+ * Keyed on the TAG, never on the id. Cuids change on every reseed — the seed
+ * TRUNCATEs and reinserts, and every e2e spec reseeds in its own beforeAll —
+ * so a QR encoding an id would die the first time anyone ran the suite, on
+ * paper already stuck to hardware. Asset.tag is @unique, so this is a natural
+ * findUnique.
+ *
+ * Gating comes from the general /inventory PATH_RULES entry, which this route
+ * matches by living under /inventory/. That is deliberate: PATH_RULES is
+ * first-match-wins, three separate comments in that file warn about ordering,
+ * and adding nothing to it is the safest possible change. The static `scan`
+ * segment wins over the sibling [id] route the same way /inventory/labels
+ * already does.
+ *
+ * Reading Prisma inline rather than via queries.ts follows the accountability
+ * form page, which does the same for the same reason: one read, no reuse.
+ */
+export default async function ScanCardPage({ params }: { params: Promise<{ tag: string }> }) {
+  await requireUser();
+  const { tag: raw } = await params;
+  const tag = decodeURIComponent(raw).trim().toUpperCase();
+
+  const asset = await prisma.asset.findUnique({
+    where: { tag },
+    select: {
+      id: true,
+      tag: true,
+      model: true,
+      serial: true,
+      status: true,
+      purchasedAt: true,
+      warrantyUntil: true,
+      category: { select: { name: true } },
+      assignee: {
+        select: {
+          id: true,
+          name: true,
+          employeeNo: true,
+          employment: true,
+          department: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  // NOT notFound(): a sticker outlives the row it names. Assets get disposed
+  // and the label stays on the hardware, so a miss is an expected outcome of
+  // scanning, not an error. Name the tag back so the person holding the thing
+  // knows the scan worked and the record is what is gone.
+  if (!asset) {
+    return (
+      <>
+        <PageHeader title="Unknown tag" breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Scan" }]} />
+        <Banner tone="attention" title={`No asset is registered as ${tag}.`}>
+          The label may belong to an asset that has been disposed, or the code may have been misread.
+        </Banner>
+        <div className="pt-3"><ButtonLink href="/inventory">Back to inventory</ButtonLink></div>
+      </>
+    );
+  }
+
+  const rows: Array<[string, string]> = [
+    ["Held by", asset.assignee ? `${asset.assignee.name} · ${asset.assignee.employeeNo}` : "Unassigned"],
+    ["Department", asset.assignee ? asset.assignee.department.name : "—"],
+    ["Employment", asset.assignee ? asset.assignee.employment : "—"],
+    ["Category", asset.category.name],
+    ["Purchased", fmtDate(asset.purchasedAt)],
+    ["Warranty", fmtDate(asset.warrantyUntil)],
+    ["Serial", asset.serial ?? "—"],
+  ];
+
+  return (
+    <>
+      <PageHeader
+        title={asset.tag}
+        breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Scan" }]}
+        badge={<StatusPill value={asset.status} />}
+      />
+      <p className="-mt-2 pb-4 text-[13px] text-fg-secondary">{asset.model}</p>
+
+      {/*
+        Cost, vendor, repair quote and notes are deliberately absent. This page
+        is reachable by anyone physically holding the device who has a login,
+        including `viewer` — a wider audience than the full record's, because
+        the full record is somewhere you navigate to deliberately and this is
+        somewhere a sticker sends you. Acquisition cost behind an adhesive
+        label is a disclosure nobody asked for. Anyone who needs it taps
+        through.
+      */}
+      <dl className="flex flex-col gap-0 rounded-(--radius-card) border border-border bg-surface">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex gap-4 border-b border-border px-4 py-2.5 last:border-b-0">
+            <dt className="w-28 shrink-0 text-[13px] text-fg-muted">{label}</dt>
+            <dd className="text-[13px]">{value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="pt-4">
+        <ButtonLink href={`/inventory/${asset.id}`}>Open full record</ButtonLink>
+      </div>
+    </>
+  );
+}
+```
+
+- [ ] **Step 2: Typecheck**
+
+```bash
+npx tsc --noEmit && npm run lint
+```
+
+Expected: both clean.
+
+- [ ] **Step 3: Write the e2e**
+
+Append inside the existing `test.describe("label sheet", …)` block in `e2e/labels.spec.ts`:
+
+```ts
+  test("the scan card shows custody at a glance, keyed on the tag not the id", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    // BY TAG. A cuid would break on the next reseed — this file's own header
+    // says never to reference one, and the tag is what the QR encodes anyway.
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Marites Bautista", { exact: false })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open full record" })).toBeVisible();
+  });
+
+  // The withholding IS the security decision (spec §0 decision 8), so it gets
+  // an assertion rather than a comment. A future "just add cost, it is handy"
+  // change has to delete a test that says why.
+  test("the scan card withholds cost, which the full record shows", async ({ page }) => {
+    const asset = await db.asset.findUniqueOrThrow({
+      where: { tag: "BR-LT-0148" },
+      select: { cost: true },
+    });
+    expect(asset.cost, "seed fixture needs a cost for this test to mean anything").not.toBeNull();
+    const cost = String(asset.cost);
+
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(cost, { exact: false })).toHaveCount(0);
+  });
+
+  test("an unknown tag explains itself instead of 404ing", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory/scan/BR-XX-9999");
+    await expect(page.getByText(/No asset is registered as BR-XX-9999/)).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("the scan card requires a session", async ({ page }) => {
+    await page.goto("/logout");
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page).toHaveURL(/\/login/);
+  });
+```
+
+- [ ] **Step 4: Run the labels spec and CHECK THE COUNT**
+
+```bash
+npx playwright test e2e/labels.spec.ts --workers=1 --global-timeout=600000
+```
+
+Expected: **15 passed** (11 before + 4). A run that hits `--global-timeout` prints "N did not run" and
+its tail still reads like a pass — read the number.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add "src/app/(app)/inventory/scan/[tag]/page.tsx" e2e/labels.spec.ts
+git commit -m "feat(inventory): a scan card that answers custody without the whole record"
+```
+
+---
+
+### Task 11: Repoint the QR at the card
+
+**Files:**
+- Modify: `src/lib/label-qr.ts`, `src/lib/label-qr.test.ts`, `e2e/labels.spec.ts`
+
+- [ ] **Step 1: Update the test first**
+
+In `src/lib/label-qr.test.ts`, replace the whole `qrUrlFor` describe block:
+
+```ts
+describe("qrUrlFor", () => {
+  // Decision 8: the QR lands on the compact scan card, not the full record.
+  // The /inventory?q= redirect still exists and is still the desk scanner's
+  // contract — it is simply not what the QR encodes any more.
+  it("builds the scan-card URL", () => {
+    expect(qrUrlFor("BR-LT-0166", { prefix: "http://host:3000" })).toBe(
+      "http://host:3000/inventory/scan/BR-LT-0166",
+    );
+  });
+
+  it("percent-encodes a tag that would otherwise break the path", () => {
+    expect(qrUrlFor("BR LT/0166", { prefix: "http://host:3000" })).toBe(
+      "http://host:3000/inventory/scan/BR%20LT%2F0166",
+    );
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+```bash
+npx vitest run src/lib/label-qr.test.ts
+```
+
+Expected: FAIL — both `qrUrlFor` tests, showing the old `?q=` URL.
+
+- [ ] **Step 3: Change the one line**
+
+In `src/lib/label-qr.ts`, replace `qrUrlFor` and its doc comment:
+
+```ts
+/**
+ * The compact scan card (`/inventory/scan/<tag>`), NOT the full record.
+ *
+ * Keyed on the tag rather than the id because a cuid changes on every reseed
+ * and this string is printed onto adhesive paper. Asset.tag is @unique, so
+ * the card can find the row from it.
+ *
+ * `/inventory?q=<tag>` still redirects an exact tag match to the full record
+ * and is untouched — that is the USB desk scanner's contract, guarded by
+ * e2e/it-core.spec.ts. This function decides only where a PHONE lands.
+ */
+export function qrUrlFor(tag: string, base: { prefix: string }): string {
+  return `${base.prefix}/inventory/scan/${encodeURIComponent(tag)}`;
+}
+```
+
+- [ ] **Step 4: Run the unit tests**
+
+```bash
+npx vitest run src/lib/label-qr.test.ts && npm run test
+```
+
+Expected: 12 passed in that file; **818 passed** overall — this task changes no test counts.
+
+- [ ] **Step 5: Update the e2e assertion that pins the encoded URL**
+
+In `e2e/labels.spec.ts`, the QR payload test asserts the old shape. Change that one line to:
+
+```ts
+    expect(name).toMatch(/^QR https?:\/\/.+\/inventory\/scan\/BR-LT-0148$/);
+```
+
+- [ ] **Step 6: Run the labels spec**
+
+```bash
+npx playwright test e2e/labels.spec.ts --workers=1 --global-timeout=600000
+```
+
+Expected: **15 passed**.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/lib/label-qr.ts src/lib/label-qr.test.ts e2e/labels.spec.ts
+git commit -m "feat(labels): the QR lands on the scan card, not the full record"
+```
+
+---
+
+### Task 12: Battery and close-out
+
+- [ ] **Step 1: The battery**
+
+```bash
+npx tsc --noEmit && npm run lint && npm run test && npm run build
+docker compose --profile prod build
+```
+
+Expected: 818 unit / 49 files; 3 images.
+
+- [ ] **Step 2: Clear `.next`, then the e2e in four parts**
+
+`build` and `next dev` share `.next` and their outputs are incompatible, so clear it — and expect the
+suite to compile cold as a result.
+
+```bash
+rm -rf .next
+npx playwright test e2e/admin.spec.ts e2e/approvals-audit.spec.ts e2e/auth-shell.spec.ts e2e/home-finance.spec.ts --workers=1 --global-timeout=540000
+npx playwright test e2e/import-export.spec.ts e2e/it-core.spec.ts e2e/kitchen-sink.spec.ts e2e/labels.spec.ts --workers=1 --global-timeout=600000
+npx playwright test e2e/offboarding.spec.ts e2e/purchases.spec.ts e2e/scanner.spec.ts --workers=1 --global-timeout=540000
+npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
+```
+
+Baseline: 51 · 58 · 34 · 6 = **149**. This adds 4 to part 2, so expect **51 · 62 · 34 · 6 = 153**.
+**Check every count.**
+
+⚠️ **`e2e/it-core.spec.ts:126` is the one to watch.** It guards the `/inventory?q=` redirect this phase
+deliberately does not touch. If it fails, the change was not as contained as intended — do not reach
+for headroom, read the diff first.
+
+⚠️ **The axe sweep does not know about `/inventory/scan/[tag]`.** It enumerates page routes from the
+filesystem and asserts its own coverage, so a new route may make it report 47 of 48. If it fails on
+coverage, **add the route to the sweep** rather than weakening the assertion — that assertion exists
+because a sweep that passes proves its list is clean, not that the app is.
+
+- [ ] **Step 3: Amend this plan** with `B-12` onward — what Tasks 10–12 deviated on and why.
+
+- [ ] **Step 4: Update `docs/HANDOVER.md`** — §0 item 4e (task count, battery numbers, the new route),
+and §8 if the physical checks moved.
+
+- [ ] **Step 5: Finish the branch.** `superpowers:finishing-a-development-branch`. **Merging and pushing
+are the user's decisions** — present the options and wait.

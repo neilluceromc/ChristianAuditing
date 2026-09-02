@@ -345,6 +345,10 @@ same way:** the phone, the print scale, and whether it read first time.
 
 **Added 2026-09-02, after decision 8 reversed decision 3:**
 
-9. The scan card route (`/inventory/scan/[tag]`) + its unit and e2e tests.
-10. Repoint the QR at it; update this spec and the plan so neither still claims the old target.
-11. Re-run the battery, amend, close out.
+These are **plan Tasks 10, 11 and 12** — the plan already used 1-9, so its numbering is the
+authoritative one:
+
+- **Task 10** — the scan card route (`/inventory/scan/[tag]`) and its e2e. No unit test: it is a
+  Server Component doing one Prisma read, and vitest here is node-env by design.
+- **Task 11** — repoint `qrUrlFor` at the card. One line, plus the tests that pin the URL shape.
+- **Task 12** — re-run the battery, amend the plan, update the handover, close the branch.
