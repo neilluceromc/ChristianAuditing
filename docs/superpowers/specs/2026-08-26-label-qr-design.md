@@ -31,7 +31,8 @@ Recorded here because each closes a question, and the first one revisits a Phase
    endpoint keyed by tag is a walkable index of who holds what — a sticker anyone can photograph,
    including whoever took the device. The convenience is real and the exposure is worse.
 
-3. **The QR encodes `{APP_BASE_URL}/inventory?q={TAG}`**, reusing the exact-tag redirect at
+3. **SUPERSEDED BY DECISION 8 — read that first.** As originally decided: the QR encodes
+   `{APP_BASE_URL}/inventory?q={TAG}`, reusing the exact-tag redirect at
    `src/app/(app)/inventory/page.tsx:39`. **No new route.** That redirect is the same one the scanner
    contract relies on and is already covered by `e2e/it-core.spec.ts:126`. It also degrades usefully:
    a reader that yields plain text still gives a human something meaningful.
@@ -65,6 +66,19 @@ Recorded here because each closes a question, and the first one revisits a Phase
    on that form is explicitly OUT of scope** (§6) — a different sheet, a different payload, a different
    reader.
 
+8. **REVERSED 2026-09-02 — decision 3 no longer holds: the QR points at a NEW compact card, not at
+   `/inventory?q=`.** The user scanned a printed QR, confirmed it read, and said the landing page is
+   wrong: opening the full inventory record answers "who owns this" only after scrolling past
+   everything else. **What the QR now encodes is `{APP_BASE_URL}/inventory/scan/{TAG}`.**
+
+   **What decision 3 got right and keeps:** the `/inventory?q=TAG` exact-tag redirect is **untouched**.
+   It is the desk scanner's contract, `e2e/it-core.spec.ts:126` guards it, and nothing about this
+   change goes near it. Only the QR's target moves.
+
+   **What decision 3 got wrong:** "no new route" optimised for the wrong thing. Reusing an existing
+   redirect avoided a route at the cost of landing a phone on a page built for a desktop workflow. The
+   route was never the expensive part.
+
 ---
 
 ## 1. What gets built
@@ -81,6 +95,7 @@ export type QrBase =
 
 export function qrBase(baseUrl: string | undefined): QrBase;
 export function qrUrlFor(tag: string, base: { prefix: string }): string;
+//   -> `{prefix}/inventory/scan/{TAG}`  (decision 8; was `?q={TAG}` under decision 3)
 ```
 
 **Split in two deliberately.** Whether the base URL is usable never depends on the tag, so it is
@@ -95,7 +110,8 @@ Validation, in order: unset/blank → `unset`; unparseable or empty host → `ba
 scheme `inventory.local:` with path `3000`); hostname `localhost`, `127.0.0.1`, `::1`, or any
 `127.0.0.0/8` → `loopback`. Trailing slashes are stripped rather than refused — the likeliest human
 input — while a base path is **preserved**, so a sub-path deployment still resolves. Any query or
-fragment on the base is dropped, since the prefix gets its own `?q=`.
+fragment on the base is dropped: the prefix is concatenated with a path, so carrying one through
+would put a query string in the middle of a URL.
 
 ### `src/lib/qr.ts` — the only file that imports the dependency, new
 
@@ -199,6 +215,42 @@ keeps its full preferred module size.
 a cell can re-tip exactly that. The existing measurements are the safety net and must be re-run, not
 assumed (§4).
 
+### `src/app/(app)/inventory/scan/[tag]/page.tsx` — the scan card, new (2026-09-02)
+
+What a phone lands on. A Server Component, one Prisma read, no client JavaScript.
+
+**Keyed on the TAG, never on the id.** Cuids change on every reseed — `npm run db:seed` TRUNCATEs and
+reinserts, and every spec file reseeds in its own `beforeAll`. A QR encoding an id would die the first
+time anyone ran the e2e suite, on paper already stuck to hardware. `Asset.tag` is `@unique`, so
+`findUnique({ where: { tag } })` is the natural read. **This was learned the hard way while generating
+a test sheet: hardcoded cuids from an earlier seed silently produced an empty sheet.**
+
+**Gating: it sits under `/inventory/` on purpose, so it inherits the existing general rule** —
+`{ test: /^\/inventory(\/|$)/, workspaces: ["it", "purchasing", "finance"] }` — which is exactly the
+audience that can already open the full record. **No new `PATH_RULES` entry.** That list is
+first-match-wins, carries three separate comments warning about ordering, and a mis-ordered rule has
+already caused a defect in this project. Adding nothing to it is the safest possible change.
+A static segment beside a dynamic one is proven here: `/inventory/labels` already lives next to
+`/inventory/[id]`, and Next resolves the static segment first.
+
+**Fields — identity and custody only:**
+
+| Shown | Withheld, and why |
+| --- | --- |
+| tag, model, status | — |
+| holder: name, employee number, department, employment state | — |
+| category, purchase date, warranty expiry, serial | — |
+| a single "Open full record" link | — |
+| | **cost, vendor, repair quote, notes** — this page is reachable by anyone holding the device who has a login, including `viewer`. Acquisition cost behind a sticker is a wider disclosure than the full record makes, because the full record is something you navigate to deliberately. |
+
+**An unknown tag renders a card, not a 404.** A sticker outlives the row it names: assets get disposed,
+and a decommissioned label still exists physically. Someone scanning one deserves "no asset with tag
+BR-XX-0000 — it may have been disposed" over Next's error page. `notFound()` is the wrong tool here
+precisely because the scan is expected to sometimes miss.
+
+**No client JavaScript.** The card is read-only text; there is nothing to hydrate. That also makes it
+the fastest page in the app to open on a phone over a LAN, which is the whole point.
+
 ### `.env.example` — one entry
 
 `APP_BASE_URL`, commented with what it is for, that labels bake it in permanently, and the
@@ -290,3 +342,9 @@ same way:** the phone, the print scale, and whether it read first time.
 6. `.env.example`, and the README section introducing the QR with §3's password prerequisite.
 7. Decision 7's one-line prose fix on the accountability form.
 8. Battery, plan amendments, handover.
+
+**Added 2026-09-02, after decision 8 reversed decision 3:**
+
+9. The scan card route (`/inventory/scan/[tag]`) + its unit and e2e tests.
+10. Repoint the QR at it; update this spec and the plan so neither still claims the old target.
+11. Re-run the battery, amend, close out.
