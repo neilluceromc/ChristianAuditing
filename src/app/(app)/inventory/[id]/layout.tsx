@@ -38,7 +38,10 @@ export default async function AssetRecordLayout({
             {asset.financeConfirmedAt ? (
               <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
             ) : (
-              <Pill>AWAITING FINANCE</Pill>
+              // Accent, not neutral: the same shape as the repair-stage pill on
+              // page.tsx, where settled reads neutral and in-flight reads accent.
+              // Rendered neutral, "awaiting" is indistinguishable from "done".
+              <Pill tone="accent">AWAITING FINANCE</Pill>
             )}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
