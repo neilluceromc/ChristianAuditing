@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1 through C-4, every one a defect in this plan. Three were caught by implementers who reported instead of guessing; C-4 would have corrupted the asset register and no test in the plan as written could have caught it.
+> ### AMENDED DURING EXECUTION — C-1 through C-5. Four were defects in this plan; C-5 is a change of PREMISE from the user that replaced Tasks 5 and 6 wholesale. C-4 would have corrupted the asset register and no test in the plan as written could have caught it.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -121,6 +121,54 @@ written until submit.
 > were mine, none would have failed a test suite as written, and three of the four were caught only
 > because an implementer refused to paper over something odd. **That ratio is the argument for the
 > review loop, and for telling implementers that objecting is part of the job.**
+>
+> **C-5. THE ENTRY POINT WAS WRONG. Tasks 5 and 6 are replaced.** On 2026-09-02 the user corrected the
+> premise: *"we are not doing purchase request but these assets are already purchased and we are
+> registering them to our system."*
+>
+> **What that invalidated.** Tasks 5–6 gated the tag generator behind a `COMPLETED` `PurchaseRequest`.
+> The seed has exactly one such request and in real use there would be none, so those tasks would have
+> built a screen **nobody could open**. The machinery from Tasks 1–4 was right; only its doorway was
+> wrong.
+>
+> **What was already true and nobody had said.** Registering already-purchased assets **already works** —
+> `/inventory/import` shipped in Phase 9 and takes 13 columns (tag, model, serial, category, type,
+> status, assignee, employee no, purchased, cost, warranty, vendor, notes), which is exactly "convert
+> the existing Excel records". **What it cannot do is number them:** `tag` is a *required* column, so
+> every tag must be typed by hand. The Admin meeting explicitly asked for **automated item numbering**,
+> and that is precisely what Tasks 1–4 built. So Phase 12's value was never the purchase-request path —
+> it was the numbering, and that survives the retarget intact.
+>
+> **New Task 5:** `/inventory/register` — a batch registration screen with **no purchase request
+> required**. Category, type, quantity, a learned prefix, auto-numbered editable tags, optional serials.
+> Linking a purchase request becomes **optional metadata**, not a gate, so the path still works if one
+> ever exists. **New Task 6:** the Finance confirmation flag and action (below).
+>
+> **The user also added a two-stage requirement:** *"IT will register the assets then finance will
+> confirm if the details are correct"*, with separate Finance tabs for IT and for Purchasing
+> (office/pantry supplies).
+>
+> **Confirmation is NOT an `AssetStatus`, and this is the decision worth defending.** Those eight values
+> are custody and physical states — `DEPLOYED`, `SPARE`, `DEFECTIVE`, `DONATED`, `TEMPORARY`, `BUYOUT`,
+> `DISPOSE`, `MISSING`. An asset can be `SPARE` **and** unconfirmed simultaneously, so confirmation is an
+> **orthogonal dimension**. Adding an `UNCONFIRMED` status would make "confirmed" unrepresentable for
+> every asset that is not spare, and would silently break `statusFamily`, the status chips, the facet
+> counts and `buildAssetWhere` — all of which treat the enum as a partition.
+>
+> **Nor does it ride the approval queue.** All five `ApprovalType` values are lifecycle changes to an
+> asset that already exists (`lifecycle.assign`, `.replace`, `.transfer`, `.return`, `.change-status`).
+> Finance confirming that *registration details are accurate* is data verification, not approval of a
+> change — a different question, a different audience, and a different failure mode.
+>
+> **So: `Asset.financeConfirmedAt` + `financeConfirmedById`, nullable, plus a Finance-only action.**
+> Null means awaiting confirmation. That is one migration, one action, one filter — and it means nothing
+> ships unconfirmable.
+>
+> **DEFERRED to Phase 13, deliberately: the Finance TABS.** "Different tabs, IT and Purchasing" **is the
+> asset-class dimension** (§9 item A). Building tabs now would mean inventing a source/department axis
+> that Phase 13 then has to reconcile or replace — the precise mistake §9 warns about, where B and D
+> each invent their own answer because A had not landed yet. The confirmation flag ships now because it
+> is orthogonal to class; the tabs wait because they *are* class.
 
 **Conventions for every task:** stay on `phase-12-receiving`; run `npx tsc --noEmit && npm run lint`
 before each commit; **NEVER run `npm run build` while a dev server is running** (they share `.next`).
@@ -826,159 +874,412 @@ git commit -m "feat(receiving): read outstanding units, write assets in one tran
 
 ---
 
-### Task 5: The receive screen
+### Task 5: `/inventory/register` — batch registration with auto-numbered tags
 
 **Files:**
-- Create: `src/app/(app)/purchases/[id]/receive/page.tsx`
-- Create: `src/components/purchases/receive-form.tsx`
+- Create: `src/app/(app)/inventory/register/page.tsx`
+- Create: `src/components/inventory/register-form.tsx`
+- Modify: `src/lib/workspaces.ts` (one `PATH_RULES` entry)
+- Modify: `src/server/modules/purchases/receiving.ts` (make the purchase request optional)
 
-**Read first:** `src/app/(app)/purchases/[id]/page.tsx` for how this app lays out a purchase surface,
-and `src/app/(app)/inventory/new/` for how a create form binds a server action and renders field
-errors. Follow those; do not invent a third style.
+**Replaces the original Task 5 — see amendment C-5.** No purchase request is required or expected.
 
-- [ ] **Step 1: Write the page (server component)**
+⚠️ **`PATH_RULES` is first-match-wins and this route MUST precede the general `/inventory` rule**, which
+admits purchasing and finance. Registration is IT's job, so it needs
+`{ test: /^\/inventory\/register(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] }` placed
+beside the existing `/inventory/import` and `/inventory/labels` entries — all three share that shape and
+that reason. Three separate comments in that file warn about ordering; a mis-ordered rule has already
+caused a defect here.
 
-Create `src/app/(app)/purchases/[id]/receive/page.tsx`. It must:
+- [ ] **Step 1: Make the purchase request optional in the server module**
 
-1. `await requireRole("admin", "it_staff")`.
-2. Load the request (`id`, `refNo`, `state`) and `notFound()` if absent.
-3. If `state !== "COMPLETED"`, render a `PageHeader` plus a `Banner tone="attention"` saying the
-   request is not completed yet, with a `ButtonLink` back to the request. **Do not render the form.**
-4. Call `receivableUnits(id)`. If every unit `isFullyReceived`, render a `Banner tone="neutral"`
-   saying everything has been received, with a link back. **Do not render the form.**
-5. Load all `AssetCategory` rows (`id`, `name`) and all `AssetType` rows (`id`, `name`, `categoryId`)
-   for the selects, and each unit's `description`, `specs`, `qty`, `unitPrice`.
-6. Render `<ReceiveForm …/>` with the outstanding units, the categories, the types, and the request's
-   `id` and `refNo`.
+`receiveUnits` currently requires a `requestId` and refuses anything that is not `COMPLETED`.
+Registration has no request at all. Add a sibling action rather than loosening the existing one — the
+receiving path's `COMPLETED` guard is correct for receiving and must not be weakened:
 
-Every branch above is a real state the operator can reach by clicking Receive on a request someone
-else just finished — so each gets a surface, not a redirect.
+```ts
+const registerSchema = z.object({
+  categoryId: z.string().min(1, "Pick a category"),
+  typeId: z.string().optional(),
+  model: z.string().trim().min(1, "Model is required").max(200),
+  // One tag per asset. The COUNT is the quantity — there is no separate qty
+  // field, so the two cannot disagree.
+  tags: z.array(z.string().trim().toUpperCase().regex(TAG_SHAPE, "Format: BR-XX-0000")).min(1).max(200),
+  serials: z.array(z.string().trim().max(120)).optional(),
+  purchasedAt: z.string().optional(),
+  cost: z.string().optional(),
+  vendorId: z.string().optional(),
+  // OPTIONAL metadata, never a gate (C-5). If a request is named it must be
+  // COMPLETED, because linking an asset to a request still in flight would
+  // claim a provenance that is not settled.
+  requestId: z.string().optional(),
+});
 
-- [ ] **Step 2: Write the form (client component)**
+interface Registered {
+  created: number;
+}
 
-Create `src/components/purchases/receive-form.tsx`, `"use client"`. Per outstanding unit:
+export async function registerAssets(input: unknown): Promise<ActionResult<Registered>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
-- the unit's `description`, `specs` and `N outstanding of M` as static text;
-- a category `<select>` (required);
-- a type `<select>`, filtered to the chosen category, optional;
-- a quantity `<input type="number">` defaulting to `outstanding`, `min={1}` `max={outstanding}`;
-- a prefix `<input>` of two characters, defaulted from `preferredPrefix` for the chosen category;
-- one tag `<input>` per quantity, pre-filled from `nextTags(prefix, highest, qty)` and editable;
-- one optional serial `<input>` per quantity.
+  const parsed = registerSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
 
-When category, prefix or quantity changes, recompute the tag inputs from `nextTags`. If `nextTags`
-returns `{ ok: false }`, show its reason and **disable submit** — `bad-prefix` reads "Prefix must be two
-capital letters", `overflow` reads "That run passes BR-XX-9999 — receive fewer, or use another prefix",
-`bad-count` reads "Quantity must be at least 1".
+  const dupe = d.tags.find((t, i) => d.tags.indexOf(t) !== i);
+  if (dupe) return conflict(`${dupe} appears twice in this batch.`);
 
-Submit calls `receiveUnits` with `{ requestId, lines }` and renders the returned field errors or
-conflict message inline. On success, navigate to `/purchases/<id>`.
+  let done: Registered | null = null;
+  let failure: ActionResult<Registered> | null = null;
 
-**The `highest` value must come from the server** — pass a map of prefix → highest number as a prop,
-computed with `highestTagNumber` for the prefixes the categories suggest. The client must not guess it,
-and it is only a starting point: the server re-validates every tag and the unique index is the real
-guard.
+  try {
+    await prisma.$transaction(async (tx) => {
+      // SAME two-pass discipline as receiveUnits, and for the same reason
+      // (C-4): Prisma commits when this callback resolves and rolls back only
+      // when it throws, so every refusal must sit above every write.
+      if (d.requestId) {
+        const req = await tx.purchaseRequest.findUnique({
+          where: { id: d.requestId },
+          select: { refNo: true, state: true },
+        });
+        if (!req) {
+          failure = validationError({ requestId: "Unknown request" });
+          return;
+        }
+        if (req.state !== "COMPLETED") {
+          failure = conflict(`${req.refNo} is ${req.state.toLowerCase()} — only a completed request can be linked.`);
+          return;
+        }
+      }
 
-- [ ] **Step 3: Typecheck, lint, and view it**
+      let created = 0;
+      for (const [i, tag] of d.tags.entries()) {
+        const asset = await tx.asset.create({
+          data: {
+            tag,
+            model: d.model,
+            serial: d.serials?.[i]?.trim() || null,
+            categoryId: d.categoryId,
+            typeId: d.typeId || null,
+            status: "SPARE",
+            purchasedAt: d.purchasedAt ? new Date(d.purchasedAt) : null,
+            cost: d.cost ? d.cost : null,
+            vendorId: d.vendorId || null,
+            purchaseRequestId: d.requestId || null,
+          },
+        });
+        created++;
+        await writeAudit(tx, {
+          actorId: user.id,
+          actorLabel: user.name,
+          entityType: "asset",
+          entityId: asset.id,
+          action: "register",
+          diff: {
+            tag: { from: null, to: asset.tag },
+            status: { from: null, to: "SPARE" },
+          },
+        });
+      }
+      done = { created };
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return conflict("One of those tags was just taken. Reload and try again.");
+    }
+    throw e;
+  }
 
-```bash
-npx tsc --noEmit && npm run lint
+  if (failure) return failure;
+  revalidatePath("/inventory");
+  return ok(done!);
+}
 ```
 
-Then ask the controller to open `/purchases/<PR-0188's id>/receive` in the preview and confirm: two
-outstanding, tags defaulting to `BR-LT-0211` and `BR-LT-0212`, and submit disabled until a category is
-chosen. **Do not start a dev server yourself.**
+⚠️ **`cost` is `Decimal?` in the schema.** Passing a string works because Prisma coerces, but check how
+`createAsset` in `src/server/modules/inventory/actions.ts` does it (it has a `toCost` helper) and **use
+that helper** rather than a second conversion — a number formatted two ways is rules 26/37/38.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 2: Add the route rule**
+
+In `src/lib/workspaces.ts`, add beside `/inventory/import`:
+
+```ts
+  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+```
+
+It must sit **above** the general `/inventory` rule. Add a test to `src/lib/workspaces.test.ts` asserting
+that `finance_staff` and `viewer` are refused `/inventory/register` while `it_staff` is allowed — the
+existing tests for `/inventory/import` show the shape.
+
+- [ ] **Step 3: Write the page**
+
+Create `src/app/(app)/inventory/register/page.tsx`. It must `await requireRole("admin", "it_staff")`,
+load all `AssetCategory` rows (`id`, `name`), all `AssetType` rows (`id`, `name`, `categoryId`), all
+`Vendor` rows (`id`, `name`), and the `COMPLETED` purchase requests (`id`, `refNo`) for the optional
+link. Then render `<RegisterForm …/>`.
+
+It must also pass a **map of prefix → highest number** and **prefix counts per category**, computed with
+the existing `highestTagNumber` and `prefixCountsForCategory`. The client must not guess either.
+
+- [ ] **Step 4: Write the form**
+
+Create `src/components/inventory/register-form.tsx`, `"use client"`. Fields: category (required), type
+(filtered to category, optional), model (required), quantity (`min={1}`), prefix (two characters,
+defaulted via `preferredPrefix` for the chosen category), one editable tag input per quantity
+(pre-filled from `nextTags`), one optional serial input per quantity, plus optional purchased date,
+cost, vendor and purchase request.
+
+When category, prefix or quantity changes, recompute the tags from `nextTags`. On
+`{ ok: false }` show the reason and **disable submit**: `bad-prefix` → "Prefix must be two capital
+letters"; `overflow` → "That run passes BR-XX-9999 — register fewer, or use another prefix";
+`bad-count` → "Quantity must be at least 1".
+
+- [ ] **Step 5: Typecheck, lint, and view it**
 
 ```bash
-git add "src/app/(app)/purchases/[id]/receive/page.tsx" src/components/purchases/receive-form.tsx
-git commit -m "feat(receiving): the receive screen, one tag field per asset"
+npx tsc --noEmit && npm run lint && npm run test
+```
+
+Then ask the controller to open `/inventory/register` in the preview and confirm the tags default to the
+next free numbers for the chosen category. **Do not start a dev server yourself.**
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add "src/app/(app)/inventory/register/page.tsx" src/components/inventory/register-form.tsx src/lib/workspaces.ts src/lib/workspaces.test.ts src/server/modules/purchases/receiving.ts
+git commit -m "feat(inventory): register already-purchased assets with auto-numbered tags"
 ```
 
 ---
 
-### Task 6: The request page — the action and the indicator
+### Task 6: Finance confirmation
 
 **Files:**
-- Modify: `src/app/(app)/purchases/[id]/page.tsx`
+- Create: `prisma/migrations/<timestamp>_asset_finance_confirmed/migration.sql`
+- Modify: `prisma/schema.prisma`, `src/server/modules/inventory/actions.ts`,
+  `src/app/(app)/inventory/[id]/layout.tsx`
 
-- [ ] **Step 1: Add the received indicator and the action**
+**Replaces the original Task 6 — see C-5.** IT registers; Finance confirms the details are correct.
 
-Load `receivableUnits(id)` on the request page. Then:
+- [ ] **Step 1: The migration**
 
-- For a `COMPLETED` request with at least one unit not fully received, render a **Receive items**
-  `ButtonLink` to `/purchases/<id>/receive`, visible only to `admin` and `it_staff` (the page already
-  knows the viewer's role — reuse that, do not re-fetch).
-- Against each `APPROVED` unit, render `received of ordered received` — e.g. `1 of 2 received` — derived
-  from the counts, never from a stored flag.
-- When every unit is fully received, show that state and **no** Receive action.
+Add to `model Asset`:
 
-- [ ] **Step 2: Typecheck, lint, commit**
+```prisma
+  financeConfirmedAt   DateTime?
+  financeConfirmedById String?
+  financeConfirmedBy   User?     @relation("financeConfirmedBy", fields: [financeConfirmedById], references: [id], onDelete: Restrict)
+```
+
+and the back-relation on `model User`:
+
+```prisma
+  financeConfirmed Asset[] @relation("financeConfirmedBy")
+```
+
+Migration SQL:
+
+```sql
+ALTER TABLE "Asset" ADD COLUMN "financeConfirmedAt" TIMESTAMP(3);
+ALTER TABLE "Asset" ADD COLUMN "financeConfirmedById" TEXT;
+ALTER TABLE "Asset" ADD CONSTRAINT "Asset_financeConfirmedById_fkey"
+  FOREIGN KEY ("financeConfirmedById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "Asset_financeConfirmedAt_idx" ON "Asset"("financeConfirmedAt");
+```
+
+**NULL means awaiting confirmation.** No backfill: every existing asset becomes unconfirmed, which is
+honest — Finance has never confirmed any of them.
+
+⚠️ **This is NOT an `AssetStatus` value, and must not become one.** Status is custody and physical state;
+an asset can be `SPARE` *and* unconfirmed. Adding `UNCONFIRMED` to that enum would make "confirmed"
+unrepresentable for anything not spare, and would break `statusFamily`, the status chips, the facet
+counts and `buildAssetWhere`, all of which treat the enum as a partition. See C-5.
+
+Then `npx prisma migrate deploy && npx prisma generate` — expect **10 migrations, none pending**.
+
+- [ ] **Step 2: The action**
+
+Add to `src/server/modules/inventory/actions.ts`:
+
+```ts
+const confirmSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * Finance confirms that a registered asset's details are correct. Separate
+ * from the approval queue on purpose (C-5): every ApprovalType is a lifecycle
+ * change to an asset that already exists, whereas this is data verification —
+ * a different question with a different audience.
+ *
+ * Idempotent by refusal rather than by silence: confirming twice is a
+ * conflict, so a double-submit cannot quietly overwrite who confirmed it and
+ * when.
+ */
+export async function confirmAssetDetails(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "finance_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const parsed = confirmSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  let out: { tag: string } | null = null;
+  let failure: ActionResult<{ tag: string }> | null = null;
+
+  await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({
+      where: { id: parsed.data.id },
+      select: { id: true, tag: true, financeConfirmedAt: true },
+    });
+    if (!asset) {
+      failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    if (asset.financeConfirmedAt) {
+      failure = conflict(`${asset.tag} was already confirmed.`);
+      return;
+    }
+    // State-guarded write: the null check is IN the where clause, so two
+    // simultaneous confirmations cannot both succeed.
+    const hit = await tx.asset.updateMany({
+      where: { id: asset.id, financeConfirmedAt: null },
+      data: { financeConfirmedAt: new Date(), financeConfirmedById: user.id },
+    });
+    if (hit.count === 0) {
+      failure = conflict(`${asset.tag} was confirmed by someone else just now.`);
+      return;
+    }
+    await writeAudit(tx, {
+      actorId: user.id,
+      actorLabel: user.name,
+      entityType: "asset",
+      entityId: asset.id,
+      action: "finance.confirm",
+      diff: { financeConfirmed: { from: null, to: user.name } },
+    });
+    out = { tag: asset.tag };
+  });
+
+  if (failure) return failure;
+  revalidatePath(`/inventory/${parsed.data.id}`);
+  revalidatePath("/inventory");
+  return ok(out!);
+}
+```
+
+- [ ] **Step 3: Surface it on the record**
+
+In `src/app/(app)/inventory/[id]/layout.tsx`, add to the header badge area: a `Pill` reading
+`AWAITING FINANCE` when `financeConfirmedAt` is null, or `FINANCE CONFIRMED` with the date when it is
+set. Show a **Confirm details** button only to `admin` and `finance_staff`, and only while unconfirmed.
+`getAsset` must select the two new fields.
+
+- [ ] **Step 4: Typecheck, lint, commit**
 
 ```bash
-npx tsc --noEmit && npm run lint
-git add "src/app/(app)/purchases/[id]/page.tsx"
-git commit -m "feat(purchases): a completed request offers receiving, and shows what arrived"
+npx tsc --noEmit && npm run lint && npm run test
+git add prisma/schema.prisma prisma/migrations src/server/modules/inventory/actions.ts "src/app/(app)/inventory/[id]/layout.tsx" src/server/modules/inventory/queries.ts
+git commit -m "feat(inventory): finance confirms a registered asset's details"
 ```
+
+**Deferred to Phase 13, deliberately:** the Finance **tabs** separating IT from Purchasing. Those are the
+asset-class dimension (§9 item A), and building them before classes exist means inventing an axis that
+Phase 13 then has to reconcile or replace.
 
 ---
 
-### Task 7: `e2e/receiving.spec.ts`
+### Task 7: `e2e/receiving.spec.ts` — registration, receiving, and confirmation
 
 **Files:**
 - Create: `e2e/receiving.spec.ts`
 
-Model it on `e2e/purchases.spec.ts` for the login helper and reseed `beforeAll`.
+**Rewritten after C-5.** There are now THREE surfaces to prove, not one. Registration is the primary
+path the user will actually use; receiving is kept because it is already built and because C-4's
+rollback guard lives there; confirmation is Task 6's.
 
-- [ ] **Step 1: Write the spec**
+Model the file on `e2e/purchases.spec.ts` for the login helper and the reseeding `beforeAll`.
 
-Cover exactly these, and **reference `PR-0188` by `refNo`, never by cuid**:
+⚠️ **Never reference a raw cuid.** The database reseeds and cuids change every run — reference
+`PR-0188` by `refNo` and assets by `tag`. This has already bitten this project once, producing a
+silently empty label sheet.
 
-1. **A partial receipt writes exactly what it said.** Receive 1 of PR-0188's 2. Assert via Prisma that
-   one new asset exists with the expected tag, `status: "SPARE"`, the chosen `categoryId`, **and both
-   `purchaseRequestId` and `purchaseUnitId` set**. Assert the request page then reads `1 of 2 received`.
-   **Read the highest `LT` number from the database first and derive the expected tag** — do not
-   hardcode `BR-LT-0211`.
-2. **The remainder completes it.** Receive the second. Assert the unit reads fully received and the
-   **Receive items action is gone**.
-3. **An over-receipt is refused and writes NOTHING.** Attempt 3 against a qty-2 unit. Assert the
-   conflict message and a **Prisma count delta of zero** — the absence of a toast proves nothing.
-4. **A duplicate tag is refused and writes NOTHING.** Submit a tag that already exists. Assert the
-   conflict and a zero count delta.
-5. **An audit row exists per created asset**, with `action: "receive"` and the asset's id.
-6. **`viewer` and `finance_staff` cannot reach `/purchases/<id>/receive`** — assert the redirect, and
-   assert it for BOTH roles rather than assuming one implies the other.
-7. **A MULTI-LINE receipt whose second line fails rolls back the first — see C-4.** This is the most
-   important case in the file and **the seed cannot express it**: `PR-0188` has exactly one unit, so
-   every case above sends a single line and none of them reaches the multi-line failure path.
-   **Build the fixture:** create a `COMPLETED` request with **two** `APPROVED` units through Prisma in
-   the spec itself (Phase 9 Task 13 set the precedent — construct what the seed lacks rather than
-   asserting around it). Then submit two lines where the first is valid and the second over-receives,
-   and assert **a Prisma count delta of ZERO** — not merely that an error was returned. Before this
-   fix, that delta would have been the first line's asset count, committed, while the caller saw a
-   conflict.
+⚠️ **Read the highest existing number and derive expected tags. Do not hardcode `BR-LT-0211`.**
+A fresh seed has `LT` at `0210`, but any earlier test in the file may have registered more.
 
-- [ ] **Step 2: Run it and read the count**
+- [ ] **Step 1: Registration — the primary path**
+
+1. **A batch writes exactly what it said.** Register 3 laptops. Assert via Prisma that three assets
+   exist with consecutive expected tags, `status: "SPARE"`, the chosen `categoryId` and `typeId`, and
+   `financeConfirmedAt: null` — **unconfirmed is the correct initial state** and asserting it here is
+   what stops a later change quietly auto-confirming.
+2. **A duplicate tag inside one batch is refused and writes NOTHING.** Submit two identical tags.
+   Assert the conflict names the tag, and assert a **Prisma count delta of zero** — the absence of a
+   success message proves nothing.
+3. **A tag that already exists is refused and writes NOTHING.** Use a seeded tag. Count delta zero.
+4. **An audit row exists per registered asset**, with `action: "register"`.
+5. **Neither `viewer` nor `finance_staff` can reach `/inventory/register`.** Assert the redirect for
+   **both** — do not assume one implies the other. This is the `PATH_RULES` ordering guard: if the new
+   rule were placed after the general `/inventory` rule, `finance_staff` would sail through, and this
+   is the only test that would notice.
+
+- [ ] **Step 2: Confirmation — Task 6's surface**
+
+6. **Finance confirms and the record says so.** As `finance_staff`, confirm a registered asset; assert
+   `financeConfirmedAt` is set, `financeConfirmedById` is that user, and an audit row exists with
+   `action: "finance.confirm"`.
+7. **Confirming twice is refused.** Assert the conflict and that `financeConfirmedAt` did **not**
+   change — capture the first timestamp and compare. A second write that merely overwrote the same
+   field with a new time would pass a naive "still confirmed" assertion.
+8. **`it_staff` cannot confirm.** IT registers, Finance confirms; asserting the split is the whole
+   point of the two-stage flow.
+
+- [ ] **Step 3: Receiving — kept, and C-4's guard**
+
+9. **A partial receipt against `PR-0188` writes exactly what it said**, with **both**
+   `purchaseRequestId` and `purchaseUnitId` set, and the unit then reads `1 of 2 received`.
+10. **An over-receipt is refused and writes NOTHING.** Attempt 3 against the qty-2 unit; count delta
+    zero.
+11. **A MULTI-LINE receipt whose second line fails rolls back the first — the C-4 case, and the most
+    important test in this file.** **The seed cannot express it:** `PR-0188` has exactly one unit, so
+    every case above sends a single line and none reaches the multi-line failure path. **Build the
+    fixture** — create a `COMPLETED` request with **two** `APPROVED` units through Prisma inside the
+    spec (Phase 9 Task 13 set the precedent: construct what the seed lacks rather than asserting
+    around it). Submit two lines where the first is valid and the second over-receives, and assert a
+    **count delta of ZERO**. Before C-4's fix this delta would have been the first line's assets,
+    committed, while the caller saw a conflict.
+
+- [ ] **Step 4: Run it and read the count**
 
 ```bash
 npx playwright test e2e/receiving.spec.ts --workers=1 --global-timeout=600000
 ```
 
 A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read
-the number.**
+the number.** Expect 11.
 
-- [ ] **Step 3: Prove the write-nothing assertions are not inert**
+- [ ] **Step 5: Prove the write-nothing assertions are not inert**
 
-Temporarily weaken the over-receipt guard (`line.tags.length > outstanding(receipt)` → `> 999`), re-run
-test 3, and **confirm it fails on the COUNT, not just the message**. Revert. Report the output. A
-write-nothing test that passes against a broken guard is worse than no test.
+Four tests above assert a count delta of zero. Each must be shown capable of failing:
 
-- [ ] **Step 4: Commit**
+- weaken the in-batch duplicate check (`d.tags.indexOf(t) !== i` → `false`) → test 2 must fail **on the
+  count**, not only the message;
+- weaken the over-receipt guard (`line.tags.length > outstanding(receipt)` → `> 999`) → tests 10 and 11
+  must fail on the count;
+- move a write above a refusal in `receiveUnits` (undo C-4's two-pass split) → **test 11 must fail**. If
+  it does not, the rollback case is inert and the C-4 regression is unguarded.
+
+Revert each after observing it. **Report the actual output for all four.** A write-nothing test that
+passes against a broken guard is worse than no test, because it certifies the bug.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add e2e/receiving.spec.ts
-git commit -m "test(e2e): receiving writes exactly what it says, or nothing at all"
+git commit -m "test(e2e): registration, confirmation and receiving each write exactly what they say"
 ```
 
 ---
@@ -1006,16 +1307,21 @@ npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-
 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 ```
 
-⚠️ **This branch is off `main`, which does NOT have Phase 11.** So `labels.spec.ts` here is the Phase 10
-version (9 tests, no QR) and `scanner.spec.ts` is present. The `main` baseline is **51 · 55 · 34 · 6**
-across four parts; re-balance and **write down what you actually used and got**.
+⚠️ **Phase 11 IS in this branch — `main` was merged in on 2026-09-02, so an earlier revision of this
+warning (claiming Phase 11 was absent and `labels.spec.ts` had 9 tests) is WRONG.** The real baseline
+here is Phase 11's: **153 e2e / 12 files** across four parts — **51 · 62 · 34 · 6** — plus whatever
+`e2e/receiving.spec.ts` adds (expect 11). `labels.spec.ts` has **11** tests, not 9, because it carries the
+QR and scan-card cases. **Re-balance the split and write down what you actually ran and got**, rather
+than trusting any number in this paragraph — it has already been wrong once.
 
-⚠️ **`e2e/purchases.spec.ts` is the one to watch.** It exercises the request page this phase modifies,
+⚠️ **`e2e/purchases.spec.ts` is the one to watch.** It exercises the request page — and note that after
+C-5 this phase no longer modifies it, so a failure there means something leaked out of scope,
 including `PR-0198`'s bounce-back thread. A failure there means Task 6 changed more than the indicator.
 
 ⚠️ **The axe sweep's route table is a HARDCODED list that nothing keeps in sync** — a new page route
-does not fail it, it silently stops being scanned. Add `/purchases/<id>/receive` to the it_staff group
-(it is `admin`/`it_staff` only) using a `refNo` lookup, not a cuid.
+does not fail it, it silently stops being scanned. This bit Phase 11 exactly once (amendment B-13),
+so add **`/inventory/register`** to the it_staff group (`admin`/`it_staff` only). Phase 12 no longer adds a
+receive screen, so there is no `/purchases/<id>/receive` route to scan.
 
 - [ ] **Step 3: Amend this plan** with `C-1` onward — Phase 10 used `A-`, Phase 11 `B-`, so this phase
 uses `C-` and the three stay distinguishable.
