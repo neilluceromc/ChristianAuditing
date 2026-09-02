@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-09-02 (**PHASE 11 IS CODE-COMPLETE on `phase-11-label-qr`, battery green, UNMERGED** — see §0 item 4e; Phase 10 merged and pushed on 2026-08-27) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-09-02 (**PHASE 11 IS CODE-COMPLETE on `phase-11-label-qr` — TWELVE tasks, battery green at 153 e2e, UNMERGED and UNPUSHED** — see §0 item 4e; Phase 10 merged and pushed on 2026-08-27) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -37,7 +37,7 @@ calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop 
 
 3. **Read the PHASE 11 plan and spec first** — `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`
    and `docs/superpowers/specs/2026-08-26-label-qr-design.md`. That is the live work. Its banner carries
-   **B-1 through B-11**, four of which were defects in the plan rather than in the implementations.
+   **B-1 through B-16**, six of which were defects in the plan rather than in the implementations.
    Phase 10's plan (`2026-08-25-phase-10-polish.md`, amendments **A-1…A-44**) is history now, but worth
    reading for the same reason. **In both, read the `AMENDED` banner BEFORE the task body** — in several
    cases the banner reverses the body outright.
@@ -80,20 +80,26 @@ calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop 
 
    **(e) PHASE 11 IS CODE-COMPLETE and UNMERGED. This is where the live work is.**
    On 2026-08-26 the user asked for a phone-scannable QR on the asset label, so `phase-11-label-qr` was
-   cut from `phase-10-polish`. **All nine tasks are now done** (2026-09-02) and the branch is **15
+   cut from `phase-10-polish`. **All TWELVE tasks are now done** (2026-09-02 — nine planned, plus three added mid-phase after the user scanned a printed sheet) and the branch is **~26
    commits ahead of `main`, 0 behind** — `main` was merged IN rather than the branch rebased, because
    this project's docs cite SHAs and a rebase would dangle every one of them.
 
    **Battery on the branch, all green:** `tsc` · `lint` · **818 unit / 49 files** · `npm run build` ·
-   `docker compose --profile prod build` (3 images) · **149 e2e / 12 files** in four measured parts —
-   **51 · 58 · 34 · 6**. Part 2 grew from 56 to 58 and needed its `--global-timeout` raised. Axe
+   `docker compose --profile prod build` (3 images) · **153 e2e / 12 files** in four measured parts —
+   **51 · 62 · 34 · 6**. Part 2 grew from 56 to 62 across the phase and needed its `--global-timeout` raised. Axe
    moderates are unchanged from Phase 10 (`empty-table-header` 9, `page-has-heading-one` 2,
    `landmark-unique` 1), so nothing regressed.
 
    **What it ships:** each label now carries **two** codes for two readers — the Code 128 barcode the
    USB desk scanner needs (it types the tag as keystrokes, which is what the offboarding wizard
-   listens for) and a QR holding `{APP_BASE_URL}/inventory?q={TAG}`, which reuses the exact-tag
-   redirect rather than adding a route. Signed-in staff only; there is deliberately no public lookup,
+   listens for) and a QR holding `{APP_BASE_URL}/inventory/scan/{TAG}`, which opens a **compact scan card**
+   at `/inventory/scan/[tag]`: tag, model, status, holder, department, employment, category, purchase
+   date, warranty, serial, and one link to the full record. **Cost, vendor, repair quote and notes are
+   deliberately withheld**, enforced by a mutation-tested e2e assertion — so a future "just add cost"
+   has to delete a test explaining why it is absent. Keyed on the **TAG, never the id**: cuids change
+   on every reseed and this string is printed onto adhesive paper. `/inventory?q={TAG}` still
+   redirects to the full record and is **untouched** — that is the desk scanner's contract, guarded by
+   `e2e/it-core.spec.ts:126`. Signed-in staff only; there is deliberately no public lookup,
    because asset tags are sequential and a public page keyed by tag would be a walkable index of who
    holds what, behind a sticker anyone can photograph. `APP_BASE_URL` is required, has **no default**,
    and a loopback/`0.0.0.0` value is **refused** rather than printed — a dead QR on adhesive paper is
@@ -107,8 +113,8 @@ calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop 
    which is exactly how the ruler once shipped at 89.38 mm.
 
    Spec: `docs/superpowers/specs/2026-08-26-label-qr-design.md`. Plan:
-   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, amendments **B-1…B-11** — **four of the
-   eleven were defects in the plan rather than the implementations**, and B-1 was a command that broke
+   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, amendments **B-1…B-16** — **six of the
+   sixteen were defects in the plan rather than the implementations**, and B-1 was a command that broke
    the working environment (an `npm install` inside a bind-mounted Alpine container replaced
    `node_modules` with Linux binaries; recovery is `npm ci` then `npx prisma generate`).
 
