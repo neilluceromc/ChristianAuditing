@@ -29,8 +29,11 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  * Deliberately OUT of scope: /dev/kitchen-sink (self-notFound()s outside
  * dev, so it isn't part of the production route surface this table
  * describes, and e2e/kitchen-sink.spec.ts already axe-checks it in both
- * themes) and /[...pending] (a placeholder EmptyState for routes that don't
- * exist yet — nothing there is real content).
+ * themes). The `/[...pending]` catch-all this comment used to also exclude
+ * was DELETED once every phase had shipped — it was intercepting genuine
+ * 404s under the (app) group and telling signed-in users the page was
+ * "PLANNED" and would "arrive in Phase 3". Unmatched paths now reach Next's
+ * own not-found handling, which is not a page route and needs no entry here.
  *
  * Never reference a raw cuid — the DB is reseeded and ids change every time.
  * BR-LT-0148, EMP-0090 (Dennis Ong, the only OFFBOARDING employee), the

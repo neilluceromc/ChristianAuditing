@@ -166,7 +166,7 @@ export default async function InventoryPage({
         ) : (
           <EmptyState
             title="No assets yet"
-            description="Register the first asset; bulk import arrives in Phase 8."
+            description="Register the first asset, or use Import to bring in a spreadsheet."
             actions={canMutate ? <ButtonLink variant="primary" href="/inventory/new">New asset</ButtonLink> : undefined}
           />
         )}
