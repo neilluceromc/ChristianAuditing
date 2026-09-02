@@ -24,7 +24,10 @@ bars. `label-sheet.tsx` renders the QR **below** the barcode. The QR encodes
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — B-1 and B-2, both defects in this plan rather than in the implementations.
+> ### AMENDED THROUGH EXECUTION — B-1 through B-11. The phase is code-complete; every task ran.
+> **Of the eleven, the ones that were defects in THIS PLAN rather than in the implementations are B-1,
+> B-2, B-3 and B-4 — and B-1 did not merely mislead, it broke the working environment.** The rest
+> record deviations, verification results and the two physical checks no agent can close (B-11).
 > **B-1. Task 2 Step 1's command was DESTRUCTIVE to the working environment.** As drafted it was
 > `docker run … node:22-alpine sh -c "npm i -g npm@11 && npm install nayuki-qr-code-generator@1.8.0"` —
 > a full install inside a container with the repo bind-mounted, which replaced `node_modules` with
@@ -65,6 +68,63 @@ bars. `label-sheet.tsx` renders the QR **below** the barcode. The QR encodes
 > including the two that already passed, so a future change to normalisation cannot quietly reintroduce
 > half of it. **Three findings on one 70-line pure module, none of which a green suite would have shown:
 > that is the argument for reviewing the rule rather than the diff, restated.**
+>
+> **B-4. Task 4 is NOT independently verifiable, and the plan implied it was.** Task 4 renders the QR
+> gated on `base.ok`; nothing reaches that gate until Task 5 passes a `baseUrl`. So Task 4 shipped with
+> no way to see whether it worked, on the phase's own riskiest edit. **Task 5 was pulled forward by the
+> controller** (one line) so the rendering could be measured. Once it was, the measurements were clean:
+> page box 209.996 × 296.999 mm · barcode height **9.000 mm** · barcode width 47.848 mm · QR footprint
+> **20.497 mm** square (`qrFit` predicts 20.500) · calibration ruler **99.996 mm** · **0 cells clipped
+> by `overflow: hidden`**. The silent-compression failure that once shipped an 89.38 mm ruler did not
+> recur. **Lesson for the next plan: a task whose only output is rendered pixels must be sequenced
+> with whatever makes those pixels reachable, or it cannot be reviewed at all.**
+>
+> **B-5. Task 8 was executed on `main`, out of order.** It is the only task in this plan independent of
+> the QR, the defect was live and had just been made public by the Phase 10 push, and parking a
+> one-line prose fix behind a phase the user had set aside would have left the accountability form
+> lying indefinitely. Committed as `740571f` on `main`. It also deviates from this plan's drafted text:
+> the draft additionally reworded "the signed **scan**" to "the signed **form**", which the defect does
+> not require — and the two clauses using "scan" for *different things* (barcode-scanning, false;
+> document-scanning, true) is very likely how the false half survived review in the first place.
+>
+> **B-6. Task 6's tests depend on an environment variable, and Playwright does load `.env` — verified,
+> not assumed.** A test asserting the QR renders fails as "expected 1, got 0" when `APP_BASE_URL` is
+> merely unset, which reads as a broken feature rather than an unconfigured one. The implementer
+> checked empirically (a temporary `console.log` at describe scope) that `process.env.APP_BASE_URL` IS
+> visible inside the test process: `@playwright/test` auto-loads `.env` when `dotenv` is present in
+> `node_modules`, which it is. A precondition guard now names its own cause on failure.
+>
+> **B-7. Task 7 shipped a PLACEHOLDER hostname, because the user did not choose one.** Asked twice and
+> deferred twice, so `.env.example` carries `http://inventory.example.local:3000` under a shouted
+> must-change warning rather than blocking the phase. **The placeholder was run through `qrBase` before
+> shipping** — a default the code would itself refuse would be worse than none. It validates and
+> encodes correctly.
+>
+> **B-8. Step 3's refusal proof was driven by an env override, not by editing `.env`.** Next.js does not
+> override an already-set `process.env` value, so `APP_BASE_URL=http://localhost:3000 npx playwright
+> test …` exercises the loopback branch without touching the user's config. Result: **0 QRs, 1 barcode
+> still rendered, and the sheet reading "No QR: APP_BASE_URL points at this machine, which no phone can
+> reach."** — the cause-specific note, not a generic one. Done with a throwaway spec that was deleted
+> afterwards.
+>
+> **B-9. The branch took a MERGE from `main`, not a rebase.** `git diff` showed zero file overlap
+> between the two sides, so either was safe — but this project's docs and commit bodies cite SHAs
+> heavily (the handover names `5b97d81`; a commit body references `f382041`), and a rebase would have
+> rewritten every one of them into a dangling reference. Non-linear history is already the convention
+> here, so the cost of merging is nil and the cost of rebasing was not.
+>
+> **B-10. The battery at this phase's close, all green:** `tsc` · `lint` · **818 unit / 49 files** ·
+> `npm run build` · `docker compose --profile prod build` (3 images) · **149 e2e / 12 files** in four
+> parts, measured: **51 · 58 · 34 · 6**. Part 2 grew from 56 to 58 (the two new label tests) and needed
+> its `--global-timeout` raised. Axe moderates unchanged from Phase 10 — `empty-table-header` 9,
+> `page-has-heading-one` 2, `landmark-unique` 1 — so nothing regressed.
+>
+> **B-11. Step 5 cannot be closed by an agent, and now there are TWO physical checks, not one.** The
+> calibration bar still needs a tape measure, and the printed QR now needs a phone. Both hinge on the
+> same setting: at "Fit to page" the QR modules and the ruler shrink together, so a failure there is a
+> print-settings problem rather than a software one. `QR_PREFERRED_MODULE_MM` (0.5) and
+> `QR_MIN_MODULE_MM` (0.4) remain the least-evidenced numbers in this phase — a judgement about phone
+> optics that the physical read is meant to replace with a measurement.
 
 **Conventions for every task:** branch `phase-11-label-qr` (already exists); run
 `npx tsc --noEmit && npm run lint` before each commit; **NEVER run `npm run build` while a dev server is
