@@ -222,6 +222,13 @@ test.describe("axe sweep", () => {
       `/offboarding/${employee.id}`, `/offboarding/${employee.id}?step=collect`,
       `/offboarding/${employee.id}/report`,
       `/approvals/${approval.id}`, `/purchases/${pr.id}`,
+      // The scan card, keyed by TAG rather than id — that is the whole point of
+      // the route, since a cuid printed onto a sticker dies at the next reseed.
+      // BOTH branches are scanned: the found card renders a <dl>, a StatusPill
+      // and a header, while the miss renders a Banner instead, and a sweep that
+      // only ever sees the happy path has not seen the page.
+      `/inventory/scan/${asset.tag}`,
+      `/inventory/scan/BR-XX-9999`,
     ]) await scanRoute(page, path);
   });
 });
