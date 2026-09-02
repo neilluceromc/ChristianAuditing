@@ -23,6 +23,22 @@ written until submit.
 
 ## Read this before Task 1
 
+> ### AMENDED DURING EXECUTION — C-1, a contradiction in this plan's own constraints.
+> **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
+> committing". Those are impossible together, and the implementer was right to stop rather than pick
+> one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
+> `export const NOTE_CHIP: Record<NoteKind, string>` — an **exhaustive** map TypeScript now demands a
+> `RECEIVE` entry for. Task 2's scope therefore includes that one line, because this project requires
+> every task to end on a green commit and the migration is what breaks the map. Verified it is the
+> **only** `Record<NoteKind, …>` in the codebase, so that is the whole blast radius — no second site
+> is waiting to surprise a later task.
+>
+> **The lesson is not "widen the scope line".** It is that a schema change to an enum has a compile-time
+> blast radius, and a plan that adds an enum member must go looking for the exhaustive maps over it
+> *before* declaring the task's file list. **And the happy note: that map being exhaustive is precisely
+> why this surfaced at compile time instead of rendering a blank chip in production the first time
+> someone received a purchase.** It was not loosened to `Partial<Record<…>>` to silence the error.
+
 **Conventions for every task:** stay on `phase-12-receiving`; run `npx tsc --noEmit && npm run lint`
 before each commit; **NEVER run `npm run build` while a dev server is running** (they share `.next`).
 DB via `docker compose up -d db`, seed via `npm run db:seed`. **Subagents must not start a dev server —
@@ -167,7 +183,13 @@ git commit -m "refactor(lib): one definition of the asset-tag shape, not three"
 
 **Files:**
 - Create: `prisma/migrations/<timestamp>_asset_purchase_unit/migration.sql`
-- Modify: `prisma/schema.prisma`
+- Modify: `prisma/schema.prisma`, `src/lib/purchase-thread.ts`
+
+**Why `purchase-thread.ts` is in scope (see C-1).** Adding a `NoteKind` member breaks
+`NOTE_CHIP: Record<NoteKind, string>` at line 16, which is exhaustive by design. Add
+`RECEIVE: "RECEIVED"` as its last entry — matching the map's convention, where every value is a
+past-tense or state label in caps. It rides in this commit because the migration is what breaks it and
+every task must end green.
 
 - [ ] **Step 1: Write the schema fields**
 
