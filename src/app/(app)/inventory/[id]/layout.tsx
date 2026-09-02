@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getAsset } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { fmtDate } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
@@ -9,6 +10,7 @@ import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
 import { RecordTabs } from "@/components/inventory/record-tabs";
 import { RequestStatusChange } from "@/components/inventory/request-status-change";
+import { ConfirmAssetDetails } from "@/components/inventory/confirm-asset-details";
 
 export default async function AssetRecordLayout({
   params,
@@ -22,6 +24,7 @@ export default async function AssetRecordLayout({
   const asset = await getAsset(id);
   if (!asset) notFound();
   const canMutate = user.role === "admin" || user.role === "it_staff";
+  const canConfirm = user.role === "admin" || user.role === "finance_staff";
   const pending = asset.approvals[0];
 
   return (
@@ -32,14 +35,26 @@ export default async function AssetRecordLayout({
         badge={
           <span className="inline-flex items-center gap-2">
             <StatusPill value={asset.status} />
+            {asset.financeConfirmedAt ? (
+              <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
+            ) : (
+              <Pill>AWAITING FINANCE</Pill>
+            )}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
         }
         actions={
-          canMutate ? (
+          canMutate || (canConfirm && !asset.financeConfirmedAt) ? (
             <>
-              <RequestStatusChange assetId={asset.id} currentStatus={asset.status} />
-              <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>
+              {canMutate && (
+                <>
+                  <RequestStatusChange assetId={asset.id} currentStatus={asset.status} />
+                  <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>
+                </>
+              )}
+              {canConfirm && !asset.financeConfirmedAt && (
+                <ConfirmAssetDetails assetId={asset.id} tag={asset.tag} />
+              )}
             </>
           ) : undefined
         }

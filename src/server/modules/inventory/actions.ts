@@ -395,3 +395,67 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
   revalidatePath(`/inventory/${d.assetId}`);
   return ok({ refNo });
 }
+
+const confirmSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * Finance confirms that a registered asset's details are correct. Separate
+ * from the approval queue on purpose (C-5): every ApprovalType is a lifecycle
+ * change to an asset that already exists, whereas this is data verification —
+ * a different question with a different audience.
+ *
+ * Idempotent by refusal rather than by silence: confirming twice is a
+ * conflict, so a double-submit cannot quietly overwrite who confirmed it and
+ * when.
+ */
+export async function confirmAssetDetails(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "finance_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const parsed = confirmSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  let out: { tag: string } | null = null;
+  let failure: ActionResult<{ tag: string }> | null = null;
+
+  await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({
+      where: { id: parsed.data.id },
+      select: { id: true, tag: true, financeConfirmedAt: true },
+    });
+    if (!asset) {
+      failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    if (asset.financeConfirmedAt) {
+      failure = conflict(`${asset.tag} was already confirmed.`);
+      return;
+    }
+    // State-guarded write: the null check is IN the where clause, so two
+    // simultaneous confirmations cannot both succeed.
+    const hit = await tx.asset.updateMany({
+      where: { id: asset.id, financeConfirmedAt: null },
+      data: { financeConfirmedAt: new Date(), financeConfirmedById: user.id },
+    });
+    if (hit.count === 0) {
+      failure = conflict(`${asset.tag} was confirmed by someone else just now.`);
+      return;
+    }
+    await writeAudit(tx, {
+      actorId: user.id,
+      actorLabel: user.name,
+      entityType: "asset",
+      entityId: asset.id,
+      action: "finance.confirm",
+      diff: { financeConfirmed: { from: null, to: user.name } },
+    });
+    out = { tag: asset.tag };
+  });
+
+  if (failure) return failure;
+  revalidatePath(`/inventory/${parsed.data.id}`);
+  revalidatePath("/inventory");
+  return ok(out!);
+}

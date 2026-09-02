@@ -131,6 +131,7 @@ model User {
   requestedApprovals Approval[]     @relation("approvalRequestedBy")
   documents        AssetDocument[]
   rateEvents       RateEvent[]
+  financeConfirmed Asset[] @relation("financeConfirmedBy")
 }
 
 model UserPreference {
@@ -243,6 +244,9 @@ model Asset {
   repairQuote       Decimal?         @db.Decimal(12, 2)
   defectiveSince    DateTime?
   notes             String?
+  financeConfirmedAt   DateTime?
+  financeConfirmedById String?
+  financeConfirmedBy   User?     @relation("financeConfirmedBy", fields: [financeConfirmedById], references: [id], onDelete: Restrict)
   secrets           AssetSecret[]
   documents         AssetDocument[]
   reservations      Reservation[]
@@ -257,6 +261,7 @@ model Asset {
   @@index([purchaseRequestId])
   @@index([purchaseUnitId])
   @@index([vendorId])
+  @@index([financeConfirmedAt])
 }
 
 model AssetSecret {
