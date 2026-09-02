@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-26 (Phase 10, Tasks 10 and 11) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS CODE-COMPLETE on branch `phase-10-polish` — all 11 tasks committed, unmerged.** The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **NOTHING IS PUSHED: the branch is 36 ahead of `main`, `main` is 140 ahead of `origin/main` — 176 total, counted immediately after the commit that wrote this line. It rises by one every time this sentence is corrected, which is precisely why you count it yourself: `git rev-list --count origin/main..HEAD`.** · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-08-27 (**PHASE 10 IS MERGED TO `main`**; Phase 11 exists and is PARKED — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,13 +13,12 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-**Phase 10 is CODE-COMPLETE on `phase-10-polish`: all 11 tasks are committed and the battery is green.
-This was the last planned phase, so there is no next task to pick up — what remains are decisions that
-belong to the user, plus one measurement no agent can take.** Read items 1–4 below, then stop and ask.
+**Phase 10 is MERGED to `main` (`--no-ff` `bd78813`, 2026-08-27) and its battery was green on the
+merged result. It was the last planned phase.** What remains is the push decision, one measurement no
+agent can take, and a parked Phase 11. Read items 1–4 below, then stop and ask.
 
-1. **`git checkout phase-10-polish`.** It is **36 commits ahead of `main`**, and `main` is **140 ahead
-   of `origin/main`** — 176 total unpushed, counted just after this line was committed.
-   **Count them again** (`git rev-list --count origin/main..HEAD`)
+1. **`git checkout main`.** Phase 10 is merged into it and it is **pushed** — level with
+   `origin/main`. **Count it yourself anyway** (`git rev-list --count origin/main..main`)
    rather than trusting those numbers; every correction to this line is itself a commit. Nothing has
    been pushed since the Phase 1–7 merge on 2026-08-19, deliberately: **the user treats merging and
    publishing as separate decisions and asks for each explicitly. Never push or merge unprompted.** The
@@ -47,11 +46,18 @@ belong to the user, plus one measurement no agent can take.** Read items 1–4 b
    (Task 4's e2e measures it, after it silently shrank to 89.38 mm once). If the physical bar comes up
    short, the PDF escape hatch in spec §5 stops being speculative and becomes justified.
 
-   **(b) Merging.** `superpowers:finishing-a-development-branch`. The branch is green and code-complete.
-   Present options; **do not merge unprompted.**
+   **(b) Merging — DONE.** `phase-10-polish` was merged to `main` on 2026-08-27 via `--no-ff`
+   `bd78813`, the user having chosen that explicitly. `tsc`, `lint` and 797 unit tests were re-run on
+   the merged result and the merged tree is byte-identical to the branch. **The branch ref was kept.**
+   Deleting it now would strand nothing — its tip is reachable from `main` — but there is no need.
 
-   **(c) Pushing.** 175 commits unpushed, deliberately, since 2026-08-19. Separate decision from
-   merging — the user asks for each explicitly. **Never push unprompted.** The repo is public.
+   **(c) Pushing — DONE.** 180 commits went up on 2026-08-27, the user having asked for it separately
+   from the merge, as this project always does. **A secret scan ran first and is worth repeating before
+   any future push, because this repo is PUBLIC:** no `.env` was ever committed in those 180 commits, no
+   `uploads/`/`backups/` content leaked in, the only `.sql` files are legitimate migrations, and no
+   secret-shaped assignment appears in any added line. The one credential that IS public is
+   `SEED_PASSWORD = "admin123"` (`prisma/fixtures.ts:31`) — deliberate, documented in `README.md`, and
+   safe only while the app stays on localhost. **Never push unprompted; still ask each time.**
 
    **(d) Two deferred items, both real, neither blocking.** **Entra SSO does not work** — the provider
    registers when three env vars are set but no `signIn` callback maps an Entra profile to a `User`, so
@@ -60,9 +66,30 @@ belong to the user, plus one measurement no agent can take.** Read items 1–4 b
    `pg_dump`** — asset documents are plain host files bind-mounted into `web`, so a database backup
    alone does not restore them.
 
-   **If the user wants more work rather than a decision, there is no plan for it.** Start with
-   `superpowers:brainstorming`, then `superpowers:writing-plans` for a Phase 11 — do not improvise
-   changes onto a branch that is being held for a merge decision.
+   **(e) PHASE 11 EXISTS AND IS PARKED. Do not be surprised by it.** On 2026-08-26 the user asked for
+   a phone-scannable QR on the asset label, so `phase-11-label-qr` was cut **from `phase-10-polish`**
+   (not from `main` — the label sheet it extends only exists here). It is brainstormed, specced, planned
+   and **three of its nine tasks are committed**: `src/lib/label-qr.ts` (the URL a QR encodes),
+   `src/lib/qr.ts` (the encoder behind a three-line surface), and `qrFit` in `label-geometry.ts`. That
+   branch is **10 commits ahead of this one, green at 818 unit tests**, and **nothing imports the new
+   modules yet** — they are self-contained, so the branch is parked mid-plan without anything
+   half-wired. On 2026-08-27 the user said to leave the QR and close Phase 10 out first.
+
+   Spec: `docs/superpowers/specs/2026-08-26-label-qr-design.md`. Plan:
+   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, **resume at Task 4**, which is the risky
+   one — it spends the same vertical budget that let the calibration ruler ship at 89.38 mm.
+   Amendments `B-1…B-3`, and **all three were defects in the plan rather than the implementations**;
+   B-1 was worse than that, a command that broke the working environment.
+
+   ✓ **Phase 11's base is now inside `main`.** It was cut from `phase-10-polish`, and that branch has
+   since been merged, so `phase-11-label-qr`'s fork point is reachable from `main`. **Deleting the
+   `phase-10-polish` ref would strand nothing** — an earlier revision of this document warned that it
+   would, and that warning was only true before the merge. Phase 11 can be rebased onto `main` whenever
+   it is resumed, or merged as-is.
+
+   **If the user wants different work rather than a decision, there is no plan for it.** Start with
+   `superpowers:brainstorming`, then `superpowers:writing-plans` — do not improvise changes onto a
+   branch that is being held for a merge decision.
 
 5. **Execution mode: subagent-driven, and the user asked for it explicitly.** `superpowers:subagent-driven-development`.
    Fresh implementer per task, then review. Tasks 1–4 used two reviewers; 5–9 used one, escalating only
@@ -359,7 +386,7 @@ scoped feed, so the only one showing the domain pill).
   on canvas), which axe flags as serious — fixed to `text-fg-muted`, the token the reachable steps
   already used.
 
-**Phase 10 — polish (CODE-COMPLETE, all 11 tasks on `phase-10-polish`, UNMERGED, battery green)**
+**Phase 10 — polish (COMPLETE, all 11 tasks, MERGED to `main` as `--no-ff` `bd78813`)**
 
 - **T1 · `src/lib/code128.ts`** — a hand-rolled Code 128-B encoder, no dependency. Pure module widths;
   knows nothing of millimetres, SVG or assets. Its table was verified against an independent
@@ -662,7 +689,7 @@ below. §0 item 4 is the actionable version of this section.
   decisions**, every shipped task carrying an `AMENDED` banner, several carrying two or three). Both
   halves ship — see §4. **Nothing about the feature is outstanding; what is outstanding is the push
   decision, which is the user's and unmade.**
-- **Phase 10 — polish. CODE-COMPLETE: all 11 tasks done** on `phase-10-polish`, unmerged, battery green.
+- **Phase 10 — polish. COMPLETE: all 11 tasks done, MERGED** to `main` (`--no-ff` `bd78813`, 2026-08-27), battery green on the merged result.
   Spec: `docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`. Plan:
   `docs/superpowers/plans/2026-08-25-phase-10-polish.md` (11 tasks, **44 amendments A-1…A-44**,
   every executed task carrying a banner). **Shipped:** the printable 3×4 A4 label sheet with real
