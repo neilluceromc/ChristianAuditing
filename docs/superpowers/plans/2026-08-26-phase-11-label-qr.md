@@ -24,7 +24,7 @@ bars. `label-sheet.tsx` renders the QR **below** the barcode. The QR encodes
 
 ## Read this before Task 1
 
-> ### AMENDED THROUGH EXECUTION — B-1 through B-11. The phase is code-complete; every task ran.
+> ### AMENDED THROUGH EXECUTION — B-1 through B-16. Twelve tasks ran; the last three were added mid-phase.
 > **Of the eleven, the ones that were defects in THIS PLAN rather than in the implementations are B-1,
 > B-2, B-3 and B-4 — and B-1 did not merely mislead, it broke the working environment.** The rest
 > record deviations, verification results and the two physical checks no agent can close (B-11).
@@ -125,6 +125,54 @@ bars. `label-sheet.tsx` renders the QR **below** the barcode. The QR encodes
 > print-settings problem rather than a software one. `QR_PREFERRED_MODULE_MM` (0.5) and
 > `QR_MIN_MODULE_MM` (0.4) remain the least-evidenced numbers in this phase — a judgement about phone
 > optics that the physical read is meant to replace with a measurement.
+>
+> **B-12. Decision 3 was reversed mid-phase by the user scanning a printed sheet.** The QR read fine —
+> which closed the phase's least-evidenced assumption — but it landed on the full inventory record, and
+> the user said that answers "who holds this?" only after scrolling past everything else. Tasks 10–12
+> were added on 2026-09-02: a compact scan card at `/inventory/scan/[tag]`, and `qrUrlFor` repointed at
+> it. **The `/inventory?q=TAG` redirect was NOT touched** — it is the desk scanner's contract, and
+> `e2e/it-core.spec.ts:126` passed throughout, which is how we know the change stayed contained.
+> **Worth noting what the original decision got wrong:** "no new route" optimised for the wrong cost.
+> It avoided a route at the price of sending a phone to a desktop page, and the route was never the
+> expensive part. Folding it into Phase 11 rather than deferring to a Phase 12 avoided merging a QR
+> target we already knew we were about to change.
+>
+> **B-13. This plan's own warning about the axe sweep was wrong in the dangerous direction, and rule 87
+> caught it.** Task 12 predicted the sweep "may report 47 of 48" and told the implementer to add the
+> route rather than weaken the assertion. **There is no such count.** The sweep's route table is a
+> hardcoded list; its header says it was built from `find src/app -name page.tsx`, but nothing enforces
+> that it stays in sync. So the sweep **passed while never scanning the new page at all** — it silently
+> stopped being a sweep of the app and remained a sweep of its own list. That is precisely §6a rule 87
+> ("verify a sweep's coverage against the filesystem, not against its own list; a sweep that passes
+> proves its list is clean, not that the app is") catching the exact thing it was written about, one
+> phase later. Both branches of the route are now in the viewer group — the found card and the
+> not-found Banner, because scanning only the happy path leaves half the page unseen. **The card passes
+> clean: no serious or critical violations, and the moderate tally is unchanged (`empty-table-header` 9,
+> `page-has-heading-one` 2, `landmark-unique` 1), so it introduces none.**
+>
+> **B-14. Repointing the QR left two pieces of text describing the URL it no longer builds.** Rule 16,
+> twice. `label-qr.ts` justified dropping a query on the base by saying the prefix gets "its own `?q=`"
+> and that carrying one would make "two query strings" — `qrUrlFor` appends a path now, so neither
+> clause was true. And `labels.spec.ts`'s QR test was still titled "whose encoded URL is the exact-tag
+> search" while its own assertion three lines below checked `/inventory/scan/`. **A test name describing
+> the wrong contract is worse than no name: the next person reading a failure would go hunting in the
+> `?q=` redirect, which this work deliberately never touched.** The implementer flagged the title rather
+> than fixing it silently, which was correct under "implement as written"; the comment it missed was in
+> the file it had just edited.
+>
+> **B-15. The stale-cuid trap bit me before it could bite a sticker.** Generating a test sheet with
+> hardcoded asset ids from an earlier seed produced a silently EMPTY sheet — because every e2e spec
+> reseeds in its own `beforeAll` and cuids change each time. `e2e/labels.spec.ts`'s own header says
+> "Never reference a raw cuid". That failure is why the scan card is keyed on `Asset.tag` (which is
+> `@unique` and survives reseeding) rather than on the id: the same mistake printed onto adhesive paper
+> would have killed every label the first time anyone ran the suite.
+>
+> **B-16. The battery at the close of Tasks 10–12, all green:** `tsc` · `lint` · **818 unit / 49 files**
+> · `npm run build` · `docker compose --profile prod build` (3 images) · **153 e2e / 12 files** in four
+> parts — **51 · 62 · 34 · 6**, exactly the count this plan predicted. Part 2 grew from 58 to 62 (the
+> four scan-card tests). The "withholds cost" assertion was **mutation-tested**: adding
+> `["Cost", String(asset.cost)]` to the card made it fail with `getByText('55000') Expected: 0
+> Received: 1`, so a security decision is guarded by a test that demonstrably can fail.
 
 **Conventions for every task:** branch `phase-11-label-qr` (already exists); run
 `npx tsc --noEmit && npm run lint` before each commit; **NEVER run `npm run build` while a dev server is
