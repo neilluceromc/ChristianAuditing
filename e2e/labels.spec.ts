@@ -223,4 +223,101 @@ test.describe("label sheet", () => {
     // the guard against turning one click into a 17-sheet print job — and it
     // has no e2e coverage right now for exactly that reason.
   });
+
+  test("each label carries a QR whose encoded URL is the scan card for its tag", async ({ page }) => {
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
+    await login(page, "it@thebackroomop.com");
+    await page.goto(`/inventory/labels?ids=${asset.id}`);
+    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+
+    // The QR is gated on APP_BASE_URL being set to a NON-loopback value
+    // (src/lib/label-qr.ts refuses localhost — a QR that scans on the dev box
+    // and is dead on every phone is the failure that module exists to
+    // prevent). Without this guard a missing env var fails as "expected 1,
+    // got 0", which reads as a broken feature rather than an unconfigured one.
+    //
+    // Confirmed visible here: @playwright/test 1.62 auto-loads .env (via the
+    // `dotenv` package present in node_modules) into ITS OWN process before
+    // the config or any test file runs, so this test process — not just the
+    // spawned `next dev` webServer — sees APP_BASE_URL. Verified directly: a
+    // console.log(process.env.APP_BASE_URL) at describe-body scope printed
+    // the real value on this machine before this guard was written.
+    expect(
+      process.env.APP_BASE_URL,
+      "APP_BASE_URL must be set to a non-loopback URL for the QR to render — see .env.example",
+    ).toBeTruthy();
+
+    // The accessible name carries the encoded URL, so this asserts the PAYLOAD
+    // rather than the presence of a square. A QR pointing at the wrong place
+    // would pass a presence check.
+    const qr = page.getByRole("img", { name: /^QR / });
+    await expect(qr).toHaveCount(1);
+    const name = await qr.getAttribute("aria-label");
+    expect(name).toMatch(/^QR https?:\/\/.+\/inventory\/scan\/BR-LT-0148$/);
+    expect(name).not.toMatch(/localhost|127\./);
+  });
+
+  test("the QR does not steal the barcode's width or the ruler's length", async ({ page }) => {
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
+    await login(page, "it@thebackroomop.com");
+    await page.goto(`/inventory/labels?ids=${asset.id}`);
+    await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toBeVisible({ timeout: 30_000 });
+
+    // A-16's class of bug, guarded in the direction the QR made possible: the
+    // cell is a column flex with overflow hidden, so a too-tall QR compresses
+    // these instead of overflowing. Both are MEASURED, not asserted visible.
+    const pageBox = await page.locator(".label-page").first().boundingBox();
+    expect(pageBox?.width).toBeCloseTo(PAGE_MM.width * MM_TO_PX, 1);
+    expect(pageBox?.height).toBeCloseTo(PAGE_MM.height * MM_TO_PX, 1);
+
+    const barcode = await page.getByRole("img", { name: "Barcode BR-LT-0148" }).boundingBox();
+    expect(barcode?.height).toBeCloseTo(9 * MM_TO_PX, 1);
+
+    const rulerWidths = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("span"))
+        .filter((s) => (s as HTMLElement).style.height === "1.5mm")
+        .map((s) => s.getBoundingClientRect().width),
+    );
+    expect(rulerWidths.length).toBeGreaterThan(0);
+    for (const w of rulerWidths) expect(w).toBeCloseTo((CALIBRATION_MM * 96) / 25.4, 1);
+  });
+
+  test("the scan card shows custody at a glance, keyed on the tag not the id", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    // BY TAG. A cuid would break on the next reseed — this file's own header
+    // says never to reference one, and the tag is what the QR encodes anyway.
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Marites Bautista", { exact: false })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open full record" })).toBeVisible();
+  });
+
+  // The withholding IS the security decision (spec §0 decision 8), so it gets
+  // an assertion rather than a comment. A future "just add cost, it is handy"
+  // change has to delete a test that says why.
+  test("the scan card withholds cost, which the full record shows", async ({ page }) => {
+    const asset = await db.asset.findUniqueOrThrow({
+      where: { tag: "BR-LT-0148" },
+      select: { cost: true },
+    });
+    expect(asset.cost, "seed fixture needs a cost for this test to mean anything").not.toBeNull();
+    const cost = String(asset.cost);
+
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(cost, { exact: false })).toHaveCount(0);
+  });
+
+  test("an unknown tag explains itself instead of 404ing", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory/scan/BR-XX-9999");
+    await expect(page.getByText(/No asset is registered as BR-XX-9999/)).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("the scan card requires a session", async ({ page }) => {
+    await page.goto("/logout");
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page).toHaveURL(/\/login/);
+  });
 });

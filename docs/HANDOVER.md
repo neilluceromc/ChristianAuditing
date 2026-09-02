@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-27 (**PHASE 10 IS MERGED TO `main`**; Phase 11 exists and is PARKED — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-09-02 (**PHASE 11 IS CODE-COMPLETE on `phase-11-label-qr` — TWELVE tasks, battery green at 153 e2e, UNMERGED and UNPUSHED** — see §0 item 4e; Phase 10 merged and pushed on 2026-08-27) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,16 +13,19 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-**Phase 10 is MERGED to `main` (`--no-ff` `bd78813`, 2026-08-27) and its battery was green on the
-merged result. It was the last planned phase.** What remains is the push decision, one measurement no
-agent can take, and a parked Phase 11. Read items 1–4 below, then stop and ask.
+**Phase 10 is MERGED and PUSHED. Phase 11 is CODE-COMPLETE on `phase-11-label-qr`, battery green,
+and UNMERGED — that branch is where the work is, not `main`.** What remains is the merge and push
+decisions for Phase 11, and **two physical checks no agent can perform**: a tape measure on the 100 mm
+calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop and ask.
 
-1. **`git checkout main`.** Phase 10 is merged into it and it is **pushed** — level with
-   `origin/main`. **Count it yourself anyway** (`git rev-list --count origin/main..main`)
-   rather than trusting those numbers; every correction to this line is itself a commit. Nothing has
-   been pushed since the Phase 1–7 merge on 2026-08-19, deliberately: **the user treats merging and
-   publishing as separate decisions and asks for each explicitly. Never push or merge unprompted.** The
-   repo is public — never commit `.env` or any real secret.
+1. **`git checkout phase-11-label-qr`** — that is where the live work is; `main` carries Phases 1–10
+   only. The branch is ~17 ahead of `main` and 0 behind, and **has never been pushed**. `main` itself
+   was pushed on 2026-08-27 and is level with `origin/main`. **Count both yourself**
+   (`git rev-list --count origin/main..main` and `git rev-list --count main..phase-11-label-qr`) —
+   every correction to this line is itself a commit, so it is stale the moment it is written.
+   **The user treats merging and publishing as separate decisions and asks for each explicitly. Never
+   push or merge unprompted.** The repo is public — never commit `.env` or any real secret, and
+   secret-scan before any push (§0 item 4c records what that scan covered last time).
 
 2. **Bring the environment up:** `docker compose up -d db` → `npx prisma migrate deploy` →
    `npm run db:seed`. **8 migrations, none pending**; Phase 10 adds none. `npm run db:seed` runs freely.
@@ -32,26 +35,35 @@ agent can take, and a parked Phase 11. Read items 1–4 below, then stop and ask
    `npipe:////./pipe/dockerDesktopLinuxEngine … cannot find the file specified`, **ask the user to start
    it** — `Start-Process "Docker Desktop.exe"` launches and silently exits. This cost twenty minutes.
 
-3. **Read `docs/superpowers/plans/2026-08-25-phase-10-polish.md`, Task 10, and its spec
-   (`docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`).** Every task carries an `AMENDED`
-   banner — **A-1 through A-44** — recording what the plan got wrong. Read the banner before the task
-   body; in several cases the banner reverses the body.
+3. **Read the PHASE 11 plan and spec first** — `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`
+   and `docs/superpowers/specs/2026-08-26-label-qr-design.md`. That is the live work. Its banner carries
+   **B-1 through B-16**, six of which were defects in the plan rather than in the implementations.
+   Phase 10's plan (`2026-08-25-phase-10-polish.md`, amendments **A-1…A-44**) is history now, but worth
+   reading for the same reason. **In both, read the `AMENDED` banner BEFORE the task body** — in several
+   cases the banner reverses the body outright.
 
-4. **There is no next task. What is left is four things, and three of them are the user's to decide.**
+4. **There is no next CODING task. Everything below is either a user decision or a physical act no
+   agent can perform.** Five items; (b) and (c) are done for Phase 10 and **open again for Phase 11**.
 
-   **(a) The one open entry criterion: print a sheet and measure it.** Task 11 Step 4 asks for a real
-   label sheet printed and the 100 mm calibration bar measured with a tape measure, with the browser and
-   print settings recorded in §8. **No agent can do this** — it needs a printer and a human. Everything
-   else about the label sheet is proven in software: the bar measured 100.0 mm in the rendered DOM
-   (Task 4's e2e measures it, after it silently shrank to 89.38 mm once). If the physical bar comes up
-   short, the PDF escape hatch in spec §5 stops being speculative and becomes justified.
+   **(a) TWO physical checks, on one sheet of paper. No agent can do either.** Print a label sheet at
+   **Scale 100%, A4, Margins None**, then (i) measure the 100 mm calibration bar with a tape measure and
+   (ii) scan one of its QR codes with a phone. Record the browser, the printer and all three print
+   settings in §8 alongside the numbers.
+   - Both hinge on that one setting: at "Fit to page" the QR modules and the ruler shrink **together**,
+     so a failure there is a print-settings problem, not a software one.
+   - The bar is proven in software — 100.0 mm in the rendered DOM, and 99.97–100.01 mm measured inside a
+     real Chrome-generated PDF. It silently shipped at 89.38 mm once, which is why it exists at all. If
+     the printed bar is short **at 100% scale**, spec §5's PDF escape hatch stops being speculative.
+   - The QR has never been read off paper by anything. `QR_PREFERRED_MODULE_MM` (0.5) and
+     `QR_MIN_MODULE_MM` (0.4) are a judgement about phone optics, not a measurement — this scan is what
+     replaces the guess. Record the result against those two constants.
 
-   **(b) Merging — DONE.** `phase-10-polish` was merged to `main` on 2026-08-27 via `--no-ff`
+   **(b) Merging — done for PHASE 10, OPEN for Phase 11.** `phase-10-polish` was merged to `main` on 2026-08-27 via `--no-ff`
    `bd78813`, the user having chosen that explicitly. `tsc`, `lint` and 797 unit tests were re-run on
    the merged result and the merged tree is byte-identical to the branch. **The branch ref was kept.**
    Deleting it now would strand nothing — its tip is reachable from `main` — but there is no need.
 
-   **(c) Pushing — DONE.** 180 commits went up on 2026-08-27, the user having asked for it separately
+   **(c) Pushing — done for PHASE 10, OPEN for Phase 11 (its branch has never been pushed).** 180 commits went up on 2026-08-27, the user having asked for it separately
    from the merge, as this project always does. **A secret scan ran first and is worth repeating before
    any future push, because this repo is PUBLIC:** no `.env` was ever committed in those 180 commits, no
    `uploads/`/`backups/` content leaked in, the only `.sql` files are legitimate migrations, and no
@@ -66,26 +78,57 @@ agent can take, and a parked Phase 11. Read items 1–4 below, then stop and ask
    `pg_dump`** — asset documents are plain host files bind-mounted into `web`, so a database backup
    alone does not restore them.
 
-   **(e) PHASE 11 EXISTS AND IS PARKED. Do not be surprised by it.** On 2026-08-26 the user asked for
-   a phone-scannable QR on the asset label, so `phase-11-label-qr` was cut **from `phase-10-polish`**
-   (not from `main` — the label sheet it extends only exists here). It is brainstormed, specced, planned
-   and **three of its nine tasks are committed**: `src/lib/label-qr.ts` (the URL a QR encodes),
-   `src/lib/qr.ts` (the encoder behind a three-line surface), and `qrFit` in `label-geometry.ts`. That
-   branch is **10 commits ahead of this one, green at 818 unit tests**, and **nothing imports the new
-   modules yet** — they are self-contained, so the branch is parked mid-plan without anything
-   half-wired. On 2026-08-27 the user said to leave the QR and close Phase 10 out first.
+   **(e) PHASE 11 IS CODE-COMPLETE and UNMERGED. This is where the live work is.**
+   On 2026-08-26 the user asked for a phone-scannable QR on the asset label, so `phase-11-label-qr` was
+   cut from `phase-10-polish`. **All TWELVE tasks are now done** (2026-09-02 — nine planned, plus three added mid-phase after the user scanned a printed sheet) and the branch is **~26
+   commits ahead of `main`, 0 behind** — `main` was merged IN rather than the branch rebased, because
+   this project's docs cite SHAs and a rebase would dangle every one of them.
+
+   **Battery on the branch, all green:** `tsc` · `lint` · **818 unit / 49 files** · `npm run build` ·
+   `docker compose --profile prod build` (3 images) · **153 e2e / 12 files** in four measured parts —
+   **51 · 62 · 34 · 6**. Part 2 grew from 56 to 62 across the phase and needed its `--global-timeout` raised. Axe
+   moderates are unchanged from Phase 10 (`empty-table-header` 9, `page-has-heading-one` 2,
+   `landmark-unique` 1), so nothing regressed.
+
+   **What it ships:** each label now carries **two** codes for two readers — the Code 128 barcode the
+   USB desk scanner needs (it types the tag as keystrokes, which is what the offboarding wizard
+   listens for) and a QR holding `{APP_BASE_URL}/inventory/scan/{TAG}`, which opens a **compact scan card**
+   at `/inventory/scan/[tag]`: tag, model, status, holder, department, employment, category, purchase
+   date, warranty, serial, and one link to the full record. **Cost, vendor, repair quote and notes are
+   deliberately withheld**, enforced by a mutation-tested e2e assertion — so a future "just add cost"
+   has to delete a test explaining why it is absent. Keyed on the **TAG, never the id**: cuids change
+   on every reseed and this string is printed onto adhesive paper. `/inventory?q={TAG}` still
+   redirects to the full record and is **untouched** — that is the desk scanner's contract, guarded by
+   `e2e/it-core.spec.ts:126`. Signed-in staff only; there is deliberately no public lookup,
+   because asset tags are sequential and a public page keyed by tag would be a walkable index of who
+   holds what, behind a sticker anyone can photograph. `APP_BASE_URL` is required, has **no default**,
+   and a loopback/`0.0.0.0` value is **refused** rather than printed — a dead QR on adhesive paper is
+   not recoverable. When it is unusable the sheet prints the barcode alone plus a note naming which of
+   the four causes applied.
+
+   **Measured, not assumed** (2026-09-02, rendered DOM): page box 209.996 × 296.999 mm · barcode
+   height **9.000 mm** · QR footprint **20.497 mm** square · calibration ruler **99.996 mm** · **0
+   cells clipped**. That last set matters because the label cell is a column flex with
+   `overflow: hidden`, so an over-tall child does not overflow — it silently compresses its siblings,
+   which is exactly how the ruler once shipped at 89.38 mm.
 
    Spec: `docs/superpowers/specs/2026-08-26-label-qr-design.md`. Plan:
-   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, **resume at Task 4**, which is the risky
-   one — it spends the same vertical budget that let the calibration ruler ship at 89.38 mm.
-   Amendments `B-1…B-3`, and **all three were defects in the plan rather than the implementations**;
-   B-1 was worse than that, a command that broke the working environment.
+   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, amendments **B-1…B-16** — **six of the
+   sixteen were defects in the plan rather than the implementations**, and B-1 was a command that broke
+   the working environment (an `npm install` inside a bind-mounted Alpine container replaced
+   `node_modules` with Linux binaries; recovery is `npm ci` then `npx prisma generate`).
 
-   ✓ **Phase 11's base is now inside `main`.** It was cut from `phase-10-polish`, and that branch has
-   since been merged, so `phase-11-label-qr`'s fork point is reachable from `main`. **Deleting the
-   `phase-10-polish` ref would strand nothing** — an earlier revision of this document warned that it
-   would, and that warning was only true before the merge. Phase 11 can be rebased onto `main` whenever
-   it is resumed, or merged as-is.
+   ⚠️ **`APP_BASE_URL` in `.env` is a PLACEHOLDER** (`http://inventory.backroom.local:3000` locally,
+   `http://inventory.example.local:3000` in `.env.example`). **The user was asked twice and deferred
+   twice — it is still unchosen.** Whatever is set there is baked permanently into every printed
+   sticker, and it needs a DNS or router entry pointing at the server before any label is printed.
+
+   **What remains for Phase 11 is not code:** the merge and push decisions, and **two physical checks
+   no agent can perform** — the tape measure on the 100 mm bar, and a phone on a printed QR. Both hinge
+   on the same setting: at "Fit to page" the QR modules and the ruler shrink together, so a failure
+   there is a print-settings problem, not a software one. `QR_PREFERRED_MODULE_MM` (0.5) and
+   `QR_MIN_MODULE_MM` (0.4) are the least-evidenced numbers in the phase — a judgement about phone
+   optics that the physical read is meant to replace with a measurement.
 
    **If the user wants different work rather than a decision, there is no plan for it.** Start with
    `superpowers:brainstorming`, then `superpowers:writing-plans` — do not improvise changes onto a
@@ -1647,6 +1690,8 @@ any task in the phase. All of them were fixtures that the running code could not
 
 ## 7. Recurring gotchas that have cost real time
 
+- **The generated Prisma client is SHARED ACROSS BRANCHES, and switching branches does not regenerate it.** `node_modules/.prisma/client` is gitignored, so it reflects whichever branch last ran `prisma generate` — not the branch you are on. Hit on 2026-09-02: after Phase 12 added `NoteKind.RECEIVE`, checking out `phase-11-label-qr` made `tsc` fail with *"Property 'RECEIVE' is missing in type … but required in `Record<NoteKind, string>`"* in `src/lib/purchase-thread.ts`. **Phase 11's code was correct for Phase 11's schema; the client on disk was from Phase 12's.** The error names an application file and reads like a real defect, which is what makes it expensive — it sent me looking at the merge I had just done. **Run `npx prisma generate` after any branch switch that crosses a schema change**, and suspect it immediately whenever `tsc` complains about an enum member or model field that the branch's own `prisma/schema.prisma` does not mention. The database keeping the other branch's migration applied is harmless by comparison — additive columns and enum values do not disturb a client that has never heard of them.
+- **Stale `.next` types outlive a deleted route.** Deleting a page route leaves its generated type file behind in `.next/types`, and `tsc` then fails on a module that no longer exists — reported twice in one session against `(app)/[...pending]` after it was removed. `rm -rf .next` and re-run. Same diagnostic instinct as the entry above: when `tsc` names something the working tree does not contain, suspect a generated artifact before suspecting your change.
 - **A fresh dev server has no session, and an agent will not type the seeded password into the login form.** It happened twice in one session. Any check that needs a signed-in browser therefore needs **you** to sign in once at `http://localhost:3000` (`admin@thebackroomop.com`), after which the agent can drive the page normally. **Two workarounds that need no browser at all, and are often better:** call the page's own query directly (`npx tsx` a throwaway script under the gitignored `backups/` that imports e.g. `adminHome()` and prints its output — this is how Task 11's data assertions were verified, and it checks the numbers rather than the pixels); or, for anything the DB can answer, `docker exec inventory-db-1 psql -U inventory -d inventory -c "…"` (note **`-U inventory`**, not `postgres` — that role does not exist and the error is unhelpful). Delete the scratch script afterwards. **A third route, and the best one for behaviour: write a throwaway Playwright spec.** The e2e harness logs in by filling the seed's fixture password (`ChangeMe123!`) from a script — that is the suite's own established mechanism, not an agent typing a human's password — so a temporary spec under `e2e/` can drive a signed-in browser, assert through the DOM, and be deleted afterwards. This is how Task 13 verified its click path, its refusal-by-absence, and its audit row. Name it `zz-*` so it sorts last and cannot perturb the files after it, and remember that **tests in one file share a database and only `beforeAll` reseeds** — Task 13's second test failed purely because its first had already consumed the fixture. Reserve the manual browser for what only the eye shows: layout, contrast, focus order, axe.
 - **A long-lived dev server degrades into stalls, and Phase 10 hit it again.** The server this session used accumulated **3.2 hours of CPU**, and a Task 9 agent's axe sweep stalled against it — the agent then backgrounded the run and ended its turn waiting, leaving nothing reaped. Restarting via `preview_stop`/`preview_start` and re-running took **3.8 minutes**. This is §6's Phase 6 lesson (memory climbed 8.5→12.2 GB, a different set of specs failed each run, all passing in isolation) recurring on a different axis. **Restart the preview before any confirmation run**, and never start or stop a server with raw Bash.
 - **A mutation applied with a `\n`-based pattern can silently fail to apply on this CRLF repo, and a mutation that never applied looks exactly like a passing suite.** This caught three separate agents in Phase 10. **Confirm the file on disk actually changed** (`grep -c` the mutated substring) before trusting any mutation result. Note also that `sed -i` on this setup rewrites the whole file to LF; revert with `git checkout --` rather than un-sedding, and check `file <path>` afterwards.
