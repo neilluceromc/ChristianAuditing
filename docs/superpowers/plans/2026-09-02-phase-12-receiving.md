@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1 through C-3. All are defects in this plan; two were caught by implementers who stopped instead of guessing, one by reading the helpers' signatures before dispatch.
+> ### AMENDED DURING EXECUTION — C-1 through C-4, every one a defect in this plan. Three were caught by implementers who reported instead of guessing; C-4 would have corrupted the asset register and no test in the plan as written could have caught it.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -82,7 +82,39 @@ written until submit.
 >
 > **The pattern across C-1, C-2 and C-3 is one thing, not three:** every defect came from writing code
 > against a remembered API instead of a read one. The fix is not more care — it is reading the signature
-> of every helper a task calls before writing the call, which is what caught these three.
+> of every helper a task calls before writing the call, which is what caught these three.>
+> **C-4. Task 4's transaction did NOT guarantee all-or-nothing, which was the one invariant that task
+> said mattered most. This is the worst defect in the plan and it would have corrupted the asset
+> register.** Found by the implementer, who committed the code as written and then reported it rather
+> than either papering over it or silently fixing it.
+>
+> **The mechanism.** Prisma commits an interactive transaction when the callback **resolves** and rolls
+> back only when it **throws**. Every refusal in the drafted loop was `failure = conflict(...); return;` —
+> a plain return. The loop validated *and wrote* per line, so a second line's refusal fired **after the
+> first line had already created assets and audit rows**. The callback then resolved, Prisma committed,
+> and the caller was handed a failure. **An operator would see an error toast while real assets with
+> generated tags sat permanently in the register** — precisely the "partial receipt that half-wrote"
+> the task text forbade.
+>
+> **Why it was easy to miss, and this is the useful part:** `runTransition` in the same directory uses the
+> identical return-don't-throw shape and is **safe**, because every one of its refusals precedes its
+> single write. The pattern is not wrong; **interleaving it with writes in a loop is.** The implementer
+> drew that distinction unprompted and it is the whole diagnosis.
+>
+> **Fixed structurally, not with a sentinel throw.** Two passes: validate every line, write nothing;
+> then write, with no refusal paths left below the first write. A sentinel would have worked but would
+> leave correctness depending on someone remembering to throw rather than return, forever. Two passes
+> make it so that breaking it requires *moving a write above a validation*.
+>
+> **It also closed a second bug neither of us had named:** two lines naming the same unit could each
+> clear an independent `outstanding` check while together exceeding the order. Pass 1 now aggregates
+> requested counts per unit before validating.
+>
+> **And a testing gap that is mine, recorded here because it is the reason this survived to
+> implementation: `PR-0188` HAS EXACTLY ONE UNIT.** Every e2e case Task 7 originally specified sends a
+> single line, so **no test in this plan could ever have reached the multi-line failure path.** A green
+> suite would have proved nothing about the invariant the task called most important. Task 7 now
+> requires a purpose-built two-unit `COMPLETED` fixture and an explicit rollback assertion.
 >
 > **This is the fourth defect in this plan** (after the contradictory scope line, the nonexistent
 > `SYSTEM` enum member, and the deliberately-wrong test expectation I removed at self-review). All four
@@ -917,6 +949,15 @@ Cover exactly these, and **reference `PR-0188` by `refNo`, never by cuid**:
 5. **An audit row exists per created asset**, with `action: "receive"` and the asset's id.
 6. **`viewer` and `finance_staff` cannot reach `/purchases/<id>/receive`** — assert the redirect, and
    assert it for BOTH roles rather than assuming one implies the other.
+7. **A MULTI-LINE receipt whose second line fails rolls back the first — see C-4.** This is the most
+   important case in the file and **the seed cannot express it**: `PR-0188` has exactly one unit, so
+   every case above sends a single line and none of them reaches the multi-line failure path.
+   **Build the fixture:** create a `COMPLETED` request with **two** `APPROVED` units through Prisma in
+   the spec itself (Phase 9 Task 13 set the precedent — construct what the seed lacks rather than
+   asserting around it). Then submit two lines where the first is valid and the second over-receives,
+   and assert **a Prisma count delta of ZERO** — not merely that an error was returned. Before this
+   fix, that delta would have been the first line's asset count, committed, while the caller saw a
+   conflict.
 
 - [ ] **Step 2: Run it and read the count**
 
