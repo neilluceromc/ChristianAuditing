@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-09-02 (**PHASES 1–11 ARE ALL MERGED AND PUSHED.** Phase 11 merged via `--no-ff` `b6aa5e2` and pushed the same day; Phase 10 on 2026-08-27. **PHASE 12 (purchase → asset receiving) IS IN FLIGHT on `phase-12-receiving` — tasks 1–4 of 8 done** — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **BATTERY ON `main` AT THE PHASE 11 MERGE:** `tsc` · `lint` · **818 unit / 49 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **153 e2e / 12 files in four parts**. **8 migrations on `main`; `phase-12-receiving` adds a 9th.** · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **`main` IS PUSHED and level with `origin/main` at `b6aa5e2`** (180 commits on 2026-08-27, then 30 more carrying Phase 11 on 2026-09-02). **All three phase branches are local only and have NEVER been pushed** — deliberately; only `main` is ever authorised. `phase-10-polish` and `phase-11-label-qr` are now fully contained in `main` and safe to delete. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-09-02 (**PHASES 1–11 ARE ALL MERGED AND PUSHED.** Phase 11 merged via `--no-ff` `b6aa5e2` and pushed the same day; Phase 10 on 2026-08-27. **PHASE 12 (purchase → asset receiving) IS IN FLIGHT on `phase-12-receiving` — tasks 1–4 of 8 done** — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **BATTERY ON `main` AT THE PHASE 11 MERGE:** `tsc` · `lint` · **818 unit / 49 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **153 e2e / 12 files in four parts**. **8 migrations on `main`; `phase-12-receiving` adds a 9th.** · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **`main` IS PUSHED and level with `origin/main` at `b6aa5e2`** (180 commits on 2026-08-27, then 30 more carrying Phase 11 on 2026-09-02). **All three phase branches are local only and have NEVER been pushed** — deliberately; only `main` is ever authorised. `phase-10-polish` and `phase-11-label-qr` are now fully contained in `main` and safe to delete. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.** · **NEW 2026-09-02: §9 records FOUR unplanned subsystems from an Admin stakeholder meeting (inventory digitization, vendor master data, purchasing extensions, consumables/stock control). Read §9 before scoping anything — one of the four cannot be modelled as  and would break four existing surfaces if it were.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -2100,3 +2100,86 @@ any task in the phase. All of them were fixtures that the running code could not
   no in-app recovery**. A last-admin guard would not have prevented it — that prevents removing the
   last admin, it cannot conjure one.
 - Entra SSO real wiring (needs tenant creds). Real product photography, brand mark, barcode generation (striped placeholders today). Off-device backups (nightly `pg_dump` to a local volume ships; copying elsewhere is the user's call). HR review of the accountability-form acknowledgement copy. `WebhookEndpoint.secret` encryption (Phase 8). CI workflow + jsdom component tests (declined in Phase 1, revisitable).
+
+---
+
+## 9. Stakeholder requirements from the 2026-09-02 Admin meeting (NOT yet planned)
+
+Raised by **Anj, Maynard, Neil, Salem and Mary**. Recorded verbatim-in-substance because none of it is
+specced yet and it is the only record. **Four distinct subsystems, not one feature** — the decomposition
+below is the important part, and item **D** breaks an assumption the whole codebase rests on.
+
+**Sequencing agreed with the user on 2026-09-02:** finish Phase 12 as scoped, then take **A** as Phase
+13. Nothing here was folded into Phase 12 mid-flight.
+
+### ⚠️ D IS A SECOND DOMAIN, NOT AN EXTENSION — read this before anyone models supplies as assets
+
+The pantry workbook reports figures like **"566 available"**. In this schema `Asset.tag` is `@unique` and
+there is **one row per physical thing**. 566 bottles of detergent as `Asset` rows would mean 566 unique
+tags, each carrying a lifecycle `status` (`SPARE`/`DEPLOYED`/`DEFECTIVE`…), each assignable to an
+`Employee`, each collected back by the offboarding wizard, and each entitled to a printed sticker.
+
+**There is no quantity-tracked model anywhere in this schema** — all 24 models are per-instance.
+Consumables need a different shape entirely: an item, a ledger of stock movements, and a balance
+**derived** from that ledger (never stored — §6a's *derived state beats stored state*, and the meeting's
+own complaint is that the stored number cannot be trusted). FIFO for pantry items additionally needs
+batch dates on receipts, and "reconcile receipts, movements and physical counts" is a **stocktake**
+feature — the one that makes the number believable.
+
+**Modelling supplies as `Asset` would break the label sheet, the offboarding wizard, the approval queue
+and the secrets surface simultaneously.** It must live beside the asset register, not inside it.
+
+### The four subsystems
+
+- **A · Asset classes — Phase 13, agreed next.** IT assets versus non-IT (cars, buildings, furniture,
+  pantry equipment such as microwaves and air purifiers). Today `Asset` is IT-shaped: offboarding
+  collects assets from leavers, `/inventory/[id]/secrets` holds credentials, the label sheet prints a
+  sticker per asset, and the scan card answers custody. **A building should not be offboarded; a car has
+  no credentials; a desk needs no custody QR.** A class dimension lets non-IT assets register without
+  inheriting IT workflows. **Do this first: both B and D need to know what KIND of thing they are
+  looking at, and doing it later means each invents its own answer.** The meeting also noted that
+  **Finance records some assets differently from Admin**, so the same physical thing may need two views
+  — that belongs in this phase's brainstorming, not bolted on after.
+
+- **B · Vendor / supplier master data.** `Vendor` **already exists but is a stub** — `id`, `name`,
+  `locked`, `assets[]`. Wanted: product/service category, company name, registered name, contact person,
+  address, phone, email, registration information, contract status and dates/terms, bank details, and
+  uploaded documents (certificates, registration records). Plus **search by supplier name returning the
+  profile and past purchase orders**, so purchasing stops retyping company details; and **role-gated
+  access** — admin maintains the master list, others get access matching their purchasing or review
+  responsibilities. Anj asked whether fields such as bank details can be added; they can. **Admin owes a
+  cleaned-up starting dataset** (the current list is several years old and missing suppliers) — chase it
+  before building, because an empty master list makes the search unreviewable.
+
+- **C · Purchasing workflow extensions.** Mostly small, and some already exists:
+  - **Department tagging on requests.** `Department` exists but links only to `Employee` and
+    `EquipmentPolicy` — **not to `PurchaseRequest`**. Admin receives requests from HR, Finance, IT and
+    others, and wants routing, approval responsibility, reporting and accountability off it.
+  - **Attachments on requests.** `AssetDocument` exists for assets; requests have no equivalent.
+  - **Serial capture at receipt — ALREADY BUILT** by Phase 12's receive screen. Salem's point that
+    receipt entry may still need manual confirmation is satisfied by that screen: nothing is written
+    until submit.
+  - **Imported assets with no purchase request must stay visible and be marked as such**, so Finance,
+    Admin and auditors can tell historical capitalised assets from newly approved purchases. Today
+    `Asset.purchaseRequestId` is nullable and **was entirely unused before Phase 12**, so "has no PR" is
+    currently indistinguishable from "predates the feature". That distinction needs deciding, not
+    inferring.
+  - Locating an asset by tag, QR, barcode, serial or other identifier — **tag, QR and serial already
+    work**; barcode is the Code 128 on the label sheet, readable by the USB desk scanner.
+
+- **D · Consumables and stock control.** The largest single piece of work in the project so far — bigger
+  than any phase to date. Office supplies, pantry supplies. Stock-in and stock-out recording with
+  automatic available quantities; **FIFO handling for pantry items** with physical tagging where
+  appropriate; **automatic item-code series by category or source document** (examples raised: separate
+  series for cleaning materials, supplies, furniture and fixtures), which must stay **searchable** and
+  support creating new items; reconciliation between receipts, movements and physical counts;
+  system-generated reports for quantities, item history, and budget/inventory views, distinguishing
+  existing items from new ones and allowing updates without retyping. **See the warning above before
+  designing any of it.**
+
+### One number worth carrying into D's brainstorming
+
+The meeting's own example is the whole argument for deriving balances rather than storing them: the
+workbook says **566 available**, and Anj, Mary and Salem all doubted it, because receipts and issues are
+keyed in by hand. A stored total that nobody trusts is worse than no total — it gets used anyway. Design
+the stocktake and the variance report **first**, not last.
