@@ -195,10 +195,13 @@ assertion that earns its keep.
    writing a test that *asserts* the collision and passes for the wrong reason; assert the count delta.
 3. **The 9999 boundary is reachable per prefix**, not theoretical, since numbers are per-prefix and
    `LT` is already at 0210 in a fixture set of 25 assets.
-4. **`onDelete: Restrict` means a received unit cannot be deleted.** That is correct — deleting a unit
-   that produced assets would orphan their provenance — but it makes `PurchaseUnit` deletion fail where
-   it previously cascaded from the request. Check whether anything deletes a request and what that now
-   does.
+4. **`onDelete: Restrict` turns out to be unreachable, and that was worth proving rather than assuming.**
+   Exactly one code path deletes a unit: `draft-actions.ts:166` drops units removed while editing a
+   draft. It is guarded at line 152 by `req.state !== "DRAFT"` → conflict. A unit can only carry assets
+   if its request reached `COMPLETED` (receiving refuses anything else), and `COMPLETED` is terminal — so a
+   unit with assets can never re-enter the one path that deletes units. **`Restrict` is therefore the
+   right constraint AND costs nothing today**; it is insurance against a future editable-after-complete
+   feature, not a live constraint on the current one.
 
 ---
 
