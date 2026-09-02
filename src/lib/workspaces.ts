@@ -181,6 +181,12 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // for requireRole to run from — only middleware can answer for a path like
   // that, so a misordered rule shows up as a 200 with no redirect at all.
   { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+  // Same shape and same reason as /inventory/import and /inventory/labels
+  // directly above: this MUST precede the general /inventory rule
+  // (first-match-wins), because that rule admits purchasing and finance, and
+  // registering a purchased asset into the register is IT's job, not theirs.
+  // The ORDERING is asserted only in workspaces.test.ts.
+  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
   // a dead end on the page built for that role. The secrets rule above still

@@ -108,6 +108,17 @@ describe("pathAllowedForRole", () => {
     ["/inventory/import", "viewer", false],
     ["/inventory/import", "purchasing_staff", false],
     ["/inventory/import", "finance_staff", false],
+    // Task 5 (Phase 12), the identical trap one route over: /inventory
+    // /register sits right above /inventory in PATH_RULES, which admits
+    // purchasing and finance — without this dedicated rule ahead of it, either
+    // could batch-register assets. Every role asserted explicitly, not just
+    // the two that should pass, for the same reason as /inventory/import and
+    // /inventory/labels above.
+    ["/inventory/register", "admin", true],
+    ["/inventory/register", "it_staff", true],
+    ["/inventory/register", "viewer", false],
+    ["/inventory/register", "purchasing_staff", false],
+    ["/inventory/register", "finance_staff", false],
     // Task 4 (Phase 10), the identical E-7/W-1 trap one route over: /inventory
     // sits right below this in PATH_RULES with workspaces ["it", "purchasing",
     // "finance"], so without a dedicated rule ahead of it a finance or
