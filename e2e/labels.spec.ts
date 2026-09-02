@@ -281,4 +281,43 @@ test.describe("label sheet", () => {
     expect(rulerWidths.length).toBeGreaterThan(0);
     for (const w of rulerWidths) expect(w).toBeCloseTo((CALIBRATION_MM * 96) / 25.4, 1);
   });
+
+  test("the scan card shows custody at a glance, keyed on the tag not the id", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    // BY TAG. A cuid would break on the next reseed — this file's own header
+    // says never to reference one, and the tag is what the QR encodes anyway.
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Marites Bautista", { exact: false })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open full record" })).toBeVisible();
+  });
+
+  // The withholding IS the security decision (spec §0 decision 8), so it gets
+  // an assertion rather than a comment. A future "just add cost, it is handy"
+  // change has to delete a test that says why.
+  test("the scan card withholds cost, which the full record shows", async ({ page }) => {
+    const asset = await db.asset.findUniqueOrThrow({
+      where: { tag: "BR-LT-0148" },
+      select: { cost: true },
+    });
+    expect(asset.cost, "seed fixture needs a cost for this test to mean anything").not.toBeNull();
+    const cost = String(asset.cost);
+
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(cost, { exact: false })).toHaveCount(0);
+  });
+
+  test("an unknown tag explains itself instead of 404ing", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory/scan/BR-XX-9999");
+    await expect(page.getByText(/No asset is registered as BR-XX-9999/)).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("the scan card requires a session", async ({ page }) => {
+    await page.goto("/logout");
+    await page.goto("/inventory/scan/BR-LT-0148");
+    await expect(page).toHaveURL(/\/login/);
+  });
 });
