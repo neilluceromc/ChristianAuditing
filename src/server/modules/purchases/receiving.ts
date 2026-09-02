@@ -115,10 +115,27 @@ export async function receiveUnits(input: unknown): Promise<ActionResult<Receive
         return;
       }
 
-      let created = 0;
+      // TWO PASSES, and the split is load-bearing.
+      //
+      // Prisma commits when this callback RESOLVES and rolls back only when it
+      // THROWS. Every refusal below is a `return`, not a throw — so if any
+      // write happened before a refusal, that write would be COMMITTED while
+      // the caller was handed a failure. `runTransition` in ./actions.ts uses
+      // the same return-don't-throw shape safely, but only because all of its
+      // validation precedes its single write.
+      //
+      // So: validate everything first, write nothing. After pass 1 there are
+      // no refusal paths left, and a `return` can no longer commit a partial
+      // receipt. DO NOT move a write into pass 1 or a check into pass 2.
+      const wanted = new Map<string, number>();
       for (const line of d.lines) {
+        wanted.set(line.unitId, (wanted.get(line.unitId) ?? 0) + line.tags.length);
+      }
+
+      const checked = new Map<string, { description: string; unitPrice: Prisma.Decimal | null }>();
+      for (const [unitId, count] of wanted) {
         const unit = await tx.purchaseUnit.findUnique({
-          where: { id: line.unitId },
+          where: { id: unitId },
           select: {
             id: true, requestId: true, qty: true, state: true, description: true,
             unitPrice: true, _count: { select: { assets: true } },
@@ -132,21 +149,28 @@ export async function receiveUnits(input: unknown): Promise<ActionResult<Receive
           failure = conflict(`"${unit.description}" is ${unit.state.toLowerCase()} — it was not purchased.`);
           return;
         }
-
         // Re-read INSIDE the transaction: the screen was rendered from a
-        // snapshot, and someone else may have received in between.
+        // snapshot and someone else may have received in between.
         const receipt: UnitReceipt = { unitId: unit.id, ordered: unit.qty, received: unit._count.assets };
         if (isFullyReceived(receipt)) {
           failure = conflict(`"${unit.description}" is already fully received.`);
           return;
         }
-        if (line.tags.length > outstanding(receipt)) {
+        // `count` is the AGGREGATE across every line naming this unit, so two
+        // lines cannot each clear this check and together exceed the order.
+        if (count > outstanding(receipt)) {
           failure = conflict(
-            `"${unit.description}" has ${outstanding(receipt)} outstanding — cannot receive ${line.tags.length}.`,
+            `"${unit.description}" has ${outstanding(receipt)} outstanding — cannot receive ${count}.`,
           );
           return;
         }
+        checked.set(unit.id, { description: unit.description, unitPrice: unit.unitPrice });
+      }
 
+      // PASS 2 — no refusals remain, so nothing here can commit a half receipt.
+      let created = 0;
+      for (const line of d.lines) {
+        const unit = checked.get(line.unitId)!;
         for (const [i, tag] of line.tags.entries()) {
           const asset = await tx.asset.create({
             data: {
@@ -158,7 +182,7 @@ export async function receiveUnits(input: unknown): Promise<ActionResult<Receive
               status: "SPARE",
               cost: unit.unitPrice ?? null,
               purchaseRequestId: req.id,
-              purchaseUnitId: unit.id,
+              purchaseUnitId: line.unitId,
             },
           });
           created++;
