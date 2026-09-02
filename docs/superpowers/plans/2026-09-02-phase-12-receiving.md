@@ -220,10 +220,12 @@ trailer `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
 | `src/lib/receiving.ts` **(create)** | Pure arithmetic: outstanding, tag runs, prefix preference. |
 | `src/lib/receiving.test.ts` **(create)** | Its unit tests. |
 | `src/server/modules/purchases/receiving.ts` **(create)** | The read and the transactional write. |
-| `src/app/(app)/purchases/[id]/receive/page.tsx` **(create)** | The receive screen. |
-| `src/components/purchases/receive-form.tsx` **(create)** | The client form. |
-| `src/app/(app)/purchases/[id]/page.tsx` **(modify)** | Receive action + per-unit received indicator. |
-| `e2e/receiving.spec.ts` **(create)** | The end-to-end proof, including the write-nothing cases. |
+| — | **Replaced by C-5.** The receive screen and its form are not built: registration needs no purchase request. |
+| `src/app/(app)/inventory/register/page.tsx` **(create)** | Batch registration — no purchase request required. |
+| `src/components/inventory/register-form.tsx` **(create)** | The client form: quantity, learned prefix, editable tags. |
+| `src/lib/workspaces.ts` **(modify)** | One `PATH_RULES` entry, ABOVE the general `/inventory` rule. |
+| `src/app/(app)/inventory/[id]/layout.tsx` **(modify)** | The Finance confirmation pill and Confirm action. |
+| `e2e/receiving.spec.ts` **(create)** | Registration, confirmation and receiving — four write-nothing cases. |
 
 ---
 
