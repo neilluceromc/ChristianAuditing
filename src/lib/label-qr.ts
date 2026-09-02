@@ -86,12 +86,16 @@ export function qrBase(baseUrl: string | undefined): QrBase {
 }
 
 /**
- * `/inventory?q=<tag>` rather than `/inventory/<id>`: the list page already
- * redirects an exact tag match to that asset's record
- * (`src/app/(app)/inventory/page.tsx`), so this reuses a proven path instead of
- * adding a route — and it degrades usefully, since a reader that yields plain
- * text still shows a human something meaningful.
+ * The compact scan card (`/inventory/scan/<tag>`), NOT the full record.
+ *
+ * Keyed on the tag rather than the id because a cuid changes on every reseed
+ * and this string is printed onto adhesive paper. Asset.tag is @unique, so
+ * the card can find the row from it.
+ *
+ * `/inventory?q=<tag>` still redirects an exact tag match to the full record
+ * and is untouched — that is the USB desk scanner's contract, guarded by
+ * e2e/it-core.spec.ts. This function decides only where a PHONE lands.
  */
 export function qrUrlFor(tag: string, base: { prefix: string }): string {
-  return `${base.prefix}/inventory?q=${encodeURIComponent(tag)}`;
+  return `${base.prefix}/inventory/scan/${encodeURIComponent(tag)}`;
 }

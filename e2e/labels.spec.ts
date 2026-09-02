@@ -253,7 +253,7 @@ test.describe("label sheet", () => {
     const qr = page.getByRole("img", { name: /^QR / });
     await expect(qr).toHaveCount(1);
     const name = await qr.getAttribute("aria-label");
-    expect(name).toMatch(/^QR https?:\/\/.+\/inventory\?q=BR-LT-0148$/);
+    expect(name).toMatch(/^QR https?:\/\/.+\/inventory\/scan\/BR-LT-0148$/);
     expect(name).not.toMatch(/localhost|127\./);
   });
 

@@ -87,15 +87,18 @@ describe("qrBase", () => {
 });
 
 describe("qrUrlFor", () => {
-  it("builds the exact-tag search URL the redirect already handles", () => {
+  // Decision 8: the QR lands on the compact scan card, not the full record.
+  // The /inventory?q= redirect still exists and is still the desk scanner's
+  // contract — it is simply not what the QR encodes any more.
+  it("builds the scan-card URL", () => {
     expect(qrUrlFor("BR-LT-0166", { prefix: "http://host:3000" })).toBe(
-      "http://host:3000/inventory?q=BR-LT-0166",
+      "http://host:3000/inventory/scan/BR-LT-0166",
     );
   });
 
-  it("percent-encodes a tag that would otherwise break the query", () => {
+  it("percent-encodes a tag that would otherwise break the path", () => {
     expect(qrUrlFor("BR LT/0166", { prefix: "http://host:3000" })).toBe(
-      "http://host:3000/inventory?q=BR%20LT%2F0166",
+      "http://host:3000/inventory/scan/BR%20LT%2F0166",
     );
   });
 });
