@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1, a contradiction in this plan's own constraints.
+> ### AMENDED DURING EXECUTION — C-1 and C-2. Both are defects in this plan, both caught by an implementer who stopped instead of guessing.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -37,7 +37,44 @@ written until submit.
 > blast radius, and a plan that adds an enum member must go looking for the exhaustive maps over it
 > *before* declaring the task's file list. **And the happy note: that map being exhaustive is precisely
 > why this surfaced at compile time instead of rendering a blank chip in production the first time
-> someone received a purchase.** It was not loosened to `Partial<Record<…>>` to silence the error.
+> someone received a purchase.** It was not loosened to `Partial<Record<…>>` to silence the error.>
+> **C-2. Task 3's given code imported `TAG_SHAPE` and never used it, so it failed
+> `eslint --max-warnings 0`.** The import was referenced only inside two doc comments. Caught by the
+> implementer, who stopped rather than deleting it silently — right call, because the obvious fix hides
+> a worse problem.
+>
+> **The worse problem: `MAX_TAG_NUMBER = 9999` and `TAG_SHAPE`'s `\d{4}` are two encodings of one
+> constraint, in two files.** That is precisely the duplication **Task 1 existed to remove** — the plan
+> hoisted the regex to a single definition and then, one task later, wrote its arithmetic twin as a
+> separate literal. Deleting the dead import alone would have left that standing behind a comment, and
+> comments do not fail.
+>
+> Resolved three ways rather than one: the dead import is gone, the comment on `MAX_TAG_NUMBER` now
+> states that it is the arithmetic face of `\d{4}` and that the two must move together, and a test
+> **pins them to each other** — the highest number the generator will mint must satisfy `TAG_SHAPE`,
+> and one past it must not. Widen the regex to five digits and the generator silently keeps refusing at
+> 9999; narrow it to three and it mints tags the rest of the app rejects. The pinning test catches both
+> of those.
+>
+> **CORRECTION, and it was the implementer's, not mine.** I predicted the pinning test would ALSO catch
+> the `start + count - 1 > MAX` → `start > MAX` off-by-one, making mutation 2 fail two tests. It fails
+> **one**. At `count: 1` the two expressions evaluate to the same number, so the mutation is simply
+> unobservable at that call site. The tests are right; my arithmetic was wrong. **The off-by-one is
+> covered by the overflow test's `count: 3` case and by nothing else** — which the implementer
+> correctly described as coverage that "happens to" exist. Incidental coverage is one tidy-up away from
+> gone, so that test now carries a comment explaining why both of its cases are load-bearing, why the
+> `count > 1` case is the only guard against the off-by-one, and that collapsing them would silently
+> delete the only thing standing between the generator and `BR-LT-10000`.
+>
+> **Rejected:** widening the pinning test to also assert a run ending past the ceiling. That is exactly
+> what the overflow test already asserts — it would be duplicate coverage dressed as a stronger test,
+> and it would blur what the pinning test is for.
+>
+> **This is the fourth defect in this plan** (after the contradictory scope line, the nonexistent
+> `SYSTEM` enum member, and the deliberately-wrong test expectation I removed at self-review). All four
+> were mine, none would have failed a test suite as written, and three of the four were caught only
+> because an implementer refused to paper over something odd. **That ratio is the argument for the
+> review loop, and for telling implementers that objecting is part of the job.**
 
 **Conventions for every task:** stay on `phase-12-receiving`; run `npx tsc --noEmit && npm run lint`
 before each commit; **NEVER run `npm run build` while a dev server is running** (they share `.next`).
