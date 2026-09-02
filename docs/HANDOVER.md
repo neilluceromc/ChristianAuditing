@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-08-27 (**PHASE 10 IS MERGED TO `main`**; Phase 11 exists and is PARKED — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-09-02 (**PHASE 11 IS CODE-COMPLETE on `phase-11-label-qr`, battery green, UNMERGED** — see §0 item 4e; Phase 10 merged and pushed on 2026-08-27) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,12 +13,14 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-**Phase 10 is MERGED to `main` (`--no-ff` `bd78813`, 2026-08-27) and its battery was green on the
-merged result. It was the last planned phase.** What remains is the push decision, one measurement no
-agent can take, and a parked Phase 11. Read items 1–4 below, then stop and ask.
+**Phase 10 is MERGED and PUSHED. Phase 11 is CODE-COMPLETE on `phase-11-label-qr`, battery green,
+and UNMERGED — that branch is where the work is, not `main`.** What remains is the merge and push
+decisions for Phase 11, and **two physical checks no agent can perform**: a tape measure on the 100 mm
+calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop and ask.
 
-1. **`git checkout main`.** Phase 10 is merged into it and it is **pushed** — level with
-   `origin/main`. **Count it yourself anyway** (`git rev-list --count origin/main..main`)
+1. **`git checkout phase-11-label-qr`** — that is where the live work is; `main` has Phases 1–10 only.
+   The branch is 15 ahead of `main` and 0 behind. `main` itself is **pushed** and level with
+   `origin/main`; **neither phase branch has ever been pushed.** **Count it yourself anyway** (`git rev-list --count origin/main..main`)
    rather than trusting those numbers; every correction to this line is itself a commit. Nothing has
    been pushed since the Phase 1–7 merge on 2026-08-19, deliberately: **the user treats merging and
    publishing as separate decisions and asks for each explicitly. Never push or merge unprompted.** The
@@ -66,26 +68,51 @@ agent can take, and a parked Phase 11. Read items 1–4 below, then stop and ask
    `pg_dump`** — asset documents are plain host files bind-mounted into `web`, so a database backup
    alone does not restore them.
 
-   **(e) PHASE 11 EXISTS AND IS PARKED. Do not be surprised by it.** On 2026-08-26 the user asked for
-   a phone-scannable QR on the asset label, so `phase-11-label-qr` was cut **from `phase-10-polish`**
-   (not from `main` — the label sheet it extends only exists here). It is brainstormed, specced, planned
-   and **three of its nine tasks are committed**: `src/lib/label-qr.ts` (the URL a QR encodes),
-   `src/lib/qr.ts` (the encoder behind a three-line surface), and `qrFit` in `label-geometry.ts`. That
-   branch is **10 commits ahead of this one, green at 818 unit tests**, and **nothing imports the new
-   modules yet** — they are self-contained, so the branch is parked mid-plan without anything
-   half-wired. On 2026-08-27 the user said to leave the QR and close Phase 10 out first.
+   **(e) PHASE 11 IS CODE-COMPLETE and UNMERGED. This is where the live work is.**
+   On 2026-08-26 the user asked for a phone-scannable QR on the asset label, so `phase-11-label-qr` was
+   cut from `phase-10-polish`. **All nine tasks are now done** (2026-09-02) and the branch is **15
+   commits ahead of `main`, 0 behind** — `main` was merged IN rather than the branch rebased, because
+   this project's docs cite SHAs and a rebase would dangle every one of them.
+
+   **Battery on the branch, all green:** `tsc` · `lint` · **818 unit / 49 files** · `npm run build` ·
+   `docker compose --profile prod build` (3 images) · **149 e2e / 12 files** in four measured parts —
+   **51 · 58 · 34 · 6**. Part 2 grew from 56 to 58 and needed its `--global-timeout` raised. Axe
+   moderates are unchanged from Phase 10 (`empty-table-header` 9, `page-has-heading-one` 2,
+   `landmark-unique` 1), so nothing regressed.
+
+   **What it ships:** each label now carries **two** codes for two readers — the Code 128 barcode the
+   USB desk scanner needs (it types the tag as keystrokes, which is what the offboarding wizard
+   listens for) and a QR holding `{APP_BASE_URL}/inventory?q={TAG}`, which reuses the exact-tag
+   redirect rather than adding a route. Signed-in staff only; there is deliberately no public lookup,
+   because asset tags are sequential and a public page keyed by tag would be a walkable index of who
+   holds what, behind a sticker anyone can photograph. `APP_BASE_URL` is required, has **no default**,
+   and a loopback/`0.0.0.0` value is **refused** rather than printed — a dead QR on adhesive paper is
+   not recoverable. When it is unusable the sheet prints the barcode alone plus a note naming which of
+   the four causes applied.
+
+   **Measured, not assumed** (2026-09-02, rendered DOM): page box 209.996 × 296.999 mm · barcode
+   height **9.000 mm** · QR footprint **20.497 mm** square · calibration ruler **99.996 mm** · **0
+   cells clipped**. That last set matters because the label cell is a column flex with
+   `overflow: hidden`, so an over-tall child does not overflow — it silently compresses its siblings,
+   which is exactly how the ruler once shipped at 89.38 mm.
 
    Spec: `docs/superpowers/specs/2026-08-26-label-qr-design.md`. Plan:
-   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, **resume at Task 4**, which is the risky
-   one — it spends the same vertical budget that let the calibration ruler ship at 89.38 mm.
-   Amendments `B-1…B-3`, and **all three were defects in the plan rather than the implementations**;
-   B-1 was worse than that, a command that broke the working environment.
+   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, amendments **B-1…B-11** — **four of the
+   eleven were defects in the plan rather than the implementations**, and B-1 was a command that broke
+   the working environment (an `npm install` inside a bind-mounted Alpine container replaced
+   `node_modules` with Linux binaries; recovery is `npm ci` then `npx prisma generate`).
 
-   ✓ **Phase 11's base is now inside `main`.** It was cut from `phase-10-polish`, and that branch has
-   since been merged, so `phase-11-label-qr`'s fork point is reachable from `main`. **Deleting the
-   `phase-10-polish` ref would strand nothing** — an earlier revision of this document warned that it
-   would, and that warning was only true before the merge. Phase 11 can be rebased onto `main` whenever
-   it is resumed, or merged as-is.
+   ⚠️ **`APP_BASE_URL` in `.env` is a PLACEHOLDER** (`http://inventory.backroom.local:3000` locally,
+   `http://inventory.example.local:3000` in `.env.example`). **The user was asked twice and deferred
+   twice — it is still unchosen.** Whatever is set there is baked permanently into every printed
+   sticker, and it needs a DNS or router entry pointing at the server before any label is printed.
+
+   **What remains for Phase 11 is not code:** the merge and push decisions, and **two physical checks
+   no agent can perform** — the tape measure on the 100 mm bar, and a phone on a printed QR. Both hinge
+   on the same setting: at "Fit to page" the QR modules and the ruler shrink together, so a failure
+   there is a print-settings problem, not a software one. `QR_PREFERRED_MODULE_MM` (0.5) and
+   `QR_MIN_MODULE_MM` (0.4) are the least-evidenced numbers in the phase — a judgement about phone
+   optics that the physical read is meant to replace with a measurement.
 
    **If the user wants different work rather than a decision, there is no plan for it.** Start with
    `superpowers:brainstorming`, then `superpowers:writing-plans` — do not improvise changes onto a
