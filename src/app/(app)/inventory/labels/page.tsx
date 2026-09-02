@@ -80,7 +80,13 @@ export default async function LabelsPage({
           </Banner>
         </div>
       </div>
-      <LabelSheet rows={rows} />
+      {/* Read here rather than inside the component: this is a Server
+          Component and the sheet is a pure render of its props, which is what
+          keeps label-sheet.tsx drivable from Playwright without stubbing an
+          environment. `qrBase` decides whether the value is usable; an unset
+          or loopback APP_BASE_URL prints the barcode alone plus a note
+          naming the cause, never a dead QR. */}
+      <LabelSheet rows={rows} baseUrl={process.env.APP_BASE_URL} />
     </>
   );
 }

@@ -142,6 +142,39 @@ That password is `admin123` — **8 characters**, deliberately shorter than the 
 a fixture for a loopback-only dev database in a public repo, not a real credential. **Change every
 seeded password before the app is reachable from anywhere but localhost.**
 
+## Scanning a label with a phone
+
+Each printed label carries **two** codes, for two different readers.
+
+The **Code 128 barcode** is for a USB handheld scanner, which behaves as a keyboard: it types the asset
+tag and presses Enter. That is what the offboarding wizard listens for, so removing it would break the
+scanner workflow.
+
+The **QR code** is for a phone. It holds `{APP_BASE_URL}/inventory?q={TAG}`, and the inventory list
+redirects an exact tag match to that asset's record — the page showing who currently holds it. Scanning
+opens the record for a **signed-in** user; an unauthenticated scan lands on the sign-in page first.
+There is no public lookup, deliberately: asset tags are sequential, so a page keyed by tag and readable
+by anyone would be a walkable index of who holds what, behind a sticker anyone can photograph.
+
+Set `APP_BASE_URL` to a **hostname you control** — read the comment block in `.env.example` before you
+choose, because that value is baked permanently into every sticker you print. Without it, labels print
+the barcode alone and the sheet says which of the four possible reasons applied, rather than printing a
+dead QR.
+
+**This turns changing the seeded passwords from advice into a prerequisite.** A phone scanning a label
+has to reach this app over the network, and the `web` service already publishes port 3000 on **all**
+interfaces — unlike the database, which is deliberately loopback-only. There is **no HTTPS**, so every
+sign-in crosses the network in plaintext, and `admin123` is published in this repo. Before you print
+labels and hand phones to staff: change every seeded password, and put the app behind a reverse proxy
+with TLS if it will be reachable beyond a trusted LAN.
+
+**What is proven and what is not.** The QR's payload, its refusal cases and its rendered geometry are
+covered by tests, and the printed symbol has been measured through a real PDF. Whether a *printed* QR
+reads on a given phone at a given distance has **not** been verified by anyone — that needs a printer, a
+phone and a person. Print at **Scale 100%, A4, Margins None**: at "Fit to page" both the QR modules and
+the calibration bar shrink together, and a QR that fails then is a print-settings problem, not a
+software one.
+
 ## Troubleshooting
 
 **`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`** — Docker Desktop

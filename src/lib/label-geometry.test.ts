@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   LABELS_PER_PAGE, LABEL_CELL_MM, LABEL_USABLE_MM,
-  barcodeFit, labelPages,
+  QR_PREFERRED_MODULE_MM, QR_MIN_MODULE_MM, QR_MAX_DARK_MM, QR_QUIET_MODULES,
+  barcodeFit, labelPages, qrFit,
 } from "./label-geometry";
 
 describe("sheet geometry", () => {
@@ -132,5 +133,51 @@ describe("barcodeFit", () => {
       expect(() => barcodeFit(t)).not.toThrow();
       expect(barcodeFit(t).encodable).toBe(expected);
     }
+  });
+});
+
+describe("qrFit", () => {
+  // Version 4 (33 modules) is what a realistic label URL produces. Below the
+  // width cap, so it gets the full preferred module size.
+  it("gives a version-4 symbol the full preferred module size", () => {
+    const fit = qrFit(33);
+    expect(fit.renderable).toBe(true);
+    if (!fit.renderable) return;
+    expect(fit.moduleMm).toBeCloseTo(QR_PREFERRED_MODULE_MM, 6);
+    // Footprint includes the mandatory 4-module quiet zone on all sides, which
+    // is what actually competes for space on the label — not the dark area.
+    expect(fit.sizeMm).toBeCloseTo((33 + 2 * QR_QUIET_MODULES) * QR_PREFERRED_MODULE_MM, 6);
+    expect(fit.sizeMm).toBeCloseTo(20.5, 6);
+  });
+
+  // Past the cap the module shrinks rather than the symbol growing without
+  // bound — the same trade `barcodeFit` makes against LABEL_USABLE_MM.
+  it("caps the dark area and lets the module shrink for a big symbol", () => {
+    const fit = qrFit(53); // version 9
+    expect(fit.renderable).toBe(true);
+    if (!fit.renderable) return;
+    expect(fit.moduleMm).toBeCloseTo(QR_MAX_DARK_MM / 53, 6);
+    expect(fit.moduleMm).toBeLessThan(QR_PREFERRED_MODULE_MM);
+    expect(fit.moduleMm).toBeGreaterThanOrEqual(QR_MIN_MODULE_MM);
+  });
+
+  it("refuses a symbol whose modules fall under the phone-camera floor", () => {
+    // 61 modules is version 11: 24/61 = 0.393mm, under the 0.4mm floor.
+    expect(qrFit(61)).toEqual({ renderable: false });
+  });
+
+  it("refuses a size that is not a legal QR module count", () => {
+    expect(qrFit(0)).toEqual({ renderable: false });
+    expect(qrFit(20)).toEqual({ renderable: false });
+    expect(qrFit(24)).toEqual({ renderable: false }); // 21+4n only
+    expect(qrFit(33.5)).toEqual({ renderable: false });
+    expect(qrFit(181)).toEqual({ renderable: false }); // past version 40
+  });
+
+  // The floor must be a real boundary, not decoration: 57 is the largest legal
+  // size that clears it and 61 is the smallest that does not.
+  it("puts the accept/refuse boundary between version 10 and version 11", () => {
+    expect(qrFit(57).renderable).toBe(true);
+    expect(qrFit(61).renderable).toBe(false);
   });
 });
