@@ -224,7 +224,7 @@ test.describe("label sheet", () => {
     // has no e2e coverage right now for exactly that reason.
   });
 
-  test("each label carries a QR whose encoded URL is the exact-tag search", async ({ page }) => {
+  test("each label carries a QR whose encoded URL is the scan card for its tag", async ({ page }) => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/labels?ids=${asset.id}`);

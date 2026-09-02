@@ -78,9 +78,10 @@ export function qrBase(baseUrl: string | undefined): QrBase {
   }
 
   // Trailing slashes are stripped rather than refused (the likeliest human
-  // input), but any query or fragment on the base is dropped: this prefix is
-  // concatenated with a path and its own `?q=`, so carrying one through would
-  // build a URL with two query strings.
+  // input), but any query or fragment on the base is dropped: this prefix has
+  // a PATH concatenated onto it (`/inventory/scan/<tag>`), so carrying a query
+  // through would strand it in the middle of the URL, before the path it was
+  // meant to follow.
   const path = url.pathname.replace(/\/+$/, "");
   return { ok: true, prefix: `${url.protocol}//${url.host}${path}` };
 }
