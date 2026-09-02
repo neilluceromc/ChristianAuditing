@@ -151,4 +151,30 @@ test.describe("shell", () => {
     await expect(page).toHaveURL(/\/inventory\//);
     await expect(page.getByRole("dialog", { name: "Command palette" })).toHaveCount(0);
   });
+
+  /**
+   * Regression guard for a deleted `(app)/[...pending]` catch-all.
+   *
+   * That route survived from the phased build and intercepted every 404 under
+   * the (app) group, rendering "This screen arrives in Phase 3 — on the
+   * roadmap, the page isn't built yet" with a PLANNED pill and HTTP 200. Once
+   * all eleven phases had shipped that message could never be true again, and
+   * it meant the app had no real 404 inside its shell: any typo under an
+   * allowed path prefix became a confident promise of a feature.
+   *
+   * The failure mode of re-adding such a catch-all is SILENT — 404s simply
+   * stop happening and every wrong URL looks like a page — so this asserts
+   * the STATUS CODE, not just the copy. A test that only checked for the
+   * words would pass against any friendly-looking placeholder.
+   */
+  test("an unmatched path under the app shell is a real 404, not a placeholder", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    // Must sit under a prefix PATH_RULES admits: a path no rule allows is
+    // redirected to the role's own landing by middleware.ts before routing is
+    // ever consulted, so it would never reach a 404 either way.
+    const resp = await page.goto("/inventory/labels/no-such-page");
+    expect(resp?.status(), "an unmatched route must answer 404").toBe(404);
+    await expect(page.getByText("This page doesn't exist")).toBeVisible();
+    await expect(page.getByText(/arrives in Phase/)).toHaveCount(0);
+  });
 });
