@@ -18,13 +18,14 @@ and UNMERGED — that branch is where the work is, not `main`.** What remains is
 decisions for Phase 11, and **two physical checks no agent can perform**: a tape measure on the 100 mm
 calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop and ask.
 
-1. **`git checkout phase-11-label-qr`** — that is where the live work is; `main` has Phases 1–10 only.
-   The branch is 15 ahead of `main` and 0 behind. `main` itself is **pushed** and level with
-   `origin/main`; **neither phase branch has ever been pushed.** **Count it yourself anyway** (`git rev-list --count origin/main..main`)
-   rather than trusting those numbers; every correction to this line is itself a commit. Nothing has
-   been pushed since the Phase 1–7 merge on 2026-08-19, deliberately: **the user treats merging and
-   publishing as separate decisions and asks for each explicitly. Never push or merge unprompted.** The
-   repo is public — never commit `.env` or any real secret.
+1. **`git checkout phase-11-label-qr`** — that is where the live work is; `main` carries Phases 1–10
+   only. The branch is ~17 ahead of `main` and 0 behind, and **has never been pushed**. `main` itself
+   was pushed on 2026-08-27 and is level with `origin/main`. **Count both yourself**
+   (`git rev-list --count origin/main..main` and `git rev-list --count main..phase-11-label-qr`) —
+   every correction to this line is itself a commit, so it is stale the moment it is written.
+   **The user treats merging and publishing as separate decisions and asks for each explicitly. Never
+   push or merge unprompted.** The repo is public — never commit `.env` or any real secret, and
+   secret-scan before any push (§0 item 4c records what that scan covered last time).
 
 2. **Bring the environment up:** `docker compose up -d db` → `npx prisma migrate deploy` →
    `npm run db:seed`. **8 migrations, none pending**; Phase 10 adds none. `npm run db:seed` runs freely.
@@ -34,26 +35,35 @@ calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop 
    `npipe:////./pipe/dockerDesktopLinuxEngine … cannot find the file specified`, **ask the user to start
    it** — `Start-Process "Docker Desktop.exe"` launches and silently exits. This cost twenty minutes.
 
-3. **Read `docs/superpowers/plans/2026-08-25-phase-10-polish.md`, Task 10, and its spec
-   (`docs/superpowers/specs/2026-08-25-phase-10-polish-design.md`).** Every task carries an `AMENDED`
-   banner — **A-1 through A-44** — recording what the plan got wrong. Read the banner before the task
-   body; in several cases the banner reverses the body.
+3. **Read the PHASE 11 plan and spec first** — `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`
+   and `docs/superpowers/specs/2026-08-26-label-qr-design.md`. That is the live work. Its banner carries
+   **B-1 through B-11**, four of which were defects in the plan rather than in the implementations.
+   Phase 10's plan (`2026-08-25-phase-10-polish.md`, amendments **A-1…A-44**) is history now, but worth
+   reading for the same reason. **In both, read the `AMENDED` banner BEFORE the task body** — in several
+   cases the banner reverses the body outright.
 
-4. **There is no next task. What is left is four things, and three of them are the user's to decide.**
+4. **There is no next CODING task. Everything below is either a user decision or a physical act no
+   agent can perform.** Five items; (b) and (c) are done for Phase 10 and **open again for Phase 11**.
 
-   **(a) The one open entry criterion: print a sheet and measure it.** Task 11 Step 4 asks for a real
-   label sheet printed and the 100 mm calibration bar measured with a tape measure, with the browser and
-   print settings recorded in §8. **No agent can do this** — it needs a printer and a human. Everything
-   else about the label sheet is proven in software: the bar measured 100.0 mm in the rendered DOM
-   (Task 4's e2e measures it, after it silently shrank to 89.38 mm once). If the physical bar comes up
-   short, the PDF escape hatch in spec §5 stops being speculative and becomes justified.
+   **(a) TWO physical checks, on one sheet of paper. No agent can do either.** Print a label sheet at
+   **Scale 100%, A4, Margins None**, then (i) measure the 100 mm calibration bar with a tape measure and
+   (ii) scan one of its QR codes with a phone. Record the browser, the printer and all three print
+   settings in §8 alongside the numbers.
+   - Both hinge on that one setting: at "Fit to page" the QR modules and the ruler shrink **together**,
+     so a failure there is a print-settings problem, not a software one.
+   - The bar is proven in software — 100.0 mm in the rendered DOM, and 99.97–100.01 mm measured inside a
+     real Chrome-generated PDF. It silently shipped at 89.38 mm once, which is why it exists at all. If
+     the printed bar is short **at 100% scale**, spec §5's PDF escape hatch stops being speculative.
+   - The QR has never been read off paper by anything. `QR_PREFERRED_MODULE_MM` (0.5) and
+     `QR_MIN_MODULE_MM` (0.4) are a judgement about phone optics, not a measurement — this scan is what
+     replaces the guess. Record the result against those two constants.
 
-   **(b) Merging — DONE.** `phase-10-polish` was merged to `main` on 2026-08-27 via `--no-ff`
+   **(b) Merging — done for PHASE 10, OPEN for Phase 11.** `phase-10-polish` was merged to `main` on 2026-08-27 via `--no-ff`
    `bd78813`, the user having chosen that explicitly. `tsc`, `lint` and 797 unit tests were re-run on
    the merged result and the merged tree is byte-identical to the branch. **The branch ref was kept.**
    Deleting it now would strand nothing — its tip is reachable from `main` — but there is no need.
 
-   **(c) Pushing — DONE.** 180 commits went up on 2026-08-27, the user having asked for it separately
+   **(c) Pushing — done for PHASE 10, OPEN for Phase 11 (its branch has never been pushed).** 180 commits went up on 2026-08-27, the user having asked for it separately
    from the merge, as this project always does. **A secret scan ran first and is worth repeating before
    any future push, because this repo is PUBLIC:** no `.env` was ever committed in those 180 commits, no
    `uploads/`/`backups/` content leaked in, the only `.sql` files are legitimate migrations, and no
