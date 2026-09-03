@@ -1,34 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isFullyReceived, nextTags, outstanding, preferredPrefix } from "./receiving";
+import { nextTags, preferredPrefix } from "./receiving";
 import { TAG_SHAPE } from "./tag-key";
-
-describe("outstanding", () => {
-  it("is what is left to receive", () => {
-    expect(outstanding({ unitId: "u", ordered: 8, received: 0 })).toBe(8);
-    expect(outstanding({ unitId: "u", ordered: 8, received: 5 })).toBe(3);
-    expect(outstanding({ unitId: "u", ordered: 8, received: 8 })).toBe(0);
-  });
-
-  // Over-receipt should not produce a NEGATIVE outstanding that a caller then
-  // renders as "-2 remaining" or uses to size an array.
-  it("floors at zero when more arrived than was ordered", () => {
-    expect(outstanding({ unitId: "u", ordered: 2, received: 5 })).toBe(0);
-  });
-});
-
-describe("isFullyReceived", () => {
-  it("is true at and beyond the ordered quantity", () => {
-    expect(isFullyReceived({ unitId: "u", ordered: 2, received: 1 })).toBe(false);
-    expect(isFullyReceived({ unitId: "u", ordered: 2, received: 2 })).toBe(true);
-    expect(isFullyReceived({ unitId: "u", ordered: 2, received: 3 })).toBe(true);
-  });
-
-  // A zero-quantity unit is vacuously complete — it must not present a
-  // Receive action forever.
-  it("treats a zero-quantity unit as complete", () => {
-    expect(isFullyReceived({ unitId: "u", ordered: 0, received: 0 })).toBe(true);
-  });
-});
 
 describe("nextTags", () => {
   it("runs on from the highest existing number", () => {

@@ -39,15 +39,11 @@ export function auditSentence(entry: ActivityEntryLike): string {
       return `${entry.actorLabel} cancelled ${entry.entityLabel}`;
     case "complete":
       return `${entry.actorLabel} completed ${entry.entityLabel}`;
-    // Phase 12's five asset actions. Left to the default they rendered the
+    // Phase 12's asset actions. Left to the default they rendered the
     // raw verb — "J. Sarmiento finance.return BR-LT-0148" — which is not a
     // sentence and buries the one thing a reader of the feed wants.
     case "register":
       return `${entry.actorLabel} registered ${entry.entityLabel}`;
-    case "receive": {
-      const ref = diff?.purchaseRequest?.to;
-      return `${entry.actorLabel} received ${entry.entityLabel}${ref ? ` against ${String(ref)}` : ""}`;
-    }
     case "finance.confirm":
       return `${entry.actorLabel} confirmed ${entry.entityLabel}'s details`;
     case "finance.return": {

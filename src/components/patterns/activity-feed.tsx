@@ -61,14 +61,13 @@ export function actionDot(action: string): string {
   // For "import-create" that WOULD be wrong: a created-by-import row
   // settles the same way a manual create does, so it needs the same
   // explicit branch create already gets.
-  // "register" and "receive" are Phase 12's two ways for an asset to come
-  // into existence, so they settle exactly as create does — explicit here
-  // for the same reason import-create is, rather than left to the default.
+  // "register" is Phase 12's way for an asset to come into existence, so it
+  // settles exactly as create does — explicit here for the same reason
+  // import-create is, rather than left to the default.
   if (
     action === "create" ||
     action === "import-create" ||
     action === "register" ||
-    action === "receive" ||
     action.includes("executed")
   )
     return "DEPLOYED"; // settled

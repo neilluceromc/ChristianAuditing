@@ -23,13 +23,6 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
   it("register reads as registration, not the raw verb", () => {
     expect(auditSentence({ ...base, action: "register" })).toBe("J. Sarmiento registered BR-LT-0148");
   });
-  it("receive names the request it came in against", () => {
-    expect(auditSentence({ ...base, action: "receive", diff: { purchaseRequest: { from: null, to: "PR-0188" } } }))
-      .toBe("J. Sarmiento received BR-LT-0148 against PR-0188");
-  });
-  it("receive still reads as a sentence when the diff has no request", () => {
-    expect(auditSentence({ ...base, action: "receive" })).toBe("J. Sarmiento received BR-LT-0148");
-  });
   it("finance.confirm says what was confirmed", () => {
     expect(auditSentence({ ...base, action: "finance.confirm", diff: { financeConfirmed: { from: null, to: "M. Cruz" } } }))
       .toBe("J. Sarmiento confirmed BR-LT-0148's details");
@@ -146,9 +139,6 @@ describe("actionDot — Phase 12's asset actions are explicit, not left to the n
   // literal so the two cannot drift apart silently.
   it("register settles the same way a manual create does", () => {
     expect(actionDot("register")).toBe(actionDot("create"));
-  });
-  it("receive settles the same way a manual create does", () => {
-    expect(actionDot("receive")).toBe(actionDot("create"));
   });
   it("finance.confirm settles", () => {
     expect(actionDot("finance.confirm")).toBe("COMPLETED");

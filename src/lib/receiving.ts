@@ -1,29 +1,12 @@
 /**
- * Receiving arithmetic. Pure by design: these are the rules that decide what
- * gets written into the asset register, so they are testable without a
- * database.
+ * Asset-tag arithmetic for registration. Pure by design: these are the rules
+ * that decide what gets written into the asset register, so they are testable
+ * without a database.
  *
- * `received` is always a COUNT OF ROWS (assets pointing at the unit), never a
- * stored flag — see the Phase 12 spec, decision 4. That is what makes partial
- * receipts and idempotency fall out for free instead of needing bookkeeping.
+ * This file also held the receiving arithmetic (`outstanding`,
+ * `isFullyReceived`, `UnitReceipt`) until C-10 removed it — C-5 had replaced
+ * the receive screen with registration, leaving that half with no caller.
  */
-export interface UnitReceipt {
-  unitId: string;
-  ordered: number;
-  received: number;
-}
-
-/** Floors at zero: an over-receipt must not yield a negative that a caller
- *  renders as "-2 remaining" or uses to size an array. */
-export function outstanding(r: UnitReceipt): number {
-  return Math.max(0, r.ordered - r.received);
-}
-
-/** `>=`, not `===`: an over-received unit is finished, not perpetually open.
- *  A zero-quantity unit is vacuously complete. */
-export function isFullyReceived(r: UnitReceipt): boolean {
-  return r.received >= r.ordered;
-}
 
 const PREFIX_SHAPE = /^[A-Z]{2}$/;
 
