@@ -98,6 +98,16 @@ with `npm ci --omit=dev` and copies it in, `tsx` is a regular dependency (surviv
 docker compose --profile prod exec web node_modules/.bin/tsx prisma/seed.ts
 ```
 
+⚠️ **Set `SEED_PASSWORD` in `.env` first, or this command refuses to run.** The seed creates
+accounts that all share one password, and the fallback is published in the table below — so
+`prisma/seed.ts` throws when `NODE_ENV=production` and `SEED_PASSWORD` is unset. The runtime image
+sets `NODE_ENV=production` (see `Dockerfile`), and `web` loads `.env` via `env_file`, so setting it
+in `.env` on the deployment host is all that is needed. The error names the reason if you forget.
+
+Note the asymmetry with local development, where `.env.example` tells you to leave `SEED_PASSWORD`
+**unset**: there, the fallback is what the test suite expects, and setting it can desynchronise the
+seed from the e2e specs. **Set it on a deployment host; leave it unset on a development machine.**
+
 ## Migrations
 
 Migrations are hand-written, additive SQL directories under `prisma/migrations/`, applied with:
