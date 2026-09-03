@@ -36,5 +36,13 @@
  * the production image sets `NODE_ENV=production` in its Dockerfile, so seeding
  * a deployed stack with this published value is not something you can do by
  * forgetting. Reachability, not the constant, is what makes it dangerous.
+ *
+ * ⚠️ Do NOT set `SEED_PASSWORD` for local development. `prisma/seed.ts` sees
+ * `.env` because Prisma Client loads it; the Playwright process that imports
+ * THIS constant to type the password into the login form does not reliably do
+ * the same. Set it locally and the seed hashes one password while every e2e
+ * spec types another, and the whole suite fails on login with nothing pointing
+ * at the cause. The env var is for deployments; the fallback is for everything
+ * else, and both halves must agree.
  */
 export const SEED_PASSWORD = process.env.SEED_PASSWORD ?? "admin123";
