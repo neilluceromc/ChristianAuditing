@@ -87,11 +87,14 @@ export function RegisterForm({
     setRun(result);
     if (result.ok) {
       setTags(result.tags);
-      setSerials((prev) => {
-        const next = [...prev];
-        next.length = result.tags.length;
-        return next.map((s) => s ?? "");
-      });
+      // Array.from, not `next.length = n` + `.map`: growing an array by
+      // assigning `.length` creates HOLES, and `.map` skips holes rather than
+      // filling them — so every added row kept an empty slot that serialized
+      // to `undefined` and was rejected by `serials: z.array(z.string())`.
+      // The per-index onChange below is `.map`-based too, so typing into the
+      // field could not repair it either: registration failed at every
+      // quantity, including 1. Found by Task 7's first e2e run.
+      setSerials((prev) => Array.from({ length: result.tags.length }, (_, i) => prev[i] ?? ""));
     } else {
       setTags([]);
     }
