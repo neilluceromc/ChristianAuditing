@@ -5,31 +5,26 @@ import { ROLE_LANDING } from "@/lib/workspaces";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 
 /**
- * Phase 12, Task 7. Three surfaces: registration (Task 5, the primary path —
- * IT registers already-purchased assets with auto-numbered tags, no purchase
- * request required), Finance review (Task 6's confirm and Task 7a's C-7
- * send-back/mark-corrected), and receiving (Tasks 3-4's transactional write
- * against a COMPLETED purchase request — kept for C-4's rollback guard).
+ * Phase 12, Task 7 (third revision). Two surfaces: registration (Task 5 — IT
+ * registers already-purchased assets with auto-numbered tags, no purchase
+ * request required) and Finance review (Task 6's confirm, Task 7a's C-7
+ * send-back/mark-corrected).
  *
- * ⚠️ BLOCKING FINDING, reported rather than papered over (see this
- * implementer's final report): **the receiving surface has no UI.** C-5
- * replaced Tasks 5-6 (the receive screen was never built — see the plan's own
- * file-structure table, "Replaced by C-5. The receive screen and its form are
- * not built"). `receiveUnits`/`receivableUnits`
- * (`src/server/modules/purchases/receiving.ts`) are exercised by unit tests
- * only; grep confirms zero `.tsx` callers and no route.ts wraps them. They
- * also require `actionRole` → NextAuth's `auth()`, which needs a real request
- * context (`next/headers`), so they cannot be invoked directly from a Node
- * script/Playwright test file the way this spec calls Prisma. Nor does
- * `/inventory/register` substitute for it: `registerAssets` never sets
- * `purchaseUnitId` and never reads `receivableUnits`/`outstanding` at all — a
- * structurally different action. Tests 9-11 are therefore `test.fixme` below,
- * with the reasoning repeated at that block. Registration (1-5), confirmation
- * (6-8) and the return path (12-16) are fully implemented — 13 of 16.
+ * Receiving (`receiveUnits`, `receivableUnits`, `outstanding`,
+ * `isFullyReceived`) is GONE — C-11 deleted that orphaned code, since C-5 had
+ * already replaced its only would-be UI with registration and nothing ever
+ * consumed it. There is nothing left to test there; this file does not
+ * reference those names.
+ *
+ * Registration was previously broken at every quantity: `register-form.tsx`
+ * grew its serials array with `next.length = n`, which creates holes that
+ * `.map` skips, so `serials.0` serialized as `undefined` and zod rejected
+ * every submit. Fixed in commit 7e1c02a (`Array.from` instead of the
+ * length-assignment). Tests 1-13 below are real, passing assertions against
+ * the fixed form.
  *
  * Never reference a raw cuid — the DB reseeds and cuids change every run.
- * Assets from registration are referenced by `tag`; `PR-0188` (referenced in
- * the fixme block only) by `refNo`.
+ * Assets are referenced by `tag`.
  *
  * Tests within each `describe` share mutable fixture state (a tag registered
  * in an earlier test is confirmed/returned in a later one) — this file must
@@ -66,54 +61,11 @@ async function highestLtNumber(): Promise<number> {
 }
 const ltTag = (n: number) => `BR-LT-${String(n).padStart(4, "0")}`;
 
-/**
- * ⚠️ SEVERE FINDING, confirmed while writing this spec and left unfixed —
- * out of this file's scope (`e2e/receiving.spec.ts` is the only file this
- * task creates) and not a "mechanical, directly-precedented correction":
- * fixing it means understanding and rewriting the array-growth logic below,
- * not swapping one obviously-right token for another.
- *
- * `register-form.tsx`'s serials-array effect —
- *   const next = [...prev]; next.length = result.tags.length;
- *   return next.map((s) => s ?? "");
- * — extends the array by assigning `.length`, which creates true sparse
- * HOLES at the new indices (an ECMAScript array does not materialise
- * `undefined` there — the index is simply absent). `Array.prototype.map`
- * never invokes its callback for a hole, so a newly-added row's serial slot
- * is never defaulted to `""`; it stays a hole. React's Server Actions
- * payload then serializes that hole as literal `undefined`, and
- * `registerSchema`'s `serials: z.array(z.string()...).optional()` requires
- * every PRESENT element to be a string, so the submission is refused with
- * `serials.<n>: "Invalid input"`.
- *
- * This is NOT recoverable by user interaction. Typing into the affected
- * Serial input calls the identical per-index onChange handler —
- * `setSerials((prev) => prev.map((x, j) => (j === i ? s : x)))` — which is
- * ALSO `.map`-based, so if `prev` already has a hole at `i`, the callback is
- * never invoked for that index EVEN THOUGH `i` is the index being changed,
- * and the hole survives the "edit" untouched. Confirmed empirically (two
- * throwaway probes, both against a stock `/inventory/register`, deleted
- * after confirming): submitting a bare quantity-1 registration with Serial 1
- * never touched fails `serials.0: "Invalid input"` — AND submitting the
- * identical form after first typing "SN-DEBUG-1" into Serial 1 fails with
- * the EXACT SAME error. A 3-quantity batch fails identically on indices 1-2
- * (`"serials":["","$undefined","$undefined"]` was the captured RSC payload).
- *
- * Net effect: **`/inventory/register` cannot successfully submit ANY
- * registration through its UI, at any quantity, regardless of what the
- * operator types.** This is Task 5's primary surface and it is completely
- * blocked. Tests 1-8 below are written correctly against the intended
- * behaviour and are left as real (non-`fixme`) tests so the suite reports
- * this honestly as a failure rather than hiding it — see this
- * implementer's final report for the recommended fix and a flagged
- * follow-up task.
- */
-
 let laptopCategoryId: string;
 let thinkpadTypeId: string;
 let financeUserId: string;
 
-// Fixtures for the Finance-review surface (Step 2a), created directly via
+// Fixtures for the Finance-review surface (Step 2/3), created directly via
 // Prisma rather than through /inventory/register: that screen is Task 5's
 // surface and is already fully exercised in Step 1, and this block needs
 // several assets in distinct pre-set states (returned, confirmed) that the
@@ -193,6 +145,8 @@ test.describe("registration — the primary path", () => {
     await page.getByLabel("Tag 2").fill(dupeTag);
 
     await page.getByRole("button", { name: "Register 2 assets" }).click();
+    // The conflict names the tag — this is the assertion the report's
+    // mutation proof (Step 5) checks is not inert.
     await expect(page.getByText(`${dupeTag} appears twice in this batch.`)).toBeVisible();
 
     // The absence of a success message proves nothing — only the count does.
@@ -212,6 +166,8 @@ test.describe("registration — the primary path", () => {
     await page.getByRole("button", { name: "Register asset" }).click();
     await expect(page.getByText("One of those tags was just taken. Reload and try again.")).toBeVisible();
 
+    // This guard is a database uniqueness constraint, not application logic —
+    // no mutation proof is needed for it (Step 5).
     expect(await db.asset.count()).toBe(before);
   });
 
@@ -233,8 +189,9 @@ test.describe("registration — the primary path", () => {
   // file's dedicated PATH_RULES probe, this hits a path with NO page file
   // (.../no-such-page) — only middleware can answer for that, so a misordered
   // or deleted rule shows up as a 200 with no redirect at all. This really is
-  // the only test in the suite that observes the ordering.
-  test("PATH_RULES itself refuses /inventory/register/* before any page renders", async ({ page }) => {
+  // the only test in the suite that observes the ordering. Both roles are
+  // asserted — do not assume one implies the other.
+  test("neither viewer nor finance_staff can reach /inventory/register", async ({ page }) => {
     for (const [email, landing] of [
       ["finance@thebackroomop.com", ROLE_LANDING.finance_staff],
       ["viewer@thebackroomop.com", ROLE_LANDING.viewer],
@@ -247,7 +204,7 @@ test.describe("registration — the primary path", () => {
   });
 });
 
-test.describe("Finance confirmation — Task 6's surface", () => {
+test.describe("Finance review — confirm", () => {
   test.describe.configure({ mode: "serial" });
 
   test("Finance confirms and the record says so", async ({ page }) => {
@@ -324,7 +281,7 @@ test.describe("Finance confirmation — Task 6's surface", () => {
   });
 });
 
-test.describe("Finance send-back — Task 7a's surface (C-7)", () => {
+test.describe("Finance review — send back and correct", () => {
   test.describe.configure({ mode: "serial" });
 
   test("Finance sends an asset back with a reason", async ({ page }) => {
@@ -340,7 +297,7 @@ test.describe("Finance send-back — Task 7a's surface (C-7)", () => {
 
     await expect(page.getByText("RETURNED BY FINANCE")).toBeVisible();
     // Visible on the record itself, not only in the audit tab — IT reading
-    // it without digging is the whole point.
+    // it without opening the audit tab is the whole point.
     const banner = page.getByRole("alert").filter({ hasText: "Finance sent this back" });
     await expect(banner).toContainText(reason);
 
@@ -354,7 +311,7 @@ test.describe("Finance send-back — Task 7a's surface (C-7)", () => {
     expect(entry?.diff).toMatchObject({ financeReturn: { to: reason } });
   });
 
-  test("An empty or too-short reason is refused and WRITES NOTHING", async ({ page }) => {
+  test("A too-short reason is refused and WRITES NOTHING", async ({ page }) => {
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/inventory/${assetShortReason.id}`);
 
@@ -438,45 +395,10 @@ test.describe("Finance send-back — Task 7a's surface (C-7)", () => {
     updated = await db.asset.findUniqueOrThrow({ where: { id: assetReturn.id } });
     expect(updated.financeConfirmedAt).not.toBeNull();
     // Task 7a's amendment to confirmAssetDetails clears the return columns on
-    // confirm — this is what makes "confirmed AND returned" unreachable.
+    // confirm — this is the only test in the suite that observes it, and it
+    // is what makes "confirmed AND returned" unreachable.
     expect(updated.financeReturnedAt).toBeNull();
     expect(updated.financeReturnedById).toBeNull();
     expect(updated.financeReturnReason).toBeNull();
   });
-});
-
-// ---------------------------------------------------------------------------
-// Step 3 — receiving. BLOCKED: see the file header. `receiveUnits` and
-// `receivableUnits` (src/server/modules/purchases/receiving.ts) have no
-// reachable UI (C-5 replaced Tasks 5-6 with registration and the receive
-// screen was never built — confirmed by grep: zero .tsx callers, no route.ts,
-// nothing under src/app referencing "receive"), and they cannot be invoked
-// directly from this Node process either: `actionRole` calls NextAuth's
-// `auth()`, which requires a real Next.js request context
-// (`next/headers`-backed `AsyncLocalStorage`) that a plain module import in a
-// Playwright test file does not provide. There is no HTTP route (route.ts)
-// wrapping either function, and no precedent anywhere in e2e/ for invoking a
-// bare "use server" action outside the browser. Fabricating a bypass (e.g.
-// hand-rolling the Server Actions POST protocol, or monkey-patching auth())
-// would not prove anything true about the shipped app — exactly the "a test
-// that passes against a broken guard is worse than no test" principle this
-// task itself invokes for the write-nothing assertions. `test.fixme` below
-// keeps the file's declared count at 16 while being honest that three are not
-// implemented, pending a controller decision (build a minimal receive
-// endpoint, or descope receiving from this task with a plan amendment).
-// ---------------------------------------------------------------------------
-
-test.describe("receiving — kept, and C-4's guard (BLOCKED — no UI surface)", () => {
-  test.fixme(
-    "a partial receipt against PR-0188 writes exactly what it said",
-    async () => {},
-  );
-  test.fixme(
-    "an over-receipt is refused and writes NOTHING",
-    async () => {},
-  );
-  test.fixme(
-    "a MULTI-LINE receipt whose second line fails rolls back the first (C-4)",
-    async () => {},
-  );
 });
