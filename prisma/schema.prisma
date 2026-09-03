@@ -132,6 +132,7 @@ model User {
   documents        AssetDocument[]
   rateEvents       RateEvent[]
   financeConfirmed Asset[] @relation("financeConfirmedBy")
+  financeReturned  Asset[] @relation("financeReturnedBy")
 }
 
 model UserPreference {
@@ -247,6 +248,10 @@ model Asset {
   financeConfirmedAt   DateTime?
   financeConfirmedById String?
   financeConfirmedBy   User?     @relation("financeConfirmedBy", fields: [financeConfirmedById], references: [id], onDelete: Restrict)
+  financeReturnedAt    DateTime?
+  financeReturnedById  String?
+  financeReturnedBy    User?     @relation("financeReturnedBy", fields: [financeReturnedById], references: [id], onDelete: Restrict)
+  financeReturnReason  String?
   secrets           AssetSecret[]
   documents         AssetDocument[]
   reservations      Reservation[]
@@ -262,6 +267,7 @@ model Asset {
   @@index([purchaseUnitId])
   @@index([vendorId])
   @@index([financeConfirmedAt])
+  @@index([financeReturnedAt])
 }
 
 model AssetSecret {

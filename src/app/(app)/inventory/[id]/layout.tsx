@@ -10,7 +10,7 @@ import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
 import { RecordTabs } from "@/components/inventory/record-tabs";
 import { RequestStatusChange } from "@/components/inventory/request-status-change";
-import { ConfirmAssetDetails } from "@/components/inventory/confirm-asset-details";
+import { FinanceReview } from "@/components/inventory/finance-review";
 
 export default async function AssetRecordLayout({
   params,
@@ -24,7 +24,9 @@ export default async function AssetRecordLayout({
   const asset = await getAsset(id);
   if (!asset) notFound();
   const canMutate = user.role === "admin" || user.role === "it_staff";
-  const canConfirm = user.role === "admin" || user.role === "finance_staff";
+  const returned = asset.financeReturnedAt !== null;
+  const canConfirm = (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt;
+  const canResubmit = (user.role === "admin" || user.role === "it_staff") && returned;
   const pending = asset.approvals[0];
 
   return (
@@ -37,6 +39,8 @@ export default async function AssetRecordLayout({
             <StatusPill value={asset.status} />
             {asset.financeConfirmedAt ? (
               <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
+            ) : returned ? (
+              <Pill tone="accent">RETURNED BY FINANCE</Pill>
             ) : (
               // Accent, not neutral: the same shape as the repair-stage pill on
               // page.tsx, where settled reads neutral and in-flight reads accent.
@@ -47,7 +51,7 @@ export default async function AssetRecordLayout({
           </span>
         }
         actions={
-          canMutate || (canConfirm && !asset.financeConfirmedAt) ? (
+          canMutate || canConfirm || canResubmit ? (
             <>
               {canMutate && (
                 <>
@@ -55,13 +59,25 @@ export default async function AssetRecordLayout({
                   <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>
                 </>
               )}
-              {canConfirm && !asset.financeConfirmedAt && (
-                <ConfirmAssetDetails assetId={asset.id} tag={asset.tag} />
+              {(canConfirm || canResubmit) && (
+                <FinanceReview
+                  assetId={asset.id}
+                  tag={asset.tag}
+                  canConfirm={canConfirm}
+                  canResubmit={canResubmit}
+                />
               )}
             </>
           ) : undefined
         }
       />
+      {returned && asset.financeReturnReason && (
+        <div className="pb-3">
+          <Banner tone="fault" title="Finance sent this back">
+            {asset.financeReturnReason}
+          </Banner>
+        </div>
+      )}
       <p className="-mt-2 pb-3 text-[13px] text-fg-secondary">
         {asset.model}
         {asset.assignee && (
