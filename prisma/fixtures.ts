@@ -27,5 +27,14 @@
  * Chosen by the user on 2026-08-24 for their own local deployment. The repo is
  * public, so treat this as what it is: a fixture for a loopback-only dev
  * database, never a credential for anything reachable.
+ *
+ * OVERRIDABLE via `SEED_PASSWORD`, and the fallback is deliberately still here:
+ * the whole e2e suite imports this constant to log in, so removing the default
+ * would mean every developer and every CI run had to set an env var before a
+ * single test could pass. The protection that matters is in `seed.ts`, which
+ * REFUSES to run under `NODE_ENV=production` unless the variable is set — and
+ * the production image sets `NODE_ENV=production` in its Dockerfile, so seeding
+ * a deployed stack with this published value is not something you can do by
+ * forgetting. Reachability, not the constant, is what makes it dangerous.
  */
-export const SEED_PASSWORD = "admin123";
+export const SEED_PASSWORD = process.env.SEED_PASSWORD ?? "admin123";

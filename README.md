@@ -127,7 +127,14 @@ running deployment.)
 ## Seeded accounts
 
 `npm run db:seed` (or the containerized equivalent above) creates five accounts, all
-`@thebackroomop.com`, all sharing the password in `SEED_PASSWORD` (`prisma/fixtures.ts`):
+`@thebackroomop.com`, all sharing one password. It defaults to the value in
+`prisma/fixtures.ts` and is overridden by the **`SEED_PASSWORD`** environment variable.
+
+⚠️ **The seed REFUSES to run when `NODE_ENV=production` and `SEED_PASSWORD` is unset**, because
+the default is published in the table below and this repository is public. The production image sets
+`NODE_ENV=production`, so seeding a deployed stack with a password anyone can read is not something
+you can do by forgetting — you have to choose one first. On a loopback dev database the default is
+fine and is what the test suite expects.
 
 | Email                          | Role               |
 | ------------------------------- | ------------------ |
