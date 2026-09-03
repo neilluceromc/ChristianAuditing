@@ -19,6 +19,7 @@ import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
 import { assetDiff } from "@/lib/asset-diff";
+import { TAG_SHAPE } from "@/lib/tag-key";
 
 const bulkSchema = z
   .object({
@@ -144,7 +145,7 @@ export async function bulkRequestStatusChange(
 const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
 
 const createSchema = z.object({
-  tag: z.string().trim().toUpperCase().regex(/^BR-[A-Z]{2}-\d{4}$/, "Format: BR-XX-0000"),
+  tag: z.string().trim().toUpperCase().regex(TAG_SHAPE, "Format: BR-XX-0000"),
   model: z.string().trim().min(2, "Name the model").max(120),
   serial: z.string().trim().max(120).optional(),
   categoryId: z.string().min(1, "Pick a category"),
@@ -393,4 +394,212 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
   }
   revalidatePath(`/inventory/${d.assetId}`);
   return ok({ refNo });
+}
+
+const confirmSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * Finance confirms that a registered asset's details are correct. Separate
+ * from the approval queue on purpose (C-5): every ApprovalType is a lifecycle
+ * change to an asset that already exists, whereas this is data verification —
+ * a different question with a different audience.
+ *
+ * Idempotent by refusal rather than by silence: confirming twice is a
+ * conflict, so a double-submit cannot quietly overwrite who confirmed it and
+ * when.
+ */
+export async function confirmAssetDetails(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "finance_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const parsed = confirmSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  let out: { tag: string } | null = null;
+  let failure: ActionResult<{ tag: string }> | null = null;
+
+  await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({
+      where: { id: parsed.data.id },
+      select: { id: true, tag: true, financeConfirmedAt: true },
+    });
+    if (!asset) {
+      failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    if (asset.financeConfirmedAt) {
+      failure = conflict(`${asset.tag} was already confirmed.`);
+      return;
+    }
+    // State-guarded write: the null check is IN the where clause, so two
+    // simultaneous confirmations cannot both succeed.
+    const hit = await tx.asset.updateMany({
+      where: { id: asset.id, financeConfirmedAt: null },
+      data: {
+        financeConfirmedAt: new Date(),
+        financeConfirmedById: user.id,
+        // Clearing the return here is what makes "confirmed AND returned"
+        // unreachable, so the pill's three states stay mutually exclusive.
+        financeReturnedAt: null,
+        financeReturnedById: null,
+        financeReturnReason: null,
+      },
+    });
+    if (hit.count === 0) {
+      failure = conflict(`${asset.tag} was confirmed by someone else just now.`);
+      return;
+    }
+    await writeAudit(tx, {
+      actorId: user.id,
+      actorLabel: user.name,
+      entityType: "asset",
+      entityId: asset.id,
+      action: "finance.confirm",
+      diff: { financeConfirmed: { from: null, to: user.name } },
+    });
+    out = { tag: asset.tag };
+  });
+
+  if (failure) return failure;
+  revalidatePath(`/inventory/${parsed.data.id}`);
+  revalidatePath("/inventory");
+  return ok(out!);
+}
+
+const returnSchema = z.object({
+  id: z.string().min(1),
+  reason: z.string().trim().min(5, "Say what is wrong — at least 5 characters.").max(500),
+});
+
+/**
+ * Finance sends a registration back to IT with a reason. The counterpart to
+ * confirmAssetDetails, and deliberately NOT a gate (C-7): the asset stays
+ * live and usable throughout — what changes is that IT can see what to fix.
+ *
+ * A SECOND return is allowed and overwrites the current reason: Finance
+ * re-checking after IT's fix and finding it still wrong is a real sequence.
+ * Only the current reason lives in the column; every one survives in the
+ * audit trail.
+ */
+export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "finance_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const parsed = returnSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { id, reason } = parsed.data;
+
+  let out: { tag: string } | null = null;
+  let failure: ActionResult<{ tag: string }> | null = null;
+
+  await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({
+      where: { id },
+      select: { id: true, tag: true, financeConfirmedAt: true },
+    });
+    if (!asset) {
+      failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    if (asset.financeConfirmedAt) {
+      failure = conflict(`${asset.tag} is already confirmed and cannot be sent back.`);
+      return;
+    }
+    // State-guarded, the same shape as confirmAssetDetails: the confirmed-is-
+    // null check lives IN the where clause, so a confirmation landing between
+    // the read above and this write wins rather than being silently undone.
+    const hit = await tx.asset.updateMany({
+      where: { id: asset.id, financeConfirmedAt: null },
+      data: {
+        financeReturnedAt: new Date(),
+        financeReturnedById: user.id,
+        financeReturnReason: reason,
+      },
+    });
+    if (hit.count === 0) {
+      failure = conflict(`${asset.tag} was confirmed by someone else just now.`);
+      return;
+    }
+    await writeAudit(tx, {
+      actorId: user.id,
+      actorLabel: user.name,
+      entityType: "asset",
+      entityId: asset.id,
+      action: "finance.return",
+      // The reason goes in the diff, and that is what makes the audit trail
+      // the history: the column holds only the CURRENT reason.
+      diff: { financeReturn: { from: null, to: reason } },
+    });
+    out = { tag: asset.tag };
+  });
+
+  if (failure) return failure;
+  revalidatePath(`/inventory/${id}`);
+  revalidatePath("/inventory");
+  return ok(out!);
+}
+
+const resubmitSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * IT says "fixed, look again", clearing the return so the record reads
+ * AWAITING FINANCE once more.
+ *
+ * Explicit rather than clearing on any edit to the asset: an IT staffer
+ * correcting an unrelated field must not silently claim the reported problem
+ * is resolved.
+ */
+export async function resubmitAssetToFinance(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const parsed = resubmitSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { id } = parsed.data;
+
+  let out: { tag: string } | null = null;
+  let failure: ActionResult<{ tag: string }> | null = null;
+
+  await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({
+      where: { id },
+      select: { id: true, tag: true, financeReturnedAt: true },
+    });
+    if (!asset) {
+      failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    if (!asset.financeReturnedAt) {
+      failure = conflict(`${asset.tag} was not sent back, so there is nothing to resubmit.`);
+      return;
+    }
+    const hit = await tx.asset.updateMany({
+      where: { id: asset.id, financeReturnedAt: { not: null } },
+      data: { financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null },
+    });
+    if (hit.count === 0) {
+      failure = conflict(`${asset.tag} was resubmitted by someone else just now.`);
+      return;
+    }
+    await writeAudit(tx, {
+      actorId: user.id,
+      actorLabel: user.name,
+      entityType: "asset",
+      entityId: asset.id,
+      action: "finance.resubmit",
+      diff: { financeReturn: { from: "returned", to: null } },
+    });
+    out = { tag: asset.tag };
+  });
+
+  if (failure) return failure;
+  revalidatePath(`/inventory/${id}`);
+  revalidatePath("/inventory");
+  return ok(out!);
 }

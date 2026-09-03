@@ -87,6 +87,7 @@ enum NoteKind {
   REQUEST_INFO
   CANCEL
   COMPLETE
+  RECEIVE
 }
 
 enum JobType {
@@ -130,6 +131,8 @@ model User {
   requestedApprovals Approval[]     @relation("approvalRequestedBy")
   documents        AssetDocument[]
   rateEvents       RateEvent[]
+  financeConfirmed Asset[] @relation("financeConfirmedBy")
+  financeReturned  Asset[] @relation("financeReturnedBy")
 }
 
 model UserPreference {
@@ -232,6 +235,8 @@ model Asset {
   cost              Decimal?         @db.Decimal(12, 2)
   purchaseRequestId String?
   purchaseRequest   PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
+  purchaseUnitId    String?
+  purchaseUnit      PurchaseUnit?    @relation(fields: [purchaseUnitId], references: [id], onDelete: Restrict)
   warrantyUntil     DateTime?
   // repair fields (repairs view = saved filter over status=DEFECTIVE; no new enum)
   vendorId          String?
@@ -240,6 +245,13 @@ model Asset {
   repairQuote       Decimal?         @db.Decimal(12, 2)
   defectiveSince    DateTime?
   notes             String?
+  financeConfirmedAt   DateTime?
+  financeConfirmedById String?
+  financeConfirmedBy   User?     @relation("financeConfirmedBy", fields: [financeConfirmedById], references: [id], onDelete: Restrict)
+  financeReturnedAt    DateTime?
+  financeReturnedById  String?
+  financeReturnedBy    User?     @relation("financeReturnedBy", fields: [financeReturnedById], references: [id], onDelete: Restrict)
+  financeReturnReason  String?
   secrets           AssetSecret[]
   documents         AssetDocument[]
   reservations      Reservation[]
@@ -252,7 +264,10 @@ model Asset {
   @@index([categoryId])
   @@index([typeId])
   @@index([purchaseRequestId])
+  @@index([purchaseUnitId])
   @@index([vendorId])
+  @@index([financeConfirmedAt])
+  @@index([financeReturnedAt])
 }
 
 model AssetSecret {
@@ -336,6 +351,7 @@ model PurchaseUnit {
   financeNotes String?
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @default(now()) @updatedAt
+  assets       Asset[]
 }
 
 // Append-only conversation thread (enforced by DB trigger, Task 4)

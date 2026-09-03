@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getAsset } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { fmtDate } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
@@ -9,6 +10,7 @@ import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
 import { RecordTabs } from "@/components/inventory/record-tabs";
 import { RequestStatusChange } from "@/components/inventory/request-status-change";
+import { FinanceReview } from "@/components/inventory/finance-review";
 
 export default async function AssetRecordLayout({
   params,
@@ -22,6 +24,9 @@ export default async function AssetRecordLayout({
   const asset = await getAsset(id);
   if (!asset) notFound();
   const canMutate = user.role === "admin" || user.role === "it_staff";
+  const returned = asset.financeReturnedAt !== null;
+  const canConfirm = (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt;
+  const canResubmit = (user.role === "admin" || user.role === "it_staff") && returned;
   const pending = asset.approvals[0];
 
   return (
@@ -32,18 +37,47 @@ export default async function AssetRecordLayout({
         badge={
           <span className="inline-flex items-center gap-2">
             <StatusPill value={asset.status} />
+            {asset.financeConfirmedAt ? (
+              <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
+            ) : returned ? (
+              <Pill tone="accent">RETURNED BY FINANCE</Pill>
+            ) : (
+              // Accent, not neutral: the same shape as the repair-stage pill on
+              // page.tsx, where settled reads neutral and in-flight reads accent.
+              // Rendered neutral, "awaiting" is indistinguishable from "done".
+              <Pill tone="accent">AWAITING FINANCE</Pill>
+            )}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
         }
         actions={
-          canMutate ? (
+          canMutate || canConfirm || canResubmit ? (
             <>
-              <RequestStatusChange assetId={asset.id} currentStatus={asset.status} />
-              <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>
+              {canMutate && (
+                <>
+                  <RequestStatusChange assetId={asset.id} currentStatus={asset.status} />
+                  <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>
+                </>
+              )}
+              {(canConfirm || canResubmit) && (
+                <FinanceReview
+                  assetId={asset.id}
+                  tag={asset.tag}
+                  canConfirm={canConfirm}
+                  canResubmit={canResubmit}
+                />
+              )}
             </>
           ) : undefined
         }
       />
+      {returned && asset.financeReturnReason && (
+        <div className="pb-3">
+          <Banner tone="fault" title="Finance sent this back">
+            {asset.financeReturnReason}
+          </Banner>
+        </div>
+      )}
       <p className="-mt-2 pb-3 text-[13px] text-fg-secondary">
         {asset.model}
         {asset.assignee && (

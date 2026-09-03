@@ -34,10 +34,16 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
 /** Status-dot family for a feed row, derived from the action. */
 export function actionDot(action: string): string {
   if (action === "SECRET_READ") return "TEMPORARY"; // attention
-  if (action === "it-reject" || action === "request-info") return "PENDING"; // attention: it came back
+  // "finance.return" joins these two for the same reason and not by
+  // resemblance: all three are a reviewer handing work back to whoever
+  // submitted it, and the feed should read as attention in every case.
+  if (action === "it-reject" || action === "request-info" || action === "finance.return")
+    return "PENDING"; // attention: it came back
   if (action === "cancel") return "CANCELLED"; // closed
-  if (action === "complete" || action === "offboarding.completed") return "COMPLETED"; // settled
-  if (action === "submit" || action === "it-review") return "SUBMITTED"; // inflight
+  if (action === "complete" || action === "offboarding.completed" || action === "finance.confirm")
+    return "COMPLETED"; // settled
+  if (action === "submit" || action === "it-review" || action === "finance.resubmit")
+    return "SUBMITTED"; // inflight
   // "disable" (entityType "user") is unreachable today: every actionDot caller
   // scopes to employee/asset/purchase-request, and /audit — the one page that
   // renders "user" entries — never calls this. Pre-wired for a user-scoped
@@ -55,7 +61,16 @@ export function actionDot(action: string): string {
   // For "import-create" that WOULD be wrong: a created-by-import row
   // settles the same way a manual create does, so it needs the same
   // explicit branch create already gets.
-  if (action === "create" || action === "import-create" || action.includes("executed")) return "DEPLOYED"; // settled
+  // "register" is Phase 12's way for an asset to come into existence, so it
+  // settles exactly as create does — explicit here for the same reason
+  // import-create is, rather than left to the default.
+  if (
+    action === "create" ||
+    action === "import-create" ||
+    action === "register" ||
+    action.includes("executed")
+  )
+    return "DEPLOYED"; // settled
   // I-5 (Task 10 round two): "import-update" is deliberately EXPLICIT here
   // rather than left to fall through to the neutral default below — not
   // because the default would be wrong, but so a future reader sees the

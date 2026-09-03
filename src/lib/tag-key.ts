@@ -82,3 +82,17 @@ export function refKey(raw: string): string {
 export function tagKey(raw: unknown): string {
   return cellText(raw).toUpperCase();
 }
+
+/**
+ * The asset tag contract: `BR-` then two uppercase letters then four digits,
+ * e.g. `BR-LT-0148`. The two letters are a human convention (mostly the
+ * category, sometimes the type — see the Phase 12 spec) and this regex does
+ * not care which.
+ *
+ * ONE definition, deliberately. It was written out separately in
+ * import-assets.ts, inventory/actions.ts and inventory/queries.ts, which is
+ * three chances for them to disagree about what a tag is — and the four-digit
+ * group is load-bearing for tag GENERATION, which cannot exceed 9999 without
+ * producing a string the other three would reject.
+ */
+export const TAG_SHAPE = /^BR-[A-Z]{2}-\d{4}$/;

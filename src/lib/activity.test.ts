@@ -20,6 +20,24 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     expect(auditSentence({ ...base, action: "approval.requested", diff: { approval: { from: null, to: "APR-2042" } } }))
       .toBe("J. Sarmiento requested APR-2042 on BR-LT-0148");
   });
+  it("register reads as registration, not the raw verb", () => {
+    expect(auditSentence({ ...base, action: "register" })).toBe("J. Sarmiento registered BR-LT-0148");
+  });
+  it("finance.confirm says what was confirmed", () => {
+    expect(auditSentence({ ...base, action: "finance.confirm", diff: { financeConfirmed: { from: null, to: "M. Cruz" } } }))
+      .toBe("J. Sarmiento confirmed BR-LT-0148's details");
+  });
+  it("finance.return carries the reason — the reason IS the record", () => {
+    expect(auditSentence({ ...base, action: "finance.return", diff: { financeReturn: { from: null, to: "Serial does not match the box" } } }))
+      .toBe("J. Sarmiento sent BR-LT-0148 back to IT \u00b7 Serial does not match the box");
+  });
+  it("finance.return without a reason does not render a dangling separator", () => {
+    expect(auditSentence({ ...base, action: "finance.return" })).toBe("J. Sarmiento sent BR-LT-0148 back to IT");
+  });
+  it("finance.resubmit reads as IT handing it back", () => {
+    expect(auditSentence({ ...base, action: "finance.resubmit" }))
+      .toBe("J. Sarmiento marked BR-LT-0148 corrected for Finance");
+  });
   it("unknown actions degrade to actor — action — entity", () => {
     expect(auditSentence({ ...base, action: "document.signed" })).toBe("J. Sarmiento document.signed BR-LT-0148");
   });
@@ -112,5 +130,25 @@ describe("actionDot — import actions get a deliberate, explicit colour", () =>
     // the actual defect. Asserted exactly, both ways:
     expect(actionDot("import-update")).toBe("SPARE");
     expect(actionDot("import-update")).toBe(actionDot("update"));
+  });
+});
+
+describe("actionDot — Phase 12's asset actions are explicit, not left to the neutral default", () => {
+  // Same reasoning as import-create's branch: an asset coming into existence
+  // settles, however it got here. Asserted against create rather than the
+  // literal so the two cannot drift apart silently.
+  it("register settles the same way a manual create does", () => {
+    expect(actionDot("register")).toBe(actionDot("create"));
+  });
+  it("finance.confirm settles", () => {
+    expect(actionDot("finance.confirm")).toBe("COMPLETED");
+  });
+  it("finance.return reads as attention — it came back, exactly like it-reject", () => {
+    expect(actionDot("finance.return")).toBe("PENDING");
+    expect(actionDot("finance.return")).toBe(actionDot("it-reject"));
+  });
+  it("finance.resubmit reads as in flight, exactly like submit", () => {
+    expect(actionDot("finance.resubmit")).toBe("SUBMITTED");
+    expect(actionDot("finance.resubmit")).toBe(actionDot("submit"));
   });
 });

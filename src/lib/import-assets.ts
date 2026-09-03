@@ -1,7 +1,7 @@
 import type { AssetStatus, EmploymentStatus } from "@prisma/client";
 import { ASSET_STATUSES } from "./inventory-list";
 import type { BlockCause, BlockedRow, ImportOption } from "./import-vocabulary";
-import { cellText, isBlank, refKey, tagKey } from "./tag-key";
+import { cellText, isBlank, refKey, tagKey, TAG_SHAPE } from "./tag-key";
 
 /**
  * Re-exported so every existing caller of `cellText`/`refKey`/`tagKey` from
@@ -321,8 +321,6 @@ function cellAt(headers: HeaderMatch, cells: unknown[], field: AssetField): unkn
 function textAt(headers: HeaderMatch, cells: unknown[], field: AssetField): string {
   return cellText(cellAt(headers, cells, field));
 }
-
-const TAG_SHAPE = /^BR-[A-Z]{2}-\d{4}$/;
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 

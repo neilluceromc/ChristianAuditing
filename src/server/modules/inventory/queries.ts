@@ -8,6 +8,7 @@ import {
 import type { ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage } from "@/lib/repairs";
+import { TAG_SHAPE } from "@/lib/tag-key";
 
 export const PAGE_SIZE = 25;
 
@@ -287,7 +288,7 @@ export async function purchaseYearBuckets(
  */
 export function exactTagMatch(q: string) {
   const tag = q.trim().toUpperCase();
-  if (!/^BR-[A-Z]{2}-\d{4}$/.test(tag)) return null;
+  if (!TAG_SHAPE.test(tag)) return null;
   return prisma.asset.findUnique({ where: { tag }, select: { id: true } });
 }
 

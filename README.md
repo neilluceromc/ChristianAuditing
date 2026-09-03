@@ -150,9 +150,13 @@ The **Code 128 barcode** is for a USB handheld scanner, which behaves as a keybo
 tag and presses Enter. That is what the offboarding wizard listens for, so removing it would break the
 scanner workflow.
 
-The **QR code** is for a phone. It holds `{APP_BASE_URL}/inventory?q={TAG}`, and the inventory list
-redirects an exact tag match to that asset's record — the page showing who currently holds it. Scanning
-opens the record for a **signed-in** user; an unauthenticated scan lands on the sign-in page first.
+The **QR code** is for a phone. It holds `{APP_BASE_URL}/inventory/scan/{TAG}` — a deliberately
+minimal card answering the one question a sticker raises: **who has this, and is it where it should
+be?** It shows the tag, model, status, holder, department, category, purchase date, warranty and
+serial. **Cost, vendor, repair quote and notes are deliberately absent**, because acquisition cost
+behind an adhesive label is a different exposure from acquisition cost behind a login. The full record
+is one tap away at `/inventory/{id}` for anyone whose role already reaches it. Scanning works for a
+**signed-in** user; an unauthenticated scan lands on the sign-in page first.
 There is no public lookup, deliberately: asset tags are sequential, so a page keyed by tag and readable
 by anyone would be a walkable index of who holds what, behind a sticker anyone can photograph.
 
