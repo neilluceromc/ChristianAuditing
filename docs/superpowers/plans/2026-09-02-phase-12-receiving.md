@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1 through C-11. Eight were defects; C-5 and C-7 are changes of PREMISE from the user, which replaced Tasks 5-7, added Task 7a, and orphaned Tasks 3-4 without saying so. **C-10 is the one that matters most: registration never worked at any quantity, and every layer below it was green.** Only Task 7's end-to-end run could see it.
+> ### AMENDED DURING EXECUTION — C-1 through C-12. Nine were defects; C-5 and C-7 are changes of PREMISE from the user, which replaced Tasks 5-7, added Task 7a, and orphaned Tasks 3-4 without saying so. **C-10 is the one that matters most: registration never worked at any quantity, and every layer below it was green.** Only Task 7's end-to-end run could see it.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -265,6 +265,29 @@ written until submit.
 > only consumer of, whether it lives or dies. `NoteKind.RECEIVE` survives the cut deliberately:
 > dropping a Postgres enum value means recreating the type, which is real migration risk for an inert
 > value.
+>
+> **C-12. A mutation proof this plan demanded cannot prove what it claimed.** Task 7 predicted that
+> weakening the in-batch duplicate check would make test 2 **"fail on the count, not only the
+> message"**. The implementer ran it, saw it fail only on the message, and — rather than reshaping the
+> test to match the plan — **reordered the assertions to check the count independently and found it
+> still passed under the mutation.** They were right, and the reason is structural: both duplicate tags
+> are created inside one `prisma.$transaction`, so the second `create` hits the DB's own
+> `@unique` on `tag`, throws `P2002`, and unwinds the whole transaction. **The batch is
+> atomic whether or not the application check exists.**
+>
+> So test 2's count assertion is defended by the *database*, not by the guard being mutated, and the
+> app-level check's only observable effect is a better message
+> (`"BR-LT-0211 appears twice in this batch."` rather than the generic
+> `"One of those tags was just taken."`). Both assertions stay: the count one documents a real
+> invariant and would catch a regression that wrote outside the transaction — it simply is not what
+> catches *this* mutation.
+>
+> **The lesson is about what a write-nothing proof actually proves.** "Break the guard, watch the count
+> assertion fail" only works when the guard is the *sole* thing standing between the input and the
+> write. Where a DB constraint sits behind it, the mutation is masked and the test looks inert when it
+> is merely redundant — **which is indistinguishable from a genuinely inert test unless you reorder the
+> assertions and check, as the implementer did.** A plan should say which layer it expects to catch a
+> mutation, not just assert that some assertion will fail.
 
 **Conventions for every task:** stay on `phase-12-receiving`; run `npx tsc --noEmit && npm run lint`
 before each commit; **NEVER run `npm run build` while a dev server is running** (they share `.next`).
@@ -1900,29 +1923,33 @@ npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 
 ⚠️ **Phase 11 IS in this branch — `main` was merged in on 2026-09-02, so an earlier revision of this
 warning (claiming Phase 11 was absent and `labels.spec.ts` had 9 tests) is WRONG.** The real baseline
-here is Phase 11's: **153 e2e / 12 files** across four parts — **51 · 62 · 34 · 6** — plus whatever
-`e2e/receiving.spec.ts` adds (expect 11). `labels.spec.ts` has **11** tests, not 9, because it carries the
-QR and scan-card cases. **Re-balance the split and write down what you actually ran and got**, rather
-than trusting any number in this paragraph — it has already been wrong once.
+here is Phase 11's: **153 e2e / 12 files** across four parts — **51 · 62 · 34 · 6** — plus
+`e2e/receiving.spec.ts`, which is **13** (it ran green standalone at commit `139182c`), for **166 / 13
+files**. `labels.spec.ts` has **11** tests, not 9, because it carries the QR and scan-card cases.
+**Re-balance the split and write down what you actually ran and got**, rather than trusting any number
+in this paragraph — it has already been wrong twice.
 
 ⚠️ **`e2e/purchases.spec.ts` is the one to watch.** It exercises the request page — and note that after
-C-5 this phase no longer modifies it, so a failure there means something leaked out of scope,
-including `PR-0198`'s bounce-back thread. A failure there means Task 6 changed more than the indicator.
+C-5 this phase no longer modifies it, so a failure there — `PR-0198`'s bounce-back thread
+included — means something leaked out of scope. C-11 deleted `receiveUnits`, which held the only
+`revalidatePath("/purchases/<id>/receive")` calls in the codebase, so this file is the one that would
+notice if that removal took anything live with it.
 
 ⚠️ **The axe sweep's route table is a HARDCODED list that nothing keeps in sync** — a new page route
 does not fail it, it silently stops being scanned. This bit Phase 11 exactly once (amendment B-13),
 so add **`/inventory/register`** to the it_staff group (`admin`/`it_staff` only). Phase 12 no longer adds a
 receive screen, so there is no `/purchases/<id>/receive` route to scan.
 
-- [ ] **Step 3: Amend this plan** with `C-1` onward — Phase 10 used `A-`, Phase 11 `B-`, so this phase
+- [ ] **Step 3: Amend this plan.** `C-1` through `C-12` are **already written** — read the banner before adding to it, and continue at `C-13` — Phase 10 used `A-`, Phase 11 `B-`, so this phase
 uses `C-` and the three stay distinguishable.
 
 - [ ] **Step 4: Update `docs/HANDOVER.md`** — the header, §0, §4 (a Phase 12 paragraph), §6a (this
 phase's rules) and §8, which currently describes this gap as unbuilt and must stop.
 
-- [ ] **Step 5: Finish the branch.** `superpowers:finishing-a-development-branch`. **Merging and pushing
-are the user's decisions** — present the options and wait. Note that Phase 11 is also unmerged, so the
-merge question now covers two branches.
+- [ ] **Step 5: Finish the branch.** `superpowers:finishing-a-development-branch`. **Merging and
+pushing are the user's decisions, separately** — present the options and wait for each. Phase 11 is
+already merged and pushed, so this covers one branch; note that `main` itself carries **3 unpushed
+documentation commits**. The repo is **PUBLIC** — secret-scan before any push.
 
 ---
 
