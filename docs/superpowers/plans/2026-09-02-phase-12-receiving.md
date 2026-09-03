@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1 through C-7. Five were defects in this plan; C-5 and C-7 are changes of PREMISE from the user, which replaced Tasks 5-7 and then added Task 7a. C-4 would have corrupted the asset register and no test in the plan as written could have caught it.
+> ### AMENDED DURING EXECUTION — C-1 through C-9. Seven were defects in this plan; C-5 and C-7 are changes of PREMISE from the user, which replaced Tasks 5-7 and then added Task 7a. C-4 would have corrupted the asset register, and C-9 shipped five audit actions the activity feed could not render — neither was catchable by any test the plan itself specified.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -210,6 +210,32 @@ written until submit.
 > design back to you is a free correctness check on your own work. Read it against the code, not against
 > your memory of the plan** — the code here was three weeks of decisions old and the plan text still
 > described a flow that C-5 had already replaced.
+>
+> **C-8. Task 7a's banner used a `tone` that does not exist.** The plan wrote
+> `<Banner tone="warn" …>`. `Banner`’s `tone` is typed `StatusFamily` —
+> `neutral | inflight | settled | attention | fault | closed` — so `"warn"` would have failed
+> `tsc`. The implementer found the precedent instead of inventing one:
+> `src/components/purchases/bounce-back-banner.tsx` already renders "sent this back" with
+> `tone="fault"` and the reason as children, which is the same event one level down. **The plan told
+> them to check `Banner`’s props before using it and that instruction is what saved the step** — but it
+> named the wrong risk: it warned that `Banner` might not take children (it does) while shipping an
+> invalid tone. **Warning about the right FILE is not the same as warning about the right THING.**
+>
+> **C-9. Phase 12 added five audit actions and taught the activity feed none of them.** Found in review
+> of Task 7a, after the implementer flagged the `finance.*` half of it as out of their scope — correctly,
+> and the flag is what surfaced it. `register`, `receive`, `finance.confirm`, `finance.return`
+> and `finance.resubmit` all fell through `auditSentence`’s default, so `/inventory/activity`
+> read **"J. Sarmiento finance.return BR-LT-0148"** — not a sentence, and it buried the reason, which is
+> the whole point of a return. They fell through `actionDot`’s neutral default too, so a send-back
+> looked exactly like a routine edit.
+>
+> Fixed with 12 tests, each observed failing first. **The lesson is that "write an audit row" is only
+> half of an audit requirement.** Tasks 4, 5, 6 and 7a each specified the `writeAudit` call exactly and
+> not one of them said what the row should READ AS — so four separate implementers each wrote a correct
+> row that rendered as garbage, and every task passed its own tests. `activity.ts` has a `default`
+> branch, which means **a missing case is never a type error and never a test failure; it is silently
+> ugly output nobody sees until they open the feed.** Any future phase that adds an audit action must
+> add its sentence and its dot in the same task.
 
 **Conventions for every task:** stay on `phase-12-receiving`; run `npx tsc --noEmit && npm run lint`
 before each commit; **NEVER run `npm run build` while a dev server is running** (they share `.next`).
