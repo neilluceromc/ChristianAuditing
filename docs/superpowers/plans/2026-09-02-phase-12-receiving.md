@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1 through C-9. Seven were defects in this plan; C-5 and C-7 are changes of PREMISE from the user, which replaced Tasks 5-7 and then added Task 7a. C-4 would have corrupted the asset register, and C-9 shipped five audit actions the activity feed could not render — neither was catchable by any test the plan itself specified.
+> ### AMENDED DURING EXECUTION — C-1 through C-11. Eight were defects; C-5 and C-7 are changes of PREMISE from the user, which replaced Tasks 5-7, added Task 7a, and orphaned Tasks 3-4 without saying so. **C-10 is the one that matters most: registration never worked at any quantity, and every layer below it was green.** Only Task 7's end-to-end run could see it.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -236,6 +236,35 @@ written until submit.
 > branch, which means **a missing case is never a type error and never a test failure; it is silently
 > ugly output nobody sees until they open the feed.** Any future phase that adds an audit action must
 > add its sentence and its dot in the same task.
+>
+> **C-10. Registration never worked, at any quantity, and only an end-to-end test could have said so.**
+> Task 7's very first assertion found it. `register-form.tsx` grew its serials array with
+> `next.length = n` and then filled it with `.map((s) => s ?? "")` — but **`.map` skips holes
+> rather than visiting them**, so the defaults were never written. The holes serialized as `undefined`
+> and `serials: z.array(z.string())` rejected them: `serials.0: Invalid input`. Typing into the field
+> could not repair it either, because the per-index `onChange` is `.map`-based too and skips the same
+> hole. **Task 5 shipped with no e2e and every layer below it was green:** `nextTags` is pure and
+> fully unit-tested, `registerAssets` is correct, `tsc` and `lint` pass, and vitest runs in
+> `environment: "node"` so no component test could exist to catch it. **The bug lived entirely in the
+> seam between a correct form and a correct action — which is the only thing an e2e test can see, and
+> the reason Task 7 is not optional.**
+>
+> **C-11. Tasks 3-4 built a receiving chain that C-5 then orphaned, and nobody noticed for four tasks.**
+> Also surfaced by Task 7, whose implementer stopped rather than improvising a surface to test against.
+> `receiveUnits`, `receivableUnits`, `outstanding` and `isFullyReceived` had **no caller at
+> all** — no `.tsx` imported them, no route wrapped them, and they need `auth()`‘s request context so
+> they could not even be driven from Node. C-5 deleted the screen that would have called them and said so
+> in the file-structure table; what it did not do was ask what happened to the two tasks' worth of server
+> code that screen was the only consumer of. **The user chose to delete it** (~264 lines), which also
+> retired C-4's rollback fix — a defect that cost a full amendment to find, guarding a path nobody could
+> reach.
+>
+> **The lesson is that removing a caller is a bigger edit than it looks.** C-5 was written as a change to
+> Tasks 5-6; it was also, silently, a change to Tasks 3-4. **When a premise change deletes a screen, walk
+> the call graph downward in the same amendment** and say explicitly, for each thing that screen was the
+> only consumer of, whether it lives or dies. `NoteKind.RECEIVE` survives the cut deliberately:
+> dropping a Postgres enum value means recreating the type, which is real migration risk for an inert
+> value.
 
 **Conventions for every task:** stay on `phase-12-receiving`; run `npx tsc --noEmit && npm run lint`
 before each commit; **NEVER run `npm run build` while a dev server is running** (they share `.next`).
@@ -1752,30 +1781,32 @@ git commit -m "feat(inventory): finance sends a bad registration back to IT with
 
 ---
 
-### Task 7: `e2e/receiving.spec.ts` — registration, Finance review, and receiving
+### Task 7: `e2e/receiving.spec.ts` — registration and Finance review
 
 **Files:**
 - Create: `e2e/receiving.spec.ts`
 
-**Rewritten after C-5.** There are now THREE surfaces to prove, not one. Registration is the primary
-path the user will actually use; receiving is kept because it is already built and because C-4's
-rollback guard lives there; confirmation is Task 6's.
+**Rewritten twice.** C-5 replaced the receive screen with registration; C-11 then deleted the receiving
+server code that screen was the only consumer of. What is left to prove is the flow the user actually
+described: **IT registers already-purchased assets, Finance confirms or sends them back.**
 
 Model the file on `e2e/purchases.spec.ts` for the login helper and the reseeding `beforeAll`.
 
-⚠️ **Never reference a raw cuid.** The database reseeds and cuids change every run — reference
-`PR-0188` by `refNo` and assets by `tag`. This has already bitten this project once, producing a
-silently empty label sheet.
+⚠️ **Never reference a raw cuid.** The database reseeds and cuids change every run — reference assets by
+`tag`. This has already produced a silently empty label sheet in this project once.
 
-⚠️ **Read the highest existing number and derive expected tags. Do not hardcode `BR-LT-0211`.**
-A fresh seed has `LT` at `0210`, but any earlier test in the file may have registered more.
+⚠️ **Read the highest existing number and derive expected tags. Do not hardcode `BR-LT-0211`.** A fresh
+seed has `LT` at `0210`, but any earlier test in this file may have registered more.
+
+⚠️ **Read `src/components/inventory/finance-review.tsx` before writing the Finance tests.** Every
+control there opens a `Dialog`, so each flow is **two clicks**, not one.
 
 - [ ] **Step 1: Registration — the primary path**
 
 1. **A batch writes exactly what it said.** Register 3 laptops. Assert via Prisma that three assets
    exist with consecutive expected tags, `status: "SPARE"`, the chosen `categoryId` and `typeId`, and
-   `financeConfirmedAt: null` — **unconfirmed is the correct initial state** and asserting it here is
-   what stops a later change quietly auto-confirming.
+   `financeConfirmedAt: null` — **unconfirmed is the correct initial state**, and asserting it here is
+   what stops a later change quietly auto-confirming. **This assertion found C-10.**
 2. **A duplicate tag inside one batch is refused and writes NOTHING.** Submit two identical tags.
    Assert the conflict names the tag, and assert a **Prisma count delta of zero** — the absence of a
    success message proves nothing.
@@ -1783,52 +1814,35 @@ A fresh seed has `LT` at `0210`, but any earlier test in the file may have regis
 4. **An audit row exists per registered asset**, with `action: "register"`.
 5. **Neither `viewer` nor `finance_staff` can reach `/inventory/register`.** Assert the redirect for
    **both** — do not assume one implies the other. This is the `PATH_RULES` ordering guard: if the new
-   rule were placed after the general `/inventory` rule, `finance_staff` would sail through, and this
-   is the only test that would notice.
+   rule sat below the general `/inventory` rule, `finance_staff` would sail through, and **this is the
+   only test in the suite that would notice.**
 
-- [ ] **Step 2: Confirmation — Task 6's surface**
+- [ ] **Step 2: Finance review — confirm**
 
 6. **Finance confirms and the record says so.** As `finance_staff`, confirm a registered asset; assert
    `financeConfirmedAt` is set, `financeConfirmedById` is that user, and an audit row exists with
    `action: "finance.confirm"`.
 7. **Confirming twice is refused.** Assert the conflict and that `financeConfirmedAt` did **not**
-   change — capture the first timestamp and compare. A second write that merely overwrote the same
-   field with a new time would pass a naive "still confirmed" assertion.
-8. **`it_staff` cannot confirm.** IT registers, Finance confirms; asserting the split is the whole
-   point of the two-stage flow.
+   change — capture the first timestamp and compare. A second write that merely overwrote the field
+   with a new time would pass a naive "still confirmed" assertion.
+8. **`it_staff` cannot confirm.** IT registers, Finance confirms; the split is the whole point.
 
-- [ ] **Step 2a: The return path — Task 7a's surface (C-7)**
+- [ ] **Step 3: Finance review — send back and correct**
 
-12. **Finance sends an asset back with a reason.** As `finance_staff`, use **Send back to IT**, type a
-    reason, submit. Assert the pill reads `RETURNED BY FINANCE`, the reason is **visible on the
-    record** (not only in the audit tab — IT reading it without digging is the whole point), and an
-    audit row exists with `action: "finance.return"` whose diff carries the reason.
-13. **An empty or too-short reason is refused and WRITES NOTHING.** Submit with a 1-character reason.
-    Assert the inline field error, and assert via Prisma that `financeReturnedAt` is **still null** —
-    a dialog that stays open proves nothing about the database.
-14. **`it_staff` cannot send back.** The role split is the control this exists to provide.
-15. **A confirmed asset cannot be sent back.** Confirm one first, then attempt the return; assert the
-    conflict. This is the guard that keeps the pill's three states mutually exclusive.
-16. **IT marks it corrected, and Finance can then confirm.** As `it_staff`, **Mark corrected**; assert
+9. **Finance sends an asset back with a reason.** Assert the pill reads `RETURNED BY FINANCE`, the
+   reason is **visible on the record** (IT reading it without opening the audit tab is the point), and
+   an audit row exists with `action: "finance.return"` whose diff carries the reason.
+10. **A too-short reason is refused and WRITES NOTHING.** Submit a 1-character reason. Assert the
+    inline field error, and assert via Prisma that `financeReturnedAt` is **still null** — a dialog
+    that stays open proves nothing about the database.
+11. **`it_staff` cannot send back.**
+12. **A confirmed asset cannot be sent back.** Confirm one first, then attempt the return; assert the
+    conflict. This guard is what keeps the pill's three states mutually exclusive.
+13. **IT marks it corrected, and Finance can then confirm.** As `it_staff`, **Mark corrected**; assert
     the pill returns to `AWAITING FINANCE` and `financeReturnReason` is **null**, not merely hidden.
     Then confirm as `finance_staff` and assert `financeConfirmedAt` is set **and** the return columns
-    are still null — Task 7a's amendment to `confirmAssetDetails` is what makes "confirmed AND
-    returned" unreachable, and this is the only test that observes it.
-
-- [ ] **Step 3: Receiving — kept, and C-4's guard**
-
-9. **A partial receipt against `PR-0188` writes exactly what it said**, with **both**
-   `purchaseRequestId` and `purchaseUnitId` set, and the unit then reads `1 of 2 received`.
-10. **An over-receipt is refused and writes NOTHING.** Attempt 3 against the qty-2 unit; count delta
-    zero.
-11. **A MULTI-LINE receipt whose second line fails rolls back the first — the C-4 case, and the most
-    important test in this file.** **The seed cannot express it:** `PR-0188` has exactly one unit, so
-    every case above sends a single line and none reaches the multi-line failure path. **Build the
-    fixture** — create a `COMPLETED` request with **two** `APPROVED` units through Prisma inside the
-    spec (Phase 9 Task 13 set the precedent: construct what the seed lacks rather than asserting
-    around it). Submit two lines where the first is valid and the second over-receives, and assert a
-    **count delta of ZERO**. Before C-4's fix this delta would have been the first line's assets,
-    committed, while the caller saw a conflict.
+    are still null. **This is the only test that observes Task 7a's amendment to `confirmAssetDetails`**,
+    which is what makes "confirmed AND returned" unreachable.
 
 - [ ] **Step 4: Run it and read the count**
 
@@ -1837,29 +1851,26 @@ npx playwright test e2e/receiving.spec.ts --workers=1 --global-timeout=600000
 ```
 
 A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read
-the number.** Expect **16** — the 11 first planned, plus the five C-7 added.
+the number.** Expect **13**.
 
 - [ ] **Step 5: Prove the write-nothing assertions are not inert**
 
-**Five** tests above assert that a refusal wrote nothing. Each must be shown capable of failing:
+Three tests assert that a refusal wrote nothing (2, 3 and 10). Test 3's guard is a database uniqueness
+constraint and needs no mutation; the other two must each be shown capable of failing:
 
-- weaken the in-batch duplicate check (`d.tags.indexOf(t) !== i` → `false`) → test 2 must fail **on the
-  count**, not only the message;
-- weaken the over-receipt guard (`line.tags.length > outstanding(receipt)` → `> 999`) → tests 10 and 11
-  must fail on the count;
-- move a write above a refusal in `receiveUnits` (undo C-4's two-pass split) → **test 11 must fail**. If
-  it does not, the rollback case is inert and the C-4 regression is unguarded.
-- weaken the return reason's floor (`.min(5, …)` → `.min(0)`) → **test 13 must fail on the
-  column**, not merely on the missing field error.
+- weaken the in-batch duplicate check (`d.tags.indexOf(t) !== i` → `false`) → **test 2 must fail on the
+  count**, not only on the message;
+- weaken the return reason's floor (`.min(5, …)` → `.min(0)`) → **test 10 must fail on the column**,
+  not merely on the missing field error.
 
-Revert each after observing it. **Report the actual output for all five.** A write-nothing test that
-passes against a broken guard is worse than no test, because it certifies the bug.
+Revert each after observing it. **Report the actual output for both.** A write-nothing test that passes
+against a broken guard is worse than no test, because it certifies the bug.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add e2e/receiving.spec.ts
-git commit -m "test(e2e): registration, confirmation and receiving each write exactly what they say"
+git commit -m "test(e2e): registration and Finance review each write exactly what they say"
 ```
 
 ---
