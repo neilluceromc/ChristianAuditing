@@ -29,7 +29,12 @@ param(
   [switch]$CheckOnly
 )
 
-$ErrorActionPreference = "Stop"
+# NOT "Stop". In PowerShell 5.1 a native command writing to stderr raises a
+# NativeCommandError, and "Stop" makes that terminating -- but `git pull` and
+# `docker compose build` both write to stderr on every successful run. Under
+# "Stop" this script died on its own first pull. Correctness here comes from
+# checking $LASTEXITCODE after each command, which it does throughout.
+$ErrorActionPreference = "Continue"
 
 function Say([string]$m) { Write-Host "[deploy] $m" }
 function Die([string]$m) { Write-Host "[deploy] FAILED: $m" -ForegroundColor Red; exit 1 }
@@ -57,10 +62,16 @@ if ($dirty) {
   Die "commit, stash or discard these on the host first. A staging box should have no local edits."
 }
 
-$upstream = git rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>$null
-if (-not $upstream) {
+# Read the upstream from config rather than `rev-parse @{u}`: rev-parse writes
+# to stderr when there is no upstream, and `git config --get` is silent and
+# merely exits non-zero. That silence is what keeps this a clean message
+# instead of a raw git error.
+$remoteName = (git config --get "branch.$branch.remote")
+$mergeRef = (git config --get "branch.$branch.merge")
+if (-not $remoteName -or -not $mergeRef) {
   Die "branch '$branch' has no upstream. Set one: git branch --set-upstream-to=origin/$branch"
 }
+$upstream = "$remoteName/" + ($mergeRef -replace '^refs/heads/', '')
 Say "upstream: $upstream"
 
 if ($CheckOnly) {
