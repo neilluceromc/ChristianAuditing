@@ -82,15 +82,32 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     # Interval anchors to container start, not wall clock — accepted at this scale.
+    # The dump alone was a FALSE backup: AssetDocument rows restore fine and the
+    # PDFs behind them do not exist, so a restore resurrects a document list
+    # where every download 404s. ./uploads is tarred in the SAME cycle as the
+    # dump so the two never drift apart by more than one run. Read-only mount:
+    # a backup process has no business writing to what it is copying.
     entrypoint: >
       sh -c 'while true; do
         ts=$$(date +%Y%m%d-%H%M%S);
+        ok=1;
         if pg_dump -h db -U $${POSTGRES_USER} -d $${POSTGRES_DB} -Fc -f /backups/.tmp-$$ts.dump; then
           mv /backups/.tmp-$$ts.dump /backups/inventory-$$ts.dump;
-          ls -1t /backups/inventory-*.dump 2>/dev/null | tail -n +15 | xargs -r rm -f;
-          echo "[backup] ok $$ts";
         else
           rm -f /backups/.tmp-$$ts.dump;
+          ok=0;
+        fi;
+        if tar -czf /backups/.tmp-$$ts.tar.gz -C /uploads .; then
+          mv /backups/.tmp-$$ts.tar.gz /backups/uploads-$$ts.tar.gz;
+        else
+          rm -f /backups/.tmp-$$ts.tar.gz;
+          ok=0;
+        fi;
+        ls -1t /backups/inventory-*.dump 2>/dev/null | tail -n +15 | xargs -r rm -f;
+        ls -1t /backups/uploads-*.tar.gz 2>/dev/null | tail -n +15 | xargs -r rm -f;
+        if [ $$ok -eq 1 ]; then
+          echo "[backup] ok $$ts";
+        else
           echo "[backup] FAILED $$ts" >&2;
         fi;
         sleep 86400;
@@ -104,6 +121,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backups:/backups
+      - ./uploads:/uploads:ro
 
 volumes:
   pgdata:
