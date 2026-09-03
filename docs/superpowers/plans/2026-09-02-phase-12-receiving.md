@@ -23,7 +23,7 @@ written until submit.
 
 ## Read this before Task 1
 
-> ### AMENDED DURING EXECUTION — C-1 through C-6. Five were defects in this plan; C-5 is a change of PREMISE from the user that replaced Tasks 5-7. C-4 would have corrupted the asset register and no test in the plan as written could have caught it.
+> ### AMENDED DURING EXECUTION — C-1 through C-7. Five were defects in this plan; C-5 and C-7 are changes of PREMISE from the user, which replaced Tasks 5-7 and then added Task 7a. C-4 would have corrupted the asset register and no test in the plan as written could have caught it.
 > **C-1. Task 2 told the implementer "migration only, no application code" AND "`tsc` clean before
 > committing". Those are impossible together, and the implementer was right to stop rather than pick
 > one.** Adding `NoteKind.RECEIVE` breaks `src/lib/purchase-thread.ts:16`, which holds
@@ -187,6 +187,29 @@ written until submit.
 > a plan that assumes it is will send an implementer into a build error. Check the directive before
 > proposing reuse across that boundary. Worth noting the cost was near zero here because the implementer
 > stopped; the same instruction followed literally would have failed the build.
+>
+> **C-7. A second change of PREMISE from the user: Finance needs to send a bad registration BACK.**
+> Asked to confirm the flow, the user described it as "hold to pending until finance check if its all
+> correct, then once approved it will automatically record to its respective tabs". Three of those four
+> beliefs did not match what Tasks 5-6 built, and checking them was worth more than the code it produced:
+>
+> | The user believed | What Tasks 5-6 actually built |
+> |---|---|
+> | The asset is **held pending** until Finance checks | It is **live immediately**. Only two files in the repo read `financeConfirmedAt` — the layout that draws the pill and the action that sets it. Confirmation is a **label, not a gate**. |
+> | **IT or Purchasing** registers | **IT only.** `/inventory/register` is `workspaces: ["it"]`, `roles: ["admin","it_staff"]`. Purchasing registers purchase *requests*, not assets. |
+> | Confirmation **routes it to its tab** | The IT-Assets / Office-Pantry tabs **do not exist yet** — that is Phase 13, and it is why the tabs were deferred. |
+> | Finance **approves** | Confirmation is **one-way**. There was no reject. |
+>
+> The user chose to keep confirmation a **flag, not a gate** (so Task 6 stands unchanged), and asked for
+> the missing reject path. **Task 7a** below adds it.
+>
+> **The lesson is about the shape of the question.** The user asked "right?" — a yes/no confirmation, the
+> cheapest possible message — and the honest answer was "one of your four is true". Had that been
+> answered "yes, that's right", Phase 13 would have been built on a mental model the code did not
+> implement, and the gap would have surfaced only when someone tried to use it. **A user restating the
+> design back to you is a free correctness check on your own work. Read it against the code, not against
+> your memory of the plan** — the code here was three weeks of decisions old and the plan text still
+> described a flow that C-5 had already replaced.
 
 **Conventions for every task:** stay on `phase-12-receiving`; run `npx tsc --noEmit && npm run lint`
 before each commit; **NEVER run `npm run build` while a dev server is running** (they share `.next`).
@@ -242,7 +265,8 @@ trailer `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
 | `src/app/(app)/inventory/register/page.tsx` **(create)** | Batch registration — no purchase request required. |
 | `src/components/inventory/register-form.tsx` **(create)** | The client form: quantity, learned prefix, editable tags. |
 | `src/lib/workspaces.ts` **(modify)** | One `PATH_RULES` entry, ABOVE the general `/inventory` rule. |
-| `src/app/(app)/inventory/[id]/layout.tsx` **(modify)** | The Finance confirmation pill and Confirm action. |
+| `src/app/(app)/inventory/[id]/layout.tsx` **(modify)** | The Finance confirmation pill and Confirm action.Three-state Finance pill, Confirm, Send back, Mark corrected. |
+| `src/components/inventory/finance-review.tsx` **(create)** | The Finance/IT review controls — one client island for all three buttons. |
 | `e2e/receiving.spec.ts` **(create)** | Registration, confirmation and receiving — four write-nothing cases. |
 
 ---
@@ -1212,7 +1236,497 @@ Phase 13 then has to reconcile or replace.
 
 ---
 
-### Task 7: `e2e/receiving.spec.ts` — registration, receiving, and confirmation
+### Task 7a: Finance sends a bad registration back to IT (C-7)
+
+**Files:**
+- Modify: `prisma/schema.prisma`
+- Create: `prisma/migrations/<timestamp>_asset_finance_return/migration.sql`
+- Modify: `src/server/modules/inventory/actions.ts`
+- Create: `src/components/inventory/finance-review.tsx`
+- Delete: `src/components/inventory/confirm-asset-details.tsx`
+- Modify: `src/app/(app)/inventory/[id]/layout.tsx`
+
+**Added by C-7.** Task 6 made confirmation one-way: Finance could say "correct" but had no tracked way
+to say "wrong, and here is why". The user asked for the return path, and chose to keep confirmation a
+**flag rather than a gate** — so nothing here blocks an asset from being used. An unconfirmed or
+returned asset is still a normal, live asset. What this task adds is a **reason that reaches IT**.
+
+**Why three columns and not a note thread.** `NoteEntry` hangs off `PurchaseRequest` by a *required*
+`requestId`, so reusing it for assets would mean making it polymorphic — which touches the append-only
+DB trigger and the exhaustive `NOTE_CHIP` map. History instead lives where this codebase already keeps
+history: `AuditEntry`, which records actor, timestamp and a `diff` JSON, and is already rendered by
+`/inventory/activity`. **The columns hold only the CURRENT reason; every reason ever given survives in
+the audit trail.** A second append-only thread for assets would duplicate it.
+
+**Still no new `AssetStatus` member** — the C-5 reasoning is unchanged. Three states, derived from two
+timestamps, mutually exclusive:
+
+| `financeConfirmedAt` | `financeReturnedAt` | pill |
+|---|---|---|
+| null | null | `AWAITING FINANCE` (accent) |
+| null | set | `RETURNED BY FINANCE` (accent) + the reason on the record |
+| set | null | `FINANCE CONFIRMED · <date>` (neutral) |
+
+The fourth combination — both set — is made unreachable by `confirmAssetDetails` clearing the return
+columns in Step 3.
+
+---
+
+- [ ] **Step 1: The schema**
+
+In `prisma/schema.prisma`, add to `model Asset` directly beneath the `financeConfirmedBy` relation
+(mirroring its shape exactly — `onDelete: Restrict`, matching the rest of `Asset`'s relations):
+
+```prisma
+  financeReturnedAt    DateTime?
+  financeReturnedById  String?
+  financeReturnedBy    User?     @relation("financeReturnedBy", fields: [financeReturnedById], references: [id], onDelete: Restrict)
+  financeReturnReason  String?
+```
+
+Add to `Asset`'s index block, beneath `@@index([financeConfirmedAt])`:
+
+```prisma
+  @@index([financeReturnedAt])
+```
+
+And to `model User`, beneath the `financeConfirmed` back-relation:
+
+```prisma
+  financeReturned  Asset[] @relation("financeReturnedBy")
+```
+
+- [ ] **Step 2: The migration**
+
+Create `prisma/migrations/<timestamp>_asset_finance_return/migration.sql` — use a timestamp **later**
+than `20260902090000`:
+
+```sql
+ALTER TABLE "Asset" ADD COLUMN "financeReturnedAt" TIMESTAMP(3);
+ALTER TABLE "Asset" ADD COLUMN "financeReturnedById" TEXT;
+ALTER TABLE "Asset" ADD COLUMN "financeReturnReason" TEXT;
+ALTER TABLE "Asset" ADD CONSTRAINT "Asset_financeReturnedById_fkey"
+  FOREIGN KEY ("financeReturnedById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "Asset_financeReturnedAt_idx" ON "Asset"("financeReturnedAt");
+```
+
+**No backfill** — every existing asset has never been returned, which NULL already says.
+
+Run:
+
+```bash
+npx prisma migrate deploy && npx prisma generate && npx prisma migrate status
+```
+
+Expected: **11 migrations found**, "Database schema is up to date!".
+
+⚠️ If `tsc` later reports that `financeReturnedAt` does not exist, you skipped `prisma generate`. The
+client is generated into gitignored `node_modules/.prisma` and is shared across branches.
+
+- [ ] **Step 3: The two actions, and one amendment**
+
+In `src/server/modules/inventory/actions.ts`, append after `confirmAssetDetails`:
+
+```ts
+const returnSchema = z.object({
+  id: z.string().min(1),
+  reason: z.string().trim().min(5, "Say what is wrong — at least 5 characters.").max(500),
+});
+
+/**
+ * Finance sends a registration back to IT with a reason. The counterpart to
+ * confirmAssetDetails, and deliberately NOT a gate (C-7): the asset stays
+ * live and usable throughout — what changes is that IT can see what to fix.
+ *
+ * A SECOND return is allowed and overwrites the current reason: Finance
+ * re-checking after IT's fix and finding it still wrong is a real sequence.
+ * Only the current reason lives in the column; every one survives in the
+ * audit trail.
+ */
+export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "finance_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const parsed = returnSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { id, reason } = parsed.data;
+
+  let out: { tag: string } | null = null;
+  let failure: ActionResult<{ tag: string }> | null = null;
+
+  await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({
+      where: { id },
+      select: { id: true, tag: true, financeConfirmedAt: true },
+    });
+    if (!asset) {
+      failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    if (asset.financeConfirmedAt) {
+      failure = conflict(`${asset.tag} is already confirmed and cannot be sent back.`);
+      return;
+    }
+    // State-guarded, the same shape as confirmAssetDetails: the confirmed-is-
+    // null check lives IN the where clause, so a confirmation landing between
+    // the read above and this write wins rather than being silently undone.
+    const hit = await tx.asset.updateMany({
+      where: { id: asset.id, financeConfirmedAt: null },
+      data: {
+        financeReturnedAt: new Date(),
+        financeReturnedById: user.id,
+        financeReturnReason: reason,
+      },
+    });
+    if (hit.count === 0) {
+      failure = conflict(`${asset.tag} was confirmed by someone else just now.`);
+      return;
+    }
+    await writeAudit(tx, {
+      actorId: user.id,
+      actorLabel: user.name,
+      entityType: "asset",
+      entityId: asset.id,
+      action: "finance.return",
+      // The reason goes in the diff, and that is what makes the audit trail
+      // the history: the column holds only the CURRENT reason.
+      diff: { financeReturn: { from: null, to: reason } },
+    });
+    out = { tag: asset.tag };
+  });
+
+  if (failure) return failure;
+  revalidatePath(`/inventory/${id}`);
+  revalidatePath("/inventory");
+  return ok(out!);
+}
+
+const resubmitSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * IT says "fixed, look again", clearing the return so the record reads
+ * AWAITING FINANCE once more.
+ *
+ * Explicit rather than clearing on any edit to the asset: an IT staffer
+ * correcting an unrelated field must not silently claim the reported problem
+ * is resolved.
+ */
+export async function resubmitAssetToFinance(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const parsed = resubmitSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { id } = parsed.data;
+
+  let out: { tag: string } | null = null;
+  let failure: ActionResult<{ tag: string }> | null = null;
+
+  await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({
+      where: { id },
+      select: { id: true, tag: true, financeReturnedAt: true },
+    });
+    if (!asset) {
+      failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    if (!asset.financeReturnedAt) {
+      failure = conflict(`${asset.tag} was not sent back, so there is nothing to resubmit.`);
+      return;
+    }
+    const hit = await tx.asset.updateMany({
+      where: { id: asset.id, financeReturnedAt: { not: null } },
+      data: { financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null },
+    });
+    if (hit.count === 0) {
+      failure = conflict(`${asset.tag} was resubmitted by someone else just now.`);
+      return;
+    }
+    await writeAudit(tx, {
+      actorId: user.id,
+      actorLabel: user.name,
+      entityType: "asset",
+      entityId: asset.id,
+      action: "finance.resubmit",
+      diff: { financeReturn: { from: "returned", to: null } },
+    });
+    out = { tag: asset.tag };
+  });
+
+  if (failure) return failure;
+  revalidatePath(`/inventory/${id}`);
+  revalidatePath("/inventory");
+  return ok(out!);
+}
+```
+
+**And amend `confirmAssetDetails`** — its `updateMany` `data` becomes:
+
+```ts
+      data: {
+        financeConfirmedAt: new Date(),
+        financeConfirmedById: user.id,
+        // Clearing the return here is what makes "confirmed AND returned"
+        // unreachable, so the pill's three states stay mutually exclusive.
+        financeReturnedAt: null,
+        financeReturnedById: null,
+        financeReturnReason: null,
+      },
+```
+
+- [ ] **Step 4: One client island for all three controls**
+
+**Delete** `src/components/inventory/confirm-asset-details.tsx` and create
+`src/components/inventory/finance-review.tsx`. Three buttons sharing one dialog beats three islands.
+
+Modelled on `src/components/approvals/approval-actions.tsx`, which is this codebase's
+act-with-a-required-reason pattern — note especially that a validation failure is read from
+**`res.fieldErrors`**, not `res.fields`.
+
+```tsx
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Banner } from "@/components/ui/banner";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { FormField } from "@/components/ui/form-field";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast";
+import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import {
+  confirmAssetDetails,
+  resubmitAssetToFinance,
+  returnAssetToIt,
+} from "@/server/modules/inventory/actions";
+import type { ActionResult } from "@/server/action-result";
+
+type Mode = "confirm" | "return" | "resubmit";
+
+const COPY: Record<Mode, { title: string; cta: string; done: string; blurb: string }> = {
+  confirm: {
+    title: "Confirm",
+    cta: "Confirm",
+    done: "confirmed",
+    blurb: "Marks the details reviewed and accurate. Recorded in the audit trail with your name.",
+  },
+  return: {
+    title: "Send back",
+    cta: "Send back",
+    done: "sent back to IT",
+    blurb: "IT sees this reason on the record, so say what is wrong rather than that something is.",
+  },
+  resubmit: {
+    title: "Mark corrected",
+    cta: "Mark corrected",
+    done: "resubmitted to Finance",
+    blurb: "Clears the returned flag so Finance reviews the record again.",
+  },
+};
+
+/**
+ * Finance's confirm / send-back pair and IT's mark-corrected, in one island
+ * (C-7). Deliberately not a gate: the asset is live and usable in every one
+ * of these states — what moves is whether IT has been told something is wrong.
+ */
+export function FinanceReview({
+  assetId,
+  tag,
+  canConfirm,
+  canResubmit,
+}: {
+  assetId: string;
+  tag: string;
+  canConfirm: boolean;
+  canResubmit: boolean;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, startTransition] = useTransition();
+  const [mode, setMode] = useState<Mode | null>(null);
+  const [reason, setReason] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+
+  function close() {
+    setMode(null);
+    setReason("");
+    setFieldErrors({});
+  }
+
+  function submit() {
+    if (!mode) return;
+    setError(null);
+    setFieldErrors({});
+    startTransition(async () => {
+      const res: ActionResult<{ tag: string }> =
+        mode === "confirm"
+          ? await confirmAssetDetails({ id: assetId })
+          : mode === "return"
+            ? await returnAssetToIt({ id: assetId, reason })
+            : await resubmitAssetToFinance({ id: assetId });
+      if (!res.ok && res.kind === "validation") {
+        setFieldErrors(res.fieldErrors ?? {});
+        return;
+      }
+      const verb = COPY[mode].done;
+      close();
+      if (res.ok) {
+        toast(`${res.data.tag} ${verb}`, "settled");
+        router.refresh();
+      } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
+      else setError(res.message);
+    });
+  }
+
+  return (
+    <>
+      {canConfirm && (
+        <>
+          <Button variant="primary" onClick={() => setMode("confirm")}>Confirm details</Button>
+          <Button variant="ghost" onClick={() => setMode("return")}>Send back to IT</Button>
+        </>
+      )}
+      {canResubmit && (
+        <Button variant="primary" onClick={() => setMode("resubmit")}>Mark corrected</Button>
+      )}
+      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+      {error && <Banner tone="fault" title={error} />}
+      <Dialog
+        open={mode !== null}
+        onClose={close}
+        title={mode ? `${COPY[mode].title} ${tag}?` : ""}
+        footer={
+          <>
+            <Button variant="ghost" onClick={close}>Cancel</Button>
+            <Button
+              variant={mode === "return" ? "danger" : "primary"}
+              loading={pending}
+              onClick={submit}
+            >
+              {mode ? COPY[mode].cta : ""}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-fg-muted">{mode ? COPY[mode].blurb : ""}</p>
+          {mode === "return" && (
+            <FormField label="What is wrong?" required error={fieldErrors.reason}>
+              {(p) => (
+                <Textarea
+                  id={p.id}
+                  aria-describedby={p["aria-describedby"]}
+                  invalid={p.invalid}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              )}
+            </FormField>
+          )}
+        </div>
+      </Dialog>
+    </>
+  );
+}
+```
+
+⚠️ **`canConfirm` and `canResubmit` already encode every state the island needs, so it takes no
+`returned` prop.** Resist adding one "for completeness": `--max-warnings 0` fails on an unused
+parameter, and C-2 in this same phase was exactly that mistake.
+
+- [ ] **Step 5: The layout**
+
+In `src/app/(app)/inventory/[id]/layout.tsx`, replace the `ConfirmAssetDetails` import with
+`FinanceReview`, and compute:
+
+```tsx
+  const returned = asset.financeReturnedAt !== null;
+  const canConfirm = (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt;
+  const canResubmit = (user.role === "admin" || user.role === "it_staff") && returned;
+```
+
+The pill becomes three-state — replace the existing two-branch pill with:
+
+```tsx
+            {asset.financeConfirmedAt ? (
+              <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
+            ) : returned ? (
+              <Pill tone="accent">RETURNED BY FINANCE</Pill>
+            ) : (
+              <Pill tone="accent">AWAITING FINANCE</Pill>
+            )}
+```
+
+The `actions` guard becomes:
+
+```tsx
+        actions={
+          canMutate || canConfirm || canResubmit ? (
+            <>
+              {canMutate && (
+                <>
+                  <RequestStatusChange assetId={asset.id} currentStatus={asset.status} />
+                  <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>
+                </>
+              )}
+              {(canConfirm || canResubmit) && (
+                <FinanceReview
+                  assetId={asset.id}
+                  tag={asset.tag}
+                  canConfirm={canConfirm}
+                  canResubmit={canResubmit}
+                />
+              )}
+            </>
+          ) : undefined
+        }
+```
+
+⚠️ **Keep that ternary.** `PageHeader` renders `actions && <div>…</div>`, and a fragment containing
+only `false` is still truthy — a naive version renders an empty action bar for viewers.
+
+**And render the reason**, immediately below the `<PageHeader>` and above `{children}`, so IT reads it
+without opening the audit tab:
+
+```tsx
+      {returned && asset.financeReturnReason && (
+        <Banner tone="warn" title="Finance sent this back">
+          {asset.financeReturnReason}
+        </Banner>
+      )}
+```
+
+⚠️ **Check `Banner`'s actual props before using this** — read `src/components/ui/banner.tsx`. Every
+other use in this file passes only `tone` and `title`. If it takes no children, put the reason in the
+`title`. **Do not guess.**
+
+- [ ] **Step 6: Verify**
+
+```bash
+npx tsc --noEmit && npm run lint && npx vitest run
+```
+
+Expected: no `tsc` output, no lint output, **838 tests / 50 files passing** (this task adds no unit
+tests — the logic is all DB-coupled and Task 7 covers it end-to-end).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A
+git commit -m "feat(inventory): finance sends a bad registration back to IT with a reason"
+```
+
+---
+
+### Task 7: `e2e/receiving.spec.ts` — registration, Finance review, and receiving
 
 **Files:**
 - Create: `e2e/receiving.spec.ts`
@@ -1257,6 +1771,24 @@ A fresh seed has `LT` at `0210`, but any earlier test in the file may have regis
 8. **`it_staff` cannot confirm.** IT registers, Finance confirms; asserting the split is the whole
    point of the two-stage flow.
 
+- [ ] **Step 2a: The return path — Task 7a's surface (C-7)**
+
+12. **Finance sends an asset back with a reason.** As `finance_staff`, use **Send back to IT**, type a
+    reason, submit. Assert the pill reads `RETURNED BY FINANCE`, the reason is **visible on the
+    record** (not only in the audit tab — IT reading it without digging is the whole point), and an
+    audit row exists with `action: "finance.return"` whose diff carries the reason.
+13. **An empty or too-short reason is refused and WRITES NOTHING.** Submit with a 1-character reason.
+    Assert the inline field error, and assert via Prisma that `financeReturnedAt` is **still null** —
+    a dialog that stays open proves nothing about the database.
+14. **`it_staff` cannot send back.** The role split is the control this exists to provide.
+15. **A confirmed asset cannot be sent back.** Confirm one first, then attempt the return; assert the
+    conflict. This is the guard that keeps the pill's three states mutually exclusive.
+16. **IT marks it corrected, and Finance can then confirm.** As `it_staff`, **Mark corrected**; assert
+    the pill returns to `AWAITING FINANCE` and `financeReturnReason` is **null**, not merely hidden.
+    Then confirm as `finance_staff` and assert `financeConfirmedAt` is set **and** the return columns
+    are still null — Task 7a's amendment to `confirmAssetDetails` is what makes "confirmed AND
+    returned" unreachable, and this is the only test that observes it.
+
 - [ ] **Step 3: Receiving — kept, and C-4's guard**
 
 9. **A partial receipt against `PR-0188` writes exactly what it said**, with **both**
@@ -1279,11 +1811,11 @@ npx playwright test e2e/receiving.spec.ts --workers=1 --global-timeout=600000
 ```
 
 A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read
-the number.** Expect 11.
+the number.** Expect **16** — the 11 first planned, plus the five C-7 added.
 
 - [ ] **Step 5: Prove the write-nothing assertions are not inert**
 
-Four tests above assert a count delta of zero. Each must be shown capable of failing:
+**Five** tests above assert that a refusal wrote nothing. Each must be shown capable of failing:
 
 - weaken the in-batch duplicate check (`d.tags.indexOf(t) !== i` → `false`) → test 2 must fail **on the
   count**, not only the message;
@@ -1291,8 +1823,10 @@ Four tests above assert a count delta of zero. Each must be shown capable of fai
   must fail on the count;
 - move a write above a refusal in `receiveUnits` (undo C-4's two-pass split) → **test 11 must fail**. If
   it does not, the rollback case is inert and the C-4 regression is unguarded.
+- weaken the return reason's floor (`.min(5, …)` → `.min(0)`) → **test 13 must fail on the
+  column**, not merely on the missing field error.
 
-Revert each after observing it. **Report the actual output for all four.** A write-nothing test that
+Revert each after observing it. **Report the actual output for all five.** A write-nothing test that
 passes against a broken guard is worse than no test, because it certifies the bug.
 
 - [ ] **Step 6: Commit**
