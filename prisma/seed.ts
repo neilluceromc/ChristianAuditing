@@ -9,6 +9,19 @@ const prisma = new PrismaClient();
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000);
 
 async function main() {
+  // The seed creates twelve accounts sharing one password, and README publishes
+  // what that password is. That is fine for a loopback dev database and is not
+  // fine for anything a phone can reach. The production image sets
+  // NODE_ENV=production (Dockerfile), so this catches the one dangerous case —
+  // running the seed inside a deployed stack — without inconveniencing dev or
+  // e2e, where the fixture default is what every login helper expects.
+  if (process.env.NODE_ENV === "production" && !process.env.SEED_PASSWORD) {
+    throw new Error(
+      "Refusing to seed: NODE_ENV=production and SEED_PASSWORD is unset, so all twelve accounts " +
+        "would share the password published in README. Set SEED_PASSWORD to something only you know.",
+    );
+  }
+
   // Dev-only reset. Row-level append-only triggers don't intercept TRUNCATE.
   await prisma.$executeRawUnsafe(`
     TRUNCATE "AuditEntry", "NoteEntry", "Job", "WebhookDelivery", "WebhookEndpoint",

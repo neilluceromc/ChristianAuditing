@@ -61,15 +61,22 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    - The QR has never been read off paper by anything. `QR_PREFERRED_MODULE_MM` (0.5) and
      `QR_MIN_MODULE_MM` (0.4) are a judgement about phone optics, not a measurement — this scan is what
      replaces the guess. Record the result against those two constants.
-   - ⚠️ **Check (ii) is BLOCKED on `APP_BASE_URL`, and cannot be attempted before it: no QR
-     prints at all while that variable is unset** — the sheet prints the barcode alone plus a note
-     saying which of four reasons applied. Any earlier claim that a printed QR has been scanned is
-     therefore wrong on its face.
+   - ⚠️ **CORRECTED 2026-09-03: check (ii) is NOT blocked — `APP_BASE_URL` has been set all
+     along.** `.env` carries `http://192.168.202.141:3000`, the host's LAN address, so labels have been
+     printing a real QR. An earlier revision of this bullet asserted the variable was unset and the
+     check therefore impossible; that was **inferred from the placeholder in `.env.example` and never
+     verified against `.env`**, which is gitignored and so had never been read by any agent. The
+     general claim is still true — no QR prints while the variable is unset — the premise was wrong.
+     **§6a rule 95: check the artefact, not the document that describes it.**
 
    **(a2) DECIDED 2026-09-03 — the `APP_BASE_URL` hostname, after ten sessions of deferral.**
-   The value is **`https://inventory.thebackroomop.com`**, served by a **Cloudflare Tunnel** beside the
-   compose stack. **None of it is built yet** — this is the decision, not the implementation, and it is
-   deliberately NOT on `phase-12-receiving`.
+   ⚠️ **SUPERSEDED THE SAME DAY — read (a3) below.** The user reframed the question ("this is a
+   prototype"), and a domain purchase plus a nameserver migration plus Cloudflare Access is a
+   production answer. The tunnel plan below is kept because it is still the right shape **when this
+   stops being a prototype**; it is not what is being built.
+
+   The value would be **`https://inventory.thebackroomop.com`**, served by a **Cloudflare Tunnel**
+   beside the compose stack.
    - **Why a hostname on a domain the user owns:** `.env.example`'s own argument — a hostname can be
      repointed, an IP cannot, and the value is baked permanently into every sticker physically applied
      to a device. Owning the name means the plumbing behind it can change later without reprinting one
@@ -91,6 +98,28 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
      Adding `:3000` (65 B) crosses to v5, 37×37, **22.5 mm**. Crossing does **not** reduce
      scannability: the module stays pinned at 0.5 mm until the symbol exceeds 48 modules, so a longer
      URL buys a physically bigger QR, not a finer one.
+
+   **(a3) DECIDED 2026-09-03, and it SUPERSEDES (a2) for now: the prototype uses the host's LAN IP.**
+   `APP_BASE_URL=http://192.168.202.141:3000`, already set in `.env`. The user's framing was decisive:
+   **this is a prototype, so the stickers are disposable** — which removes the whole reason the
+   permanence argument existed.
+   - **Why this is low-regret:** switching to any other option later costs **exactly one environment
+     variable**. No code, no schema, no rebuild. The only sunk cost is reprinting a sheet, which a
+     prototype would reprint anyway. Measured at 50 bytes → v4, 33×33, 20.5 mm.
+   - ⚠️ **That address is DHCP-assigned** (`PrefixOrigin: Dhcp`, /16, on **Wi-Fi**), so it WILL
+     move. **The open task is a DHCP reservation on the router**, which needs router admin access —
+     not something an agent can do. Until then, every printed label is one lease renewal from dead.
+   - ⚠️ **Test phone → host reachability BEFORE printing anything.** Many office Wi-Fi networks
+     enable **client isolation**, which blocks phone-to-laptop traffic outright and would defeat this
+     option regardless of the URL. Open `http://192.168.202.141:3000` in a phone browser first.
+   - ⚠️ **Logins cross the LAN in cleartext** on plain HTTP. Accepted deliberately for a
+     prototype on a trusted network; it is the reason `(a2)`'s HTTPS options exist for later.
+   - **Rejected for the prototype, with reasons, so nobody re-litigates:** `.local`/mDNS (**Android
+     support is unreliable, and phones are the entire point**); a `trycloudflare.com` quick tunnel (the
+     URL changes every restart, so it cannot be baked into a sticker — fine for a demo-day reprint);
+     Tailscale (free, HTTPS, works off-site, but every scanning phone needs the app installed and
+     signed in); a named tunnel on the company domain (see (a2) — **the nameserver move would put
+     `thebackroomop.com`'s MX records at risk, and company email lives there**).
 
    **(b) Merging — done for PHASE 10, OPEN for Phase 11.** `phase-10-polish` was merged to `main` on 2026-08-27 via `--no-ff`
    `bd78813`, the user having chosen that explicitly. `tsc`, `lint` and 797 unit tests were re-run on
@@ -1844,12 +1873,26 @@ entry to find the next free number gives you 81, which is taken. **Append at 101
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
 
-- **`./uploads` is not backed up, and the daily `pg_dump` will not save you.** Since Phase 10, asset
-  documents persist correctly — `web` bind-mounts `./uploads:/app/uploads`, so they survive container
-  recreation. But they are plain host files with no replication, and the compose `backup` service dumps
-  **only the database**. Restoring from a backup therefore restores every document *row* with no file
-  behind it. Either add `./uploads` to whatever backs up the machine, or extend the `backup` service.
-  Stated in `README.md` under "What does not work" so an operator meets it before an incident does.
+- **✅ CLOSED 2026-09-03 — `./uploads` IS now backed up.** It was a **false backup**: the `backup`
+  service dumped only the database, so a restore resurrected every `AssetDocument` row with no file
+  behind it and every download 404ing. The service now tars `./uploads` in the **same loop iteration**
+  as the dump (so the two never drift by more than one run), with matching 14-file retention, from a
+  **read-only** mount. Proven rather than asserted: the tar exits 0 inside `postgres:16-alpine`, the
+  archive held **77 real asset photos** the nightly job had been silently excluding, and `touch` on the
+  mount exits 1. ⚠️ **Two caveats remain:** the tar is taken against a live directory, so a file
+  being written at that instant could be caught mid-write (write-once PDFs make this low risk, not zero
+  risk); and `./backups` still needs to exist on the host — a bind mount into a missing directory
+  failed outright during this work.
+- **✅ CLOSED 2026-09-03 — the seeded password can no longer reach a deployed stack.**
+  `SEED_PASSWORD` was a hardcoded `"admin123"` that `README.md` publishes, in a **public** repo, with
+  nothing stopping a production seed from using it. It is now env-overridable, and `prisma/seed.ts`
+  **refuses to run when `NODE_ENV=production` and the variable is unset** — the case that matters,
+  since the production image sets `NODE_ENV=production` in its Dockerfile. The fixture default stays on
+  purpose: the whole e2e suite imports that constant to log in, so dropping it would mean setting an
+  env var before a single test could run. **Reachability is what makes the value dangerous, not the
+  constant.** Proven both ways: the guard exits 1 with the intended message and leaves the DB untouched
+  (it sits above the `TRUNCATE`; the asset count was unchanged), and `e2e/receiving.spec.ts` still
+  reseeds and passes 13/13, so `execSync("npm run db:seed")` does not trip it.
 - **The physical print measurement (Phase 10, Task 11 Step 4) was never taken — but the software half
   of it is now proven one leg further than the e2e goes.** The suite measures the bar in the **DOM under
   print emulation** (377.95 CSS px). On 2026-08-26 the bar was additionally measured **inside a real PDF

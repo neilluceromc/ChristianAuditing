@@ -98,6 +98,53 @@ with `npm ci --omit=dev` and copies it in, `tsx` is a regular dependency (surviv
 docker compose --profile prod exec web node_modules/.bin/tsx prisma/seed.ts
 ```
 
+⚠️ **Set `SEED_PASSWORD` in `.env` first, or this command refuses to run.** The seed creates
+accounts that all share one password, and the fallback is published in the table below — so
+`prisma/seed.ts` throws when `NODE_ENV=production` and `SEED_PASSWORD` is unset. The runtime image
+sets `NODE_ENV=production` (see `Dockerfile`), and `web` loads `.env` via `env_file`, so setting it
+in `.env` on the deployment host is all that is needed. The error names the reason if you forget.
+
+Note the asymmetry with local development, where `.env.example` tells you to leave `SEED_PASSWORD`
+**unset**: there, the fallback is what the test suite expects, and setting it can desynchronise the
+seed from the e2e specs. **Set it on a deployment host; leave it unset on a development machine.**
+
+## Staging on a dedicated host
+
+The intended shape is **development on one machine, staging on another** that runs the compose stack
+and nothing else. Set the host up once (Prerequisites, Secrets and Production deploy above), then
+redeploy with:
+
+```powershell
+.\scripts\deploy-staging.ps1
+```
+
+It pulls the current branch, rebuilds, restarts, and then **polls the app until it answers** rather
+than assuming `up -d` succeeded. `-CheckOnly` reports what is waiting and touches nothing; `-Force`
+rebuilds even when the pull brought nothing new, which is what lets you run it on a Task Scheduler
+timer cheaply.
+
+**Deploy from a branch you push deliberately**, not from whatever you are working on — otherwise every
+commit restarts staging mid-session.
+
+⚠️ **The script never seeds, and neither should you on a redeploy.** `prisma/seed.ts` opens with a
+`TRUNCATE` of every table, so a deploy that seeded would wipe staging every time. Migrations are the
+part that is safe to automate, and already are: `migrate` runs `prisma migrate deploy` and must exit 0
+before `web` and `worker` start. **A stopped `migrate` container is success, not a crash.**
+
+It refuses rather than guessing when the host's tree is dirty or the branch has no upstream, because
+both mean someone edited the server and neither has a safe automatic answer.
+
+### If the host is a laptop
+
+Two things will otherwise bite you, and neither is about Docker:
+
+- **A closed lid or a sleeping machine is a total outage.** Set lid-close to *Do nothing*, sleep and
+  hibernate to *Never*, and leave it on mains.
+- **Docker Desktop only runs inside a logged-in Windows session.** After a reboot with nobody logged
+  in, the stack does not come back — `restart: unless-stopped` cannot help if Docker itself never
+  started. Either run Docker Engine under WSL 2 with systemd, enable auto-login (a real trade-off), or
+  accept that a reboot needs a person.
+
 ## Migrations
 
 Migrations are hand-written, additive SQL directories under `prisma/migrations/`, applied with:
@@ -127,7 +174,14 @@ running deployment.)
 ## Seeded accounts
 
 `npm run db:seed` (or the containerized equivalent above) creates five accounts, all
-`@thebackroomop.com`, all sharing the password in `SEED_PASSWORD` (`prisma/fixtures.ts`):
+`@thebackroomop.com`, all sharing one password. It defaults to the value in
+`prisma/fixtures.ts` and is overridden by the **`SEED_PASSWORD`** environment variable.
+
+⚠️ **The seed REFUSES to run when `NODE_ENV=production` and `SEED_PASSWORD` is unset**, because
+the default is published in the table below and this repository is public. The production image sets
+`NODE_ENV=production`, so seeding a deployed stack with a password anyone can read is not something
+you can do by forgetting — you have to choose one first. On a loopback dev database the default is
+fine and is what the test suite expects.
 
 | Email                          | Role               |
 | ------------------------------- | ------------------ |

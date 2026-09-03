@@ -27,5 +27,22 @@
  * Chosen by the user on 2026-08-24 for their own local deployment. The repo is
  * public, so treat this as what it is: a fixture for a loopback-only dev
  * database, never a credential for anything reachable.
+ *
+ * OVERRIDABLE via `SEED_PASSWORD`, and the fallback is deliberately still here:
+ * the whole e2e suite imports this constant to log in, so removing the default
+ * would mean every developer and every CI run had to set an env var before a
+ * single test could pass. The protection that matters is in `seed.ts`, which
+ * REFUSES to run under `NODE_ENV=production` unless the variable is set — and
+ * the production image sets `NODE_ENV=production` in its Dockerfile, so seeding
+ * a deployed stack with this published value is not something you can do by
+ * forgetting. Reachability, not the constant, is what makes it dangerous.
+ *
+ * ⚠️ Do NOT set `SEED_PASSWORD` for local development. `prisma/seed.ts` sees
+ * `.env` because Prisma Client loads it; the Playwright process that imports
+ * THIS constant to type the password into the login form does not reliably do
+ * the same. Set it locally and the seed hashes one password while every e2e
+ * spec types another, and the whole suite fails on login with nothing pointing
+ * at the cause. The env var is for deployments; the fallback is for everything
+ * else, and both halves must agree.
  */
-export const SEED_PASSWORD = "admin123";
+export const SEED_PASSWORD = process.env.SEED_PASSWORD ?? "admin123";
