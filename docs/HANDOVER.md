@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-09-02 (**PHASE 11 IS CODE-COMPLETE on `phase-11-label-qr` — TWELVE tasks, battery green at 153 e2e, UNMERGED and UNPUSHED** — see §0 item 4e; Phase 10 merged and pushed on 2026-08-27) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **THE FULL BATTERY IS GREEN AS OF THIS SESSION:** `tsc` · `lint` · **797 unit / 47 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **147 e2e / 12 files in four parts**. 8 migrations, none pending. · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **PUSHED at last, on 2026-08-27: `main` is level with `origin/main` at `42d770d`, the first push since 2026-08-19 and 180 commits in one go.** Both phase branches (`phase-10-polish`, `phase-11-label-qr`) are **local only** — deliberately, only `main` was authorised. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.**
+**Last updated:** 2026-09-02 (**PHASES 1–11 ARE ALL MERGED AND PUSHED.** Phase 11 merged via `--no-ff` `b6aa5e2` and pushed the same day; Phase 10 on 2026-08-27. **PHASE 12 (purchase → asset receiving) IS IN FLIGHT on `phase-12-receiving` — tasks 1–4 of 8 done** — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **BATTERY ON `main` AT THE PHASE 11 MERGE:** `tsc` · `lint` · **818 unit / 49 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **153 e2e / 12 files in four parts**. **8 migrations on `main`; `phase-12-receiving` adds a 9th.** · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **`main` IS PUSHED and level with `origin/main` at `b6aa5e2`** (180 commits on 2026-08-27, then 30 more carrying Phase 11 on 2026-09-02). **All three phase branches are local only and have NEVER been pushed** — deliberately; only `main` is ever authorised. `phase-10-polish` and `phase-11-label-qr` are now fully contained in `main` and safe to delete. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.** · **NEW 2026-09-02: §9 records FOUR unplanned subsystems from an Admin stakeholder meeting (inventory digitization, vendor master data, purchasing extensions, consumables/stock control). Read §9 before scoping anything — one of the four cannot be modelled as an `Asset` and would break four existing surfaces if it were.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,10 +13,11 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-**Phase 10 is MERGED and PUSHED. Phase 11 is CODE-COMPLETE on `phase-11-label-qr`, battery green,
-and UNMERGED — that branch is where the work is, not `main`.** What remains is the merge and push
-decisions for Phase 11, and **two physical checks no agent can perform**: a tape measure on the 100 mm
-calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop and ask.
+**Phases 1–11 are all merged into `main` and pushed. PHASE 12 (purchase → asset receiving) is IN
+FLIGHT on `phase-12-receiving` — tasks 1–4 of 8 committed, that branch is where the live work is.**
+One physical check remains that no agent can perform: a tape measure on the 100 mm calibration bar.
+(The printed QR **has** been read on a phone — the user confirmed it, which closed Phase 11's
+least-evidenced assumption.) Read items 1–4 below, then stop and ask.
 
 1. **`git checkout phase-11-label-qr`** — that is where the live work is; `main` carries Phases 1–10
    only. The branch is ~17 ahead of `main` and 0 behind, and **has never been pushed**. `main` itself
@@ -78,57 +79,42 @@ calibration bar, and a phone on a printed QR. Read items 1–4 below, then stop 
    `pg_dump`** — asset documents are plain host files bind-mounted into `web`, so a database backup
    alone does not restore them.
 
-   **(e) PHASE 11 IS CODE-COMPLETE and UNMERGED. This is where the live work is.**
-   On 2026-08-26 the user asked for a phone-scannable QR on the asset label, so `phase-11-label-qr` was
-   cut from `phase-10-polish`. **All TWELVE tasks are now done** (2026-09-02 — nine planned, plus three added mid-phase after the user scanned a printed sheet) and the branch is **~26
-   commits ahead of `main`, 0 behind** — `main` was merged IN rather than the branch rebased, because
-   this project's docs cite SHAs and a rebase would dangle every one of them.
+   **(e) PHASE 11 IS MERGED. PHASE 12 IS IN FLIGHT — that branch is where the live work is.**
 
-   **Battery on the branch, all green:** `tsc` · `lint` · **818 unit / 49 files** · `npm run build` ·
-   `docker compose --profile prod build` (3 images) · **153 e2e / 12 files** in four measured parts —
-   **51 · 62 · 34 · 6**. Part 2 grew from 56 to 62 across the phase and needed its `--global-timeout` raised. Axe
-   moderates are unchanged from Phase 10 (`empty-table-header` 9, `page-has-heading-one` 2,
-   `landmark-unique` 1), so nothing regressed.
+   Phase 11 (the label QR and the compact scan card) merged to `main` via `--no-ff b6aa5e2` on
+   2026-09-02 and was pushed the same day, after a green battery on the merged result: 818 unit / 49
+   files, 153 e2e / 12 files, both builds. Sixteen amendments, **six of them defects in the plan**.
+   `phase-11-label-qr` is fully contained in `main` and safe to delete.
 
-   **What it ships:** each label now carries **two** codes for two readers — the Code 128 barcode the
-   USB desk scanner needs (it types the tag as keystrokes, which is what the offboarding wizard
-   listens for) and a QR holding `{APP_BASE_URL}/inventory/scan/{TAG}`, which opens a **compact scan card**
-   at `/inventory/scan/[tag]`: tag, model, status, holder, department, employment, category, purchase
-   date, warranty, serial, and one link to the full record. **Cost, vendor, repair quote and notes are
-   deliberately withheld**, enforced by a mutation-tested e2e assertion — so a future "just add cost"
-   has to delete a test explaining why it is absent. Keyed on the **TAG, never the id**: cuids change
-   on every reseed and this string is printed onto adhesive paper. `/inventory?q={TAG}` still
-   redirects to the full record and is **untouched** — that is the desk scanner's contract, guarded by
-   `e2e/it-core.spec.ts:126`. Signed-in staff only; there is deliberately no public lookup,
-   because asset tags are sequential and a public page keyed by tag would be a walkable index of who
-   holds what, behind a sticker anyone can photograph. `APP_BASE_URL` is required, has **no default**,
-   and a loopback/`0.0.0.0` value is **refused** rather than printed — a dead QR on adhesive paper is
-   not recoverable. When it is unusable the sheet prints the barcode alone plus a note naming which of
-   the four causes applied.
+   **PHASE 12 — purchase → asset receiving. Tasks 1–4 of 8 done, on `phase-12-receiving`** (12 ahead of
+   `main`, 0 behind, **833 unit / 50 files**). It closes the last outstanding commitment in the
+   original brief: card `1m` promises labels printed "from a bulk selection **or a completed
+   purchase**", and the second half has never been possible because nothing created an `Asset` from a
+   `PurchaseRequest`.
 
-   **Measured, not assumed** (2026-09-02, rendered DOM): page box 209.996 × 296.999 mm · barcode
-   height **9.000 mm** · QR footprint **20.497 mm** square · calibration ruler **99.996 mm** · **0
-   cells clipped**. That last set matters because the label cell is a column flex with
-   `overflow: hidden`, so an over-tall child does not overflow — it silently compresses its siblings,
-   which is exactly how the ruler once shipped at 89.38 mm.
+   Spec: `docs/superpowers/specs/2026-09-02-purchase-receiving-design.md`. Plan:
+   `docs/superpowers/plans/2026-09-02-phase-12-receiving.md`. **Resume at Task 5** (the receive screen);
+   6 is the request page, 7 the e2e, 8 the battery.
 
-   Spec: `docs/superpowers/specs/2026-08-26-label-qr-design.md`. Plan:
-   `docs/superpowers/plans/2026-08-26-phase-11-label-qr.md`, amendments **B-1…B-16** — **six of the
-   sixteen were defects in the plan rather than the implementations**, and B-1 was a command that broke
-   the working environment (an `npm install` inside a bind-mounted Alpine container replaced
-   `node_modules` with Linux binaries; recovery is `npm ci` then `npx prisma generate`).
+   Done so far: `TAG_SHAPE` hoisted to one definition (it was written out three times);
+   `Asset.purchaseUnitId` + `NoteKind.RECEIVE` (**a 9th migration — `main` has 8**); the pure
+   arithmetic in `src/lib/receiving.ts`; and the transactional write in
+   `src/server/modules/purchases/receiving.ts`.
 
-   ⚠️ **`APP_BASE_URL` in `.env` is a PLACEHOLDER** (`http://inventory.backroom.local:3000` locally,
-   `http://inventory.example.local:3000` in `.env.example`). **The user was asked twice and deferred
-   twice — it is still unchosen.** Whatever is set there is baked permanently into every printed
-   sticker, and it needs a DNS or router entry pointing at the server before any label is printed.
+   ⚠️ **Read amendments `C-1`–`C-4` before touching it. All four are defects in the plan, and `C-4` is the
+   one that matters:** the transaction could **commit a half receipt**. Prisma commits when the callback
+   RESOLVES and rolls back only when it THROWS, and every refusal was a plain `return` placed *after*
+   earlier lines had already written. An operator would have seen an error while real tagged assets sat
+   permanently in the register. Fixed with two passes — validate every line, then write — so no refusal
+   sits below a write. **`runTransition` in the same directory uses the identical return-don't-throw
+   shape SAFELY, because all its refusals precede its single write; the pattern is not wrong,
+   interleaving it with writes in a loop is.**
 
-   **What remains for Phase 11 is not code:** the merge and push decisions, and **two physical checks
-   no agent can perform** — the tape measure on the 100 mm bar, and a phone on a printed QR. Both hinge
-   on the same setting: at "Fit to page" the QR modules and the ruler shrink together, so a failure
-   there is a print-settings problem, not a software one. `QR_PREFERRED_MODULE_MM` (0.5) and
-   `QR_MIN_MODULE_MM` (0.4) are the least-evidenced numbers in the phase — a judgement about phone
-   optics that the physical read is meant to replace with a measurement.
+   ⚠️ **And the reason C-4 survived to implementation, which is the more transferable lesson:
+   `PR-0188` has exactly ONE unit**, so every e2e case the plan originally specified sends a single
+   line and **none could ever reach the multi-line failure path**. A fully green suite would have
+   blessed the bug. Task 7 now requires a purpose-built two-unit `COMPLETED` fixture and a rollback
+   assertion on a count delta of **zero**.
 
    **If the user wants different work rather than a decision, there is no plan for it.** Start with
    `superpowers:brainstorming`, then `superpowers:writing-plans` — do not improvise changes onto a
@@ -2114,3 +2100,86 @@ any task in the phase. All of them were fixtures that the running code could not
   no in-app recovery**. A last-admin guard would not have prevented it — that prevents removing the
   last admin, it cannot conjure one.
 - Entra SSO real wiring (needs tenant creds). Real product photography, brand mark, barcode generation (striped placeholders today). Off-device backups (nightly `pg_dump` to a local volume ships; copying elsewhere is the user's call). HR review of the accountability-form acknowledgement copy. `WebhookEndpoint.secret` encryption (Phase 8). CI workflow + jsdom component tests (declined in Phase 1, revisitable).
+
+---
+
+## 9. Stakeholder requirements from the 2026-09-02 Admin meeting (NOT yet planned)
+
+Raised by **Anj, Maynard, Neil, Salem and Mary**. Recorded verbatim-in-substance because none of it is
+specced yet and it is the only record. **Four distinct subsystems, not one feature** — the decomposition
+below is the important part, and item **D** breaks an assumption the whole codebase rests on.
+
+**Sequencing agreed with the user on 2026-09-02:** finish Phase 12 as scoped, then take **A** as Phase
+13. Nothing here was folded into Phase 12 mid-flight.
+
+### ⚠️ D IS A SECOND DOMAIN, NOT AN EXTENSION — read this before anyone models supplies as assets
+
+The pantry workbook reports figures like **"566 available"**. In this schema `Asset.tag` is `@unique` and
+there is **one row per physical thing**. 566 bottles of detergent as `Asset` rows would mean 566 unique
+tags, each carrying a lifecycle `status` (`SPARE`/`DEPLOYED`/`DEFECTIVE`…), each assignable to an
+`Employee`, each collected back by the offboarding wizard, and each entitled to a printed sticker.
+
+**There is no quantity-tracked model anywhere in this schema** — all 24 models are per-instance.
+Consumables need a different shape entirely: an item, a ledger of stock movements, and a balance
+**derived** from that ledger (never stored — §6a's *derived state beats stored state*, and the meeting's
+own complaint is that the stored number cannot be trusted). FIFO for pantry items additionally needs
+batch dates on receipts, and "reconcile receipts, movements and physical counts" is a **stocktake**
+feature — the one that makes the number believable.
+
+**Modelling supplies as `Asset` would break the label sheet, the offboarding wizard, the approval queue
+and the secrets surface simultaneously.** It must live beside the asset register, not inside it.
+
+### The four subsystems
+
+- **A · Asset classes — Phase 13, agreed next.** IT assets versus non-IT (cars, buildings, furniture,
+  pantry equipment such as microwaves and air purifiers). Today `Asset` is IT-shaped: offboarding
+  collects assets from leavers, `/inventory/[id]/secrets` holds credentials, the label sheet prints a
+  sticker per asset, and the scan card answers custody. **A building should not be offboarded; a car has
+  no credentials; a desk needs no custody QR.** A class dimension lets non-IT assets register without
+  inheriting IT workflows. **Do this first: both B and D need to know what KIND of thing they are
+  looking at, and doing it later means each invents its own answer.** The meeting also noted that
+  **Finance records some assets differently from Admin**, so the same physical thing may need two views
+  — that belongs in this phase's brainstorming, not bolted on after.
+
+- **B · Vendor / supplier master data.** `Vendor` **already exists but is a stub** — `id`, `name`,
+  `locked`, `assets[]`. Wanted: product/service category, company name, registered name, contact person,
+  address, phone, email, registration information, contract status and dates/terms, bank details, and
+  uploaded documents (certificates, registration records). Plus **search by supplier name returning the
+  profile and past purchase orders**, so purchasing stops retyping company details; and **role-gated
+  access** — admin maintains the master list, others get access matching their purchasing or review
+  responsibilities. Anj asked whether fields such as bank details can be added; they can. **Admin owes a
+  cleaned-up starting dataset** (the current list is several years old and missing suppliers) — chase it
+  before building, because an empty master list makes the search unreviewable.
+
+- **C · Purchasing workflow extensions.** Mostly small, and some already exists:
+  - **Department tagging on requests.** `Department` exists but links only to `Employee` and
+    `EquipmentPolicy` — **not to `PurchaseRequest`**. Admin receives requests from HR, Finance, IT and
+    others, and wants routing, approval responsibility, reporting and accountability off it.
+  - **Attachments on requests.** `AssetDocument` exists for assets; requests have no equivalent.
+  - **Serial capture at receipt — ALREADY BUILT** by Phase 12's receive screen. Salem's point that
+    receipt entry may still need manual confirmation is satisfied by that screen: nothing is written
+    until submit.
+  - **Imported assets with no purchase request must stay visible and be marked as such**, so Finance,
+    Admin and auditors can tell historical capitalised assets from newly approved purchases. Today
+    `Asset.purchaseRequestId` is nullable and **was entirely unused before Phase 12**, so "has no PR" is
+    currently indistinguishable from "predates the feature". That distinction needs deciding, not
+    inferring.
+  - Locating an asset by tag, QR, barcode, serial or other identifier — **tag, QR and serial already
+    work**; barcode is the Code 128 on the label sheet, readable by the USB desk scanner.
+
+- **D · Consumables and stock control.** The largest single piece of work in the project so far — bigger
+  than any phase to date. Office supplies, pantry supplies. Stock-in and stock-out recording with
+  automatic available quantities; **FIFO handling for pantry items** with physical tagging where
+  appropriate; **automatic item-code series by category or source document** (examples raised: separate
+  series for cleaning materials, supplies, furniture and fixtures), which must stay **searchable** and
+  support creating new items; reconciliation between receipts, movements and physical counts;
+  system-generated reports for quantities, item history, and budget/inventory views, distinguishing
+  existing items from new ones and allowing updates without retyping. **See the warning above before
+  designing any of it.**
+
+### One number worth carrying into D's brainstorming
+
+The meeting's own example is the whole argument for deriving balances rather than storing them: the
+workbook says **566 available**, and Anj, Mary and Salem all doubted it, because receipts and issues are
+keyed in by hand. A stored total that nobody trusts is worse than no total — it gets used anyway. Design
+the stocktake and the variance report **first**, not last.
