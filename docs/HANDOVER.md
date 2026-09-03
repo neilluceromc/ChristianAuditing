@@ -46,7 +46,8 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    cases the banner reverses the body outright.
 
 4. **There is no next CODING task. Everything below is either a user decision or a physical act no
-   agent can perform.** Five items; (b) and (c) are done for Phase 10 and **open again for Phase 11**.
+   agent can perform.** Six items; (b) and (c) are done for Phase 10 and **open again for Phase 11**.
+   **(a2) is newly DECIDED and needs building — as its own piece of work, not on this branch.**
 
    **(a) TWO physical checks, on one sheet of paper. No agent can do either.** Print a label sheet at
    **Scale 100%, A4, Margins None**, then (i) measure the 100 mm calibration bar with a tape measure and
@@ -60,6 +61,36 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    - The QR has never been read off paper by anything. `QR_PREFERRED_MODULE_MM` (0.5) and
      `QR_MIN_MODULE_MM` (0.4) are a judgement about phone optics, not a measurement — this scan is what
      replaces the guess. Record the result against those two constants.
+   - ⚠️ **Check (ii) is BLOCKED on `APP_BASE_URL`, and cannot be attempted before it: no QR
+     prints at all while that variable is unset** — the sheet prints the barcode alone plus a note
+     saying which of four reasons applied. Any earlier claim that a printed QR has been scanned is
+     therefore wrong on its face.
+
+   **(a2) DECIDED 2026-09-03 — the `APP_BASE_URL` hostname, after ten sessions of deferral.**
+   The value is **`https://inventory.thebackroomop.com`**, served by a **Cloudflare Tunnel** beside the
+   compose stack. **None of it is built yet** — this is the decision, not the implementation, and it is
+   deliberately NOT on `phase-12-receiving`.
+   - **Why a hostname on a domain the user owns:** `.env.example`'s own argument — a hostname can be
+     repointed, an IP cannot, and the value is baked permanently into every sticker physically applied
+     to a device. Owning the name means the plumbing behind it can change later without reprinting one
+     label.
+   - **Why a tunnel:** phones must reach the app. A LAN-only DNS record works on office Wi-Fi and
+     nowhere else, and some routers refuse public DNS records that answer with a private IP
+     (rebinding protection). The tunnel needs no port forwarding and no certificate work.
+   - ⚠️ **The scheme and the port are part of the baked string.** Printing `http://…:3000`
+     now and moving to `https://…` later kills every sticker already on a device. Build the plumbing
+     to match the final URL rather than baking whatever is easiest today.
+   - ⚠️ **Do NOT set `APP_BASE_URL` until that hostname actually resolves from a phone.** The
+     code refuses unset/scheme-less/loopback values and prints a note instead, but a value that is
+     merely *unreachable* passes every check and prints a **dead QR** — strictly worse than the
+     current no-QR behaviour, which was a deliberate design choice.
+   - **A tunnel makes the app internet-reachable, which turns changing the seeded passwords from
+     advice into a hard prerequisite** — README already says so under "Scanning a label with a phone".
+   - **Measured, 2026-09-03** (`qrMatrix` + `qrFit`, tag `BR-LT-0211`): the chosen URL is **61 bytes
+     → v4, 33×33, 20.5 mm at 0.5 mm/module** — one byte under the 62-byte v4 ceiling at ECC-M.
+     Adding `:3000` (65 B) crosses to v5, 37×37, **22.5 mm**. Crossing does **not** reduce
+     scannability: the module stays pinned at 0.5 mm until the symbol exceeds 48 modules, so a longer
+     URL buys a physically bigger QR, not a finer one.
 
    **(b) Merging — done for PHASE 10, OPEN for Phase 11.** `phase-10-polish` was merged to `main` on 2026-08-27 via `--no-ff`
    `bd78813`, the user having chosen that explicitly. `tsc`, `lint` and 797 unit tests were re-run on
