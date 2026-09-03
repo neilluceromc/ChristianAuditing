@@ -1873,12 +1873,26 @@ entry to find the next free number gives you 81, which is taken. **Append at 101
 
 ## 8. Deferred / out-of-scope (tracked, don't lose)
 
-- **`./uploads` is not backed up, and the daily `pg_dump` will not save you.** Since Phase 10, asset
-  documents persist correctly — `web` bind-mounts `./uploads:/app/uploads`, so they survive container
-  recreation. But they are plain host files with no replication, and the compose `backup` service dumps
-  **only the database**. Restoring from a backup therefore restores every document *row* with no file
-  behind it. Either add `./uploads` to whatever backs up the machine, or extend the `backup` service.
-  Stated in `README.md` under "What does not work" so an operator meets it before an incident does.
+- **✅ CLOSED 2026-09-03 — `./uploads` IS now backed up.** It was a **false backup**: the `backup`
+  service dumped only the database, so a restore resurrected every `AssetDocument` row with no file
+  behind it and every download 404ing. The service now tars `./uploads` in the **same loop iteration**
+  as the dump (so the two never drift by more than one run), with matching 14-file retention, from a
+  **read-only** mount. Proven rather than asserted: the tar exits 0 inside `postgres:16-alpine`, the
+  archive held **77 real asset photos** the nightly job had been silently excluding, and `touch` on the
+  mount exits 1. ⚠️ **Two caveats remain:** the tar is taken against a live directory, so a file
+  being written at that instant could be caught mid-write (write-once PDFs make this low risk, not zero
+  risk); and `./backups` still needs to exist on the host — a bind mount into a missing directory
+  failed outright during this work.
+- **✅ CLOSED 2026-09-03 — the seeded password can no longer reach a deployed stack.**
+  `SEED_PASSWORD` was a hardcoded `"admin123"` that `README.md` publishes, in a **public** repo, with
+  nothing stopping a production seed from using it. It is now env-overridable, and `prisma/seed.ts`
+  **refuses to run when `NODE_ENV=production` and the variable is unset** — the case that matters,
+  since the production image sets `NODE_ENV=production` in its Dockerfile. The fixture default stays on
+  purpose: the whole e2e suite imports that constant to log in, so dropping it would mean setting an
+  env var before a single test could run. **Reachability is what makes the value dangerous, not the
+  constant.** Proven both ways: the guard exits 1 with the intended message and leaves the DB untouched
+  (it sits above the `TRUNCATE`; the asset count was unchanged), and `e2e/receiving.spec.ts` still
+  reseeds and passes 13/13, so `execSync("npm run db:seed")` does not trip it.
 - **The physical print measurement (Phase 10, Task 11 Step 4) was never taken — but the software half
   of it is now proven one leg further than the e2e goes.** The suite measures the bar in the **DOM under
   print emulation** (377.95 CSS px). On 2026-08-26 the bar was additionally measured **inside a real PDF
