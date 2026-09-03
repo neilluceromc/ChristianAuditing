@@ -108,6 +108,43 @@ Note the asymmetry with local development, where `.env.example` tells you to lea
 **unset**: there, the fallback is what the test suite expects, and setting it can desynchronise the
 seed from the e2e specs. **Set it on a deployment host; leave it unset on a development machine.**
 
+## Staging on a dedicated host
+
+The intended shape is **development on one machine, staging on another** that runs the compose stack
+and nothing else. Set the host up once (Prerequisites, Secrets and Production deploy above), then
+redeploy with:
+
+```powershell
+.\scripts\deploy-staging.ps1
+```
+
+It pulls the current branch, rebuilds, restarts, and then **polls the app until it answers** rather
+than assuming `up -d` succeeded. `-CheckOnly` reports what is waiting and touches nothing; `-Force`
+rebuilds even when the pull brought nothing new, which is what lets you run it on a Task Scheduler
+timer cheaply.
+
+**Deploy from a branch you push deliberately**, not from whatever you are working on — otherwise every
+commit restarts staging mid-session.
+
+⚠️ **The script never seeds, and neither should you on a redeploy.** `prisma/seed.ts` opens with a
+`TRUNCATE` of every table, so a deploy that seeded would wipe staging every time. Migrations are the
+part that is safe to automate, and already are: `migrate` runs `prisma migrate deploy` and must exit 0
+before `web` and `worker` start. **A stopped `migrate` container is success, not a crash.**
+
+It refuses rather than guessing when the host's tree is dirty or the branch has no upstream, because
+both mean someone edited the server and neither has a safe automatic answer.
+
+### If the host is a laptop
+
+Two things will otherwise bite you, and neither is about Docker:
+
+- **A closed lid or a sleeping machine is a total outage.** Set lid-close to *Do nothing*, sleep and
+  hibernate to *Never*, and leave it on mains.
+- **Docker Desktop only runs inside a logged-in Windows session.** After a reboot with nobody logged
+  in, the stack does not come back — `restart: unless-stopped` cannot help if Docker itself never
+  started. Either run Docker Engine under WSL 2 with systemd, enable auto-login (a real trade-off), or
+  accept that a reboot needs a person.
+
 ## Migrations
 
 Migrations are hand-written, additive SQL directories under `prisma/migrations/`, applied with:
