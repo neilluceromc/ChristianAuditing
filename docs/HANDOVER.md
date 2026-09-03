@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-09-02 (**PHASES 1–11 ARE ALL MERGED AND PUSHED.** Phase 11 merged via `--no-ff` `b6aa5e2` and pushed the same day; Phase 10 on 2026-08-27. **PHASE 12 (purchase → asset receiving) IS IN FLIGHT on `phase-12-receiving` — tasks 1–4 of 8 done** — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **BATTERY ON `main` AT THE PHASE 11 MERGE:** `tsc` · `lint` · **818 unit / 49 files** · `npm run build` · `docker compose --profile prod build` (3 images) · **153 e2e / 12 files in four parts**. **8 migrations on `main`; `phase-12-receiving` adds a 9th.** · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **`main` IS PUSHED and level with `origin/main` at `b6aa5e2`** (180 commits on 2026-08-27, then 30 more carrying Phase 11 on 2026-09-02). **All three phase branches are local only and have NEVER been pushed** — deliberately; only `main` is ever authorised. `phase-10-polish` and `phase-11-label-qr` are now fully contained in `main` and safe to delete. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.** · **NEW 2026-09-02: §9 records FOUR unplanned subsystems from an Admin stakeholder meeting (inventory digitization, vendor master data, purchasing extensions, consumables/stock control). Read §9 before scoping anything — one of the four cannot be modelled as an `Asset` and would break four existing surfaces if it were.**
+**Last updated:** 2026-09-02 (**PHASES 1–11 ARE ALL MERGED AND PUSHED.** Phase 11 merged via `--no-ff` `b6aa5e2` and pushed the same day; Phase 10 on 2026-08-27. **PHASE 12 IS CODE-COMPLETE on `phase-12-receiving` — all 8 tasks, battery green, UNMERGED and UNPUSHED. It is NOT “receiving” any more:** amendment `C-5` replaced it with **registering already-purchased assets**, and `C-11` then deleted the receiving code outright — see §0 item 4e) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **BATTERY ON `phase-12-receiving` AT PHASE 12 CODE-COMPLETE (2026-09-03):** `tsc` · `lint` · **843 unit / 50 files** · `npm run build` (38 static pages) · `docker compose --profile prod build` (3 images) · **167 e2e / 13 files in five parts, zero failed, zero did-not-run**. **11 migrations; `main` has 8.** ⚠️ **The “153 e2e” this line used to claim for `main` was wrong by one — Phase 12 added exactly one e2e file (13 tests) and a one-line axe change, so `main`’s real baseline is **154 / 12 files**. Verified with `npx playwright test --list`, which counts without running; use it rather than trusting any number in this doc.** · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **`main` IS PUSHED and level with `origin/main` at `b6aa5e2`** (180 commits on 2026-08-27, then 30 more carrying Phase 11 on 2026-09-02). **All three phase branches are local only and have NEVER been pushed** — deliberately; only `main` is ever authorised. `phase-10-polish` and `phase-11-label-qr` are now fully contained in `main` and safe to delete. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.** · **NEW 2026-09-02: §9 records FOUR unplanned subsystems from an Admin stakeholder meeting (inventory digitization, vendor master data, purchasing extensions, consumables/stock control). Read §9 before scoping anything — one of the four cannot be modelled as an `Asset` and would break four existing surfaces if it were.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -13,8 +13,10 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
-**Phases 1–11 are all merged into `main` and pushed. PHASE 12 (purchase → asset receiving) is IN
-FLIGHT on `phase-12-receiving` — tasks 1–4 of 8 committed, that branch is where the live work is.**
+**Phases 1–11 are all merged into `main` and pushed. PHASE 12 is CODE-COMPLETE on
+`phase-12-receiving` — all 8 tasks, battery green, UNMERGED and UNPUSHED. That branch is where the
+live work is.** What remains is the merge and push decisions (separately), plus the two physical checks
+no agent can perform. ⚠️ **`main` also carries 3 unpushed documentation commits of its own.**
 One physical check remains that no agent can perform: a tape measure on the 100 mm calibration bar.
 (The printed QR **has** been read on a phone — the user confirmed it, which closed Phase 11's
 least-evidenced assumption.) Read items 1–4 below, then stop and ask.
@@ -86,35 +88,57 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    files, 153 e2e / 12 files, both builds. Sixteen amendments, **six of them defects in the plan**.
    `phase-11-label-qr` is fully contained in `main` and safe to delete.
 
-   **PHASE 12 — purchase → asset receiving. Tasks 1–4 of 8 done, on `phase-12-receiving`** (12 ahead of
-   `main`, 0 behind, **833 unit / 50 files**). It closes the last outstanding commitment in the
-   original brief: card `1m` promises labels printed "from a bulk selection **or a completed
-   purchase**", and the second half has never been possible because nothing created an `Asset` from a
-   `PurchaseRequest`.
+   **PHASE 12 — CODE-COMPLETE on `phase-12-receiving`, battery green, UNMERGED and UNPUSHED**
+   (30 ahead of `main`, 0 behind, **843 unit / 50 files**, **167 e2e / 13 files**, 11 migrations).
 
-   Spec: `docs/superpowers/specs/2026-09-02-purchase-receiving-design.md`. Plan:
-   `docs/superpowers/plans/2026-09-02-phase-12-receiving.md`. **Resume at Task 5** (the receive screen);
-   6 is the request page, 7 the e2e, 8 the battery.
+   ⚠️ **It is not "purchase → asset receiving" any more, whatever the branch name and the spec
+   filename say.** Two premise changes from the user rewrote it mid-flight:
 
-   Done so far: `TAG_SHAPE` hoisted to one definition (it was written out three times);
-   `Asset.purchaseUnitId` + `NoteKind.RECEIVE` (**a 9th migration — `main` has 8**); the pure
-   arithmetic in `src/lib/receiving.ts`; and the transactional write in
-   `src/server/modules/purchases/receiving.ts`.
+   - **`C-5`** — *"we are not doing purchase request; these assets are already purchased and we are
+     registering them to our system."* The receive screen was dropped for **`/inventory/register`**:
+     batch registration with auto-numbered tags, no purchase request required (one is accepted as
+     optional provenance, and must be `COMPLETED` if given).
+   - **`C-7`** — Finance confirmation needed a way back. IT registers, **Finance confirms or sends it
+     back with a reason**, IT marks it corrected.
 
-   ⚠️ **Read amendments `C-1`–`C-4` before touching it. All four are defects in the plan, and `C-4` is the
-   one that matters:** the transaction could **commit a half receipt**. Prisma commits when the callback
-   RESOLVES and rolls back only when it THROWS, and every refusal was a plain `return` placed *after*
-   earlier lines had already written. An operator would have seen an error while real tagged assets sat
-   permanently in the register. Fixed with two passes — validate every line, then write — so no refusal
-   sits below a write. **`runTransition` in the same directory uses the identical return-don't-throw
-   shape SAFELY, because all its refusals precede its single write; the pattern is not wrong,
-   interleaving it with writes in a loop is.**
+   **What shipped:** `TAG_SHAPE` hoisted to one definition (it was written out three times);
+   `Asset.purchaseUnitId`; `/inventory/register` + `register-form.tsx`; the tag arithmetic in
+   `src/lib/receiving.ts` (`nextTags`, `preferredPrefix`); `registerAssets`; and on `Asset`, two
+   nullable pairs — `financeConfirmedAt`/`ById` and `financeReturnedAt`/`ById` plus
+   `financeReturnReason` — driving a three-state pill on the asset record.
 
-   ⚠️ **And the reason C-4 survived to implementation, which is the more transferable lesson:
-   `PR-0188` has exactly ONE unit**, so every e2e case the plan originally specified sends a single
-   line and **none could ever reach the multi-line failure path**. A fully green suite would have
-   blessed the bug. Task 7 now requires a purpose-built two-unit `COMPLETED` fixture and a rollback
-   assertion on a count delta of **zero**.
+   ⚠️ **Finance confirmation is a LABEL, not a GATE, and the user chose that deliberately.** An
+   unconfirmed or returned asset is a completely normal, live asset — assignable, deployable. Nothing
+   in the app reads `financeConfirmedAt` except the pill and the action that sets it. **Do not "fix"
+   this into a hold without asking.**
+
+   ⚠️ **It is deliberately NOT an `AssetStatus` member and NOT an approval** (`C-5`). Those eight
+   status values are a partition of custody/physical state and an asset can be `SPARE` *and*
+   unconfirmed at once; all five `ApprovalType` values are lifecycle changes to an existing asset,
+   while this is data verification. An `UNCONFIRMED` status would break `statusFamily`, the status
+   chips, the facet counts and `buildAssetWhere`.
+
+   ⚠️ **Read the amendment banner — `C-1` through `C-12`, nine of them defects in the plan.** The
+   three that generalise past this phase:
+
+   - **`C-10` is the most expensive lesson in this project.** `/inventory/register` **never worked, at
+     any quantity, from the day it shipped**, and stayed broken through three later tasks. Every layer
+     below it was green. See §6a rules **97** and **98**.
+   - **`C-4`** — the receive transaction could **commit a half receipt** (Prisma commits when the
+     callback RESOLVES, rolls back only when it THROWS, and refusals sat *after* writes). The code it
+     guarded is now deleted by `C-11`, but the trap is live anywhere else: **`runTransition` uses the
+     identical return-don't-throw shape SAFELY, because all its refusals precede its single write. The
+     pattern is not wrong; interleaving it with writes in a loop is.**
+   - **`C-11`** — `C-5` deleted the receive screen and nobody walked the call graph down, so
+     `receiveUnits`, `receivableUnits`, `outstanding` and `isFullyReceived` sat with **no caller at
+     all** for four tasks, reading as a working feature. The user chose to delete them (264 lines).
+     `NoteKind.RECEIVE` survives in the enum on purpose — dropping a Postgres enum value means
+     recreating the type.
+
+   **Still open from the original brief:** card `1m` promises labels printed "from a bulk selection
+   **or a completed purchase**". Assets created from a purchase now exist and carry an optional
+   `purchaseRequestId`, so they can be labelled from the bulk selection — but there is still **no
+   "pick a completed purchase, print its labels" flow**. Half-closed, honestly.
 
    **If the user wants different work rather than a decision, there is no plan for it.** Start with
    `superpowers:brainstorming`, then `superpowers:writing-plans` — do not improvise changes onto a
@@ -1606,6 +1630,60 @@ any task in the phase. All of them were fixtures that the running code could not
     Shipping the compose change alone would have left the repo's public face contradicting its own
     behaviour — the exact drift this project has now caught in comments (rule 16), in plans (A-30…A-44)
     and here in prose. Grep the docs for what a fix invalidates *before* committing it.
+94. **A `"use server"` module is not a library.** Every top-level export from one must be an async
+    function, so "extract the shared helper" is not always available across that boundary — Phase 12's
+    `C-6` sent an implementer to reuse `toCost`, a non-exported synchronous arrow inside
+    `src/server/modules/inventory/actions.ts`, and exporting it would have broken the build. Check the
+    directive before proposing reuse. If a helper genuinely needs sharing, it moves to a
+    non-`"use server"` lib module first, and that move is its own task.
+
+95. **A user restating your design back to you is a free correctness check — spend it on the code, not
+    on your memory of the plan.** Phase 12's `C-7`: asked to confirm the flow, the user described a
+    hold-until-approved pipeline routing into per-department tabs. **Three of those four beliefs were
+    wrong**, and answering "yes, that's right" would have built the next phase on a model the code did
+    not implement. What made the check cheap was reading the actual gates — `grep` showed only two
+    files read `financeConfirmedAt`, which is what proved confirmation was a *label, not a gate*. The
+    fourth belief exposed a genuine missing feature. **Re-derive from the code every time: a plan
+    section describing a flow may itself have been superseded by an earlier amendment.**
+
+96. **"Write an audit row" is only half of an audit requirement — the sentence and the dot move in the
+    same task.** Phase 12's `C-9`: four tasks each specified their `writeAudit` call exactly and none
+    said what the row should READ AS, so `/inventory/activity` rendered
+    **"J. Sarmiento finance.return BR-LT-0148"**. `auditSentence` in `src/lib/activity.ts` has a
+    `default` branch and `actionDot` has a neutral fallback, which means **a missing case is never a
+    type error and never a test failure — just output nobody sees until they open the feed.** Any new
+    audit action adds its case and its dot, with tests, in the task that introduces it.
+
+97. **The seam between a correct form and a correct action is visible ONLY to an end-to-end test.**
+    Phase 12's `C-10` is the most expensive lesson in this project: `/inventory/register` **never
+    worked, at any quantity**, from the day it shipped. `nextTags` is pure and fully unit-tested,
+    `registerAssets` is correct, `tsc` and `lint` passed, and vitest runs in `environment: "node"` so
+    no component test could exist to catch it. The bug lived entirely in what the client sent. **A task
+    that ships a form and defers its e2e to a later task has shipped nothing verifiable** — and this one
+    sat broken through three subsequent tasks.
+
+98. **`.map` skips holes; never grow an array by assigning `.length`.** The concrete form of rule 97's
+    bug. `next.length = 5` on a shorter array creates true sparse holes, and `.map`, `.forEach` and
+    `.filter` all **skip** them rather than visiting them — so `next.map((s) => s ?? "")` fills
+    nothing. The holes then serialize across the RSC boundary as `undefined` and fail
+    `z.array(z.string())`. Use `Array.from({ length: n }, (_, i) => prev[i] ?? "")`.
+
+99. **Removing a caller is a bigger edit than it looks — walk the call graph downward in the same
+    amendment.** Phase 12's `C-11`: `C-5` was written as a change to Tasks 5–6 and was silently also a
+    change to Tasks 3–4, orphaning `receiveUnits`, `receivableUnits`, `outstanding` and
+    `isFullyReceived` — ~264 lines with **no caller at all**, which then read as a working feature for
+    four more tasks. Worse, `C-4`'s rollback fix (a full amendment's work, guarding real data
+    corruption) was protecting a path nobody could reach. **When a premise change deletes a screen, name
+    every thing that screen was the only consumer of and say whether it lives or dies.**
+
+100. **A write-nothing mutation proof only proves what the guard ALONE defends.** Phase 12's `C-12`:
+     the plan predicted that weakening the in-batch duplicate check would make the count assertion
+     fail. It does not — both tags are created inside one `$transaction`, so the second hits the DB's
+     own `@unique` and unwinds the batch whether or not the app check exists. **A DB constraint sitting
+     behind the guard masks the mutation, and a masked test is indistinguishable from an inert one
+     unless you reorder the assertions and check each independently** — which is exactly what the
+     implementer did. State which layer you expect to catch a mutation, not merely that something will
+     fail.
 75. **This document is a surface, and rule 16 applies to it exactly as it applies to a comment.** §6a
     rule 61 told three tasks to prove hydration by waiting for a server-rendered field's initial value,
     which proves nothing (rule 76). §7's own bullet on the same subject already said the opposite — "a
@@ -1672,6 +1750,10 @@ any task in the phase. All of them were fixtures that the running code could not
     module that owns the sentence** (`rowCapRefusal(IMPORT_ROW_CAP + 1)`, `idsRefusalText(IDS_CAP + 1)`)
     rather than a literal, so the assertion cannot keep passing after the cap moves and the screen
     starts lying (rules 26, 37, 38).
+
+⚠️ **The list ENDS at rule 100, not at rule 80.** Rules 75–80 sit out of numeric order at the
+tail of this section — they are not duplicates, the ordering is simply wrong, and reading the last
+entry to find the next free number gives you 81, which is taken. **Append at 101.**
 ---
 
 ## 7. Recurring gotchas that have cost real time
@@ -1802,16 +1884,19 @@ any task in the phase. All of them were fixtures that the running code could not
   any user exists (asserted in `e2e/auth-shell.spec.ts`). There is nothing to scan in any seeded state.
   Not a gap; recorded so the 46-of-47 figure is not mistaken for one.
 
-- **Phase 10 spec — purchase → asset receiving does not exist, and it blocks half of the brief's
-  label-sheet story.** `design_handover/README.md` card `1m` says labels print "straight from a bulk
-  selection **or a completed purchase**". The second is unbuildable: `PurchaseUnit`
-  (`prisma/schema.prisma:326`) carries `description`, `qty` and `unitPrice` and has **no relation to
-  `Asset`**, nothing anywhere creates an Asset from a purchase, and `complete` only flips the request
-  to `COMPLETED`. So a completed purchase has nothing with a tag to put on a sticker. Building it
-  means deciding how many assets a `qty: 5` unit becomes, where their tags come from, what category
-  they land in, and whether it needs an approval — a real feature with schema, actions and audit
-  implications, not polish. **Dropped from Phase 10 by decision, not oversight** (spec §0.2). If it is
-  ever built, the label sheet already accepts `?ids=` and needs no change.
+- **Card `1m`'s "or a completed purchase" is HALF-closed by Phase 12, and the remaining half is a
+  screen nobody has asked for.** `design_handover/README.md` card `1m` says labels print "straight
+  from a bulk selection **or a completed purchase**". When this bullet was written the second was
+  unbuildable — `PurchaseUnit` had no relation to `Asset` and nothing anywhere created an Asset from
+  a purchase. **Phase 12 fixed the data half:** `Asset.purchaseUnitId` exists, `/inventory/register`
+  creates tagged assets, and a registration may name a `COMPLETED` request as provenance. So a
+  completed purchase's assets now exist, carry tags, and can be labelled **from the bulk selection**.
+  **What does NOT exist is a "pick a completed purchase, print its labels" entry point** — you reach
+  the same stickers through `/inventory`. The label sheet already accepts `?ids=` and would need no
+  change; this is a selection screen, nothing more. ⚠️ **Phase 12 also went the other way once:
+  Tasks 3–4 built a full receiving flow against purchase units, and amendments `C-5`/`C-11` deleted
+  it, because the user's actual process is "these assets are already purchased, we are registering
+  them". Read `C-5` before proposing receiving again.**
 
 - **Phase 9, Task 13 — what the e2e suite does NOT cover, named so nobody reads 123 green tests as
   "import is fully exercised".** Six gaps, all deliberate, none a defect:
