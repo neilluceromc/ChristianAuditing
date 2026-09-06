@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-12. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-13. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -201,6 +201,45 @@
 >
 > **The lesson:** when a change scopes one list in a function, scope *every* list in that function or write
 > down why not. Two of three is the shape that ships green.
+>
+> **D-13. Task 6's one-sentence rule over-claimed, one write path was missed, and the fourth literal sat one
+> file away.** All from the code-quality review; the implementer's own report added two more.
+>
+> - **`resubmitAssetToFinance` was still `actionRole("admin", "it_staff")`.** Task 7 renders Resubmit for
+>   whoever `canManageClass` says may (plan line ~1588), so a Purchasing user would have seen the button and got
+>   `forbidden()` on the click. Resubmit is the mirror of register — Finance sent the registration back to the
+>   department that made it — so the register row of spec §5 governs it. Fixed in Task 6: role widened,
+>   `canManageClass(user.role, asset.cls)` after the read, `cls` added to the select. **When a later task
+>   renders a control gated by a predicate, the action behind it must be gated by the same predicate, and the
+>   plan must say which task adds it.**
+> - **The fourth literal.** Step 4 was titled "the three literals in `employees/actions.ts`"; the employee page's
+>   spare picker (`src/app/(app)/employees/[id]/page.tsx`, `status: "SPARE"`) is the fourth, one file away, and
+>   no task in this plan touched that file. Pinned deliberately to `cls: "IT", status: ASSIGNABLE_FROM.IT` with
+>   the reason in a comment. **When a step counts the literals it replaces, grep for the one it did not count.**
+> - **"a IT", again.** D-8 fixed "not a IT status" in three worker strings; Task 6 reintroduced the article
+>   before `CLASS_LABEL[cls]` at six sites and Task 4 at one. Fixed at the source: `CLASS_PHRASE` ("an IT",
+>   "a Purchasing") in `asset-class.ts`, used everywhere an article precedes the label, with a test.
+> - **Decision, argued from the spec: assign / return / reserve-fulfil in `employees/actions.ts` do NOT get a class
+>   check.** §5's intro is "each class is *registered and edited* by its own department; everything else is
+>   shared", and its table has no assign row; §8 has IT's offboarding wizard returning a leaver's car (Task 11
+>   case 8 asserts it). `MANAGEABLE_CLASSES`' own docblock already says "deliberately NOT 'act on' in general".
+>   The plan's sentence "a role may act on an asset only if `canManageClass`" was the loose text — corrected
+>   below. Also confirmed: no reservation can hold a Purchasing asset today (there is no reservation write
+>   path in `src/`; the seed's four are IT), so the loop's PURCHASING branch is dead-but-correct.
+> - **Recorded, not fixed — follow-ups beside §7's approvals asymmetry:** Purchasing has no assign or return
+>   surface (`/employees` is IT's workspace; a car is assigned at create time only); a change-status request to
+>   a holder status with no holder is allowed on BOTH sides (Task 11 case 7 relies on it — a pool car may
+>   legitimately be OPERATIONAL with no driver), but IT's Home detects the resulting state for laptops and
+>   Purchasing has no detector; `@default(IT)` plus a category-creation UI means an import row naming a Purchasing
+>   category now reaches the trigger's raw error until Task 10 lands.
+> - **From the implementer:** a second `CREATABLE_STATUSES` pin in `asset-rules.test.ts` the plan did not name
+>   (widened to five, honestly); Step 3's import line listed `DEFAULT_STATUS`, which nothing in that file reads.
+> - **Coverage.** Every server-side class refusal Task 6 added is Prisma-bound, and none of Task 11's fourteen
+>   cases posts a wrong-class request — cases 2 and 3 assert the picker's options and an unchanged count,
+>   which reads as coverage of the server gate and is not. Two cases added (15: a cross-class category edit;
+>   16: Finance sends a Purchasing registration back and Purchasing resubmits it). The gates unreachable from
+>   the UI (wrong-class register, mixed-class bulk) ship covered by the trigger and by review only; Task 12
+>   says so.
 
 
 
@@ -1295,7 +1334,7 @@ git commit -m "feat(inventory): the list, facets, export and bulk filters are sc
 - Modify: `src/server/modules/employees/actions.ts`
 - Modify: `src/server/modules/admin/reference-actions.ts`
 
-**The rule, once:** a role may act on an asset (or register into a category) only if `canManageClass(user.role, cls)`. Finance and viewers act on none. `admin` acts on both.
+**The rule, once:** a role may REGISTER, CREATE, EDIT or REQUEST A STATUS CHANGE on an asset (or register into a category) only if `canManageClass(user.role, cls)`. Finance and viewers do none of those. `admin` does both classes. Assign / return through `/employees`, offboarding, approvals and Finance confirmation are **shared** and are not gated by class (spec §5 intro, §7, §8 — D-13).
 
 - [ ] **Step 0: Delete the transition pin.** In `src/lib/asset-class.test.ts`, remove the `it` that pins `CREATABLE_BY_CLASS.IT` to `CREATABLE_STATUSES` and the `CREATABLE_STATUSES` import — this task widens that constant to both classes (D-6).
 
@@ -1488,6 +1527,22 @@ and in `createRefRow`, `const { entity, name, categoryId } = parsed.data;` becom
 ```
 
 with the audit diff for a category also recording the class: change that `diff:` to `diff: entity === "category" ? { name: { from: null, to: name }, cls: { from: null, to: cls ?? "IT" } } : { name: { from: null, to: name } },`.
+
+- [ ] **Step 5a: The write path the plan missed, the fourth literal, and the article (D-13)**
+
+- `resubmitAssetToFinance` in `src/server/modules/inventory/actions.ts`: `actionRole("admin", "it_staff", "purchasing_staff")`;
+  add `cls: true` to its asset `select`; after the `!asset` guard, refuse with `forbidden()` unless
+  `canManageClass(user.role, asset.cls)`. Resubmit is the department's own action, like register.
+- `src/app/(app)/employees/[id]/page.tsx`: the spare picker's `where: { status: "SPARE" }` becomes
+  `where: { cls: "IT", status: ASSIGNABLE_FROM.IT }` with a comment: assignment through `/employees` is IT's surface in
+  this phase; pinned explicitly so the picker never offers a STORED car by accident.
+- `src/lib/asset-class.ts` gains `CLASS_PHRASE: Record<AssetClass, string> = { IT: "an IT", PURCHASING: "a Purchasing" }`;
+  every `a ${CLASS_LABEL[x]}` in `src/` becomes `${CLASS_PHRASE[x]}` (six sites in this task's files, one in
+  `offboarding/actions.ts`); one unit test pins the article to the label. `grep -rn 'a \${CLASS_LABEL' src/` must be empty.
+- `src/server/modules/import/asset-actions.ts`: the comment claiming `creationPlan` "guarantees SPARE-only direct
+  creation" now says `DEFAULT_STATUS[cls]`-only.
+
+Expected after this step: **895 tests / 51 files.**
 
 - [ ] **Step 6: Full check and commit**
 
@@ -2254,6 +2309,26 @@ matches `/lifecycle\.return/`, and that the car is still `OPERATIONAL` and still
 be status-changed out from under its holder; for a Purchasing asset that means it cannot be changed at all
 while held — return it first.
 
+**Add a 15th and a 16th case (D-13)** — Task 6's server-side class gates are Prisma-bound and no case above
+posts a wrong-class request (cases 2 and 3 assert the picker and an unchanged count, not the refusal).
+
+15. **A cross-class category edit is refused by name.** As `admin` (who sees both classes), open the edit form of
+    `BR-LT-0148` and change its category to `Vehicle`; save; assert the field error
+    `Vehicle is a Purchasing category; this is an IT asset.` and, via Prisma, that the row's `categoryId` and `cls` are
+    unchanged. **Conditional:** if Task 8 has made the edit form's category picker class-filtered so that no
+    other-class category can be chosen even by admin, this case is unreachable from the UI — drop it and write
+    in Task 12 that the `updateAsset` cross-class guard is covered by review and the trigger (case 13) only.
+16. **Finance sends a Purchasing registration back; Purchasing resubmits it; IT cannot.** As `finance_staff`, open
+    `BR-FN-0003` and use the Phase 12 send-back control with a reason; assert the record reads as returned. As
+    `purchasing_staff`, open the same record, assert the Resubmit control is present, click it, and assert the
+    record reads as awaiting Finance again and, via Prisma, `financeReturnedAt` is null. Then as `it_staff`, open
+    the record and assert the Resubmit control is absent (Task 7's `canResubmit`). Selectors for the send-back
+    and resubmit controls: read `src/app/(app)/inventory/[id]/` — the warning below applies; report what you used.
+
+The two gates that remain unreachable from the UI — a wrong-class register POST (the picker is filtered) and a
+mixed-class bulk request (the list is class-scoped) — ship covered by the trigger and by code review only.
+Task 12 records that in the handover rather than pretending otherwise.
+
 ⚠️ **Two sets of selectors are guesses at markup this plan did not read, and must be corrected to what the components actually render before the run:** test 11's (`checkbox` in a row, a button matching `/Bulk/` — see `inventory-table.tsx` and its selection bar), and test 8's (`getByRole("button", { name: "Returned" })` etc. inside the group — see `src/components/ui/segmented-control.tsx` for whether its options are buttons, radios or something else). Report what you changed.
 
 - [ ] **Step 3: The axe routes**
@@ -2266,7 +2341,7 @@ In `e2e/axe-sweep.spec.ts`: add `"/inventory?cls=PURCHASING"` to `VIEWER_STATIC_
 npx playwright test e2e/asset-classes.spec.ts --workers=1 --global-timeout=600000
 ```
 
-A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 14** (13 planned + D-8's held-car case).
+A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 16** (13 planned + D-8's held-car case + D-13's two; 15 if case 15 was dropped as unreachable — say which).
 
 - [ ] **Step 5: Prove the guards are not inert — four mutations, report all four**
 
@@ -2302,7 +2377,7 @@ In `docs/HANDOVER.md` §9, add directly under the heading:
 
 Header line: Phase 13 code-complete on `phase-13-asset-classes`, unmerged, unpushed, with the battery numbers you actually got. §0 item 4: a Phase 13 paragraph pointing at the spec and this plan, naming the two premise-level facts (own vocabulary; one register), the two accepted defaults (approvers unchanged; categories admin/IT-created), and the two triggers. §4: a "Phase 13" paragraph in the DONE list.
 
-- [ ] **Step 3: §6a rules** — append at **101** (the list ends at 100; rules 75-80 sit out of order at the tail — see the warning there). Candidates from this phase: the `Asset.cls` default-plus-trigger pattern (a default is not a guarantee; a trigger is); the "IT is the URL default so nothing that predates the phase changes meaning" pattern; a default parameter added so intermediate commits compile is removed in the commit where the last caller passes the value (D-12); when a function scopes one of its lists by a key, every list in it is scoped by the same key or the exception is written down (D-12); anything an amendment taught.
+- [ ] **Step 3: §6a rules** — append at **101** (the list ends at 100; rules 75-80 sit out of order at the tail — see the warning there). Candidates from this phase: the `Asset.cls` default-plus-trigger pattern (a default is not a guarantee; a trigger is); the "IT is the URL default so nothing that predates the phase changes meaning" pattern; a default parameter added so intermediate commits compile is removed in the commit where the last caller passes the value (D-12); when a function scopes one of its lists by a key, every list in it is scoped by the same key or the exception is written down (D-12); a control rendered behind a predicate has its action gated by the same predicate, in the same phase (D-13); a label that can start with a vowel sound never takes a bare article — the vocabulary carries the phrase (D-8, D-13); anything an amendment taught. **Also record in §8 (D-13):** Task 6's wrong-class register and mixed-class bulk gates are unreachable from the UI and are covered by the trigger and review only.
 
 - [ ] **Step 4: The battery**
 
@@ -2317,7 +2392,7 @@ npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-
 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 ```
 
-Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **181 / 14 files** — 167 + 14 (D-8). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
+Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **183 / 14 files** — 167 + 16 (D-8, D-13); 182 if case 15 was dropped. **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
 
 - [ ] **Step 5: Finish the branch** — `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions, separately.**
 
@@ -2325,4 +2400,4 @@ Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). 
 
 ## Out of scope, deliberately (spec §12)
 
-Locations · Purchasing self-service categories · Purchasing bulk import · a Purchasing Home · **Purchasing-owned approvals (first follow-up)** · depreciation / accounting classes · consumables (§9 D) · vendor master (§9 B).
+Locations · Purchasing self-service categories · Purchasing bulk import · a Purchasing Home · **Purchasing-owned approvals (first follow-up)** · a Purchasing assign / return surface (D-13: `/employees` is IT's workspace; a car is assigned at create time only) · a detector for an unassigned holder status on the Purchasing side (IT's Home has one for DEPLOYED; D-13) · depreciation / accounting classes · consumables (§9 D) · vendor master (§9 B).
