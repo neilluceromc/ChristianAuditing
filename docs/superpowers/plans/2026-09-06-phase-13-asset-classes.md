@@ -240,6 +240,10 @@
 >   16: Finance sends a Purchasing registration back and Purchasing resubmits it). The gates unreachable from
 >   the UI (wrong-class register, mixed-class bulk) ship covered by the trigger and by review only; Task 12
 >   says so.
+> - **From the re-review, handed to Task 7 (Step 4b):** widening resubmit made Finance's send-back copy wrong
+>   for the class it can now reach — `finance-review.tsx` says "sent back to IT" / "Send back to IT" and its
+>   docblock speaks of IT throughout, and `resubmitAssetToFinance`'s own docstring still says "IT says fixed".
+>   The action name `returnAssetToIt` stays (renaming a server action for a word is churn; a comment says why).
 
 
 
@@ -1656,6 +1660,24 @@ import { statusesFor } from "@/lib/asset-class";
 
 (remove the `ASSET_STATUSES` import). Signature: `({ assetId, currentStatus, cls }: { assetId: string; currentStatus: string; cls: AssetClass })`. `const options = statusesFor(cls).filter((s) => s !== currentStatus);`
 
+- [ ] **Step 4b: Finance's send-back copy names the class it is sending back to (D-13)**
+
+`src/components/inventory/finance-review.tsx`: add prop `cls: AssetClass` (import `type AssetClass` from `@prisma/client` and
+`CLASS_LABEL` from `@/lib/asset-class`). The three IT-specific strings become class-aware: `done: "sent back to IT"` →
+`done: `sent back to ${CLASS_LABEL[cls]}``; the blurb's "IT sees this reason on the record…" → ``${CLASS_LABEL[cls]} sees this reason on the record, …``;
+the button `Send back to IT` → `Send back to {CLASS_LABEL[cls]}`. If those strings live in a constant outside the component, turn it
+into a function of `cls` (or index a per-class record) — do not duplicate the object. Reword the component's docblock so
+"IT" becomes "the registering department" where it means the department, and leave a one-line comment on the
+`returnAssetToIt` import: the action keeps its Phase 12 name; it sends the record back to whichever department registered it.
+
+`src/app/(app)/inventory/[id]/layout.tsx`: pass `cls={asset.cls}` to `<FinanceReview …>`.
+
+`src/server/modules/inventory/actions.ts`: the docstring on `resubmitAssetToFinance` — "IT says 'fixed, look again'" and "an IT
+staffer correcting an unrelated field" — becomes class-neutral ("the registering department says…", "a staffer correcting…").
+
+If a unit or e2e test asserts the literal "sent back to IT" / "Send back to IT", update it to the IT-class rendering
+(the seeded send-back fixtures are IT assets, so the visible text is unchanged there) and say which test.
+
 - [ ] **Step 5: Equipment policies offer IT types only**
 
 In `src/app/(app)/admin/equipment-policies/page.tsx`:
@@ -1668,7 +1690,7 @@ In `src/app/(app)/admin/equipment-policies/page.tsx`:
 
 ```bash
 npx tsc --noEmit && npm run lint && npx vitest run
-git add src/lib/workspaces.ts src/lib/workspaces.test.ts "src/app/(app)/inventory" src/components/inventory/record-tabs.tsx src/components/inventory/request-status-change.tsx "src/app/(app)/admin/equipment-policies/page.tsx"
+git add src/lib/workspaces.ts src/lib/workspaces.test.ts "src/app/(app)/inventory" src/components/inventory/record-tabs.tsx src/components/inventory/request-status-change.tsx src/components/inventory/finance-review.tsx src/server/modules/inventory/actions.ts "src/app/(app)/admin/equipment-policies/page.tsx"
 git commit -m "feat(routes): register opens to Purchasing; Secrets and leaver kits stay IT"
 ```
 
