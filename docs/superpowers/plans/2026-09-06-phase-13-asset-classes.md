@@ -380,8 +380,16 @@
 > **For Task 11:** case 21 — the wizard's `wrong-class` refusal has no coverage above the pure planner, and its fix
 > is the one affordance whose correctness depends on who is reading it. Count 20; e2e 187.
 >
-> **The lesson:** a fix that names an action must be true for every role that can read it — and "the route
-> exists" is not that test.
+> **The re-review of that fix found the fix I specified had done it again, one level down:** refusing a Purchasing asset
+> reached by its TAG routed a second row shape into the same `wrong-class` card — a row that may name an IT category and
+> whose asset already exists — under a headline ("Purchasing category") and an action ("register these") that are false for
+> it. `groupByCause` buckets by cause alone, so one card must be true for every row it can hold. Relabelled "Belongs to
+> Purchasing"; the explain names both routes (category, or tag/serial matching an asset Purchasing owns) and both onward
+> paths (a new one is registered; an existing one is theirs to edit); a test pins the tag/serial sentence. Two stale
+> field lists that enumerated `AssetRecordRef` without `cls` were corrected.
+>
+> **The lesson:** a fix that names an action must be true for every role that can read it — and for every ROW the card
+> can hold. "The route exists" is neither test.
 
 
 
@@ -2138,6 +2146,9 @@ Run both — Expected: FAIL.
 In `src/lib/import-vocabulary.ts`: append `"wrong-class",` to `BLOCK_CAUSES` (last, per the array's own append-only rule), and add to `SPECS`:
 
 ```ts
+  // SUPERSEDED by D-17 (twice): the shipped label is "Belongs to Purchasing", the fix label "Open the Register
+  // screen", and the explain names both routes into this card — see Step 3a. This block is the ORIGINAL recipe, kept
+  // so the amendment trail reads; do not assert these strings in an e2e.
   "wrong-class": {
     label: "Purchasing category",
     explain:
@@ -2180,7 +2191,10 @@ And the status match becomes IT's set: replace `(ASSET_STATUSES as readonly stri
 - `import-vocabulary.ts` `wrong-class`: explain "These rows name a Purchasing-class category. This importer is IT's — Purchasing
   staff (or an admin) register these on the Register screen, where the tags are numbered for them. Hand them the rows
   below; the rest of your file still imports."; fix label `Open the Register screen` (describes the click — true for every
-  role the importer admits). Test: the explain names Purchasing staff and does not say "for you". `bad-status`: "one of IT's
+  role the importer admits). Then, after the tag-match guard below widened what the card holds: label `Belongs to Purchasing`, explain
+  naming both routes ("…they name a Purchasing-class category, or their tag or serial matches an asset Purchasing already owns…
+  A new Purchasing asset is registered by Purchasing staff (or an admin) on the Register screen…; an existing one is theirs to
+  edit."), test pins `/tag or serial/`. Test: the explain names Purchasing staff and does not say "for you". `bad-status`: "one of IT's
   `${STATUSES_BY_CLASS.IT.length}`", pinned.
 - `resolve.test.ts`: `buildAssetRefs` carries each category's class, keyed by id (mutation: an empty map fails it).
 - `import-assets.ts`: the asset record projection carries `cls`; a row whose tag or serial matches an EXISTING Purchasing
@@ -2576,7 +2590,7 @@ fix link is the one affordance whose correctness depends on who is reading it.
 21. **An IT import of a Purchasing row is refused by name, and the fix names who can act.** Build a one-row sheet
     naming `Vehicle` (the seed's Purchasing category) with an IT-shaped tag (use the same xlsx helper `e2e/fixtures/make.ts`
     uses; do NOT add rows to `assets-mixed.xlsx` — `import-export.spec.ts` pins its counts and group order). As `it_staff`,
-    `/inventory/import` → validate: `0 new · 0 updates · 1 blocked`, the group card reads **Purchasing category**, its example
+    `/inventory/import` → validate: `0 new · 0 updates · 1 blocked`, the group card reads **Belongs to Purchasing**, its example
     line shows `Vehicle`, and the card's text does NOT contain "for you" (the reader is not told to register it themselves).
     Then as `admin`, the same file: follow the fix link `Open the Register screen` — `/inventory/register`'s category select
     offers `Vehicle`. Same refusal, different onward paths; that difference is the case. Put it in `asset-classes.spec.ts`.
