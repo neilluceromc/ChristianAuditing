@@ -138,7 +138,10 @@ export default async function InventoryPage({
             {/* key: any URL-state change remounts the island — selection must
                 never silently survive a page/filter/sort change (it would act
                 on rows the user can no longer see). purchaseYear is part of
-                that key via exportQS even though it isn't part of `state`. */}
+                that key via exportQS even though it isn't part of `state`.
+                The class must stay part of this key too — Task 9 threads
+                `cls` into exportQS via withClsQS — because the drawer's `to`
+                and the selection Set both belong to one class view. */}
             <InventoryTable
               key={exportQS}
               rows={rows}

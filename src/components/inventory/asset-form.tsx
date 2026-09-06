@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { CREATABLE_BY_CLASS, type CreatableStatus } from "@/lib/asset-rules";
-import { DEFAULT_STATUS } from "@/lib/asset-class";
+import { CLASS_EXAMPLE, DEFAULT_STATUS } from "@/lib/asset-class";
 import type { ActionResult } from "@/server/action-result";
 
 export interface AssetFormInitial {
@@ -81,14 +81,17 @@ export function AssetForm({
   const typesForCategory = types.filter((t) => t.categoryId === form.categoryId);
 
   // The category decides the class; the class decides which initial states
-  // exist. Before a category is picked the form shows IT's, which is also
-  // what an empty pre-Phase-13 form showed.
-  const cls: AssetClass = categories.find((c) => c.id === form.categoryId)?.cls ?? "IT";
+  // exist. Before a category is picked, follow the first category offered —
+  // a purchasing_staff user sees only Purchasing categories, so IT's states
+  // would be wrong for them (D-14b, D-15).
+  const cls: AssetClass = categories.find((c) => c.id === form.categoryId)?.cls ?? categories[0]?.cls ?? "IT";
   const creatable = CREATABLE_BY_CLASS[cls];
-
-  useEffect(() => {
-    if (!(creatable as readonly string[]).includes(requestedStatus)) setRequestedStatus(DEFAULT_STATUS[cls]);
-  }, [cls, creatable, requestedStatus]);
+  // Derived, not reset by an effect: what the control shows and what the
+  // payload carries are the same expression, so they cannot disagree, and a
+  // class switch never paints an out-of-class selection for a frame.
+  const effectiveStatus: CreatableStatus = (creatable as readonly string[]).includes(requestedStatus)
+    ? requestedStatus
+    : DEFAULT_STATUS[cls];
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -98,7 +101,7 @@ export function AssetForm({
     startTransition(async () => {
       const res = await action({
         ...form,
-        requestedStatus: mode === "new" ? requestedStatus : undefined,
+        requestedStatus: mode === "new" ? effectiveStatus : undefined,
         assigneeId: mode === "new" ? (assigneeId ?? "") : undefined,
         assignReason: mode === "new" ? assignReason : undefined,
       });
@@ -113,8 +116,8 @@ export function AssetForm({
       else if (res.kind === "validation") {
         const fe = res.fieldErrors ?? {};
         setErrors(fe);
-        // errors no FormField claims (_form/id) must not dead-end silently
-        const unclaimed = fe._form ?? fe.id;
+        // errors no FormField claims (_form/id/requestedStatus) must not dead-end silently
+        const unclaimed = fe._form ?? fe.id ?? fe.requestedStatus;
         if (unclaimed) setConflictMsg(unclaimed);
       }
       else setConflictMsg(res.message);
@@ -160,7 +163,7 @@ export function AssetForm({
             disabled: mode === "edit",
             placeholder: "BR-LT-0201",
           })}
-          {field("Model", "model", { required: true, placeholder: "ThinkPad T14 Gen 4" })}
+          {field("Model", "model", { required: true, placeholder: CLASS_EXAMPLE[cls].model })}
           {field("Serial", "serial")}
           <FormField label="Category" required error={errors.categoryId}>
             {(p) => (
@@ -237,10 +240,10 @@ export function AssetForm({
             <SegmentedControl
               aria-label="Initial status"
               options={creatable.map((s) => ({ value: s, label: s }))}
-              value={requestedStatus}
+              value={effectiveStatus}
               onChange={(v) => setRequestedStatus(v as CreatableStatus)}
             />
-            {requestedStatus !== DEFAULT_STATUS[cls] && (
+            {effectiveStatus !== DEFAULT_STATUS[cls] && (
               <>
                 <p className="text-xs text-fg-muted">
                   Assignment routes through a <span className="font-mono">lifecycle.assign</span> approval —

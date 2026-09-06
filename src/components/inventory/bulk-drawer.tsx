@@ -37,6 +37,11 @@ export function BulkDrawer({
   const toast = useToast();
   const [pending, startTransition] = useTransition();
   const [to, setTo] = useState<string>(DEFAULT_STATUS[cls]);
+  // Normalized, not trusted: the drawer outlives a class switch only if the
+  // list island is not remounted, and then `to` would be an IT status against
+  // Purchasing options — a controlled select showing one thing and submitting
+  // another. Same-class or the class default, always.
+  const effectiveTo = (statusesFor(cls) as readonly string[]).includes(to) ? to : DEFAULT_STATUS[cls];
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -52,7 +57,7 @@ export function BulkDrawer({
       const res = await bulkRequestStatusChange({
         ids: allMatching ? undefined : selectedIds,
         filters: allMatching ? filtersQS : undefined,
-        to,
+        to: effectiveTo,
         reason,
       });
       if (res.ok) {
@@ -138,7 +143,7 @@ export function BulkDrawer({
               id={props.id}
               aria-describedby={props["aria-describedby"]}
               invalid={props.invalid}
-              value={to}
+              value={effectiveTo}
               onChange={(e) => setTo(e.target.value)}
             >
               {statusesFor(cls).map((s) => (
