@@ -195,6 +195,9 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // because that rule admits finance and viewer, and neither registers
   // anything. The ORDERING is asserted only in workspaces.test.ts.
   { test: /^\/inventory\/register(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
+  // Same treatment as /inventory/register (spec §5): a write surface stops
+  // finance and viewer at layer 1, not only at the page's requireRole.
+  { test: /^\/inventory\/new(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
   // a dead end on the page built for that role. The secrets rule above still
@@ -232,8 +235,11 @@ export function pathAllowedForRole(pathname: string, role: Role): boolean {
 
 /**
  * Saved-filter links (href carries a query) are active only when every one
- * of their params matches the URL. A bare list link yields to an active
- * sibling saved filter (state param present ⇒ the filter owns the highlight).
+ * of their params matches the URL. A bare list link (no query of its own)
+ * yields to any active sibling saved filter — the /purchases + ?state= pair
+ * originally, and now also the /inventory + ?cls=PURCHASING pair — so it is
+ * active only when the current URL carries no query params at all that a
+ * sibling could own.
  */
 export function navIsActive(href: string, pathname: string, search: URLSearchParams): boolean {
   const [hrefPath, hrefQuery] = href.split("?");
@@ -243,5 +249,5 @@ export function navIsActive(href: string, pathname: string, search: URLSearchPar
     for (const [k, v] of wanted) if (search.get(k) !== v) return false;
     return true;
   }
-  return !search.has("state");
+  return search.size === 0;
 }

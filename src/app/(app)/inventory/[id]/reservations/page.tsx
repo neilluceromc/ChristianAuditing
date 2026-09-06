@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { getAsset } from "@/server/modules/inventory/queries";
 import { fmtDate } from "@/lib/format";
+import { DEFAULT_STATUS } from "@/lib/asset-class";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -20,7 +21,7 @@ export default async function AssetReservationsPage({ params }: { params: Promis
     return (
       <EmptyState
         title="No holds on this asset"
-        description="Reserved stock still reads SPARE in inventory — holds only appear here and on the reservations list."
+        description={`Reserved stock still reads ${DEFAULT_STATUS[asset.cls]} in inventory — holds only appear here and on the reservations list.`}
       />
     );
   }

@@ -15,6 +15,16 @@ export const ASSET_CLASSES = ["IT", "PURCHASING"] as const satisfies readonly As
 export const CLASS_LABEL: Record<AssetClass, string> = { IT: "IT", PURCHASING: "Purchasing" };
 
 /**
+ * Example copy for form placeholders and hints — one per class, so a
+ * Purchasing user registering a car is not told to model it on a ThinkPad.
+ * Kept here (not in the component) so vitest can pin it.
+ */
+export const CLASS_EXAMPLE: Record<AssetClass, { model: string; prefixHint: string }> = {
+  IT: { model: "ThinkPad T14 Gen 4", prefixHint: "Two letters, e.g. LT for laptops." },
+  PURCHASING: { model: "Toyota Vios 1.3 E", prefixHint: "Two letters, e.g. VH for vehicles." },
+};
+
+/**
  * The label with its indefinite article — "an IT asset", "a Purchasing
  * category". Use this, never `a ${CLASS_LABEL[cls]}`: "a IT" has shipped
  * twice in this phase (D-8, D-13).

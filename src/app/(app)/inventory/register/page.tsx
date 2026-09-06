@@ -15,7 +15,7 @@ export default async function RegisterAssetsPage() {
   const [categories, types, vendors, requests] = await Promise.all([
     prisma.assetCategory.findMany({
       where: { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, cls: true },
       orderBy: { name: "asc" },
     }),
     prisma.assetType.findMany({

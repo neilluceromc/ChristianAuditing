@@ -120,6 +120,12 @@ describe("pathAllowedForRole", () => {
     ["/inventory/register", "viewer", false],
     ["/inventory/register", "purchasing_staff", true],
     ["/inventory/register", "finance_staff", false],
+    // /inventory/new: same shape and same reason as /inventory/register above.
+    ["/inventory/new", "admin", true],
+    ["/inventory/new", "it_staff", true],
+    ["/inventory/new", "purchasing_staff", true],
+    ["/inventory/new", "finance_staff", false],
+    ["/inventory/new", "viewer", false],
     // Task 4 (Phase 10), the identical E-7/W-1 trap one route over: /inventory
     // sits right below this in PATH_RULES with workspaces ["it", "purchasing",
     // "finance"], so without a dedicated rule ahead of it a finance or
@@ -174,6 +180,9 @@ describe("navIsActive", () => {
   it("the bare list link yields to an active saved filter", () => {
     expect(navIsActive("/purchases", "/purchases", q("state=DRAFT"))).toBe(false);
     expect(navIsActive("/purchases", "/purchases", q(""))).toBe(true);
+    // Same yield, for the /inventory + ?cls=PURCHASING pair (Task 7 fix).
+    expect(navIsActive("/inventory", "/inventory", q("cls=PURCHASING"))).toBe(false);
+    expect(navIsActive("/inventory?cls=PURCHASING", "/inventory", q("cls=PURCHASING"))).toBe(true);
   });
 });
 

@@ -105,7 +105,13 @@ export default async function AssetRecordLayout({
           </Banner>
         </div>
       )}
-      <RecordTabs assetId={asset.id} cls={asset.cls} />
+      {/* The tab route is IT-workspace-only (workspaces.ts PATH_RULES) and the
+          Purchasing class has no credentials — viewer keeps the tab because
+          secrets/page.tsx shows labels without values for that role. */}
+      <RecordTabs
+        assetId={asset.id}
+        showSecrets={asset.cls === "IT" && (user.role === "admin" || user.role === "it_staff" || user.role === "viewer")}
+      />
       <div className="pt-4">{children}</div>
     </>
   );

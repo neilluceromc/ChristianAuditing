@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { AssetClass, AssetStatus } from "@prisma/client";
 import {
-  ASSET_CLASSES, ASSIGN_TARGETS, ASSIGNABLE_FROM, CLASS_LABEL, CLASS_PHRASE, CREATABLE_BY_CLASS,
+  ASSET_CLASSES, ASSIGN_TARGETS, ASSIGNABLE_FROM, CLASS_EXAMPLE, CLASS_LABEL, CLASS_PHRASE, CREATABLE_BY_CLASS,
   DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
   canManageClass, isStatusOf, parseCls, statusesFor, withClsQS,
 } from "./asset-class";
@@ -41,6 +41,18 @@ describe("CLASS_PHRASE — the labels, with their article, said out loud", () =>
     for (const cls of ASSET_CLASSES) expect(CLASS_PHRASE[cls].endsWith(CLASS_LABEL[cls])).toBe(true);
     expect(CLASS_PHRASE.IT).toBe("an IT"); // "IT" is said like the letters I-T -- a vowel sound
     expect(CLASS_PHRASE.PURCHASING).toBe("a Purchasing");
+  });
+});
+
+describe("CLASS_EXAMPLE — form placeholder copy, one per class", () => {
+  it("every class has an example, the prefix hint carries a two-letter token, and IT ≠ Purchasing copy", () => {
+    for (const cls of ASSET_CLASSES) {
+      expect(CLASS_EXAMPLE[cls].model.length).toBeGreaterThan(0);
+      expect(CLASS_EXAMPLE[cls].prefixHint).toMatch(/\b[A-Z]{2}\b/);
+    }
+    // A copy-paste of one class's example into the other must fail.
+    expect(CLASS_EXAMPLE.IT.model).toMatch(/ThinkPad/);
+    expect(CLASS_EXAMPLE.PURCHASING.model).not.toMatch(/ThinkPad/);
   });
 });
 
