@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-14. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-15. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -295,6 +295,34 @@
 > on purpose (paging inside the Purchasing view keeps the Purchasing item lit), and nothing asserted it — the
 > plausible future "fix" to an exact match would have killed the highlight with a green suite. Row added and
 > mutation-checked (exact match → one failure). `sort` and `purchaseYear` pinned as page-owned while there.
+>
+> **D-15. Task 8's plan text hard-coded the class list it exists to abolish, and the create form repeated
+> two defects this phase had already fixed on its sibling.** All from the code-quality review; the
+> implementer was verbatim to the plan, so every one of these is a plan defect.
+>
+> - **Step 4 wrote `useState<"IT" | "PURCHASING">("IT")`, two literal `<option>`s with hand-typed labels, and a cast** —
+>   three copies of the enumeration in a component, the day after `asset-class.ts` was created to be the only
+>   copy. `ASSET_CLASSES` / `CLASS_LABEL` now; the data cell renders the same way the record pill does.
+> - **`asset-form.tsx` had D-14b's `?? "IT"` fallback and the ThinkPad placeholder** that D-14 fixed on
+>   `register-form.tsx` one commit earlier — the second create surface, missed. `categories[0]?.cls` and `CLASS_EXAMPLE`.
+> - **The `useEffect` reset rendered a wrong frame and then corrected it**, with the submit button live in that frame.
+>   Replaced by derivation: `effectiveStatus` is what the control shows AND what the payload carries — one expression,
+>   so they cannot disagree, and the effect import goes.
+> - **A `requestedStatus` server error dead-ended silently.** Task 6 made that key reachable; the form's unclaimed-error
+>   escape hatch listed `_form` and `id` only. Nobody re-walked the list when the server grew a refusal.
+> - **The drawer's `to` was initialized from `cls` once and trusted.** It survives a class switch only because
+>   Task 9 happens to put `cls` into the `key` on `InventoryTable` through `exportQS` — load-bearing and
+>   accidental. Normalized at render (`effectiveTo`), and the key comment now says the class is part of it.
+>
+> **For Task 9 (below):** the `cls` attribute on `<InventoryTable>` already exists as a literal with a comment — REPLACE
+> it, do not add a second. **For Task 11:** case 15 is dropped — Task 7 filtered the edit form's categories to the
+> asset's class, so a cross-class edit is unreachable from the UI (its own conditional said so); case 20 covers
+> the whole of Step 3, which had no coverage at any level. Count stays 19. **For Task 12:** Purchasing mints
+> `BR-VH-####` tags and has no route to a label sheet — a product gap, recorded, not fixed.
+>
+> **The lesson:** when a phase creates a vocabulary module, the plan's own code blocks are the first place to
+> grep for the literals it replaces. And when a defect is fixed on one of two sibling surfaces, name the other
+> in the amendment — or it is fixed twice, one review apart.
 
 
 
@@ -1829,6 +1857,20 @@ In `src/components/inventory/asset-form.tsx`:
 
 `src/app/(app)/admin/asset-categories/page.tsx`: the row map gains `cls: r.cls,`.
 
+- [ ] **Step 4a: The review fixes (D-15)**
+
+- `asset-form.tsx`: `cls` falls back to `categories[0]?.cls` before `"IT"`; the `useEffect` reset is replaced by
+  `const effectiveStatus = creatable.includes(requestedStatus) ? requestedStatus : DEFAULT_STATUS[cls]`, used for the control's
+  value, the disclosure test and the payload; `const unclaimed = fe._form ?? fe.id ?? fe.requestedStatus`; the Model placeholder is
+  `CLASS_EXAMPLE[cls].model`.
+- `ref-table.tsx`: `cls?: AssetClass`; `useState<AssetClass>(ASSET_CLASSES[0])`; options `ASSET_CLASSES.map(c => <option>{CLASS_LABEL[c]}</option>)`;
+  the cell renders `CLASS_LABEL[row.cls].toUpperCase()` like the record pill; one muted line under the categories table: "A category's
+  class is fixed once it has assets."
+- `bulk-drawer.tsx`: `const effectiveTo = statusesFor(cls).includes(to) ? to : DEFAULT_STATUS[cls]` for the select and the payload.
+  `inventory/page.tsx`: the `key={exportQS}` comment says the class is part of the key (Task 9 puts it there via `withClsQS`).
+
+Expected after this step: **903 tests / 51 files** (unchanged — client components).
+
 - [ ] **Step 5: Full check and commit**
 
 ```bash
@@ -1865,7 +1907,11 @@ In `src/app/(app)/inventory/page.tsx`:
 - `hasFilters` is unchanged — the class is a view, not a filter.
 - `PageHeader title` becomes `` title={cls === "IT" ? "Inventory" : `${CLASS_LABEL[cls]} assets`} ``.
 - The Import button stays IT-only: `{canMutate && cls === "IT" && <ButtonLink href="/inventory/import">Import</ButtonLink>}`.
-- `<InventoryToolbar … cls={cls}>` and `<InventoryTable … cls={cls}>`.
+- `<InventoryToolbar … cls={cls}>` (a new prop). On `<InventoryTable>` the attribute ALREADY EXISTS as `cls="IT"` with a
+  "Task 9 threads the real class" comment above it (Task 8's intermediate state) — **replace both lines with `cls={cls}`**; do
+  not add a second `cls` attribute and do not leave the comment (D-15). Then confirm `cls` reaches `key={exportQS}` through
+  `withClsQS` — the key comment now says the class must be part of it, because the drawer's `to` and the selection Set
+  belong to one class view.
 
 In `src/components/inventory/inventory-toolbar.tsx`:
 
@@ -2400,12 +2446,9 @@ while held — return it first.
 **Add a 15th and a 16th case (D-13)** — Task 6's server-side class gates are Prisma-bound and no case above
 posts a wrong-class request (cases 2 and 3 assert the picker and an unchanged count, not the refusal).
 
-15. **A cross-class category edit is refused by name.** As `admin` (who sees both classes), open the edit form of
-    `BR-LT-0148` and change its category to `Vehicle`; save; assert the field error
-    `Vehicle is a Purchasing category; this is an IT asset.` and, via Prisma, that the row's `categoryId` and `cls` are
-    unchanged. **Conditional:** if Task 8 has made the edit form's category picker class-filtered so that no
-    other-class category can be chosen even by admin, this case is unreachable from the UI — drop it and write
-    in Task 12 that the `updateAsset` cross-class guard is covered by review and the trigger (case 13) only.
+15. **DROPPED (D-15).** A cross-class category edit is unreachable from the UI: Task 7 filtered the edit form's
+    categories to `asset.cls` (`[id]/edit/page.tsx`), for every role. The `updateAsset` cross-class guard ships covered
+    by the trigger (case 13) and by review only — Task 12 records that. Do not renumber the cases below.
 16. **Finance sends a Purchasing registration back; Purchasing resubmits it; IT cannot.** As `finance_staff`, open
     `BR-FN-0003` and use the Phase 12 send-back control with a reason; assert the record reads as returned. As
     `purchasing_staff`, open the same record, assert the Resubmit control is present, click it, and assert the
@@ -2425,6 +2468,18 @@ posts a wrong-class request (cases 2 and 3 assert the picker and an unchanged co
 19. **The leaver-kit policy picker names no Purchasing type.** As `admin` on `/admin/equipment-policies`, the Add-slot type
     control's options contain `Laptop`'s types and do not contain `Sedan`.
 
+**Add a 20th case (D-15)** — Task 8 Step 3, the create form's initial-state control, had no coverage at any level.
+
+20. **The create form's initial-state control follows the chosen category's class.** As `admin` (sees both classes)
+    on `/inventory/new`: `SegmentedControl` renders `role="radiogroup"` with one `role="radio"` per status, named by the
+    status; the category control is `getByLabel("Category")` as in case 18. Pick `Vehicle`: the group has exactly 2 radios,
+    `STORED` is checked, `OPERATIONAL` is present, `DEPLOYED` has count 0. Check `OPERATIONAL`, then pick `Laptop`: 3
+    radios, `SPARE` checked, `OPERATIONAL` count 0 (the status is derived at render — an out-of-class choice normalizes
+    to the class default). Check `DEPLOYED` and assert the disclosure text matches `/registered as SPARE/`; pick
+    `Vehicle` again and check `OPERATIONAL` — the text matches `/registered as STORED/`. Note: under derivation, returning
+    to `Laptop` after `DEPLOYED` restores `DEPLOYED` (the choice was kept, only hidden while out of class) — do not assert
+    `SPARE` there.
+
 The two gates that remain unreachable from the UI — a wrong-class register POST (the picker is filtered) and a
 mixed-class bulk request (the list is class-scoped) — ship covered by the trigger and by code review only.
 Task 12 records that in the handover rather than pretending otherwise.
@@ -2441,7 +2496,7 @@ In `e2e/axe-sweep.spec.ts`: add `"/inventory?cls=PURCHASING"` to `VIEWER_STATIC_
 npx playwright test e2e/asset-classes.spec.ts --workers=1 --global-timeout=600000
 ```
 
-A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 19** (13 planned + D-8's held-car case + D-13's two + D-14's three; 18 if case 15 was dropped as unreachable — say which).
+A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 19** (13 planned + D-8's held-car case + D-13's case 16 + D-14's three + D-15's case 20; case 15 is dropped).
 
 - [ ] **Step 5: Prove the guards are not inert — four mutations, report all four**
 
@@ -2492,7 +2547,7 @@ npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-
 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 ```
 
-Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **186 / 14 files** — 167 + 19 (D-8, D-13, D-14); 185 if case 15 was dropped. **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
+Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **186 / 14 files** — 167 + 19 (D-8, D-13, D-14, D-15; case 15 dropped, case 20 added). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
 
 - [ ] **Step 5: Finish the branch** — `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions, separately.**
 
@@ -2500,4 +2555,4 @@ Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). 
 
 ## Out of scope, deliberately (spec §12)
 
-Locations · Purchasing self-service categories · Purchasing bulk import · a Purchasing Home · **Purchasing-owned approvals (first follow-up)** · a Purchasing assign / return surface (D-13: `/employees` is IT's workspace; a car is assigned at create time only) · a detector for an unassigned holder status on the Purchasing side (IT's Home has one for DEPLOYED; D-13) · class-aware document permissions (D-14: `documents/page.tsx` and `document-actions.ts` are role-hardcoded to IT, so Purchasing cannot attach a car's OR/CR while IT can) · a policy slot naming a type whose empty category was later flipped to Purchasing (direct-DB only; `resolvePolicy` reports a permanent gap — D-14) · depreciation / accounting classes · consumables (§9 D) · vendor master (§9 B).
+Locations · Purchasing self-service categories · Purchasing bulk import · a Purchasing Home · **Purchasing-owned approvals (first follow-up)** · a Purchasing assign / return surface (D-13: `/employees` is IT's workspace; a car is assigned at create time only) · a detector for an unassigned holder status on the Purchasing side (IT's Home has one for DEPLOYED; D-13) · class-aware document permissions (D-14: `documents/page.tsx` and `document-actions.ts` are role-hardcoded to IT, so Purchasing cannot attach a car's OR/CR while IT can) · a policy slot naming a type whose empty category was later flipped to Purchasing (direct-DB only; `resolvePolicy` reports a permanent gap — D-14) · a label sheet for Purchasing assets (D-15: they are minted `BR-VH-####` tags and `/inventory/labels` is IT-only, so nothing prints them) · depreciation / accounting classes · consumables (§9 D) · vendor master (§9 B).
