@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-10. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-11. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -168,6 +168,13 @@
 > **The lesson is derived-beats-stored's inverse:** when the stored value IS the fact — the payload's
 > target, what the worker will actually apply — print it. Re-deriving it through two maps is not
 > "derived state", it is a second copy that can disagree with the first.
+>
+> **D-11. Task 5 named one existing assertion its change would break; there were four.** Making `cls` an
+> unconditional key in `buildAssetWhere`'s output broke the `toHaveLength(8)` check the plan called out — and
+> three more that asserted `toEqual({})` on the WHOLE where object ("empty state → empty where", the
+> `q` search shape, and the null-`purchaseYear` cases). The implementer fixed all four mechanically and flagged
+> them. Same lesson as D-9, one notch smaller: **when a change alters a function's output shape, grep
+> its test file for whole-object assertions, not just the one you remember.**
 
 
 
