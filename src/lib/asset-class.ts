@@ -8,10 +8,18 @@ import type { AssetClass, AssetStatus, Role } from "@prisma/client";
  * "Admin" in the 2026-09-02 meeting notes is the PURCHASING department; the
  * codebase's `admin` is the sysadmin role. Hence the class is PURCHASING.
  */
+// Order is load-bearing: index 0 is the default class -- what parseCls(null)
+// means and which tab a class-split screen opens on.
 export const ASSET_CLASSES = ["IT", "PURCHASING"] as const satisfies readonly AssetClass[];
 
 export const CLASS_LABEL: Record<AssetClass, string> = { IT: "IT", PURCHASING: "Purchasing" };
 
+/**
+ * A control that offers statuses to a PERSON -- a picker, a facet, a chip row
+ * -- must use statusesFor(cls). A flat list of every AssetStatus is only for
+ * "is this any valid value at all" checks (zod enums, an import's error text).
+ * Offering DEPLOYED for a car is a bug, and a flat list makes it an easy one.
+ */
 export const STATUSES_BY_CLASS = {
   IT: ["DEPLOYED", "SPARE", "DEFECTIVE", "DONATED", "TEMPORARY", "BUYOUT", "DISPOSE", "MISSING"],
   PURCHASING: ["OPERATIONAL", "STORED", "REPAIRING", "RETIRED", "SOLD", "LOST"],
@@ -42,11 +50,25 @@ export const CREATABLE_BY_CLASS = {
   IT: ["SPARE", "DEPLOYED", "TEMPORARY"], PURCHASING: ["STORED", "OPERATIONAL"],
 } as const satisfies Record<AssetClass, readonly AssetStatus[]>;
 
-/** Statuses an asset may hold WHILE assigned — the worker's change-status guard. */
-export const HOLDER_STATUSES = ASSIGN_TARGETS;
+/**
+ * Statuses an asset may hold WHILE assigned -- the worker's change-status
+ * guard, which exists to stop an asset being status-changed out from under
+ * its holder. Its OWN literal, not an alias of ASSIGN_TARGETS: that one is a
+ * workflow set that may widen (spec §7 anticipates replace/transfer); this one
+ * is a safety invariant. They coincide today, and a test says so.
+ */
+export const HOLDER_STATUSES = {
+  IT: ["DEPLOYED", "TEMPORARY"], PURCHASING: ["OPERATIONAL"],
+} as const satisfies Record<AssetClass, readonly AssetStatus[]>;
 
-/** Which classes a role may register, edit and request changes on. Finance and viewers act on none. */
-export const CLASSES_FOR_ROLE: Record<Role, readonly AssetClass[]> = {
+/**
+ * Which classes a role may REGISTER, CREATE, EDIT, and REQUEST STATUS CHANGES
+ * on -- the four write rows of spec §5. Deliberately NOT "act on" in general:
+ * finance_staff acts on assets of BOTH classes through confirm / send back
+ * (Phase 12) and is [] here on purpose. A guard on those Finance actions must
+ * not use this map.
+ */
+export const MANAGEABLE_CLASSES: Record<Role, readonly AssetClass[]> = {
   admin: ["IT", "PURCHASING"],
   it_staff: ["IT"],
   purchasing_staff: ["PURCHASING"],
@@ -62,8 +84,8 @@ export function isStatusOf(cls: AssetClass, status: string): status is AssetStat
   return (STATUSES_BY_CLASS[cls] as readonly string[]).includes(status);
 }
 
-export function canActOnClass(role: Role, cls: AssetClass): boolean {
-  return CLASSES_FOR_ROLE[role].includes(cls);
+export function canManageClass(role: Role, cls: AssetClass): boolean {
+  return MANAGEABLE_CLASSES[role].includes(cls);
 }
 
 /**
@@ -73,7 +95,7 @@ export function canActOnClass(role: Role, cls: AssetClass): boolean {
  * this phase means exactly what it used to.
  */
 export function parseCls(raw: string | null | undefined): AssetClass | null {
-  return raw === "IT" || raw === "PURCHASING" ? raw : null;
+  return raw != null && (ASSET_CLASSES as readonly string[]).includes(raw) ? (raw as AssetClass) : null;
 }
 
 /** Splice `cls` onto an already-serialized list query string. IT is the default and is never written. */

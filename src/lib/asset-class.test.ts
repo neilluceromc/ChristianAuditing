@@ -1,12 +1,16 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { AssetStatus, type AssetClass } from "@prisma/client";
+import { AssetClass, AssetStatus } from "@prisma/client";
 import {
-  ASSET_CLASSES, ASSIGN_TARGETS, CLASSES_FOR_ROLE, CREATABLE_BY_CLASS, DEFAULT_ASSIGN_STATUS,
+  ASSET_CLASSES, ASSIGN_TARGETS, CREATABLE_BY_CLASS, DEFAULT_ASSIGN_STATUS,
   DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
-  canActOnClass, isStatusOf, parseCls, statusesFor, withClsQS,
+  canManageClass, isStatusOf, parseCls, statusesFor, withClsQS,
 } from "./asset-class";
+import { RETURN_STATUSES } from "./approval-execution";
+import { CREATABLE_STATUSES } from "./asset-rules";
+import { ASSET_STATUSES } from "./inventory-list";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
 
@@ -28,6 +32,10 @@ describe("STATUSES_BY_CLASS — a partition of the enum", () => {
     expect([...STATUSES_BY_CLASS.PURCHASING]).toEqual([
       "OPERATIONAL", "STORED", "REPAIRING", "RETIRED", "SOLD", "LOST",
     ]);
+  });
+  it("ASSET_CLASSES is every AssetClass value, IT first", () => {
+    expect(sorted([...ASSET_CLASSES])).toEqual(sorted(Object.values(AssetClass)));
+    expect(ASSET_CLASSES[0]).toBe("IT"); // the default class -- see the comment on the constant
   });
 });
 
@@ -52,6 +60,20 @@ describe("the derived sets stay inside their class", () => {
     expect(RETURN_TARGETS.PURCHASING).not.toContain("BUYOUT");
     expect(RETURN_TARGETS.PURCHASING).toEqual(["STORED", "REPAIRING", "LOST"]);
   });
+  it("the assign default is an assign target -- the summary and the executor must agree", () => {
+    for (const cls of ASSET_CLASSES) expect(ASSIGN_TARGETS[cls]).toContain(DEFAULT_ASSIGN_STATUS[cls]);
+  });
+  it("creatable = the default plus the assign targets -- exactly what creationPlan encodes", () => {
+    for (const cls of ASSET_CLASSES) {
+      expect(sorted(CREATABLE_BY_CLASS[cls])).toEqual(sorted([DEFAULT_STATUS[cls], ...ASSIGN_TARGETS[cls]]));
+    }
+  });
+  it("the create default is never a holder status -- an asset is created with nobody holding it", () => {
+    for (const cls of ASSET_CLASSES) expect(HOLDER_STATUSES[cls]).not.toContain(DEFAULT_STATUS[cls]);
+  });
+  it("HOLDER_STATUSES and ASSIGN_TARGETS coincide today -- when they diverge, delete this test, not the constant", () => {
+    for (const cls of ASSET_CLASSES) expect(sorted(HOLDER_STATUSES[cls])).toEqual(sorted(ASSIGN_TARGETS[cls]));
+  });
 });
 
 describe("statusesFor / isStatusOf", () => {
@@ -65,16 +87,15 @@ describe("statusesFor / isStatusOf", () => {
   });
 });
 
-describe("CLASSES_FOR_ROLE / canActOnClass — each class is its own department's", () => {
-  it.each<[Parameters<typeof canActOnClass>[0], AssetClass, boolean]>([
+describe("MANAGEABLE_CLASSES / canManageClass — each class is its own department's", () => {
+  it.each<[Parameters<typeof canManageClass>[0], AssetClass, boolean]>([
     ["admin", "IT", true], ["admin", "PURCHASING", true],
     ["it_staff", "IT", true], ["it_staff", "PURCHASING", false],
     ["purchasing_staff", "PURCHASING", true], ["purchasing_staff", "IT", false],
     ["finance_staff", "IT", false], ["finance_staff", "PURCHASING", false],
     ["viewer", "IT", false], ["viewer", "PURCHASING", false],
   ])("%s on %s → %s", (role, cls, ok) => {
-    expect(canActOnClass(role, cls)).toBe(ok);
-    expect(CLASSES_FOR_ROLE[role].includes(cls)).toBe(ok);
+    expect(canManageClass(role, cls)).toBe(ok);
   });
 });
 
@@ -95,6 +116,18 @@ describe("parseCls / withClsQS — the ?cls= nav parameter", () => {
   });
 });
 
+describe("the IT sets match the constants they are replacing -- each pin is deleted by the task that deletes its constant", () => {
+  it("RETURN_TARGETS.IT === RETURN_STATUSES (approval-execution.ts; Task 3 removes both this and that)", () => {
+    expect(sorted(RETURN_TARGETS.IT)).toEqual(sorted(RETURN_STATUSES));
+  });
+  it("CREATABLE_BY_CLASS.IT === CREATABLE_STATUSES (asset-rules.ts; Task 6 widens that to both classes and removes this)", () => {
+    expect(sorted(CREATABLE_BY_CLASS.IT)).toEqual(sorted(CREATABLE_STATUSES));
+  });
+  it("STATUSES_BY_CLASS.IT === ASSET_STATUSES (inventory-list.ts; Task 5 widens that to fourteen and removes this)", () => {
+    expect(sorted(STATUSES_BY_CLASS.IT)).toEqual(sorted(ASSET_STATUSES));
+  });
+});
+
 describe("the trigger's literal lists are pinned to STATUSES_BY_CLASS", () => {
   // Same move as receiving.test.ts pinning MAX_TAG_NUMBER to TAG_SHAPE: the
   // status list exists twice — here and in plpgsql — and the two must move
@@ -104,16 +137,16 @@ describe("the trigger's literal lists are pinned to STATUSES_BY_CLASS", () => {
   // replaced it (D-3), and CREATE OR REPLACE means the database runs whichever
   // came last. Pinning a fixed filename would pin a body the database no
   // longer executes -- a green test proving nothing (D-4).
-  const migrationsDir = path.join(process.cwd(), "prisma/migrations");
+  const migrationsDir = fileURLToPath(new URL("../../prisma/migrations", import.meta.url));
   const bodies = readdirSync(migrationsDir)
     .filter((d) => statSync(path.join(migrationsDir, d)).isDirectory())
     .sort()
     .map((d) => readFileSync(path.join(migrationsDir, d, "migration.sql"), "utf8"))
-    .filter((sql) => sql.includes("FUNCTION asset_class_invariants()"));
+    .filter((sql) => sql.includes("CREATE OR REPLACE FUNCTION asset_class_invariants()"));
   if (bodies.length === 0) throw new Error("no migration defines asset_class_invariants()");
   const sql = bodies[bodies.length - 1];
   const listAfter = (cls: AssetClass): string[] => {
-    const m = new RegExp(`NEW\\."cls" = '${cls}' AND NEW\\."status"::text NOT IN\\s*\\(([^)]*)\\)`).exec(sql);
+    const m = new RegExp(`NEW\\."cls" = '${cls}' AND NEW\\."status"(?:::text)? NOT IN\\s*\\(([^)]*)\\)`).exec(sql);
     if (!m) throw new Error(`trigger has no NOT IN list for ${cls}`);
     return m[1].split(",").map((s) => s.trim().replace(/^'|'$/g, ""));
   };
