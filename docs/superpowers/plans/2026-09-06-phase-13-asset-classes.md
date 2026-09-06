@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-5. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix. **D-3 is a real concurrency hole in a trigger this spec called a guarantee.**
+> ### AMENDED DURING EXECUTION — D-1 through D-6. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -70,6 +70,39 @@
 > is the one that fails loudly). **The lesson is C-8's, one level up: when you write the correction,
 > re-read it against the code AS IT IS AT THAT COMMIT, not as the plan says it will be.** A comment
 > that names a future task's behaviour is a false comment today.
+>
+> **D-6. Task 2's module was correct and its shape was wrong in five ways, all caught while it still
+> had zero call sites.** The code-quality reviewer verified every one of the six maps against the four
+> consumers that hold the IT literals today and found no wrong entry — and then found the following,
+> each cheap now and expensive after Tasks 3-10 import the module:
+>
+> - `canActOnClass` was **misnamed in a way with a concrete victim**: `finance_staff` maps to `[]`, but Finance
+>   acts on assets of both classes through confirm / send back. A later task reaching for that guard
+>   would have locked Finance out of what Phase 12 shipped. Renamed `canManageClass` /
+>   `MANAGEABLE_CLASSES` — the four write rows of spec §5, and nothing else. **This plan is renamed
+>   throughout.**
+> - `HOLDER_STATUSES = ASSIGN_TARGETS` aliased a **safety invariant** (the worker's don't-change-status-out-
+>   from-under-the-holder guard) to a **workflow set** that spec §7 already expects to widen. Its own
+>   literal now, with a test asserting the two coincide today.
+> - Three invariants were unasserted: the assign default ∈ assign targets (the summary and the executor
+>   must agree); creatable = default + assign targets (what `creationPlan` encodes); the create default ∉
+>   holder statuses (an asset is created with nobody holding it). All hold; none would have survived an
+>   edit unnoticed.
+> - Nothing caught a third `AssetClass`: `satisfies readonly AssetClass[]` does not check completeness, and
+>   `parseCls` retyped the two literals inside a module whose thesis is single ownership.
+> - The IT sets now coexist with the constants they replace (`RETURN_STATUSES`, `CREATABLE_STATUSES`,
+>   `ASSET_STATUSES`) until Tasks 3, 6 and 5 delete or widen them. **Three transition pins** hold them equal
+>   in that window — and **each later task now has an explicit step to delete its pin**, because two of
+>   those constants are widened rather than deleted and a stale pin would fail for the wrong reason.
+>
+> Also: the migration scan filters on `CREATE OR REPLACE FUNCTION asset_class_invariants()` (a trigger-only
+> migration or a comment would otherwise be mistaken for a definition), `::text` in the regex is
+> optional (002's own comment invites dropping it), and the path is module-relative via
+> `import.meta.url`, the house idiom.
+>
+> **The lesson:** review a new module's *names* as hard as its *values*. The values were all right. The
+> name would have caused a bug in someone else's task, at a call site where the doc comment is not
+> visible.
 
 
 
@@ -357,9 +390,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AssetStatus, type AssetClass } from "@prisma/client";
 import {
-  ASSET_CLASSES, ASSIGN_TARGETS, CLASSES_FOR_ROLE, CREATABLE_BY_CLASS, DEFAULT_ASSIGN_STATUS,
+  ASSET_CLASSES, ASSIGN_TARGETS, MANAGEABLE_CLASSES, CREATABLE_BY_CLASS, DEFAULT_ASSIGN_STATUS,
   DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
-  canActOnClass, isStatusOf, parseCls, statusesFor, withClsQS,
+  canManageClass, isStatusOf, parseCls, statusesFor, withClsQS,
 } from "./asset-class";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
@@ -419,16 +452,16 @@ describe("statusesFor / isStatusOf", () => {
   });
 });
 
-describe("CLASSES_FOR_ROLE / canActOnClass — each class is its own department's", () => {
-  it.each<[Parameters<typeof canActOnClass>[0], AssetClass, boolean]>([
+describe("MANAGEABLE_CLASSES / canManageClass — each class is its own department's", () => {
+  it.each<[Parameters<typeof canManageClass>[0], AssetClass, boolean]>([
     ["admin", "IT", true], ["admin", "PURCHASING", true],
     ["it_staff", "IT", true], ["it_staff", "PURCHASING", false],
     ["purchasing_staff", "PURCHASING", true], ["purchasing_staff", "IT", false],
     ["finance_staff", "IT", false], ["finance_staff", "PURCHASING", false],
     ["viewer", "IT", false], ["viewer", "PURCHASING", false],
   ])("%s on %s → %s", (role, cls, ok) => {
-    expect(canActOnClass(role, cls)).toBe(ok);
-    expect(CLASSES_FOR_ROLE[role].includes(cls)).toBe(ok);
+    expect(canManageClass(role, cls)).toBe(ok);
+    expect(MANAGEABLE_CLASSES[role].includes(cls)).toBe(ok);
   });
 });
 
@@ -532,7 +565,7 @@ export const CREATABLE_BY_CLASS = {
 export const HOLDER_STATUSES = ASSIGN_TARGETS;
 
 /** Which classes a role may register, edit and request changes on. Finance and viewers act on none. */
-export const CLASSES_FOR_ROLE: Record<Role, readonly AssetClass[]> = {
+export const MANAGEABLE_CLASSES: Record<Role, readonly AssetClass[]> = {
   admin: ["IT", "PURCHASING"],
   it_staff: ["IT"],
   purchasing_staff: ["PURCHASING"],
@@ -548,8 +581,8 @@ export function isStatusOf(cls: AssetClass, status: string): status is AssetStat
   return (STATUSES_BY_CLASS[cls] as readonly string[]).includes(status);
 }
 
-export function canActOnClass(role: Role, cls: AssetClass): boolean {
-  return CLASSES_FOR_ROLE[role].includes(cls);
+export function canManageClass(role: Role, cls: AssetClass): boolean {
+  return MANAGEABLE_CLASSES[role].includes(cls);
 }
 
 /**
@@ -582,7 +615,7 @@ git add src/lib/asset-class.ts src/lib/asset-class.test.ts
 git commit -m "feat(lib): asset-class — the status partition, class defaults and role rights"
 ```
 
-Expected before commit: **873 tests / 51 files** (850 + 23 — 850 after the Task 1 review fix added `hasStatusFamily`'s test).
+Expected before commit: **873 tests / 51 files** (850 + 23); **881** after the D-6 review fixes.
 
 ---
 
@@ -641,6 +674,8 @@ And in the `summarizeApproval` tests (find the existing assign summary test), ad
 
 Run: `npx vitest run src/lib/approval-execution.test.ts`
 Expected: FAIL — `tsc`-level: `Expected 2 arguments, but got 3` (vitest surfaces it as a type error or the new cases fail at runtime).
+
+- [ ] **Step 1a: Delete the transition pin.** In `src/lib/asset-class.test.ts`, remove the `it` that pins `RETURN_TARGETS.IT` to `RETURN_STATUSES` and the `RETURN_STATUSES` import — this task deletes that constant (D-6).
 
 - [ ] **Step 2: Rewrite `executionPlan` and `summarizeApproval`**
 
@@ -1071,6 +1106,8 @@ describe("buildAssetWhere — class (Phase 13)", () => {
 
 Run: `npx vitest run src/lib/inventory-list.test.ts` — Expected: FAIL.
 
+- [ ] **Step 1a: Delete the transition pin.** In `src/lib/asset-class.test.ts`, remove the `it` that pins `STATUSES_BY_CLASS.IT` to `ASSET_STATUSES` and, if nothing else in that file uses it, the `ASSET_STATUSES` import — this task widens that constant to fourteen (D-6).
+
 - [ ] **Step 2: `inventory-list.ts`**
 
 Replace the `ASSET_STATUSES` definition:
@@ -1160,7 +1197,9 @@ git commit -m "feat(inventory): the list, facets, export and bulk filters are sc
 - Modify: `src/server/modules/employees/actions.ts`
 - Modify: `src/server/modules/admin/reference-actions.ts`
 
-**The rule, once:** a role may act on an asset (or register into a category) only if `canActOnClass(user.role, cls)`. Finance and viewers act on none. `admin` acts on both.
+**The rule, once:** a role may act on an asset (or register into a category) only if `canManageClass(user.role, cls)`. Finance and viewers act on none. `admin` acts on both.
+
+- [ ] **Step 0: Delete the transition pin.** In `src/lib/asset-class.test.ts`, remove the `it` that pins `CREATABLE_BY_CLASS.IT` to `CREATABLE_STATUSES` and the `CREATABLE_STATUSES` import — this task widens that constant to both classes (D-6).
 
 - [ ] **Step 1: `creationPlan` learns its class**
 
@@ -1216,7 +1255,7 @@ If `src/lib/asset-rules.test.ts` exists, add `"IT"` as the third argument to eve
 
 In `src/server/modules/purchases/receiving.ts`:
 
-Imports — add `import { CLASS_LABEL, DEFAULT_STATUS, canActOnClass } from "@/lib/asset-class";`.
+Imports — add `import { CLASS_LABEL, DEFAULT_STATUS, canManageClass } from "@/lib/asset-class";`.
 
 Replace `const user = await actionRole("admin", "it_staff");` with `const user = await actionRole("admin", "it_staff", "purchasing_staff");`.
 
@@ -1232,7 +1271,7 @@ Directly after `if (dupe) return conflict(...)`, add:
     select: { name: true, cls: true },
   });
   if (!category) return validationError({ categoryId: "Unknown category" });
-  if (!canActOnClass(user.role, category.cls)) {
+  if (!canManageClass(user.role, category.cls)) {
     return validationError({
       categoryId: `${category.name} is a ${CLASS_LABEL[category.cls]} category — ${CLASS_LABEL[category.cls]} staff register ${CLASS_LABEL[category.cls]} assets.`,
     });
@@ -1253,7 +1292,7 @@ and in the audit diff replace `status: { from: null, to: "SPARE" },` with `statu
 In `src/server/modules/inventory/actions.ts`, extend the `@/lib/asset-class` import to:
 
 ```ts
-import { CLASS_LABEL, DEFAULT_STATUS, canActOnClass, isStatusOf, parseCls } from "@/lib/asset-class";
+import { CLASS_LABEL, DEFAULT_STATUS, canManageClass, isStatusOf, parseCls } from "@/lib/asset-class";
 ```
 
 **`createAsset`:**
@@ -1263,7 +1302,7 @@ import { CLASS_LABEL, DEFAULT_STATUS, canActOnClass, isStatusOf, parseCls } from
 ```ts
   const category = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
   if (!category) return validationError({ categoryId: "Unknown category" });
-  if (!canActOnClass(user.role, category.cls)) {
+  if (!canManageClass(user.role, category.cls)) {
     return validationError({ categoryId: `${category.name} is a ${CLASS_LABEL[category.cls]} category — ${CLASS_LABEL[category.cls]} staff create ${CLASS_LABEL[category.cls]} assets.` });
   }
   const plan = creationPlan(d.requestedStatus, d.assigneeId || null, category.cls);
@@ -1281,7 +1320,7 @@ import { CLASS_LABEL, DEFAULT_STATUS, canActOnClass, isStatusOf, parseCls } from
 - After `if (!asset) return conflict("That asset no longer exists.");` add:
 
 ```ts
-  if (!canActOnClass(user.role, asset.cls)) return forbidden();
+  if (!canManageClass(user.role, asset.cls)) return forbidden();
   if (d.categoryId !== asset.categoryId) {
     // Same class only. A category change across classes would flip the
     // asset's class and invalidate its status; the trigger would refuse it,
@@ -1299,7 +1338,7 @@ import { CLASS_LABEL, DEFAULT_STATUS, canActOnClass, isStatusOf, parseCls } from
 - Inside the transaction, after `if (!asset) return conflict(...)`, add:
 
 ```ts
-      if (!canActOnClass(user.role, asset.cls)) return forbidden();
+      if (!canManageClass(user.role, asset.cls)) return forbidden();
       if (!isStatusOf(asset.cls, d.to)) {
         return validationError({ to: `${d.to} is not a ${CLASS_LABEL[asset.cls]} status.` });
       }
@@ -1317,7 +1356,7 @@ import { CLASS_LABEL, DEFAULT_STATUS, canActOnClass, isStatusOf, parseCls } from
       const classes = new Set(assets.map((a) => a.cls));
       if (classes.size > 1) return conflict("Select assets of one class — IT and Purchasing assets cannot share a status change.");
       const cls = assets[0].cls;
-      if (!canActOnClass(user.role, cls)) return forbidden();
+      if (!canManageClass(user.role, cls)) return forbidden();
       if (!isStatusOf(cls, to)) return validationError({ to: `${to} is not a ${CLASS_LABEL[cls]} status.` });
 ```
 
@@ -1420,17 +1459,17 @@ and the categories query becomes:
 
 ```ts
     prisma.assetCategory.findMany({
-      where: { cls: { in: [...CLASSES_FOR_ROLE[user.role]] } },
+      where: { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
 ```
 
-(import `CLASSES_FOR_ROLE` from `@/lib/asset-class`). Types are filtered the same way through their category: `prisma.assetType.findMany({ where: { category: { cls: { in: [...CLASSES_FOR_ROLE[user.role]] } } }, select: …, orderBy: … })`.
+(import `MANAGEABLE_CLASSES` from `@/lib/asset-class`). Types are filtered the same way through their category: `prisma.assetType.findMany({ where: { category: { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } } }, select: …, orderBy: … })`.
 
 `src/app/(app)/inventory/new/page.tsx`: same `requireRole` and the same two `where` clauses; the `categories.map` passed to `AssetForm` becomes `categories.map((c) => ({ id: c.id, name: c.name, cls: c.cls }))`.
 
-`src/app/(app)/inventory/[id]/edit/page.tsx`: `requireRole("admin", "it_staff", "purchasing_staff")`, then after `if (!asset) notFound();` add `if (!canActOnClass(user.role, asset.cls)) redirect(ROLE_LANDING[user.role]);` (import `redirect` from `next/navigation`, `ROLE_LANDING` from `@/lib/workspaces`, `canActOnClass` from `@/lib/asset-class`; capture `const user = await requireRole(...)`). Categories and types are filtered to **the asset's own class**: `where: { cls: asset.cls }` / `where: { category: { cls: asset.cls } }`. The `categories.map` gains `cls: c.cls`.
+`src/app/(app)/inventory/[id]/edit/page.tsx`: `requireRole("admin", "it_staff", "purchasing_staff")`, then after `if (!asset) notFound();` add `if (!canManageClass(user.role, asset.cls)) redirect(ROLE_LANDING[user.role]);` (import `redirect` from `next/navigation`, `ROLE_LANDING` from `@/lib/workspaces`, `canManageClass` from `@/lib/asset-class`; capture `const user = await requireRole(...)`). Categories and types are filtered to **the asset's own class**: `where: { cls: asset.cls }` / `where: { category: { cls: asset.cls } }`. The `categories.map` gains `cls: c.cls`.
 
 - [ ] **Step 4: Secrets closes; the record shows its class**
 
@@ -1446,9 +1485,9 @@ and the categories query becomes:
 `src/components/inventory/record-tabs.tsx`: the signature becomes `export function RecordTabs({ assetId, cls }: { assetId: string; cls: AssetClass })` (import `type AssetClass` from `@prisma/client`), and the Secrets entry is wrapped: build `items` as before, then `.filter((t) => cls === "IT" || !t.href.endsWith("/secrets"))` before the `.map`.
 
 `src/app/(app)/inventory/[id]/layout.tsx`:
-- Import `CLASS_LABEL, canActOnClass` from `@/lib/asset-class`.
-- `const canMutate = canActOnClass(user.role, asset.cls);`
-- `const canResubmit = canActOnClass(user.role, asset.cls) && returned;` (Purchasing marks its own registrations corrected.)
+- Import `CLASS_LABEL, canManageClass` from `@/lib/asset-class`.
+- `const canMutate = canManageClass(user.role, asset.cls);`
+- `const canResubmit = canManageClass(user.role, asset.cls) && returned;` (Purchasing marks its own registrations corrected.)
 - In the badge span, directly after `<StatusPill value={asset.status} />`: `<Pill>{CLASS_LABEL[asset.cls].toUpperCase()}</Pill>`.
 - `<RequestStatusChange assetId={asset.id} currentStatus={asset.status} cls={asset.cls} />`.
 - `<RecordTabs assetId={asset.id} cls={asset.cls} />`.
@@ -1570,9 +1609,9 @@ git commit -m "feat(ui): status pickers, the create form and the category table 
 
 In `src/app/(app)/inventory/page.tsx`:
 
-- Import `CLASS_LABEL, canActOnClass, parseCls, withClsQS, type AssetClass` — `type AssetClass` from `@prisma/client`, the rest from `@/lib/asset-class`.
+- Import `CLASS_LABEL, canManageClass, parseCls, withClsQS, type AssetClass` — `type AssetClass` from `@prisma/client`, the rest from `@/lib/asset-class`.
 - After `const purchaseYear = …`: `const cls: AssetClass = parseCls(sp.get("cls")) ?? "IT";`
-- `const canMutate = canActOnClass(user.role, cls);` (replaces the admin/it_staff line — on the Purchasing view, Purchasing gets New asset; IT does not).
+- `const canMutate = canManageClass(user.role, cls);` (replaces the admin/it_staff line — on the Purchasing view, Purchasing gets New asset; IT does not).
 - Pass `cls` as the third argument to `listAssets`, `facetOptions`, and as the second to `purchaseYearBuckets(state, cls)`.
 - `href` and `exportQS` wrap with `withClsQS(..., cls)`:
 
@@ -2083,7 +2122,7 @@ A run that hits `--global-timeout` prints "N did not run" and its tail still rea
 3. In `secrets/page.tsx`, comment out the `if (asset.cls === "PURCHASING") notFound();` line → test 5 must fail on the status code. Revert.
 4. In `outcomesFor`, return `OUTCOMES` regardless of class → test 8 must fail on the Buyout count. Revert.
 
-**Report the actual observed output for all four.** Tests 2 and 3 assert the UI gate; the server gate behind it (`canActOnClass` in `registerAssets`) is pinned by the unit matrix in `asset-class.test.ts`, and **cannot** be reached through the UI once the options are filtered — say so in the report rather than claiming e2e coverage of it.
+**Report the actual observed output for all four.** Tests 2 and 3 assert the UI gate; the server gate behind it (`canManageClass` in `registerAssets`) is pinned by the unit matrix in `asset-class.test.ts`, and **cannot** be reached through the UI once the options are filtered — say so in the report rather than claiming e2e coverage of it.
 
 - [ ] **Step 6: Commit**
 
