@@ -19,9 +19,9 @@ export const CLASS_LABEL: Record<AssetClass, string> = { IT: "IT", PURCHASING: "
  * Purchasing user registering a car is not told to model it on a ThinkPad.
  * Kept here (not in the component) so vitest can pin it.
  */
-export const CLASS_EXAMPLE: Record<AssetClass, { model: string; prefixHint: string }> = {
-  IT: { model: "ThinkPad T14 Gen 4", prefixHint: "Two letters, e.g. LT for laptops." },
-  PURCHASING: { model: "Toyota Vios 1.3 E", prefixHint: "Two letters, e.g. VH for vehicles." },
+export const CLASS_EXAMPLE: Record<AssetClass, { model: string; prefixHint: string; tag: string }> = {
+  IT: { model: "ThinkPad T14 Gen 4", prefixHint: "Two letters, e.g. LT for laptops.", tag: "BR-LT-0201" },
+  PURCHASING: { model: "Toyota Vios 1.3 E", prefixHint: "Two letters, e.g. VH for vehicles.", tag: "BR-VH-0201" },
 };
 
 /**

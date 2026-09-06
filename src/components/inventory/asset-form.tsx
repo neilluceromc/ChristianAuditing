@@ -57,7 +57,9 @@ export function AssetForm({
       cost: "", warrantyUntil: "", notes: "", vendorId: "", rmaRef: "", repairQuote: "",
     },
   );
-  const [requestedStatus, setRequestedStatus] = useState<CreatableStatus>("SPARE");
+  // A sentinel only: `effectiveStatus` below normalizes it to the chosen
+  // category's class, so this never reaches the control or the payload raw.
+  const [requestedStatus, setRequestedStatus] = useState<CreatableStatus>(DEFAULT_STATUS.IT);
   const [assigneeId, setAssigneeId] = useState<string | null>(null);
   const [assignReason, setAssignReason] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -161,7 +163,7 @@ export function AssetForm({
             required: true,
             hint: mode === "edit" ? "Tags are permanent — they're printed labels." : "Format BR-XX-0000, as printed on the label.",
             disabled: mode === "edit",
-            placeholder: "BR-LT-0201",
+            placeholder: CLASS_EXAMPLE[cls].tag,
           })}
           {field("Model", "model", { required: true, placeholder: CLASS_EXAMPLE[cls].model })}
           {field("Serial", "serial")}

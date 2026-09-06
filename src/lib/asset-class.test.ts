@@ -49,7 +49,12 @@ describe("CLASS_EXAMPLE — form placeholder copy, one per class", () => {
     for (const cls of ASSET_CLASSES) {
       expect(CLASS_EXAMPLE[cls].model.length).toBeGreaterThan(0);
       expect(CLASS_EXAMPLE[cls].prefixHint).toMatch(/\b[A-Z]{2}\b/);
+      // The example tag must itself be a valid tag, or the placeholder teaches a wrong shape.
+      expect(CLASS_EXAMPLE[cls].tag).toMatch(/^BR-[A-Z]{2}-\d{4}$/);
     }
+    // The tag's prefix is the class's own — a laptop tag on the car form is the defect this exists for (D-15).
+    expect(CLASS_EXAMPLE.IT.tag).toMatch(/^BR-LT-/);
+    expect(CLASS_EXAMPLE.PURCHASING.tag).toMatch(/^BR-VH-/);
     // A copy-paste of one class's example into the other must fail.
     expect(CLASS_EXAMPLE.IT.model).toMatch(/ThinkPad/);
     expect(CLASS_EXAMPLE.PURCHASING.model).not.toMatch(/ThinkPad/);
