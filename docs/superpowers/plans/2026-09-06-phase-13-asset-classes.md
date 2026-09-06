@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-13. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-14. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -244,6 +244,41 @@
 >   for the class it can now reach — `finance-review.tsx` says "sent back to IT" / "Send back to IT" and its
 >   docblock speaks of IT throughout, and `resubmitAssetToFinance`'s own docstring still says "IT says fixed".
 >   The action name `returnAssetToIt` stays (renaming a server action for a word is churn; a comment says why).
+>
+> **D-14. Task 7 closed every write gate and left six dead affordances — links and redirects that lead where
+> the user cannot go.** None is a permission hole; all violate the house rule this codebase states in two
+> places (`bulk-drawer.tsx`, `inventory/page.tsx`): an affordance the user cannot use is **absent, not disabled,
+> and never a link that ejects them.** All from the code-quality review.
+>
+> - **The edit page's wrong-class redirect went to `ROLE_LANDING`** — for `purchasing_staff` on a laptop's edit URL
+>   that is `/purchases`, a different workspace. The record is readable by both classes; only the form is not.
+>   `purchases/[id]/edit` already had the right shape (redirect to the record). Fixed to `/inventory/{id}`.
+> - **Spec §5's "`/inventory/new` gets the same treatment" was not executed.** No narrow PATH_RULE; finance and
+>   viewer reached the route at layer 1 and were stopped only by the page. Rule added, five roles asserted.
+> - **Two nav items active at once.** `navIsActive`'s bare-link yield tested only `state` — written for the
+>   `/purchases` pair; `?cls=` is the first second param to share a path with a bare link, so on the Purchasing
+>   view both "Purchasing assets" and "IT inventory" lit up. Generalised to any sibling query; test added.
+> - **The Secrets tab hid by class only.** `/inventory/[id]/secrets` is IT-workspace; a `purchasing_staff` on an IT
+>   record saw the tab and was ejected on click. Now hidden by role as well, as a conditional spread — the
+>   `href.endsWith("/secrets")` string test is gone.
+> - **`register-form.tsx` was owned by no task** and told a Purchasing user to model a car on a ThinkPad, use "LT
+>   for laptops", and then pushed them to the IT list. Categories now carry `cls`, copy comes from
+>   `CLASS_EXAMPLE` in the vocabulary (unit-pinned), and success lands on `withClsQS`'s view — the first call site
+>   of a helper Task 2 shipped with none.
+> - **Three small ones:** `addSlot` validated a type exists but not that it is IT-class (the picker was the only
+>   gate — the exact shape D-13 named); the Reservations tab said "reads SPARE" on a car; and two
+>   `{ id, name, cls }` hand-offs into `AssetForm`'s narrower prop type now carry a comment naming Task 8.
+>
+> **Handed to later tasks:** the bulk drawer's "Print labels" link is unconditional and `/inventory/labels` is
+> IT-only — the moment Task 9 makes the drawer live for Purchasing it becomes an ejecting link (Task 8 Step 2
+> gates it). Task 11 gains cases 17–19 (edit redirect and Secrets-tab absence per role; `/inventory/new`'s
+> categories per role; the policy picker offers no Purchasing type). Task 12 records two asymmetries the split
+> created and this phase does not fix: document upload/delete is role-hardcoded to IT (Purchasing cannot attach
+> a car's OR/CR; IT can), and a policy slot could name a type whose empty category was later flipped (direct-DB
+> only; `resolvePolicy` then reports a permanent gap).
+>
+> **The lesson:** when a task opens a route to a new role, walk every link and redirect that role can now
+> reach and ask where it lands. Gates were reviewed; affordances were not, and five of six led off a cliff.
 
 
 
@@ -1678,6 +1713,21 @@ staffer correcting an unrelated field" — becomes class-neutral ("the registeri
 If a unit or e2e test asserts the literal "sent back to IT" / "Send back to IT", update it to the IT-class rendering
 (the seeded send-back fixtures are IT assets, so the visible text is unchanged there) and say which test.
 
+- [ ] **Step 4c: Dead affordances are absent (D-14)**
+
+- `[id]/edit/page.tsx`: the wrong-class redirect goes to ``/inventory/${id}``, not `ROLE_LANDING` (drop that import).
+- `workspaces.ts`: a narrow rule for `/inventory/new` beside `/inventory/register`'s — `workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"]`;
+  `workspaces.test.ts` asserts all five roles (finance and viewer `false`).
+- `navIsActive`: a bare link yields to ANY sibling query param, not only `state`; test `navIsActive("/inventory", "/inventory", q("cls=PURCHASING"))` is false.
+- `record-tabs.tsx`: prop `showSecrets: boolean` and a conditional spread — no `href` string test. `layout.tsx` passes
+  `asset.cls === "IT"` AND the roles the secrets page admits (read its `requireRole`).
+- `register/page.tsx` selects category `cls`; `register-form.tsx` derives the chosen category's class and uses `CLASS_EXAMPLE[cls]`
+  (new in `asset-class.ts`, with a test) for the Model placeholder and Prefix hint, and pushes to `"/inventory" + withClsQS("", cls)` on success.
+- `policy-actions.ts` `addSlot`: `findFirst({ where: { id, category: { cls: "IT" } } })`. `[id]/reservations/page.tsx`: `DEFAULT_STATUS[asset.cls]` in the sentence.
+  `new/page.tsx` and `[id]/edit/page.tsx`: a comment naming Task 8 where `cls` is passed into the narrower prop type.
+
+Expected after this step: **901 tests / 51 files** (895 + 5 PATH_RULES rows — the table is one `it` per row — + the `CLASS_EXAMPLE` test). Got: 901.
+
 - [ ] **Step 5: Equipment policies offer IT types only**
 
 In `src/app/(app)/admin/equipment-policies/page.tsx`:
@@ -1706,7 +1756,7 @@ git commit -m "feat(routes): register opens to Purchasing; Secrets and leaver ki
 
 - [ ] **Step 2: `BulkDrawer` and `InventoryTable`**
 
-`bulk-drawer.tsx`: same two imports; add `cls: AssetClass` to props and their type; `const [to, setTo] = useState<string>(DEFAULT_STATUS[cls]);` (import `DEFAULT_STATUS` too); the `<Select>` maps `statusesFor(cls)` instead of `ASSET_STATUSES`.
+`bulk-drawer.tsx`: same two imports; add `cls: AssetClass` to props and their type; `const [to, setTo] = useState<string>(DEFAULT_STATUS[cls]);` (import `DEFAULT_STATUS` too); the `<Select>` maps `statusesFor(cls)` instead of `ASSET_STATUSES`. **And (D-14):** the "Print labels for N selected" link renders only when `cls === "IT"` — `/inventory/labels` is IT-workspace-only (`workspaces.ts`) and Task 9 makes this drawer live for Purchasing; the component's own comment says absent, not disabled, and never a link that ejects. Put that sentence beside the condition.
 
 `inventory-table.tsx`: add `cls: AssetClass` to `InventoryTable`'s props and pass `cls={cls}` to `<BulkDrawer …>`. **Locate the `<BulkDrawer` element in this file and add the prop there** — it is the only render site.
 
@@ -2347,6 +2397,18 @@ posts a wrong-class request (cases 2 and 3 assert the picker and an unchanged co
     the record and assert the Resubmit control is absent (Task 7's `canResubmit`). Selectors for the send-back
     and resubmit controls: read `src/app/(app)/inventory/[id]/` — the warning below applies; report what you used.
 
+**Add a 17th, 18th and 19th case (D-14)** — Task 7's page gates and the affordances around them have no coverage.
+
+17. **A wrong-class edit URL lands on the record, and the Secrets tab is absent by role.** As `it_staff`, go to
+    `/inventory/{id of BR-VH-0001}/edit` and assert the URL becomes `/inventory/{that id}` (the record) — not `/inventory`, not
+    `ROLE_LANDING`. As `purchasing_staff`, do the same with `BR-LT-0148`'s edit URL; on the laptop's record also assert
+    there is no `Secrets` tab (`getByRole("link", { name: /Secrets/ })` has count 0) while as `it_staff` it is present.
+18. **`/inventory/new` offers each role its own categories.** As `purchasing_staff`, the category control offers `Vehicle` and
+    not `Laptop`; as `it_staff`, `Laptop` and not `Vehicle`; as `finance_staff`, the URL redirects to `ROLE_LANDING.finance_staff`
+    (layer 1 — the new PATH_RULE).
+19. **The leaver-kit policy picker names no Purchasing type.** As `admin` on `/admin/equipment-policies`, the Add-slot type
+    control's options contain `Laptop`'s types and do not contain `Sedan`.
+
 The two gates that remain unreachable from the UI — a wrong-class register POST (the picker is filtered) and a
 mixed-class bulk request (the list is class-scoped) — ship covered by the trigger and by code review only.
 Task 12 records that in the handover rather than pretending otherwise.
@@ -2363,7 +2425,7 @@ In `e2e/axe-sweep.spec.ts`: add `"/inventory?cls=PURCHASING"` to `VIEWER_STATIC_
 npx playwright test e2e/asset-classes.spec.ts --workers=1 --global-timeout=600000
 ```
 
-A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 16** (13 planned + D-8's held-car case + D-13's two; 15 if case 15 was dropped as unreachable — say which).
+A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 19** (13 planned + D-8's held-car case + D-13's two + D-14's three; 18 if case 15 was dropped as unreachable — say which).
 
 - [ ] **Step 5: Prove the guards are not inert — four mutations, report all four**
 
@@ -2414,7 +2476,7 @@ npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-
 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 ```
 
-Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **183 / 14 files** — 167 + 16 (D-8, D-13); 182 if case 15 was dropped. **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
+Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **186 / 14 files** — 167 + 19 (D-8, D-13, D-14); 185 if case 15 was dropped. **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
 
 - [ ] **Step 5: Finish the branch** — `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions, separately.**
 
@@ -2422,4 +2484,4 @@ Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). 
 
 ## Out of scope, deliberately (spec §12)
 
-Locations · Purchasing self-service categories · Purchasing bulk import · a Purchasing Home · **Purchasing-owned approvals (first follow-up)** · a Purchasing assign / return surface (D-13: `/employees` is IT's workspace; a car is assigned at create time only) · a detector for an unassigned holder status on the Purchasing side (IT's Home has one for DEPLOYED; D-13) · depreciation / accounting classes · consumables (§9 D) · vendor master (§9 B).
+Locations · Purchasing self-service categories · Purchasing bulk import · a Purchasing Home · **Purchasing-owned approvals (first follow-up)** · a Purchasing assign / return surface (D-13: `/employees` is IT's workspace; a car is assigned at create time only) · a detector for an unassigned holder status on the Purchasing side (IT's Home has one for DEPLOYED; D-13) · class-aware document permissions (D-14: `documents/page.tsx` and `document-actions.ts` are role-hardcoded to IT, so Purchasing cannot attach a car's OR/CR while IT can) · a policy slot naming a type whose empty category was later flipped to Purchasing (direct-DB only; `resolvePolicy` reports a permanent gap — D-14) · depreciation / accounting classes · consumables (§9 D) · vendor master (§9 B).
