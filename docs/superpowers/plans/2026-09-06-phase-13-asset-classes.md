@@ -2067,6 +2067,9 @@ In `src/server/modules/home/queries.ts`, **every** `prisma.asset.findMany`, `pri
   are narrowed to that class (single-class roles: no change; admin from the Purchasing view: a Purchasing form). The back
   link returns to the view the user came from.
 - `finance/assets/page.tsx`: the active class tab keeps the current status and page; the inactive tab still resets.
+- From the re-review (D-16, approved with two minors): `stage` is dropped alongside `status` when `cls !== "IT"` — it is the other arm
+  of `isRepairView` and its chips write an IT status; and the empty state's description no longer mentions Import on the Purchasing
+  view, where the button is absent.
 
 - [ ] **Step 4: Full check and commit**
 

@@ -43,6 +43,11 @@ export default async function InventoryPage({
   if (statusFilter && statusFilter.length !== state.filters.status?.length) {
     state = withFilter(state, "status", statusFilter);
   }
+  // `stage` is the other arm of isRepairView, and repair stages are IT's: a
+  // hand-typed ?stage= on the Purchasing view would enter repair mode whose
+  // chips write status=DEFECTIVE — an IT status the line above then drops,
+  // ejecting the user from the view they clicked in. Same rule, same place.
+  if (cls !== "IT" && state.filters.stage) state = withFilter(state, "stage", []);
 
   // USB scanner contract: an exact tag match opens the record, not a list.
   if (state.q) {
@@ -186,7 +191,11 @@ export default async function InventoryPage({
         ) : (
           <EmptyState
             title="No assets yet"
-            description="Register the first asset, or use Import to bring in a spreadsheet."
+            description={
+              cls === "IT"
+                ? "Register the first asset, or use Import to bring in a spreadsheet."
+                : "Register the first asset — Purchasing assets are registered one batch at a time; there is no spreadsheet import for them yet."
+            }
             actions={canMutate ? <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink> : undefined}
           />
         )}
