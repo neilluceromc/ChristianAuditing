@@ -8,7 +8,7 @@ import {
   INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
   type PurchaseYearValue,
 } from "@/lib/inventory-list";
-import { CLASS_LABEL, canManageClass, parseCls, withClsQS } from "@/lib/asset-class";
+import { CLASS_LABEL, canManageClass, isStatusOf, parseCls, withClsQS } from "@/lib/asset-class";
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
@@ -31,10 +31,18 @@ export default async function InventoryPage({
 }) {
   const user = await requireUser();
   const sp = toSearchParams(await searchParams);
-  const state = parseListState(sp, INVENTORY_LIST_CONFIG);
+  let state = parseListState(sp, INVENTORY_LIST_CONFIG);
   const purchaseYear = parsePurchaseYear(sp.get("purchaseYear"));
   const cls: AssetClass = parseCls(sp.get("cls")) ?? "IT";
   const canMutate = canManageClass(user.role, cls);
+
+  // A status from the other class is dropped by buildAssetWhere; drop it from
+  // the state too, or the chip row advertises a filter that isn't applied and
+  // hasFilters counts it (D-16).
+  const statusFilter = state.filters.status?.filter((s) => isStatusOf(cls, s));
+  if (statusFilter && statusFilter.length !== state.filters.status?.length) {
+    state = withFilter(state, "status", statusFilter);
+  }
 
   // USB scanner contract: an exact tag match opens the record, not a list.
   if (state.q) {
@@ -118,7 +126,7 @@ export default async function InventoryPage({
                 stays IT-only regardless of the view: there is no Purchasing
                 import wizard yet (Task 10). */}
             {canMutate && cls === "IT" && <ButtonLink href="/inventory/import">Import</ButtonLink>}
-            {canMutate && <ButtonLink variant="primary" href="/inventory/new">New asset</ButtonLink>}
+            {canMutate && <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>}
           </>
         }
       />
@@ -133,7 +141,9 @@ export default async function InventoryPage({
         >
           <ColumnChooser visible={visibleColumns} />
           {/* Saved views are named URLs (README): Repairs is one of them. */}
-          <ButtonLink size="sm" href={REPAIRS_SAVED_VIEW}>Repairs</ButtonLink>
+          {/* Repairs is an IT saved view — its URL pins status=DEFECTIVE, an IT
+              status, and carries no cls. Absent, not a link that ejects (D-14). */}
+          {cls === "IT" && <ButtonLink size="sm" href={REPAIRS_SAVED_VIEW}>Repairs</ButtonLink>}
         </InventoryToolbar>
         {repairMode && <RepairChips state={state} href={href} />}
         {/* Clearing filters resets purchaseYear too — it is the same

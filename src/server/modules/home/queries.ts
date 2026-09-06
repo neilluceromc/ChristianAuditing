@@ -419,7 +419,12 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
       where: { state: "COMPLETED", completedAt: { gte: monthStart } },
       select: { units: { select: { qty: true, unitPrice: true } } },
     }),
-    prisma.asset.aggregate({ where: { cost: { not: null }, cls: "IT" }, _sum: { cost: true }, _count: { _all: true } }),
+    // financeHome is the ONE prisma.asset read in this file NOT pinned to IT.
+    // Spec §6 makes IT's HOME alerts IT-only; this is FINANCE's home, and spec
+    // line 8 gives Finance both classes — /finance/assets shows both on its
+    // tabs, so a headline total that showed one would contradict the page it
+    // fronts (D-16).
+    prisma.asset.aggregate({ where: { cost: { not: null } }, _sum: { cost: true }, _count: { _all: true } }),
   ]);
 
   const oldest = waiting[0];

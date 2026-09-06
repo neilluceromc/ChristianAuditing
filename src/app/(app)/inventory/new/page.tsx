@@ -3,17 +3,30 @@ import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { AssetForm } from "@/components/inventory/asset-form";
 import { createAsset } from "@/server/modules/inventory/actions";
-import { MANAGEABLE_CLASSES } from "@/lib/asset-class";
+import { toSearchParams } from "@/lib/url-state";
+import { MANAGEABLE_CLASSES, canManageClass, parseCls, withClsQS } from "@/lib/asset-class";
 
-export default async function NewAssetPage() {
+export default async function NewAssetPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireRole("admin", "it_staff", "purchasing_staff");
+  const sp = toSearchParams(await searchParams);
+  const cls = parseCls(sp.get("cls"));
+  // A single-class role's MANAGEABLE_CLASSES list has one entry either way, so
+  // this narrows nothing for it. For admin arriving from the Purchasing view,
+  // it does: without this, "New asset" from /inventory?cls=PURCHASING opened
+  // a form whose categories were whichever class's names sort first, not
+  // Purchasing's (D-14).
+  const scopedCls = cls !== null && canManageClass(user.role, cls) ? cls : null;
   const [categories, types, employees] = await Promise.all([
     prisma.assetCategory.findMany({
-      where: { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } },
+      where: scopedCls ? { cls: scopedCls } : { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } },
       orderBy: { name: "asc" },
     }),
     prisma.assetType.findMany({
-      where: { category: { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } } },
+      where: scopedCls ? { category: { cls: scopedCls } } : { category: { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } } },
       orderBy: { name: "asc" },
     }),
     prisma.employee.findMany({ where: { employment: "ACTIVE" }, orderBy: { name: "asc" } }),
@@ -23,7 +36,7 @@ export default async function NewAssetPage() {
     <>
       <PageHeader
         title="New asset"
-        breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "New" }]}
+        breadcrumb={[{ label: "Inventory", href: "/inventory" + withClsQS("", cls ?? "IT") }, { label: "New" }]}
       />
       <AssetForm
         mode="new"

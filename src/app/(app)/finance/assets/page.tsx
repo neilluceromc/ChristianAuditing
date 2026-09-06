@@ -40,7 +40,12 @@ export default async function FinanceAssetsPage({
           {ASSET_CLASSES.map((c) => (
             <Link
               key={c}
-              href={c === "PURCHASING" ? "/finance/assets?cls=PURCHASING" : "/finance/assets"}
+              // The active tab's href is the CURRENT URL (hrefFor already
+              // closes over this page's cls/status), so clicking it is a
+              // no-op — a class switch (the inactive tab, still bare) resets
+              // filters on purpose, but re-clicking the tab you're already on
+              // must not (D-16).
+              href={c === cls ? hrefFor(current) : c === "PURCHASING" ? "/finance/assets?cls=PURCHASING" : "/finance/assets"}
               aria-current={c === cls ? "page" : undefined}
               className={cn(
                 "-mb-px border-b-2 px-3 py-2 text-[13px] font-medium",
