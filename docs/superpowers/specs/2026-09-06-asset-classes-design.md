@@ -365,7 +365,7 @@ the status against the class's set.
 ### 9.3 The asset record
 
 - A class pill beside the status pill.
-- The Secrets tab is absent for `PURCHASING` (`record-tabs.tsx`), and the page 404s.
+- The Secrets tab is absent for `PURCHASING` (`record-tabs.tsx`), and the page renders the record's not-found page (`notFound()`; the HTTP status is 200 because `inventory/loading.tsx` streams the shell first — corrected during execution, D-18).
 - `RequestStatusChange` receives `cls` and offers that class's statuses minus the current one.
 
 ### 9.4 Bulk drawer
@@ -425,7 +425,7 @@ Existing seeded assets are untouched and become IT.
 3. `it_staff` cannot register into a Purchasing category — refused, writes nothing.
 4. The car appears under Finance's **Purchasing** tab and **not** under IT; the chips read `OPERATIONAL
    · STORED …`.
-5. The Secrets tab is absent on the car, and `/inventory/<id>/secrets` returns 404.
+5. The Secrets tab is absent on the car, and `/inventory/<id>/secrets` renders the not-found page (not an HTTP 404 — D-18).
 6. The status picker on the car offers exactly the six.
 7. An approval executes the car to `OPERATIONAL`; **requesting** `DEPLOYED` for it is refused at
    request time (the executor's refusal is unit-tested, §11.1).

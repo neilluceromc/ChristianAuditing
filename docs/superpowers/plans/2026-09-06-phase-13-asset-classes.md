@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-17. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-18. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -390,6 +390,25 @@
 >
 > **The lesson:** a fix that names an action must be true for every role that can read it — and for every ROW the card
 > can hold. "The route exists" is neither test.
+>
+> **D-18. "The URL 404s" was a claim about an HTTP status that this app cannot make for a page-level `notFound()`.**
+> Case 5 asserted `res.status() === 404` for `/inventory/{car}/secrets` and got 200 — with the not-found page in the body.
+> `src/app/(app)/inventory/loading.tsx` is a Suspense boundary above every `[id]/…` route, so Next streams the shell
+> with 200 before the page's guard runs and then streams `[id]/not-found.tsx` ("Asset not found") into it. The guard
+> fired; the status is a property of streaming, not of the guard. The suite's only 404-status assertions
+> (`auth-shell.spec.ts`) are for UNMATCHED routes, which never cross that boundary. Spec §6 and §9 said "404s"
+> because the author (me) reasoned from the API's name, not from the route tree. Case 5 now asserts the rendered
+> outcome — the not-found heading visible, the secrets panel's own control absent — and mutation 3 fails on that.
+> Spec corrected in place.
+>
+> **Process, recorded because it will recur:** Task 11's first implementer stopped mid-run "with a monitor", leaving
+> a Playwright run and then an orphaned `next dev` on :3000. The second agent correctly refused to race an unowned
+> process and reported it (the rule worked). The controller then identified the orphan as current-code and
+> authorised reuse (`reuseExistingServer: true`). **A subagent brief that allows Playwright must say: the run
+> completes inside your tool call, with a tool timeout that covers `--global-timeout` — no monitors, no waiting.**
+>
+> **The lesson:** an assertion about a transport detail (status code, header) is a claim about the framework's
+> plumbing; assert the outcome the user sees unless the transport IS the contract.
 
 
 
@@ -418,7 +437,7 @@
 | registers / edits / requests | `admin`, `it_staff` | `admin`, `purchasing_staff` |
 | approves | `admin`, `it_staff` | `admin`, `it_staff` (unchanged — follow-up) |
 | confirms / sends back (Phase 12) | `admin`, `finance_staff` | same |
-| Secrets tab | yes | **hidden, and the URL 404s** |
+| Secrets tab | yes | **hidden, and the URL renders the not-found page** (HTTP 200 — the shell streams before the guard; D-18) |
 | in equipment policies | yes | no |
 | import wizard | yes | rows refused with `wrong-class` |
 | Home alerts | yes | no (Home is IT's) |
@@ -2396,14 +2415,18 @@ test.describe("Finance sees two tabs", () => {
 });
 
 test.describe("IT-only surfaces close to a Purchasing asset", () => {
-  test("5. Secrets tab absent, and the URL 404s", async ({ page }) => {
+  test("5. Secrets tab absent, and the URL renders the not-found page", async ({ page }) => {
     const id = await idOf("BR-VH-0001");
     await login(page, "admin@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
     await expect(page.getByRole("link", { name: /Secrets/ })).toHaveCount(0);
     await expect(page.getByText("PURCHASING", { exact: true })).toBeVisible();
-    const res = await page.goto(`/inventory/${id}/secrets`);
-    expect(res?.status()).toBe(404);
+    await page.goto(`/inventory/${id}/secrets`);
+    // A page-level notFound() under inventory/loading.tsx streams the shell with
+    // 200 before the guard runs — the not-found page IS the 404 (D-18). EmptyState
+    // renders its title as a <p>, so getByText, not a heading role.
+    await expect(page.getByText("Asset not found", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Reveal/ })).toHaveCount(0);
   });
 });
 
@@ -2617,7 +2640,7 @@ A run that hits `--global-timeout` prints "N did not run" and its tail still rea
 
 1. In the migration SQL — **on the live database only, via `psql` or a throwaway `npx tsx -e` script, never by editing the committed migration** — `DROP TRIGGER asset_class_invariants ON "Asset";` → test 9 must fail. Recreate it by re-running the `CREATE TRIGGER` statement from the migration.
 2. Same for `category_class_frozen` → test 13 must fail. Recreate.
-3. In `secrets/page.tsx`, comment out the `if (asset.cls === "PURCHASING") notFound();` line → test 5 must fail on the status code. Revert.
+3. In `secrets/page.tsx`, comment out the `if (asset.cls === "PURCHASING") notFound();` line → test 5 must fail on the not-found heading (the secrets panel renders instead; D-18). Revert.
 4. In `outcomesFor`, return `OUTCOMES` regardless of class → test 8 must fail on the Buyout count. Revert.
 
 **Report the actual observed output for all four.** Tests 2 and 3 assert the UI gate; the server gate behind it (`canManageClass` in `registerAssets`) is pinned by the unit matrix in `asset-class.test.ts`, and **cannot** be reached through the UI once the options are filtered — say so in the report rather than claiming e2e coverage of it.
@@ -2626,7 +2649,7 @@ A run that hits `--global-timeout` prints "N did not run" and its tail still rea
 
 ```bash
 git add prisma/seed.ts e2e/asset-classes.spec.ts e2e/axe-sweep.spec.ts
-git commit -m "test(e2e): asset classes — registration gates, Finance tabs, Secrets 404, class-aware controls, both triggers"
+git commit -m "test(e2e): asset classes — registration gates, Finance tabs, Secrets not-found, class-aware controls, both triggers"
 ```
 
 ---
