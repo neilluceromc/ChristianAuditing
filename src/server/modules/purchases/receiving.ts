@@ -8,7 +8,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { TAG_SHAPE } from "@/lib/tag-key";
-import { CLASS_LABEL, DEFAULT_STATUS, canManageClass } from "@/lib/asset-class";
+import { CLASS_LABEL, CLASS_PHRASE, DEFAULT_STATUS, canManageClass } from "@/lib/asset-class";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -85,7 +85,7 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
   if (!category) return validationError({ categoryId: "Unknown category" });
   if (!canManageClass(user.role, category.cls)) {
     return validationError({
-      categoryId: `${category.name} is a ${CLASS_LABEL[category.cls]} category — ${CLASS_LABEL[category.cls]} staff register ${CLASS_LABEL[category.cls]} assets.`,
+      categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — ${CLASS_LABEL[category.cls]} staff register ${CLASS_LABEL[category.cls]} assets.`,
     });
   }
 

@@ -15,6 +15,13 @@ export const ASSET_CLASSES = ["IT", "PURCHASING"] as const satisfies readonly As
 export const CLASS_LABEL: Record<AssetClass, string> = { IT: "IT", PURCHASING: "Purchasing" };
 
 /**
+ * The label with its indefinite article — "an IT asset", "a Purchasing
+ * category". Use this, never `a ${CLASS_LABEL[cls]}`: "a IT" has shipped
+ * twice in this phase (D-8, D-13).
+ */
+export const CLASS_PHRASE: Record<AssetClass, string> = { IT: "an IT", PURCHASING: "a Purchasing" };
+
+/**
  * A control that offers statuses to a PERSON -- a picker, a facet, a chip row
  * -- must use statusesFor(cls). A flat list of every AssetStatus is only for
  * "is this any valid value at all" checks (zod enums, an import's error text).

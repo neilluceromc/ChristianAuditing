@@ -201,7 +201,8 @@ export async function applyAssetImport(
         if (row.kind === "create") {
           const asset = await tx.asset.create({ data: row.data });
           // A-5: `createAsset` can hardcode tag/model/status as a from-null
-          // because `creationPlan` guarantees SPARE-only direct creation.
+          // because `creationPlan` guarantees DEFAULT_STATUS[cls]-only direct
+          // creation (SPARE for IT, STORED for Purchasing).
           // Import cannot: scope decision 13 lets an import create an asset
           // already DEPLOYED to a holder, the one surface in this app that
           // can, and an audit trail that omits it cannot answer "how did

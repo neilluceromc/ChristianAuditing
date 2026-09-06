@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { AssetClass, AssetStatus } from "@prisma/client";
 import {
-  ASSET_CLASSES, ASSIGN_TARGETS, ASSIGNABLE_FROM, CREATABLE_BY_CLASS, DEFAULT_ASSIGN_STATUS,
-  DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
+  ASSET_CLASSES, ASSIGN_TARGETS, ASSIGNABLE_FROM, CLASS_LABEL, CLASS_PHRASE, CREATABLE_BY_CLASS,
+  DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
   canManageClass, isStatusOf, parseCls, statusesFor, withClsQS,
 } from "./asset-class";
 
@@ -33,6 +33,14 @@ describe("STATUSES_BY_CLASS — a partition of the enum", () => {
   it("ASSET_CLASSES is every AssetClass value, IT first", () => {
     expect(sorted([...ASSET_CLASSES])).toEqual(sorted(Object.values(AssetClass)));
     expect(ASSET_CLASSES[0]).toBe("IT"); // the default class -- see the comment on the constant
+  });
+});
+
+describe("CLASS_PHRASE — the labels, with their article, said out loud", () => {
+  it("every phrase ends with its label, and the article is \"an\" exactly when the label starts with a vowel sound", () => {
+    for (const cls of ASSET_CLASSES) expect(CLASS_PHRASE[cls].endsWith(CLASS_LABEL[cls])).toBe(true);
+    expect(CLASS_PHRASE.IT).toBe("an IT"); // "IT" is said like the letters I-T -- a vowel sound
+    expect(CLASS_PHRASE.PURCHASING).toBe("a Purchasing");
   });
 });
 
@@ -116,7 +124,6 @@ describe("parseCls / withClsQS — the ?cls= nav parameter", () => {
     expect(withClsQS("?q=x", "PURCHASING")).toBe("?q=x&cls=PURCHASING");
   });
 });
-
 
 describe("the trigger's literal lists are pinned to STATUSES_BY_CLASS", () => {
   // Same move as receiving.test.ts pinning MAX_TAG_NUMBER to TAG_SHAPE: the

@@ -14,7 +14,7 @@ import {
 import {
   ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
-import { CLASS_LABEL, canManageClass, isStatusOf, parseCls } from "@/lib/asset-class";
+import { CLASS_LABEL, CLASS_PHRASE, canManageClass, isStatusOf, parseCls } from "@/lib/asset-class";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
@@ -98,7 +98,7 @@ export async function bulkRequestStatusChange(
       if (classes.size > 1) return conflict("Select assets of one class — IT and Purchasing assets cannot share a status change.");
       const cls = assets[0].cls;
       if (!canManageClass(user.role, cls)) return forbidden();
-      if (!isStatusOf(cls, to)) return validationError({ to: `${to} is not a ${CLASS_LABEL[cls]} status.` });
+      if (!isStatusOf(cls, to)) return validationError({ to: `${to} is not ${CLASS_PHRASE[cls]} status.` });
 
       const open = await tx.approval.findMany({
         where: { assetId: { in: assets.map((a) => a.id) }, state: { in: [...OPEN_APPROVAL_STATES] } },
@@ -196,13 +196,13 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   const category = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
   if (!category) return validationError({ categoryId: "Unknown category" });
   if (!canManageClass(user.role, category.cls)) {
-    return validationError({ categoryId: `${category.name} is a ${CLASS_LABEL[category.cls]} category — ${CLASS_LABEL[category.cls]} staff create ${CLASS_LABEL[category.cls]} assets.` });
+    return validationError({ categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — ${CLASS_LABEL[category.cls]} staff create ${CLASS_LABEL[category.cls]} assets.` });
   }
   const plan = creationPlan(d.requestedStatus, d.assigneeId || null, category.cls);
   if (!plan.ok) {
     return plan.error === "assignee_required"
       ? validationError({ assigneeId: "Pick who this deploys to" })
-      : validationError({ requestedStatus: `${d.requestedStatus} is not an initial state for a ${CLASS_LABEL[category.cls]} asset.` });
+      : validationError({ requestedStatus: `${d.requestedStatus} is not an initial state for ${CLASS_PHRASE[category.cls]} asset.` });
   }
 
   if (d.typeId) {
@@ -321,7 +321,7 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
     const target = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
     if (!target) return validationError({ categoryId: "Unknown category" });
     if (target.cls !== asset.cls) {
-      return validationError({ categoryId: `${target.name} is a ${CLASS_LABEL[target.cls]} category; this is a ${CLASS_LABEL[asset.cls]} asset.` });
+      return validationError({ categoryId: `${target.name} is ${CLASS_PHRASE[target.cls]} category; this is ${CLASS_PHRASE[asset.cls]} asset.` });
     }
   }
   if (d.typeId) {
@@ -398,7 +398,7 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
       if (!asset) return conflict("That asset no longer exists.");
       if (!canManageClass(user.role, asset.cls)) return forbidden();
       if (!isStatusOf(asset.cls, d.to)) {
-        return validationError({ to: `${d.to} is not a ${CLASS_LABEL[asset.cls]} status.` });
+        return validationError({ to: `${d.to} is not ${CLASS_PHRASE[asset.cls]} status.` });
       }
       if (asset.status === d.to) return conflict(`Already ${d.to}.`);
       if (await openApprovalForAsset(tx, asset.id)) {
@@ -590,7 +590,7 @@ const resubmitSchema = z.object({ id: z.string().min(1) });
  * is resolved.
  */
 export async function resubmitAssetToFinance(input: unknown): Promise<ActionResult<{ tag: string }>> {
-  const user = await actionRole("admin", "it_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -605,10 +605,16 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id },
-      select: { id: true, tag: true, financeReturnedAt: true },
+      select: { id: true, tag: true, cls: true, financeReturnedAt: true },
     });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    // Resubmit is the department's own action, like register: the class that
+    // may send an asset back to Finance is the class that may send it again.
+    if (!canManageClass(user.role, asset.cls)) {
+      failure = forbidden();
       return;
     }
     if (!asset.financeReturnedAt) {

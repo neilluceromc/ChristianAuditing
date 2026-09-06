@@ -9,7 +9,7 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
 import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, reasonRequired } from "@/lib/offboarding";
-import { CLASS_LABEL } from "@/lib/asset-class";
+import { CLASS_PHRASE } from "@/lib/asset-class";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { candidatesFor } from "@/server/modules/offboarding/queries";
 import { emitWebhook } from "@/server/webhooks/emit";
@@ -112,7 +112,7 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
       // check that proves it.
       const targetStatus = outcomeStatus(asset.cls, d.outcome);
       if (targetStatus === null) {
-        return validationError({ outcome: `${OUTCOME_LABEL[d.outcome]} is not an outcome for a ${CLASS_LABEL[asset.cls]} asset.` });
+        return validationError({ outcome: `${OUTCOME_LABEL[d.outcome]} is not an outcome for ${CLASS_PHRASE[asset.cls]} asset.` });
       }
       // README 3e: a reason is required for anything other than a clean
       // return. Inside the transaction, after the class check: it precedes
