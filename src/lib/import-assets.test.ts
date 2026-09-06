@@ -58,20 +58,26 @@ const REFS: AssetRefs = {
   // typeId under cat-1 specifically so a category-changing row with no Type
   // column can be shown stranding it (NC-3).
   byTag: new Map([
-    ["BR-LT-0148", { id: "a-1", tag: "BR-LT-0148", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: "typ-1" }],
-    ["BR-LT-0200", { id: "a-2", tag: "BR-LT-0200", status: "DEPLOYED", assigneeId: "e-1", categoryId: "cat-1", typeId: null }],
+    ["BR-LT-0148", { id: "a-1", tag: "BR-LT-0148", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: "typ-1", cls: "IT" }],
+    ["BR-LT-0200", { id: "a-2", tag: "BR-LT-0200", status: "DEPLOYED", assigneeId: "e-1", categoryId: "cat-1", typeId: null, cls: "IT" }],
     // a-3: DEPLOYED to e-2, who is OFFBOARDED (not ACTIVE) — the export
     // round-trip case NC-2 exists for: re-uploading this asset's own row
     // unchanged must not block on its own already-recorded, non-ACTIVE holder.
-    ["BR-LT-0300", { id: "a-3", tag: "BR-LT-0300", status: "DEPLOYED", assigneeId: "e-2", categoryId: "cat-1", typeId: null }],
+    ["BR-LT-0300", { id: "a-3", tag: "BR-LT-0300", status: "DEPLOYED", assigneeId: "e-2", categoryId: "cat-1", typeId: null, cls: "IT" }],
+    // a-10: Fix 4 (phase 13 Task 10 review) — an EXISTING Purchasing asset,
+    // reachable by its own tag rather than by a Purchasing category name, for
+    // the "reached by tag" wrong-class test below. categoryId is cat-3
+    // (Vehicles, PURCHASING) to match its own cls, the same invariant the
+    // asset_class_invariants trigger holds in production.
+    ["BR-VH-0500", { id: "a-10", tag: "BR-VH-0500", status: "STORED", assigneeId: null, categoryId: "cat-3", typeId: null, cls: "PURCHASING" }],
   ]),
   bySerial: new Map([
     // Tag deliberately DIFFERENT from any sheet row used in the rescue tests
     // below (BR-LT-0777, not BR-LT-0901/0952/etc.), so a test can assert the
     // update verdict names the MATCHED asset, not the row's own tag (NI-4's
     // legibility gap, closed by AssetRecordRef.tag).
-    ["SN-TAKEN", { id: "a-9", tag: "BR-LT-0777", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: null }],
-    ["SN-OLD", { id: "a-1", tag: "BR-LT-0148", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: "typ-1" }],
+    ["SN-TAKEN", { id: "a-9", tag: "BR-LT-0777", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: null, cls: "IT" }],
+    ["SN-OLD", { id: "a-1", tag: "BR-LT-0148", status: "SPARE", assigneeId: null, categoryId: "cat-1", typeId: "typ-1", cls: "IT" }],
   ]),
 };
 
@@ -306,6 +312,20 @@ describe("planAssetRows", () => {
   it("blocks a row naming a Purchasing-class category with wrong-class, not unknown-category", () => {
     const p = plan([cells({ tag: "BR-VH-0100", model: "Toyota Vios", category: "Vehicles" })]);
     expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "wrong-class", detail: "Vehicles" });
+  });
+
+  // Fix 4 (phase 13 Task 10 review): a Purchasing asset reached by its TAG,
+  // not by naming a Purchasing category, must be refused too — before this
+  // fix it resolved as an update (the row's own Category cell names an IT
+  // category, "Laptops") and would have failed at the DB trigger with a
+  // generic row error at apply time, instead of this named, actionable
+  // block. `detail` is the MATCHED asset's own tag (a-10 / BR-VH-0500), the
+  // same convention every other cause here uses, matching `AssetRecordRef.tag`
+  // rather than the sheet row's tag — they're the same value in this test,
+  // but the code reads `matched.tag`, not the row's.
+  it("blocks a row whose tag matches an existing Purchasing asset with wrong-class, even naming an IT category", () => {
+    const p = plan([cells({ tag: "BR-VH-0500", model: "Toyota Vios", category: "Laptops" })]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "wrong-class", detail: "BR-VH-0500" });
   });
 
   // Phase 13 Task 10: since Task 5 widened ASSET_STATUSES to fourteen, the

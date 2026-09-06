@@ -12,6 +12,12 @@ const RECORD_SELECT = {
   assigneeId: true,
   categoryId: true,
   typeId: true,
+  // Fix 4 (phase 13 Task 10 review): a Purchasing asset reached by its tag
+  // or serial must be refused the same way a row naming a Purchasing
+  // category is. `Asset.cls` (schema.prisma) is the asset's own column, kept
+  // equal to its category's `cls` by the asset_class_invariants trigger — read
+  // straight off the asset row, no join needed.
+  cls: true,
 } as const;
 
 interface RawRecord {
@@ -21,6 +27,7 @@ interface RawRecord {
   assigneeId: string | null;
   categoryId: string;
   typeId: string | null;
+  cls: AssetClass;
 }
 
 function toRecordRef(a: RawRecord): AssetRecordRef {
@@ -31,6 +38,7 @@ function toRecordRef(a: RawRecord): AssetRecordRef {
     assigneeId: a.assigneeId,
     categoryId: a.categoryId,
     typeId: a.typeId,
+    cls: a.cls,
   };
 }
 
@@ -155,8 +163,8 @@ export function buildAssetRefs(
     bySerial: new Map(bySerialRows.flatMap((a) => (a.serial ? [[a.serial, toRecordRef(a)] as const] : []))),
     // Phase 13 Task 10: this importer is IT's. Keyed by id, not by the
     // refKey'd name map above — planAssetRows already has the resolved
-    // categoryId by the time it checks class, and a category never changes
-    // class once created, so no case-collision handling is needed here.
+    // categoryId by the time it checks class, so no case-collision handling
+    // is needed here (id, unlike a refKey'd name, is never case-ambiguous).
     categoryClass: new Map(categories.map((c) => [c.id, c.cls])),
   };
 }

@@ -215,7 +215,7 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   "bad-status": {
     label: "Status not recognised",
     explain:
-      `These rows carry a status that is not one of IT's eight: ${STATUSES_BY_CLASS.IT.join(", ")}. ` +
+      `These rows carry a status that is not one of IT's ${STATUSES_BY_CLASS.IT.length}: ${STATUSES_BY_CLASS.IT.join(", ")}. ` +
       "Leave the column blank to get SPARE, or correct it to one of those.",
     fix: { kind: "reupload", label: "Fix the file" },
   },
@@ -432,10 +432,10 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   "wrong-class": {
     label: "Purchasing category",
     explain:
-      "These rows name a Purchasing-class category (vehicles, furniture, buildings, pantry equipment). " +
-      "This importer is IT's — Purchasing assets are registered on the Register screen, where the " +
-      "tags are numbered for you.",
-    fix: { kind: "link", label: "Register Purchasing assets", href: "/inventory/register" },
+      "These rows name a Purchasing-class category. This importer is IT's — Purchasing staff (or an " +
+      "admin) register these on the Register screen, where the tags are numbered for them. Hand them " +
+      "the rows below; the rest of your file still imports.",
+    fix: { kind: "link", label: "Open the Register screen", href: "/inventory/register" },
   },
 };
 

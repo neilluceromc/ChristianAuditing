@@ -90,21 +90,40 @@ describe("BLOCK_CAUSES", () => {
   // ASSET_STATUSES closes that.
   //
   // Phase 13 Task 10: this importer is IT's. `bad-status`'s explanation now
-  // names IT's eight statuses, derived from STATUSES_BY_CLASS.IT (never
-  // retyped), and must NOT name any of Purchasing's six — those rows are
-  // refused by `wrong-class` before a status is ever checked.
-  it("names IT's eight statuses in bad-status's explanation, derived not retyped — and none of Purchasing's", () => {
+  // names IT's statuses, derived from STATUSES_BY_CLASS.IT (never retyped —
+  // the COUNT included, so a ninth status added there is reflected here
+  // automatically instead of leaving a stale "eight" behind), and must NOT
+  // name any of Purchasing's six — those rows are refused by `wrong-class`
+  // before a status is ever checked.
+  it("names IT's statuses (and their count) in bad-status's explanation, derived not retyped — and none of Purchasing's", () => {
     const explain = blockSpec("bad-status").explain;
+    expect(explain).toContain(String(STATUSES_BY_CLASS.IT.length));
     for (const s of STATUSES_BY_CLASS.IT) expect(explain).toContain(s);
     for (const s of STATUSES_BY_CLASS.PURCHASING) expect(explain).not.toContain(s);
   });
 
-  // Phase 13 Task 10: a Purchasing-class category is not an unknown one — it
-  // exists — so it gets its own cause, and its own fix: the Register screen,
-  // not a spreadsheet edit.
+  // Phase 13 Task 10, D-17 (fix): the ORIGINAL wording ("Purchasing assets are
+  // registered on the Register screen") told an it_staff reader — who CAN
+  // reach this importer — to do something the Register screen refuses them
+  // (`/inventory/register` offers each role only its own classes' categories).
+  // The fix must be true for EVERY reader admitted to the importer: the label
+  // now describes what the click does ("Open the Register screen"), not who
+  // may act there, and the explain hands the rows to Purchasing staff or an
+  // admin rather than telling the reader to register them "yourself".
   it("wrong-class sends the operator to the register screen, not to a file fix", () => {
     const spec = blockSpec("wrong-class");
-    expect(spec.fix).toEqual({ kind: "link", label: "Register Purchasing assets", href: "/inventory/register" });
+    expect(spec.fix).toEqual({ kind: "link", label: "Open the Register screen", href: "/inventory/register" });
+    // The fix must be true for EVERY reader admitted to the importer, not
+    // just an admin — an it_staff reader can reach this wizard but cannot
+    // register a Purchasing asset on `/inventory/register` (it offers each
+    // role only its own classes' categories), so the explain hands the rows
+    // to Purchasing staff (or an admin) rather than telling the reader to
+    // register them "yourself". The OLD wording's exact defect: "for you"
+    // told every reader — including one the Register screen refuses — the
+    // screen was theirs to use.
+    expect(spec.explain).toContain("Purchasing staff");
+    expect(spec.explain).not.toMatch(/register these assets yourself|you register/i);
+    expect(spec.explain).not.toContain("for you");
   });
 
   it("offers lifecycle-via-import a way to keep applying the row's other columns", () => {
