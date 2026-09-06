@@ -582,10 +582,10 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
 const resubmitSchema = z.object({ id: z.string().min(1) });
 
 /**
- * IT says "fixed, look again", clearing the return so the record reads
- * AWAITING FINANCE once more.
+ * The registering department says "fixed, look again", clearing the return
+ * so the record reads AWAITING FINANCE once more.
  *
- * Explicit rather than clearing on any edit to the asset: an IT staffer
+ * Explicit rather than clearing on any edit to the asset: a staffer
  * correcting an unrelated field must not silently claim the reported problem
  * is resolved.
  */

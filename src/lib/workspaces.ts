@@ -96,7 +96,14 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         { label: "Completed", href: "/purchases?state=COMPLETED" },
       ],
     },
-    { heading: "Reference", items: [{ label: "Inventory", href: "/inventory" }] },
+    {
+      heading: "Assets",
+      items: [
+        { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
+        { label: "Register assets", href: "/inventory/register", roles: ["admin", "purchasing_staff"] },
+      ],
+    },
+    { heading: "Reference", items: [{ label: "IT inventory", href: "/inventory" }] },
   ],
   finance: [
     { heading: "Overview", items: [{ label: "Home", href: "/" }] },
@@ -181,12 +188,13 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // for requireRole to run from — only middleware can answer for a path like
   // that, so a misordered rule shows up as a 200 with no redirect at all.
   { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
-  // Same shape and same reason as /inventory/import and /inventory/labels
-  // directly above: this MUST precede the general /inventory rule
-  // (first-match-wins), because that rule admits purchasing and finance, and
-  // registering a purchased asset into the register is IT's job, not theirs.
-  // The ORDERING is asserted only in workspaces.test.ts.
-  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+  // Phase 13: registering is each department's own — IT registers IT-class
+  // categories, Purchasing registers Purchasing-class ones — so BOTH
+  // workspaces are admitted here and `registerAssets` refuses the wrong class
+  // by name. This MUST still precede the general /inventory rule below,
+  // because that rule admits finance and viewer, and neither registers
+  // anything. The ORDERING is asserted only in workspaces.test.ts.
+  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
   // a dead end on the page built for that role. The secrets rule above still

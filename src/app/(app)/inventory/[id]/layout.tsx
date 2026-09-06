@@ -3,6 +3,7 @@ import { requireUser } from "@/server/auth/guards";
 import { getAsset } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
+import { CLASS_LABEL, canManageClass } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
@@ -23,10 +24,12 @@ export default async function AssetRecordLayout({
   const { id } = await params;
   const asset = await getAsset(id);
   if (!asset) notFound();
-  const canMutate = user.role === "admin" || user.role === "it_staff";
+  const canMutate = canManageClass(user.role, asset.cls);
   const returned = asset.financeReturnedAt !== null;
   const canConfirm = (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt;
-  const canResubmit = (user.role === "admin" || user.role === "it_staff") && returned;
+  // Purchasing marks its own registrations corrected. The server action
+  // already enforces this — b521e14.
+  const canResubmit = canManageClass(user.role, asset.cls) && returned;
   const pending = asset.approvals[0];
 
   return (
@@ -37,6 +40,7 @@ export default async function AssetRecordLayout({
         badge={
           <span className="inline-flex items-center gap-2">
             <StatusPill value={asset.status} />
+            <Pill>{CLASS_LABEL[asset.cls].toUpperCase()}</Pill>
             {asset.financeConfirmedAt ? (
               <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
             ) : returned ? (
@@ -55,7 +59,7 @@ export default async function AssetRecordLayout({
             <>
               {canMutate && (
                 <>
-                  <RequestStatusChange assetId={asset.id} currentStatus={asset.status} />
+                  <RequestStatusChange assetId={asset.id} currentStatus={asset.status} cls={asset.cls} />
                   <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>
                 </>
               )}
@@ -63,6 +67,7 @@ export default async function AssetRecordLayout({
                 <FinanceReview
                   assetId={asset.id}
                   tag={asset.tag}
+                  cls={asset.cls}
                   canConfirm={canConfirm}
                   canResubmit={canResubmit}
                 />
@@ -100,7 +105,7 @@ export default async function AssetRecordLayout({
           </Banner>
         </div>
       )}
-      <RecordTabs assetId={asset.id} />
+      <RecordTabs assetId={asset.id} cls={asset.cls} />
       <div className="pt-4">{children}</div>
     </>
   );

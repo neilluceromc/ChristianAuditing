@@ -9,54 +9,69 @@ import { FormField } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import type { AssetClass } from "@prisma/client";
+import { CLASS_LABEL } from "@/lib/asset-class";
 import {
   confirmAssetDetails,
   resubmitAssetToFinance,
+  // The action keeps its Phase 12 name; it sends the record back to
+  // whichever department registered it, not necessarily IT.
   returnAssetToIt,
 } from "@/server/modules/inventory/actions";
 import type { ActionResult } from "@/server/action-result";
 
 type Mode = "confirm" | "return" | "resubmit";
 
-const COPY: Record<Mode, { title: string; cta: string; done: string; blurb: string }> = {
-  confirm: {
-    title: "Confirm",
-    cta: "Confirm",
-    done: "confirmed",
-    blurb: "Marks the details reviewed and accurate. Recorded in the audit trail with your name.",
-  },
-  return: {
-    title: "Send back",
-    cta: "Send back",
-    done: "sent back to IT",
-    blurb: "IT sees this reason on the record, so say what is wrong rather than that something is.",
-  },
-  resubmit: {
-    title: "Mark corrected",
-    cta: "Mark corrected",
-    done: "resubmitted to Finance",
-    blurb: "Clears the returned flag so Finance reviews the record again.",
-  },
-};
+/**
+ * `return`'s copy names the class it is sending back to (D-13) — the other
+ * two modes are class-neutral, so only `return` is computed per class rather
+ * than duplicating the whole table.
+ */
+function copyFor(cls: AssetClass): Record<Mode, { title: string; cta: string; done: string; blurb: string }> {
+  return {
+    confirm: {
+      title: "Confirm",
+      cta: "Confirm",
+      done: "confirmed",
+      blurb: "Marks the details reviewed and accurate. Recorded in the audit trail with your name.",
+    },
+    return: {
+      title: "Send back",
+      cta: "Send back",
+      done: `sent back to ${CLASS_LABEL[cls]}`,
+      blurb: `${CLASS_LABEL[cls]} sees this reason on the record, so say what is wrong rather than that something is.`,
+    },
+    resubmit: {
+      title: "Mark corrected",
+      cta: "Mark corrected",
+      done: "resubmitted to Finance",
+      blurb: "Clears the returned flag so Finance reviews the record again.",
+    },
+  };
+}
 
 /**
- * Finance's confirm / send-back pair and IT's mark-corrected, in one island
- * (C-7). Deliberately not a gate: the asset is live and usable in every one
- * of these states — what moves is whether IT has been told something is wrong.
+ * Finance's confirm / send-back pair and the registering department's
+ * mark-corrected, in one island (C-7). Deliberately not a gate: the asset is
+ * live and usable in every one of these states — what moves is whether the
+ * registering department has been told something is wrong.
  */
 export function FinanceReview({
   assetId,
   tag,
+  cls,
   canConfirm,
   canResubmit,
 }: {
   assetId: string;
   tag: string;
+  cls: AssetClass;
   canConfirm: boolean;
   canResubmit: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
+  const COPY = copyFor(cls);
   const [pending, startTransition] = useTransition();
   const [mode, setMode] = useState<Mode | null>(null);
   const [reason, setReason] = useState("");
@@ -100,7 +115,7 @@ export function FinanceReview({
       {canConfirm && (
         <>
           <Button variant="primary" onClick={() => setMode("confirm")}>Confirm details</Button>
-          <Button variant="ghost" onClick={() => setMode("return")}>Send back to IT</Button>
+          <Button variant="ghost" onClick={() => setMode("return")}>Send back to {CLASS_LABEL[cls]}</Button>
         </>
       )}
       {canResubmit && (

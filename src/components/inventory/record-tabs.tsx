@@ -1,10 +1,11 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { Tabs } from "@/components/ui/tabs";
 import { Pill } from "@/components/ui/pill";
 
-export function RecordTabs({ assetId }: { assetId: string }) {
+export function RecordTabs({ assetId, cls }: { assetId: string; cls: AssetClass }) {
   const pathname = usePathname();
   const base = `/inventory/${assetId}`;
   const items = [
@@ -21,6 +22,8 @@ export function RecordTabs({ assetId }: { assetId: string }) {
       href: `${base}/secrets`,
     },
     { label: "Reservations" as React.ReactNode, href: `${base}/reservations` },
-  ].map((t) => ({ ...t, active: t.href === base ? pathname === base : pathname.startsWith(t.href) }));
+  ]
+    .filter((t) => cls === "IT" || !t.href.endsWith("/secrets"))
+    .map((t) => ({ ...t, active: t.href === base ? pathname === base : pathname.startsWith(t.href) }));
   return <Tabs items={items} />;
 }

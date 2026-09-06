@@ -10,15 +10,24 @@ import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { ASSET_STATUSES } from "@/lib/inventory-list";
+import type { AssetClass } from "@prisma/client";
+import { statusesFor } from "@/lib/asset-class";
 import { requestStatusChange } from "@/server/modules/inventory/actions";
 
-export function RequestStatusChange({ assetId, currentStatus }: { assetId: string; currentStatus: string }) {
+export function RequestStatusChange({
+  assetId,
+  currentStatus,
+  cls,
+}: {
+  assetId: string;
+  currentStatus: string;
+  cls: AssetClass;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const options = ASSET_STATUSES.filter((s) => s !== currentStatus);
+  const options = statusesFor(cls).filter((s) => s !== currentStatus);
   const [to, setTo] = useState<string>(options[0]);
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
