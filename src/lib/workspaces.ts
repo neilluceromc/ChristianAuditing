@@ -233,13 +233,37 @@ export function pathAllowedForRole(pathname: string, role: Role): boolean {
   return rule.workspaces.some((w) => mine.includes(w));
 }
 
+// Per-pathname cache of the query-param keys some sibling WORKSPACE_NAV item
+// on that same path declares (e.g. /inventory -> {"cls"}, /purchases ->
+// {"state"}). Built lazily and memoized — navIsActive runs once per nav item
+// per render, and the nav definition never changes at runtime.
+const ownedParamsByPath = new Map<string, ReadonlySet<string>>();
+
+function ownedParamsFor(pathname: string): ReadonlySet<string> {
+  const cached = ownedParamsByPath.get(pathname);
+  if (cached) return cached;
+  const owned = new Set<string>();
+  for (const sections of Object.values(WORKSPACE_NAV)) {
+    for (const section of sections) {
+      for (const item of section.items) {
+        const [itemPath, itemQuery] = item.href.split("?");
+        if (itemPath !== pathname || !itemQuery) continue;
+        for (const key of new URLSearchParams(itemQuery).keys()) owned.add(key);
+      }
+    }
+  }
+  ownedParamsByPath.set(pathname, owned);
+  return owned;
+}
+
 /**
  * Saved-filter links (href carries a query) are active only when every one
  * of their params matches the URL. A bare list link (no query of its own)
- * yields to any active sibling saved filter — the /purchases + ?state= pair
- * originally, and now also the /inventory + ?cls=PURCHASING pair — so it is
- * active only when the current URL carries no query params at all that a
- * sibling could own.
+ * yields only to a sibling's own params — never to a page-owned param (page,
+ * q, sort, a status facet, ...) that no sibling nav item on this path
+ * declares. The owned set is derived from WORKSPACE_NAV itself (today:
+ * {state} for /purchases, {cls} for /inventory) so it cannot drift from the
+ * nav out from under this rule.
  */
 export function navIsActive(href: string, pathname: string, search: URLSearchParams): boolean {
   const [hrefPath, hrefQuery] = href.split("?");
@@ -249,5 +273,6 @@ export function navIsActive(href: string, pathname: string, search: URLSearchPar
     for (const [k, v] of wanted) if (search.get(k) !== v) return false;
     return true;
   }
-  return search.size === 0;
+  for (const key of ownedParamsFor(pathname)) if (search.has(key)) return false;
+  return true;
 }

@@ -60,7 +60,7 @@ export function RegisterForm({
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
   const typesForCategory = types.filter((t) => t.categoryId === categoryId);
-  const cls: AssetClass = categories.find((c) => c.id === categoryId)?.cls ?? "IT";
+  const cls: AssetClass = categories.find((c) => c.id === categoryId)?.cls ?? categories[0]?.cls ?? "IT";
 
   // A category switch picks a fresh default prefix (the one already most
   // used in that category) rather than carrying over a prefix that may not

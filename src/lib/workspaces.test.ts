@@ -184,6 +184,21 @@ describe("navIsActive", () => {
     expect(navIsActive("/inventory", "/inventory", q("cls=PURCHASING"))).toBe(false);
     expect(navIsActive("/inventory?cls=PURCHASING", "/inventory", q("cls=PURCHASING"))).toBe(true);
   });
+  it("the bare list link stays active under a page-owned param no sibling declares", () => {
+    // /inventory's only sibling-declared key is `cls` (?cls=PURCHASING) — paging,
+    // searching, sorting and status faceting are page-owned and must not
+    // de-activate the bare "Inventory" item.
+    expect(navIsActive("/inventory", "/inventory", q("page=2"))).toBe(true);
+    expect(navIsActive("/inventory", "/inventory", q("q=dell"))).toBe(true);
+    expect(navIsActive("/inventory", "/inventory", q("status=DEFECTIVE"))).toBe(true);
+    // /purchases's only sibling-declared key is `state` — paging is page-owned.
+    expect(navIsActive("/purchases", "/purchases", q("page=3"))).toBe(true);
+  });
+  it("a bare item is unaffected by a query on a route with no sibling saved filters at all", () => {
+    // No WORKSPACE_NAV item for /reservations carries a query, so `state`
+    // here is page-owned, not sibling-owned — the bare item must stay active.
+    expect(navIsActive("/reservations", "/reservations", q("state=ACTIVE"))).toBe(true);
+  });
 });
 
 describe("WORKSPACE_NAV shape", () => {

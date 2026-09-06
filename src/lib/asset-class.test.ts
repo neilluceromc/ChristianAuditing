@@ -53,6 +53,10 @@ describe("CLASS_EXAMPLE — form placeholder copy, one per class", () => {
     // A copy-paste of one class's example into the other must fail.
     expect(CLASS_EXAMPLE.IT.model).toMatch(/ThinkPad/);
     expect(CLASS_EXAMPLE.PURCHASING.model).not.toMatch(/ThinkPad/);
+    // The two-letter token is shape-checked above; pin its actual content too,
+    // so swapping the two hints (both still match \b[A-Z]{2}\b) still fails.
+    expect(CLASS_EXAMPLE.IT.prefixHint).toMatch(/\bLT\b/);
+    expect(CLASS_EXAMPLE.PURCHASING.prefixHint).not.toMatch(/\bLT\b/);
   });
 });
 
