@@ -1,10 +1,11 @@
 import type { AssetClass, AssetStatus } from "@prisma/client";
 
 /**
- * README 3e: per item, a 4-way control — Returned / Defective / Buyout /
- * **Missing**. Missing is first-class because "pretending everything comes
- * back is why spreadsheets drift", and a reason is required for anything
- * other than a clean return.
+ * The outcome VOCABULARY, in README 3e's order. It is no longer the control:
+ * what any given item offers is `outcomesFor(cls)` -- four for an IT asset,
+ * three for a Purchasing one (no Buyout). Missing is first-class because
+ * "pretending everything comes back is why spreadsheets drift", and a reason
+ * is required for anything other than a clean return.
  */
 export const OUTCOMES = ["RETURNED", "DEFECTIVE", "BUYOUT", "MISSING"] as const;
 
@@ -135,6 +136,8 @@ export interface Decision {
   outcome: Outcome;
   state: string;
   reason: string | null;
+  /** payload.to.status, exactly as stored — the payload's real target, not a re-derivation. */
+  toStatus: string | null;
 }
 
 /**
@@ -192,5 +195,6 @@ export function decisionOf(
     outcome: winner.outcome,
     state: winner.state,
     reason: winner.reason,
+    toStatus: winner.toStatus,
   };
 }

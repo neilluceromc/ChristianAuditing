@@ -8,7 +8,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
-import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, outcomesFor, reasonRequired } from "@/lib/offboarding";
+import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, reasonRequired } from "@/lib/offboarding";
 import { CLASS_LABEL } from "@/lib/asset-class";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { candidatesFor } from "@/server/modules/offboarding/queries";
@@ -49,7 +49,8 @@ function revalidate(employeeId: string, assetId?: string) {
  *
  * NOTE for anyone editing the callbacks below: RETURNING a failure from a
  * $transaction callback COMMITS the transaction — only a throw rolls it back.
- * That is safe here because every `return conflict(...)` precedes every write.
+ * That is safe here because every failure return precedes every write (there
+ * is now a `validationError` in the same position as the `conflict`s).
  * Add a write before one of them and it will commit silently.
  */
 async function asActionResult<T>(run: () => Promise<T>): Promise<T | ActionResult<never>> {
@@ -73,7 +74,9 @@ const decideSchema = z.object({
 /**
  * One decision → one approval, immediately (entry criterion #1). The payload's
  * to.status is what the worker will apply, and Task 1 taught executionPlan all
- * four outcomes — before that, three of them died as EXECUTION_FAILED.
+ * four outcomes — before that, three of them died as EXECUTION_FAILED. The
+ * outcome is validated against the asset's class — a Purchasing asset offers
+ * three outcomes, not four.
  */
 export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: string }>> {
   const user = await actionRole("admin", "it_staff");
@@ -84,12 +87,6 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
   const reason = (d.reason ?? "").trim();
-  // README 3e: a reason is required for anything other than a clean return.
-  if (reasonRequired(d.outcome) && reason.length < 3) {
-    return validationError({
-      reason: `${OUTCOME_LABEL[d.outcome]} needs a reason (at least 3 characters) — it lands in the approval and on the farewell report.`,
-    });
-  }
 
   let refNo = "";
   try {
@@ -109,10 +106,24 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
       // A car has no Buyout. Validated HERE, against the asset's class, not
       // at parse time — the outcome is legal for the enum and illegal for
       // this asset, and only the asset knows which it is.
-      if (!outcomesFor(asset.cls).includes(d.outcome)) {
+      // One lookup, narrowed: null means this class does not offer the outcome.
+      // No `!` -- this file's own rule (offboarding.ts, decisionOf) is that
+      // non-null-ness should be structural, not asserted several lines from the
+      // check that proves it.
+      const targetStatus = outcomeStatus(asset.cls, d.outcome);
+      if (targetStatus === null) {
         return validationError({ outcome: `${OUTCOME_LABEL[d.outcome]} is not an outcome for a ${CLASS_LABEL[asset.cls]} asset.` });
       }
-      const targetStatus = outcomeStatus(asset.cls, d.outcome)!;
+      // README 3e: a reason is required for anything other than a clean
+      // return. Inside the transaction, after the class check: it precedes
+      // every write, which the NOTE above relies on, and a Purchasing asset
+      // sent BUYOUT must be refused for being a Purchasing asset, not for
+      // "needing a reason" — a remedy that could never work.
+      if (reasonRequired(d.outcome) && reason.length < 3) {
+        return validationError({
+          reason: `${OUTCOME_LABEL[d.outcome]} needs a reason (at least 3 characters) — it lands in the approval and on the farewell report.`,
+        });
+      }
       // The one-open-per-asset index is per ASSET, not per approval type: a
       // pending lifecycle.change-status refuses this decision too, and
       // "that decision is already recorded" would be a lie pointing nowhere.

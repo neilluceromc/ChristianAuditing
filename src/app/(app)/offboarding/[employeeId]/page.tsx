@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { getWizard } from "@/server/modules/offboarding/queries";
-import { canContinue, OUTCOME_LABEL, outcomeStatus, parseStep } from "@/lib/offboarding";
+import { canContinue, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
 import { fmtMoney } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
@@ -260,7 +260,7 @@ export default async function OffboardingWizardPage({
                       i.decision ? (
                         <span className="inline-flex items-center gap-2">
                           <StatusPill
-                            value={outcomeStatus(i.cls, i.decision.outcome) ?? ""}
+                            value={i.decision.toStatus ?? "?"}
                             label={OUTCOME_LABEL[i.decision.outcome]}
                           />
                           <StatusPill value={i.decision.state} />
@@ -276,7 +276,7 @@ export default async function OffboardingWizardPage({
                         <span className="font-mono text-[11px]">
                           <Link href="/approvals" className="text-accent hover:underline">{i.decision.refNo}</Link>
                           {" · "}
-                          {i.status} → {outcomeStatus(i.cls, i.decision.outcome)}
+                          {i.status} → {i.decision.toStatus ?? "?"}
                         </span>
                         {i.decision.reason && <span>{i.decision.reason}</span>}
                         {i.decision.state === "EXECUTION_FAILED" && (
@@ -420,11 +420,11 @@ export default async function OffboardingWizardPage({
                       <Td>{i.model}</Td>
                       <Td>
                         <StatusPill
-                          value={outcomeStatus(i.cls, i.decision.outcome) ?? ""}
+                          value={i.decision.toStatus ?? "?"}
                           label={OUTCOME_LABEL[i.decision.outcome]}
                         />
                       </Td>
-                      <Td mono className="text-[10.5px]">{outcomeStatus(i.cls, i.decision.outcome)}</Td>
+                      <Td mono className="text-[10.5px]">{i.decision.toStatus ?? "?"}</Td>
                       <Td>{i.decision.reason ?? "—"}</Td>
                       <Td align="right" mono>{i.costLabel}</Td>
                       {/* linked like the collect step's copy of the same refNo —

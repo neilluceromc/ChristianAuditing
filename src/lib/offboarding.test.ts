@@ -128,9 +128,9 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     expect(decisionOf([], { held: true })).toBeNull();
   });
 
-  it("reports the outcome, ref, state and reason of a live decision", () => {
+  it("reports the outcome, ref, state, reason and stored target of a live decision", () => {
     expect(decisionOf([cand({ toStatus: "MISSING", state: "CLAIMED", reason: "never handed back" })], { held: true })).toEqual({
-      refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back",
+      refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back", toStatus: "MISSING",
     });
   });
 
@@ -182,7 +182,7 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     expect(decisionOf([
       cand({ id: "old", refNo: "APR-2100", state: "REJECTED", createdAt: at(0) }),
       cand({ id: "new", refNo: "APR-2101", state: "PENDING", toStatus: "BUYOUT", createdAt: at(5_000) }),
-    ], { held: true })).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null });
+    ], { held: true })).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null, toStatus: "BUYOUT" });
   });
 
   it("the newest decision wins even when the older one is also live", () => {
@@ -233,17 +233,18 @@ describe("outcomes by class (Phase 13)", () => {
     expect(outcomeStatus("PURCHASING", "BUYOUT")).toBeNull();
     expect(outcomeStatus("IT", "BUYOUT")).toBe("BUYOUT");
   });
-  it("every class's outcome map is a subset of that class's return targets", () => {
+  it("every class's outcome map is exactly that class's return targets — no orphan and no extra", () => {
+    // Set equality, not subset: a fourth Purchasing return target the wizard
+    // could never produce should fail this test, as it already would for IT.
     for (const cls of ["IT", "PURCHASING"] as const) {
-      for (const s of Object.values(OUTCOME_STATUS_BY_CLASS[cls])) {
-        expect(RETURN_TARGETS[cls]).toContain(s);
-      }
+      expect(new Set(Object.values(OUTCOME_STATUS_BY_CLASS[cls]))).toEqual(new Set(RETURN_TARGETS[cls]));
     }
   });
   it("outcomeOfStatus reads both vocabularies", () => {
     expect(outcomeOfStatus("SPARE")).toBe("RETURNED");
     expect(outcomeOfStatus("STORED")).toBe("RETURNED");
     expect(outcomeOfStatus("LOST")).toBe("MISSING");
+    expect(outcomeOfStatus("REPAIRING")).toBe("DEFECTIVE"); // the one Purchasing status whose outcome name differs
     expect(outcomeOfStatus("DEPLOYED")).toBeNull();
   });
 });
