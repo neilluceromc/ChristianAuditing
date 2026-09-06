@@ -76,6 +76,15 @@ export function statusFamily(value: string, ns?: StatusNamespace): StatusFamily 
   return Object.hasOwn(MAP, value) ? MAP[value] : "neutral";
 }
 
+/**
+ * Whether `value` has an EXPLICIT family entry. `statusFamily` returns neutral
+ * for anything unmapped, so a test asserting `neutral` proves nothing about
+ * the map; this is the assertion that does (Phase 13, D-1).
+ */
+export function hasStatusFamily(value: string, ns?: StatusNamespace): boolean {
+  return Object.hasOwn(ns ? NAMESPACED[ns] : MAP, value);
+}
+
 /** EXECUTION_FAILED must not look like REJECTED: dashed border + diamond mark. */
 export function isSystemFailure(value: string): boolean {
   return value === "EXECUTION_FAILED";
