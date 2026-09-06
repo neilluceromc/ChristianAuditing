@@ -17,9 +17,9 @@ enum Role {
   viewer
 }
 
-/// Phase 13. Lives on the category. Each asset also carries it -- set from the
-/// category by every code path that creates one, defaulting to IT until then --
-/// and the asset_class_invariants trigger holds the two equal. See spec §2.
+/// Phase 13. Lives on the category. Each asset also carries a copy (Asset.cls,
+/// default IT); the asset_class_invariants trigger holds the two equal on every
+/// write that touches it. See spec §2.
 enum AssetClass {
   IT
   PURCHASING
@@ -247,13 +247,12 @@ model Asset {
   type              AssetType?       @relation(fields: [typeId], references: [id], onDelete: Restrict)
   status            AssetStatus      @default(SPARE)
   /// @default(IT) is scaffolding: it keeps every insert path that predates Phase
-  /// 13 working while Tasks 6-11 teach each one to set this from the category.
+  /// 13 working while later tasks teach each one to set this from the category.
   /// The asset_class_invariants trigger -- not the default -- is the guarantee:
   /// it holds this equal to the category's cls, and the status inside that
   /// class's set, on every write that touches status, cls or categoryId. It
-  /// does NOT make the value immutable; a same-transaction change of category,
-  /// cls and status together is legal, and updateAsset refuses cross-class
-  /// moves in application code.
+  /// does NOT make the value immutable: at the database level a same-transaction
+  /// change of category, cls and status together is legal.
   cls               AssetClass       @default(IT)
   assigneeId        String?
   assignee          Employee?        @relation(fields: [assigneeId], references: [id], onDelete: Restrict)

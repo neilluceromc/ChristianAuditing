@@ -12,9 +12,10 @@
 -- instead of a misleading "its category is <NULL>"; and the status lists are
 -- compared as text DEFENSIVELY, not out of necessity -- a plpgsql body is not
 -- parsed until first execution, so an enum comparison would have resolved
--- fine too. The trade is that a typo'd literal here fails at write time, not
--- at first execution. The cast stays because asset-class.test.ts pins these
--- two lists by matching on it.
+-- fine too. The honest cost: with the cast a typo'd literal is NOT caught --
+-- it silently widens or narrows the allowed set -- where an enum comparison
+-- would have failed loudly at first execution. Kept as text so the two lists
+-- stay greppable as plain strings.
 CREATE OR REPLACE FUNCTION asset_class_invariants() RETURNS trigger AS $$
 DECLARE cat_cls "AssetClass";
 BEGIN
