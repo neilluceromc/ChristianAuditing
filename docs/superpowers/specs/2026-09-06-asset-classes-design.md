@@ -104,8 +104,10 @@ reasons that survive that rule:
   makes people skip the check — and the database trigger in §3.4 can only enforce class ↔ status if the
   row carries the class.
 
-The trigger also asserts `Asset.cls = category.cls` on every write, so the "no drift" claim is enforced
-by Postgres, not trusted.
+The trigger also asserts `Asset.cls = category.cls` on every write, **with a `FOR SHARE` lock on the
+category row** so a concurrent class flip cannot slip between the read and the write (D-3). Only with
+that lock is the "no drift" claim actually enforced by Postgres rather than trusted — the first draft
+of this trigger lacked it, and a code-quality review caught the race before any code depended on it.
 
 ---
 
@@ -170,7 +172,11 @@ A `BEFORE INSERT OR UPDATE OF status, cls, "categoryId"` trigger on `"Asset"` ra
 CREATE OR REPLACE FUNCTION asset_class_invariants() RETURNS trigger AS $$
 DECLARE cat_cls "AssetClass";
 BEGIN
-  SELECT "cls" INTO cat_cls FROM "AssetCategory" WHERE "id" = NEW."categoryId";
+  -- FOR SHARE, not an unlocked read (D-3): under READ COMMITTED an insert and a
+  -- concurrent category flip could each pass against a snapshot that did not
+  -- see the other. The row lock makes the flip wait, then re-check, then refuse.
+  SELECT "cls" INTO cat_cls FROM "AssetCategory" WHERE "id" = NEW."categoryId" FOR SHARE;
+  IF NOT FOUND THEN RETURN NEW; END IF; -- let the FK raise its own, accurate error
   IF cat_cls IS DISTINCT FROM NEW."cls" THEN
     RAISE EXCEPTION 'asset % carries class % but its category is %', NEW."tag", NEW."cls", cat_cls;
   END IF;
@@ -222,13 +228,16 @@ each other** by reading the migration file, the same way `receiving.test.ts` pin
 
 ### 3.5 Migrations
 
-Two, in order, taking the count from 11 to 13 (corrected during execution — the 12 was a miscount that included `migration_lock.toml`):
+Three, taking the count from 11 to 14 (D-2 corrected a miscount; D-3 added the third):
 
 1. **`asset_status_purchasing_values`** — the six `ADD VALUE` statements only. Postgres will not let a
    newly added enum value be *used* in the transaction that added it, and Prisma runs each migration in
    its own transaction.
-2. **`asset_classes`** — the `AssetClass` enum; `AssetCategory.cls` with default `IT`; `Asset.cls` added
-   nullable, backfilled from the category, then set `NOT NULL`; both trigger functions and triggers.
+2. **`asset_classes`** — the `AssetClass` enum; `AssetCategory.cls` and `Asset.cls`, both
+   `NOT NULL DEFAULT 'IT'`; both trigger functions and triggers.
+3. **`asset_class_invariants_lock`** — `CREATE OR REPLACE` of the first trigger function with the
+   `FOR SHARE` lock and the FK fall-through. Separate because 002 was already applied when the race
+   was found, and applied migrations are frozen in this project.
 
 ---
 

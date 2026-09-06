@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 and D-2, both defects in this plan, both caught by the Task 1 implementer.
+> ### AMENDED DURING EXECUTION — D-1 through D-5. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix. **D-3 is a real concurrency hole in a trigger this spec called a guarantee.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -27,6 +27,49 @@
 > own handover says 11. Corrected below and in the spec: **11 → 13**. The implementer did the right
 > thing — reported the discrepancy against both briefing documents instead of assuming the repo was
 > wrong.
+>
+> **D-3. The trigger had a READ COMMITTED race, and it was the exact hole the design claimed did not
+> exist.** Found by the Task 1 code-quality reviewer. `asset_class_invariants` read the category with an
+> unlocked `SELECT`. Transaction 1 inserts an asset and reads `cls='IT'` from its snapshot;
+> transaction 2 flips the category to `PURCHASING` and `category_class_frozen`'s `EXISTS` cannot
+> see T1's uncommitted row; both commit; the asset now carries a class its category no longer has, and
+> no trigger revisits it. Spec §2.4 justified storing `Asset.cls` at all on *"there is no drift path…
+> enforced by Postgres, not trusted."* **That sentence was false as written.** Fixed with `FOR SHARE` on
+> the category read — a row lock a plain `UPDATE` conflicts with, so the flip waits and re-checks. Not
+> `FOR KEY SHARE`, which is what FK checks take and which does NOT conflict with an update of a non-key
+> column. The re-review confirmed both interleavings are now refused and two concurrent inserts still
+> both succeed (the lock is shared).
+>
+> Because migration 001 was already applied and this project never resets, the fix is a **third
+> migration** with `CREATE OR REPLACE FUNCTION` — the clause was there for exactly this. Migration count:
+> **11 → 14**, not 13. Three smaller findings ride in the same migration: a missing category now falls
+> through to the FK's own error; the `::text` comparison is documented as *defensive* (a plpgsql body is
+> not parsed until first execution, so the "can't use a new enum value in the same transaction" rule
+> does not apply to it — correct fact, wrong anchor); and the backfill `UPDATE` in 001 is noted as
+> provably inert (both columns were added with `DEFAULT 'IT'` two lines earlier) and left frozen.
+>
+> **The lesson:** a trigger that reads another table is a concurrency question, not just a logic
+> question. "Enforced by the database" is only true if the read is locked against the write it is
+> guarding. Ask what the *other* transaction sees.
+>
+> **D-4. Task 2's pin test read the wrong file.** It hard-coded migration 001 as the source of the
+> trigger's status lists. After D-3, 001 holds a **stale** function body and 002 holds the live one —
+> the test would have pinned `asset-class.ts` to text the database no longer runs, and stayed green while
+> the two drifted. Task 2 is amended below to read every migration in order and take the **last**
+> `CREATE OR REPLACE FUNCTION asset_class_invariants()` body. Also from the same review: the
+> `["STORED", "neutral"]` test is now backed by `hasStatusFamily`, a presence check that CAN fail — closing
+> D-1 properly rather than merely noting it.
+>
+> **D-5. The fix for Important 2 re-introduced the defect it was fixing, and I wrote it.** The
+> review said the `Asset.cls` comment described a future state. My replacement text ended *"updateAsset
+> refuses cross-class moves in application code"* — which is **Task 6**, not this commit — and the
+> enum doc I supplied said *"set from the category by every code path that creates one"*, also false
+> until Task 6. The re-review caught both. The same fix's migration comment cited
+> `asset-class.test.ts`, a file Task 2 has not yet created, and stated the `::text` trade backwards (with
+> the cast a typo'd literal is *not* caught — it silently widens or narrows the set; the enum comparison
+> is the one that fails loudly). **The lesson is C-8's, one level up: when you write the correction,
+> re-read it against the code AS IT IS AT THAT COMMIT, not as the plan says it will be.** A comment
+> that names a future task's behaviour is a false comment today.
 
 
 
@@ -262,7 +305,7 @@ CREATE TRIGGER category_class_frozen
 npx prisma migrate deploy && npx prisma generate && npx prisma migrate status
 ```
 
-Expected: **13 migrations found**, "Database schema is up to date!" (11 + 2 — D-2).
+Expected: **13 migrations found** at this step (11 + 2 — D-2); **14** once the review fix in D-3 lands.
 
 - [ ] **Step 6: The six family entries**
 
@@ -309,7 +352,7 @@ This module is the **only** place that knows which statuses belong to which clas
 Create `src/lib/asset-class.test.ts`:
 
 ```ts
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AssetStatus, type AssetClass } from "@prisma/client";
@@ -411,10 +454,18 @@ describe("the trigger's literal lists are pinned to STATUSES_BY_CLASS", () => {
   // status list exists twice — here and in plpgsql — and the two must move
   // together. This test reads the migration so a drift is a red test, not a
   // production error at the first write.
-  const sql = readFileSync(
-    path.join(process.cwd(), "prisma/migrations/20260906090001_asset_classes/migration.sql"),
-    "utf8",
-  );
+  // The LAST definition wins: migration 001 created the function and 002
+  // replaced it (D-3), and CREATE OR REPLACE means the database runs whichever
+  // came last. Pinning a fixed filename would pin a body the database no
+  // longer executes -- a green test proving nothing (D-4).
+  const migrationsDir = path.join(process.cwd(), "prisma/migrations");
+  const bodies = readdirSync(migrationsDir)
+    .filter((d) => statSync(path.join(migrationsDir, d)).isDirectory())
+    .sort()
+    .map((d) => readFileSync(path.join(migrationsDir, d, "migration.sql"), "utf8"))
+    .filter((sql) => sql.includes("FUNCTION asset_class_invariants()"));
+  if (bodies.length === 0) throw new Error("no migration defines asset_class_invariants()");
+  const sql = bodies[bodies.length - 1];
   const listAfter = (cls: AssetClass): string[] => {
     const m = new RegExp(`NEW\\."cls" = '${cls}' AND NEW\\."status"::text NOT IN\\s*\\(([^)]*)\\)`).exec(sql);
     if (!m) throw new Error(`trigger has no NOT IN list for ${cls}`);
@@ -531,7 +582,7 @@ git add src/lib/asset-class.ts src/lib/asset-class.test.ts
 git commit -m "feat(lib): asset-class — the status partition, class defaults and role rights"
 ```
 
-Expected before commit: **872 tests / 51 files** (849 + 23).
+Expected before commit: **873 tests / 51 files** (850 + 23 — 850 after the Task 1 review fix added `hasStatusFamily`'s test).
 
 ---
 
