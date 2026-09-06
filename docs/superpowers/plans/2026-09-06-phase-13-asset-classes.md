@@ -279,6 +279,17 @@
 >
 > **The lesson:** when a task opens a route to a new role, walk every link and redirect that role can now
 > reach and ask where it lands. Gates were reviewed; affordances were not, and five of six led off a cliff.
+>
+> **D-14b. The fix I specified for the double highlight introduced a wider regression, and the re-review caught
+> it — D-5's lesson, second occurrence.** I wrote "the simplest correct form is `search.size === 0`". It is not
+> correct: the sidebar feeds `navIsActive` the LIVE search params, so every page-owned param — `?page=`, `?q=`,
+> `?sort=`, facets — now de-highlighted the bare item on six nav entries across four workspaces. Green suite,
+> because no test exercised a bare item under a filter. The rule that is actually right: a bare link yields
+> only to query params a SIBLING nav item on the same path declares, derived from `WORKSPACE_NAV` so it cannot
+> drift (today `{ state }` on `/purchases`, `{ cls }` on `/inventory`); tests pin `?page=` / `?q=` / `?status=` as still
+> active. Also from the re-review: the register form's `?? "IT"` fallback showed a Purchasing user IT copy until
+> they picked a category — `categories[0]?.cls` first. **When the fix text contains the word "simplest", read the
+> call site before believing it.**
 
 
 
@@ -1718,7 +1729,7 @@ If a unit or e2e test asserts the literal "sent back to IT" / "Send back to IT",
 - `[id]/edit/page.tsx`: the wrong-class redirect goes to ``/inventory/${id}``, not `ROLE_LANDING` (drop that import).
 - `workspaces.ts`: a narrow rule for `/inventory/new` beside `/inventory/register`'s — `workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"]`;
   `workspaces.test.ts` asserts all five roles (finance and viewer `false`).
-- `navIsActive`: a bare link yields to ANY sibling query param, not only `state`; test `navIsActive("/inventory", "/inventory", q("cls=PURCHASING"))` is false.
+- `navIsActive`: a bare link yields only to query params a sibling nav item on the same path declares (derived from `WORKSPACE_NAV`; D-14b), never to page-owned ones; tests: `q("cls=PURCHASING")` on `/inventory` is false, `q("page=2")` / `q("q=dell")` / `q("status=DEFECTIVE")` stay true.
 - `record-tabs.tsx`: prop `showSecrets: boolean` and a conditional spread — no `href` string test. `layout.tsx` passes
   `asset.cls === "IT"` AND the roles the secrets page admits (read its `requireRole`).
 - `register/page.tsx` selects category `cls`; `register-form.tsx` derives the chosen category's class and uses `CLASS_EXAMPLE[cls]`
@@ -1726,7 +1737,7 @@ If a unit or e2e test asserts the literal "sent back to IT" / "Send back to IT",
 - `policy-actions.ts` `addSlot`: `findFirst({ where: { id, category: { cls: "IT" } } })`. `[id]/reservations/page.tsx`: `DEFAULT_STATUS[asset.cls]` in the sentence.
   `new/page.tsx` and `[id]/edit/page.tsx`: a comment naming Task 8 where `cls` is passed into the narrower prop type.
 
-Expected after this step: **901 tests / 51 files** (895 + 5 PATH_RULES rows — the table is one `it` per row — + the `CLASS_EXAMPLE` test). Got: 901.
+Expected after this step: **903 tests / 51 files** (895 + 5 PATH_RULES rows — the table is one `it` per row — + the `CLASS_EXAMPLE` test + D-14b's two navIsActive cases). Got: 903.
 
 - [ ] **Step 5: Equipment policies offer IT types only**
 
