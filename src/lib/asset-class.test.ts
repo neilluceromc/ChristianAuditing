@@ -8,7 +8,6 @@ import {
   DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
   canManageClass, isStatusOf, parseCls, statusesFor, withClsQS,
 } from "./asset-class";
-import { CREATABLE_STATUSES } from "./asset-rules";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
 
@@ -118,11 +117,6 @@ describe("parseCls / withClsQS — the ?cls= nav parameter", () => {
   });
 });
 
-describe("the IT sets match the constants they are replacing -- each pin is deleted by the task that deletes its constant", () => {
-  it("CREATABLE_BY_CLASS.IT === CREATABLE_STATUSES (asset-rules.ts; Task 6 widens that to both classes and removes this)", () => {
-    expect(sorted(CREATABLE_BY_CLASS.IT)).toEqual(sorted(CREATABLE_STATUSES));
-  });
-});
 
 describe("the trigger's literal lists are pinned to STATUSES_BY_CLASS", () => {
   // Same move as receiving.test.ts pinning MAX_TAG_NUMBER to TAG_SHAPE: the

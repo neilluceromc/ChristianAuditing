@@ -1,20 +1,32 @@
-/** Only these are offered on creation (README 3b). */
-export const CREATABLE_STATUSES = ["SPARE", "DEPLOYED", "TEMPORARY"] as const;
+import type { AssetClass, AssetStatus } from "@prisma/client";
+import { CREATABLE_BY_CLASS, DEFAULT_STATUS } from "./asset-class";
+
+/** Re-exported for the form; the source of truth is asset-class.ts (Phase 13). */
+export { CREATABLE_BY_CLASS };
+
+/** Any creatable status of either class — the zod enum on the create payload. */
+export const CREATABLE_STATUSES = [
+  ...CREATABLE_BY_CLASS.IT, ...CREATABLE_BY_CLASS.PURCHASING,
+] as const satisfies readonly AssetStatus[];
 export type CreatableStatus = (typeof CREATABLE_STATUSES)[number];
 
 export type CreationPlan =
-  | { ok: true; status: "SPARE"; approval: null | { toStatus: "DEPLOYED" | "TEMPORARY"; assigneeId: string } }
-  | { ok: false; error: "assignee_required" };
+  | { ok: true; status: AssetStatus; approval: null | { toStatus: AssetStatus; assigneeId: string } }
+  | { ok: false; error: "assignee_required" | "not_creatable_for_class" };
 
 /**
- * Assets are always CREATED as SPARE. Requesting DEPLOYED/TEMPORARY yields a
- * lifecycle.assign approval — the worker (Phase 4) performs the actual flip,
- * and until then the asset honestly reads SPARE everywhere.
+ * Assets are always CREATED in their class's default state (SPARE / STORED).
+ * Requesting anything else yields a lifecycle.assign approval — the worker
+ * performs the flip, and until then the asset honestly reads its default.
  */
-export function creationPlan(requested: CreatableStatus, assigneeId: string | null): CreationPlan {
-  if (requested === "SPARE") return { ok: true, status: "SPARE", approval: null };
+export function creationPlan(requested: CreatableStatus, assigneeId: string | null, cls: AssetClass): CreationPlan {
+  if (!(CREATABLE_BY_CLASS[cls] as readonly string[]).includes(requested)) {
+    return { ok: false, error: "not_creatable_for_class" };
+  }
+  const base = DEFAULT_STATUS[cls];
+  if (requested === base) return { ok: true, status: base, approval: null };
   if (!assigneeId) return { ok: false, error: "assignee_required" };
-  return { ok: true, status: "SPARE", approval: { toStatus: requested, assigneeId } };
+  return { ok: true, status: base, approval: { toStatus: requested, assigneeId } };
 }
 
 const DAY_MS = 86_400_000;

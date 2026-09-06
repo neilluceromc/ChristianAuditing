@@ -8,6 +8,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { TAG_SHAPE } from "@/lib/tag-key";
+import { CLASS_LABEL, DEFAULT_STATUS, canManageClass } from "@/lib/asset-class";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -61,7 +62,7 @@ interface Registered {
 }
 
 export async function registerAssets(input: unknown): Promise<ActionResult<Registered>> {
-  const user = await actionRole("admin", "it_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -72,6 +73,21 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
 
   const dupe = d.tags.find((t, i) => d.tags.indexOf(t) !== i);
   if (dupe) return conflict(`${dupe} appears twice in this batch.`);
+
+  // The category decides the class; the class decides who may register into
+  // it. Finance and viewers never reach here (actionRole above), so the only
+  // refusal this produces is IT registering a Purchasing category or vice
+  // versa — named, because "forbidden" would not say what to do instead.
+  const category = await prisma.assetCategory.findUnique({
+    where: { id: d.categoryId },
+    select: { name: true, cls: true },
+  });
+  if (!category) return validationError({ categoryId: "Unknown category" });
+  if (!canManageClass(user.role, category.cls)) {
+    return validationError({
+      categoryId: `${category.name} is a ${CLASS_LABEL[category.cls]} category — ${CLASS_LABEL[category.cls]} staff register ${CLASS_LABEL[category.cls]} assets.`,
+    });
+  }
 
   let done: Registered | null = null;
   let failure: ActionResult<Registered> | null = null;
@@ -105,7 +121,8 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             serial: d.serials?.[i]?.trim() || null,
             categoryId: d.categoryId,
             typeId: d.typeId || null,
-            status: "SPARE",
+            status: DEFAULT_STATUS[category.cls],
+            cls: category.cls,
             purchasedAt: d.purchasedAt ? new Date(d.purchasedAt) : null,
             // NOT `toCost` from inventory/actions.ts (checked, see report): it
             // is a private, non-exported, synchronous helper inside a
@@ -129,7 +146,7 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
           action: "register",
           diff: {
             tag: { from: null, to: asset.tag },
-            status: { from: null, to: "SPARE" },
+            status: { from: null, to: DEFAULT_STATUS[category.cls] },
           },
         });
       }
