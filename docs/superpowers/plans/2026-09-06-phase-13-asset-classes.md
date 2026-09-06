@@ -290,6 +290,11 @@
 > active. Also from the re-review: the register form's `?? "IT"` fallback showed a Purchasing user IT copy until
 > they picked a category — `categories[0]?.cls` first. **When the fix text contains the word "simplest", read the
 > call site before believing it.**
+>
+> The re-review of that fix approved the rule and asked for one more pin: the with-query branch is SUBSET-match
+> on purpose (paging inside the Purchasing view keeps the Purchasing item lit), and nothing asserted it — the
+> plausible future "fix" to an exact match would have killed the highlight with a green suite. Row added and
+> mutation-checked (exact match → one failure). `sort` and `purchaseYear` pinned as page-owned while there.
 
 
 
