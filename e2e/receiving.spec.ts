@@ -182,8 +182,9 @@ test.describe("registration — the primary path", () => {
 
   // The PATH_RULES ordering guard. Hitting /inventory/register itself would
   // NOT isolate this: the page also carries its own requireRole("admin",
-  // "it_staff", "purchasing_staff"), which would redirect both roles to the same landing even if
-  // the PATH_RULES entry were deleted or moved after the general /inventory
+  // "it_staff", "purchasing_staff"), which would redirect both roles to the
+  // same landing even if the PATH_RULES entry were deleted or moved after the
+  // general /inventory
   // rule — exactly the "either layer may be the one that refuses" trap
   // e2e/labels.spec.ts documents for the identical shape. So, like that
   // file's dedicated PATH_RULES probe, this hits a path with NO page file

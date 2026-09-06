@@ -193,6 +193,14 @@ describe("navIsActive", () => {
     expect(navIsActive("/inventory", "/inventory", q("status=DEFECTIVE"))).toBe(true);
     // /purchases's only sibling-declared key is `state` — paging is page-owned.
     expect(navIsActive("/purchases", "/purchases", q("page=3"))).toBe(true);
+    // `sort` and `purchaseYear` are page-owned too (the docblock names them).
+    expect(navIsActive("/inventory", "/inventory", q("sort=tag:desc"))).toBe(true);
+    expect(navIsActive("/inventory", "/inventory", q("purchaseYear=2024"))).toBe(true);
+    // The with-query branch is subset-match ON PURPOSE: paging inside the
+    // Purchasing view keeps the Purchasing item lit, and only it. Tightening
+    // it to an exact match would kill this highlight with a green suite.
+    expect(navIsActive("/inventory?cls=PURCHASING", "/inventory", q("cls=PURCHASING&page=2"))).toBe(true);
+    expect(navIsActive("/inventory", "/inventory", q("cls=PURCHASING&page=2"))).toBe(false);
   });
   it("a bare item is unaffected by a query on a route with no sibling saved filters at all", () => {
     // No WORKSPACE_NAV item for /reservations carries a query, so `state`
