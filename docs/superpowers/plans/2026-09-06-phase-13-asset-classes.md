@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-7. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-10. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -121,6 +121,53 @@
 > **The lesson:** when a task deletes an export, the SAME task must touch every importer at least
 > minimally, even if a later task rewrites the file properly. "Task N owns that file" is not a reason to
 > commit red.
+>
+> **D-8. Task 3's plan scoped a call-site sweep to one file, and the call site that mattered was in
+> another.** Step 5 said pass `cls` to "every other `summarizeApproval` call **in this file**". The one call
+> that renders the change line is `src/app/(app)/approvals/[id]/page.tsx`. Without `cls`, a Purchasing
+> `lifecycle.assign` whose payload omits `to.status` — the seeded APR-2035 shape, the case that page exists
+> to show — rendered **"→ DEPLOYED" for a car**. Found by the Task 3 code-quality reviewer, who walked
+> all five call sites. Fixed two ways: the missing `cls` added, AND `cls` made a **required key**
+> (`cls: AssetClass | undefined`) so the omission is a compile error next time.
+>
+> Three more from the same review. **`ASSIGNABLE_FROM`**: the worker's assign precondition was reading
+> `DEFAULT_STATUS` ("what a new asset reads") as "the status an asset must be in to be assigned" — the
+> same conflation D-6 removed between `HOLDER_STATUSES` and `ASSIGN_TARGETS`. Its own constant now,
+> pinned equal; **Task 6's assign guards use it** (amended below). **Wording**: "not a IT status" in three
+> strings stored verbatim in `Approval.workerError`; reworded. **The return check's detail** said "returns as
+> SPARE" beside a red dot when the asset row was gone; it now says why.
+>
+> For **Task 11**: seeded APR-2035 (assign, APPROVED, no asset) now fails with "no asset attached" rather
+> than "malformed payload" — update its seed comment or attach an asset. And **neither class-aware worker
+> guard is reachable by a unit test** — Task 11's e2e gains a case: a held car may not be status-changed.
+> Also confirmed: no IT flow can create an approval the new executor refuses. The Purchasing side has a
+> window until Task 6 lands; **Task 6 precedes Task 11's seed in this plan; keep it that way.**
+>
+> **The re-review of that fix found one more of mine (D-1, third occurrence):** the new test I specified
+> passed an explicit `OPERATIONAL` with `cls: "PURCHASING"` — and `OPERATIONAL` IS Purchasing's fallback, so
+> deleting the explicit-status path leaves it green. It now uses `STORED`.
+>
+> **D-9. Task 4 listed one consumer of the export it deleted; there were five.** Step 5 named the single
+> `<ItemDecision>` render line. That page had **three more** bare `OUTCOME_STATUS` reads, and
+> `src/app/(app)/offboarding/[employeeId]/report/page.tsx` — the farewell report, a file the plan never
+> mentioned — imported it too. The task's grep non-negotiable caught it; the implementer fixed all five and
+> flagged it. **When a task deletes an export, the plan must `grep` for every consumer at planning time.**
+>
+> **D-10. Printing a re-derivation of a stored fact, when the row already carries the fact.** The five
+> consumers D-9 fixed all rendered `outcomeStatus(i.cls, i.decision.outcome)` — that is
+> `forward(cls, reverse(storedStatus))`, a lossy round-trip that equals the stored status only when the
+> payload's status belongs to the asset's own class, and yields `null` (hence `?? ""` and bare-null
+> renders) otherwise. The decision row already knows the payload's real target. Task 4's reviewer had the
+> fix: carry `toStatus` on `Decision` and print it. Now no page re-derives; `item-decision.tsx` keeps
+> `outcomeStatus(cls, picked)` because there `picked` is a *choice* constrained to `outcomesFor(cls)`, not a
+> stored fact. Same review: a `!` non-null assertion whose proof lived in another function (this codebase's
+> own rule forbids it — collapsed to one lookup narrowed on `null`); the class refusal now wins over the
+> reason check (a Purchasing BUYOUT with no reason used to get "Buyout needs a reason", a remedy that
+> could never work); and two docstrings still said "4-way control".
+>
+> **The lesson is derived-beats-stored's inverse:** when the stored value IS the fact — the payload's
+> target, what the worker will actually apply — print it. Re-deriving it through two maps is not
+> "derived state", it is a second copy that can disagree with the first.
 
 
 
@@ -1380,13 +1427,13 @@ import { CLASS_LABEL, DEFAULT_STATUS, canManageClass, isStatusOf, parseCls } fro
 
 - [ ] **Step 4: The three literals in `employees/actions.ts`**
 
-In `src/server/modules/employees/actions.ts`, add `import { DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS } from "@/lib/asset-class";` and:
+In `src/server/modules/employees/actions.ts`, add `import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS } from "@/lib/asset-class";` and:
 
 - The assign action's `if (asset.status !== "SPARE") return conflict(\`${asset.tag} is ${asset.status}, not SPARE — only spares can be assigned.\`);` becomes
-  `if (asset.status !== DEFAULT_STATUS[asset.cls]) return conflict(\`${asset.tag} is ${asset.status}, not ${DEFAULT_STATUS[asset.cls]} — only idle stock can be assigned.\`);`
+  `if (asset.status !== ASSIGNABLE_FROM[asset.cls]) return conflict(\`${asset.tag} is ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — only idle stock can be assigned.\`);`
 - Its payload `to: { assigneeId: d.employeeId, status: "DEPLOYED" }` becomes `to: { assigneeId: d.employeeId, status: DEFAULT_ASSIGN_STATUS[asset.cls] }`.
 - The return action's `to: { assigneeId: null, status: "SPARE" }` becomes `to: { assigneeId: null, status: DEFAULT_STATUS[asset.cls] }`.
-- The reservation-fulfilment loop's `if (hold.asset.status !== "SPARE") continue;` becomes `if (hold.asset.status !== DEFAULT_STATUS[hold.asset.cls]) continue;` and its payload's `status: "DEPLOYED"` becomes `status: DEFAULT_ASSIGN_STATUS[hold.asset.cls]`. (`hold.asset` is already included there; if `cls` is not selected, add it.)
+- The reservation-fulfilment loop's `if (hold.asset.status !== "SPARE") continue;` becomes `if (hold.asset.status !== ASSIGNABLE_FROM[hold.asset.cls]) continue;` and its payload's `status: "DEPLOYED"` becomes `status: DEFAULT_ASSIGN_STATUS[hold.asset.cls]`. (`hold.asset` is already included there; if `cls` is not selected, add it.)
 
 - [ ] **Step 5: Categories are created WITH a class**
 
@@ -1872,7 +1919,7 @@ In `prisma/seed.ts`, replace the `catData` block through the `Uncategorised` cre
       mk("BR-BL-0001", "Makati office, 12F", "Building", "OPERATIONAL", { cost: 45_000_000, purchasedAt: day(-3000), warrantyUntil: null }),
 ```
 
-Run: `npm run db:seed` — Expected: completes. Then `npx vitest run` — unchanged count.
+Run: `npm run db:seed` — Expected: completes. Then `npx vitest run` — unchanged count. **APR-2035** (D-8): the worker now checks for an asset before planning the payload, so this fixture's `workerError` reads "no asset attached" instead of "malformed payload". Update its seed comment to say it now demonstrates the missing-asset guard, or attach an asset and keep the malformed payload — either is honest; pick one and say which.
 
 ⚠️ **Every existing e2e count of IT things is protected by the IT default**, not by accident: the list, facets, export, Home and Finance all pin `cls: "IT"` unless asked otherwise. If Task 12's battery shows an IT-side count moving, the leak is in a query that was not pinned — find it, do not adjust the assertion.
 
@@ -2119,6 +2166,14 @@ test.describe("category admin", () => {
 });
 ```
 
+**Add a 14th case (D-8)** — the only test that reaches the worker's `HOLDER_STATUSES` guard. Using the car
+assigned to a driver (`BR-VH-0001`, `OPERATIONAL`): as `purchasing_staff`, request a status change to
+`STORED`; set that approval to `APPROVED` via Prisma (the same fixture shortcut test 7 uses); run
+`execSync("npm run worker:once")`; then assert the approval is `EXECUTION_FAILED` with a `workerError` that
+matches `/lifecycle\.return/`, and that the car is still `OPERATIONAL` and still assigned. A held asset may not
+be status-changed out from under its holder; for a Purchasing asset that means it cannot be changed at all
+while held — return it first.
+
 ⚠️ **Two sets of selectors are guesses at markup this plan did not read, and must be corrected to what the components actually render before the run:** test 11's (`checkbox` in a row, a button matching `/Bulk/` — see `inventory-table.tsx` and its selection bar), and test 8's (`getByRole("button", { name: "Returned" })` etc. inside the group — see `src/components/ui/segmented-control.tsx` for whether its options are buttons, radios or something else). Report what you changed.
 
 - [ ] **Step 3: The axe routes**
@@ -2131,7 +2186,7 @@ In `e2e/axe-sweep.spec.ts`: add `"/inventory?cls=PURCHASING"` to `VIEWER_STATIC_
 npx playwright test e2e/asset-classes.spec.ts --workers=1 --global-timeout=600000
 ```
 
-A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 13.**
+A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 14** (13 planned + D-8's held-car case).
 
 - [ ] **Step 5: Prove the guards are not inert — four mutations, report all four**
 
@@ -2182,7 +2237,7 @@ npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-
 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 ```
 
-Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **180 / 14 files** — 167 + 13. **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
+Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **181 / 14 files** — 167 + 14 (D-8). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
 
 - [ ] **Step 5: Finish the branch** — `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions, separately.**
 
