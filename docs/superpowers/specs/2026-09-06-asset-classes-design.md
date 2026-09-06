@@ -222,7 +222,7 @@ each other** by reading the migration file, the same way `receiving.test.ts` pin
 
 ### 3.5 Migrations
 
-Two, in order, taking the count from 12 to 14:
+Two, in order, taking the count from 11 to 13 (corrected during execution — the 12 was a miscount that included `migration_lock.toml`):
 
 1. **`asset_status_purchasing_values`** — the six `ADD VALUE` statements only. Postgres will not let a
    newly added enum value be *used* in the transaction that added it, and Prisma runs each migration in

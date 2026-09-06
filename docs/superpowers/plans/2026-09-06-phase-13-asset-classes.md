@@ -10,7 +10,25 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
-**Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **12 migrations**, none pending.
+**Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
+> ### AMENDED DURING EXECUTION — D-1 and D-2, both defects in this plan, both caught by the Task 1 implementer.
+>
+> **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
+> `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
+> UNMAPPED value. So `["STORED", "neutral"]` passes whether or not the map entry exists — it is an inert
+> assertion, and this plan predicted it would go red. The same is true of the pre-existing
+> `["SPARE", "neutral"]` case, which nobody had noticed. **The lesson is the C-12 one again, one layer
+> down: a red-then-green test is only evidence when the red was actually possible.** A test whose
+> expected value equals the fallback needs a different shape — e.g. asserting the key is present in the
+> map — or an honest comment saying it documents intent rather than guards it.
+>
+> **D-2. The migration baseline was 11, not 12, so every count in this plan and in spec §3.5 is off by
+> one.** `ls prisma/migrations | wc -l` returned 12 because it counted `migration_lock.toml`. Phase 12's
+> own handover says 11. Corrected below and in the spec: **11 → 13**. The implementer did the right
+> thing — reported the discrepancy against both briefing documents instead of assuming the repo was
+> wrong.
+
+
 
 ---
 
@@ -110,7 +128,7 @@ In `src/lib/status.test.ts`, inside the `cases` array, directly after the `["DIS
 ```
 
 Run: `npx vitest run src/lib/status.test.ts`
-Expected: **6 failures** — each new value maps to `neutral` (the fallback), e.g. `expected 'neutral' to be 'settled'`.
+Expected: **5 failures** — each new value maps to `neutral` (the fallback), e.g. `expected 'neutral' to be 'settled'`. **Not six:** `STORED → neutral` equals the fallback and passes vacuously (D-1).
 
 - [ ] **Step 2: The schema**
 
@@ -244,7 +262,7 @@ CREATE TRIGGER category_class_frozen
 npx prisma migrate deploy && npx prisma generate && npx prisma migrate status
 ```
 
-Expected: **14 migrations found**, "Database schema is up to date!".
+Expected: **13 migrations found**, "Database schema is up to date!" (11 + 2 — D-2).
 
 - [ ] **Step 6: The six family entries**
 
