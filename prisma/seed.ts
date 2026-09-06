@@ -181,7 +181,10 @@ async function main() {
       // (no default in the schema/no trigger touches it), so leaving it out of
       // `extra` here already leaves the row unconfirmed; nothing else to do.
       mk("BR-FN-0003", "Meeting table", "Furniture", "STORED", { cost: 40_000, warrantyUntil: null }),
-      mk("BR-PE-0001", "Panasonic microwave", "Pantry Equipment", "REPAIRING", { cost: 8_000, defectiveSince: day(-5), notes: "Turntable motor", warrantyUntil: null }),
+      // defectiveSince is an IT repair-stage field; Purchasing has no repair
+      // stages — repairStage() is class-blind and would resolve this
+      // otherwise-non-DEFECTIVE row's leftover defectiveSince to "returned-ok".
+      mk("BR-PE-0001", "Panasonic microwave", "Pantry Equipment", "REPAIRING", { cost: 8_000, notes: "Turntable motor", warrantyUntil: null }),
       mk("BR-BL-0001", "Makati office, 12F", "Building", "OPERATIONAL", { cost: 45_000_000, purchasedAt: day(-3000), warrantyUntil: null }),
     ],
   });

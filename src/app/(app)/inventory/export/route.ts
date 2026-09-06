@@ -7,7 +7,7 @@ import {
   buildAssetOrderBy, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
 import { parseCls } from "@/lib/asset-class";
-import { parseListState } from "@/lib/url-state";
+import { parseListState, withFilter } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 
 export async function GET(req: Request) {
@@ -20,12 +20,16 @@ export async function GET(req: Request) {
   // query, so an over-large selection costs one comparison, not a fetch.
   if (ids && ids.length > IDS_CAP) return idsRefusal(ids.length);
 
-  const state = parseListState(url.searchParams, INVENTORY_LIST_CONFIG);
+  let state = parseListState(url.searchParams, INVENTORY_LIST_CONFIG);
   // Not a config facet (see parsePurchaseYear) — read off the raw params
   // directly, same as `ids` above, so this route and the page it serves
   // cannot disagree about which year is active.
   const purchaseYear = parsePurchaseYear(url.searchParams.get("purchaseYear"));
   const cls = parseCls(url.searchParams.get("cls")) ?? "IT";
+  // Repair stages are IT's (inventory/page.tsx, D-16): a hand-built
+  // ?cls=PURCHASING&stage=… would otherwise narrow to the repair candidate
+  // set regardless of class and return rows the list would never show.
+  if (cls !== "IT" && state.filters.stage) state = withFilter(state, "stage", []);
   // `stage` is a derived facet — buildAssetWhere only narrows to the repair
   // CANDIDATE set in SQL, so a stage-filtered export must resolve to the same
   // exact ids the list screen shows, or the row count won't match the UI.

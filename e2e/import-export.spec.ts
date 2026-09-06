@@ -355,7 +355,8 @@ test.describe.serial("the asset import wizard", () => {
     test.setTimeout(180_000);
     await login(page, "admin@thebackroomop.com");
 
-    const stampsBefore = await db.asset.findMany({ orderBy: { tag: "asc" }, select: { tag: true, updatedAt: true } });
+    // The export is the IT view (Phase 13); the DB read must be too.
+    const stampsBefore = await db.asset.findMany({ where: { cls: "IT" }, orderBy: { tag: "asc" }, select: { tag: true, updatedAt: true } });
     const auditBefore = await db.auditEntry.count();
 
     // The app's own export, unedited, straight back in — handed to
@@ -393,7 +394,8 @@ test.describe.serial("the asset import wizard", () => {
     await expect(page.getByText("The outcome differs from what Validate showed")).toHaveCount(0);
 
     expect(await db.auditEntry.count()).toBe(auditBefore);
-    expect(await db.asset.findMany({ orderBy: { tag: "asc" }, select: { tag: true, updatedAt: true } })).toEqual(
+    // The export is the IT view (Phase 13); the DB read must be too.
+    expect(await db.asset.findMany({ where: { cls: "IT" }, orderBy: { tag: "asc" }, select: { tag: true, updatedAt: true } })).toEqual(
       stampsBefore,
     );
   });

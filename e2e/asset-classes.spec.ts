@@ -140,7 +140,12 @@ test.describe("IT-only surfaces close to a Purchasing asset", () => {
     // not-found page IS the 404 (D-18). The secrets panel must not render.
     // EmptyState (empty-state.tsx) renders its title as a plain <p>, not a heading.
     await expect(page.getByText("Asset not found", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Reveal/ })).toHaveCount(0);
+    // The seed creates no AssetSecret rows, so a Reveal-button negative would
+    // be vacuous here regardless of the class guard — SecretsPanel renders no
+    // Reveal button when there are no secrets either way. "Reads are audited"
+    // (secrets-panel.tsx ~line 97) is the banner SecretsPanel renders
+    // unconditionally whenever it mounts, so its absence is the real assertion.
+    await expect(page.getByText("Reads are audited", { exact: true })).toHaveCount(0);
   });
 });
 
@@ -180,7 +185,7 @@ test.describe("status controls and approvals speak the class's language", () => 
     const approval = await db.approval.findFirstOrThrow({ where: { assetId: id, state: "PENDING" } });
     await db.approval.update({ where: { id: approval.id }, data: { state: "APPROVED" } });
     await db.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: approval.id } } });
-    execSync("npm run worker:once", { timeout: 60_000 });
+    execSync("npm run worker:once", { timeout: 60_000, stdio: "inherit" });
 
     const after = await db.asset.findUniqueOrThrow({ where: { id } });
     expect(after.status).toBe("OPERATIONAL");
@@ -203,10 +208,10 @@ test.describe("status controls and approvals speak the class's language", () => 
     // Same enqueue-by-hand as case 7 — this shortcut bypasses actions.ts, which
     // is the only place that normally creates the EXECUTE_APPROVAL job.
     await db.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: approval.id } } });
-    execSync("npm run worker:once", { timeout: 60_000 });
+    execSync("npm run worker:once", { timeout: 60_000, stdio: "inherit" });
     const after = await db.approval.findUniqueOrThrow({ where: { id: approval.id } });
     expect(after.state).toBe("EXECUTION_FAILED");
-    expect(after.workerError).toMatch(/lifecycle\.return/);
+    expect(after.workerError).toMatch(/is still assigned — request a lifecycle\.return first/);
     const car = await db.asset.findUniqueOrThrow({ where: { id } });
     expect(car.status).toBe("OPERATIONAL");
     expect(car.assigneeId).not.toBeNull();
@@ -236,6 +241,8 @@ test.describe("a leaver who holds a car", () => {
     await expect(outcomeGroup.getByText("Returned")).toBeVisible();
     await expect(outcomeGroup.getByText("Missing")).toBeVisible();
     await expect(outcomeGroup.getByText("Buyout")).toHaveCount(0);
+    // Pins the count so ["RETURNED","MISSING"] alone (2, no Defective) would fail.
+    await expect(outcomeGroup.getByRole("radio")).toHaveCount(3);
 
     await outcomeGroup.getByText("Returned").click();
     await group.getByRole("button", { name: "Confirm decision" }).click();
@@ -307,6 +314,8 @@ test.describe("the inventory view", () => {
 
 test.describe("category admin", () => {
   test("12. a category is created with a class and the column shows it", async ({ page }) => {
+    // "Artwork" must stay unique across the suite's data — this case relies on
+    // the file-level reseed (test.beforeAll) for it to be creatable again on a re-run.
     await login(page, "admin@thebackroomop.com");
     await page.goto("/admin/asset-categories");
     await page.getByLabel("Class for the new category").selectOption("PURCHASING");
@@ -335,6 +344,16 @@ test.describe("Finance send-back and resubmit speak the class", () => {
     // on "AWAITING FINANCE" below regardless of whether the pill ever changed.
     await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
 
+    // IT cannot resubmit while the record still reads RETURNED BY FINANCE —
+    // asserted here, before Purchasing's resubmit clears financeReturnedAt,
+    // because once it's null the control is absent for every role and the
+    // check below (moved after the resubmit) could not fail even with the
+    // class guard dropped.
+    await login(page, "it@thebackroomop.com");
+    await page.goto(`/inventory/${id}`);
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Mark corrected" })).toHaveCount(0);
+
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
     await expect(page.getByRole("button", { name: "Mark corrected" })).toBeVisible();
@@ -343,10 +362,6 @@ test.describe("Finance send-back and resubmit speak the class", () => {
     await resubmitDialog.getByRole("button", { name: "Mark corrected" }).click();
     await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).financeReturnedAt).toBeNull();
-
-    await login(page, "it@thebackroomop.com");
-    await page.goto(`/inventory/${id}`);
-    await expect(page.getByRole("button", { name: "Mark corrected" })).toHaveCount(0);
   });
 });
 
@@ -417,8 +432,12 @@ test.describe("the leaver-kit policy picker", () => {
       .getByLabel("Asset type for the new slot in Finance standard")
       .locator("option")
       .allTextContents();
-    expect(options.some((o) => /Laptop/.test(o))).toBe(true);
-    expect(options.some((o) => /Sedan/.test(o))).toBe(false);
+    // Options are `${category.name} · ${type.name}`. A bare /Sedan/ negative
+    // would pass even if the whole Purchasing side leaked in (every Purchasing
+    // type name happens not to be "Sedan"), so assert no Purchasing CATEGORY
+    // is offered at all, alongside a positive that Laptop is.
+    expect(options.some((o) => /^Laptop · /.test(o))).toBe(true);
+    expect(options.some((o) => /^(Vehicle|Furniture|Pantry Equipment|Building) · /.test(o))).toBe(false);
   });
 });
 
