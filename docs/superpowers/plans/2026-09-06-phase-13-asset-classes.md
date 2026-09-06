@@ -103,6 +103,9 @@
 > **The lesson:** review a new module's *names* as hard as its *values*. The values were all right. The
 > name would have caused a bug in someone else's task, at a call site where the doc comment is not
 > visible.
+>
+> Task 2's code snippets below are left as originally written; **the committed module (`d65e12c`) is the
+> reference**, not the snippet. Re-deriving from the snippet would rebuild what the review removed.
 
 
 
