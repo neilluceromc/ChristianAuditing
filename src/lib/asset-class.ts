@@ -30,6 +30,16 @@ export const DEFAULT_STATUS = {
   IT: "SPARE", PURCHASING: "STORED",
 } as const satisfies Record<AssetClass, AssetStatus>;
 
+/**
+ * The status an asset must currently hold to be ASSIGNED -- the worker's
+ * precondition, and the approval detail's "Asset is assignable" check. Its own
+ * constant, not DEFAULT_STATUS: that one is what a new asset READS, and the two
+ * coincide today by design, not by definition. A test pins them equal.
+ */
+export const ASSIGNABLE_FROM = {
+  IT: "SPARE", PURCHASING: "STORED",
+} as const satisfies Record<AssetClass, AssetStatus>;
+
 /** What lifecycle.assign lands on when the payload does not say. */
 export const DEFAULT_ASSIGN_STATUS = {
   IT: "DEPLOYED", PURCHASING: "OPERATIONAL",

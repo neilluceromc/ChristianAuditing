@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { prisma } from "@/server/db/client";
 import { summarizeApproval } from "@/lib/approval-execution";
-import { DEFAULT_STATUS, RETURN_TARGETS } from "@/lib/asset-class";
+import { ASSIGNABLE_FROM, RETURN_TARGETS } from "@/lib/asset-class";
 import { slaLabel, tabWhere, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
 
 export const QUEUE_PAGE_SIZE = 50;
@@ -100,7 +100,7 @@ export async function systemChecks(
       return [
         assetCheck,
         asset
-          ? { label: "Asset is assignable", pass: asset.status === DEFAULT_STATUS[asset.cls], detail: `reads ${asset.status} right now` }
+          ? { label: "Asset is assignable", pass: asset.status === ASSIGNABLE_FROM[asset.cls], detail: `reads ${asset.status} right now` }
           : { label: "Asset is assignable", pass: false, detail: "—" },
         employee
           ? { label: "Recipient is active", pass: employee.employment === "ACTIVE", detail: `${employee.employeeNo} · ${employee.employment}` }
@@ -123,7 +123,9 @@ export async function systemChecks(
         {
           label: "Return target",
           pass: target !== null && asset !== null && (RETURN_TARGETS[asset.cls] as readonly string[]).includes(target),
-          detail: target ? `returns as ${target}` : "no target status in the payload",
+          detail: asset
+            ? (target ? `returns as ${target}` : "no target status in the payload")
+            : "asset is gone — target not checked",
         },
       ];
     }

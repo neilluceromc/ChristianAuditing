@@ -3,7 +3,7 @@ import { prisma } from "../server/db/client";
 import { executionPlan } from "../lib/approval-execution";
 import { APPROVAL_TYPE_LABEL } from "../lib/labels";
 import { emitWebhook } from "../server/webhooks/emit";
-import { DEFAULT_STATUS, HOLDER_STATUSES } from "../lib/asset-class";
+import { ASSIGNABLE_FROM, HOLDER_STATUSES } from "../lib/asset-class";
 
 type Diff = Record<string, { from: unknown; to: unknown }>;
 
@@ -79,8 +79,8 @@ async function runExecution(approvalId: string): Promise<void> {
       if (employee.employment !== "ACTIVE") {
         return fail(`Execution guard: target employee ${employee.employeeNo} is ${employee.employment} — assignment refused`);
       }
-      if (asset.status !== DEFAULT_STATUS[asset.cls]) {
-        return fail(`Execution guard: ${asset.tag} reads ${asset.status}, not ${DEFAULT_STATUS[asset.cls]} — assignment refused`);
+      if (asset.status !== ASSIGNABLE_FROM[asset.cls]) {
+        return fail(`Execution guard: ${asset.tag} reads ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — assignment refused`);
       }
       assigneeLabelTo = employee.employeeNo;
     }

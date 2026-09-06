@@ -27,7 +27,7 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
   it("change-status: refuses out-of-enum targets instead of casting blindly", () => {
     const plan = executionPlan("lifecycle_change_status", { from: { status: "SPARE" }, to: { status: "BANANAS" } }, "IT");
     expect(plan.ok).toBe(false);
-    if (!plan.ok) expect(plan.error).toMatch(/not a IT status/);
+    if (!plan.ok) expect(plan.error).toMatch(/not a valid status for IT assets/);
   });
   it("unsupported types fail honestly", () => {
     const plan = executionPlan("lifecycle_transfer", { from: "EMP-0042", to: "EMP-0051" }, "IT");
@@ -49,7 +49,7 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
   });
 
   it("return: refuses a target that isn't an offboarding outcome, naming it", () => {
-    for (const bad of ["DEPLOYED", "TEMPORARY", "DONATED", "DISPOSE"]) {
+    for (const bad of ["DEPLOYED", "TEMPORARY", "DONATED", "DISPOSE", "STORED"]) {
       const plan = executionPlan("lifecycle_return", { from: { assigneeId: "e" }, to: { assigneeId: null, status: bad } }, "IT");
       expect(plan.ok).toBe(false);
       // the offending value must END the message, not merely appear inside a
@@ -74,6 +74,7 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
   it("assign (IT): OPERATIONAL is refused — the class sets are disjoint both ways", () => {
     const plan = executionPlan("lifecycle_assign", { to: { assigneeId: "emp1", status: "OPERATIONAL" } }, "IT");
     expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.error).toMatch(/DEPLOYED or TEMPORARY/);
   });
   it("return (PURCHASING): STORED / REPAIRING / LOST, never BUYOUT", () => {
     expect(executionPlan("lifecycle_return", { from: { assigneeId: "e" }, to: { assigneeId: null, status: "STORED" } }, "PURCHASING"))
@@ -86,7 +87,7 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
     // DEPLOYED is a perfectly valid AssetStatus — and illegal for a car.
     const plan = executionPlan("lifecycle_change_status", { from: { status: "STORED" }, to: { status: "DEPLOYED" } }, "PURCHASING");
     expect(plan.ok).toBe(false);
-    if (!plan.ok) expect(plan.error).toMatch(/not a Purchasing status/);
+    if (!plan.ok) expect(plan.error).toMatch(/not a valid status for Purchasing assets/);
     expect(executionPlan("lifecycle_change_status", { from: { status: "STORED" }, to: { status: "SOLD" } }, "PURCHASING"))
       .toEqual({ ok: true, updates: { status: "SOLD" } });
   });
@@ -94,22 +95,22 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
 
 describe("summarizeApproval — the queue's two-line change cell", () => {
   it("assign", () => {
-    const s = summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "DEPLOYED" }, reason: "slot fill" }, { assetTag: "BR-HS-0502", employeeName: "M. Bautista" });
+    const s = summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "DEPLOYED" }, reason: "slot fill" }, { assetTag: "BR-HS-0502", employeeName: "M. Bautista", cls: "IT" });
     expect(s.line1).toBe("lifecycle.assign · BR-HS-0502");
     expect(s.line2).toBe("→ DEPLOYED · M. Bautista — slot fill");
   });
   it("change-status shows from → to", () => {
-    const s = summarizeApproval("lifecycle_change_status", { from: { status: "SPARE" }, to: { status: "DISPOSE" }, reason: "EOL" }, { assetTag: "BR-LT-0031" });
+    const s = summarizeApproval("lifecycle_change_status", { from: { status: "SPARE" }, to: { status: "DISPOSE" }, reason: "EOL" }, { assetTag: "BR-LT-0031", cls: "IT" });
     expect(s.line1).toBe("lifecycle.change-status · BR-LT-0031");
     expect(s.line2).toBe("SPARE → DISPOSE — EOL");
   });
   it("return", () => {
-    const s = summarizeApproval("lifecycle_return", { from: { assigneeId: "e" }, to: { assigneeId: null, status: "SPARE" }, reason: "offboarding" }, { assetTag: "BR-LT-0148", employeeName: "D. Ong" });
+    const s = summarizeApproval("lifecycle_return", { from: { assigneeId: "e" }, to: { assigneeId: null, status: "SPARE" }, reason: "offboarding" }, { assetTag: "BR-LT-0148", employeeName: "D. Ong", cls: "IT" });
     expect(s.line1).toBe("lifecycle.return · BR-LT-0148");
     expect(s.line2).toBe("D. Ong → SPARE — offboarding");
   });
   it("degrades without names and without reason", () => {
-    const s = summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "DEPLOYED" } }, {});
+    const s = summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "DEPLOYED" } }, { cls: undefined });
     expect(s.line1).toBe("lifecycle.assign");
     expect(s.line2).toBe("→ DEPLOYED");
   });
@@ -117,7 +118,7 @@ describe("summarizeApproval — the queue's two-line change cell", () => {
     const s = summarizeApproval(
       "lifecycle_return",
       { from: { assigneeId: "e" }, to: { assigneeId: null, status: "MISSING" }, reason: "not returned at offboarding" },
-      { assetTag: "BR-PH-0301", employeeName: "D. Ong" },
+      { assetTag: "BR-PH-0301", employeeName: "D. Ong", cls: "IT" },
     );
     expect(s.line1).toBe("lifecycle.return · BR-PH-0301");
     expect(s.line2).toBe("D. Ong → MISSING — not returned at offboarding");
@@ -125,13 +126,17 @@ describe("summarizeApproval — the queue's two-line change cell", () => {
   it("return: a payload with no target renders '?', not an invented SPARE (seeded APR-2040 shape)", () => {
     // The detail page shows this line beside a system check reading "no target
     // status in the payload" — the two panes must not contradict each other.
-    const s = summarizeApproval("lifecycle_return", { reason: "offboarding" }, { employeeName: "D. Ong" });
+    const s = summarizeApproval("lifecycle_return", { reason: "offboarding" }, { employeeName: "D. Ong", cls: undefined });
     expect(s.line2).toBe("D. Ong → ? — offboarding");
   });
   it("assign summary defaults to the CLASS's assign status when the payload omits one", () => {
     expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e" } }, { assetTag: "BR-VH-0001", cls: "PURCHASING" }).line2)
       .toBe("→ OPERATIONAL");
-    expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e" } }, { assetTag: "BR-LT-0001" }).line2)
+    expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e" } }, { assetTag: "BR-LT-0001", cls: "IT" }).line2)
       .toBe("→ DEPLOYED");
+  });
+  it("assign summary prints an explicit status regardless of class fallback", () => {
+    expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "OPERATIONAL" } }, { assetTag: "BR-VH-0001", cls: "PURCHASING" }).line2)
+      .toBe("→ OPERATIONAL");
   });
 });

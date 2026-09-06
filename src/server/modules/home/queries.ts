@@ -81,7 +81,7 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
   const rows: ShiftRow[] = [];
 
   for (const a of breached) {
-    const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name });
+    const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
     rows.push({
       key: `SLA:${a.id}`,
       kind: "SLA",
@@ -94,7 +94,7 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
   }
 
   for (const a of failed) {
-    const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name });
+    const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
     rows.push({
       key: `EXEC:${a.id}`,
       kind: "EXEC",
@@ -185,7 +185,7 @@ export async function claimedByYou(userId: string, now: Date = new Date()): Prom
   return rows.map((a) => ({
     id: a.id,
     refNo: a.refNo,
-    line1: summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name }).line1,
+    line1: summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls }).line1,
     sla: slaLabel(a.slaAt, now),
   }));
 }

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { AssetClass, AssetStatus } from "@prisma/client";
 import {
-  ASSET_CLASSES, ASSIGN_TARGETS, CREATABLE_BY_CLASS, DEFAULT_ASSIGN_STATUS,
+  ASSET_CLASSES, ASSIGN_TARGETS, ASSIGNABLE_FROM, CREATABLE_BY_CLASS, DEFAULT_ASSIGN_STATUS,
   DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
   canManageClass, isStatusOf, parseCls, statusesFor, withClsQS,
 } from "./asset-class";
@@ -72,6 +72,9 @@ describe("the derived sets stay inside their class", () => {
   });
   it("HOLDER_STATUSES and ASSIGN_TARGETS coincide today -- when they diverge, delete this test, not the constant", () => {
     for (const cls of ASSET_CLASSES) expect(sorted(HOLDER_STATUSES[cls])).toEqual(sorted(ASSIGN_TARGETS[cls]));
+  });
+  it("ASSIGNABLE_FROM and DEFAULT_STATUS coincide today -- when they diverge, delete this test, not the constant", () => {
+    for (const cls of ASSET_CLASSES) expect(ASSIGNABLE_FROM[cls]).toBe(DEFAULT_STATUS[cls]);
   });
 });
 

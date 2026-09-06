@@ -36,7 +36,7 @@ export function executionPlan(type: ApprovalType, payload: unknown, cls: AssetCl
         return { ok: false, error: `Malformed lifecycle.assign payload: expected to.assigneeId and to.status, got ${JSON.stringify(payload)}` };
       }
       if (!(ASSIGN_TARGETS[cls] as readonly string[]).includes(status)) {
-        return { ok: false, error: `lifecycle.assign target status for a ${CLASS_LABEL[cls]} asset must be ${ASSIGN_TARGETS[cls].join(" or ")}, got ${status}` };
+        return { ok: false, error: `lifecycle.assign target status for ${CLASS_LABEL[cls]} assets must be ${ASSIGN_TARGETS[cls].join(" or ")}, got ${status}` };
       }
       return { ok: true, updates: { assigneeId, status: status as AssetStatus } };
     }
@@ -54,7 +54,7 @@ export function executionPlan(type: ApprovalType, payload: unknown, cls: AssetCl
       if (!(RETURN_TARGETS[cls] as readonly string[]).includes(status)) {
         return {
           ok: false,
-          error: `lifecycle.return target status for a ${CLASS_LABEL[cls]} asset must be one of ${RETURN_TARGETS[cls].join(", ")}, got ${status}`,
+          error: `lifecycle.return target status for ${CLASS_LABEL[cls]} assets must be one of ${RETURN_TARGETS[cls].join(", ")}, got ${status}`,
         };
       }
       return { ok: true, updates: { assigneeId: null, status: status as AssetStatus } };
@@ -69,7 +69,7 @@ export function executionPlan(type: ApprovalType, payload: unknown, cls: AssetCl
       // AssetStatus and an illegal one for a car. (A blind cast here once let
       // an out-of-enum value throw INSIDE the execution transaction.)
       if (!isStatusOf(cls, status)) {
-        return { ok: false, error: `lifecycle.change-status target ${status} is not a ${CLASS_LABEL[cls]} status` };
+        return { ok: false, error: `lifecycle.change-status target ${status} is not a valid status for ${CLASS_LABEL[cls]} assets` };
       }
       return { ok: true, updates: { status } };
     }
@@ -82,7 +82,7 @@ export function executionPlan(type: ApprovalType, payload: unknown, cls: AssetCl
 export function summarizeApproval(
   type: ApprovalType,
   payload: unknown,
-  names: { assetTag?: string | null; employeeName?: string | null; cls?: AssetClass },
+  names: { assetTag?: string | null; employeeName?: string | null; cls: AssetClass | undefined },
 ): { line1: string; line2: string } {
   const p = obj(payload) ?? {};
   const from = obj(p.from);
