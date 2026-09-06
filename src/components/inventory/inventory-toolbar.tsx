@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { cn } from "@/lib/cn";
 import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
@@ -9,6 +10,7 @@ import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import {
   INVENTORY_LIST_CONFIG, withPurchaseYearQS, type PurchaseYearValue, type YearChip,
 } from "@/lib/inventory-list";
+import { ASSET_CLASSES, CLASS_LABEL, withClsQS } from "@/lib/asset-class";
 import { isRepairStage } from "@/lib/repairs";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
@@ -19,6 +21,7 @@ export function InventoryToolbar({
   facets,
   yearChips,
   purchaseYear,
+  cls,
   children,
 }: {
   state: ListState;
@@ -28,6 +31,8 @@ export function InventoryToolbar({
   yearChips: YearChip[];
   /** the currently active `?purchaseYear=`, or null */
   purchaseYear: PurchaseYearValue | null;
+  /** the class this view is scoped to (`?cls=`) */
+  cls: AssetClass;
   children?: React.ReactNode;
 }) {
   const router = useRouter();
@@ -35,14 +40,18 @@ export function InventoryToolbar({
 
   function submitSearch(q: string) {
     router.push(
-      pathname + withPurchaseYearQS(serializeListState(withSearch(state, q), INVENTORY_LIST_CONFIG), purchaseYear),
+      pathname
+        + withClsQS(withPurchaseYearQS(serializeListState(withSearch(state, q), INVENTORY_LIST_CONFIG), purchaseYear), cls),
     );
   }
 
   function applyFacet(facet: string, values: string[]) {
     router.push(
       pathname
-        + withPurchaseYearQS(serializeListState(withFilter(state, facet, values), INVENTORY_LIST_CONFIG), purchaseYear),
+        + withClsQS(
+          withPurchaseYearQS(serializeListState(withFilter(state, facet, values), INVENTORY_LIST_CONFIG), purchaseYear),
+          cls,
+        ),
     );
   }
 
@@ -55,13 +64,40 @@ export function InventoryToolbar({
    */
   function yearHref(chip: YearChip): string {
     const value: PurchaseYearValue = chip.year === null ? "none" : chip.year;
-    return pathname + withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), value);
+    return pathname + withClsQS(withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), value), cls);
   }
+
+  // Every facet option belongs to one class, so no facet filter survives a
+  // class switch: a status from the other class is silently dropped by the
+  // where but still shown as a chip; a category/type/assignee id from the
+  // other class matches nothing and renders as a raw id. Clear them; keep the
+  // class-neutral parts (q, sort, columns). The active class keeps its state.
+  const stateFor = (c: AssetClass): ListState => (c === cls ? state : { ...state, filters: {}, page: 1 });
 
   const stageActive = (state.filters.stage ?? []).some(isRepairStage);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-1.5" role="navigation" aria-label="Asset class">
+        {ASSET_CLASSES.map((c) => {
+          const active = c === cls;
+          return (
+            <Link
+              key={c}
+              href={pathname + withClsQS(withPurchaseYearQS(serializeListState(stateFor(c), INVENTORY_LIST_CONFIG), purchaseYear), c)}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "inline-flex items-center rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
+                active
+                  ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
+                  : "border-border bg-surface text-fg-secondary hover:bg-surface-subtle",
+              )}
+            >
+              {CLASS_LABEL[c]}
+            </Link>
+          );
+        })}
+      </div>
       <div className="relative w-[260px]">
         <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint">
           <Icon name="search" size={14} />

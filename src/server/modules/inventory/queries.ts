@@ -111,7 +111,7 @@ function toRow(a: {
 export async function repairStageIds(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
-  cls: AssetClass = "IT",
+  cls: AssetClass,
 ): Promise<string[] | null> {
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
   if (stages.length === 0) return null;
@@ -134,7 +134,7 @@ export async function repairStageIds(
 export async function listAssets(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
-  cls: AssetClass = "IT",
+  cls: AssetClass,
 ): Promise<{
   rows: AssetRow[];
   total: number;
@@ -208,7 +208,7 @@ export interface FacetOption {
 export async function facetOptions(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
-  cls: AssetClass = "IT",
+  cls: AssetClass,
 ): Promise<Record<string, FacetOption[]>> {
   const without = (facet: string): ListState => ({
     ...state,
@@ -278,7 +278,7 @@ export async function facetOptions(
  */
 export async function purchaseYearBuckets(
   state: ListState,
-  cls: AssetClass = "IT",
+  cls: AssetClass,
 ): Promise<Array<{ year: number | null; count: number }>> {
   const where = buildAssetWhere(state, null, cls);
   const rows = await prisma.asset.findMany({ where, select: { purchasedAt: true } });

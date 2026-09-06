@@ -38,7 +38,7 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
       where: { employment: "OFFBOARDING" },
       orderBy: { updatedAt: "asc" },
       take: 10,
-      select: { id: true, name: true, employeeNo: true, updatedAt: true, _count: { select: { assets: true } } },
+      select: { id: true, name: true, employeeNo: true, updatedAt: true, _count: { select: { assets: { where: { cls: "IT" } } } } },
     }),
     prisma.employee.findMany({
       where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
@@ -46,18 +46,18 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
       take: 10,
       select: {
         id: true, name: true, employeeNo: true, title: true, departmentId: true, joinedAt: true,
-        assets: { select: { id: true, tag: true, model: true, typeId: true, status: true } },
+        assets: { where: { cls: "IT" }, select: { id: true, tag: true, model: true, typeId: true, status: true } },
       },
     }),
     prisma.asset.findMany({
-      where: { status: "MISSING" },
+      where: { status: "MISSING", cls: "IT" },
       orderBy: { updatedAt: "asc" },
       take: 10,
       select: { id: true, tag: true, model: true, updatedAt: true },
     }),
     // custody that doesn't add up: DEPLOYED with nobody holding it
     prisma.asset.findMany({
-      where: { status: "DEPLOYED", assigneeId: null },
+      where: { status: "DEPLOYED", assigneeId: null, cls: "IT" },
       orderBy: { updatedAt: "asc" },
       take: 10,
       select: { id: true, tag: true, model: true, updatedAt: true },
@@ -209,17 +209,17 @@ export interface Fleet {
  */
 export async function fleet(now: Date = new Date()): Promise<Fleet> {
   const [groups, spares, hires] = await Promise.all([
-    prisma.asset.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.asset.groupBy({ by: ["status"], where: { cls: "IT" }, _count: { _all: true } }),
     // a spare under an ACTIVE hold is already promised to someone
     prisma.asset.findMany({
-      where: { status: "SPARE", reservations: { none: { state: "ACTIVE" } } },
+      where: { status: "SPARE", reservations: { none: { state: "ACTIVE" } }, cls: "IT" },
       select: { typeId: true },
     }),
     prisma.employee.findMany({
       where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
       select: {
         title: true, departmentId: true,
-        assets: { select: { id: true, tag: true, model: true, typeId: true, status: true } },
+        assets: { where: { cls: "IT" }, select: { id: true, tag: true, model: true, typeId: true, status: true } },
       },
     }),
   ]);
@@ -270,7 +270,7 @@ export interface AgeBar {
 
 /** Five buckets; only 4y+ changes colour, because that's next year's capex conversation. */
 export async function ageHistogram(now: Date = new Date()): Promise<AgeBar[]> {
-  const assets = await prisma.asset.findMany({ select: { purchasedAt: true } });
+  const assets = await prisma.asset.findMany({ where: { cls: "IT" }, select: { purchasedAt: true } });
   const counts = new Map<AgeBucket, number>(AGE_BUCKETS.map((b) => [b, 0]));
   for (const a of assets) {
     const bucket = ageBucket(a.purchasedAt, now);
@@ -296,6 +296,7 @@ export async function warrantyRunway(now: Date = new Date()): Promise<WarrantyRo
     where: {
       warrantyUntil: { gte: now, lte: horizon },
       status: { notIn: ["DISPOSE", "DONATED", "BUYOUT"] },
+      cls: "IT",
     },
     orderBy: { warrantyUntil: "asc" },
     take: 8,
@@ -418,7 +419,7 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
       where: { state: "COMPLETED", completedAt: { gte: monthStart } },
       select: { units: { select: { qty: true, unitPrice: true } } },
     }),
-    prisma.asset.aggregate({ where: { cost: { not: null } }, _sum: { cost: true }, _count: { _all: true } }),
+    prisma.asset.aggregate({ where: { cost: { not: null }, cls: "IT" }, _sum: { cost: true }, _count: { _all: true } }),
   ]);
 
   const oldest = waiting[0];

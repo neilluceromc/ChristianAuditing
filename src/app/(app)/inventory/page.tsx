@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
 import {
   clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter,
@@ -7,6 +8,7 @@ import {
   INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
   type PurchaseYearValue,
 } from "@/lib/inventory-list";
+import { CLASS_LABEL, canManageClass, parseCls, withClsQS } from "@/lib/asset-class";
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
@@ -28,10 +30,11 @@ export default async function InventoryPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
-  const canMutate = user.role === "admin" || user.role === "it_staff";
   const sp = toSearchParams(await searchParams);
   const state = parseListState(sp, INVENTORY_LIST_CONFIG);
   const purchaseYear = parsePurchaseYear(sp.get("purchaseYear"));
+  const cls: AssetClass = parseCls(sp.get("cls")) ?? "IT";
+  const canMutate = canManageClass(user.role, cls);
 
   // USB scanner contract: an exact tag match opens the record, not a list.
   if (state.q) {
@@ -40,10 +43,10 @@ export default async function InventoryPage({
   }
 
   const [{ rows, total, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
-    listAssets(state, purchaseYear),
-    facetOptions(state, purchaseYear),
+    listAssets(state, purchaseYear, cls),
+    facetOptions(state, purchaseYear, cls),
     getInventoryColumns(user.id),
-    purchaseYearBuckets(state),
+    purchaseYearBuckets(state, cls),
   ]);
   const yearChips = purchaseYearChips(yearBuckets);
 
@@ -63,8 +66,8 @@ export default async function InventoryPage({
   // imports `serializeListState` or `INVENTORY_LIST_CONFIG` any more, so
   // neither can reconstruct that bug.
   const href = (s: typeof state, py: PurchaseYearValue | null = purchaseYear) =>
-    "/inventory" + withPurchaseYearQS(serializeListState(s, INVENTORY_LIST_CONFIG), py);
-  const exportQS = withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear);
+    "/inventory" + withClsQS(withPurchaseYearQS(serializeListState(s, INVENTORY_LIST_CONFIG), py), cls);
+  const exportQS = withClsQS(withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear), cls);
   // One href per sortable key — the result of clicking that column's header —
   // plain serializable data, unlike `href` above, so it can cross into the
   // InventoryTable Client Component.
@@ -102,7 +105,7 @@ export default async function InventoryPage({
   return (
     <>
       <PageHeader
-        title="Inventory"
+        title={cls === "IT" ? "Inventory" : `${CLASS_LABEL[cls]} assets`}
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
         actions={
           <>
@@ -111,8 +114,10 @@ export default async function InventoryPage({
             </ButtonLink>
             {/* Affordance absent, not disabled, for a role that can't reach the
                 page — canMutate is exactly admin/it_staff, matching the
-                PATH_RULES entry that gates /inventory/import itself. */}
-            {canMutate && <ButtonLink href="/inventory/import">Import</ButtonLink>}
+                PATH_RULES entry that gates /inventory/import itself. Import
+                stays IT-only regardless of the view: there is no Purchasing
+                import wizard yet (Task 10). */}
+            {canMutate && cls === "IT" && <ButtonLink href="/inventory/import">Import</ButtonLink>}
             {canMutate && <ButtonLink variant="primary" href="/inventory/new">New asset</ButtonLink>}
           </>
         }
@@ -124,6 +129,7 @@ export default async function InventoryPage({
           facets={facets}
           yearChips={yearChips}
           purchaseYear={purchaseYear}
+          cls={cls}
         >
           <ColumnChooser visible={visibleColumns} />
           {/* Saved views are named URLs (README): Repairs is one of them. */}
@@ -150,8 +156,7 @@ export default async function InventoryPage({
               canMutate={canMutate}
               filtersQS={exportQS.replace(/^\?/, "")}
               total={total}
-              // Task 9 threads the real class from ?cls=; until then this page is the IT view, as it always was.
-              cls="IT"
+              cls={cls}
               repairMode={repairMode}
               sortHrefs={sortHrefs}
             />
