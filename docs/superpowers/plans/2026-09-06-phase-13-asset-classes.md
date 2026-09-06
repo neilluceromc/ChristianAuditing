@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-11. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-12. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -175,6 +175,32 @@
 > `q` search shape, and the null-`purchaseYear` cases). The implementer fixed all four mechanically and flagged
 > them. Same lesson as D-9, one notch smaller: **when a change alters a function's output shape, grep
 > its test file for whole-object assertions, not just the one you remember.**
+>
+> **D-12. Task 5 scoped two of `facetOptions`' three reference lists and left the third global.** Categories
+> and types got `where: { cls }`; the assignee list did not — so once Task 11's seed lands, the IT view's
+> Assigned facet would list a driver who holds only a car, at a permanent zero. Not "dimmed at zero", which
+> means *could have rows*; an option that can never have rows in this view. One-line fix
+> (`assets: { some: { cls } }`), found by the code-quality reviewer, who also walked every asset query the task
+> did NOT touch and confirmed each is right to stay global: the label sheet's `?ids=`, the palette, the
+> employee record, offboarding's holdings (a leaver holds a laptop AND a car), import dedupe (a tag must be
+> unique across classes), and `exactTagMatch` — a scanner contract: the label read off the object opens the
+> object, from whichever view. That last one now says so in its doc comment, because the sibling non-exact
+> path IS class-scoped and a later reader would "fix" the asymmetry.
+>
+> Three hand-offs from the same review, recorded in the tasks that own them. **Task 9:** the class switch
+> carries the whole serialized state across, so `?status=SPARE` on the Purchasing view would render a
+> "status: SPARE" chip for a filter `buildAssetWhere` silently drops — and a category, type or assignee id
+> from the other class would render as a raw cuid chip over an honestly empty list (the re-review's
+> addition). Every facet option belongs to exactly one class, so the switch now clears the facet filters
+> outright and keeps only what is class-neutral (`q`, sort, columns, year); the URL says what the where does. Also Task 9: the `cls = "IT"` defaults on the four
+> query functions were right for intermediate `tsc` and become a trap the moment the page threads `cls` —
+> removed there, in the same commit. **Task 11:** case 10 asserts the Filters panel (the three scoped lists
+> have zero coverage otherwise — no e2e case looked at the panel) and the class-switch clear. **Noted, not
+> amended:** `import-assets.ts` now accepts `OPERATIONAL` (fourteen statuses), so such a row passes
+> `bad-status` and dies at the trigger with the generic row error; Task 10 Step 3 closes it as planned.
+>
+> **The lesson:** when a change scopes one list in a function, scope *every* list in that function or write
+> down why not. Two of three is the shape that ships green.
 
 
 
@@ -1703,6 +1729,23 @@ In `src/components/inventory/inventory-toolbar.tsx`:
 - Import `ASSET_CLASSES, CLASS_LABEL, withClsQS` from `@/lib/asset-class` and `type AssetClass`.
 - Add prop `cls: AssetClass`.
 - Every `pathname + withPurchaseYearQS(...)` becomes `pathname + withClsQS(withPurchaseYearQS(...), cls)` (three places: `submitSearch`, `applyFacet`, `yearHref`).
+- The class switch must not carry facet filters across (D-12). Every facet option belongs to exactly one
+  class: an out-of-class status is dropped silently by `buildAssetWhere` while the chip row still shows it and
+  `hasFilters` still counts it; an out-of-class category, type or assignee id is applied, matches nothing, and
+  renders as a raw cuid chip because no option carries its label. Clear the facets at the switch and keep
+  only what is class-neutral — `q`, sort, columns, page size, the year. Above the component's `return`:
+
+```ts
+  // Every facet option belongs to one class, so no facet filter survives a
+  // class switch: a status from the other class is silently dropped by the
+  // where but still shown as a chip; a category/type/assignee id from the
+  // other class matches nothing and renders as a raw id. Clear them; keep the
+  // class-neutral parts (q, sort, columns). The active class keeps its state.
+  const stateFor = (c: AssetClass): ListState => (c === cls ? state : { ...state, filters: {}, page: 1 });
+```
+
+  (Not `clearFilters` — that also blanks `q`, and a search term is class-neutral.)
+
 - Render the class switch **before** the search box:
 
 ```tsx
@@ -1712,7 +1755,7 @@ In `src/components/inventory/inventory-toolbar.tsx`:
           return (
             <Link
               key={c}
-              href={pathname + withClsQS(withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear), c)}
+              href={pathname + withClsQS(withPurchaseYearQS(serializeListState(stateFor(c), INVENTORY_LIST_CONFIG), purchaseYear), c)}
               aria-current={active ? "page" : undefined}
               className={cn(
                 "inline-flex items-center rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
@@ -1727,6 +1770,16 @@ In `src/components/inventory/inventory-toolbar.tsx`:
         })}
       </div>
 ```
+
+- [ ] **Step 1a: Remove the scaffolding defaults (D-12)**
+
+In `src/server/modules/inventory/queries.ts`, `repairStageIds`, `listAssets`, `facetOptions` and
+`purchaseYearBuckets` each took `cls: AssetClass = "IT"` in Task 5 so that every intermediate commit compiled. After
+Step 1 the page passes `cls` explicitly, and the export route and bulk's `filters` branch already parse their own
+`?? "IT"` — no caller relies on the default any more. Make it `cls: AssetClass` (required) on all four. `tsc` is
+the proof that no caller was missed: a fifth caller added next year then fails to compile instead of silently
+reading IT. `buildAssetWhere` keeps its default — it is a pure function whose tests exercise the default on
+purpose, and its only callers are the three above.
 
 - [ ] **Step 2: Finance — the query and the tabs**
 
@@ -1784,7 +1837,7 @@ In `src/server/modules/home/queries.ts`, **every** `prisma.asset.findMany`, `pri
 
 ```bash
 npx tsc --noEmit && npm run lint && npx vitest run
-git add "src/app/(app)/inventory/page.tsx" src/components/inventory/inventory-toolbar.tsx src/server/modules/finance/queries.ts "src/app/(app)/finance/assets/page.tsx" src/server/modules/home/queries.ts
+git add "src/app/(app)/inventory/page.tsx" src/components/inventory/inventory-toolbar.tsx src/server/modules/inventory/queries.ts src/server/modules/finance/queries.ts "src/app/(app)/finance/assets/page.tsx" src/server/modules/home/queries.ts
 git commit -m "feat(views): ?cls= switches the inventory view; Finance gets IT and Purchasing tabs; Home stays IT"
 ```
 
@@ -2139,14 +2192,34 @@ test.describe("the database is the guarantee", () => {
 });
 
 test.describe("the inventory view", () => {
-  test("10. ?cls=PURCHASING lists Purchasing assets; the plain URL is unchanged", async ({ page }) => {
+  test("10. ?cls=PURCHASING lists Purchasing assets and scopes the Filters panel; the plain URL is unchanged", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory?cls=PURCHASING");
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toHaveCount(0);
+    // The Filters panel is scoped too (D-12): six Purchasing statuses, Purchasing categories only.
+    // FacetDropdown opens a dialog labelled "Filter by <label>" with one checkbox per option.
+    await page.getByRole("button", { name: /^Status/ }).click();
+    const statusDialog = page.getByRole("dialog", { name: "Filter by Status" });
+    await expect(statusDialog.getByRole("checkbox")).toHaveCount(6);
+    await expect(statusDialog.getByText("RETIRED")).toBeVisible();
+    await expect(statusDialog.getByText("DISPOSE")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /^Category/ }).click();
+    const categoryDialog = page.getByRole("dialog", { name: "Filter by Category" });
+    await expect(categoryDialog.getByText("Vehicle")).toBeVisible();
+    await expect(categoryDialog.getByText("Laptop")).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await page.goto("/inventory");
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
+    // Switching class clears the facet filters — none of them can apply to the other class (D-12).
+    await page.goto("/inventory?status=SPARE");
+    await expect(page.getByText("status: SPARE")).toBeVisible();
+    await page.getByRole("navigation", { name: "Asset class" }).getByRole("link", { name: "Purchasing" }).click();
+    await expect(page).toHaveURL(/cls=PURCHASING/);
+    await expect(page).not.toHaveURL(/status=/);
+    await expect(page.getByText("status: SPARE")).toHaveCount(0);
   });
 
   test("11. the bulk drawer on the Purchasing view offers Purchasing statuses", async ({ page }) => {
@@ -2229,7 +2302,7 @@ In `docs/HANDOVER.md` §9, add directly under the heading:
 
 Header line: Phase 13 code-complete on `phase-13-asset-classes`, unmerged, unpushed, with the battery numbers you actually got. §0 item 4: a Phase 13 paragraph pointing at the spec and this plan, naming the two premise-level facts (own vocabulary; one register), the two accepted defaults (approvers unchanged; categories admin/IT-created), and the two triggers. §4: a "Phase 13" paragraph in the DONE list.
 
-- [ ] **Step 3: §6a rules** — append at **101** (the list ends at 100; rules 75-80 sit out of order at the tail — see the warning there). Candidates from this phase: the `Asset.cls` default-plus-trigger pattern (a default is not a guarantee; a trigger is); the "IT is the URL default so nothing that predates the phase changes meaning" pattern; anything an amendment taught.
+- [ ] **Step 3: §6a rules** — append at **101** (the list ends at 100; rules 75-80 sit out of order at the tail — see the warning there). Candidates from this phase: the `Asset.cls` default-plus-trigger pattern (a default is not a guarantee; a trigger is); the "IT is the URL default so nothing that predates the phase changes meaning" pattern; a default parameter added so intermediate commits compile is removed in the commit where the last caller passes the value (D-12); when a function scopes one of its lists by a key, every list in it is scoped by the same key or the exception is written down (D-12); anything an amendment taught.
 
 - [ ] **Step 4: The battery**
 
