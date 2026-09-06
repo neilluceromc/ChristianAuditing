@@ -123,9 +123,11 @@ export async function systemChecks(
         {
           label: "Return target",
           pass: target !== null && asset !== null && (RETURN_TARGETS[asset.cls] as readonly string[]).includes(target),
-          detail: asset
-            ? (target ? `returns as ${target}` : "no target status in the payload")
-            : "asset is gone — target not checked",
+          detail: !approval.assetId
+            ? "—"
+            : asset
+              ? (target ? `returns as ${target}` : "no target status in the payload")
+              : "asset is gone — target not checked",
         },
       ];
     }

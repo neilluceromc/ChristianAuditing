@@ -135,8 +135,8 @@ describe("summarizeApproval — the queue's two-line change cell", () => {
     expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e" } }, { assetTag: "BR-LT-0001", cls: "IT" }).line2)
       .toBe("→ DEPLOYED");
   });
-  it("assign summary prints an explicit status regardless of class fallback", () => {
-    expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "OPERATIONAL" } }, { assetTag: "BR-VH-0001", cls: "PURCHASING" }).line2)
-      .toBe("→ OPERATIONAL");
+  it("assign summary prints an explicit status even when it differs from the class fallback", () => {
+    expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "STORED" } }, { assetTag: "BR-VH-0001", cls: "PURCHASING" }).line2)
+      .toBe("→ STORED");
   });
 });

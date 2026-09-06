@@ -44,6 +44,7 @@ describe("the derived sets stay inside their class", () => {
     it(`${cls}: defaults, assign, return, creatable and holder statuses are all members`, () => {
       expect(set.has(DEFAULT_STATUS[cls])).toBe(true);
       expect(set.has(DEFAULT_ASSIGN_STATUS[cls])).toBe(true);
+      expect(set.has(ASSIGNABLE_FROM[cls])).toBe(true);
       for (const s of ASSIGN_TARGETS[cls]) expect(set.has(s), s).toBe(true);
       for (const s of RETURN_TARGETS[cls]) expect(set.has(s), s).toBe(true);
       for (const s of CREATABLE_BY_CLASS[cls]) expect(set.has(s), s).toBe(true);
