@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-18. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-19. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -409,6 +409,36 @@
 >
 > **The lesson:** an assertion about a transport detail (status code, header) is a claim about the framework's
 > plumbing; assert the outcome the user sees unless the transport IS the contract.
+>
+> **D-19. Twenty green in one file said nothing about the other thirteen.** Task 11 validated the new spec alone;
+> the code-quality review walked every other spec against the new seed and found `import-export.spec.ts` comparing an
+> UNSCOPED `db.asset.findMany` (36 rows) to the class-pinned export (29) — the close-out battery would have gone red,
+> and the plan's own heuristic ("a moving IT count means a query was not pinned — fix the query") would have
+> misdiagnosed it: the query was right, the test's Prisma read was the unpinned side. Scoped to IT.
+>
+> Same review, same file: **two vacuous negatives.** Case 16's "IT cannot resubmit" ran after the resubmit, when the
+> control is absent for EVERY role — moved to the moment the record still reads RETURNED BY FINANCE. Case 5's
+> "no Reveal button" could never fail because the seed has no secrets, so the panel renders no Reveal even
+> unguarded — replaced with text the panel renders unconditionally. **A negative assertion is proven only when
+> the same locator matches in the other branch; write the pair or write nothing.** Also: the seed gave a REPAIRING
+> microwave a `defectiveSince`, and `repairStage` is class-blind, so the record showed an IT RETURNED OK card;
+> removed, and the export route now mirrors the page's D-16 `stage` drop so a stage-filtered export cannot return
+> rows the Purchasing list would not show. Minors: case 8 pins the outcome COUNT (3), case 19 excludes every
+> Purchasing type by prefix, case 14's regex is the holder guard's exact phrase, `worker:once` inherits stdio.
+>
+> **D-16's number was wrong for Task 12.** "about ₱47.6M" is the PURCHASING sum (₱47,635,000 / 7). Finance Home's
+> Capitalized tile totals BOTH classes: **₱48,442,000 across 32 assets** (IT ₱807,000 / 25). The Task 12 assertion
+> derives it from `db.asset.aggregate({ where: { cost: { not: null } } })` so the next seed edit cannot strand it.
+>
+> **Recorded for the handover (Task 12):** `labels.spec.ts`'s numbers still pass but 4 of its 13 printed labels are
+> now Purchasing (tag-ascending `take: 13`, label sheet unscoped by design) — D-15's "no label sheet for
+> Purchasing" is half true: nothing OFFERS one, but `?ids=` prints one. Home's leaver card pins `cls: "IT"` on
+> the holdings while the offboarding queue does not — the first seeded leaver holding a car makes them disagree.
+> No test drives a PURCHASING approval through the real approve action (cases 7/14 use the Prisma shortcut;
+> `approvals-audit.spec.ts` is IT-only). `worker:once` drains the whole queue, so cases 7/14 also fire the seed's
+> webhook delivery (pre-existing, bounded).
+>
+> **The lesson:** when a task changes shared fixtures, its verification is the suite, not its file.
 
 
 
@@ -2685,7 +2715,7 @@ npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-
 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 ```
 
-Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **187 / 14 files** — 167 + 20 (D-8, D-13, D-14, D-15, D-17; case 15 dropped, cases 20 and 21 added). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion. **That heuristic does not cover `financeHome` (D-16): nothing asserts Finance Home's Capitalized tile. Add an assertion in `home-finance.spec.ts` that it totals BOTH classes' seeded costs (IT + the seven Purchasing assets), so the one unpinned query is pinned the other way.**
+Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **187 / 14 files** — 167 + 20 (D-8, D-13, D-14, D-15, D-17; case 15 dropped, cases 20 and 21 added). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion. **That heuristic does not cover `financeHome` (D-16): nothing asserts Finance Home's Capitalized tile. Add an assertion in `home-finance.spec.ts` that it totals BOTH classes' seeded costs — **₱48,442,000 across 32 assets** (IT ₱807,000 / 25 + Purchasing ₱47,635,000 / 7; D-19 corrected D-16's "₱47.6M", which was the Purchasing sum alone) — derived in the test from `db.asset.aggregate({ where: { cost: { not: null } }, _sum: { cost: true }, _count: { _all: true } })` rather than typed, so the one unpinned query is pinned the other way and survives the next seed edit.** Also record in §8 (D-19): `labels.spec.ts` now prints 4 Purchasing labels of 13 (its numbers hold; the meaning moved); Home's leaver card pins IT holdings while the offboarding queue does not; no test drives a Purchasing approval through the real approve action.
 
 - [ ] **Step 5: Finish the branch** — `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions, separately.**
 
