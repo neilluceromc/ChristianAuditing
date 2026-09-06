@@ -4,15 +4,17 @@ import {
   parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
 } from "./inventory-list";
 import { parseListState } from "./url-state";
+import { STATUSES_BY_CLASS } from "./asset-class";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), INVENTORY_LIST_CONFIG);
 
 describe("buildAssetWhere", () => {
-  it("empty state → empty where", () => {
-    expect(buildAssetWhere(parse(""))).toEqual({});
+  it("empty state → IT-scoped where (cls defaults to IT — Phase 13)", () => {
+    expect(buildAssetWhere(parse(""))).toEqual({ cls: "IT" });
   });
   it("q searches tag, model and serial (contains, insensitive — NOT equals)", () => {
     expect(buildAssetWhere(parse("q=latitude"))).toEqual({
+      cls: "IT",
       OR: [
         { tag: { contains: "latitude", mode: "insensitive" } },
         { model: { contains: "latitude", mode: "insensitive" } },
@@ -40,11 +42,6 @@ describe("buildAssetOrderBy", () => {
     expect(buildAssetOrderBy([{ key: "category", dir: "desc" }, { key: "model", dir: "asc" }]))
       .toEqual([{ category: { name: "desc" } }, { model: "asc" }]);
   });
-});
-
-it("ASSET_STATUSES covers all 8 enum values", () => {
-  expect(ASSET_STATUSES).toHaveLength(8);
-  expect(ASSET_STATUSES).toContain("MISSING");
 });
 
 describe("the stage facet narrows to the repair candidate set", () => {
@@ -97,8 +94,8 @@ describe("purchaseYear filter on buildAssetWhere", () => {
   });
 
   it("omitted or null leaves purchasedAt untouched", () => {
-    expect(buildAssetWhere(parse(""))).toEqual({});
-    expect(buildAssetWhere(parse(""), null)).toEqual({});
+    expect(buildAssetWhere(parse(""))).toEqual({ cls: "IT" });
+    expect(buildAssetWhere(parse(""), null)).toEqual({ cls: "IT" });
   });
 
   it("rides alongside other facets and q without disturbing them", () => {
@@ -164,6 +161,26 @@ describe("purchaseYearChips", () => {
 
   it("builds a plain href naming the numeric year", () => {
     expect(purchaseYearChips([{ year: 2025, count: 1 }])[0].href).toBe("/inventory?purchaseYear=2025");
+  });
+});
+
+describe("buildAssetWhere — class (Phase 13)", () => {
+  const empty = { q: "", page: 1, sort: [], filters: {} };
+  it("defaults to IT, so every pre-Phase-13 URL means what it used to", () => {
+    expect(buildAssetWhere(empty).cls).toBe("IT");
+    expect(buildAssetWhere(empty, null).cls).toBe("IT");
+  });
+  it("filters to the requested class", () => {
+    expect(buildAssetWhere(empty, null, "PURCHASING").cls).toBe("PURCHASING");
+  });
+  it("a status filter outside the class is dropped, not passed through", () => {
+    // ?status=SPARE on the Purchasing view is a stale link, not a query
+    const w = buildAssetWhere({ ...empty, filters: { status: ["SPARE", "STORED"] } }, null, "PURCHASING");
+    expect(w.status).toEqual({ in: ["STORED"] });
+  });
+  it("ASSET_STATUSES is now every status of both classes", () => {
+    expect(ASSET_STATUSES).toHaveLength(14);
+    expect(ASSET_STATUSES).toEqual([...STATUSES_BY_CLASS.IT, ...STATUSES_BY_CLASS.PURCHASING]);
   });
 });
 

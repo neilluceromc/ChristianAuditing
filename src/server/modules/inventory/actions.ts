@@ -14,6 +14,7 @@ import {
 import {
   ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
+import { parseCls } from "@/lib/asset-class";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
@@ -68,8 +69,9 @@ export async function bulkRequestStatusChange(
     // which no Prisma filter can express). Acting on that candidate set
     // directly would mean the drawer's "all N matching" acts on more rows
     // than the screen shows. Resolve to the exact cut ids first.
-    const cutIds = await repairStageIds(state, purchaseYear);
-    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear);
+    const cls = parseCls(filterParams.get("cls")) ?? "IT";
+    const cutIds = await repairStageIds(state, purchaseYear, cls);
+    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear, cls);
   }
 
   let created = 0;

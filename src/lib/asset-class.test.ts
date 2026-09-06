@@ -9,7 +9,6 @@ import {
   canManageClass, isStatusOf, parseCls, statusesFor, withClsQS,
 } from "./asset-class";
 import { CREATABLE_STATUSES } from "./asset-rules";
-import { ASSET_STATUSES } from "./inventory-list";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
 
@@ -122,9 +121,6 @@ describe("parseCls / withClsQS — the ?cls= nav parameter", () => {
 describe("the IT sets match the constants they are replacing -- each pin is deleted by the task that deletes its constant", () => {
   it("CREATABLE_BY_CLASS.IT === CREATABLE_STATUSES (asset-rules.ts; Task 6 widens that to both classes and removes this)", () => {
     expect(sorted(CREATABLE_BY_CLASS.IT)).toEqual(sorted(CREATABLE_STATUSES));
-  });
-  it("STATUSES_BY_CLASS.IT === ASSET_STATUSES (inventory-list.ts; Task 5 widens that to fourteen and removes this)", () => {
-    expect(sorted(STATUSES_BY_CLASS.IT)).toEqual(sorted(ASSET_STATUSES));
   });
 });
 

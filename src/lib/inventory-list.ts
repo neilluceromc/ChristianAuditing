@@ -1,9 +1,16 @@
-import type { AssetStatus, Prisma } from "@prisma/client";
+import type { AssetClass, AssetStatus, Prisma } from "@prisma/client";
 import type { ListConfig, ListState, SortKey } from "./url-state";
 import { isRepairStage } from "./repairs";
+import { STATUSES_BY_CLASS, isStatusOf } from "./asset-class";
 
+/**
+ * EVERY status of BOTH classes (Phase 13) — the flat list for the places that
+ * genuinely mean "any valid value" (zod enums on request payloads, the import
+ * wizard's error text). A control that offers statuses to a person must use
+ * `statusesFor(cls)` instead; offering DEPLOYED for a car is a bug.
+ */
 export const ASSET_STATUSES = [
-  "DEPLOYED", "SPARE", "DEFECTIVE", "DONATED", "TEMPORARY", "BUYOUT", "DISPOSE", "MISSING",
+  ...STATUSES_BY_CLASS.IT, ...STATUSES_BY_CLASS.PURCHASING,
 ] as const satisfies readonly AssetStatus[];
 
 /** Bulk actions cap — shared by the server action and the selection bar UI. */
@@ -84,8 +91,12 @@ export function purchaseYearChips(buckets: Array<{ year: number | null; count: n
 export function buildAssetWhere(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
+  cls: AssetClass = "IT",
 ): Prisma.AssetWhereInput {
-  const where: Prisma.AssetWhereInput = {};
+  // Class first: it is the one filter that is ALWAYS applied. IT by default
+  // so that every consumer and every URL that predates Phase 13 behaves
+  // identically — the Purchasing view is the one that has to ask for itself.
+  const where: Prisma.AssetWhereInput = { cls };
   if (state.q) {
     // contains-search with insensitive mode is the sanctioned use; the
     // ILIKE-wildcard hazard applies to identity/equals lookups only.
@@ -96,8 +107,7 @@ export function buildAssetWhere(
     ];
   }
   const f = state.filters;
-  const statuses = (f.status ?? []).filter((s): s is AssetStatus =>
-    (ASSET_STATUSES as readonly string[]).includes(s));
+  const statuses = (f.status ?? []).filter((s): s is AssetStatus => isStatusOf(cls, s));
   if (statuses.length) where.status = { in: statuses };
   if (f.category?.length) where.categoryId = { in: f.category };
   if (f.type?.length) where.typeId = { in: f.type };
