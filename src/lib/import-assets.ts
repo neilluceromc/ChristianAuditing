@@ -1,5 +1,5 @@
-import type { AssetStatus, EmploymentStatus } from "@prisma/client";
-import { ASSET_STATUSES } from "./inventory-list";
+import type { AssetClass, AssetStatus, EmploymentStatus } from "@prisma/client";
+import { STATUSES_BY_CLASS } from "./asset-class";
 import type { BlockCause, BlockedRow, ImportOption } from "./import-vocabulary";
 import { cellText, isBlank, refKey, tagKey, TAG_SHAPE } from "./tag-key";
 
@@ -217,6 +217,8 @@ export interface AssetRefs {
    * the asset — so this carries the same shape as `byTag`, not a bare id.
    */
   bySerial: Map<string, AssetRecordRef>;
+  /** categoryId → class. Absent means IT, so a fixture that predates classes still reads as it did. */
+  categoryClass: Map<string, AssetClass>;
 }
 
 /**
@@ -551,6 +553,14 @@ export function planAssetRows(
       return;
     }
 
+    // Phase 13: this importer is IT's. A Purchasing-class category is not an
+    // unknown category — it exists — so it gets its own cause and its own
+    // fix, which is a different screen, not a different spreadsheet.
+    if (refs.categoryClass.get(categoryId) === "PURCHASING") {
+      block("wrong-class", categoryRaw);
+      return;
+    }
+
     // Type resolves WITHIN the row's own category, because AssetType is only
     // unique per category — pairing e.g. "Laptops" with a "Furniture" type
     // would otherwise produce an asset its own edit form can't save
@@ -691,7 +701,7 @@ export function planAssetRows(
     let parsedStatus: AssetStatus | null = null;
     if (statusRaw !== "") {
       const upper = statusRaw.toUpperCase();
-      const match = (ASSET_STATUSES as readonly string[]).find((s) => s === upper);
+      const match = (STATUSES_BY_CLASS.IT as readonly string[]).find((s) => s === upper);
       if (!match) {
         block("bad-status", statusRaw);
         return;

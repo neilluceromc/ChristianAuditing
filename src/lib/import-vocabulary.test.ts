@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ASSET_STATUSES } from "./inventory-list";
 import { EMPLOYMENT_STATUSES } from "./employees-list";
+import { STATUSES_BY_CLASS } from "./asset-class";
 import {
   BLOCK_CAUSES, IMPORT_MAX_UPLOAD_BYTES, IMPORT_OPTIONS, IMPORT_ROW_CAP, blockSpec, groupByCause,
   optionLabel, optionsFromForm, rowCapRefusal, uploadTooLargeRefusal,
@@ -13,9 +14,12 @@ import {
 // creates a Vendor), the latter is T11's own page (the wizard doesn't link to
 // itself; a "reupload" fix renders as its own restart instead). `/admin/
 // departments` was added in Task 12 — it exists, and unlike `/admin/vendors`
-// a rename there is genuinely possible (E-6).
+// a rename there is genuinely possible (E-6). `/inventory/register` was added
+// in Phase 13 Task 10 — it exists, and is where a Purchasing-class row is
+// pointed instead of a file fix.
 const REAL_ROUTES = [
   "/admin/asset-categories", "/admin/asset-types", "/admin/departments", "/inventory",
+  "/inventory/register",
 ];
 
 describe("BLOCK_CAUSES", () => {
@@ -84,9 +88,23 @@ describe("BLOCK_CAUSES", () => {
   // asserts are derived, directly under a comment saying never to — so it
   // would not have caught the exact drift it warns about. Iterating
   // ASSET_STATUSES closes that.
-  it("names all eight statuses inline in bad-status's explanation, derived not retyped", () => {
+  //
+  // Phase 13 Task 10: this importer is IT's. `bad-status`'s explanation now
+  // names IT's eight statuses, derived from STATUSES_BY_CLASS.IT (never
+  // retyped), and must NOT name any of Purchasing's six — those rows are
+  // refused by `wrong-class` before a status is ever checked.
+  it("names IT's eight statuses in bad-status's explanation, derived not retyped — and none of Purchasing's", () => {
     const explain = blockSpec("bad-status").explain;
-    for (const s of ASSET_STATUSES) expect(explain).toContain(s);
+    for (const s of STATUSES_BY_CLASS.IT) expect(explain).toContain(s);
+    for (const s of STATUSES_BY_CLASS.PURCHASING) expect(explain).not.toContain(s);
+  });
+
+  // Phase 13 Task 10: a Purchasing-class category is not an unknown one — it
+  // exists — so it gets its own cause, and its own fix: the Register screen,
+  // not a spreadsheet edit.
+  it("wrong-class sends the operator to the register screen, not to a file fix", () => {
+    const spec = blockSpec("wrong-class");
+    expect(spec.fix).toEqual({ kind: "link", label: "Register Purchasing assets", href: "/inventory/register" });
   });
 
   it("offers lifecycle-via-import a way to keep applying the row's other columns", () => {
@@ -193,6 +211,7 @@ describe("BLOCK_CAUSES", () => {
       "missing-required": "reupload",
       "employment-via-import": "option",
       "name-or-title-length": "reupload",
+      "wrong-class": "link",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);

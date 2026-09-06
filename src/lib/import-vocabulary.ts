@@ -1,5 +1,5 @@
-import { ASSET_STATUSES } from "./inventory-list";
 import { EMPLOYMENT_STATUSES } from "./employees-list";
+import { STATUSES_BY_CLASS } from "./asset-class";
 
 /**
  * Scope decision 5. An import writes one AuditEntry per row, so this cap bounds
@@ -98,6 +98,11 @@ export const BLOCK_CAUSES = [
   "missing-required",
   "employment-via-import",
   "name-or-title-length",
+  // Phase 13 Task 10: this importer is IT's. A Purchasing-class category is
+  // not an unknown one — it exists — so it is not `unknown-category`; it is
+  // its own cause, with its own fix (the Register screen, not a spreadsheet
+  // edit). Appended, per this array's own rule above — never inserted.
+  "wrong-class",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -210,7 +215,7 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   "bad-status": {
     label: "Status not recognised",
     explain:
-      `These rows carry a status that is not one of this system's eight: ${ASSET_STATUSES.join(", ")}. ` +
+      `These rows carry a status that is not one of IT's eight: ${STATUSES_BY_CLASS.IT.join(", ")}. ` +
       "Leave the column blank to get SPARE, or correct it to one of those.",
     fix: { kind: "reupload", label: "Fix the file" },
   },
@@ -419,6 +424,18 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "— 2 to 120 characters, the same rule the edit form enforces. Shorten or lengthen it to fit, and " +
       "re-upload.",
     fix: { kind: "reupload", label: "Fix the file" },
+  },
+
+  // Phase 13 Task 10: this importer is IT's. Not a reuse of `unknown-category`
+  // — the category IS known, it just belongs to the other class, so the fix
+  // is a different screen, not "create it first and re-upload".
+  "wrong-class": {
+    label: "Purchasing category",
+    explain:
+      "These rows name a Purchasing-class category (vehicles, furniture, buildings, pantry equipment). " +
+      "This importer is IT's — Purchasing assets are registered on the Register screen, where the " +
+      "tags are numbered for you.",
+    fix: { kind: "link", label: "Register Purchasing assets", href: "/inventory/register" },
   },
 };
 

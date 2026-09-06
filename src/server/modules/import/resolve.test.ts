@@ -113,7 +113,7 @@ describe("buildAssetRefs", () => {
   });
 
   it("resolves a category name to its id when there is exactly one match", () => {
-    const refs = buildAssetRefs([{ id: "cat-1", name: "Laptops" }], [], [], [], [], []);
+    const refs = buildAssetRefs([{ id: "cat-1", name: "Laptops", cls: "IT" }], [], [], [], [], []);
     expect(refs.categories.get(refKey("Laptops"))).toBe("cat-1");
   });
 
@@ -124,7 +124,7 @@ describe("buildAssetRefs", () => {
   // silently; the fix surfaces that as `null` instead of an id.
   it("resolves a case-colliding category name to null (ambiguous), not silently to one of the two ids", () => {
     const refs = buildAssetRefs(
-      [{ id: "cat-1", name: "Laptop" }, { id: "cat-2", name: "laptop" }],
+      [{ id: "cat-1", name: "Laptop", cls: "IT" }, { id: "cat-2", name: "laptop", cls: "IT" }],
       [],
       [],
       [],
@@ -167,7 +167,7 @@ describe("buildAssetRefs", () => {
   // non-breaking space) so a category/vendor/employee name pasted with one
   // still matches the plain-space spelling stored in the database.
   it("resolves a category name carrying an internal non-breaking space via refKey", () => {
-    const refs = buildAssetRefs([{ id: "cat-1", name: "Spare Parts" }], [], [], [], [], []);
+    const refs = buildAssetRefs([{ id: "cat-1", name: "Spare Parts", cls: "IT" }], [], [], [], [], []);
     expect(refs.categories.get(refKey("Spare Parts"))).toBe("cat-1");
   });
 });

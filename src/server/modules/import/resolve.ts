@@ -2,7 +2,7 @@ import { prisma } from "@/server/db/client";
 import { refKey, tagKey } from "@/lib/import-assets";
 import type { AssetRecordRef, AssetRefs, EmployeeRef } from "@/lib/import-assets";
 import type { EmployeeRecordRef, EmployeeRefs } from "@/lib/import-employees";
-import type { EmploymentStatus } from "@prisma/client";
+import type { AssetClass, EmploymentStatus } from "@prisma/client";
 
 /** Every field `AssetRecordRef` needs, straight off the Prisma select. */
 const RECORD_SELECT = {
@@ -37,6 +37,7 @@ function toRecordRef(a: RawRecord): AssetRecordRef {
 interface CategoryRow {
   id: string;
   name: string;
+  cls: AssetClass;
 }
 interface TypeRow {
   id: string;
@@ -152,6 +153,11 @@ export function buildAssetRefs(
     // visually distinct tags resolve to the same asset.
     byTag: new Map(byTagRows.map((a) => [a.tag, toRecordRef(a)])),
     bySerial: new Map(bySerialRows.flatMap((a) => (a.serial ? [[a.serial, toRecordRef(a)] as const] : []))),
+    // Phase 13 Task 10: this importer is IT's. Keyed by id, not by the
+    // refKey'd name map above — planAssetRows already has the resolved
+    // categoryId by the time it checks class, and a category never changes
+    // class once created, so no case-collision handling is needed here.
+    categoryClass: new Map(categories.map((c) => [c.id, c.cls])),
   };
 }
 
@@ -188,7 +194,7 @@ export async function resolveAssetRefs(tags: string[], serials: string[]): Promi
   const upperTags = tags.map(tagKey);
 
   const [categories, types, employees, vendors, byTagRows, bySerialRows] = await Promise.all([
-    prisma.assetCategory.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.assetCategory.findMany({ select: { id: true, name: true, cls: true }, orderBy: { name: "asc" } }),
     // Categories AND names, never a flat name→id map: AssetType is
     // `@@unique([categoryId, name])`, not globally unique, so two categories
     // can each have their own same-named type and a flat key would silently
