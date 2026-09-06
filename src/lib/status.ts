@@ -16,6 +16,11 @@ const MAP: Record<string, StatusFamily> = {
   // Asset status (MISSING: custody lost — a fault demanding investigation, not "fine for now")
   DEPLOYED: "settled", SPARE: "neutral", DEFECTIVE: "fault", MISSING: "fault", DONATED: "closed",
   TEMPORARY: "attention", BUYOUT: "closed", DISPOSE: "closed",
+  // Purchasing-class asset status (Phase 13). STORED is neutral for the same
+  // reason SPARE is — idle stock is not a problem; REPAIRING and LOST are
+  // faults for the same reason DEFECTIVE and MISSING are.
+  OPERATIONAL: "settled", STORED: "neutral", REPAIRING: "fault",
+  RETIRED: "closed", SOLD: "closed", LOST: "fault",
   // Purchase request state
   DRAFT: "neutral", SUBMITTED: "inflight", IT_REVIEWED: "inflight",
   COMPLETED: "settled", CANCELLED: "closed",

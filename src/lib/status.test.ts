@@ -7,6 +7,10 @@ describe("statusFamily", () => {
     // Asset status (8 — MISSING is the approved schema extension for the offboarding wizard)
     ["DEPLOYED", "settled"], ["SPARE", "neutral"], ["DEFECTIVE", "fault"], ["MISSING", "fault"],
     ["DONATED", "closed"], ["TEMPORARY", "attention"], ["BUYOUT", "closed"], ["DISPOSE", "closed"],
+    // Purchasing-class asset status (Phase 13, 6): the same six families, so a
+    // car in repair is amber the way a laptop in repair is
+    ["OPERATIONAL", "settled"], ["STORED", "neutral"], ["REPAIRING", "fault"],
+    ["RETIRED", "closed"], ["SOLD", "closed"], ["LOST", "fault"],
     // Purchase request state (5)
     ["DRAFT", "neutral"], ["SUBMITTED", "inflight"], ["IT_REVIEWED", "inflight"],
     ["COMPLETED", "settled"], ["CANCELLED", "closed"],

@@ -17,6 +17,13 @@ enum Role {
   viewer
 }
 
+/// Phase 13. Lives on the category; copied onto each asset at creation and
+/// held equal to the category's by a trigger. See spec §2.
+enum AssetClass {
+  IT
+  PURCHASING
+}
+
 enum AssetStatus {
   DEPLOYED
   SPARE
@@ -26,6 +33,14 @@ enum AssetStatus {
   BUYOUT
   DISPOSE
   MISSING
+  // Purchasing-class vocabulary (Phase 13). Disjoint from the eight above; a
+  // trigger refuses any asset whose status is outside its class's set.
+  OPERATIONAL
+  STORED
+  REPAIRING
+  RETIRED
+  SOLD
+  LOST
 }
 
 enum PurchaseRequestState {
@@ -169,6 +184,7 @@ model AssetCategory {
   id     String      @id @default(cuid())
   name   String      @unique
   locked Boolean     @default(false)
+  cls    AssetClass  @default(IT)
   types  AssetType[]
   assets Asset[]
 }
@@ -229,6 +245,9 @@ model Asset {
   typeId            String?
   type              AssetType?       @relation(fields: [typeId], references: [id], onDelete: Restrict)
   status            AssetStatus      @default(SPARE)
+  // Copied from category.cls at creation, never edited; the
+  // asset_class_invariants trigger keeps it equal to the category's.
+  cls               AssetClass       @default(IT)
   assigneeId        String?
   assignee          Employee?        @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
   purchasedAt       DateTime?
@@ -268,6 +287,7 @@ model Asset {
   @@index([vendorId])
   @@index([financeConfirmedAt])
   @@index([financeReturnedAt])
+  @@index([cls])
 }
 
 model AssetSecret {
