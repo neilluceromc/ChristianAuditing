@@ -99,7 +99,7 @@ export const EMPLOYEE_EXPORT_COLUMNS: XlsxColumn<{
  *
  * The plan for this task named "Decided by" and "Decided" (a timestamp)
  * columns. Neither exists on `Decision` (`src/lib/offboarding.ts`): it
- * carries `refNo`, `outcome`, `state` and `reason` only — no approver actor,
+ * carries `refNo`, `outcome`, `state`, `reason` and `toStatus` only — no approver actor,
  * no decision timestamp, and adding either would mean widening the shared
  * `Decision`/`DecisionCandidate` types and the query that fills them, which
  * is out of this task's scope and not something to do by inventing a field

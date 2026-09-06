@@ -15,9 +15,11 @@ import { useScan } from "./scan-provider";
 import { decideItem } from "@/server/modules/offboarding/actions";
 
 /**
- * The 4-way control (README 3e). Missing is first-class and sits in the same
- * row as the other three — not behind a "more" menu — because pretending
- * everything comes back is why spreadsheets drift.
+ * The per-item outcome control (README 3e): `outcomesFor(cls)` -- Returned /
+ * Defective / Buyout / Missing for an IT asset, the same minus Buyout for a
+ * Purchasing one. Missing is first-class and sits in the same row as the
+ * others -- not behind a "more" menu -- because pretending everything comes
+ * back is why spreadsheets drift.
  *
  * Confirm is enabled as soon as an outcome is picked, even with the reason
  * empty: the SERVER refuses a reasonless Defective/Buyout/Missing, and letting
