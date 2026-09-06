@@ -9,7 +9,8 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, reasonRequired, type Outcome } from "@/lib/offboarding";
+import type { AssetClass } from "@prisma/client";
+import { OUTCOME_LABEL, outcomeStatus, outcomesFor, reasonRequired, type Outcome } from "@/lib/offboarding";
 import { useScan } from "./scan-provider";
 import { decideItem } from "@/server/modules/offboarding/actions";
 
@@ -27,10 +28,12 @@ export function ItemDecision({
   employeeId,
   assetId,
   tag,
+  cls,
 }: {
   employeeId: string;
   assetId: string;
   tag: string;
+  cls: AssetClass;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -44,6 +47,7 @@ export function ItemDecision({
   const [scanned, setScanned] = useState(false);
   const scan = useScan();
   const outcomeErrorId = "outcome-error-" + assetId;
+  const outcomes = outcomesFor(cls);
 
   // Acts only on this card's own tag. `nonce` is in the dependency list so
   // scanning the same tag twice re-triggers (e.g. after changing your mind
@@ -76,7 +80,7 @@ export function ItemDecision({
     rootRef.current?.focus();
   }, [scan.tag, scan.nonce, tag]);
 
-  const picked = (OUTCOMES as readonly string[]).includes(outcome) ? (outcome as Outcome) : null;
+  const picked = (outcomes as readonly string[]).includes(outcome) ? (outcome as Outcome) : null;
 
   function submit() {
     if (!picked) {
@@ -88,7 +92,7 @@ export function ItemDecision({
     startTransition(async () => {
       const res = await decideItem({ employeeId, assetId, outcome: picked, reason });
       if (res.ok) {
-        toast(`${res.data.refNo} created — ${tag} → ${OUTCOME_STATUS[picked]}`, "settled");
+        toast(`${res.data.refNo} created — ${tag} → ${outcomeStatus(cls, picked)}`, "settled");
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
@@ -122,7 +126,7 @@ export function ItemDecision({
           aria-label={`Outcome for ${tag}`}
           aria-describedby={fieldErrors.outcome ? outcomeErrorId : undefined}
           aria-invalid={!!fieldErrors.outcome}
-          options={OUTCOMES.map((o) => ({ value: o, label: OUTCOME_LABEL[o] }))}
+          options={outcomes.map((o) => ({ value: o, label: OUTCOME_LABEL[o] }))}
           value={outcome}
           onChange={setOutcome}
         />
@@ -130,7 +134,7 @@ export function ItemDecision({
           Confirm decision
         </Button>
         <span className="font-mono text-[10px] text-fg-muted">
-          {picked ? `creates a lifecycle.return → ${OUTCOME_STATUS[picked]}` : "creates its own request the moment you confirm"}
+          {picked ? `creates a lifecycle.return → ${outcomeStatus(cls, picked)}` : "creates its own request the moment you confirm"}
         </span>
       </div>
       <FormError id={outcomeErrorId}>{fieldErrors.outcome}</FormError>

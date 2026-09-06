@@ -8,7 +8,8 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
-import { OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, decisionOf, reasonRequired } from "@/lib/offboarding";
+import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, outcomesFor, reasonRequired } from "@/lib/offboarding";
+import { CLASS_LABEL } from "@/lib/asset-class";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { candidatesFor } from "@/server/modules/offboarding/queries";
 import { emitWebhook } from "@/server/webhooks/emit";
@@ -105,6 +106,13 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
       if (asset.assigneeId !== d.employeeId) {
         return conflict(`${asset.tag} isn't held by ${employee.name} any more — refresh the wizard.`);
       }
+      // A car has no Buyout. Validated HERE, against the asset's class, not
+      // at parse time — the outcome is legal for the enum and illegal for
+      // this asset, and only the asset knows which it is.
+      if (!outcomesFor(asset.cls).includes(d.outcome)) {
+        return validationError({ outcome: `${OUTCOME_LABEL[d.outcome]} is not an outcome for a ${CLASS_LABEL[asset.cls]} asset.` });
+      }
+      const targetStatus = outcomeStatus(asset.cls, d.outcome)!;
       // The one-open-per-asset index is per ASSET, not per approval type: a
       // pending lifecycle.change-status refuses this decision too, and
       // "that decision is already recorded" would be a lie pointing nowhere.
@@ -126,7 +134,7 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
         type: "lifecycle_return",
         payload: {
           from: { assigneeId: d.employeeId },
-          to: { assigneeId: null, status: OUTCOME_STATUS[d.outcome] },
+          to: { assigneeId: null, status: targetStatus },
           // keyed on the outcome rather than on emptiness: reasonRequired
           // guarantees a reason for the other three, and this sentinel would be
           // a lie stamped on a MISSING item if that ever changed
