@@ -147,6 +147,8 @@ export default async function InventoryPage({
               canMutate={canMutate}
               filtersQS={exportQS.replace(/^\?/, "")}
               total={total}
+              // Task 9 threads the real class from ?cls=; until then this page is the IT view, as it always was.
+              cls="IT"
               repairMode={repairMode}
               sortHrefs={sortHrefs}
             />

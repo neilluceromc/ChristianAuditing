@@ -15,7 +15,7 @@ export default async function AssetCategoriesPage() {
       <RefTable
         entity="category"
         rows={rows.map((r) => ({
-          id: r.id, name: r.name, locked: r.locked,
+          id: r.id, name: r.name, locked: r.locked, cls: r.cls,
           usage: `${r._count.types} types · ${r._count.assets} assets`,
         }))}
       />

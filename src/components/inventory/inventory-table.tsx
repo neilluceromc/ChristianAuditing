@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -47,6 +48,7 @@ export function InventoryTable({
   canMutate,
   filtersQS,
   total,
+  cls,
   repairMode = false,
   sortHrefs,
 }: {
@@ -56,6 +58,7 @@ export function InventoryTable({
   canMutate: boolean;
   filtersQS: string; // serialized current list state, no leading "?"
   total: number;
+  cls: AssetClass;
   /** the repairs saved view: adds Stage + Down (README 7b) */
   repairMode?: boolean;
   /**
@@ -249,6 +252,7 @@ export function InventoryTable({
           allMatching={allMatching}
           filtersQS={filtersQS}
           total={total}
+          cls={cls}
           onDone={clearSelection}
         />
       )}

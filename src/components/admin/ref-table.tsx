@@ -19,6 +19,7 @@ export interface RefRow {
   usage: string; // "12 assets · 2 types" — preformatted server-side
   locked: boolean;
   categoryName?: string; // types only
+  cls?: string; // categories only
 }
 
 /** One table design serves all three reference screens (README 4c): inline add row, locked rows, in-use delete refusal. */
@@ -40,7 +41,9 @@ export function RefTable({
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const [newCls, setNewCls] = useState<"IT" | "PURCHASING">("IT");
   const isType = entity === "type";
+  const isCategory = entity === "category";
 
   function run(fn: () => Promise<{ ok: boolean } & Record<string, unknown>>, okMsg: string) {
     setError(null);
@@ -67,6 +70,7 @@ export function RefTable({
         <THead>
           <Tr>
             <Th>Name</Th>
+            {isCategory && <Th width={130}>Class</Th>}
             {isType && <Th width={140}>Category</Th>}
             <Th width={200}>In use by</Th>
             <Th width={60} aria-label="Row actions" />
@@ -87,13 +91,22 @@ export function RefTable({
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
-                      run(() => createRefRow({ entity, name: newName, categoryId: isType ? newCategory : undefined }), "Added");
+                      run(() => createRefRow({ entity, name: newName, categoryId: isType ? newCategory : undefined, cls: isCategory ? newCls : undefined }), "Added");
                     }
                   }}
                 />
                 {fieldError && <p role="alert" className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{fieldError}</p>}
               </div>
             </Td>
+            {isCategory && (
+              <Td>
+                <Select aria-label="Class for the new category" value={newCls} className="py-1.5 text-xs"
+                  onChange={(e) => setNewCls(e.target.value as "IT" | "PURCHASING")}>
+                  <option value="IT">IT</option>
+                  <option value="PURCHASING">Purchasing</option>
+                </Select>
+              </Td>
+            )}
             {isType && (
               <Td>
                 <Select aria-label="Category for the new type" value={newCategory} className="py-1.5 text-xs"
@@ -105,7 +118,7 @@ export function RefTable({
             <Td className="text-fg-faint">—</Td>
             <Td>
               <Button size="sm" variant="primary" loading={pending}
-                onClick={() => run(() => createRefRow({ entity, name: newName, categoryId: isType ? newCategory : undefined }), "Added")}>
+                onClick={() => run(() => createRefRow({ entity, name: newName, categoryId: isType ? newCategory : undefined, cls: isCategory ? newCls : undefined }), "Added")}>
                 Add
               </Button>
             </Td>
@@ -130,6 +143,7 @@ export function RefTable({
                   <span className="text-[12.5px] text-fg">{row.name}</span>
                 )}
               </Td>
+              {isCategory && <Td mono className="text-[10.5px]">{row.cls}</Td>}
               {isType && <Td>{row.categoryName}</Td>}
               <Td mono className="text-[10.5px]">{row.usage}</Td>
               <Td>

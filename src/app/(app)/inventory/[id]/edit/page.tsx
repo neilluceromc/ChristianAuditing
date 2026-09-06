@@ -43,7 +43,6 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
       />
       <AssetForm
         mode="edit"
-        // Task 8 widens AssetForm's category prop to carry cls; until then cls is passed and ignored.
         categories={categories.map((c) => ({ id: c.id, name: c.name, cls: c.cls }))}
         types={types.map((t) => ({ id: t.id, name: t.name, categoryId: t.categoryId }))}
         employees={[]}

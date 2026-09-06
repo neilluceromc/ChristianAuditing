@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -12,7 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { CREATABLE_STATUSES, type CreatableStatus } from "@/lib/asset-rules";
+import { CREATABLE_BY_CLASS, type CreatableStatus } from "@/lib/asset-rules";
+import { DEFAULT_STATUS } from "@/lib/asset-class";
 import type { ActionResult } from "@/server/action-result";
 
 export interface AssetFormInitial {
@@ -40,7 +42,7 @@ export function AssetForm({
   action,
 }: {
   mode: "new" | "edit";
-  categories: Array<{ id: string; name: string }>;
+  categories: Array<{ id: string; name: string; cls: AssetClass }>;
   types: Array<{ id: string; name: string; categoryId: string }>;
   employees: ComboOption[];
   vendors?: Array<{ id: string; name: string }>;
@@ -77,6 +79,16 @@ export function AssetForm({
   };
 
   const typesForCategory = types.filter((t) => t.categoryId === form.categoryId);
+
+  // The category decides the class; the class decides which initial states
+  // exist. Before a category is picked the form shows IT's, which is also
+  // what an empty pre-Phase-13 form showed.
+  const cls: AssetClass = categories.find((c) => c.id === form.categoryId)?.cls ?? "IT";
+  const creatable = CREATABLE_BY_CLASS[cls];
+
+  useEffect(() => {
+    if (!(creatable as readonly string[]).includes(requestedStatus)) setRequestedStatus(DEFAULT_STATUS[cls]);
+  }, [cls, creatable, requestedStatus]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -224,15 +236,15 @@ export function AssetForm({
           <CardBody className="flex flex-col gap-4">
             <SegmentedControl
               aria-label="Initial status"
-              options={CREATABLE_STATUSES.map((s) => ({ value: s, label: s }))}
+              options={creatable.map((s) => ({ value: s, label: s }))}
               value={requestedStatus}
               onChange={(v) => setRequestedStatus(v as CreatableStatus)}
             />
-            {requestedStatus !== "SPARE" && (
+            {requestedStatus !== DEFAULT_STATUS[cls] && (
               <>
                 <p className="text-xs text-fg-muted">
                   Assignment routes through a <span className="font-mono">lifecycle.assign</span> approval —
-                  the asset is registered as SPARE and flips once the request executes.
+                  the asset is registered as {DEFAULT_STATUS[cls]} and flips once the request executes.
                 </p>
                 <FormField label="Assign to" required error={errors.assigneeId}>
                   {(p) => (

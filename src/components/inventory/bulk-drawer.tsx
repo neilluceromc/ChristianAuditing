@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -10,7 +11,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { ASSET_STATUSES } from "@/lib/inventory-list";
+import { DEFAULT_STATUS, statusesFor } from "@/lib/asset-class";
 import { bulkRequestStatusChange } from "@/server/modules/inventory/actions";
 
 export function BulkDrawer({
@@ -20,6 +21,7 @@ export function BulkDrawer({
   allMatching,
   filtersQS,
   total,
+  cls,
   onDone,
 }: {
   open: boolean;
@@ -28,12 +30,13 @@ export function BulkDrawer({
   allMatching: boolean;
   filtersQS: string; // serialized current list state, no leading "?"
   total: number;
+  cls: AssetClass;
   onDone: () => void;
 }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, startTransition] = useTransition();
-  const [to, setTo] = useState<string>("SPARE");
+  const [to, setTo] = useState<string>(DEFAULT_STATUS[cls]);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -108,7 +111,10 @@ export function BulkDrawer({
             rendered with an empty, non-allMatching selection. Kept anyway so
             the link stays ABSENT, not disabled, if that caller ever changes —
             the house rule for affordances that cannot act. */}
-        {!allMatching && selectedIds.length > 0 && (
+        {/* /inventory/labels is IT-workspace-only (workspaces.ts PATH_RULES);
+            for a Purchasing selection the affordance is absent, not a link
+            that would eject the user out of the workspace. */}
+        {!allMatching && selectedIds.length > 0 && cls === "IT" && (
           <a
             href={`/inventory/labels?ids=${selectedIds.join(",")}`}
             className="text-xs text-accent hover:underline"
@@ -135,7 +141,7 @@ export function BulkDrawer({
               value={to}
               onChange={(e) => setTo(e.target.value)}
             >
-              {ASSET_STATUSES.map((s) => (
+              {statusesFor(cls).map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </Select>
