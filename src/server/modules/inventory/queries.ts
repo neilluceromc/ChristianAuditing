@@ -200,6 +200,10 @@ export interface FacetOption {
  * not its own selection — options stay visible (dimmed at zero) instead of
  * vanishing once a sibling is picked. URL updates only on Apply, so these
  * recompute per navigation, not per click.
+ *
+ * Every list and every count in here is scoped by `cls` — the four groupBys
+ * through buildAssetWhere, the three reference lists directly. An eighth
+ * query must be too; two-of-three was the shape that shipped (D-12).
  */
 export async function facetOptions(
   state: ListState,

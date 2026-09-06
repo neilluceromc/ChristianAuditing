@@ -5,14 +5,16 @@ import { STATUSES_BY_CLASS, isStatusOf } from "./asset-class";
 
 /**
  * EVERY status of BOTH classes (Phase 13) — the flat list for the places that
- * genuinely mean "any valid value" (zod enums on request payloads, the import
- * wizard's error text). A control that offers statuses to a person must use
- * `statusesFor(cls)` instead; offering DEPLOYED for a car is a bug.
+ * genuinely mean "any valid value": the two zod enums on request payloads in
+ * inventory/actions.ts. Those stay at fourteen on purpose — the class check on
+ * the action is the guard, not the enum. A control that offers statuses to a
+ * person must use `statusesFor(cls)` instead; offering DEPLOYED for a car is a bug.
  *
- * Three pickers (request-status-change, bulk-drawer, finance/assets) still
- * read this list and show fourteen; Tasks 7-9 move them to `statusesFor(cls)`.
- * The zod enums stay at fourteen on purpose — the class check on the action
- * is the guard, not the enum.
+ * Every other reader is a known intermediate state, not a second legitimate
+ * use: three pickers (request-status-change, bulk-drawer, finance/assets) that
+ * Tasks 7-9 move to `statusesFor(cls)`; finance/queries.ts's `parseAssetStatus`, which
+ * Task 9 makes class-aware; and the import wizard's status check and error
+ * text (import-assets.ts, import-vocabulary.ts), which Task 10 narrows to IT.
  */
 export const ASSET_STATUSES = [
   ...STATUSES_BY_CLASS.IT, ...STATUSES_BY_CLASS.PURCHASING,
