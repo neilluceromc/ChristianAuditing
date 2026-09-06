@@ -2315,7 +2315,7 @@ In `prisma/seed.ts`, replace the `catData` block through the `Uncategorised` cre
       mk("BR-FN-0001", "Executive desk", "Furniture", "OPERATIONAL", { cost: 25_000, warrantyUntil: null }),
       mk("BR-FN-0002", "Ergonomic chair", "Furniture", "OPERATIONAL", { cost: 12_000, warrantyUntil: null }),
       mk("BR-FN-0003", "Meeting table", "Furniture", "STORED", { cost: 40_000, warrantyUntil: null }),
-      mk("BR-PE-0001", "Panasonic microwave", "Pantry Equipment", "REPAIRING", { cost: 8_000, defectiveSince: day(-5), notes: "Turntable motor", warrantyUntil: null }),
+      mk("BR-PE-0001", "Panasonic microwave", "Pantry Equipment", "REPAIRING", { cost: 8_000, notes: "Turntable motor", warrantyUntil: null }), // no defectiveSince — an IT repair-stage field (D-19)
       mk("BR-BL-0001", "Makati office, 12F", "Building", "OPERATIONAL", { cost: 45_000_000, purchasedAt: day(-3000), warrantyUntil: null }),
 ```
 
