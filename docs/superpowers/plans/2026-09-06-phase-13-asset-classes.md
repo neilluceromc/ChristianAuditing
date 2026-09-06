@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-16. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-17. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -359,6 +359,29 @@
 > string, grep for the others before writing the fix.**
 >
 > **The lesson:** "every X in the file" is a grep, not a rule. Before writing it, read what each X serves.
+>
+> **D-17. Task 10's `wrong-class` fix told an IT operator to do something the Register screen refuses them.**
+> The importer admits `admin` and `it_staff`; the fix said "Register Purchasing assets" and linked to `/inventory/register`,
+> where `it_staff` sees IT categories only (Task 7) and the server refuses a Purchasing one by name (Task 6). True
+> for admin, false for the route's main reader — the D-B rule this very file states ("a fix the operator can act
+> on right now"), re-opened one level up, and the test written to close D-B checks only that the route EXISTS.
+> Reworded: the explain names WHO acts ("Purchasing staff or an admin register these…"), the link label
+> describes the click ("Open the Register screen"), and a test pins that the reader is not told to do it
+> themselves.
+>
+> Same review: **`buildAssetRefs`' class map had no test** — emptying it left 906 tests green while every
+> Purchasing row would import as IT up to the trigger; the reported mutation check covered the pure planner only.
+> Pinned. **A Purchasing asset reached by its TAG** (an IT row naming an existing `BR-VH-…`) resolved as an update and
+> died at the trigger with the generic row error — the importer is IT's in both directions now. And Task 10 restored
+> a LIVE regression, worth naming: Task 5's fourteen-status list had made `assets-mixed.xlsx`'s `RETIRED` row a
+> create, which would have flipped `import-export.spec.ts`'s "3 blocked" and its group order. Minor: "IT's eight"
+> now derives its number; two comments trimmed to what is true.
+>
+> **For Task 11:** case 21 — the wizard's `wrong-class` refusal has no coverage above the pure planner, and its fix
+> is the one affordance whose correctness depends on who is reading it. Count 20; e2e 187.
+>
+> **The lesson:** a fix that names an action must be true for every role that can read it — and "the route
+> exists" is not that test.
 
 
 
@@ -2152,6 +2175,22 @@ And the status match becomes IT's set: replace `(ASSET_STATUSES as readonly stri
 
 `src/server/modules/import/resolve.ts`: the categories query selects `cls` — `prisma.assetCategory.findMany({ select: { id: true, name: true, cls: true }, orderBy: { name: "asc" } })`; `CategoryRow` gains `cls: AssetClass`; `buildAssetRefs` builds `categoryClass: new Map(categories.map((c) => [c.id, c.cls]))` and returns it in the refs object. Update `resolve.test.ts`'s category fixtures with `cls: "IT"`.
 
+- [ ] **Step 3a: The review fixes (D-17)**
+
+- `import-vocabulary.ts` `wrong-class`: explain "These rows name a Purchasing-class category. This importer is IT's — Purchasing
+  staff (or an admin) register these on the Register screen, where the tags are numbered for them. Hand them the rows
+  below; the rest of your file still imports."; fix label `Open the Register screen` (describes the click — true for every
+  role the importer admits). Test: the explain names Purchasing staff and does not say "for you". `bad-status`: "one of IT's
+  `${STATUSES_BY_CLASS.IT.length}`", pinned.
+- `resolve.test.ts`: `buildAssetRefs` carries each category's class, keyed by id (mutation: an empty map fails it).
+- `import-assets.ts`: the asset record projection carries `cls`; a row whose tag or serial matches an EXISTING Purchasing
+  asset blocks `wrong-class` with the tag as detail — the importer is IT's in both directions. Test + mutation.
+- Comments: `categoryClass`'s "absent means IT" is a fixture shorthand (production fills every id); `resolve.ts` no longer
+  claims a category never changes class (the trigger freezes it only once it has assets); `blocked-causes.tsx`'s `Fix` doc
+  says a link is offered only when its label is true for every role that can reach the wizard.
+
+Expected after this step: **908 tests / 51 files** (906 + 2).
+
 - [ ] **Step 4: Full check and commit**
 
 ```bash
@@ -2531,6 +2570,17 @@ posts a wrong-class request (cases 2 and 3 assert the picker and an unchanged co
     to `Laptop` after `DEPLOYED` restores `DEPLOYED` (the choice was kept, only hidden while out of class) — do not assert
     `SPARE` there.
 
+**Add a 21st case (D-17)** — the import wizard's `wrong-class` refusal has no coverage above the pure planner, and its
+fix link is the one affordance whose correctness depends on who is reading it.
+
+21. **An IT import of a Purchasing row is refused by name, and the fix names who can act.** Build a one-row sheet
+    naming `Vehicle` (the seed's Purchasing category) with an IT-shaped tag (use the same xlsx helper `e2e/fixtures/make.ts`
+    uses; do NOT add rows to `assets-mixed.xlsx` — `import-export.spec.ts` pins its counts and group order). As `it_staff`,
+    `/inventory/import` → validate: `0 new · 0 updates · 1 blocked`, the group card reads **Purchasing category**, its example
+    line shows `Vehicle`, and the card's text does NOT contain "for you" (the reader is not told to register it themselves).
+    Then as `admin`, the same file: follow the fix link `Open the Register screen` — `/inventory/register`'s category select
+    offers `Vehicle`. Same refusal, different onward paths; that difference is the case. Put it in `asset-classes.spec.ts`.
+
 The two gates that remain unreachable from the UI — a wrong-class register POST (the picker is filtered) and a
 mixed-class bulk request (the list is class-scoped) — ship covered by the trigger and by code review only.
 Task 12 records that in the handover rather than pretending otherwise.
@@ -2547,7 +2597,7 @@ In `e2e/axe-sweep.spec.ts`: add `"/inventory?cls=PURCHASING"` to `VIEWER_STATIC_
 npx playwright test e2e/asset-classes.spec.ts --workers=1 --global-timeout=600000
 ```
 
-A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 19** (13 planned + D-8's held-car case + D-13's case 16 + D-14's three + D-15's case 20; case 15 is dropped).
+A run that hits `--global-timeout` prints "N did not run" and its tail still reads like a pass. **Read the number. Expect 20** (13 planned + D-8's held-car case + D-13's case 16 + D-14's three + D-15's case 20 + D-17's case 21; case 15 is dropped).
 
 - [ ] **Step 5: Prove the guards are not inert — four mutations, report all four**
 
@@ -2598,7 +2648,7 @@ npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-
 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 ```
 
-Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **186 / 14 files** — 167 + 19 (D-8, D-13, D-14, D-15; case 15 dropped, case 20 added). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion. **That heuristic does not cover `financeHome` (D-16): nothing asserts Finance Home's Capitalized tile. Add an assertion in `home-finance.spec.ts` that it totals BOTH classes' seeded costs (IT + the seven Purchasing assets), so the one unpinned query is pinned the other way.**
+Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **187 / 14 files** — 167 + 20 (D-8, D-13, D-14, D-15, D-17; case 15 dropped, cases 20 and 21 added). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion. **That heuristic does not cover `financeHome` (D-16): nothing asserts Finance Home's Capitalized tile. Add an assertion in `home-finance.spec.ts` that it totals BOTH classes' seeded costs (IT + the seven Purchasing assets), so the one unpinned query is pinned the other way.**
 
 - [ ] **Step 5: Finish the branch** — `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions, separately.**
 
