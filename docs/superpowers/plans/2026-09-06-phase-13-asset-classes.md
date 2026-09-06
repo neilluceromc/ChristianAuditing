@@ -323,6 +323,12 @@
 > **The lesson:** when a phase creates a vocabulary module, the plan's own code blocks are the first place to
 > grep for the literals it replaces. And when a defect is fixed on one of two sibling surfaces, name the other
 > in the amendment — or it is fixed twice, one review apart.
+>
+> **The re-review of that fix found the third copy of the same defect on the same form:** the asset-tag placeholder
+> still read `BR-LT-0201` — a laptop tag shown to someone about to type `BR-VH-####`. `CLASS_EXAMPLE` gains `tag`, pinned
+> per class. Also: the sentinel `useState("SPARE")` now reads `DEFAULT_STATUS.IT` so no bare IT literal survives in the
+> form. Recorded, not changed: for `admin` (both classes, ordered by name) the pre-pick class is whichever category
+> sorts first — cosmetic and self-correcting on the required pick.
 
 
 
@@ -1862,7 +1868,7 @@ In `src/components/inventory/asset-form.tsx`:
 - `asset-form.tsx`: `cls` falls back to `categories[0]?.cls` before `"IT"`; the `useEffect` reset is replaced by
   `const effectiveStatus = creatable.includes(requestedStatus) ? requestedStatus : DEFAULT_STATUS[cls]`, used for the control's
   value, the disclosure test and the payload; `const unclaimed = fe._form ?? fe.id ?? fe.requestedStatus`; the Model placeholder is
-  `CLASS_EXAMPLE[cls].model`.
+  `CLASS_EXAMPLE[cls].model`; the tag placeholder is `CLASS_EXAMPLE[cls].tag` (new field, pinned); the sentinel initial state is `DEFAULT_STATUS.IT`.
 - `ref-table.tsx`: `cls?: AssetClass`; `useState<AssetClass>(ASSET_CLASSES[0])`; options `ASSET_CLASSES.map(c => <option>{CLASS_LABEL[c]}</option>)`;
   the cell renders `CLASS_LABEL[row.cls].toUpperCase()` like the record pill; one muted line under the categories table: "A category's
   class is fixed once it has assets."
