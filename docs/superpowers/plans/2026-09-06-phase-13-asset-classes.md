@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-6. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-7. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -106,6 +106,21 @@
 >
 > Task 2's code snippets below are left as originally written; **the committed module (`d65e12c`) is the
 > reference**, not the snippet. Re-deriving from the snippet would rebuild what the review removed.
+>
+> **D-7. Task 3 as written leaves ONE commit on the branch with red `tsc`, and the plan's own conventions
+> forbid exactly that.** Task 3 deletes `RETURN_STATUSES`; `src/lib/offboarding.test.ts` imports it; Task 4 rewrites
+> that file. The dispatch told the implementer to leave `offboarding.test.ts` alone, so commit `a21d034` has
+> one `tsc` error and one failing vitest case, both fixed by Task 4's first step. **Every commit should be
+> green; this one is not, and the reason is my sequencing, not the implementer's.** Two smaller defects in the
+> same task text, both caught by the implementer: Step 6's `git add` omitted `src/lib/asset-class.test.ts`,
+> which Step 1a edits (the pin deletion), so following it literally would have left a dangling import; and
+> rewriting the change-status refusal to name the class changed the wording an existing test asserted on
+> (`/not a valid asset status/` → `/not a IT status/`), which the plan's list of touched assertions did not
+> mention. The implementer updated that regex and said so rather than working around it — correct.
+>
+> **The lesson:** when a task deletes an export, the SAME task must touch every importer at least
+> minimally, even if a later task rewrites the file properly. "Task N owns that file" is not a reason to
+> commit red.
 
 
 
