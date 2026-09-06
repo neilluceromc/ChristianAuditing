@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-06-asset-classes-design.md` — read §0 (naming) and §1 (the decisions and what they rejected) before touching anything. "Admin" in the meeting notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
 **Baselines on `phase-13-asset-classes` at start:** 843 unit / 50 files · 167 e2e / 13 files · `tsc` and `lint` clean · **11 migrations**, none pending (D-2).
-> ### AMENDED DURING EXECUTION — D-1 through D-15. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
+> ### AMENDED DURING EXECUTION — D-1 through D-16. D-1/D-2 caught by the Task 1 implementer; D-3/D-4 by its code-quality reviewer; D-5 by the re-review, in text I wrote for the fix; D-6 by Task 2's reviewer. **D-3 is a real concurrency hole in a trigger this spec called a guarantee; D-6 a guard name that would have locked Finance out.**
 >
 > **D-1. "Expected: 6 failures" was wrong — only five of the six status-family tests CAN fail.**
 > `STORED` maps to `neutral`, and `neutral` is also what `statusFamily` returns for an
@@ -329,6 +329,36 @@
 > per class. Also: the sentinel `useState("SPARE")` now reads `DEFAULT_STATUS.IT` so no bare IT literal survives in the
 > form. Recorded, not changed: for `admin` (both classes, ordered by name) the pre-pick class is whichever category
 > sorts first — cosmetic and self-correcting on the required pick.
+>
+> **D-16. Task 9's Step 3 said "every `prisma.asset` read in the file" — and one of them was Finance's.** The
+> implementer pinned `financeHome`'s capitalized aggregate to IT exactly as told, and flagged it (DONE_WITH_CONCERNS).
+> The code-quality reviewer confirmed the flag: spec line 8 gives Finance BOTH classes, §6's exclusion names IT's
+> two alert queries and "IT's home" as the reason, and the same commit gave `/finance/assets` a Purchasing tab with
+> its own total — so Finance's headline would have disagreed with the page it fronts by every seeded Purchasing
+> cost (about ₱47.6M once Task 11 lands), with a green suite, because nothing asserts the Capitalized tile.
+> Unpinned, with a comment naming it as the file's one exception. **My instruction over-reached by one query; the
+> grep-count self-check I asked for made the over-reach look like completeness.**
+>
+> Two more dead affordances the D-14 walk did not reach because the Purchasing view did not exist yet: the
+> **Repairs** saved-view button (`/inventory?status=DEFECTIVE&sort=defectiveSince`, no `cls`, an IT status — it moved a
+> Purchasing user to the IT class) is now IT-only; and **New asset** did not carry the class, so an `admin` arriving
+> from the Purchasing view got a form pre-set to whichever category sorts first (Building — Purchasing — by luck).
+> `/inventory/new?cls=` now narrows the form to the view's class for a role that may manage it. Also: a hand-typed
+> out-of-class `?status=` rendered a chip for a filter `buildAssetWhere` had dropped (the D-12 shape, direct-URL path) —
+> the state is normalized once after parsing. The active Finance tab keeps its filters instead of resetting.
+>
+> **Recorded, not fixed:** `purchaseYear` survives the class switch into a view that may have no such year, and the
+> empty state then says "0 active filters" because the year is counted by `hasFilters` but has no chip (pre-existing);
+> the two class switches use two markups (`<nav>` on Finance, `role="navigation"` in the toolbar — both specified
+> by this plan; pick one next phase). **For Task 11:** case 18 gains the admin-from-Purchasing-view check. **For
+> Task 12:** the battery warning "an IT-side count moving means a query was not pinned" is unreliable for
+> `financeHome` — assert the Capitalized tile explicitly, or the warning over-promises.
+>
+> The implementer of that fix found the SECOND bare `/inventory/new` href on the same page — the empty state's New asset
+> link — and flagged it rather than widening scope; fixed in the same pass. **When a fix names one call site of a
+> string, grep for the others before writing the fix.**
+>
+> **The lesson:** "every X in the file" is a grep, not a rule. Before writing it, read what each X serves.
 
 
 
@@ -2026,7 +2056,17 @@ export function parseAssetStatus(raw: string | null | undefined, cls: AssetClass
 
 - [ ] **Step 3: Home is IT's**
 
-In `src/server/modules/home/queries.ts`, **every** `prisma.asset.findMany`, `prisma.asset.count` and `prisma.asset.groupBy` gets `cls: "IT"` added to its `where` (create the `where` if a call has none), and the employee query's nested `assets: { select: … }` becomes `assets: { where: { cls: "IT" }, select: … }`. A `LOST` car is not an IT alert, and a Purchasing desk must not count in IT's fleet composition. **Grep the file for `prisma.asset` and `assets:` and touch every hit; report the count you changed.**
+In `src/server/modules/home/queries.ts`, **every** `prisma.asset.findMany`, `prisma.asset.count` and `prisma.asset.groupBy` gets `cls: "IT"` added to its `where` (create the `where` if a call has none), and the employee query's nested `assets: { select: … }` becomes `assets: { where: { cls: "IT" }, select: … }`. A `LOST` car is not an IT alert, and a Purchasing desk must not count in IT's fleet composition. **Grep the file for `prisma.asset` and `assets:` and touch every hit — EXCEPT `financeHome`'s capitalized `aggregate` (D-16): that is Finance's home, and Finance capitalizes both classes; it stays unpinned with a comment. Report the count you changed (expect 9).**
+
+- [ ] **Step 3a: The review fixes (D-16)**
+
+- `inventory/page.tsx`: the Repairs button renders only when `cls === "IT"` (its saved view pins an IT status and carries no
+  `cls`); New asset's href is `"/inventory/new" + withClsQS("", cls)`; after `parseListState`, out-of-class values are dropped
+  from `state.filters.status` (`isStatusOf(cls, s)`) so no chip advertises a filter the where does not apply.
+- `inventory/new/page.tsx`: reads `?cls=` with `parseCls`; when present and `canManageClass(user.role, cls)`, categories and types
+  are narrowed to that class (single-class roles: no change; admin from the Purchasing view: a Purchasing form). The back
+  link returns to the view the user came from.
+- `finance/assets/page.tsx`: the active class tab keeps the current status and page; the inactive tab still resets.
 
 - [ ] **Step 4: Full check and commit**
 
@@ -2470,7 +2510,9 @@ posts a wrong-class request (cases 2 and 3 assert the picker and an unchanged co
     there is no `Secrets` tab (`getByRole("link", { name: /Secrets/ })` has count 0) while as `it_staff` it is present.
 18. **`/inventory/new` offers each role its own categories.** As `purchasing_staff`, the category control offers `Vehicle` and
     not `Laptop`; as `it_staff`, `Laptop` and not `Vehicle`; as `finance_staff`, the URL redirects to `ROLE_LANDING.finance_staff`
-    (layer 1 — the new PATH_RULE).
+    (layer 1 — the new PATH_RULE). **And (D-16):** as `admin`, `/inventory/new?cls=PURCHASING` offers `Vehicle` and not `Laptop`;
+    bare `/inventory/new` offers both. On `/inventory?cls=PURCHASING` the New asset link's href ends in `?cls=PURCHASING` and the
+    Repairs button is absent; on `/inventory` it is present.
 19. **The leaver-kit policy picker names no Purchasing type.** As `admin` on `/admin/equipment-policies`, the Add-slot type
     control's options contain `Laptop`'s types and do not contain `Sedan`.
 
@@ -2553,7 +2595,7 @@ npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-
 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
 ```
 
-Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **186 / 14 files** — 167 + 19 (D-8, D-13, D-14, D-15; case 15 dropped, case 20 added). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion.
+Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). Expect **186 / 14 files** — 167 + 19 (D-8, D-13, D-14, D-15; case 15 dropped, case 20 added). **Read every count; write down what you got.** ⚠️ `home-finance.spec.ts`, `it-core.spec.ts` and `import-export.spec.ts` are the ones to watch: they assert IT-side counts and totals, and a failure there means a query was not pinned to `cls: "IT"` (Task 9 Step 3) — fix the query, never the assertion. **That heuristic does not cover `financeHome` (D-16): nothing asserts Finance Home's Capitalized tile. Add an assertion in `home-finance.spec.ts` that it totals BOTH classes' seeded costs (IT + the seven Purchasing assets), so the one unpinned query is pinned the other way.**
 
 - [ ] **Step 5: Finish the branch** — `superpowers:finishing-a-development-branch`. **Merging and pushing are the user's decisions, separately.**
 
@@ -2561,4 +2603,4 @@ Baseline before this phase: **167 e2e / 13 files** (52 · 47 · 39 · 23 · 6). 
 
 ## Out of scope, deliberately (spec §12)
 
-Locations · Purchasing self-service categories · Purchasing bulk import · a Purchasing Home · **Purchasing-owned approvals (first follow-up)** · a Purchasing assign / return surface (D-13: `/employees` is IT's workspace; a car is assigned at create time only) · a detector for an unassigned holder status on the Purchasing side (IT's Home has one for DEPLOYED; D-13) · class-aware document permissions (D-14: `documents/page.tsx` and `document-actions.ts` are role-hardcoded to IT, so Purchasing cannot attach a car's OR/CR while IT can) · a policy slot naming a type whose empty category was later flipped to Purchasing (direct-DB only; `resolvePolicy` reports a permanent gap — D-14) · a label sheet for Purchasing assets (D-15: they are minted `BR-VH-####` tags and `/inventory/labels` is IT-only, so nothing prints them) · depreciation / accounting classes · consumables (§9 D) · vendor master (§9 B).
+Locations · Purchasing self-service categories · Purchasing bulk import · a Purchasing Home · **Purchasing-owned approvals (first follow-up)** · a Purchasing assign / return surface (D-13: `/employees` is IT's workspace; a car is assigned at create time only) · a detector for an unassigned holder status on the Purchasing side (IT's Home has one for DEPLOYED; D-13) · class-aware document permissions (D-14: `documents/page.tsx` and `document-actions.ts` are role-hardcoded to IT, so Purchasing cannot attach a car's OR/CR while IT can) · a policy slot naming a type whose empty category was later flipped to Purchasing (direct-DB only; `resolvePolicy` reports a permanent gap — D-14) · a label sheet for Purchasing assets (D-15: they are minted `BR-VH-####` tags and `/inventory/labels` is IT-only, so nothing prints them) · the year chip's empty-state count (D-16: `purchaseYear` is counted by `hasFilters` but has no chip, so an empty year reads "0 active filters") · one markup for a class switch (D-16: Finance uses `<nav>`, the toolbar `role="navigation"`) · depreciation / accounting classes · consumables (§9 D) · vendor master (§9 B).
