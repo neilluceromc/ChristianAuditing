@@ -8,6 +8,11 @@ import { STATUSES_BY_CLASS, isStatusOf } from "./asset-class";
  * genuinely mean "any valid value" (zod enums on request payloads, the import
  * wizard's error text). A control that offers statuses to a person must use
  * `statusesFor(cls)` instead; offering DEPLOYED for a car is a bug.
+ *
+ * Three pickers (request-status-change, bulk-drawer, finance/assets) still
+ * read this list and show fourteen; Tasks 7-9 move them to `statusesFor(cls)`.
+ * The zod enums stay at fourteen on purpose — the class check on the action
+ * is the guard, not the enum.
  */
 export const ASSET_STATUSES = [
   ...STATUSES_BY_CLASS.IT, ...STATUSES_BY_CLASS.PURCHASING,

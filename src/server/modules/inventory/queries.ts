@@ -233,7 +233,7 @@ export async function facetOptions(
     prisma.asset.groupBy({ by: ["assigneeId"], where: buildAssetWhere(without("assignee"), purchaseYear, cls), _count: true }),
     prisma.assetCategory.findMany({ where: { cls }, orderBy: { name: "asc" } }),
     prisma.assetType.findMany({ where: { category: { cls } }, orderBy: { name: "asc" }, include: { category: true } }),
-    prisma.employee.findMany({ where: { assets: { some: {} } }, orderBy: { name: "asc" } }),
+    prisma.employee.findMany({ where: { assets: { some: { cls } } }, orderBy: { name: "asc" } }),
   ]);
 
   return {
@@ -290,6 +290,13 @@ export async function purchaseYearBuckets(
  * A USB scanner is just a keyboard: an exact tag match opens the record
  * instead of listing it. findUnique on the uppercased tag — NEVER an
  * insensitive equals (ILIKE wildcard hazard).
+ *
+ * Deliberately not scoped by class. Tags are globally unique, and this is the
+ * scanner contract: a label read off the object opens the object, whichever
+ * list view the search box happened to be on. The non-exact path
+ * (`listAssets`) IS class-scoped — `q=BR-VH-0001` from the IT view jumps to
+ * the car, `q=BR-VH` from the IT view finds nothing. That asymmetry is
+ * intended; do not "fix" it by adding `cls` here.
  */
 export function exactTagMatch(q: string) {
   const tag = q.trim().toUpperCase();
