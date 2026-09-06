@@ -110,6 +110,16 @@ describe("BLOCK_CAUSES", () => {
   // now describes what the click does ("Open the Register screen"), not who
   // may act there, and the explain hands the rows to Purchasing staff or an
   // admin rather than telling the reader to register them "yourself".
+  // Re-review (post D-17): `wrong-class` now catches TWO row shapes — (a) a
+  // row naming a Purchasing-class category, and (b) a row whose tag or
+  // serial matches an asset Purchasing already owns, whatever category the
+  // row names (`import-assets.ts`, the `matched?.cls === "PURCHASING"`
+  // check). `groupByCause` buckets by cause alone, so one card's copy must
+  // be true for BOTH shapes — shape (b) may name an IT category and the
+  // asset already exists, so "register these" alone would read as telling
+  // the reader to create a duplicate. The `tag or serial` assertion pins
+  // that second route in the copy so the two shapes cannot drift apart
+  // again unnoticed.
   it("wrong-class sends the operator to the register screen, not to a file fix", () => {
     const spec = blockSpec("wrong-class");
     expect(spec.fix).toEqual({ kind: "link", label: "Open the Register screen", href: "/inventory/register" });
@@ -124,6 +134,10 @@ describe("BLOCK_CAUSES", () => {
     expect(spec.explain).toContain("Purchasing staff");
     expect(spec.explain).not.toMatch(/register these assets yourself|you register/i);
     expect(spec.explain).not.toContain("for you");
+    // Must also be true for the tag/serial-match shape, not just the
+    // category-name shape — otherwise the copy is false for rows blocked by
+    // `matched?.cls === "PURCHASING"` in import-assets.ts.
+    expect(spec.explain).toMatch(/tag or serial/);
   });
 
   it("offers lifecycle-via-import a way to keep applying the row's other columns", () => {

@@ -430,11 +430,13 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   // — the category IS known, it just belongs to the other class, so the fix
   // is a different screen, not "create it first and re-upload".
   "wrong-class": {
-    label: "Purchasing category",
+    label: "Belongs to Purchasing",
     explain:
-      "These rows name a Purchasing-class category. This importer is IT's — Purchasing staff (or an " +
-      "admin) register these on the Register screen, where the tags are numbered for them. Hand them " +
-      "the rows below; the rest of your file still imports.",
+      "These rows belong to Purchasing: they name a Purchasing-class category, or their tag or serial " +
+      "matches an asset Purchasing already owns. This importer is IT's. A new Purchasing asset is " +
+      "registered by Purchasing staff (or an admin) on the Register screen, where the tags are numbered " +
+      "for them; an existing one is theirs to edit. Hand them the rows below; the rest of your file " +
+      "still imports.",
     fix: { kind: "link", label: "Open the Register screen", href: "/inventory/register" },
   },
 };

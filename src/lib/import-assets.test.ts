@@ -53,7 +53,7 @@ const REFS: AssetRefs = {
   // Purchasing-class category this fixture needs, for the wrong-class test.
   categoryClass: new Map([["cat-3", "PURCHASING"]]),
   // AssetRecordRef (round 2, NC-1/NC-2/NC-3's unified shape): id, tag, status,
-  // assigneeId, categoryId, typeId. `tag` is the RECORD's own tag (not the
+  // assigneeId, categoryId, typeId, cls. `tag` is the RECORD's own tag (not the
   // sheet row's — they can differ on a serial rescue). a-1 carries a real
   // typeId under cat-1 specifically so a category-changing row with no Type
   // column can be shown stranding it (NC-3).

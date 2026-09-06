@@ -31,7 +31,7 @@ export interface AppliedCounts {
  * Task 11 round two, V-1: `AssetPlan.counts` is `{create, update, blocked}`
  * with NO `unchanged` bucket, and it cannot have one — the plan can't know a
  * row is a no-op, because `AssetRecordRef` (`resolve.ts`) carries only
- * `id/tag/status/assigneeId/categoryId/typeId`, never `model`/`serial`/
+ * `id/tag/status/assigneeId/categoryId/typeId/cls`, never `model`/`serial`/
  * `cost`. `unchanged` is discovered at write time by `assetDiff`. So a
  * predicate comparing `applied.created + applied.updated` against
  * `approved.create + approved.update` falls short by exactly the `unchanged`
