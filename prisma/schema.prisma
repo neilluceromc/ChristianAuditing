@@ -251,7 +251,7 @@ model Asset {
   /// The asset_class_invariants trigger -- not the default -- is the guarantee:
   /// it holds this equal to the category's cls, and the status inside that
   /// class's set, on every write that touches status, cls or categoryId. It
-  /// does NOT make the value immutable: at the database level a same-transaction
+  /// does NOT make the value immutable: at the database level a single-statement
   /// change of category, cls and status together is legal.
   cls               AssetClass       @default(IT)
   assigneeId        String?
