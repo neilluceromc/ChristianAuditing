@@ -47,6 +47,7 @@ export default async function EquipmentPoliciesPage() {
       name: s.name,
       typeName: s.assetType?.name ?? "any type",
       required: s.required,
+      loaner: s.loaner,
     })),
   }));
 

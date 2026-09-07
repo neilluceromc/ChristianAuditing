@@ -74,7 +74,10 @@ async function slotList(tx: Prisma.TransactionClient, policyId: string): Promise
     include: { assetType: true },
     orderBy: [{ name: "asc" }, { id: "asc" }],
   });
-  return slots.map((s) => `${s.name} · ${s.assetType?.name ?? "any type"} · ${s.required ? "required" : "optional"}`);
+  return slots.map((s) => {
+    const label = s.loaner ? `${s.name} (loaner)` : s.name;
+    return `${label} · ${s.assetType?.name ?? "any type"} · ${s.required ? "required" : "optional"}`;
+  });
 }
 
 /**
@@ -213,6 +216,7 @@ const addSlotSchema = z.object({
   name: z.string().trim().min(2, "Name the slot").max(40),
   assetTypeId: z.string().min(1, "Pick an asset type"),
   required: z.boolean(),
+  loaner: z.boolean(),
 });
 
 export async function addSlot(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -236,7 +240,9 @@ export async function addSlot(input: unknown): Promise<ActionResult<{ id: string
     }
     const before = await slotList(tx, policy.id);
     const slot = await tx.policySlot.create({
-      data: { policyId: policy.id, name: d.name, assetTypeId: d.assetTypeId, required: d.required },
+      data: {
+        policyId: policy.id, name: d.name, assetTypeId: d.assetTypeId, required: d.required, loaner: d.loaner,
+      },
     });
     id = slot.id;
     await auditSlots(tx, user, policy.id, before, "policy.slot.added");
