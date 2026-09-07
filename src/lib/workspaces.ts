@@ -101,6 +101,15 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       items: [
         { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
         { label: "Register assets", href: "/inventory/register", roles: ["admin", "purchasing_staff"] },
+        { label: "Approvals", href: "/approvals", badge: "approvals" },
+        { label: "Employees", href: "/employees" },
+      ],
+    },
+    {
+      heading: "Records",
+      items: [
+        { label: "Asset categories", href: "/admin/asset-categories" },
+        { label: "Asset types", href: "/admin/asset-types" },
       ],
     },
     { heading: "Reference", items: [{ label: "IT inventory", href: "/inventory" }] },
@@ -156,11 +165,15 @@ const UNGATED: RegExp[] = [/^\/$/, /^\/dev(\/|$)/];
 
 const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[] }> = [
   { test: /^\/admin\/(users|webhooks|flags)(\/|$)/, workspaces: ["admin"] },
+  // Phase 14: each department creates categories and types of its OWN class
+  // (reference-actions.ts forces the class from MANAGEABLE_CLASSES). Departments
+  // are org structure, not class data, and stay IT.
   {
-    test: /^\/admin\/(asset-categories|asset-types|departments)(\/|$)/,
-    workspaces: ["it"],
-    roles: ["admin", "it_staff"],
+    test: /^\/admin\/(asset-categories|asset-types)(\/|$)/,
+    workspaces: ["it", "purchasing"],
+    roles: ["admin", "it_staff", "purchasing_staff"],
   },
+  { test: /^\/admin\/departments(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   { test: /^\/admin\/equipment-policies(\/|$)/, workspaces: ["it"] },
   // Backstop: any unlisted /admin/* route is admin-only, never default-allow.
   { test: /^\/admin(\/|$)/, workspaces: ["admin"] },
@@ -187,7 +200,9 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // probe in e2e/labels.spec.ts, precisely because no page file exists there
   // for requireRole to run from — only middleware can answer for a path like
   // that, so a misordered rule shows up as a 200 with no redirect at all.
-  { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+  // Phase 14: a label sheet is each class's own artifact; the page prints only
+  // the classes the role manages. Still MUST precede the general /inventory rule.
+  { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
   // Phase 13: registering is each department's own — IT registers IT-class
   // categories, Purchasing registers Purchasing-class ones — so BOTH
   // workspaces are admitted here and `registerAssets` refuses the wrong class
@@ -210,12 +225,17 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // import` already guards above; this MUST precede the general rule
   // (first-match-wins), for the same reason.
   { test: /^\/employees\/import(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
-  // Covers /employees/export and /audit/export too (prefix + "(\/|$)"): an
-  // export route intentionally has no separate rule of its own — like
-  // /inventory/export above, it matches its list page's access exactly
-  // because it IS that page's data, just downloaded instead of rendered.
-  { test: /^\/(employees|audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
-  { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance"] },
+  // Phase 14: the two other employee WRITE surfaces get the same treatment,
+  // because the general /employees rule right after them now admits
+  // purchasing (reads only). Both MUST precede it.
+  { test: /^\/employees\/new(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+  { test: /^\/employees\/[^/]+\/edit(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+  // Phase 14: purchasing READS the directory so "held by …" on a car opens.
+  // Covers /employees/export too: an export matches its list page's access.
+  { test: /^\/employees(\/|$)/, workspaces: ["it", "purchasing"] },
+  { test: /^\/(audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
+  // Phase 14: purchasing approves lifecycle changes on its own class.
+  { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance", "purchasing"] },
   // Brief §6.1 is a three-party handoff: purchasing drafts, IT specs it,
   // finance approves the money. IT therefore needs the path its own
   // it-review/it-reject actions live on; page-level requireRole keeps
