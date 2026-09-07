@@ -3,7 +3,7 @@ import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
-import { CLASS_LABEL, canEditAsset, canManageClass, isAwaitingItCheck } from "@/lib/asset-class";
+import { ASSIGNABLE_FROM, CLASS_LABEL, canEditAsset, canManageClass, isAwaitingItCheck } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
@@ -13,6 +13,8 @@ import { RecordTabs } from "@/components/inventory/record-tabs";
 import { RequestStatusChange } from "@/components/inventory/request-status-change";
 import { FinanceReview } from "@/components/inventory/finance-review";
 import { ItCheck } from "@/components/inventory/it-check";
+import { HolderControl } from "@/components/inventory/holder-control";
+import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 
 export default async function AssetRecordLayout({
   params,
@@ -36,6 +38,11 @@ export default async function AssetRecordLayout({
   // already enforces this — b521e14.
   const canResubmit = canManageClass(user.role, asset.cls) && returned;
   const pending = asset.approvals[0];
+  // Spec §7.1: offered only when the action would be legal; a pending approval
+  // freezes both (the server would answer "already has an open request").
+  const canAssign = canMutate && !pending && !asset.assignee && asset.status === ASSIGNABLE_FROM[asset.cls];
+  const canReturn = canMutate && !pending && asset.assignee !== null;
+  const employees = canAssign ? await activeEmployeeOptions() : [];
 
   return (
     <>
@@ -62,9 +69,13 @@ export default async function AssetRecordLayout({
           </span>
         }
         actions={
-          canMutate || canEdit || canCheck || canConfirm || canResubmit ? (
+          canMutate || canEdit || canCheck || canConfirm || canResubmit || canAssign || canReturn ? (
             <>
               {canCheck && <ItCheck assetId={asset.id} tag={asset.tag} />}
+              {canAssign && <HolderControl mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} />}
+              {canReturn && asset.assignee && (
+                <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} />
+              )}
               {canMutate && <RequestStatusChange assetId={asset.id} currentStatus={asset.status} cls={asset.cls} />}
               {canEdit && <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>}
               {(canConfirm || canResubmit) && (

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
-import { ASSIGNABLE_FROM } from "@/lib/asset-class";
+import { ASSIGNABLE_FROM, canSeeClass } from "@/lib/asset-class";
 import { fmtDate, fmtMoney, fmtRelativeDays } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
@@ -49,6 +49,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     id: a.id, tag: a.tag, model: a.model, status: a.status,
     age: a.purchasedAt ? fmtRelativeDays(a.purchasedAt).replace(" ago", " old") : "age unknown",
     pendingRef: pendingByAsset.get(a.id) ?? null,
+    visible: canSeeClass(user.role, a.cls),
   });
 
   const slots: SlotTile[] = loadout.slots.map(({ slot, asset }) => ({
@@ -71,6 +72,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       id: r.assetId, tag: r.asset.tag, model: r.asset.model,
       note: `reserved${r.expiresAt ? ` · expires ${fmtDate(r.expiresAt)}` : ""}`,
       kind: "reserved" as const,
+      visible: canSeeClass(user.role, r.asset.cls),
     })),
     ...openApprovals
       .filter((a) => a.asset && a.asset.assigneeId !== id)
@@ -78,6 +80,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
         id: a.assetId!, tag: a.asset!.tag, model: a.asset!.model,
         note: `assignment queued · ${a.refNo}`,
         kind: "queued" as const,
+        visible: canSeeClass(user.role, a.asset!.cls),
       })),
   ];
 
