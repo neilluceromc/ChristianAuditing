@@ -12,7 +12,7 @@ assistant memory until now — that is why this file exists.
 | | |
 |---|---|
 | Repository | `github.com/neilluceromc/ChristianAuditing` — **public**, by choice. Never commit `.env` or any real secret; scan before every push. |
-| Branch | `main`, level with `origin/main`. Phase branches (`phase-10-polish` … `phase-13-asset-classes`) exist only on the old dev laptop and are fully contained in `main`; nothing on them is needed. |
+| Branch | `main`, **ahead of `origin/main`** since the Phase 14 merge (`dc0121d`, 2026-09-07) — pushing is the user's decision. Phase branches (`phase-10-polish` … `phase-13-asset-classes`) exist only on the old dev laptop; `phase-14-department-owned-classes` was deleted after its merge. All are fully contained in `main`. |
 | Stack | Next.js 15 App Router · Prisma 6 · PostgreSQL 16 (Docker) · Auth.js v5 · Tailwind v4 · Playwright · vitest. Node ≥ 22, npm ≥ 11 (dev machine ran Node 24). |
 | Database | 15 migrations, additive only. `prisma migrate reset` is **not** used in this project. |
 | Battery, last run 2026-09-07 | `tsc` clean · `lint` clean · **971 unit / 52 files** · `npm run build` · `docker compose --profile prod build` · **203 e2e / 15 files** in five foreground parts (36 · 46 · 54 · 34 · 33). Commands and history: `HANDOVER.md` §0 item 9. |
