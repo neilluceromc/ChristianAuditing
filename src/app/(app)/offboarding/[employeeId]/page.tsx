@@ -6,7 +6,7 @@ import { canContinue, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
 import { fmtMoney } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
-import { canSeeClass } from "@/lib/asset-class";
+import { canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -301,7 +301,13 @@ export default async function OffboardingWizardPage({
                         first, then decide this item.
                       </p>
                     ) : canDecide ? (
-                      <ItemDecision employeeId={employeeId} assetId={i.assetId} tag={i.tag} cls={i.cls} />
+                      <ItemDecision
+                        employeeId={employeeId}
+                        assetId={i.assetId}
+                        tag={i.tag}
+                        cls={i.cls}
+                        direct={isDirectLifecycle(user.role, i.cls)}
+                      />
                     ) : (
                       <p className="text-xs text-fg-muted">
                         {/* `active` is OFFBOARDING only, so its else covers

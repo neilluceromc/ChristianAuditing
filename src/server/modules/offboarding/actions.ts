@@ -9,10 +9,11 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
 import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, reasonRequired } from "@/lib/offboarding";
-import { CLASS_PHRASE } from "@/lib/asset-class";
+import { CLASS_PHRASE, isDirectLifecycle } from "@/lib/asset-class";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { candidatesFor } from "@/server/modules/offboarding/queries";
 import { emitWebhook } from "@/server/webhooks/emit";
+import { prepareLifecycle, commitLifecycle } from "@/server/modules/lifecycle/apply";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -78,7 +79,7 @@ const decideSchema = z.object({
  * outcome is validated against the asset's class — a Purchasing asset offers
  * three outcomes, not four.
  */
-export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: string }>> {
+export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: string; applied: string | null }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -87,8 +88,10 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
   const reason = (d.reason ?? "").trim();
+  const now = new Date();
 
   let refNo = "";
+  let applied: string | null = null;
   try {
     const failure = await prisma.$transaction(async (tx) => {
       const employee = await tx.employee.findUnique({ where: { id: d.employeeId } });
@@ -141,6 +144,43 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
             : `${asset.tag} is held by ${open.refNo} (${APPROVAL_TYPE_LABEL[open.type]}) — resolve that in Approvals first, then decide this item.`,
         );
       }
+      // Phase 15 (spec §2.1): IT confirms and it's done — no queue. The asset
+      // is applied through the SAME executor the worker uses, in the same
+      // transaction as the approval that records it, and that approval is
+      // born EXECUTED rather than PENDING: the wizard's Continue gate and the
+      // farewell report only ever read approval rows, so a decision that
+      // skipped the queue must still leave one behind. Purchasing keeps the
+      // PENDING path below — its class is absent from DIRECT_LIFECYCLE_CLASSES.
+      if (isDirectLifecycle(user.role, asset.cls)) {
+        const prepared = await prepareLifecycle(tx, asset, { kind: "return", status: targetStatus }, now);
+        if (!prepared.ok) return conflict(prepared.error);
+        await commitLifecycle(tx, asset.id, prepared.prepared, now);
+        const approval = await createApproval(tx, {
+          type: "lifecycle_return",
+          payload: {
+            from: { assigneeId: d.employeeId },
+            to: { assigneeId: null, status: targetStatus },
+            reason: d.outcome === "RETURNED" ? reason || "offboarding · returned" : reason,
+          },
+          requestedById: user.id,
+          assetId: asset.id,
+          employeeId: d.employeeId,
+          priority: d.outcome === "MISSING" ? "HIGH" : "NORMAL",
+          executed: { by: user.id, at: now },
+        });
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name,
+          entityType: "asset", entityId: asset.id,
+          action: "lifecycle.return",
+          diff: prepared.prepared.diff,
+        });
+        await emitWebhook(tx, "approval.executed", {
+          approvalId: approval.id, refNo: approval.refNo, type: approval.type, assetId: asset.id, assetTag: asset.tag,
+        });
+        refNo = approval.refNo;
+        applied = targetStatus;
+        return null;
+      }
       const approval = await createApproval(tx, {
         type: "lifecycle_return",
         payload: {
@@ -183,7 +223,7 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
     throw err;
   }
   revalidate(d.employeeId, d.assetId);
-  return ok({ refNo });
+  return ok({ refNo, applied });
 }
 
 const accountsSchema = z.object({
