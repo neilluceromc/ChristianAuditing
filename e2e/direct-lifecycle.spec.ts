@@ -193,6 +193,7 @@ test.describe.serial("direct changes", () => {
     ]);
     expect(hs.status).toBe("DISPOSE");
     expect(mn.status).toBe("DISPOSE");
+    expect(await db.approval.count({ where: { assetId: { in: [hsId, mnId] }, state: { in: [...OPEN_STATES] } } })).toBe(0);
   });
 
   test("6. Deploy at creation lands DEPLOYED with a holder and no pending approval", async ({ page }) => {
@@ -249,10 +250,26 @@ test.describe.serial("offboarding", () => {
     await expect(page.getByRole("link", { name: /Continue to Accounts/ }).first()).toBeVisible();
     await expect(page.getByRole("list", { name: "Offboarding steps" }).getByRole("link")).toHaveCount(4);
 
-    const laptop = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0166" } });
+    // All three decisions write to the DB, not just the one that lands in
+    // Triage — the sibling test in offboarding.spec.ts ("each decision…")
+    // checks all three rows; carry that in here too.
+    const [laptop, phone, headset] = await Promise.all([
+      db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0166" } }),
+      db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0312" } }),
+      db.asset.findUniqueOrThrow({ where: { tag: "BR-HS-0510" } }),
+    ]);
     expect(laptop.status).toBe("SPARE");
     expect(laptop.assigneeId).toBeNull();
-    expect(laptop.returnedAt).not.toBeNull();
+    expect(laptop.returnedAt).not.toBeNull(); // "Returned" lands on the default status, back for triage
+    expect(phone.status).toBe("MISSING");
+    expect(phone.assigneeId).toBeNull();
+    expect(headset.status).toBe("DEFECTIVE");
+    expect(headset.assigneeId).toBeNull();
+    for (const a of [laptop, phone, headset]) {
+      const approval = await db.approval.findFirstOrThrow({ where: { assetId: a.id, type: "lifecycle_return" } });
+      expect(approval.state).toBe("EXECUTED");
+    }
+
     await page.goto(`/inventory/${laptop.id}`);
     await expect(page.getByText("BACK · NOT CHECKED")).toBeVisible();
 
@@ -267,6 +284,16 @@ test.describe.serial("offboarding", () => {
 test.describe("worklist", () => {
   test("8. Home sections and /inventory/work; clearing a row hides it", async ({ page }) => {
     await login(page, IT);
+
+    // Worklist.tsx renders each section as `<h3>{title} <span>{total}</span></h3>`
+    // (src/components/home/worklist.tsx); the Triage section's total is every
+    // IT asset back for triage (src/server/modules/home/queries.ts's `triage`
+    // query: `{ cls: "IT", returnedAt: { not: null } }`), uncapped by either
+    // page's row limit. Computed once, before either page load below, since
+    // nothing in this test changes a `returnedAt` before both checks run.
+    const expectedTriage = await db.asset.count({ where: { cls: "IT", returnedAt: { not: null } } });
+    const triageHeadingText = new RegExp(`^Triage\\s+${expectedTriage}$`);
+
     await page.goto("/");
 
     const worklistCard = page.locator("main > div > *").filter({
@@ -282,6 +309,7 @@ test.describe("worklist", () => {
     for (const heading of ["Triage", "Repairs to chase", "New hires"]) {
       await expect(worklistCard.getByRole("heading", { name: heading })).toBeVisible();
     }
+    await expect(worklistCard.getByRole("heading", { name: /^Triage/ })).toHaveText(triageHeadingText);
     await expect(worklistCard).toContainText("BR-LT-0201");
 
     await page.goto("/inventory/work");
@@ -289,6 +317,7 @@ test.describe("worklist", () => {
     for (const heading of ["Triage", "Repairs to chase", "New hires", "Loans", "Missing & records", "Approvals & leavers"]) {
       await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     }
+    await expect(page.getByRole("heading", { name: /^Triage/ })).toHaveText(triageHeadingText);
     // BR-MN-0910 (case 1's fresh repair, 0 days down) sorts last among the
     // section's 8 real DEFECTIVE rows and never makes Home's own 2-row cap —
     // the uncapped Worklist page is where it has to show up.
