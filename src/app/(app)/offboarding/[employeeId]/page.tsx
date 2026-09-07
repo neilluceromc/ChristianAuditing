@@ -158,9 +158,18 @@ export default async function OffboardingWizardPage({
               </CardBody>
             </Card>
           ) : (
-            <Banner tone="neutral" title="No equipment policy applies to this person">
+            <Banner
+              tone="neutral"
+              title={
+                data.policyName === null
+                  ? "No equipment policy applies to this person"
+                  : `${data.policyName} defines no slots`
+              }
+            >
               {employee.title} · {employee.department}{" "}
-              has no policy, so there are no slots to check against{" "}
+              {data.policyName === null
+                ? "has no policy, so there are no slots to check against"
+                : "matches a policy that lists no equipment, so there is nothing to check against"}{" "}
               — the holdings below are the whole picture.
             </Banner>
           )}

@@ -6,7 +6,7 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
-import { FormField } from "@/components/ui/form-field";
+import { FormError, FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -167,7 +167,7 @@ export function AddSlotDialog({
       footer={
         <>
           <Button variant="ghost" onClick={close}>Cancel</Button>
-          <Button variant="primary" loading={pending} onClick={submit}>Add</Button>
+          <Button variant="primary" loading={pending} disabled={itTypes.length === 0} onClick={submit}>Add</Button>
         </>
       }
     >
@@ -190,7 +190,10 @@ export function AddSlotDialog({
           )}
         </FormField>
         {itTypes.length === 0 ? (
-          <p className="text-xs text-fg-muted">No IT asset types exist yet — create one before adding a slot.</p>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-fg-muted">No IT asset types exist yet — create one before adding a slot.</p>
+            <FormError>{fieldErrors.assetTypeId}</FormError>
+          </div>
         ) : (
           <FormField label="Asset type" required error={fieldErrors.assetTypeId}>
             {(p) => (

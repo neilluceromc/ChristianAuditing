@@ -411,6 +411,7 @@ export function LoadoutView({
           </THead>
           <TBody>
             {[...slots.filter((s) => s.asset).map((s) => ({ a: s.asset!, slot: s.name })),
+              ...onLoan.filter(Boolean).map((a) => ({ a: a!, slot: "on loan" })),
               ...unslotted.filter(Boolean).map((a) => ({ a: a!, slot: "—" }))].map(({ a, slot }) => (
               <Tr key={a.id}>
                 <Td className="pr-0"><StatusDot value={a.status} /></Td>
