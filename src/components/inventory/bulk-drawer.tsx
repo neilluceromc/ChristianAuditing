@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -10,7 +11,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { ASSET_STATUSES } from "@/lib/inventory-list";
+import { DEFAULT_STATUS, statusesFor } from "@/lib/asset-class";
 import { bulkRequestStatusChange } from "@/server/modules/inventory/actions";
 
 export function BulkDrawer({
@@ -20,6 +21,7 @@ export function BulkDrawer({
   allMatching,
   filtersQS,
   total,
+  cls,
   onDone,
 }: {
   open: boolean;
@@ -28,12 +30,18 @@ export function BulkDrawer({
   allMatching: boolean;
   filtersQS: string; // serialized current list state, no leading "?"
   total: number;
+  cls: AssetClass;
   onDone: () => void;
 }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, startTransition] = useTransition();
-  const [to, setTo] = useState<string>("SPARE");
+  const [to, setTo] = useState<string>(DEFAULT_STATUS[cls]);
+  // Normalized, not trusted: the drawer outlives a class switch only if the
+  // list island is not remounted, and then `to` would be an IT status against
+  // Purchasing options — a controlled select showing one thing and submitting
+  // another. Same-class or the class default, always.
+  const effectiveTo = (statusesFor(cls) as readonly string[]).includes(to) ? to : DEFAULT_STATUS[cls];
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -49,7 +57,7 @@ export function BulkDrawer({
       const res = await bulkRequestStatusChange({
         ids: allMatching ? undefined : selectedIds,
         filters: allMatching ? filtersQS : undefined,
-        to,
+        to: effectiveTo,
         reason,
       });
       if (res.ok) {
@@ -108,7 +116,10 @@ export function BulkDrawer({
             rendered with an empty, non-allMatching selection. Kept anyway so
             the link stays ABSENT, not disabled, if that caller ever changes —
             the house rule for affordances that cannot act. */}
-        {!allMatching && selectedIds.length > 0 && (
+        {/* /inventory/labels is IT-workspace-only (workspaces.ts PATH_RULES);
+            for a Purchasing selection the affordance is absent, not a link
+            that would eject the user out of the workspace. */}
+        {!allMatching && selectedIds.length > 0 && cls === "IT" && (
           <a
             href={`/inventory/labels?ids=${selectedIds.join(",")}`}
             className="text-xs text-accent hover:underline"
@@ -132,10 +143,10 @@ export function BulkDrawer({
               id={props.id}
               aria-describedby={props["aria-describedby"]}
               invalid={props.invalid}
-              value={to}
+              value={effectiveTo}
               onChange={(e) => setTo(e.target.value)}
             >
-              {ASSET_STATUSES.map((s) => (
+              {statusesFor(cls).map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </Select>

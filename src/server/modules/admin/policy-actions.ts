@@ -230,7 +230,8 @@ export async function addSlot(input: unknown): Promise<ActionResult<{ id: string
     if (!policy) return conflict("That policy no longer exists.");
     // A typeless slot could never be filled — computeLoadout matches on type —
     // so it would be a permanent policy gap. Require the type.
-    if (!(await tx.assetType.findUnique({ where: { id: d.assetTypeId } }))) {
+    // Leaver kits are IT's — the picker offers IT types only; this is the gate.
+    if (!(await tx.assetType.findFirst({ where: { id: d.assetTypeId, category: { cls: "IT" } } }))) {
       return validationError({ assetTypeId: "Unknown asset type" });
     }
     const before = await slotList(tx, policy.id);

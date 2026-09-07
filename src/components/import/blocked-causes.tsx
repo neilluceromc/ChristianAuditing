@@ -28,6 +28,9 @@ function Fix({
    * rather than passing a no-op, and the affordance disappears instead of
    * lying. A `link` fix stays live either way: navigating to
    * /admin/asset-categories is safe whatever plan is on screen.
+   * A link is still only offered when its label is true for every role that
+   * can reach the wizard — `wrong-class`'s label describes the click, not an
+   * outcome, for that reason (D-17).
    */
   onApplyOption?: (option: ImportOption) => void;
   onReupload?: () => void;

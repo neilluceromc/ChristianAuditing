@@ -108,17 +108,24 @@ describe("pathAllowedForRole", () => {
     ["/inventory/import", "viewer", false],
     ["/inventory/import", "purchasing_staff", false],
     ["/inventory/import", "finance_staff", false],
-    // Task 5 (Phase 12), the identical trap one route over: /inventory
-    // /register sits right above /inventory in PATH_RULES, which admits
-    // purchasing and finance — without this dedicated rule ahead of it, either
-    // could batch-register assets. Every role asserted explicitly, not just
-    // the two that should pass, for the same reason as /inventory/import and
-    // /inventory/labels above.
+    // Phase 13: registering is each department's own — IT registers IT-class
+    // categories, Purchasing registers Purchasing-class ones — so BOTH
+    // workspaces are admitted here and `registerAssets` refuses the wrong
+    // class by name. finance and viewer still get nothing: neither registers
+    // anything. Every role asserted explicitly, not just the ones that should
+    // pass, for the same reason as /inventory/import and /inventory/labels
+    // above.
     ["/inventory/register", "admin", true],
     ["/inventory/register", "it_staff", true],
     ["/inventory/register", "viewer", false],
-    ["/inventory/register", "purchasing_staff", false],
+    ["/inventory/register", "purchasing_staff", true],
     ["/inventory/register", "finance_staff", false],
+    // /inventory/new: same shape and same reason as /inventory/register above.
+    ["/inventory/new", "admin", true],
+    ["/inventory/new", "it_staff", true],
+    ["/inventory/new", "purchasing_staff", true],
+    ["/inventory/new", "finance_staff", false],
+    ["/inventory/new", "viewer", false],
     // Task 4 (Phase 10), the identical E-7/W-1 trap one route over: /inventory
     // sits right below this in PATH_RULES with workspaces ["it", "purchasing",
     // "finance"], so without a dedicated rule ahead of it a finance or
@@ -173,6 +180,32 @@ describe("navIsActive", () => {
   it("the bare list link yields to an active saved filter", () => {
     expect(navIsActive("/purchases", "/purchases", q("state=DRAFT"))).toBe(false);
     expect(navIsActive("/purchases", "/purchases", q(""))).toBe(true);
+    // Same yield, for the /inventory + ?cls=PURCHASING pair (Task 7 fix).
+    expect(navIsActive("/inventory", "/inventory", q("cls=PURCHASING"))).toBe(false);
+    expect(navIsActive("/inventory?cls=PURCHASING", "/inventory", q("cls=PURCHASING"))).toBe(true);
+  });
+  it("the bare list link stays active under a page-owned param no sibling declares", () => {
+    // /inventory's only sibling-declared key is `cls` (?cls=PURCHASING) — paging,
+    // searching, sorting and status faceting are page-owned and must not
+    // de-activate the bare "Inventory" item.
+    expect(navIsActive("/inventory", "/inventory", q("page=2"))).toBe(true);
+    expect(navIsActive("/inventory", "/inventory", q("q=dell"))).toBe(true);
+    expect(navIsActive("/inventory", "/inventory", q("status=DEFECTIVE"))).toBe(true);
+    // /purchases's only sibling-declared key is `state` — paging is page-owned.
+    expect(navIsActive("/purchases", "/purchases", q("page=3"))).toBe(true);
+    // `sort` and `purchaseYear` are page-owned too (the docblock names them).
+    expect(navIsActive("/inventory", "/inventory", q("sort=tag:desc"))).toBe(true);
+    expect(navIsActive("/inventory", "/inventory", q("purchaseYear=2024"))).toBe(true);
+    // The with-query branch is subset-match ON PURPOSE: paging inside the
+    // Purchasing view keeps the Purchasing item lit, and only it. Tightening
+    // it to an exact match would kill this highlight with a green suite.
+    expect(navIsActive("/inventory?cls=PURCHASING", "/inventory", q("cls=PURCHASING&page=2"))).toBe(true);
+    expect(navIsActive("/inventory", "/inventory", q("cls=PURCHASING&page=2"))).toBe(false);
+  });
+  it("a bare item is unaffected by a query on a route with no sibling saved filters at all", () => {
+    // No WORKSPACE_NAV item for /reservations carries a query, so `state`
+    // here is page-owned, not sibling-owned — the bare item must stay active.
+    expect(navIsActive("/reservations", "/reservations", q("state=ACTIVE"))).toBe(true);
   });
 });
 

@@ -1,12 +1,19 @@
-import type { ApprovalType, AssetStatus } from "@prisma/client";
+import type { ApprovalType, AssetClass, AssetStatus } from "@prisma/client";
 import { APPROVAL_TYPE_LABEL } from "./labels";
-import { ASSET_STATUSES } from "./inventory-list";
+import {
+  ASSIGN_TARGETS, CLASS_LABEL, DEFAULT_ASSIGN_STATUS, RETURN_TARGETS, isStatusOf,
+} from "./asset-class";
 
 /**
  * Pure payload → planned asset update. The worker re-validates LIVE state
  * (employment, current holder, current status) inside its transaction —
- * this module only decides what a well-formed payload MEANS. Failures
- * become EXECUTION_FAILED with the error stored verbatim.
+ * this module only decides what a well-formed payload MEANS for an asset of
+ * the given CLASS. Failures become EXECUTION_FAILED with the error stored
+ * verbatim.
+ *
+ * `cls` is required, not defaulted: an approval can never execute a car into
+ * DEPLOYED, and the only way to be sure is to make every caller say which
+ * class it is executing against (Phase 13, spec §7).
  */
 export type ExecutionPlan =
   | { ok: true; updates: { assigneeId?: string | null; status: AssetStatus } }
@@ -18,10 +25,7 @@ const obj = (v: unknown): Payload | null =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Payload) : null;
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
-/** The four outcomes an item can come back in (README 3e). */
-export const RETURN_STATUSES = ["SPARE", "DEFECTIVE", "BUYOUT", "MISSING"] as const satisfies readonly AssetStatus[];
-
-export function executionPlan(type: ApprovalType, payload: unknown): ExecutionPlan {
+export function executionPlan(type: ApprovalType, payload: unknown, cls: AssetClass): ExecutionPlan {
   const p = obj(payload) ?? {};
   switch (type) {
     case "lifecycle_assign": {
@@ -31,28 +35,26 @@ export function executionPlan(type: ApprovalType, payload: unknown): ExecutionPl
       if (!assigneeId || !status) {
         return { ok: false, error: `Malformed lifecycle.assign payload: expected to.assigneeId and to.status, got ${JSON.stringify(payload)}` };
       }
-      if (status !== "DEPLOYED" && status !== "TEMPORARY") {
-        return { ok: false, error: `lifecycle.assign target status must be DEPLOYED or TEMPORARY, got ${status}` };
+      if (!(ASSIGN_TARGETS[cls] as readonly string[]).includes(status)) {
+        return { ok: false, error: `lifecycle.assign target status for ${CLASS_LABEL[cls]} assets must be ${ASSIGN_TARGETS[cls].join(" or ")}, got ${status}` };
       }
-      return { ok: true, updates: { assigneeId, status } };
+      return { ok: true, updates: { assigneeId, status: status as AssetStatus } };
     }
     case "lifecycle_return": {
       const to = obj(p.to);
       const status = to ? str(to.status) : null;
       // A return is the item coming back from a person; WHAT STATE it comes
-      // back in is exactly what the offboarding wizard asks (README 3e:
-      // Returned / Defective / Buyout / Missing, with Missing first-class).
-      // The holder is cleared either way — the person has left, and who it
-      // came from survives in from.assigneeId and in the audit diff.
+      // back in is exactly what the offboarding wizard asks. The holder is
+      // cleared either way — who it came from survives in from.assigneeId.
       if (!status) {
         return { ok: false, error: `Malformed lifecycle.return payload: expected to.status, got ${JSON.stringify(payload)}` };
       }
       // A disallowed target is not a malformed payload, and the operator reading
       // this in the retry UI needs the offending value, not a JSON blob.
-      if (!(RETURN_STATUSES as readonly string[]).includes(status)) {
+      if (!(RETURN_TARGETS[cls] as readonly string[]).includes(status)) {
         return {
           ok: false,
-          error: `lifecycle.return target status must be one of ${RETURN_STATUSES.join(", ")}, got ${status}`,
+          error: `lifecycle.return target status for ${CLASS_LABEL[cls]} assets must be one of ${RETURN_TARGETS[cls].join(", ")}, got ${status}`,
         };
       }
       return { ok: true, updates: { assigneeId: null, status: status as AssetStatus } };
@@ -63,12 +65,13 @@ export function executionPlan(type: ApprovalType, payload: unknown): ExecutionPl
       if (!status) {
         return { ok: false, error: `Malformed lifecycle.change-status payload: expected to.status, got ${JSON.stringify(payload)}` };
       }
-      if (!(ASSET_STATUSES as readonly string[]).includes(status)) {
-        // A blind cast here once let an out-of-enum value throw INSIDE the
-        // execution transaction — stranding the approval in APPROVED.
-        return { ok: false, error: `lifecycle.change-status target ${status} is not a valid asset status` };
+      // Against the CLASS's set, not the whole enum: DEPLOYED is a valid
+      // AssetStatus and an illegal one for a car. (A blind cast here once let
+      // an out-of-enum value throw INSIDE the execution transaction.)
+      if (!isStatusOf(cls, status)) {
+        return { ok: false, error: `lifecycle.change-status target ${status} is not a valid status for ${CLASS_LABEL[cls]} assets` };
       }
-      return { ok: true, updates: { status: status as AssetStatus } };
+      return { ok: true, updates: { status } };
     }
     default:
       return { ok: false, error: `Execution guard: ${APPROVAL_TYPE_LABEL[type]} has no executor yet (arrives with its producing flow).` };
@@ -79,7 +82,7 @@ export function executionPlan(type: ApprovalType, payload: unknown): ExecutionPl
 export function summarizeApproval(
   type: ApprovalType,
   payload: unknown,
-  names: { assetTag?: string | null; employeeName?: string | null },
+  names: { assetTag?: string | null; employeeName?: string | null; cls: AssetClass | undefined },
 ): { line1: string; line2: string } {
   const p = obj(payload) ?? {};
   const from = obj(p.from);
@@ -90,7 +93,8 @@ export function summarizeApproval(
 
   switch (type) {
     case "lifecycle_assign": {
-      const status = to ? str(to.status) ?? "DEPLOYED" : "DEPLOYED";
+      const fallback = DEFAULT_ASSIGN_STATUS[names.cls ?? "IT"];
+      const status = to ? str(to.status) ?? fallback : fallback;
       const who = names.employeeName ? ` · ${names.employeeName}` : "";
       return { line1, line2: withReason(`→ ${status}${who}`) };
     }

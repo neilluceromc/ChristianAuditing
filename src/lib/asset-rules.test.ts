@@ -3,19 +3,27 @@ import { creationPlan, warrantyProgress, CREATABLE_STATUSES } from "./asset-rule
 
 describe("creationPlan (README 3b: assignment routes through lifecycle.assign)", () => {
   it("SPARE is a plain direct write", () => {
-    expect(creationPlan("SPARE", null)).toEqual({ ok: true, status: "SPARE", approval: null });
+    expect(creationPlan("SPARE", null, "IT")).toEqual({ ok: true, status: "SPARE", approval: null });
   });
   it("DEPLOYED/TEMPORARY require an assignee", () => {
-    expect(creationPlan("DEPLOYED", null)).toEqual({ ok: false, error: "assignee_required" });
-    expect(creationPlan("TEMPORARY", "")).toEqual({ ok: false, error: "assignee_required" });
+    expect(creationPlan("DEPLOYED", null, "IT")).toEqual({ ok: false, error: "assignee_required" });
+    expect(creationPlan("TEMPORARY", "", "IT")).toEqual({ ok: false, error: "assignee_required" });
   });
   it("assignment creates the asset SPARE plus an approval — never a direct DEPLOYED write", () => {
-    expect(creationPlan("DEPLOYED", "emp1")).toEqual({
+    expect(creationPlan("DEPLOYED", "emp1", "IT")).toEqual({
       ok: true, status: "SPARE", approval: { toStatus: "DEPLOYED", assigneeId: "emp1" },
     });
   });
-  it("only SPARE/DEPLOYED/TEMPORARY are offered on creation", () => {
-    expect(CREATABLE_STATUSES).toEqual(["SPARE", "DEPLOYED", "TEMPORARY"]);
+  it("CREATABLE_STATUSES is the creatable statuses of both classes, IT first (Task 6 widens this)", () => {
+    expect(CREATABLE_STATUSES).toEqual(["SPARE", "DEPLOYED", "TEMPORARY", "STORED", "OPERATIONAL"]);
+  });
+  it("Purchasing creates as STORED and an OPERATIONAL request becomes an assign approval", () => {
+    expect(creationPlan("STORED", null, "PURCHASING")).toEqual({ ok: true, status: "STORED", approval: null });
+    expect(creationPlan("OPERATIONAL", "e1", "PURCHASING")).toEqual({ ok: true, status: "STORED", approval: { toStatus: "OPERATIONAL", assigneeId: "e1" } });
+  });
+  it("a status the class cannot be created in is refused by name", () => {
+    expect(creationPlan("DEPLOYED", "e1", "PURCHASING")).toEqual({ ok: false, error: "not_creatable_for_class" });
+    expect(creationPlan("STORED", null, "IT")).toEqual({ ok: false, error: "not_creatable_for_class" });
   });
 });
 

@@ -35,6 +35,7 @@ const createSchema = z.object({
   entity: entitySchema,
   name: nameSchema,
   categoryId: z.string().optional(), // types only
+  cls: z.enum(["IT", "PURCHASING"]).optional(), // categories only (Phase 13); defaults to IT
 });
 
 export async function createRefRow(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -44,19 +45,20 @@ export async function createRefRow(input: unknown): Promise<ActionResult<{ id: s
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { entity, name, categoryId } = parsed.data;
+  const { entity, name, categoryId, cls } = parsed.data;
   if (entity === "type" && !categoryId) return validationError({ categoryId: "Pick a category" });
 
   try {
     let id = "";
     await prisma.$transaction(async (tx) => {
-      if (entity === "category") id = (await tx.assetCategory.create({ data: { name } })).id;
+      if (entity === "category") id = (await tx.assetCategory.create({ data: { name, cls: cls ?? "IT" } })).id;
       else if (entity === "department") id = (await tx.department.create({ data: { name } })).id;
       else id = (await tx.assetType.create({ data: { name, categoryId: categoryId! } })).id;
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name,
         entityType: AUDIT_TYPE[entity], entityId: id,
-        action: "create", diff: { name: { from: null, to: name } },
+        action: "create",
+        diff: entity === "category" ? { name: { from: null, to: name }, cls: { from: null, to: cls ?? "IT" } } : { name: { from: null, to: name } },
       });
     });
     revalidatePath(PATHS[entity]);

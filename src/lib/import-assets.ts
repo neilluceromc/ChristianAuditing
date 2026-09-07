@@ -1,5 +1,5 @@
-import type { AssetStatus, EmploymentStatus } from "@prisma/client";
-import { ASSET_STATUSES } from "./inventory-list";
+import type { AssetClass, AssetStatus, EmploymentStatus } from "@prisma/client";
+import { STATUSES_BY_CLASS } from "./asset-class";
 import type { BlockCause, BlockedRow, ImportOption } from "./import-vocabulary";
 import { cellText, isBlank, refKey, tagKey, TAG_SHAPE } from "./tag-key";
 
@@ -158,6 +158,13 @@ export interface EmployeeRef {
  * - `categoryId` / `typeId`: the record's OWN, currently-stored values —
  *   needed so rule 7 can tell whether a category change with no Type column
  *   would strand the stored type outside the newly-written category (NC-3).
+ * - `cls`: the record's OWN class, straight off its (unchangeable) category —
+ *   Fix 4, phase 13 Task 10 review. A Purchasing asset reached by its TAG or
+ *   SERIAL, not just by naming a Purchasing category, must be refused the
+ *   same way: this importer is IT's in both directions, and without this a
+ *   matched Purchasing asset would plan as a silent update and die at the DB
+ *   trigger with a generic row error at apply time instead of this named,
+ *   actionable block.
  */
 export interface AssetRecordRef {
   id: string;
@@ -166,6 +173,7 @@ export interface AssetRecordRef {
   assigneeId: string | null;
   categoryId: string;
   typeId: string | null;
+  cls: AssetClass;
 }
 
 /**
@@ -217,6 +225,16 @@ export interface AssetRefs {
    * the asset — so this carries the same shape as `byTag`, not a bare id.
    */
   bySerial: Map<string, AssetRecordRef>;
+  /**
+   * categoryId → class. In production this map is never missing an entry:
+   * `buildAssetRefs` fills it from EVERY category row, and `categoryId` here
+   * always came from that same `refs.categories` lookup two lines above. An
+   * absent key reading as IT is a TEST-FIXTURE shorthand only — a hand-built
+   * `AssetRefs` in a test that predates classes, and so never populated this
+   * map, still reads as it did before this field existed — not a production
+   * fallback this module relies on.
+   */
+  categoryClass: Map<string, AssetClass>;
 }
 
 /**
@@ -519,6 +537,18 @@ export function planAssetRows(
       }
     }
 
+    // Fix 4 (phase 13 Task 10 review): this importer is IT's in BOTH
+    // directions — it neither creates Purchasing assets (the category-name
+    // check below) nor edits them. A row reaching an existing Purchasing
+    // asset by TAG or SERIAL, not by naming a Purchasing category at all,
+    // must be refused here too, at the earliest point `matched` is known —
+    // otherwise it plans as a silent update and fails at the DB trigger with
+    // a generic row error at apply time instead of this named, actionable one.
+    if (matched?.cls === "PURCHASING") {
+      block("wrong-class", matched.tag);
+      return;
+    }
+
     // Rule 4: `required: true` on a header spec governs the COLUMN, not the
     // cell — a blank Model cell must still block, or it plans as
     // `model: ""`, which createSchema's/updateSchema's `min(2)` forbids.
@@ -548,6 +578,14 @@ export function planAssetRows(
     // rather than picking one.
     if (categoryId === null) {
       block("duplicate-category-name", categoryRaw);
+      return;
+    }
+
+    // Phase 13: this importer is IT's. A Purchasing-class category is not an
+    // unknown category — it exists — so it gets its own cause and its own
+    // fix, which is a different screen, not a different spreadsheet.
+    if (refs.categoryClass.get(categoryId) === "PURCHASING") {
+      block("wrong-class", categoryRaw);
       return;
     }
 
@@ -691,7 +729,7 @@ export function planAssetRows(
     let parsedStatus: AssetStatus | null = null;
     if (statusRaw !== "") {
       const upper = statusRaw.toUpperCase();
-      const match = (ASSET_STATUSES as readonly string[]).find((s) => s === upper);
+      const match = (STATUSES_BY_CLASS.IT as readonly string[]).find((s) => s === upper);
       if (!match) {
         block("bad-status", statusRaw);
         return;

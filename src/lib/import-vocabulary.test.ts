@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ASSET_STATUSES } from "./inventory-list";
 import { EMPLOYMENT_STATUSES } from "./employees-list";
+import { STATUSES_BY_CLASS } from "./asset-class";
 import {
   BLOCK_CAUSES, IMPORT_MAX_UPLOAD_BYTES, IMPORT_OPTIONS, IMPORT_ROW_CAP, blockSpec, groupByCause,
   optionLabel, optionsFromForm, rowCapRefusal, uploadTooLargeRefusal,
@@ -13,9 +14,12 @@ import {
 // creates a Vendor), the latter is T11's own page (the wizard doesn't link to
 // itself; a "reupload" fix renders as its own restart instead). `/admin/
 // departments` was added in Task 12 — it exists, and unlike `/admin/vendors`
-// a rename there is genuinely possible (E-6).
+// a rename there is genuinely possible (E-6). `/inventory/register` was added
+// in Phase 13 Task 10 — it exists, and is where a Purchasing-class row is
+// pointed instead of a file fix.
 const REAL_ROUTES = [
   "/admin/asset-categories", "/admin/asset-types", "/admin/departments", "/inventory",
+  "/inventory/register",
 ];
 
 describe("BLOCK_CAUSES", () => {
@@ -84,9 +88,56 @@ describe("BLOCK_CAUSES", () => {
   // asserts are derived, directly under a comment saying never to — so it
   // would not have caught the exact drift it warns about. Iterating
   // ASSET_STATUSES closes that.
-  it("names all eight statuses inline in bad-status's explanation, derived not retyped", () => {
+  //
+  // Phase 13 Task 10: this importer is IT's. `bad-status`'s explanation now
+  // names IT's statuses, derived from STATUSES_BY_CLASS.IT (never retyped —
+  // the COUNT included, so a ninth status added there is reflected here
+  // automatically instead of leaving a stale "eight" behind), and must NOT
+  // name any of Purchasing's six — those rows are refused by `wrong-class`
+  // before a status is ever checked.
+  it("names IT's statuses (and their count) in bad-status's explanation, derived not retyped — and none of Purchasing's", () => {
     const explain = blockSpec("bad-status").explain;
-    for (const s of ASSET_STATUSES) expect(explain).toContain(s);
+    expect(explain).toContain(String(STATUSES_BY_CLASS.IT.length));
+    for (const s of STATUSES_BY_CLASS.IT) expect(explain).toContain(s);
+    for (const s of STATUSES_BY_CLASS.PURCHASING) expect(explain).not.toContain(s);
+  });
+
+  // Phase 13 Task 10, D-17 (fix): the ORIGINAL wording ("Purchasing assets are
+  // registered on the Register screen") told an it_staff reader — who CAN
+  // reach this importer — to do something the Register screen refuses them
+  // (`/inventory/register` offers each role only its own classes' categories).
+  // The fix must be true for EVERY reader admitted to the importer: the label
+  // now describes what the click does ("Open the Register screen"), not who
+  // may act there, and the explain hands the rows to Purchasing staff or an
+  // admin rather than telling the reader to register them "yourself".
+  // Re-review (post D-17): `wrong-class` now catches TWO row shapes — (a) a
+  // row naming a Purchasing-class category, and (b) a row whose tag or
+  // serial matches an asset Purchasing already owns, whatever category the
+  // row names (`import-assets.ts`, the `matched?.cls === "PURCHASING"`
+  // check). `groupByCause` buckets by cause alone, so one card's copy must
+  // be true for BOTH shapes — shape (b) may name an IT category and the
+  // asset already exists, so "register these" alone would read as telling
+  // the reader to create a duplicate. The `tag or serial` assertion pins
+  // that second route in the copy so the two shapes cannot drift apart
+  // again unnoticed.
+  it("wrong-class sends the operator to the register screen, not to a file fix", () => {
+    const spec = blockSpec("wrong-class");
+    expect(spec.fix).toEqual({ kind: "link", label: "Open the Register screen", href: "/inventory/register" });
+    // The fix must be true for EVERY reader admitted to the importer, not
+    // just an admin — an it_staff reader can reach this wizard but cannot
+    // register a Purchasing asset on `/inventory/register` (it offers each
+    // role only its own classes' categories), so the explain hands the rows
+    // to Purchasing staff (or an admin) rather than telling the reader to
+    // register them "yourself". The OLD wording's exact defect: "for you"
+    // told every reader — including one the Register screen refuses — the
+    // screen was theirs to use.
+    expect(spec.explain).toContain("Purchasing staff");
+    expect(spec.explain).not.toMatch(/register these assets yourself|you register/i);
+    expect(spec.explain).not.toContain("for you");
+    // Must also be true for the tag/serial-match shape, not just the
+    // category-name shape — otherwise the copy is false for rows blocked by
+    // `matched?.cls === "PURCHASING"` in import-assets.ts.
+    expect(spec.explain).toMatch(/tag or serial/);
   });
 
   it("offers lifecycle-via-import a way to keep applying the row's other columns", () => {
@@ -193,6 +244,7 @@ describe("BLOCK_CAUSES", () => {
       "missing-required": "reupload",
       "employment-via-import": "option",
       "name-or-title-length": "reupload",
+      "wrong-class": "link",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);

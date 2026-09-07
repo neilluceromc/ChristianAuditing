@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
-import { ASSET_STATUSES } from "@/lib/inventory-list";
+import { ASSET_CLASSES, CLASS_LABEL, parseCls, statusesFor } from "@/lib/asset-class";
 import { financeAssets, parseAssetStatus } from "@/server/modules/finance/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, TBody, THead, Th, Td, Tr } from "@/components/ui/table";
@@ -18,12 +18,14 @@ export default async function FinanceAssetsPage({
 }) {
   await requireUser();
   const params = toSearchParams(await searchParams);
-  const status = parseAssetStatus(params.get("status"));
+  const cls = parseCls(params.get("cls")) ?? "IT";
+  const status = parseAssetStatus(params.get("status"), cls);
   const page = Math.max(1, Number.parseInt(params.get("page") ?? "1", 10) || 1);
-  const { rows, total, page: current, pageCount, totalCost } = await financeAssets(status, page);
+  const { rows, total, page: current, pageCount, totalCost } = await financeAssets(status, page, cls);
 
   const hrefFor = (p: number) => {
     const next = new URLSearchParams();
+    if (cls === "PURCHASING") next.set("cls", "PURCHASING");
     if (status) next.set("status", status);
     if (p > 1) next.set("page", String(p));
     const qs = next.toString();
@@ -34,9 +36,29 @@ export default async function FinanceAssetsPage({
     <>
       <PageHeader title="Capitalized assets" />
       <div className="flex flex-col gap-3">
+        <nav aria-label="Asset class" className="flex gap-1 border-b border-border">
+          {ASSET_CLASSES.map((c) => (
+            <Link
+              key={c}
+              // The active tab's href is the CURRENT URL (hrefFor already
+              // closes over this page's cls/status), so clicking it is a
+              // no-op — a class switch (the inactive tab, still bare) resets
+              // filters on purpose, but re-clicking the tab you're already on
+              // must not (D-16).
+              href={c === cls ? hrefFor(current) : c === "PURCHASING" ? "/finance/assets?cls=PURCHASING" : "/finance/assets"}
+              aria-current={c === cls ? "page" : undefined}
+              className={cn(
+                "-mb-px border-b-2 px-3 py-2 text-[13px] font-medium",
+                c === cls ? "border-accent text-fg" : "border-transparent text-fg-secondary hover:text-fg",
+              )}
+            >
+              {CLASS_LABEL[c]}
+            </Link>
+          ))}
+        </nav>
         <div className="flex flex-wrap items-center gap-1.5">
           <Link
-            href="/finance/assets"
+            href={cls === "PURCHASING" ? "/finance/assets?cls=PURCHASING" : "/finance/assets"}
             aria-current={status ? undefined : "page"}
             className={cn(
               "rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
@@ -45,10 +67,10 @@ export default async function FinanceAssetsPage({
           >
             All
           </Link>
-          {ASSET_STATUSES.map((s) => (
+          {statusesFor(cls).map((s) => (
             <Link
               key={s}
-              href={`/finance/assets?status=${s}`}
+              href={`/finance/assets?${cls === "PURCHASING" ? "cls=PURCHASING&" : ""}status=${s}`}
               aria-current={status === s ? "page" : undefined}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
@@ -109,13 +131,13 @@ export default async function FinanceAssetsPage({
           </>
         ) : status ? (
           <EmptyState
-            title={`No capitalized asset reads ${status}`}
+            title={`No capitalized ${CLASS_LABEL[cls]} asset reads ${status}`}
             description="Only assets with an acquisition cost appear here."
-            actions={<ButtonLink href="/finance/assets">Clear filter</ButtonLink>}
+            actions={<ButtonLink href={cls === "PURCHASING" ? "/finance/assets?cls=PURCHASING" : "/finance/assets"}>Clear filter</ButtonLink>}
           />
         ) : (
           <EmptyState
-            title="Nothing has been capitalized yet"
+            title={`No ${CLASS_LABEL[cls]} asset has been capitalized yet`}
             description="An asset appears here once it carries an acquisition cost."
           />
         )}

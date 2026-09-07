@@ -1,5 +1,5 @@
-import { ASSET_STATUSES } from "./inventory-list";
 import { EMPLOYMENT_STATUSES } from "./employees-list";
+import { STATUSES_BY_CLASS } from "./asset-class";
 
 /**
  * Scope decision 5. An import writes one AuditEntry per row, so this cap bounds
@@ -98,6 +98,11 @@ export const BLOCK_CAUSES = [
   "missing-required",
   "employment-via-import",
   "name-or-title-length",
+  // Phase 13 Task 10: this importer is IT's. A Purchasing-class category is
+  // not an unknown one — it exists — so it is not `unknown-category`; it is
+  // its own cause, with its own fix (the Register screen, not a spreadsheet
+  // edit). Appended, per this array's own rule above — never inserted.
+  "wrong-class",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -210,7 +215,7 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   "bad-status": {
     label: "Status not recognised",
     explain:
-      `These rows carry a status that is not one of this system's eight: ${ASSET_STATUSES.join(", ")}. ` +
+      `These rows carry a status that is not one of IT's ${STATUSES_BY_CLASS.IT.length}: ${STATUSES_BY_CLASS.IT.join(", ")}. ` +
       "Leave the column blank to get SPARE, or correct it to one of those.",
     fix: { kind: "reupload", label: "Fix the file" },
   },
@@ -419,6 +424,20 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "— 2 to 120 characters, the same rule the edit form enforces. Shorten or lengthen it to fit, and " +
       "re-upload.",
     fix: { kind: "reupload", label: "Fix the file" },
+  },
+
+  // Phase 13 Task 10: this importer is IT's. Not a reuse of `unknown-category`
+  // — the category IS known, it just belongs to the other class, so the fix
+  // is a different screen, not "create it first and re-upload".
+  "wrong-class": {
+    label: "Belongs to Purchasing",
+    explain:
+      "These rows belong to Purchasing: they name a Purchasing-class category, or their tag or serial " +
+      "matches an asset Purchasing already owns. This importer is IT's. A new Purchasing asset is " +
+      "registered by Purchasing staff (or an admin) on the Register screen, where the tags are numbered " +
+      "for them; an existing one is theirs to edit. Hand them the rows below; the rest of your file " +
+      "still imports.",
+    fix: { kind: "link", label: "Open the Register screen", href: "/inventory/register" },
   },
 };
 

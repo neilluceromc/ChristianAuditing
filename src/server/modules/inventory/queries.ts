@@ -1,10 +1,11 @@
 import { cache } from "react";
-import type { Prisma } from "@prisma/client";
+import type { AssetClass, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
-  ASSET_STATUSES, buildAssetOrderBy, buildAssetWhere, type PurchaseYearValue,
+  buildAssetOrderBy, buildAssetWhere, type PurchaseYearValue,
 } from "@/lib/inventory-list";
+import { statusesFor } from "@/lib/asset-class";
 import type { ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage } from "@/lib/repairs";
@@ -110,10 +111,11 @@ function toRow(a: {
 export async function repairStageIds(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
+  cls: AssetClass,
 ): Promise<string[] | null> {
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
   if (stages.length === 0) return null;
-  const where = buildAssetWhere(state, purchaseYear);
+  const where = buildAssetWhere(state, purchaseYear, cls);
   const candidates = await prisma.asset.findMany({
     where,
     select: {
@@ -132,12 +134,13 @@ export async function repairStageIds(
 export async function listAssets(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
+  cls: AssetClass,
 ): Promise<{
   rows: AssetRow[];
   total: number;
   pageCount: number;
 }> {
-  const where = buildAssetWhere(state, purchaseYear);
+  const where = buildAssetWhere(state, purchaseYear, cls);
   const orderBy = buildAssetOrderBy(state.sort);
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
 
@@ -197,10 +200,15 @@ export interface FacetOption {
  * not its own selection — options stay visible (dimmed at zero) instead of
  * vanishing once a sibling is picked. URL updates only on Apply, so these
  * recompute per navigation, not per click.
+ *
+ * Every list and every count in here is scoped by `cls` — the four groupBys
+ * through buildAssetWhere, the three reference lists directly. An eighth
+ * query must be too; two-of-three was the shape that shipped (D-12).
  */
 export async function facetOptions(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
+  cls: AssetClass,
 ): Promise<Record<string, FacetOption[]>> {
   const without = (facet: string): ListState => ({
     ...state,
@@ -223,17 +231,17 @@ export async function facetOptions(
   // being computed. Matches the without(facet) rule above: apply everything
   // else, never the facet's own selection.
   const [statusG, categoryG, typeG, assigneeG, categories, types, assignees] = await Promise.all([
-    prisma.asset.groupBy({ by: ["status"], where: buildAssetWhere(without("status"), purchaseYear), _count: true }),
-    prisma.asset.groupBy({ by: ["categoryId"], where: buildAssetWhere(without("category"), purchaseYear), _count: true }),
-    prisma.asset.groupBy({ by: ["typeId"], where: buildAssetWhere(without("type"), purchaseYear), _count: true }),
-    prisma.asset.groupBy({ by: ["assigneeId"], where: buildAssetWhere(without("assignee"), purchaseYear), _count: true }),
-    prisma.assetCategory.findMany({ orderBy: { name: "asc" } }),
-    prisma.assetType.findMany({ orderBy: { name: "asc" }, include: { category: true } }),
-    prisma.employee.findMany({ where: { assets: { some: {} } }, orderBy: { name: "asc" } }),
+    prisma.asset.groupBy({ by: ["status"], where: buildAssetWhere(without("status"), purchaseYear, cls), _count: true }),
+    prisma.asset.groupBy({ by: ["categoryId"], where: buildAssetWhere(without("category"), purchaseYear, cls), _count: true }),
+    prisma.asset.groupBy({ by: ["typeId"], where: buildAssetWhere(without("type"), purchaseYear, cls), _count: true }),
+    prisma.asset.groupBy({ by: ["assigneeId"], where: buildAssetWhere(without("assignee"), purchaseYear, cls), _count: true }),
+    prisma.assetCategory.findMany({ where: { cls }, orderBy: { name: "asc" } }),
+    prisma.assetType.findMany({ where: { category: { cls } }, orderBy: { name: "asc" }, include: { category: true } }),
+    prisma.employee.findMany({ where: { assets: { some: { cls } } }, orderBy: { name: "asc" } }),
   ]);
 
   return {
-    status: ASSET_STATUSES.map((s) => ({
+    status: statusesFor(cls).map((s) => ({
       value: s, label: s, count: statusG.find((g) => g.status === s)?._count ?? 0,
     })),
     category: categories.map((c) => ({
@@ -270,8 +278,9 @@ export async function facetOptions(
  */
 export async function purchaseYearBuckets(
   state: ListState,
+  cls: AssetClass,
 ): Promise<Array<{ year: number | null; count: number }>> {
-  const where = buildAssetWhere(state);
+  const where = buildAssetWhere(state, null, cls);
   const rows = await prisma.asset.findMany({ where, select: { purchasedAt: true } });
   const counts = new Map<number | null, number>();
   for (const { purchasedAt } of rows) {
@@ -285,6 +294,13 @@ export async function purchaseYearBuckets(
  * A USB scanner is just a keyboard: an exact tag match opens the record
  * instead of listing it. findUnique on the uppercased tag — NEVER an
  * insensitive equals (ILIKE wildcard hazard).
+ *
+ * Deliberately not scoped by class. Tags are globally unique, and this is the
+ * scanner contract: a label read off the object opens the object, whichever
+ * list view the search box happened to be on. The non-exact path
+ * (`listAssets`) IS class-scoped — `q=BR-VH-0001` from the IT view jumps to
+ * the car, `q=BR-VH` from the IT view finds nothing. That asymmetry is
+ * intended; do not "fix" it by adding `cls` here.
  */
 export function exactTagMatch(q: string) {
   const tag = q.trim().toUpperCase();

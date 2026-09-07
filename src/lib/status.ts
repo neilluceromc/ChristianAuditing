@@ -16,6 +16,11 @@ const MAP: Record<string, StatusFamily> = {
   // Asset status (MISSING: custody lost — a fault demanding investigation, not "fine for now")
   DEPLOYED: "settled", SPARE: "neutral", DEFECTIVE: "fault", MISSING: "fault", DONATED: "closed",
   TEMPORARY: "attention", BUYOUT: "closed", DISPOSE: "closed",
+  // Purchasing-class asset status (Phase 13). STORED is neutral for the same
+  // reason SPARE is — idle stock is not a problem; REPAIRING and LOST are
+  // faults for the same reason DEFECTIVE and MISSING are.
+  OPERATIONAL: "settled", STORED: "neutral", REPAIRING: "fault",
+  RETIRED: "closed", SOLD: "closed", LOST: "fault",
   // Purchase request state
   DRAFT: "neutral", SUBMITTED: "inflight", IT_REVIEWED: "inflight",
   COMPLETED: "settled", CANCELLED: "closed",
@@ -69,6 +74,15 @@ export function statusFamily(value: string, ns?: StatusNamespace): StatusFamily 
   // Object.hasOwn: a client-defined status named "constructor" or "toString"
   // must map to neutral, not walk the prototype chain into a Function.
   return Object.hasOwn(MAP, value) ? MAP[value] : "neutral";
+}
+
+/**
+ * Whether `value` has an EXPLICIT family entry. `statusFamily` returns neutral
+ * for anything unmapped, so a test asserting `neutral` proves nothing about
+ * the map; this is the assertion that does (Phase 13, D-1).
+ */
+export function hasStatusFamily(value: string, ns?: StatusNamespace): boolean {
+  return Object.hasOwn(ns ? NAMESPACED[ns] : MAP, value);
 }
 
 /** EXECUTION_FAILED must not look like REJECTED: dashed border + diamond mark. */

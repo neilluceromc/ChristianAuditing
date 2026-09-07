@@ -1,4 +1,4 @@
-import type { ApprovalType, Prisma } from "@prisma/client";
+import type { ApprovalType, AssetClass, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
@@ -136,6 +136,7 @@ export async function listOffboarding(): Promise<OffboardingRow[]> {
 export interface WizardItem {
   assetId: string;
   tag: string;
+  cls: AssetClass;
   model: string;
   category: string;
   status: string;
@@ -224,7 +225,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
         id: true, refNo: true, state: true, payload: true, createdAt: true, assetId: true,
         asset: {
           select: {
-            id: true, tag: true, model: true, status: true, cost: true,
+            id: true, tag: true, cls: true, model: true, status: true, cost: true,
             category: { select: { name: true } },
           },
         },
@@ -273,7 +274,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
 
   const toItem = (
     a: {
-      id: string; tag: string; model: string; status: string;
+      id: string; tag: string; cls: AssetClass; model: string; status: string;
       cost: Prisma.Decimal | null; category: { name: string };
     },
     held: boolean,
@@ -281,6 +282,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   ): WizardItem => ({
     assetId: a.id,
     tag: a.tag,
+    cls: a.cls,
     model: a.model,
     category: a.category.name,
     status: a.status,

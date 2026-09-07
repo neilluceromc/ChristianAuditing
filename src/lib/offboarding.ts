@@ -1,10 +1,11 @@
-import type { AssetStatus } from "@prisma/client";
+import type { AssetClass, AssetStatus } from "@prisma/client";
 
 /**
- * README 3e: per item, a 4-way control — Returned / Defective / Buyout /
- * **Missing**. Missing is first-class because "pretending everything comes
- * back is why spreadsheets drift", and a reason is required for anything
- * other than a clean return.
+ * The outcome VOCABULARY, in README 3e's order. It is no longer the control:
+ * what any given item offers is `outcomesFor(cls)` -- four for an IT asset,
+ * three for a Purchasing one (no Buyout). Missing is first-class because
+ * "pretending everything comes back is why spreadsheets drift", and a reason
+ * is required for anything other than a clean return.
  */
 export const OUTCOMES = ["RETURNED", "DEFECTIVE", "BUYOUT", "MISSING"] as const;
 
@@ -14,10 +15,26 @@ export const OUTCOME_LABEL: Record<Outcome, string> = {
   RETURNED: "Returned", DEFECTIVE: "Defective", BUYOUT: "Buyout", MISSING: "Missing",
 };
 
-/** What the worker will set the asset to — the payload's `to.status`. */
-export const OUTCOME_STATUS: Record<Outcome, AssetStatus> = {
-  RETURNED: "SPARE", DEFECTIVE: "DEFECTIVE", BUYOUT: "BUYOUT", MISSING: "MISSING",
+/**
+ * What the worker will set the asset to — the payload's `to.status` — per
+ * CLASS (Phase 13). Purchasing has no Buyout: nobody buys out a company car or
+ * a desk through the leaver wizard, so the key is simply absent, and
+ * `outcomesFor` derives the offered set from what is present.
+ */
+export const OUTCOME_STATUS_BY_CLASS: Record<AssetClass, Partial<Record<Outcome, AssetStatus>>> = {
+  IT: { RETURNED: "SPARE", DEFECTIVE: "DEFECTIVE", BUYOUT: "BUYOUT", MISSING: "MISSING" },
+  PURCHASING: { RETURNED: "STORED", DEFECTIVE: "REPAIRING", MISSING: "LOST" },
 };
+
+/** The outcomes the wizard offers for an asset of this class, in README 3e order. */
+export function outcomesFor(cls: AssetClass): readonly Outcome[] {
+  return OUTCOMES.filter((o) => OUTCOME_STATUS_BY_CLASS[cls][o] !== undefined);
+}
+
+/** The status an outcome lands on for this class, or null if the class does not offer it. */
+export function outcomeStatus(cls: AssetClass, outcome: Outcome): AssetStatus | null {
+  return OUTCOME_STATUS_BY_CLASS[cls][outcome] ?? null;
+}
 
 export function reasonRequired(outcome: Outcome): boolean {
   return outcome !== "RETURNED";
@@ -86,9 +103,13 @@ export function reportTotals(items: ReportItem[]): ReportTotals {
   return { ...money, total: items.length, counts };
 }
 
-/** Reverse of OUTCOME_STATUS: what a stored payload's target status meant. */
+/** Reverse of the outcome maps, across BOTH classes: what a stored payload's target status meant. */
 export function outcomeOfStatus(status: string | null | undefined): Outcome | null {
-  return OUTCOMES.find((o) => OUTCOME_STATUS[o] === status) ?? null;
+  for (const cls of ["IT", "PURCHASING"] as const) {
+    const hit = OUTCOMES.find((o) => OUTCOME_STATUS_BY_CLASS[cls][o] === status);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** `to.status` out of an approval payload, trusting nothing about its shape. */
@@ -115,6 +136,8 @@ export interface Decision {
   outcome: Outcome;
   state: string;
   reason: string | null;
+  /** payload.to.status, exactly as stored — the payload's real target, not a re-derivation. */
+  toStatus: string | null;
 }
 
 /**
@@ -172,5 +195,6 @@ export function decisionOf(
     outcome: winner.outcome,
     state: winner.state,
     reason: winner.reason,
+    toStatus: winner.toStatus,
   };
 }

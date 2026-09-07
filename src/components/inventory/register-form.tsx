@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { nextTags, preferredPrefix, type TagRun } from "@/lib/receiving";
+import { CLASS_EXAMPLE, withClsQS } from "@/lib/asset-class";
 import type { ActionResult } from "@/server/action-result";
 
 // Mirrors the discriminated union `nextTags` returns (`./lib/receiving.ts`) —
@@ -29,7 +31,7 @@ export function RegisterForm({
   highestByPrefix,
   action,
 }: {
-  categories: Array<{ id: string; name: string }>;
+  categories: Array<{ id: string; name: string; cls: AssetClass }>;
   types: Array<{ id: string; name: string; categoryId: string }>;
   vendors: Array<{ id: string; name: string }>;
   requests: Array<{ id: string; refNo: string }>;
@@ -58,6 +60,7 @@ export function RegisterForm({
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
   const typesForCategory = types.filter((t) => t.categoryId === categoryId);
+  const cls: AssetClass = categories.find((c) => c.id === categoryId)?.cls ?? categories[0]?.cls ?? "IT";
 
   // A category switch picks a fresh default prefix (the one already most
   // used in that category) rather than carrying over a prefix that may not
@@ -121,7 +124,7 @@ export function RegisterForm({
         requestId: requestId || undefined,
       });
       if (res.ok) {
-        router.push("/inventory");
+        router.push("/inventory" + withClsQS("", cls));
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
         const fe = res.fieldErrors ?? {};
@@ -172,7 +175,7 @@ export function RegisterForm({
             {(p) => (
               <Input
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                placeholder="ThinkPad T14 Gen 4"
+                placeholder={CLASS_EXAMPLE[cls].model}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
@@ -197,7 +200,7 @@ export function RegisterForm({
                 />
               )}
             </FormField>
-            <FormField label="Prefix" required hint="Two letters, e.g. LT for laptops.">
+            <FormField label="Prefix" required hint={CLASS_EXAMPLE[cls].prefixHint}>
               {(p) => (
                 <Input
                   id={p.id} aria-describedby={p["aria-describedby"]}

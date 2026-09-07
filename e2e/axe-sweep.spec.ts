@@ -104,7 +104,7 @@ const IT_STAFF_ROUTES = [
 const PURCHASING_STAFF_ROUTES = ["/purchases/new"];
 
 // ── finance_staff: PATH_RULES workspace "finance" only ─────────────────────
-const FINANCE_STAFF_ROUTES = ["/finance/assets", "/finance/activity"];
+const FINANCE_STAFF_ROUTES = ["/finance/assets", "/finance/activity", "/finance/assets?cls=PURCHASING"];
 
 // ── viewer: everything else — PATH_RULES workspace "it" (viewer's only
 // workspace) with no further role restriction. This is the lowest role that
@@ -113,7 +113,7 @@ const FINANCE_STAFF_ROUTES = ["/finance/assets", "/finance/activity"];
 // admin-logged-in sweep would show (a "READ-ONLY · VIEWER" pill, hidden
 // mutate actions) and therefore the render most likely to have gone unchecked.
 const VIEWER_STATIC_ROUTES = [
-  "/inventory", "/inventory/activity",
+  "/inventory", "/inventory/activity", "/inventory?cls=PURCHASING",
   "/employees", "/employees?gaps=1", "/employees/activity",
   "/approvals", "/audit", "/offboarding", "/reservations",
   "/admin/equipment-policies",

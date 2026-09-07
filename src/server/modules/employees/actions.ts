@@ -12,6 +12,7 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { diffOf } from "@/lib/audit-diff";
+import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS } from "@/lib/asset-class";
 
 const assignSchema = z.object({
   employeeId: z.string().min(1),
@@ -42,7 +43,9 @@ export async function requestAssign(input: unknown): Promise<ActionResult<{ refN
         include: { reservations: { where: { state: "ACTIVE" }, include: { employee: true } } },
       });
       if (!asset) return conflict("That asset no longer exists.");
-      if (asset.status !== "SPARE") return conflict(`${asset.tag} is ${asset.status}, not SPARE — only spares can be assigned.`);
+      if (asset.status !== ASSIGNABLE_FROM[asset.cls]) {
+        return conflict(`${asset.tag} is ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — only idle stock can be assigned.`);
+      }
       const hold = asset.reservations[0];
       if (hold && hold.employeeId !== d.employeeId) {
         return conflict(`${asset.tag} is reserved for ${hold.employee.name} — release the hold first.`);
@@ -53,7 +56,7 @@ export async function requestAssign(input: unknown): Promise<ActionResult<{ refN
       const approval = await createApproval(tx, {
         type: "lifecycle_assign",
         payload: {
-          to: { assigneeId: d.employeeId, status: "DEPLOYED" },
+          to: { assigneeId: d.employeeId, status: DEFAULT_ASSIGN_STATUS[asset.cls] },
           reason: d.reason || (hold ? "reserved — fulfilling the hold" : "slot fill"),
         },
         requestedById: user.id,
@@ -110,7 +113,7 @@ export async function requestReturn(input: unknown): Promise<ActionResult<{ refN
         type: "lifecycle_return",
         payload: {
           from: { assigneeId: d.employeeId },
-          to: { assigneeId: null, status: "SPARE" },
+          to: { assigneeId: null, status: DEFAULT_STATUS[asset.cls] },
           reason: d.reason,
         },
         requestedById: user.id,
@@ -163,11 +166,11 @@ export async function requestAssignReserved(input: unknown): Promise<ActionResul
         include: { asset: true },
       });
       for (const hold of holds) {
-        if (hold.asset.status !== "SPARE") continue;
+        if (hold.asset.status !== ASSIGNABLE_FROM[hold.asset.cls]) continue;
         if (await openApprovalForAsset(tx, hold.assetId)) continue;
         const approval = await createApproval(tx, {
           type: "lifecycle_assign",
-          payload: { to: { assigneeId: employeeId, status: "DEPLOYED" }, reason: "reserved — day-one setup" },
+          payload: { to: { assigneeId: employeeId, status: DEFAULT_ASSIGN_STATUS[hold.asset.cls] }, reason: "reserved — day-one setup" },
           requestedById: user.id,
           assetId: hold.assetId,
           employeeId,

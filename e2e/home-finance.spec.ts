@@ -1,7 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
+import { PrismaClient } from "@prisma/client";
+import { fmtMoney } from "@/lib/format";
 import { SEED_PASSWORD } from "../prisma/fixtures";
+
+const db = new PrismaClient();
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login — going there
@@ -37,6 +41,9 @@ async function expectNoSeriousAxe(page: Page) {
 // reseeds so no file inherits another's mutations.
 test.beforeAll(() => {
   execSync("npm run db:seed", { timeout: 120_000 });
+});
+test.afterAll(async () => {
+  await db.$disconnect();
 });
 
 test.describe("home — IT dashboard leads with work, not KPIs", () => {
@@ -149,6 +156,28 @@ test.describe("home — finance leads with money, not counts", () => {
 
     await expect(page.locator("li").filter({ hasText: "PR-0195" })).toBeVisible();
     await expect(page.locator("li").filter({ hasText: "PR-0195" }).getByRole("link", { name: "Review" })).toBeVisible();
+
+    // The Capitalized stat tile (financeHome() in
+    // src/server/modules/home/queries.ts) is the one asset query in that file
+    // deliberately NOT pinned to a single class — Finance gets both classes'
+    // totals here, matching /finance/assets' own two-tab, both-classes view
+    // (D-16). Derive the expectation from the same aggregate the page runs,
+    // rather than hardcoding it, then pin the seed total once so a future
+    // reseed change is caught here too.
+    const capitalizedAgg = await db.asset.aggregate({
+      where: { cost: { not: null } },
+      _sum: { cost: true },
+      _count: { _all: true },
+    });
+    const totalCost = Number(capitalizedAgg._sum.cost ?? 0);
+    const totalCount = capitalizedAgg._count._all;
+    // Seed pin: IT ₱807,000 / 25 assets + Purchasing ₱47,635,000 / 7 assets.
+    expect(totalCost).toBe(48_442_000);
+    expect(totalCount).toBe(32);
+
+    const capitalizedTile = page.getByText("Capitalized", { exact: true }).locator("..");
+    await expect(capitalizedTile).toContainText(fmtMoney(totalCost));
+    await expect(capitalizedTile).toContainText(`${totalCount} assets`);
   });
 });
 

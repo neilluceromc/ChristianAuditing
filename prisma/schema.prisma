@@ -17,6 +17,14 @@ enum Role {
   viewer
 }
 
+/// Phase 13. Lives on the category. Each asset also carries a copy (Asset.cls,
+/// default IT); the asset_class_invariants trigger holds the two equal on every
+/// write that touches it. See spec §2.
+enum AssetClass {
+  IT
+  PURCHASING
+}
+
 enum AssetStatus {
   DEPLOYED
   SPARE
@@ -26,6 +34,14 @@ enum AssetStatus {
   BUYOUT
   DISPOSE
   MISSING
+  // Purchasing-class vocabulary (Phase 13). Disjoint from the eight above; a
+  // trigger refuses any asset whose status is outside its class's set.
+  OPERATIONAL
+  STORED
+  REPAIRING
+  RETIRED
+  SOLD
+  LOST
 }
 
 enum PurchaseRequestState {
@@ -169,6 +185,7 @@ model AssetCategory {
   id     String      @id @default(cuid())
   name   String      @unique
   locked Boolean     @default(false)
+  cls    AssetClass  @default(IT)
   types  AssetType[]
   assets Asset[]
 }
@@ -229,6 +246,14 @@ model Asset {
   typeId            String?
   type              AssetType?       @relation(fields: [typeId], references: [id], onDelete: Restrict)
   status            AssetStatus      @default(SPARE)
+  /// @default(IT) is scaffolding: it keeps every insert path that predates Phase
+  /// 13 working while later tasks teach each one to set this from the category.
+  /// The asset_class_invariants trigger -- not the default -- is the guarantee:
+  /// it holds this equal to the category's cls, and the status inside that
+  /// class's set, on every write that touches status, cls or categoryId. It
+  /// does NOT make the value immutable: at the database level a single-statement
+  /// change of category, cls and status together is legal.
+  cls               AssetClass       @default(IT)
   assigneeId        String?
   assignee          Employee?        @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
   purchasedAt       DateTime?
@@ -268,6 +293,7 @@ model Asset {
   @@index([vendorId])
   @@index([financeConfirmedAt])
   @@index([financeReturnedAt])
+  @@index([cls])
 }
 
 model AssetSecret {

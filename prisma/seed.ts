@@ -1,4 +1,4 @@
-import { PrismaClient, type AssetStatus } from "@prisma/client";
+import { PrismaClient, type AssetStatus, type AssetClass } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { encryptSecret } from "../src/server/crypto";
 import { secretAad } from "../src/server/webhooks/sign";
@@ -54,22 +54,28 @@ async function main() {
   );
   const depts = Object.fromEntries(deptList.map((d) => [d.name, d]));
 
-  const catData: Record<string, string[]> = {
-    Laptop: ["Dell Latitude", "ThinkPad"],
-    Monitor: ["24-inch", "27-inch"],
-    Phone: ["iPhone", "Android"],
-    Dock: ["USB-C Dock"],
-    Headset: ["Wired", "Wireless"],
-    Peripheral: ["Keyboard", "Mouse"],
+  // Phase 13: every category carries a class. The six IT categories are what
+  // they always were; the four Purchasing ones are the meeting's own examples.
+  const catData: Record<string, { cls: AssetClass; types: string[] }> = {
+    Laptop: { cls: "IT", types: ["Dell Latitude", "ThinkPad"] },
+    Monitor: { cls: "IT", types: ["24-inch", "27-inch"] },
+    Phone: { cls: "IT", types: ["iPhone", "Android"] },
+    Dock: { cls: "IT", types: ["USB-C Dock"] },
+    Headset: { cls: "IT", types: ["Wired", "Wireless"] },
+    Peripheral: { cls: "IT", types: ["Keyboard", "Mouse"] },
+    Vehicle: { cls: "PURCHASING", types: ["Sedan", "Van"] },
+    Furniture: { cls: "PURCHASING", types: ["Desk", "Chair"] },
+    "Pantry Equipment": { cls: "PURCHASING", types: ["Microwave", "Air purifier"] },
+    Building: { cls: "PURCHASING", types: ["Floor", "Warehouse"] },
   };
-  const cats: Record<string, { id: string; typeIds: string[] }> = {};
-  for (const [name, types] of Object.entries(catData)) {
-    const cat = await prisma.assetCategory.create({ data: { name } });
+  const cats: Record<string, { id: string; typeIds: string[]; cls: AssetClass }> = {};
+  for (const [name, { cls, types }] of Object.entries(catData)) {
+    const cat = await prisma.assetCategory.create({ data: { name, cls } });
     const typeIds: string[] = [];
     for (const t of types) {
       typeIds.push((await prisma.assetType.create({ data: { name: t, categoryId: cat.id } })).id);
     }
-    cats[name] = { id: cat.id, typeIds };
+    cats[name] = { id: cat.id, typeIds, cls };
   }
   await prisma.assetCategory.create({ data: { name: "Uncategorised", locked: true } });
 
@@ -113,6 +119,7 @@ async function main() {
     tag: string, model: string, cat: string, status: string, extra: Record<string, unknown> = {},
   ) => ({
     tag, model, categoryId: cats[cat].id, typeId: cats[cat].typeIds[0],
+    cls: cats[cat].cls,
     status: status as AssetStatus,
     purchasedAt: day(-720), cost: 55_000, warrantyUntil: day(180), ...extra,
   });
@@ -158,6 +165,27 @@ async function main() {
       mk("BR-HS-0501", "Jabra Evolve2 65", "Headset", "DEPLOYED", { assigneeId: emp("EMP-0051").id, cost: 7_500 }),
       mk("BR-HS-0502", "Jabra Evolve2 40", "Headset", "SPARE", { cost: 5_500 }),
       mk("BR-KB-0402", "Logitech MX Keys", "Peripheral", "DEFECTIVE", { defectiveSince: day(-2), cost: 6_000, notes: "Two keys unresponsive" }),
+      // Purchasing-class fixtures (Phase 13): one per branch a test needs —
+      // a car that is assigned (custody works for a car), idle stock, a repair,
+      // a building with no holder. Ramon (EMP-0051, ACTIVE) drives the car so
+      // Dennis's three-item offboarding fixture is untouched; the leaver-with-
+      // a-car case builds its own row inside e2e/asset-classes.spec.ts.
+      mk("BR-VH-0001", "Toyota Vios", "Vehicle", "OPERATIONAL", { assigneeId: emp("EMP-0051").id, cost: 950_000, purchasedAt: day(-800), warrantyUntil: day(300) }),
+      // typeId override: mk defaults to typeIds[0] ("Sedan"); a HiAce is the Van type.
+      mk("BR-VH-0002", "Toyota HiAce", "Vehicle", "STORED", { typeId: cats["Vehicle"].typeIds[1], cost: 1_600_000, purchasedAt: day(-1400), warrantyUntil: null }),
+      mk("BR-FN-0001", "Executive desk", "Furniture", "OPERATIONAL", { cost: 25_000, warrantyUntil: null }),
+      // typeId override: mk defaults to typeIds[0] ("Desk"); an ergonomic chair is the Chair type.
+      mk("BR-FN-0002", "Ergonomic chair", "Furniture", "OPERATIONAL", { typeId: cats["Furniture"].typeIds[1], cost: 12_000, warrantyUntil: null }),
+      // e2e/asset-classes.spec.ts case 16's Finance send-back target — must stay
+      // un-confirmed at seed time. `mk` never sets financeConfirmedAt itself
+      // (no default in the schema/no trigger touches it), so leaving it out of
+      // `extra` here already leaves the row unconfirmed; nothing else to do.
+      mk("BR-FN-0003", "Meeting table", "Furniture", "STORED", { cost: 40_000, warrantyUntil: null }),
+      // defectiveSince is an IT repair-stage field; Purchasing has no repair
+      // stages — repairStage() is class-blind and would resolve this
+      // otherwise-non-DEFECTIVE row's leftover defectiveSince to "returned-ok".
+      mk("BR-PE-0001", "Panasonic microwave", "Pantry Equipment", "REPAIRING", { cost: 8_000, notes: "Turntable motor", warrantyUntil: null }),
+      mk("BR-BL-0001", "Makati office, 12F", "Building", "OPERATIONAL", { cost: 45_000_000, purchasedAt: day(-3000), warrantyUntil: null }),
     ],
   });
   const asset = (tag: string) => prisma.asset.findUniqueOrThrow({ where: { tag } });
@@ -221,6 +249,16 @@ async function main() {
       // deliberately incomplete (no assetId, bare payload): the detail page's system checks show honest failures; e2e rejects it, never executes it
       { refNo: "APR-2040", type: "lifecycle_return", state: "PENDING", priority: "URGENT", slaAt: day(-1), requestedById: itStaff.id, employeeId: emp("EMP-0090").id, payload: { reason: "offboarding" } },
       { refNo: "APR-2039", type: "lifecycle_change_status", state: "CLAIMED", priority: "NORMAL", slaAt: day(1), requestedById: itStaff.id, claimedById: admin.id, claimedAt: day(0), assetId: a0148.id, payload: { from: { status: "DEPLOYED" }, to: { status: "TEMPORARY" } } },
+      // APR-2035 (Phase 13, APR-2035/D-8): this row carries no assetId and a
+      // payload that names neither `to.assigneeId` nor `to.status`. Before D-8
+      // the worker's first complaint about that was the payload shape; since
+      // D-8, execute-approval.ts checks `!approval.assetId || !approval.asset`
+      // BEFORE it ever inspects the payload, so the worker now fails this one
+      // with "Execution guard: approval has no asset attached — nothing to
+      // execute against" — the missing-asset guard, not a malformed-payload
+      // complaint. Kept exactly as-is (no assetId attached) so this fixture
+      // demonstrates that guard, honestly renamed rather than "fixed" to keep
+      // exercising a payload check the worker no longer reaches first.
       { refNo: "APR-2035", type: "lifecycle_assign", state: "APPROVED", priority: "NORMAL", slaAt: day(1), requestedById: itStaff.id, claimedById: admin.id, claimedAt: day(-1), payload: { note: "queued for execution" } },
       { refNo: "APR-2031", type: "lifecycle_transfer", state: "EXECUTED", priority: "NORMAL", slaAt: day(-2), requestedById: itStaff.id, claimedById: admin.id, resolvedAt: day(-2), payload: { from: "EMP-0042", to: "EMP-0051" } },
       { refNo: "APR-2028", type: "lifecycle_replace", state: "REJECTED", priority: "HIGH", slaAt: day(-5), requestedById: itStaff.id, claimedById: admin.id, resolvedAt: day(-5), resolutionReason: "Replacement not justified; repair quote pending", payload: {} },

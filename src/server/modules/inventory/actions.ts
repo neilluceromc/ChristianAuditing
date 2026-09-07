@@ -14,6 +14,7 @@ import {
 import {
   ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
+import { CLASS_LABEL, CLASS_PHRASE, canManageClass, isStatusOf, parseCls } from "@/lib/asset-class";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
@@ -44,7 +45,7 @@ const bulkSchema = z
 export async function bulkRequestStatusChange(
   input: unknown,
 ): Promise<ActionResult<{ created: number; skipped: number }>> {
-  const user = await actionRole("admin", "it_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -68,8 +69,9 @@ export async function bulkRequestStatusChange(
     // which no Prisma filter can express). Acting on that candidate set
     // directly would mean the drawer's "all N matching" acts on more rows
     // than the screen shows. Resolve to the exact cut ids first.
-    const cutIds = await repairStageIds(state, purchaseYear);
-    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear);
+    const cls = parseCls(filterParams.get("cls")) ?? "IT";
+    const cutIds = await repairStageIds(state, purchaseYear, cls);
+    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear, cls);
   }
 
   let created = 0;
@@ -82,12 +84,21 @@ export async function bulkRequestStatusChange(
       const assets = await tx.asset.findMany({
         where,
         take: BULK_MAX + 1,
-        select: { id: true, status: true },
+        select: { id: true, status: true, cls: true },
       });
       if (assets.length === 0) return conflict("Nothing matched the selection.");
       if (assets.length > BULK_MAX) {
         return conflict(`That selection exceeds the ${BULK_MAX}-asset bulk cap — narrow the filter and repeat.`);
       }
+
+      // No status is valid for both a laptop and a desk, so a mixed selection
+      // has no legal target. The list is class-scoped, so this is unreachable
+      // from the UI — it guards a hand-built request.
+      const classes = new Set(assets.map((a) => a.cls));
+      if (classes.size > 1) return conflict("Select assets of one class — IT and Purchasing assets cannot share a status change.");
+      const cls = assets[0].cls;
+      if (!canManageClass(user.role, cls)) return forbidden();
+      if (!isStatusOf(cls, to)) return validationError({ to: `${to} is not ${CLASS_PHRASE[cls]} status.` });
 
       const open = await tx.approval.findMany({
         where: { assetId: { in: assets.map((a) => a.id) }, state: { in: [...OPEN_APPROVAL_STATES] } },
@@ -174,7 +185,7 @@ const toDate = (s: string | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null
 const toCost = (c: number | "" | undefined) => (c === "" || c === undefined ? null : c);
 
 export async function createAsset(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await actionRole("admin", "it_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -182,8 +193,17 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
 
-  const plan = creationPlan(d.requestedStatus, d.assigneeId || null);
-  if (!plan.ok) return validationError({ assigneeId: "Pick who this deploys to" });
+  const category = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
+  if (!category) return validationError({ categoryId: "Unknown category" });
+  if (!canManageClass(user.role, category.cls)) {
+    return validationError({ categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — ${CLASS_LABEL[category.cls]} staff create ${CLASS_LABEL[category.cls]} assets.` });
+  }
+  const plan = creationPlan(d.requestedStatus, d.assigneeId || null, category.cls);
+  if (!plan.ok) {
+    return plan.error === "assignee_required"
+      ? validationError({ assigneeId: "Pick who this deploys to" })
+      : validationError({ requestedStatus: `${d.requestedStatus} is not an initial state for ${CLASS_PHRASE[category.cls]} asset.` });
+  }
 
   if (d.typeId) {
     const type = await prisma.assetType.findUnique({ where: { id: d.typeId } });
@@ -208,7 +228,8 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           serial: d.serial || null,
           categoryId: d.categoryId,
           typeId: d.typeId || null,
-          status: "SPARE",
+          status: plan.status,
+          cls: category.cls,
           purchasedAt: toDate(d.purchasedAt),
           cost: toCost(d.cost),
           warrantyUntil: toDate(d.warrantyUntil),
@@ -224,7 +245,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
         diff: {
           tag: { from: null, to: created.tag },
           model: { from: null, to: created.model },
-          status: { from: null, to: "SPARE" },
+          status: { from: null, to: plan.status },
         },
       });
       if (plan.approval) {
@@ -282,7 +303,7 @@ const updateSchema = z.object({
  * decision #3). tag is immutable; status/assignee move via approvals.
  */
 export async function updateAsset(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await actionRole("admin", "it_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -292,6 +313,17 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
 
   const asset = await prisma.asset.findUnique({ where: { id: d.id } });
   if (!asset) return conflict("That asset no longer exists.");
+  if (!canManageClass(user.role, asset.cls)) return forbidden();
+  if (d.categoryId !== asset.categoryId) {
+    // Same class only. A category change across classes would flip the
+    // asset's class and invalidate its status; the trigger would refuse it,
+    // but the person deserves the reason, not a database error.
+    const target = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
+    if (!target) return validationError({ categoryId: "Unknown category" });
+    if (target.cls !== asset.cls) {
+      return validationError({ categoryId: `${target.name} is ${CLASS_PHRASE[target.cls]} category; this is ${CLASS_PHRASE[asset.cls]} asset.` });
+    }
+  }
   if (d.typeId) {
     const type = await prisma.assetType.findUnique({ where: { id: d.typeId } });
     if (!type || type.categoryId !== d.categoryId) {
@@ -351,7 +383,7 @@ const statusChangeSchema = z.object({
 
 /** Lifecycle change = approval, never a direct write. */
 export async function requestStatusChange(input: unknown): Promise<ActionResult<{ refNo: string }>> {
-  const user = await actionRole("admin", "it_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -364,6 +396,10 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
     const result = await prisma.$transaction(async (tx) => {
       const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
       if (!asset) return conflict("That asset no longer exists.");
+      if (!canManageClass(user.role, asset.cls)) return forbidden();
+      if (!isStatusOf(asset.cls, d.to)) {
+        return validationError({ to: `${d.to} is not ${CLASS_PHRASE[asset.cls]} status.` });
+      }
       if (asset.status === d.to) return conflict(`Already ${d.to}.`);
       if (await openApprovalForAsset(tx, asset.id)) {
         return conflict("This asset already has an open request — resolve it first.");
@@ -546,15 +582,15 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
 const resubmitSchema = z.object({ id: z.string().min(1) });
 
 /**
- * IT says "fixed, look again", clearing the return so the record reads
- * AWAITING FINANCE once more.
+ * The registering department says "fixed, look again", clearing the return
+ * so the record reads AWAITING FINANCE once more.
  *
- * Explicit rather than clearing on any edit to the asset: an IT staffer
+ * Explicit rather than clearing on any edit to the asset: a staffer
  * correcting an unrelated field must not silently claim the reported problem
  * is resolved.
  */
 export async function resubmitAssetToFinance(input: unknown): Promise<ActionResult<{ tag: string }>> {
-  const user = await actionRole("admin", "it_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -569,10 +605,16 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id },
-      select: { id: true, tag: true, financeReturnedAt: true },
+      select: { id: true, tag: true, cls: true, financeReturnedAt: true },
     });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
+      return;
+    }
+    // Resubmit is the department's own action, like register: the class that
+    // may send an asset back to Finance is the class that may send it again.
+    if (!canManageClass(user.role, asset.cls)) {
+      failure = forbidden();
       return;
     }
     if (!asset.financeReturnedAt) {

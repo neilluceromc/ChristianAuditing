@@ -25,6 +25,7 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
   const s = summarizeApproval(approval.type, approval.payload, {
     assetTag: approval.asset?.tag,
     employeeName: approval.employee?.name,
+    cls: approval.asset?.cls,
   });
 
   return (

@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { prisma } from "@/server/db/client";
-import { RETURN_STATUSES, summarizeApproval } from "@/lib/approval-execution";
+import { summarizeApproval } from "@/lib/approval-execution";
+import { ASSIGNABLE_FROM, RETURN_TARGETS } from "@/lib/asset-class";
 import { slaLabel, tabWhere, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
 
 export const QUEUE_PAGE_SIZE = 50;
@@ -30,6 +31,7 @@ export async function listApprovals(tab: QueueTab, userId: string): Promise<Appr
     const s = summarizeApproval(a.type, a.payload, {
       assetTag: a.asset?.tag,
       employeeName: a.employee?.name,
+      cls: a.asset?.cls,
     });
     return {
       id: a.id,
@@ -98,7 +100,7 @@ export async function systemChecks(
       return [
         assetCheck,
         asset
-          ? { label: "Asset is assignable", pass: asset.status === "SPARE", detail: `reads ${asset.status} right now` }
+          ? { label: "Asset is assignable", pass: asset.status === ASSIGNABLE_FROM[asset.cls], detail: `reads ${asset.status} right now` }
           : { label: "Asset is assignable", pass: false, detail: "—" },
         employee
           ? { label: "Recipient is active", pass: employee.employment === "ACTIVE", detail: `${employee.employeeNo} · ${employee.employment}` }
@@ -120,8 +122,12 @@ export async function systemChecks(
           : { label: "Still held by the returner", pass: false, detail: "—" },
         {
           label: "Return target",
-          pass: target !== null && (RETURN_STATUSES as readonly string[]).includes(target),
-          detail: target ? `returns as ${target}` : "no target status in the payload",
+          pass: target !== null && asset !== null && (RETURN_TARGETS[asset.cls] as readonly string[]).includes(target),
+          detail: !approval.assetId
+            ? "—"
+            : asset
+              ? (target ? `returns as ${target}` : "no target status in the payload")
+              : "asset is gone — target not checked",
         },
       ];
     }

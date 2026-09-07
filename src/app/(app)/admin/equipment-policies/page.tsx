@@ -20,7 +20,8 @@ export default async function EquipmentPoliciesPage() {
       },
       orderBy: [{ name: "asc" }],
     }),
-    prisma.assetType.findMany({ include: { category: true }, orderBy: [{ name: "asc" }] }),
+    // Leaver kits are IT's; a policy never names a car.
+    prisma.assetType.findMany({ where: { category: { cls: "IT" } }, include: { category: true }, orderBy: [{ name: "asc" }] }),
     prisma.employee.findMany({
       where: { employment: { not: "OFFBOARDED" } },
       select: { title: true, departmentId: true },

@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { DeliveryStatus, JobStatus } from "@prisma/client";
-import { statusFamily, isSystemFailure, STATUS_FAMILIES } from "./status";
+import { AssetStatus, DeliveryStatus, JobStatus } from "@prisma/client";
+import { statusFamily, hasStatusFamily, isSystemFailure, STATUS_FAMILIES } from "./status";
 
 describe("statusFamily", () => {
   const cases: Array<[string, string]> = [
     // Asset status (8 — MISSING is the approved schema extension for the offboarding wizard)
     ["DEPLOYED", "settled"], ["SPARE", "neutral"], ["DEFECTIVE", "fault"], ["MISSING", "fault"],
     ["DONATED", "closed"], ["TEMPORARY", "attention"], ["BUYOUT", "closed"], ["DISPOSE", "closed"],
+    // Purchasing-class asset status (Phase 13): four of the six families. STORED
+    // is neutral like SPARE; REPAIRING and LOST are faults like DEFECTIVE and
+    // MISSING; RETIRED and SOLD are closed like DISPOSE.
+    ["OPERATIONAL", "settled"], ["STORED", "neutral"], ["REPAIRING", "fault"],
+    ["RETIRED", "closed"], ["SOLD", "closed"], ["LOST", "fault"],
     // Purchase request state (5)
     ["DRAFT", "neutral"], ["SUBMITTED", "inflight"], ["IT_REVIEWED", "inflight"],
     ["COMPLETED", "settled"], ["CANCELLED", "closed"],
@@ -95,6 +100,10 @@ describe("every Prisma enum member maps to a real family", () => {
     for (const value of Object.values(DeliveryStatus)) {
       expect(statusFamily(value, "delivery")).not.toBe("neutral");
     }
+  });
+
+  it("every AssetStatus has an explicit entry — SPARE and STORED are neutral by choice, not by fallback", () => {
+    for (const v of Object.values(AssetStatus)) expect(hasStatusFamily(v), v).toBe(true);
   });
 
   it("every JobStatus value is non-neutral in the flat map", () => {

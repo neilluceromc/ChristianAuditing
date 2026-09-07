@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { RETURN_STATUSES } from "./approval-execution";
+import { RETURN_TARGETS } from "./asset-class";
 import {
-  OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS, WIZARD_STEPS, canContinue, decisionOf, outcomeOfStatus,
+  OUTCOMES, OUTCOME_LABEL, OUTCOME_STATUS_BY_CLASS, WIZARD_STEPS, canContinue, decisionOf,
+  outcomeOfStatus, outcomeStatus, outcomesFor,
   parseStep, reasonRequired, reportTotals, returnTargetStatus,
   type DecisionCandidate, type Outcome,
 } from "./offboarding";
@@ -13,17 +14,17 @@ describe("outcomes — Missing is first-class", () => {
   });
 
   it("maps each outcome to the asset status the worker will apply", () => {
-    expect(OUTCOME_STATUS).toEqual({
+    expect(OUTCOME_STATUS_BY_CLASS.IT).toEqual({
       RETURNED: "SPARE", DEFECTIVE: "DEFECTIVE", BUYOUT: "BUYOUT", MISSING: "MISSING",
     });
   });
 
   it("agrees with the executor about what a return may become", () => {
-    // Two copies of one truth: this map is what the wizard WRITES, RETURN_STATUSES
+    // Two copies of one truth: this map is what the wizard WRITES, RETURN_TARGETS
     // is what executionPlan will ACCEPT. If they ever drift, every decision of the
     // orphaned outcome becomes EXECUTION_FAILED — which is the exact bug Task 1
     // existed to fix. (Raised by the Task 1 code review.)
-    expect(new Set(Object.values(OUTCOME_STATUS))).toEqual(new Set(RETURN_STATUSES));
+    expect(new Set(Object.values(OUTCOME_STATUS_BY_CLASS.IT))).toEqual(new Set(RETURN_TARGETS.IT));
   });
 
   it("requires a reason for everything except a clean return", () => {
@@ -127,9 +128,9 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     expect(decisionOf([], { held: true })).toBeNull();
   });
 
-  it("reports the outcome, ref, state and reason of a live decision", () => {
+  it("reports the outcome, ref, state, reason and stored target of a live decision", () => {
     expect(decisionOf([cand({ toStatus: "MISSING", state: "CLAIMED", reason: "never handed back" })], { held: true })).toEqual({
-      refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back",
+      refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back", toStatus: "MISSING",
     });
   });
 
@@ -181,7 +182,7 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     expect(decisionOf([
       cand({ id: "old", refNo: "APR-2100", state: "REJECTED", createdAt: at(0) }),
       cand({ id: "new", refNo: "APR-2101", state: "PENDING", toStatus: "BUYOUT", createdAt: at(5_000) }),
-    ], { held: true })).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null });
+    ], { held: true })).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null, toStatus: "BUYOUT" });
   });
 
   it("the newest decision wins even when the older one is also live", () => {
@@ -217,5 +218,33 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     ];
     expect(decisionOf(rows, { held: true })?.refNo).toBe("APR-2101");
     expect(decisionOf([...rows].reverse(), { held: true })?.refNo).toBe("APR-2101");
+  });
+});
+
+describe("outcomes by class (Phase 13)", () => {
+  it("Purchasing offers Returned / Defective / Missing — Buyout does not exist for a company car", () => {
+    expect(outcomesFor("PURCHASING")).toEqual(["RETURNED", "DEFECTIVE", "MISSING"]);
+    expect(outcomesFor("IT")).toEqual(OUTCOMES);
+  });
+  it("Purchasing outcomes land on Purchasing statuses", () => {
+    expect(outcomeStatus("PURCHASING", "RETURNED")).toBe("STORED");
+    expect(outcomeStatus("PURCHASING", "DEFECTIVE")).toBe("REPAIRING");
+    expect(outcomeStatus("PURCHASING", "MISSING")).toBe("LOST");
+    expect(outcomeStatus("PURCHASING", "BUYOUT")).toBeNull();
+    expect(outcomeStatus("IT", "BUYOUT")).toBe("BUYOUT");
+  });
+  it("every class's outcome map is exactly that class's return targets — no orphan and no extra", () => {
+    // Set equality, not subset: a fourth Purchasing return target the wizard
+    // could never produce should fail this test, as it already would for IT.
+    for (const cls of ["IT", "PURCHASING"] as const) {
+      expect(new Set(Object.values(OUTCOME_STATUS_BY_CLASS[cls]))).toEqual(new Set(RETURN_TARGETS[cls]));
+    }
+  });
+  it("outcomeOfStatus reads both vocabularies", () => {
+    expect(outcomeOfStatus("SPARE")).toBe("RETURNED");
+    expect(outcomeOfStatus("STORED")).toBe("RETURNED");
+    expect(outcomeOfStatus("LOST")).toBe("MISSING");
+    expect(outcomeOfStatus("REPAIRING")).toBe("DEFECTIVE"); // the one Purchasing status whose outcome name differs
+    expect(outcomeOfStatus("DEPLOYED")).toBeNull();
   });
 });

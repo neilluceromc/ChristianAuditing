@@ -1,7 +1,7 @@
-import { Prisma, type AssetStatus } from "@prisma/client";
+import { Prisma, type AssetClass, type AssetStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
-import { ASSET_STATUSES } from "@/lib/inventory-list";
+import { isStatusOf } from "@/lib/asset-class";
 import { ageBucket } from "@/lib/home";
 
 export const FINANCE_PAGE_SIZE = 25;
@@ -19,8 +19,8 @@ export interface FinanceAssetRow {
   assignee: string | null;
 }
 
-export function parseAssetStatus(raw: string | null | undefined): AssetStatus | null {
-  return (ASSET_STATUSES as readonly string[]).includes(raw ?? "") ? (raw as AssetStatus) : null;
+export function parseAssetStatus(raw: string | null | undefined, cls: AssetClass): AssetStatus | null {
+  return raw != null && isStatusOf(cls, raw) ? raw : null;
 }
 
 /**
@@ -32,9 +32,10 @@ export function parseAssetStatus(raw: string | null | undefined): AssetStatus | 
 export async function financeAssets(
   status: AssetStatus | null,
   page: number,
+  cls: AssetClass,
   now: Date = new Date(),
 ): Promise<{ rows: FinanceAssetRow[]; total: number; page: number; pageCount: number; totalCost: string }> {
-  const where: Prisma.AssetWhereInput = { cost: { not: null }, ...(status ? { status } : {}) };
+  const where: Prisma.AssetWhereInput = { cls, cost: { not: null }, ...(status ? { status } : {}) };
   const [total, sum] = await Promise.all([
     prisma.asset.count({ where }),
     prisma.asset.aggregate({ where, _sum: { cost: true } }),

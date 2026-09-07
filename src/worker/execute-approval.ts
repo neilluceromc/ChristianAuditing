@@ -3,6 +3,7 @@ import { prisma } from "../server/db/client";
 import { executionPlan } from "../lib/approval-execution";
 import { APPROVAL_TYPE_LABEL } from "../lib/labels";
 import { emitWebhook } from "../server/webhooks/emit";
+import { ASSIGNABLE_FROM, HOLDER_STATUSES } from "../lib/asset-class";
 
 type Diff = Record<string, { from: unknown; to: unknown }>;
 
@@ -58,12 +59,14 @@ async function runExecution(approvalId: string): Promise<void> {
       });
     };
 
-    const plan = executionPlan(approval.type, approval.payload);
-    if (!plan.ok) return fail(plan.error);
+    // The asset first: the plan needs its class, and an approval with no
+    // asset has nothing to be planned against anyway.
     if (!approval.assetId || !approval.asset) {
       return fail("Execution guard: approval has no asset attached — nothing to execute against");
     }
     const asset = approval.asset;
+    const plan = executionPlan(approval.type, approval.payload, asset.cls);
+    if (!plan.ok) return fail(plan.error);
 
     // Per-type live re-validation.
     let assigneeLabelFrom: string | null = null;
@@ -76,8 +79,8 @@ async function runExecution(approvalId: string): Promise<void> {
       if (employee.employment !== "ACTIVE") {
         return fail(`Execution guard: target employee ${employee.employeeNo} is ${employee.employment} — assignment refused`);
       }
-      if (asset.status !== "SPARE") {
-        return fail(`Execution guard: ${asset.tag} reads ${asset.status}, not SPARE — assignment refused`);
+      if (asset.status !== ASSIGNABLE_FROM[asset.cls]) {
+        return fail(`Execution guard: ${asset.tag} reads ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — assignment refused`);
       }
       assigneeLabelTo = employee.employeeNo;
     }
@@ -101,7 +104,7 @@ async function runExecution(approvalId: string): Promise<void> {
       // A held asset can't be status-changed out from under its holder — that
       // would strand the assignment invisibly. Returns go through
       // lifecycle.return; only holder-compatible statuses may apply here.
-      const keepsHolder = plan.updates.status === "DEPLOYED" || plan.updates.status === "TEMPORARY";
+      const keepsHolder = (HOLDER_STATUSES[asset.cls] as readonly string[]).includes(plan.updates.status);
       if (asset.assigneeId && !keepsHolder) {
         return fail(`Execution guard: ${asset.tag} is still assigned — request a lifecycle.return first, then change its status`);
       }

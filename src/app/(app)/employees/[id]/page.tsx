@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
+import { ASSIGNABLE_FROM } from "@/lib/asset-class";
 import { fmtDate, fmtMoney, fmtRelativeDays } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
@@ -29,7 +30,11 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     }),
     prisma.equipmentPolicy.findMany({ include: { slots: { include: { assetType: true } } }, orderBy: [{ name: "asc" }] }),
     prisma.asset.findMany({
-      where: { status: "SPARE" },
+      // Assignment through /employees is IT's surface in Phase 13 —
+      // Purchasing assets are assigned at create time (spec §5 has no assign
+      // row; recorded as a follow-up). Pinned to the IT class explicitly so
+      // this picker never offers a STORED car by accident.
+      where: { cls: "IT", status: ASSIGNABLE_FROM.IT },
       include: { reservations: { where: { state: "ACTIVE" }, include: { employee: true } } },
       orderBy: { tag: "asc" },
     }),

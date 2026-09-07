@@ -10,6 +10,10 @@ export default async function AssetSecretsPage({ params }: { params: Promise<{ i
   const { id } = await params;
   const asset = await getAsset(id);
   if (!asset) notFound();
+  // A car has no credentials. 404 rather than 403: the tab is not rendered
+  // for this class, so a request here is a typed URL, and "there is nothing
+  // here" is the true answer.
+  if (asset.cls === "PURCHASING") notFound();
   // Ciphertext NEVER leaves the server — the panel gets labels only.
   const secrets = await prisma.assetSecret.findMany({
     where: { assetId: id },

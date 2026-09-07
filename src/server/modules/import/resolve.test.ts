@@ -11,6 +11,7 @@ const record = (over: Partial<{
   categoryId: string;
   typeId: string | null;
   serial: string | null;
+  cls: "IT" | "PURCHASING";
 }> = {}) => ({
   id: "a-1",
   tag: "BR-LT-0148",
@@ -19,6 +20,7 @@ const record = (over: Partial<{
   categoryId: "cat-1",
   typeId: null,
   serial: null,
+  cls: "IT" as const,
   ...over,
 });
 
@@ -113,7 +115,7 @@ describe("buildAssetRefs", () => {
   });
 
   it("resolves a category name to its id when there is exactly one match", () => {
-    const refs = buildAssetRefs([{ id: "cat-1", name: "Laptops" }], [], [], [], [], []);
+    const refs = buildAssetRefs([{ id: "cat-1", name: "Laptops", cls: "IT" }], [], [], [], [], []);
     expect(refs.categories.get(refKey("Laptops"))).toBe("cat-1");
   });
 
@@ -124,7 +126,7 @@ describe("buildAssetRefs", () => {
   // silently; the fix surfaces that as `null` instead of an id.
   it("resolves a case-colliding category name to null (ambiguous), not silently to one of the two ids", () => {
     const refs = buildAssetRefs(
-      [{ id: "cat-1", name: "Laptop" }, { id: "cat-2", name: "laptop" }],
+      [{ id: "cat-1", name: "Laptop", cls: "IT" }, { id: "cat-2", name: "laptop", cls: "IT" }],
       [],
       [],
       [],
@@ -167,8 +169,25 @@ describe("buildAssetRefs", () => {
   // non-breaking space) so a category/vendor/employee name pasted with one
   // still matches the plain-space spelling stored in the database.
   it("resolves a category name carrying an internal non-breaking space via refKey", () => {
-    const refs = buildAssetRefs([{ id: "cat-1", name: "Spare Parts" }], [], [], [], [], []);
+    const refs = buildAssetRefs([{ id: "cat-1", name: "Spare Parts", cls: "IT" }], [], [], [], [], []);
     expect(refs.categories.get(refKey("Spare Parts"))).toBe("cat-1");
+  });
+
+  // Phase 13 Task 10 review, Fix 2: `categoryClass` had no test of its own —
+  // every existing test above passes an empty `categories` array. Keyed by
+  // id (not the refKey'd name map above), since `planAssetRows` already has
+  // the resolved categoryId by the time it checks class.
+  it("carries each category's class through to the planner, keyed by id", () => {
+    const refs = buildAssetRefs(
+      [{ id: "cat-1", name: "Laptops", cls: "IT" }, { id: "cat-2", name: "Vehicles", cls: "PURCHASING" }],
+      [],
+      [],
+      [],
+      [],
+      [],
+    );
+    expect(refs.categoryClass.get("cat-2")).toBe("PURCHASING");
+    expect(refs.categoryClass.get("cat-1")).toBe("IT");
   });
 });
 

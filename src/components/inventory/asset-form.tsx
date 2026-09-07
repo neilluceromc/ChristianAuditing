@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -12,7 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { CREATABLE_STATUSES, type CreatableStatus } from "@/lib/asset-rules";
+import { CREATABLE_BY_CLASS, type CreatableStatus } from "@/lib/asset-rules";
+import { CLASS_EXAMPLE, DEFAULT_STATUS } from "@/lib/asset-class";
 import type { ActionResult } from "@/server/action-result";
 
 export interface AssetFormInitial {
@@ -40,7 +42,7 @@ export function AssetForm({
   action,
 }: {
   mode: "new" | "edit";
-  categories: Array<{ id: string; name: string }>;
+  categories: Array<{ id: string; name: string; cls: AssetClass }>;
   types: Array<{ id: string; name: string; categoryId: string }>;
   employees: ComboOption[];
   vendors?: Array<{ id: string; name: string }>;
@@ -55,7 +57,9 @@ export function AssetForm({
       cost: "", warrantyUntil: "", notes: "", vendorId: "", rmaRef: "", repairQuote: "",
     },
   );
-  const [requestedStatus, setRequestedStatus] = useState<CreatableStatus>("SPARE");
+  // A sentinel only: `effectiveStatus` below normalizes it to the chosen
+  // category's class, so this never reaches the control or the payload raw.
+  const [requestedStatus, setRequestedStatus] = useState<CreatableStatus>(DEFAULT_STATUS.IT);
   const [assigneeId, setAssigneeId] = useState<string | null>(null);
   const [assignReason, setAssignReason] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -78,6 +82,19 @@ export function AssetForm({
 
   const typesForCategory = types.filter((t) => t.categoryId === form.categoryId);
 
+  // The category decides the class; the class decides which initial states
+  // exist. Before a category is picked, follow the first category offered —
+  // a purchasing_staff user sees only Purchasing categories, so IT's states
+  // would be wrong for them (D-14b, D-15).
+  const cls: AssetClass = categories.find((c) => c.id === form.categoryId)?.cls ?? categories[0]?.cls ?? "IT";
+  const creatable = CREATABLE_BY_CLASS[cls];
+  // Derived, not reset by an effect: what the control shows and what the
+  // payload carries are the same expression, so they cannot disagree, and a
+  // class switch never paints an out-of-class selection for a frame.
+  const effectiveStatus: CreatableStatus = (creatable as readonly string[]).includes(requestedStatus)
+    ? requestedStatus
+    : DEFAULT_STATUS[cls];
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErrors({});
@@ -86,7 +103,7 @@ export function AssetForm({
     startTransition(async () => {
       const res = await action({
         ...form,
-        requestedStatus: mode === "new" ? requestedStatus : undefined,
+        requestedStatus: mode === "new" ? effectiveStatus : undefined,
         assigneeId: mode === "new" ? (assigneeId ?? "") : undefined,
         assignReason: mode === "new" ? assignReason : undefined,
       });
@@ -101,8 +118,8 @@ export function AssetForm({
       else if (res.kind === "validation") {
         const fe = res.fieldErrors ?? {};
         setErrors(fe);
-        // errors no FormField claims (_form/id) must not dead-end silently
-        const unclaimed = fe._form ?? fe.id;
+        // errors no FormField claims (_form/id/requestedStatus) must not dead-end silently
+        const unclaimed = fe._form ?? fe.id ?? fe.requestedStatus;
         if (unclaimed) setConflictMsg(unclaimed);
       }
       else setConflictMsg(res.message);
@@ -146,9 +163,9 @@ export function AssetForm({
             required: true,
             hint: mode === "edit" ? "Tags are permanent — they're printed labels." : "Format BR-XX-0000, as printed on the label.",
             disabled: mode === "edit",
-            placeholder: "BR-LT-0201",
+            placeholder: CLASS_EXAMPLE[cls].tag,
           })}
-          {field("Model", "model", { required: true, placeholder: "ThinkPad T14 Gen 4" })}
+          {field("Model", "model", { required: true, placeholder: CLASS_EXAMPLE[cls].model })}
           {field("Serial", "serial")}
           <FormField label="Category" required error={errors.categoryId}>
             {(p) => (
@@ -224,15 +241,15 @@ export function AssetForm({
           <CardBody className="flex flex-col gap-4">
             <SegmentedControl
               aria-label="Initial status"
-              options={CREATABLE_STATUSES.map((s) => ({ value: s, label: s }))}
-              value={requestedStatus}
+              options={creatable.map((s) => ({ value: s, label: s }))}
+              value={effectiveStatus}
               onChange={(v) => setRequestedStatus(v as CreatableStatus)}
             />
-            {requestedStatus !== "SPARE" && (
+            {effectiveStatus !== DEFAULT_STATUS[cls] && (
               <>
                 <p className="text-xs text-fg-muted">
                   Assignment routes through a <span className="font-mono">lifecycle.assign</span> approval —
-                  the asset is registered as SPARE and flips once the request executes.
+                  the asset is registered as {DEFAULT_STATUS[cls]} and flips once the request executes.
                 </p>
                 <FormField label="Assign to" required error={errors.assigneeId}>
                   {(p) => (

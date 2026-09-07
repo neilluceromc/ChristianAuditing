@@ -96,7 +96,14 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         { label: "Completed", href: "/purchases?state=COMPLETED" },
       ],
     },
-    { heading: "Reference", items: [{ label: "Inventory", href: "/inventory" }] },
+    {
+      heading: "Assets",
+      items: [
+        { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
+        { label: "Register assets", href: "/inventory/register", roles: ["admin", "purchasing_staff"] },
+      ],
+    },
+    { heading: "Reference", items: [{ label: "IT inventory", href: "/inventory" }] },
   ],
   finance: [
     { heading: "Overview", items: [{ label: "Home", href: "/" }] },
@@ -181,12 +188,16 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // for requireRole to run from — only middleware can answer for a path like
   // that, so a misordered rule shows up as a 200 with no redirect at all.
   { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
-  // Same shape and same reason as /inventory/import and /inventory/labels
-  // directly above: this MUST precede the general /inventory rule
-  // (first-match-wins), because that rule admits purchasing and finance, and
-  // registering a purchased asset into the register is IT's job, not theirs.
-  // The ORDERING is asserted only in workspaces.test.ts.
-  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
+  // Phase 13: registering is each department's own — IT registers IT-class
+  // categories, Purchasing registers Purchasing-class ones — so BOTH
+  // workspaces are admitted here and `registerAssets` refuses the wrong class
+  // by name. This MUST still precede the general /inventory rule below,
+  // because that rule admits finance and viewer, and neither registers
+  // anything. The ORDERING is asserted only in workspaces.test.ts.
+  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
+  // Same treatment as /inventory/register (spec §5): a write surface stops
+  // finance and viewer at layer 1, not only at the page's requireRole.
+  { test: /^\/inventory\/new(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
   // a dead end on the page built for that role. The secrets rule above still
@@ -222,10 +233,37 @@ export function pathAllowedForRole(pathname: string, role: Role): boolean {
   return rule.workspaces.some((w) => mine.includes(w));
 }
 
+// Per-pathname cache of the query-param keys some sibling WORKSPACE_NAV item
+// on that same path declares (e.g. /inventory -> {"cls"}, /purchases ->
+// {"state"}). Built lazily and memoized — navIsActive runs once per nav item
+// per render, and the nav definition never changes at runtime.
+const ownedParamsByPath = new Map<string, ReadonlySet<string>>();
+
+function ownedParamsFor(pathname: string): ReadonlySet<string> {
+  const cached = ownedParamsByPath.get(pathname);
+  if (cached) return cached;
+  const owned = new Set<string>();
+  for (const sections of Object.values(WORKSPACE_NAV)) {
+    for (const section of sections) {
+      for (const item of section.items) {
+        const [itemPath, itemQuery] = item.href.split("?");
+        if (itemPath !== pathname || !itemQuery) continue;
+        for (const key of new URLSearchParams(itemQuery).keys()) owned.add(key);
+      }
+    }
+  }
+  ownedParamsByPath.set(pathname, owned);
+  return owned;
+}
+
 /**
  * Saved-filter links (href carries a query) are active only when every one
- * of their params matches the URL. A bare list link yields to an active
- * sibling saved filter (state param present ⇒ the filter owns the highlight).
+ * of their params matches the URL. A bare list link (no query of its own)
+ * yields only to a sibling's own params — never to a page-owned param (page,
+ * q, sort, a status facet, ...) that no sibling nav item on this path
+ * declares. The owned set is derived from WORKSPACE_NAV itself (today:
+ * {state} for /purchases, {cls} for /inventory) so it cannot drift from the
+ * nav out from under this rule.
  */
 export function navIsActive(href: string, pathname: string, search: URLSearchParams): boolean {
   const [hrefPath, hrefQuery] = href.split("?");
@@ -235,5 +273,6 @@ export function navIsActive(href: string, pathname: string, search: URLSearchPar
     for (const [k, v] of wanted) if (search.get(k) !== v) return false;
     return true;
   }
-  return !search.has("state");
+  for (const key of ownedParamsFor(pathname)) if (search.has(key)) return false;
+  return true;
 }

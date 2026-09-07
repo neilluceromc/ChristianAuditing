@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
 import {
   clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter,
@@ -7,6 +8,7 @@ import {
   INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
   type PurchaseYearValue,
 } from "@/lib/inventory-list";
+import { CLASS_LABEL, canManageClass, isStatusOf, parseCls, withClsQS } from "@/lib/asset-class";
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
@@ -28,10 +30,24 @@ export default async function InventoryPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
-  const canMutate = user.role === "admin" || user.role === "it_staff";
   const sp = toSearchParams(await searchParams);
-  const state = parseListState(sp, INVENTORY_LIST_CONFIG);
+  let state = parseListState(sp, INVENTORY_LIST_CONFIG);
   const purchaseYear = parsePurchaseYear(sp.get("purchaseYear"));
+  const cls: AssetClass = parseCls(sp.get("cls")) ?? "IT";
+  const canMutate = canManageClass(user.role, cls);
+
+  // A status from the other class is dropped by buildAssetWhere; drop it from
+  // the state too, or the chip row advertises a filter that isn't applied and
+  // hasFilters counts it (D-16).
+  const statusFilter = state.filters.status?.filter((s) => isStatusOf(cls, s));
+  if (statusFilter && statusFilter.length !== state.filters.status?.length) {
+    state = withFilter(state, "status", statusFilter);
+  }
+  // `stage` is the other arm of isRepairView, and repair stages are IT's: a
+  // hand-typed ?stage= on the Purchasing view would enter repair mode whose
+  // chips write status=DEFECTIVE — an IT status the line above then drops,
+  // ejecting the user from the view they clicked in. Same rule, same place.
+  if (cls !== "IT" && state.filters.stage) state = withFilter(state, "stage", []);
 
   // USB scanner contract: an exact tag match opens the record, not a list.
   if (state.q) {
@@ -40,10 +56,10 @@ export default async function InventoryPage({
   }
 
   const [{ rows, total, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
-    listAssets(state, purchaseYear),
-    facetOptions(state, purchaseYear),
+    listAssets(state, purchaseYear, cls),
+    facetOptions(state, purchaseYear, cls),
     getInventoryColumns(user.id),
-    purchaseYearBuckets(state),
+    purchaseYearBuckets(state, cls),
   ]);
   const yearChips = purchaseYearChips(yearBuckets);
 
@@ -63,8 +79,8 @@ export default async function InventoryPage({
   // imports `serializeListState` or `INVENTORY_LIST_CONFIG` any more, so
   // neither can reconstruct that bug.
   const href = (s: typeof state, py: PurchaseYearValue | null = purchaseYear) =>
-    "/inventory" + withPurchaseYearQS(serializeListState(s, INVENTORY_LIST_CONFIG), py);
-  const exportQS = withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear);
+    "/inventory" + withClsQS(withPurchaseYearQS(serializeListState(s, INVENTORY_LIST_CONFIG), py), cls);
+  const exportQS = withClsQS(withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear), cls);
   // One href per sortable key — the result of clicking that column's header —
   // plain serializable data, unlike `href` above, so it can cross into the
   // InventoryTable Client Component.
@@ -102,7 +118,7 @@ export default async function InventoryPage({
   return (
     <>
       <PageHeader
-        title="Inventory"
+        title={cls === "IT" ? "Inventory" : `${CLASS_LABEL[cls]} assets`}
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
         actions={
           <>
@@ -111,9 +127,11 @@ export default async function InventoryPage({
             </ButtonLink>
             {/* Affordance absent, not disabled, for a role that can't reach the
                 page — canMutate is exactly admin/it_staff, matching the
-                PATH_RULES entry that gates /inventory/import itself. */}
-            {canMutate && <ButtonLink href="/inventory/import">Import</ButtonLink>}
-            {canMutate && <ButtonLink variant="primary" href="/inventory/new">New asset</ButtonLink>}
+                PATH_RULES entry that gates /inventory/import itself. Import
+                stays IT-only regardless of the view: there is no Purchasing
+                import wizard yet (Task 10). */}
+            {canMutate && cls === "IT" && <ButtonLink href="/inventory/import">Import</ButtonLink>}
+            {canMutate && <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>}
           </>
         }
       />
@@ -124,10 +142,13 @@ export default async function InventoryPage({
           facets={facets}
           yearChips={yearChips}
           purchaseYear={purchaseYear}
+          cls={cls}
         >
           <ColumnChooser visible={visibleColumns} />
           {/* Saved views are named URLs (README): Repairs is one of them. */}
-          <ButtonLink size="sm" href={REPAIRS_SAVED_VIEW}>Repairs</ButtonLink>
+          {/* Repairs is an IT saved view — its URL pins status=DEFECTIVE, an IT
+              status, and carries no cls. Absent, not a link that ejects (D-14). */}
+          {cls === "IT" && <ButtonLink size="sm" href={REPAIRS_SAVED_VIEW}>Repairs</ButtonLink>}
         </InventoryToolbar>
         {repairMode && <RepairChips state={state} href={href} />}
         {/* Clearing filters resets purchaseYear too — it is the same
@@ -138,7 +159,10 @@ export default async function InventoryPage({
             {/* key: any URL-state change remounts the island — selection must
                 never silently survive a page/filter/sort change (it would act
                 on rows the user can no longer see). purchaseYear is part of
-                that key via exportQS even though it isn't part of `state`. */}
+                that key via exportQS even though it isn't part of `state`.
+                The class must stay part of this key too — Task 9 threads
+                `cls` into exportQS via withClsQS — because the drawer's `to`
+                and the selection Set both belong to one class view. */}
             <InventoryTable
               key={exportQS}
               rows={rows}
@@ -147,6 +171,7 @@ export default async function InventoryPage({
               canMutate={canMutate}
               filtersQS={exportQS.replace(/^\?/, "")}
               total={total}
+              cls={cls}
               repairMode={repairMode}
               sortHrefs={sortHrefs}
             />
@@ -166,8 +191,12 @@ export default async function InventoryPage({
         ) : (
           <EmptyState
             title="No assets yet"
-            description="Register the first asset, or use Import to bring in a spreadsheet."
-            actions={canMutate ? <ButtonLink variant="primary" href="/inventory/new">New asset</ButtonLink> : undefined}
+            description={
+              cls === "IT"
+                ? "Register the first asset, or use Import to bring in a spreadsheet."
+                : "Register the first asset — Purchasing assets are registered one batch at a time; there is no spreadsheet import for them yet."
+            }
+            actions={canMutate ? <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink> : undefined}
           />
         )}
       </div>
