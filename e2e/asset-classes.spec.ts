@@ -504,9 +504,9 @@ test.describe("the IT import wizard refuses a Purchasing row by name", () => {
     // whose counts import-export.spec.ts pins.
     const buffer = await toXlsxBuffer(ASSET_EXPORT_COLUMNS, [
       {
-        tag: "BR-LT-9901", model: "Wrong department (e2e)", serial: null, categoryName: "Vehicle", typeName: null,
+        tag: "BR-LT-9901", model: "Wrong department (e2e)", brand: null, serial: null, categoryName: "Vehicle", typeName: null,
         status: "", assigneeName: null, assigneeNo: null, purchasedAt: null, cost: null, warrantyUntil: null,
-        vendorName: null, rmaRef: null, notes: null,
+        loanDueAt: null, vendorName: null, invoiceRef: null, rmaRef: null, notes: null,
       },
     ]);
 

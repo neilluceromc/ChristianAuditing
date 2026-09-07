@@ -63,6 +63,7 @@ export function assetDiff(
     ...before,
     purchasedAt: toDay(before.purchasedAt),
     warrantyUntil: toDay(before.warrantyUntil),
+    loanDueAt: toDay(before.loanDueAt),
   };
   const patchForDiff: Record<string, unknown> = { ...patch };
   if (patchForDiff.cost !== undefined && patchForDiff.cost !== null) {

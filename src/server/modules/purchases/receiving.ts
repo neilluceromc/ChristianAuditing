@@ -15,33 +15,6 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 
-/** The prefixes already in use by assets of a given category, most-used first
- *  — the raw material for `preferredPrefix`. Grouped in SQL rather than pulled
- *  into memory, because this runs on every render of the register screen. */
-export async function prefixCountsForCategory(
-  categoryId: string,
-): Promise<Array<{ prefix: string; n: number }>> {
-  const rows = await prisma.$queryRaw<Array<{ prefix: string; n: bigint }>>`
-    SELECT substring("tag", 4, 2) AS prefix, count(*) AS n
-    FROM "Asset"
-    WHERE "categoryId" = ${categoryId}
-    GROUP BY 1
-    ORDER BY 2 DESC, 1 ASC
-  `;
-  return rows.map((r) => ({ prefix: r.prefix, n: Number(r.n) }));
-}
-
-/** The highest number currently used by a prefix, or null if unused. */
-export async function highestTagNumber(prefix: string): Promise<number | null> {
-  const rows = await prisma.$queryRaw<Array<{ max: string | null }>>`
-    SELECT max(substring("tag", 7, 4)) AS max
-    FROM "Asset"
-    WHERE substring("tag", 4, 2) = ${prefix}
-  `;
-  const raw = rows[0]?.max;
-  return raw == null ? null : Number(raw);
-}
-
 const registerSchema = z.object({
   categoryId: z.string().min(1, "Pick a category"),
   typeId: z.string().optional(),
@@ -53,6 +26,10 @@ const registerSchema = z.object({
   purchasedAt: z.string().optional(),
   cost: z.string().optional(),
   vendorId: z.string().optional(),
+  warrantyUntil: z.string().optional(),
+  brand: z.string().trim().max(60).optional(),
+  notes: z.string().trim().max(2000).optional(),
+  invoiceRef: z.string().trim().max(60).optional(),
   // OPTIONAL metadata, never a gate (C-5). If a request is named it must be
   // COMPLETED, because linking an asset to a request still in flight would
   // claim a provenance that is not settled.
@@ -61,6 +38,7 @@ const registerSchema = z.object({
 
 interface Registered {
   created: number;
+  ids: string[];
 }
 
 export async function registerAssets(input: unknown): Promise<ActionResult<Registered>> {
@@ -95,6 +73,19 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
   // Spec §4 stamping: born checked when the registrant manages the class.
   const selfChecked = category.cls === "IT" && canManageClass(user.role, "IT");
 
+  // Serial is unique fleet-wide (like tag), but a batch never gets to check
+  // itself against the database mid-loop — two rows of ONE submission naming
+  // the same serial would otherwise fail only on the second `create()`, deep
+  // inside the transaction, with a P2002 message that cannot say WHICH row.
+  // Named here, before either check below.
+  const serials = (d.serials ?? []).map((s) => s.trim()).filter(Boolean);
+  const dupSerial = serials.find((s, i) => serials.indexOf(s) !== i);
+  if (dupSerial) return conflict(`Serial ${dupSerial} appears twice in this batch.`);
+  if (serials.length) {
+    const taken = await prisma.asset.findFirst({ where: { serial: { in: serials } }, select: { serial: true } });
+    if (taken) return validationError({ serials: `Serial ${taken.serial} is already registered` });
+  }
+
   let done: Registered | null = null;
   let failure: ActionResult<Registered> | null = null;
 
@@ -119,6 +110,7 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
       }
 
       let created = 0;
+      const ids: string[] = [];
       for (const [i, tag] of d.tags.entries()) {
         const asset = await tx.asset.create({
           data: {
@@ -140,12 +132,17 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             // is a pass-through, not a re-implementation of its rule.
             cost: d.cost ? d.cost : null,
             vendorId: d.vendorId || null,
+            warrantyUntil: d.warrantyUntil ? new Date(d.warrantyUntil) : null,
+            brand: d.brand || null,
+            notes: d.notes || null,
+            invoiceRef: d.invoiceRef || null,
             purchaseRequestId: d.requestId || null,
             itVerifiedAt: selfChecked ? new Date() : null,
             itVerifiedById: selfChecked ? user.id : null,
           },
         });
         created++;
+        ids.push(asset.id);
         await writeAudit(tx, {
           actorId: user.id,
           actorLabel: user.name,
@@ -158,11 +155,15 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
           },
         });
       }
-      done = { created };
+      done = { created, ids };
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return conflict("One of those tags was just taken. Reload and try again.");
+      const target = (e.meta as { target?: string[] | string } | undefined)?.target;
+      const t = Array.isArray(target) ? target.join(",") : String(target ?? "");
+      return t.includes("serial")
+        ? validationError({ serials: "That serial is already registered" })
+        : conflict("One of those tags was just taken. Reload and try again.");
     }
     throw e;
   }

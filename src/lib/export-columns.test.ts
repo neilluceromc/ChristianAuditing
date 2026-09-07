@@ -19,10 +19,11 @@ describe("export column specs", () => {
   // a dropped, renamed or reordered column fails the suite instead of only
   // being caught by diffing against the deleted CSV route by hand, which is
   // how "Employee no" and "RMA ref" going missing was actually found.
-  it("carries all fourteen columns, in this exact order", () => {
+  it("carries all seventeen columns, in this exact order", () => {
     expect(ASSET_EXPORT_COLUMNS.map((c) => c.label)).toEqual([
       "Tag",
       "Model",
+      "Brand",
       "Serial",
       "Category",
       "Type",
@@ -32,7 +33,9 @@ describe("export column specs", () => {
       "Purchased",
       "Cost",
       "Warranty until",
+      "Loan until",
       "Vendor",
+      "Invoice / receipt no.",
       "RMA ref",
       "Notes",
     ]);
