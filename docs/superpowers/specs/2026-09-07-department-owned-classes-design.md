@@ -1,92 +1,193 @@
-# Phase 14 — Each Department Owns Its Class — Design
+# Phase 14 — Department-Owned Classes — Design
 
-**Status:** designed 2026-09-07. The user asked for a plan and said *"think about it and proceed
-with what is best"*, so the decisions in §1 were taken by the assistant rather than through the usual
-one-question-at-a-time interview. Every one of them is reversible until the plan is executed; §1 records
-the alternative each one rejected so the user can flip any of them by name.
+**Status:** revised 2026-09-07 after the user's direction, superseding the same-day first draft. The
+first draft was written under *"think about it and proceed with what is best"*; the user then set the
+register workflow and answered two design questions. §1 marks which decisions are the user's and which
+the assistant took to fill the gaps. Every assistant decision is reversible until the plan is executed.
 
-**Goal:** finish what Phase 13 started. Phase 13 put IT and Purchasing assets in one register with two
-classes and let each department *register, create, edit and request* its own class, but left five
-management verbs in IT's hands for both classes: approving, assigning and returning, attaching documents,
-creating categories and types, and printing labels. This phase moves each of those to the department that
-owns the class, and adds the one create form the system never had — a new employee.
+**Goal:** IT sees and manages IT assets only. Purchasing sees every asset, registers assets of both
+classes, and manages the Purchasing class end to end. An IT asset that Purchasing registers is handed to
+IT, who checks it before Finance sees it. Finance confirms everything, and its record is what the
+depreciation module (Phase 15) will read. The system also gains its first manual create form for
+employees.
 
-**Source requirement:** the user's instruction of 2026-09-07: *"plan the changes for adding of new assets
-and new employees, also the purchasing assets should be separate since IT will only manage the IT and
-purchasing will manage purchasing/pantry/office supplies."* Plus `docs/PICKUP.md` §4 item 3, which lists
-Purchasing-owned approvals, a Purchasing assign/return surface, class-aware document permissions and a
-label-sheet path for Purchasing as the Phase 13 follow-ups, in that value order.
+**Source requirement:** the user's words of 2026-09-07:
 
----
+> *"plan the changes for adding of new assets and new employees, also the purchasing assets should be
+> separate since IT will only manage the IT and purchasing will manage purchasing/pantry/office supplies."*
 
-## 0. What "separate" means here, and what it does not
+> *"IT can only see their assets, so we should have them separate, and when registering assets:
+> Purchasing — can register IT assets then it will be transferred to IT. IT — can also register IT Assets.
+> So when purchasing registers an asset, IT can also edit it if there is a correction. Purchasing can see
+> everything that was registered and purchased, while IT can just see the IT assets. So the workflow will
+> be: Purchasing (Registers Assets) → IT (Registers Assets / Check the Purchasing Asset if its correct) →
+> Finance check everything and will have a record for the depreciation."*
 
-Phase 13 decided **one register, two classes** and rejected two registers with nothing shared. This
-phase keeps that. "Separate" means **every management verb on an asset is performed by the department
-that owns the asset's class**. It does not mean the departments cannot see each other's assets.
-
-Reads stay shared, on purpose:
-
-- Offboarding a leaver who holds a laptop and a car needs both rows on one screen.
-- Finance confirms both classes from one queue.
-- The audit trail and the Home leaver card cross classes.
-- `/inventory` already offers a class switch; a Purchasing user who wants only cars clicks it.
-
-The naming rule from Phase 13 §0 still holds: in this codebase `admin` is the sysadmin role, and the
-business's "Admin department" is the **Purchasing** workspace and the `purchasing_staff` role.
+Two design questions were then answered: **full depreciation module** (scoped to Phase 15, §15) and **IT
+verifies, then Finance sees it** (§5).
 
 ---
 
-## 1. Decisions taken, with the alternatives rejected
+## 0. Naming — read this first
 
-| # | Question | Decision | Rejected |
+In this codebase `admin` is the sysadmin role and `/admin/*` the sysadmin routes. The business's "Admin
+department" is the **Purchasing** department: the `purchasing` workspace and the `purchasing_staff` role
+(Phase 13 §0). Nothing in this phase changes that.
+
+---
+
+## 1. Decisions, with who made them and what was rejected
+
+| # | Question | Decision | By | Rejected |
+|---|---|---|---|---|
+| 1 | Who sees which assets? | **IT sees IT only. Purchasing, Finance and admin see everything.** `VISIBLE_CLASSES`, §2–3. | user | Shared reads for all (first draft). |
+| 2 | Who registers which class? | **Purchasing registers both classes. IT registers IT.** `REGISTRABLE_CLASSES`, §4. | user | Each class registered by its own department (Phase 13). |
+| 3 | Who owns a Purchasing-registered IT asset? | **IT, from the moment it is registered.** Purchasing may still edit it until IT has checked it. §5.4. | user (ownership) / assistant (edit-until-checked) | Purchasing keeps editing IT assets it registered forever; Purchasing loses edit at once (typos would need IT). |
+| 4 | Is IT's check formal? | **Yes. An IT asset waits for IT's check; Finance's register shows it and Finance can confirm it only after.** The asset is live throughout. §5. | user | No gate, IT just edits; verification blocks assignment and status changes. |
+| 5 | What does Finance record for depreciation? | **A full depreciation module — Phase 15, its own spec.** Phase 14 guarantees the inputs it will read. §15. | user | Cost and dates only; straight-line fields. |
+| 6 | Does the viewer role see both classes? | **No, IT only.** The viewer is the IT workspace's read-only seat. | assistant | Viewer sees everything (it is not Purchasing or Finance). |
+| 7 | Do person-centric pages hide the other class? | **No.** An employee's holdings, the offboarding wizard and an approval's detail show every asset the person holds, because they are about the person. A tag the viewer cannot open renders as text, not a link. §3.3 | assistant | Hiding a leaver's car from IT's offboarding wizard (nobody would return it). |
+| 8 | Who approves a lifecycle change? | **Whoever manages the asset's class.** A class-less approval (no asset) is any approver's to reject. §6 | assistant | Approvers stay `admin`/`it_staff` (Phase 13 default). |
+| 9 | Where does Purchasing assign and return a car? | **From the asset record**, a new header control. §7 | assistant | Opening IT's loadout picker to Purchasing. |
+| 10 | May Purchasing create categories and types? | **Of its own class only.** IT likewise. Admin both. §9 | assistant | Asking IT for an "Office Supplies" row. |
+| 11 | How is a new employee created? | **A form at `/employees/new`**, `admin`/`it_staff`, `employeeNo` typed and unique case-insensitively. §11 | assistant | An `EMP-` number generator. |
+| 12 | Purchasing bulk CSV import? | **Phase 15.** §15 | assistant | Fold into this phase. |
+| 13 | Consumable office supplies? | **Not assets. Out.** PICKUP §4 item 4. | assistant | Quantity fields on `Asset`. |
+| 14 | Schema change? | **One additive migration** for the IT check (`itVerifiedAt`, `itVerifiedById`). §13 | — | — |
+
+---
+
+## 2. Three maps, one module
+
+`src/lib/asset-class.ts` gains two maps beside `MANAGEABLE_CLASSES` and every guard in the codebase asks
+one of the three. Nothing else may hard-code which role sees, registers or manages a class.
+
+| Role | `VISIBLE_CLASSES` — sees | `REGISTRABLE_CLASSES` — registers / creates | `MANAGEABLE_CLASSES` — edits, requests, approves, assigns, documents, categorises, labels |
 |---|---|---|---|
-| 1 | Does "separate" mean hiding each class from the other department? | **No. Management is class-owned; reading stays shared.** §0 | A `VISIBLE_CLASSES` map hiding IT rows from Purchasing and vice versa. It breaks offboarding, Finance and audit, all of which are shared by Phase 13's decision, and it would need an exception list longer than the rule. |
-| 2 | Who approves a lifecycle change on a Purchasing asset? | **`admin` or `purchasing_staff`.** Who approves on an IT asset: `admin` or `it_staff`. One rule: the approver is whoever can manage the asset's class. §3 | Keep approvers `admin`/`it_staff` (Phase 13's default, recorded there as the first follow-up). A separate `approver` flag on `User` (a second permission system for one distinction). |
-| 3 | Where does Purchasing assign and return a car? | **From the asset record.** A new header control on `/inventory/[id]`, offered to whoever can manage the asset's class, for both classes. §4 | Open `/employees`' loadout picker to Purchasing (the loadout is IT's policy-slot view; a car has no slot). A Purchasing-only holder page (a second surface for one action). |
-| 4 | May Purchasing see the employee directory? | **Yes, read-only**, so "held by A. Reyes" on a car is a link that opens. Editing, importing and creating employees stay `admin`/`it_staff`. §4.3, §8 | Keep `/employees` IT-only and render the holder as plain text for Purchasing. |
-| 5 | May Purchasing create categories and types? | **Yes, of its own class only.** `it_staff` likewise becomes IT-only; `admin` keeps both. §6 | Keep category creation `admin`/`it_staff` and have Purchasing ask IT for an "Office Supplies" row. The user's words were that Purchasing manages office supplies; asking IT for the category contradicts that. |
-| 6 | How does a new employee get created? | **A form at `/employees/new`**, `admin`/`it_staff`, with `employeeNo` typed by hand and checked unique case-insensitively, exactly as the importer does. §8 | An auto-generated `EMP-` number (the importer records that `employeeNo` has no format and refuses to invent one; a generator would invent one). Letting Purchasing create employees (they are IT/HR data). |
-| 7 | Does Purchasing get bulk CSV import in this phase? | **No. Phase 15.** The import planner is 2,000-row IT vocabulary; opening it to a second class is its own design. Purchasing adds assets one at a time on `/inventory/new` or by batch on `/inventory/register`, both of which already exist. §12 | Fold import into this phase. |
-| 8 | Are consumable office supplies (pens, paper) assets? | **No.** Only durable, tagged items are. PICKUP §4 item 4 already records that consumables are a second domain that must not be modelled as an `Asset`. §12 | Quantity fields on `Asset`. |
-| 9 | Any schema or migration change? | **None.** Every rule in this phase is application-layer over Phase 13's model; the two triggers remain the guarantee. | — |
+| `admin` | IT, PURCHASING | IT, PURCHASING | IT, PURCHASING |
+| `it_staff` | IT | IT | IT |
+| `purchasing_staff` | IT, PURCHASING | IT, PURCHASING | PURCHASING |
+| `finance_staff` | IT, PURCHASING | — | — (Finance confirms both, through its own guard) |
+| `viewer` | IT | — | — |
+
+Invariant, pinned by a test: for every role, `MANAGEABLE ⊆ REGISTRABLE ⊆ VISIBLE`.
+
+Pure helpers: `canSeeClass`, `canRegisterClass`, `canManageClass` (exists), `visibleClassWhere(role)` (a
+Prisma where-fragment, `{}` for an all-class role), `isAwaitingItCheck(asset)` and `canEditAsset(role,
+asset)` (§5.4). The Finance exception stands: `finance_staff` is `[]` in `MANAGEABLE_CLASSES` on purpose
+and Finance's confirm / send-back never consult it.
 
 ---
 
-## 2. The rule: one map decides every management verb
+## 3. Visibility
 
-`MANAGEABLE_CLASSES` in `src/lib/asset-class.ts` already answers *"may this role register, create, edit
-or request a status change on this class?"* This phase makes it answer every management verb:
+### 3.1 The register surfaces
 
-| Verb | Today | After this phase |
-|---|---|---|
-| register / create / edit / request status | `canManageClass` | unchanged |
-| claim / release / approve / reject / escalate / retry an approval | `admin`, `it_staff` literal | `canManageClass(role, approval.asset.cls)`; no asset → `admin` only |
-| request assign / request return | `admin`, `it_staff` literal | `canManageClass(role, asset.cls)` |
-| upload document / mark signed | `admin`, `it_staff` literal | `canManageClass(role, asset.cls)` |
-| create / rename / delete category | `admin`, `it_staff` literal | `canManageClass(role, category.cls)` |
-| create / rename / delete type | `admin`, `it_staff` literal | `canManageClass(role, type.category.cls)` |
-| print labels | `admin`, `it_staff` literal | `canManageClass(role, asset.cls)` per asset |
+For a role that does not see every class, these surfaces are scoped to `VISIBLE_CLASSES[role]`:
 
-The Finance exception stands and must be repeated in every review: `finance_staff` maps to `[]` and
-Finance's confirm / send-back actions **must not** consult this map (asset-class.ts:92-97 already warns).
+- **`/inventory`.** A `?cls=` the role cannot see redirects to bare `/inventory`. The default class is the
+  role's first visible class. The class switch renders only when the role sees more than one class; IT and
+  the viewer see no switch at all.
+- **The asset record** and every tab under `/inventory/[id]`. A new `getVisibleAsset(id, role)` wraps
+  `getAsset` and returns null for an invisible class, so the existing `notFound()` fires. The edit page
+  does the same before its own redirect logic.
+- **`/inventory/export`**, both the filter branch and the `?ids=` branch, AND `visibleClassWhere(role)`.
+- **The command palette** asset search.
+- **The scan page** `/inventory/scan/[tag]`: a tag of an invisible class renders a banner naming the tag
+  as outside the viewer's register, with no details. Not the "unknown tag" copy — the sticker is real.
+- **`/inventory/activity`** and **`/audit`**: audit rows whose entity is an asset of an invisible class are
+  excluded (`NOT (entityType = asset AND entityId IN invisible ids)`). The invisible set for IT is the
+  Purchasing fleet, which is small; for an all-class role the exclusion is empty and costs nothing.
+- **`/inventory/labels`** filters `?ids=` to `MANAGEABLE_CLASSES` (you print what you manage), which is
+  narrower than visibility for every role.
 
-What stays a literal role list, on purpose, because it is not a verb on an asset of a class:
+`exactTagMatch` (the USB-scanner contract on the list's search box) stays unscoped: it resolves a tag to an
+id and redirects to the record, and the record then answers with not-found for an invisible class. The
+list's non-exact search is scoped by the class filter as today.
 
-- Departments CRUD, employee edit/import/create, `/inventory/import`, secrets, reservations,
-  day-one `requestAssignReserved`, offboarding outcomes, `/admin/users|webhooks|flags`.
+### 3.2 What Finance and Purchasing see
+
+Everything, including IT's records, exactly as today. `/finance/assets` keeps its IT and Purchasing tabs.
+
+### 3.3 Person-centric pages
+
+An employee's page, the offboarding wizard and an approval's detail list every asset the person holds,
+whatever its class, because the question they answer is about the person. A tag the viewer cannot open
+renders as plain text with a title "Outside your register" instead of a link. One small component,
+`<TagRef>`, does this everywhere.
+
+### 3.4 What does not change
+
+`/finance/*`, `/purchases/*`, `/employees/*` reads, `/offboarding`, `/reservations` (IT assets only by
+construction). Home's IT queries are already pinned to IT; its approval rows take the class scope of §6.
 
 ---
 
-## 3. Approvals by class
+## 4. Registration
 
-### 3.1 Who may act
+- `/inventory/register` and `/inventory/new` offer the categories and types of `REGISTRABLE_CLASSES[role]`.
+  Purchasing therefore sees Laptop beside Vehicle; IT sees IT categories only.
+- `registerAssets` and `createAsset` gate on `canRegisterClass(role, category.cls)`. The class is still
+  derived from the category, never chosen per item (Phase 13 §2.3).
+- **Stamping.** When the registrant manages the class being registered (`admin` or `it_staff` registering
+  IT), the asset is created already checked: `itVerifiedAt = now`, `itVerifiedById = registrant`. When
+  Purchasing registers an IT asset both stay null: the asset is awaiting IT's check. Purchasing-class assets
+  never carry a value (§5.1). The IT import wizard (admin/IT only) stamps every row it creates.
+- `/inventory`'s **New asset** button follows `canRegisterClass`; bulk actions and Edit follow the
+  management rules.
 
-Every approval action routes through the single `transition()` helper in
-`src/server/modules/approvals/actions.ts`, guarded today at line 42 by `actionRole("admin","it_staff")`.
-That guard becomes: load the approval **with its asset**, then require `canActOnApproval(role, cls)`.
+---
 
-A new pure module `src/lib/approval-access.ts`:
+## 5. The IT check
+
+### 5.1 Definition
+
+An asset is **awaiting IT's check** when `cls = IT` and `itVerifiedAt IS NULL`. Purchasing-class assets
+never carry a value and are never awaiting; the predicate includes the class on purpose so a stray null
+on a car means nothing.
+
+### 5.2 The action
+
+`verifyAssetDetails({ id })`, `admin`/`it_staff`. Refuses a Purchasing asset by name, refuses an already
+checked asset, writes `itVerifiedAt`/`itVerifiedById` under a state-guarded `updateMany` (the null check in
+the where, like Finance's confirm), audits `it.verify`. Idempotent by refusal, not by silence.
+
+### 5.3 Where Finance's gate bites
+
+- `/finance/assets`, IT tab: rows require `itVerifiedAt IS NOT NULL`. The Purchasing tab is unchanged.
+- `confirmAssetDetails` refuses an awaiting IT asset: *"BR-LT-0300 is waiting for IT's check — Finance
+  confirms after IT."* The record's Confirm button is absent while awaiting.
+- The record's pill reads, in order of precedence: **FINANCE CONFIRMED · date** → **RETURNED BY FINANCE**
+  → **AWAITING IT CHECK** → **AWAITING FINANCE**.
+- Finance's Home "Capitalized" aggregate stays the whole fleet at cost, unchanged; it is a fleet value, not a
+  review queue, and `home-finance.spec.ts` pins it.
+
+### 5.4 Who may edit while it waits
+
+`canEditAsset(role, asset) = canManageClass(role, asset.cls) OR (isAwaitingItCheck(asset) AND
+canRegisterClass(role, asset.cls))`. So Purchasing can fix its own registration until IT checks it; after
+the check, IT only. IT can edit at any time. Status changes, assign and return follow `canManageClass`
+alone: an awaiting laptop is IT's to deploy, not Purchasing's.
+
+### 5.5 Surfaces
+
+- **Record header:** a **Mark checked** button for `admin`/`it_staff` while awaiting, with a one-line dialog.
+- **IT Home, "Your shift":** a new row kind `CHECK` — each awaiting IT asset, oldest first, action *Check*,
+  linking to the record.
+- **Purchasing Home:** a stat **Awaiting IT check** (count of awaiting IT assets), beside **Approvals
+  waiting** (§6.4).
+- Finance's send-back on an IT asset goes to IT, whose **Mark corrected** clears it (Phase 12, class =
+  IT). Send-back does not clear the IT check.
+
+---
+
+## 6. Approvals by class
+
+### 6.1 Who may act
+
+Every approval action goes through the single `transition()` helper in
+`src/server/modules/approvals/actions.ts`. Its `actionRole("admin","it_staff")` becomes: load the approval
+with its asset, require `canActOnApproval(role, cls)` from a new pure module `src/lib/approval-access.ts`:
 
 ```ts
 export function isApprover(role: Role): boolean
@@ -101,248 +202,222 @@ export function approvalClassWhere(role: Role): Prisma.ApprovalWhereInput
 // otherwise → { OR: [{ assetId: null }, { asset: { cls: { in: MANAGEABLE_CLASSES[role] } } }] }
 ```
 
-Finance and the viewer already read `/approvals` today (`approvals-audit.spec.ts` asserts Finance's read-only
-queue), so a role that manages no class reads everything and acts on nothing, exactly as before.
+Finance and the viewer already read `/approvals` (`approvals-audit.spec.ts` asserts Finance's read-only
+queue), so a role that manages no class reads everything and acts on nothing, as before. The pure state
+machine `approvalTransition` is unchanged; `isAdmin` still means the `admin` role.
 
-The pure state machine `approvalTransition` in `approval-flow.ts` is unchanged; `isAdmin` still means
-the `admin` role. `it_staff` and `purchasing_staff` are peers: each is an ordinary approver inside its
-own class.
+### 6.2 Queue, badge, Home
 
-### 3.2 Queue scope
+`listApprovals`, `tabCounts`, the sidebar badge, Home's "Your shift" approval rows and "Claimed by you"
+all AND `approvalClassWhere(role)`. IT sees IT approvals; Purchasing sees Purchasing approvals; admin,
+Finance and the viewer see all. The detail page computes `canAct` from `canActOnApproval`.
 
-`listApprovals` and `tabCounts` in `queries.ts` take the role and AND `approvalClassWhere(role)` into
-every tab's where-clause; the sidebar badge (`getApprovalsBadge`) takes the same scope. `it_staff` sees
-IT approvals; `purchasing_staff` sees Purchasing approvals; `admin`, Finance and the viewer see all. The
-detail page computes `canAct` from `canActOnApproval`, so a Purchasing user who follows a link to an IT
-approval sees it read-only with the existing "you cannot act on this" state.
+### 6.3 Approvals with no asset
 
-### 3.3 Approvals with no asset
+The seed carries two (`APR-2040`, `APR-2035`) and `approvals-audit.spec.ts` counts them in IT's queue. A
+class-less row is visible to and rejectable by every approver; `systemChecks` already reports it as
+unexecutable. Counts in that spec do not change.
 
-`Approval.assetId` is nullable and `systemChecks` already treats a missing asset as a failing check.
-Such a row has no class, so no class filter can exclude it: it is visible to and actionable (rejectable)
-by every approver. The seed carries two (`APR-2040`, `APR-2035`) and `approvals-audit.spec.ts` counts
-them in IT's queue; this rule keeps those counts unchanged. No new UI.
+### 6.4 Surfaces
 
-### 3.4 Surfaces
+`PATH_RULES`: `/approvals` admits the `purchasing` workspace. `WORKSPACE_NAV.purchasing` gains
+**Approvals** with the badge marker. Purchasing Home gains **Approvals waiting**.
 
-- `PATH_RULES`: `/approvals` gains the `purchasing` workspace and the `purchasing_staff` role.
-- `WORKSPACE_NAV.purchasing`: an **Approvals** item, placed after "Purchasing assets".
-- Purchasing Home: one more `Stat`, **Approvals waiting**, counting `PENDING`+`CLAIMED` approvals under
-  `approvalClassWhere("purchasing_staff")`, linking to `/approvals`.
-- IT Home is unchanged: "Your shift" and "Claimed by you" query by `claimedById`, and after this phase
-  an `it_staff` user can only have claimed IT approvals.
+### 6.5 Offboarding a leaver who holds a car
 
-### 3.5 What does not change
-
-SLA, `refNo`, priority, the worker, `approval.executed` webhook, `escalate`/`retry` semantics,
-one-open-approval-per-asset.
+IT runs the wizard and decides "Returned" for the car; that creates a `lifecycle.return` approval on a
+Purchasing asset, which **Purchasing** claims and approves. IT initiates, the class owner approves. The
+wizard shows the car's tag as text (§3.3).
 
 ---
 
-## 4. Assign and return from the asset record
+## 7. Assign and return from the asset record
 
-### 4.1 The control
+### 7.1 The control
 
-`/inventory/[id]`'s header (`[id]/layout.tsx`) gains one component, `<HolderControl>`, beside
-`RequestStatusChange`, rendered when `canManageClass(user.role, asset.cls)` and the asset is not frozen
-by a pending approval (the existing `pendingRef` banner logic):
+`/inventory/[id]`'s header gains `<HolderControl>`, rendered when `canManageClass(role, asset.cls)` and no
+approval is open on the asset:
 
-- **Unheld and `status === ASSIGNABLE_FROM[cls]`** → button **Assign holder** → dialog with the same
-  `EntityCombobox` of ACTIVE employees the create form uses, a reason field, **Request assign**.
-- **Held** → button **Return** → dialog with a reason, **Request return**.
-- Otherwise no control, because neither action is legal (the same rule the loadout view follows).
+- **Unheld and `status === ASSIGNABLE_FROM[cls]`** → **Assign holder** → dialog with the same employee
+  combobox the create form uses, a reason, **Request assign**.
+- **Held** → **Return** → dialog with a reason, **Request return**.
+- Otherwise nothing; neither action is legal.
 
-Both call the existing `requestAssign` / `requestReturn` in `src/server/modules/employees/actions.ts`.
-No new action, no new approval type. The result is the same `lifecycle.assign` / `lifecycle.return`
-approval the loadout view creates, now claimable by the class's own department (§3).
+Both call the existing `requestAssign` / `requestReturn`. No new action, no new approval type.
 
-### 4.2 Guards
+### 7.2 Guards
 
-`requestAssign` and `requestReturn` replace `actionRole("admin","it_staff")` with: load the asset,
-`canManageClass(role, asset.cls)`, else `forbidden()`. `requestAssignReserved` keeps its IT-only guard;
-reservations are IT.
+`requestAssign` and `requestReturn` replace their role literal with: load the asset,
+`canManageClass(role, asset.cls)`, else `forbidden()`. `requestAssignReserved` stays IT: reservations are.
 
-### 4.3 Purchasing reads the directory
+### 7.3 Purchasing reads the directory
 
-`PATH_RULES`: `/employees` and `/employees/[id]` (and its `history`, `form` read pages) gain the
-`purchasing` workspace, role `purchasing_staff`. `/employees/[id]/edit`, `/employees/import`,
-`/employees/new` stay IT. `WORKSPACE_NAV.purchasing` gains an **Employees** item. On the loadout page
-`canMutate` is already `admin || it_staff`, so Purchasing sees the loadout read-only with the spare picker
-hidden; the spare picker stays pinned to IT because it fills IT policy slots.
-
-### 4.4 What stays IT
-
-The loadout's spare picker, day-one reserved assignment, offboarding (shared, per Phase 13 §8), the
-Home leaver card.
+`/employees` and its read pages admit the `purchasing` workspace so "held by …" on a car opens. Edit,
+import and create stay `admin`/`it_staff`. The loadout's spare picker stays pinned to IT (it fills IT policy
+slots) and is read-only for Purchasing.
 
 ---
 
-## 5. Documents
+## 8. Documents
 
-`uploadDocument` and `markDocumentSigned` in `document-actions.ts` load the asset and require
-`canManageClass(role, asset.cls)`. `documents/page.tsx` passes `canMutate` from the same call. Kinds,
-size cap, extensions, paths and audit entries are unchanged. There is still no delete.
-
----
-
-## 6. Reference data by class
-
-### 6.1 Who creates what
-
-`reference-actions.ts`:
-
-- `createRefRow` **category**: `cls` is required from the client but overridden server-side to the
-  single manageable class when the role has exactly one (`it_staff` → IT, `purchasing_staff` → PURCHASING);
-  `admin` may pick. A role with no manageable class is `forbidden()`.
-- `createRefRow` **type**: load the category; `canManageClass(role, category.cls)`.
-- `renameRefRow` / `deleteRefRow` category: `canManageClass(role, row.cls)`. Type: via `row.category.cls`.
-- **department**: unchanged, `admin`/`it_staff`.
-
-The `category_class_frozen` trigger continues to refuse a class flip once assets exist; no action changes
-`cls` after create.
-
-### 6.2 What each role sees
-
-`/admin/asset-categories` and `/admin/asset-types` list rows whose class is in
-`MANAGEABLE_CLASSES[role]`; `admin` sees all with the Class column. `it_staff` therefore stops seeing
-Vehicle and Furniture. `ref-table.tsx`'s Class picker on create is shown to `admin` only; for the two
-staff roles the class is fixed and shown as text.
-
-### 6.3 The types page picker
-
-`asset-types/page.tsx` loads categories `where: { locked: false, cls: { in: MANAGEABLE_CLASSES[role] } }`,
-so a type can only be filed under a category of the creator's class. Today the picker mixes both classes.
-
-### 6.4 Nav and paths
-
-`PATH_RULES`: `/admin/asset-categories` and `/admin/asset-types` gain workspace `purchasing`, role
-`purchasing_staff`. `/admin/departments` unchanged. `WORKSPACE_NAV.purchasing` gains a **Reference data**
-section with **Categories** and **Types**.
+`uploadDocument` and `markDocumentSigned` load the asset and require `canManageClass(role, asset.cls)`.
+The Documents tab's `canMutate` uses the same call. Kinds, size cap, extensions, audit: unchanged.
 
 ---
 
-## 7. Labels
+## 9. Reference data by class
 
-- `/inventory/labels`: `requireRole("admin","it_staff","purchasing_staff")`; `PATH_RULES` gains the
-  `purchasing` workspace.
-- The page filters the requested ids to `cls in MANAGEABLE_CLASSES[role]`; rows dropped this way count
-  toward the existing `missing` banner. `admin` prints anything.
-- `bulk-drawer.tsx`: the "Print labels for N selected" affordance drops its `cls === "IT"` condition
-  and shows whenever the selection is explicit; the drawer's `cls` is already the user's manageable
-  class on that view.
-- `APP_BASE_URL`, `labelPages`, the 100 mm bar: unchanged.
+- `createRefRow` **category**: the class is decided server-side from the role — a single-class role gets
+  its class whatever the client sent; admin may pick; a no-class role is refused.
+- `createRefRow` **type**: the category's class must be manageable by the role.
+- `renameRefRow` / `deleteRefRow`: category by its class, type by its category's class, department
+  `admin`/`it_staff` as today.
+- `/admin/asset-categories` and `/admin/asset-types` list only manageable classes; admin sees all with the
+  Class column. The types page's category picker offers manageable classes only (today it mixes both).
+- `PATH_RULES` and `WORKSPACE_NAV.purchasing` gain both pages under a **Records** heading. Departments
+  stay IT.
 
----
-
-## 8. The new-employee form
-
-- **Route** `/employees/new`, `requireRole("admin","it_staff")`, `PATH_RULES` under the `it` workspace.
-  Entry: a **New employee** button on `/employees` beside Import, shown when `canMutate`.
-- **Form:** `employee-form.tsx` gains `mode: "new" | "edit"`. In `new` mode it shows **Employee number**
-  (required, trimmed, 1–60 characters, no format rule — the importer's E-2 decision) and **Joined**
-  (date, default today) above the existing Name, Title, Department, Employment and M365 fields.
-  Employment defaults to `ACTIVE`.
-- **Action** `createEmployee` in `employees/actions.ts`: schema = `employeeSchema` minus `id` plus
-  `employeeNo` and `joinedAt`; department must exist; `employeeNo` unique **case-insensitively**
-  (`findFirst` with `mode: "insensitive"`, matching `import-employees.ts`'s `refKey` rule) → field error
-  "That employee number is already in use"; P2002 backstop; audit `employee.created`; redirect to
-  `/employees/[id]`.
-- The empty-state copy on `/employees` ("there is no create form by design") is replaced with "Add one
-  with New employee, or import a sheet."
-- `updateEmployee` still never accepts `employeeNo`; identity is not editable.
+Purchasing registers IT assets into **existing** IT categories; it does not create IT categories.
 
 ---
 
-## 9. Navigation and path rules, in one table
+## 10. Labels
 
-| Path | Workspaces today | Workspaces after | Roles after |
+`/inventory/labels` admits `purchasing_staff`; the page prints the ids whose class the role manages and
+counts the rest in the existing skipped banner (copy becomes cause-neutral: *could not be printed*). The
+bulk drawer's **Print labels** link appears for any explicit selection.
+
+---
+
+## 11. The new-employee form
+
+- `/employees/new`, `requireRole("admin","it_staff")`, an IT write surface at layer 1 like `/employees/import`.
+  Entry: **New employee** on `/employees` for those roles.
+- `employee-form.tsx` gains `mode: "new" | "edit"`. New mode adds **Employee number** (required, trimmed,
+  1–60 characters, no format rule — the importer's E-2 decision) and **Joined** (date, default today).
+- `createEmployee`: department must exist; `employeeNo` unique case-insensitively (matching the importer's
+  `refKey`) with field error *"That employee number is already in use"*; P2002 backstop; audit `create`;
+  redirect to the record. `updateEmployee` still never accepts `employeeNo`.
+- The empty-state copy "there is no create form by design" is replaced.
+
+---
+
+## 12. Navigation and path rules
+
+| Path | Workspaces today | After | Roles after |
 |---|---|---|---|
-| `/approvals`, `/approvals/[id]` | it, finance | it, finance, **purchasing** | admin, it_staff, finance_staff (read), **purchasing_staff** |
-| `/employees` reads — list, `[id]`, `history`, `form`, `activity`, `export` | it | it, **purchasing** | today's roles plus **purchasing_staff**; nav item added for purchasing |
-| `/employees/[id]/edit` | it (general rule) | it, own rule | admin, it_staff — a write surface stopped at layer 1, like `/employees/import` |
+| `/approvals`, `/approvals/[id]` | it, finance | it, finance, **purchasing** | + `purchasing_staff` |
+| `/employees` reads — list, `[id]`, `history`, `form`, `activity`, `export` | it | it, **purchasing** | + `purchasing_staff` |
 | `/employees/new` | — | it | admin, it_staff |
-| `/employees/[id]/edit`, `/employees/import` | it | unchanged | unchanged |
+| `/employees/[id]/edit` | it (general rule) | it, own rule | admin, it_staff |
 | `/admin/asset-categories`, `/admin/asset-types` | it | it, **purchasing** | admin, it_staff, **purchasing_staff** |
 | `/admin/departments` | it | unchanged | unchanged |
 | `/inventory/labels` | it | it, **purchasing** | admin, it_staff, **purchasing_staff** |
 
-`workspaces.test.ts` asserts every row of this table per role. Nothing is removed from any role.
+`WORKSPACE_NAV.purchasing`: **Assets** gains *Approvals* (badge) and *Employees*; a new **Records** section
+holds *Asset categories* and *Asset types*; **Reference → IT inventory** stays (Purchasing sees everything).
+IT's nav is unchanged. `/inventory`'s class switch renders only for roles that see more than one class.
 
 ---
 
-## 10. Seed
+## 13. Migration and seed
 
-No new rows. Purchasing creating an "Office Supplies" category through the new form *is* the e2e test
-for §6, and staging is never re-seeded (`PICKUP.md` §3). One housekeeping fix rides along: the comment
-in `prisma/seed.ts:12` says twelve accounts; the seed creates five. Correct the comment and the message
-at line 20.
+**Migration `20260907090000_asset_it_verified`** (hand-written, additive, HANDOVER §7 rule): two columns,
+one FK to `User` (`ON DELETE RESTRICT`, like Finance's), one index, and a backfill
+`UPDATE "Asset" SET "itVerifiedAt" = "createdAt" WHERE "cls" = 'IT'` — every IT asset that exists today
+was registered by IT, because Phase 13 allowed nothing else. Migration count 14 → 15.
+
+**Seed:** a reseed TRUNCATEs, so `prisma/seed.ts` sets `itVerifiedAt` on every IT-class fixture itself.
+No new fixture rows: `home-finance.spec.ts` pins the fleet at 25 IT assets and ₱48,442,000 across 32. The
+e2e for the register flow creates its own laptop. One housekeeping fix rides along: the seed's comment
+says twelve accounts; it creates five.
 
 ---
 
-## 11. Testing
+## 14. Testing
 
-### 11.1 Unit (pure, `src/lib`, vitest)
+### 14.1 Unit (pure, `src/lib`, vitest)
 
-- `approval-access.test.ts`: `isApprover` per role; `canActOnApproval` table-driven over all five roles ×
-  {IT, PURCHASING, null}; `approvalClassWhere` returns `{}` for admin, finance and viewer and the
-  `OR [assetId null, cls in …]` fragment for the two staff roles. Mutation check: a literal `["IT"]` in
-  place of the map fails the purchasing row.
-- `workspaces.test.ts`: every row of §9 per role, including the negatives that stay negative
-  (purchasing on `/employees/import`, `/employees/new`, `/admin/departments`, `/inventory/import`).
-- `asset-class.test.ts`: unchanged; the map is not touched.
+- `asset-class.test.ts`: the three maps per role; the `MANAGEABLE ⊆ REGISTRABLE ⊆ VISIBLE` invariant;
+  `visibleClassWhere` is `{}` for all-class roles and `{ cls: { in: ["IT"] } }` for IT and viewer;
+  `isAwaitingItCheck` on the four (cls × verified) combinations; `canEditAsset` table-driven over roles ×
+  {IT verified, IT awaiting, PURCHASING}.
+- `approval-access.test.ts`: `isApprover`, `canActOnApproval` over roles × {IT, PURCHASING, null},
+  `approvalClassWhere` shapes, and a mutation check against a literal `["IT"]`.
+- `workspaces.test.ts`: every row of §12 per role, plus the negatives that stay negative.
+- `audit-list.test.ts`: `buildAuditWhere` adds the `NOT` clause only when given hidden ids.
 
-### 11.2 End-to-end, `e2e/department-owned.spec.ts`
+### 14.2 Phase 13 cases this phase flips (`e2e/asset-classes.spec.ts`)
 
-Same conventions as `asset-classes.spec.ts`: the local `login(page, email)` helper, references by tag /
-employeeNo / category name, never a raw id.
+| Case | Today | After |
+|---|---|---|
+| 2 | Purchasing is *not* offered Laptop on `/inventory/register` | Purchasing **is** offered Laptop and Vehicle; IT still only Laptop |
+| 10 | `it@` on `/inventory?cls=PURCHASING` sees `BR-VH-0001` and a class switch | `it@` is redirected to `/inventory`, sees no `BR-VH` tag and no class switch; the Purchasing half of the case runs as `purchasing@` |
+| 17 | `it@` on a car's edit URL lands on the car's record | `it@` gets the not-found page (case 5's assertion) |
+| 18 | Purchasing is *not* offered Laptop on `/inventory/new` | Purchasing is offered both |
+
+Unchanged by construction: `receiving.spec.ts` (IT registers → stamped → Finance confirms),
+`approvals-audit.spec.ts` (§6.3), `home-finance.spec.ts` (§5.3, §13).
+
+### 14.3 End-to-end, `e2e/department-owned.spec.ts`
 
 | # | Case |
 |---|---|
-| 1 | Purchasing requests a status change on `BR-VH-0002`; the approval appears in Purchasing's `/approvals`, **not** in IT's; Purchasing claims and approves it through the real actions; the worker executes it. **Closes PICKUP §5's D-19 gap.** |
-| 2 | IT signed in cannot claim that Purchasing approval (detail page read-only; direct action call → forbidden). |
+| 1 | Purchasing requests a status change on a car; the approval appears in Purchasing's queue, not IT's; Purchasing claims and approves through the real buttons; the worker executes. Closes the D-19 gap. |
+| 2 | IT cannot act on a Purchasing approval, even by URL. |
 | 3 | Admin's queue shows both classes. |
-| 4 | Purchasing opens `BR-VH-0002` (STORED), **Assign holder** → picks an employee → approval created; approves it; the car is OPERATIONAL and held. Then **Return** → approval → executes to STORED. |
-| 5 | On a laptop record signed in as Purchasing, no Assign/Return control; the URL of the employee holder opens read-only. |
-| 6 | Purchasing uploads a PDF to a car's Documents and marks it signed; on a laptop the panel is read-only and a direct upload is refused. |
-| 7 | Purchasing creates category **Office Supplies**; it is PURCHASING with no class picker offered; creates type **Shredder** under it; the types picker never offered an IT category. On IT's categories page Office Supplies is absent; on admin's it is present with class Purchasing. |
-| 8 | Purchasing selects two cars on `/inventory?cls=PURCHASING` → **Print labels** → a sheet renders with two labels; a hand-crafted `?ids=` containing a laptop id drops it and shows the skipped-count banner. |
-| 9 | IT creates an employee at `/employees/new`; the record opens; the list shows them; a second create with the same number in different case is refused with the field error. |
-| 10 | Purchasing cannot open `/employees/new` or `/employees/[id]/edit` (redirected). |
-| 11 | Purchasing Home shows **Approvals waiting** with the right count. |
+| 4 | Purchasing assigns a stored car from the record, approves, the car is held; then requests its return. |
+| 5 | On a verified laptop, Purchasing has no Edit and no holder control; the holder link opens the employee read-only. |
+| 6 | Purchasing files a car's papers and signs them; a laptop's panel is read-only for Purchasing. |
+| 7 | Purchasing creates **Office Supplies** (class forced) and **Shredder** under it; IT's categories page lacks the row; admin's shows it with the class. |
+| 8 | Purchasing prints two cars; a smuggled laptop id is skipped and counted. |
+| 9 | IT creates an employee; a case-variant duplicate number is refused. |
+| 10 | Purchasing cannot open `/employees/new` or an edit form. |
+| 11 | Purchasing Home shows **Approvals waiting** and **Awaiting IT check** with the right counts. |
+| 12 | **Visibility.** `it@`: `/inventory?cls=PURCHASING` → `/inventory`; a car's record is not found; the scan page for a car says it is outside IT's register. `purchasing@` sees the car on both. |
+| 13 | **The register flow.** `purchasing@` registers a Laptop (prefix LT) → class IT, awaiting; the record shows **AWAITING IT CHECK** and Purchasing has **Edit**; Purchasing corrects the model. `finance@`'s IT tab does not list it and the record shows no **Confirm details**. `it@`'s Home lists it under **CHECK**; IT opens it, **Mark checked**; pill becomes **AWAITING FINANCE**; Purchasing's Edit is gone. `finance@` now lists it and confirms; pill **FINANCE CONFIRMED**. |
 
-`e2e/axe-sweep.spec.ts` gains `/employees/new` and `/approvals` as `purchasing@`.
+`e2e/axe-sweep.spec.ts`: `/employees/new` for IT; `/approvals`, `/employees`, `/admin/asset-categories`,
+`/admin/asset-types`, `/inventory?cls=PURCHASING` for Purchasing (the last moved from the viewer list,
+which is redirected now).
 
 ---
 
-## 12. Out of scope, on the record
+## 15. Out of scope, on the record
 
+- **Depreciation module — Phase 15, own brainstorm and spec.** Phase 14 guarantees its inputs on every
+  Finance-confirmed asset: `cost`, `purchasedAt`, `financeConfirmedAt`/`By`, `itVerifiedAt`/`By` for IT
+  assets, `cls`, `category`. It does not add useful life, salvage, method or postings.
 - **Purchasing bulk import** — Phase 15. The wrong-class refusal in `import-assets.ts` stays.
-- **Consumables** (pens, paper, pantry stock with quantities) — a second domain, own brainstorm, never an
-  `Asset` (PICKUP §4 item 4).
-- **Hiding one class from the other department** — rejected, §1 row 1.
-- **Purchasing-owned offboarding or reservations** — offboarding stays shared per Phase 13 §8;
-  reservations are IT policy.
-- **An `employeeNo` generator or format** — the importer's E-2 rule stands.
-- **Vendor master data, depreciation, locations** — Phase 13 §12, unchanged.
-- **Notifying a department that an approval is waiting** — there is no notification model; the Home
-  stat is the signal.
+- **Consumables** — a second domain, never an `Asset`.
+- **Purchasing-owned offboarding or reservations** — offboarding stays IT-run and shared (§6.5).
+- **An `employeeNo` generator or format.**
+- **Vendor master data, locations.**
+- **Notifying a department that a check or approval waits** — no notification model; the Home rows and
+  stats are the signal.
 
 ---
 
-## 13. Files
+## 16. Files
 
-New: `src/lib/approval-access.ts` + test · `src/components/inventory/holder-control.tsx` ·
-`src/app/(app)/employees/new/page.tsx` · `e2e/department-owned.spec.ts`.
+New: `prisma/migrations/20260907090000_asset_it_verified/migration.sql` · `src/lib/approval-access.ts` +
+test · `src/components/inventory/holder-control.tsx` · `src/components/inventory/it-check.tsx` ·
+`src/components/inventory/tag-ref.tsx` · `src/app/(app)/employees/new/page.tsx` ·
+`e2e/department-owned.spec.ts`.
 
-Changed: `src/lib/workspaces.ts` (+test) · `src/server/modules/approvals/{actions,queries}.ts` ·
-`src/app/(app)/approvals/{page,[id]/page}.tsx` · `src/components/shell/sidebar.tsx` · `src/app/(app)/layout.tsx` ·
-`src/server/modules/employees/{actions,queries}.ts` · `e2e/labels.spec.ts` (one copy assertion) ·
-`src/app/(app)/inventory/[id]/layout.tsx` · `src/server/modules/inventory/document-actions.ts` ·
-`src/app/(app)/inventory/[id]/documents/page.tsx` · `src/server/modules/admin/reference-actions.ts` ·
-`src/components/admin/ref-table.tsx` · `src/app/(app)/admin/{asset-categories,asset-types}/page.tsx` ·
-`src/app/(app)/inventory/labels/page.tsx` · `src/components/inventory/bulk-drawer.tsx` ·
-`src/components/employees/employee-form.tsx` · `src/app/(app)/employees/page.tsx` ·
-`src/app/(app)/page.tsx` (+ the purchasing home query) · `prisma/seed.ts` (comment) ·
-`e2e/axe-sweep.spec.ts` · `docs/PICKUP.md` §3–§5 · `docs/HANDOVER.md` §8.
-
-No migration.
+Changed: `prisma/schema.prisma` · `prisma/seed.ts` · `src/lib/asset-class.ts` (+test) ·
+`src/lib/workspaces.ts` (+test) · `src/lib/audit-list.ts` (+test) · `src/lib/home.ts` · `src/lib/activity.ts` (+test) ·
+`src/server/modules/inventory/{queries,actions,document-actions}.ts` ·
+`src/server/modules/purchases/receiving.ts` · `src/server/modules/import/asset-actions.ts` ·
+`src/server/modules/approvals/{actions,queries}.ts` · `src/server/modules/employees/{actions,queries}.ts` ·
+`src/server/modules/admin/reference-actions.ts` · `src/server/modules/finance/queries.ts` ·
+`src/server/modules/home/queries.ts` · `src/server/modules/audit/queries.ts` · `src/server/palette.ts` ·
+`src/app/(app)/inventory/{page,export/route,activity/page,scan/[tag]/page,labels/page,register/page,new/page}.tsx` ·
+`src/app/(app)/inventory/[id]/{layout,page,edit/page,documents/page,history/page,timeline/page,reservations/page,secrets/page}.tsx` ·
+`src/app/(app)/approvals/{page,[id]/page}.tsx` · `src/app/(app)/audit/page.tsx` ·
+`src/app/(app)/employees/{page,[id]/page,[id]/edit/page}.tsx` · `src/app/(app)/offboarding/[employeeId]/page.tsx` ·
+`src/app/(app)/admin/{asset-categories,asset-types}/page.tsx` · `src/app/(app)/page.tsx` · `src/app/(app)/layout.tsx` ·
+`src/components/shell/sidebar.tsx` · `src/components/home/your-shift.tsx` ·
+`src/components/inventory/{inventory-toolbar,bulk-drawer}.tsx` · `src/components/admin/ref-table.tsx` ·
+`src/components/employees/{employee-form,loadout-view}.tsx` ·
+`e2e/{asset-classes,axe-sweep,labels}.spec.ts` · `docs/PICKUP.md` · `docs/HANDOVER.md`.

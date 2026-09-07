@@ -1,28 +1,29 @@
-# Phase 14 — Each Department Owns Its Class Implementation Plan
+# Phase 14 — Department-Owned Classes Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move the five management verbs Phase 13 left with IT — approving, assigning/returning, attaching documents, creating categories/types, printing labels — to the department that manages the asset's class, and add a `/employees/new` form.
+**Goal:** IT sees and manages IT assets only; Purchasing sees everything, registers both classes, manages the Purchasing class end to end; a Purchasing-registered IT asset waits for IT's check before Finance sees it; plus a `/employees/new` form.
 
-**Architecture:** No schema change. `MANAGEABLE_CLASSES` in `src/lib/asset-class.ts` already says which role manages which class; this phase makes every remaining role-literal guard consult it, through one new pure module `src/lib/approval-access.ts` for the approvals queue and `canManageClass` everywhere else. Path rules and nav open the Purchasing workspace to `/approvals`, `/employees` (read), `/admin/asset-categories|asset-types` and `/inventory/labels`. A new `<HolderControl>` on the asset record is the Purchasing assign/return surface; it calls the existing `requestAssign`/`requestReturn`.
+**Architecture:** Three role→class maps in `src/lib/asset-class.ts` — `VISIBLE_CLASSES`, `REGISTRABLE_CLASSES`, `MANAGEABLE_CLASSES` — and every guard asks one of them. Visibility is enforced at the read seams (`getVisibleAsset`, the list, export, palette, scan, activity/audit) not by hiding links alone. The IT check is two nullable columns on `Asset` (one additive migration), a predicate `cls = IT AND itVerifiedAt IS NULL`, one action, and a gate in Finance's register and confirm. Approvals scope through a new pure `approval-access.ts`. Purchasing's assign/return surface is a `<HolderControl>` on the asset record calling the existing actions.
 
 **Tech Stack:** Next.js 15 App Router · Prisma 6 / PostgreSQL 16 · vitest (node env, pure `src/lib`) · Playwright.
 
-**Spec:** `docs/superpowers/specs/2026-09-07-department-owned-classes-design.md` — read §0 (what "separate" does not mean), §1 (the nine decisions and what each rejected) and §2 (the one rule) before touching anything. "Admin" in stakeholder notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
+**Spec:** `docs/superpowers/specs/2026-09-07-department-owned-classes-design.md` — read §0 (naming), §1 (who decided what), §2 (the three maps) and §5 (the IT check) before touching anything. "Admin" in stakeholder notes means the **Purchasing** department; the codebase's `admin` is the sysadmin role.
 
-**Baselines on `main` at `5b2192c`:** 908 unit / 51 files · 187 e2e / 14 files · `tsc` and `lint` clean · 14 migrations, none pending. Verify with `npm test`, `npm run typecheck`, `npm run lint` before Task 1 and record the numbers here if they differ.
+**Baselines on `main` at `600949c`:** 908 unit / 51 files · 187 e2e / 14 files · `tsc` and `lint` clean · 14 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
 ## Global Constraints
 
-- **No migration.** If a task appears to need one, stop and report; the spec (§1 row 9) says none.
-- **`finance_staff` maps to `[]` in `MANAGEABLE_CLASSES` on purpose.** Finance confirm / send-back must never consult `canManageClass`. Do not touch `finance-review` code.
-- **Reads stay shared.** Nothing in this plan removes a path, page or row from any role. `workspaces.test.ts` must keep every existing `true` case `true`.
-- **Never `a ${CLASS_LABEL[cls]}`** in copy — use `CLASS_PHRASE[cls]` ("an IT", "a Purchasing").
-- **Absent, not disabled:** an affordance the server would refuse is not rendered (house rule, every component in this plan follows it).
-- **e2e references rows by tag / employeeNo / category name, never a raw cuid.** Every spec file reseeds in `beforeAll` (`execSync("npm run db:seed")`).
-- **Commit after every task**, message prefixed `feat(phase-14):`, `test(phase-14):` or `docs(phase-14):`. Work on branch `phase-14-department-owned-classes`, created from `main`. Never push; merging and pushing are the user's decisions.
-- **Windows dev machines:** never `npm install` a new package (PICKUP §2). This plan adds none.
-- Copy in this codebase is sentence case, terse, and names the mechanism ("Creates a `lifecycle.assign` approval…").
+- **Exactly one migration**, `20260907090000_asset_it_verified`, hand-written SQL (HANDOVER §7). Never `prisma migrate reset`; `npm run db:seed` is the sanctioned reset, and a reseed TRUNCATEs, so anything a migration backfills the seed must also set.
+- **`finance_staff` maps to `[]` in `MANAGEABLE_CLASSES` on purpose.** Finance's confirm / send-back never consult `canManageClass`.
+- **Every guard asks a map.** No new `role === "it_staff"` literal outside `asset-class.ts`, `approval-access.ts` and the department / employee-write surfaces the spec names as role-literal.
+- **Absent, not disabled.** An affordance the server would refuse is not rendered.
+- **Never `a ${CLASS_LABEL[cls]}`** in copy — use `CLASS_PHRASE[cls]`.
+- **e2e references rows by tag / employeeNo / category name / refNo, never a raw cuid.** Every spec file reseeds in `beforeAll`.
+- **Seed fixture count is pinned** by `home-finance.spec.ts` (25 IT assets, 32 with cost, ₱48,442,000). Add no seed assets.
+- **Commit after every task** on branch `phase-14-department-owned-classes` from `main`, messages prefixed `feat(phase-14):`, `test(phase-14):` or `docs(phase-14):`. Never push; merging and pushing are the user's decisions (PICKUP §3).
+- **Windows dev machines:** never `npm install` a new package. This plan adds none.
+- Run `npx prisma generate` after Task 2 and after any branch switch that crosses it (HANDOVER).
 
 ---
 
@@ -30,55 +31,131 @@
 
 | File | Responsibility after this phase |
 |---|---|
-| `src/lib/approval-access.ts` (new) + `.test.ts` | Pure: who may act on an approval of a given class; the Prisma where-fragment that scopes a role's queue |
-| `src/lib/workspaces.ts` + `.test.ts` | Path rules and nav for the four new Purchasing surfaces; `/employees/new` and `/employees/[id]/edit` as IT write surfaces |
-| `src/server/modules/approvals/{actions,queries}.ts`, `src/app/(app)/approvals/{page,[id]/page}.tsx`, `src/components/shell/sidebar.tsx`, `src/app/(app)/layout.tsx` | Class-scoped queue, badge and actions |
-| `src/server/modules/employees/actions.ts` | `requestAssign`/`requestReturn` class-guarded; new `createEmployee` |
-| `src/server/modules/employees/queries.ts` | `activeEmployeeOptions()` for the holder picker |
-| `src/components/inventory/holder-control.tsx` (new), `src/app/(app)/inventory/[id]/layout.tsx` | Assign / Return from the asset record |
-| `src/server/modules/inventory/document-actions.ts`, `src/app/(app)/inventory/[id]/documents/page.tsx` | Documents class-owned |
-| `src/server/modules/admin/reference-actions.ts`, `src/components/admin/ref-table.tsx`, `src/app/(app)/admin/{asset-categories,asset-types}/page.tsx` | Categories and types by class |
-| `src/app/(app)/inventory/labels/page.tsx`, `src/components/inventory/bulk-drawer.tsx` | Labels for the classes a role manages |
-| `src/components/employees/employee-form.tsx`, `src/app/(app)/employees/new/page.tsx` (new), `src/app/(app)/employees/page.tsx`, `src/app/(app)/employees/[id]/edit/page.tsx` | New-employee form |
-| `src/server/modules/home/queries.ts`, `src/app/(app)/page.tsx` | Purchasing Home "Approvals waiting" |
-| `e2e/department-owned.spec.ts` (new), `e2e/axe-sweep.spec.ts` | End-to-end proof |
-| `prisma/seed.ts`, `docs/PICKUP.md`, `docs/HANDOVER.md` | Housekeeping and the record |
+| `src/lib/asset-class.ts` + test | The three maps; `canSeeClass`, `canRegisterClass`, `visibleClassWhere`, `isAwaitingItCheck`, `canEditAsset` |
+| `src/lib/approval-access.ts` + test | Who acts on an approval; the queue scope fragment |
+| `prisma/migrations/20260907090000_asset_it_verified/`, `prisma/schema.prisma`, `prisma/seed.ts` | The IT-check columns and their backfill |
+| `src/lib/workspaces.ts` + test | Path rules and nav for the Purchasing surfaces; employee write surfaces |
+| `src/server/modules/inventory/queries.ts` | `getVisibleAsset`, `invisibleAssetIds` |
+| `src/app/(app)/inventory/**` | Visibility on list, record tabs, export, scan, activity, labels; register/new offer registrable classes |
+| `src/components/inventory/{inventory-toolbar,tag-ref,it-check,holder-control,bulk-drawer}.tsx` | Class switch by visibility; tag-as-text; Mark checked; Assign/Return; labels link |
+| `src/lib/audit-list.ts` + test, `src/server/modules/audit/queries.ts`, `src/app/(app)/audit/page.tsx`, `src/app/(app)/audit/export/route.ts` | Audit rows exclude invisible assets |
+| `src/server/palette.ts` | Palette assets scoped |
+| `src/server/modules/purchases/receiving.ts`, `src/server/modules/inventory/actions.ts`, `src/server/modules/import/asset-actions.ts` | Register/create gate on registrable; stamp the IT check; `verifyAssetDetails`; `updateAsset` via `canEditAsset`; Finance confirm refuses awaiting |
+| `src/server/modules/finance/queries.ts` | IT tab requires the check |
+| `src/lib/home.ts`, `src/server/modules/home/queries.ts`, `src/components/home/your-shift.tsx`, `src/app/(app)/page.tsx` | CHECK rows; class-scoped approval rows; Purchasing stats |
+| `src/lib/activity.ts` + test | Sentence for `it.verify` |
+| `src/server/modules/approvals/{actions,queries}.ts`, `src/app/(app)/approvals/**`, `src/components/shell/sidebar.tsx`, `src/app/(app)/layout.tsx` | Approvals by class |
+| `src/server/modules/employees/{actions,queries}.ts`, `src/components/employees/{employee-form,loadout-view}.tsx`, `src/app/(app)/employees/**` | Assign/return guards; `createEmployee`; new form; tag-as-text in the loadout |
+| `src/app/(app)/offboarding/[employeeId]/page.tsx` | Tag-as-text |
+| `src/server/modules/inventory/document-actions.ts`, `src/app/(app)/inventory/[id]/documents/page.tsx` | Documents by class |
+| `src/server/modules/admin/reference-actions.ts`, `src/components/admin/ref-table.tsx`, `src/app/(app)/admin/{asset-categories,asset-types}/page.tsx` | Reference data by class |
+| `e2e/department-owned.spec.ts` (new), `e2e/{asset-classes,axe-sweep,labels}.spec.ts` | Proof |
+| `docs/PICKUP.md`, `docs/HANDOVER.md`, the spec's Status line | The record |
 
 ---
 
 ### Task 0: Branch and baseline
 
-**Files:** none changed.
-
-- [ ] **Step 1: Branch**
-
-```bash
-git checkout -b phase-14-department-owned-classes main
-```
-
-- [ ] **Step 2: Record the baseline**
-
-Run: `npm run typecheck && npm run lint && npm test`
-Expected: clean, clean, `Test Files 51 passed · Tests 908 passed`. If the numbers differ, edit the **Baselines** line above and commit that edit as `docs(plan): Phase 14 baseline is N unit / M files`.
+- [ ] **Step 1:** `git checkout -b phase-14-department-owned-classes main`
+- [ ] **Step 2:** `npm run typecheck && npm run lint && npm test` → clean, clean, `51 files / 908 tests`. If different, correct the **Baselines** line and commit `docs(plan): Phase 14 baseline`.
 
 ---
 
-### Task 1: `approval-access.ts` — the pure rule
+### Task 1: The maps and pure rules
 
 **Files:**
-- Create: `src/lib/approval-access.ts`
-- Test: `src/lib/approval-access.test.ts`
+- Modify: `src/lib/asset-class.ts` (append after `canManageClass`, line 116)
+- Test: `src/lib/asset-class.test.ts` (append)
+- Create: `src/lib/approval-access.ts`, `src/lib/approval-access.test.ts`
 
-**Interfaces:**
-- Consumes: `MANAGEABLE_CLASSES`, `ASSET_CLASSES`, `canManageClass` from `src/lib/asset-class.ts`.
-- Produces: `isApprover(role): boolean` · `canActOnApproval(role, assetCls: AssetClass | null): boolean` · `approvalClassWhere(role): Prisma.ApprovalWhereInput`. Tasks 3, 4 and 10 import these exact names.
+**Interfaces — Produces:**
+- `VISIBLE_CLASSES`, `REGISTRABLE_CLASSES: Record<Role, readonly AssetClass[]>`
+- `canSeeClass(role, cls)`, `canRegisterClass(role, cls): boolean`
+- `visibleClassWhere(role): Prisma.AssetWhereInput`
+- `isAwaitingItCheck(a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean`
+- `canEditAsset(role, a: { cls; itVerifiedAt }): boolean`
+- `isApprover(role)`, `canActOnApproval(role, cls | null)`, `approvalClassWhere(role): Prisma.ApprovalWhereInput`
 
-Rules (spec §3.1–3.3 as amended): a role is an **approver** when it manages at least one class. An approval **with an asset** is actionable by whoever manages that asset's class. An approval **with no asset** has no class, so it is visible to and actionable by every approver (the seed carries two such rows, `APR-2040` and `APR-2035`, and `approvals-audit.spec.ts` counts them in IT's queue). A role that manages **no** class (finance, viewer) reads everything and acts on nothing, exactly as today. A role that manages **every** class (admin) is unfiltered.
+Every later task imports these exact names.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Failing tests — `asset-class.test.ts`** (append)
 
 ```ts
-// src/lib/approval-access.test.ts
+import type { Role } from "@prisma/client";
+import {
+  ASSET_CLASSES, MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, VISIBLE_CLASSES,
+  canEditAsset, canRegisterClass, canSeeClass, isAwaitingItCheck, visibleClassWhere,
+} from "./asset-class";
+
+const ROLES: Role[] = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"];
+
+describe("Phase 14 — the three maps", () => {
+  it("VISIBLE: IT and the viewer see IT only; everyone else sees everything", () => {
+    expect(VISIBLE_CLASSES.it_staff).toEqual(["IT"]);
+    expect(VISIBLE_CLASSES.viewer).toEqual(["IT"]);
+    for (const r of ["admin", "purchasing_staff", "finance_staff"] as Role[]) {
+      expect(VISIBLE_CLASSES[r]).toEqual([...ASSET_CLASSES]);
+    }
+  });
+  it("REGISTRABLE: Purchasing registers both, IT its own, Finance and viewer nothing", () => {
+    expect(REGISTRABLE_CLASSES.purchasing_staff).toEqual(["IT", "PURCHASING"]);
+    expect(REGISTRABLE_CLASSES.it_staff).toEqual(["IT"]);
+    expect(REGISTRABLE_CLASSES.finance_staff).toEqual([]);
+    expect(REGISTRABLE_CLASSES.viewer).toEqual([]);
+  });
+  it("MANAGEABLE ⊆ REGISTRABLE ⊆ VISIBLE for every role", () => {
+    for (const r of ROLES) {
+      for (const c of MANAGEABLE_CLASSES[r]) expect(REGISTRABLE_CLASSES[r]).toContain(c);
+      for (const c of REGISTRABLE_CLASSES[r]) expect(VISIBLE_CLASSES[r]).toContain(c);
+    }
+  });
+  it("canSeeClass / canRegisterClass read the maps", () => {
+    expect(canSeeClass("it_staff", "PURCHASING")).toBe(false);
+    expect(canSeeClass("purchasing_staff", "IT")).toBe(true);
+    expect(canRegisterClass("purchasing_staff", "IT")).toBe(true);
+    expect(canRegisterClass("it_staff", "PURCHASING")).toBe(false);
+    expect(canRegisterClass("finance_staff", "IT")).toBe(false);
+  });
+  it("visibleClassWhere is empty for an all-class role and an `in` list otherwise", () => {
+    expect(visibleClassWhere("admin")).toEqual({});
+    expect(visibleClassWhere("purchasing_staff")).toEqual({});
+    expect(visibleClassWhere("finance_staff")).toEqual({});
+    expect(visibleClassWhere("it_staff")).toEqual({ cls: { in: ["IT"] } });
+    expect(visibleClassWhere("viewer")).toEqual({ cls: { in: ["IT"] } });
+  });
+});
+
+describe("Phase 14 — the IT check", () => {
+  const d = new Date();
+  it("only an IT asset with no stamp is awaiting", () => {
+    expect(isAwaitingItCheck({ cls: "IT", itVerifiedAt: null })).toBe(true);
+    expect(isAwaitingItCheck({ cls: "IT", itVerifiedAt: d })).toBe(false);
+    expect(isAwaitingItCheck({ cls: "PURCHASING", itVerifiedAt: null })).toBe(false);
+    expect(isAwaitingItCheck({ cls: "PURCHASING", itVerifiedAt: d })).toBe(false);
+  });
+  const awaiting = { cls: "IT" as const, itVerifiedAt: null };
+  const checked = { cls: "IT" as const, itVerifiedAt: d };
+  const car = { cls: "PURCHASING" as const, itVerifiedAt: null };
+  it.each([
+    ["admin", true, true, true],
+    ["it_staff", true, true, false],
+    ["purchasing_staff", true, false, true],
+    ["finance_staff", false, false, false],
+    ["viewer", false, false, false],
+  ] as Array<[Role, boolean, boolean, boolean]>)(
+    "canEditAsset %s: awaiting IT %s · checked IT %s · car %s",
+    (role, a, c, p) => {
+      expect(canEditAsset(role, awaiting)).toBe(a);
+      expect(canEditAsset(role, checked)).toBe(c);
+      expect(canEditAsset(role, car)).toBe(p);
+    },
+  );
+});
+```
+
+- [ ] **Step 2: Failing tests — `approval-access.test.ts`**
+
+```ts
 import { describe, expect, it } from "vitest";
 import type { Role } from "@prisma/client";
 import { approvalClassWhere, canActOnApproval, isApprover } from "./approval-access";
@@ -110,20 +187,15 @@ describe("canActOnApproval — the approver is whoever manages the asset's class
 });
 
 describe("approvalClassWhere — a role's queue", () => {
-  it("is unfiltered for admin, finance and viewer (all-or-nothing managers read everything)", () => {
+  it("is unfiltered for admin, finance and viewer", () => {
     expect(approvalClassWhere("admin")).toEqual({});
     expect(approvalClassWhere("finance_staff")).toEqual({});
     expect(approvalClassWhere("viewer")).toEqual({});
   });
   it("scopes a single-class role to its class OR to approvals with no asset", () => {
-    expect(approvalClassWhere("it_staff")).toEqual({
-      OR: [{ assetId: null }, { asset: { cls: { in: ["IT"] } } }],
-    });
-    expect(approvalClassWhere("purchasing_staff")).toEqual({
-      OR: [{ assetId: null }, { asset: { cls: { in: ["PURCHASING"] } } }],
-    });
+    expect(approvalClassWhere("it_staff")).toEqual({ OR: [{ assetId: null }, { asset: { cls: { in: ["IT"] } } }] });
+    expect(approvalClassWhere("purchasing_staff")).toEqual({ OR: [{ assetId: null }, { asset: { cls: { in: ["PURCHASING"] } } }] });
   });
-  // Mutation check: this fails if someone hard-codes ["IT"] instead of reading the map.
   it("derives the class list from MANAGEABLE_CLASSES, not a literal", () => {
     const where = approvalClassWhere("purchasing_staff") as { OR: Array<{ asset?: { cls: { in: string[] } } }> };
     expect(where.OR[1].asset?.cls.in).toEqual(["PURCHASING"]);
@@ -131,23 +203,82 @@ describe("approvalClassWhere — a role's queue", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 3: Run** `npx vitest run src/lib/asset-class.test.ts src/lib/approval-access.test.ts` → FAIL (missing exports / module).
 
-Run: `npx vitest run src/lib/approval-access.test.ts`
-Expected: FAIL — `Cannot find module './approval-access'`.
-
-- [ ] **Step 3: Write the module**
+- [ ] **Step 4: Implement — append to `asset-class.ts`** (and widen the import to `import type { AssetClass, AssetStatus, Prisma, Role } from "@prisma/client";`)
 
 ```ts
-// src/lib/approval-access.ts
+/**
+ * Phase 14 (spec §2). Which classes a role SEES on the register — list, record,
+ * export, search, scan, activity. IT's department sees IT only; Purchasing,
+ * Finance and admin see everything; the viewer is IT's read-only seat.
+ * Person-centric pages (an employee's holdings, offboarding) are NOT scoped by
+ * this map — they render an invisible tag as text (spec §3.3).
+ */
+export const VISIBLE_CLASSES: Record<Role, readonly AssetClass[]> = {
+  admin: ["IT", "PURCHASING"],
+  it_staff: ["IT"],
+  purchasing_staff: ["IT", "PURCHASING"],
+  finance_staff: ["IT", "PURCHASING"],
+  viewer: ["IT"],
+};
+
+/**
+ * Which classes a role may REGISTER or CREATE into. Purchasing buys for the
+ * whole company, so it registers both; IT registers its own. Registering is
+ * not managing: a laptop Purchasing registers is IT's from that moment.
+ */
+export const REGISTRABLE_CLASSES: Record<Role, readonly AssetClass[]> = {
+  admin: ["IT", "PURCHASING"],
+  it_staff: ["IT"],
+  purchasing_staff: ["IT", "PURCHASING"],
+  finance_staff: [],
+  viewer: [],
+};
+
+export function canSeeClass(role: Role, cls: AssetClass): boolean {
+  return VISIBLE_CLASSES[role].includes(cls);
+}
+
+export function canRegisterClass(role: Role, cls: AssetClass): boolean {
+  return REGISTRABLE_CLASSES[role].includes(cls);
+}
+
+/** AND this into any asset read a single-class role may reach. `{}` for an all-class role. */
+export function visibleClassWhere(role: Role): Prisma.AssetWhereInput {
+  const mine = VISIBLE_CLASSES[role];
+  return mine.length === ASSET_CLASSES.length ? {} : { cls: { in: [...mine] } };
+}
+
+/**
+ * Spec §5.1. An IT asset registered by a department that does not manage IT
+ * waits for IT's check. The class is part of the predicate on purpose: a
+ * Purchasing asset never carries a stamp and is never "awaiting".
+ */
+export function isAwaitingItCheck(a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
+  return a.cls === "IT" && a.itVerifiedAt === null;
+}
+
+/**
+ * Spec §5.4. Who may EDIT: the managing department always; the registering
+ * department only while IT has not yet checked it (so Purchasing can fix its
+ * own typo). Status, assign and return follow canManageClass alone.
+ */
+export function canEditAsset(role: Role, a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
+  return canManageClass(role, a.cls) || (isAwaitingItCheck(a) && canRegisterClass(role, a.cls));
+}
+```
+
+- [ ] **Step 5: Implement — `src/lib/approval-access.ts`**
+
+```ts
 import type { AssetClass, Prisma, Role } from "@prisma/client";
 import { ASSET_CLASSES, MANAGEABLE_CLASSES, canManageClass } from "./asset-class";
 
 /**
- * Phase 14. Who may act on an approval, and which approvals a role's queue
- * shows. Both derive from MANAGEABLE_CLASSES — the approver of a lifecycle
- * change is whoever manages the asset's class (spec §3.1). `admin` and
- * `it_staff`/`purchasing_staff` are the approvers; finance and viewer read.
+ * Phase 14 (spec §6). Who may act on an approval, and which approvals a role's
+ * queue shows. Both derive from MANAGEABLE_CLASSES: the approver of a lifecycle
+ * change is whoever manages the asset's class.
  */
 
 /** A role that manages at least one class may act on SOME approval. */
@@ -156,9 +287,9 @@ export function isApprover(role: Role): boolean {
 }
 
 /**
- * An approval with no asset has no class (the seed carries two such rows, and
- * `systemChecks` already reports them as unexecutable). Any approver may reject
- * one; none may execute it. Spec §3.3.
+ * An approval with no asset has no class (the seed carries two; systemChecks
+ * already reports them unexecutable). Any approver may reject one; none may
+ * execute it. Spec §6.3.
  */
 export function canActOnApproval(role: Role, assetCls: AssetClass | null): boolean {
   if (assetCls === null) return isApprover(role);
@@ -166,10 +297,9 @@ export function canActOnApproval(role: Role, assetCls: AssetClass | null): boole
 }
 
 /**
- * The where-fragment that scopes a queue, badge or count to what a role may
- * see. A role that manages every class or no class is unfiltered: admin acts
- * on all, finance and viewer read all (spec §0 — reads stay shared). A
- * single-class role sees its class plus the class-less rows.
+ * The where-fragment that scopes a queue, badge or count. A role that manages
+ * every class or no class is unfiltered — admin acts on all, finance and viewer
+ * read all. A single-class role sees its class plus the class-less rows.
  */
 export function approvalClassWhere(role: Role): Prisma.ApprovalWhereInput {
   const mine = MANAGEABLE_CLASSES[role];
@@ -178,45 +308,89 @@ export function approvalClassWhere(role: Role): Prisma.ApprovalWhereInput {
 }
 ```
 
-- [ ] **Step 4: Run the test**
-
-Run: `npx vitest run src/lib/approval-access.test.ts`
-Expected: PASS, 22 tests.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/approval-access.ts src/lib/approval-access.test.ts
-git commit -m "feat(phase-14): approval-access -- the approver is whoever manages the asset's class"
-```
+- [ ] **Step 6: Run** the two test files → PASS. `npm test` → the rest still green.
+- [ ] **Step 7: Commit** `feat(phase-14): VISIBLE / REGISTRABLE maps, IT-check predicate, approval-access`
 
 ---
 
-### Task 2: Path rules and nav
+### Task 2: Migration, schema, seed
 
 **Files:**
-- Modify: `src/lib/workspaces.ts:80-107` (purchasing nav), `:157-225` (PATH_RULES)
-- Test: `src/lib/workspaces.test.ts:44-156`
+- Create: `prisma/migrations/20260907090000_asset_it_verified/migration.sql`
+- Modify: `prisma/schema.prisma:273` (Asset), `:150-151` (User back-relations)
+- Modify: `prisma/seed.ts:12, 20, 118-127` (comment; `mk`)
 
-**Interfaces:**
-- Produces: the purchasing workspace can reach `/approvals`, `/employees/*` (reads), `/admin/asset-categories`, `/admin/asset-types`, `/inventory/labels`. `/employees/new` and `/employees/[id]/edit` are IT write surfaces at layer 1. Departments admin unchanged.
+- [ ] **Step 1: Migration SQL**
 
-- [ ] **Step 1: Add the failing cases to `workspaces.test.ts`**
+```sql
+-- Phase 14 (spec §5): an IT-class asset that Purchasing registers waits for
+-- IT's check before Finance sees it. NULL on an IT asset means awaiting.
+-- Purchasing assets never carry a value -- the predicate in asset-class.ts is
+-- cls = IT AND itVerifiedAt IS NULL, so a null on a car means nothing.
+ALTER TABLE "Asset" ADD COLUMN "itVerifiedAt" TIMESTAMP(3);
+ALTER TABLE "Asset" ADD COLUMN "itVerifiedById" TEXT;
+ALTER TABLE "Asset" ADD CONSTRAINT "Asset_itVerifiedById_fkey"
+  FOREIGN KEY ("itVerifiedById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "Asset_itVerifiedAt_idx" ON "Asset"("itVerifiedAt");
 
-Insert into the `cases` array, directly after the `/employees/import` block (line 148):
+-- Every IT asset that exists today was registered by IT: Phase 13 allowed
+-- nothing else. None is awaiting a check. A reseed TRUNCATEs, so prisma/seed.ts
+-- sets the same value itself (HANDOVER: a migration's backfill does not survive
+-- a reseed).
+UPDATE "Asset" SET "itVerifiedAt" = "createdAt" WHERE "cls" = 'IT';
+```
+
+- [ ] **Step 2: Schema** — after `financeReturnReason  String?` (line 279) add:
+
+```prisma
+  /// Phase 14: set when IT checked a Purchasing-registered IT asset, or at
+  /// creation when IT registered it. NULL on an IT asset = awaiting IT's check.
+  /// Always NULL on a Purchasing asset (isAwaitingItCheck includes the class).
+  itVerifiedAt         DateTime?
+  itVerifiedById       String?
+  itVerifiedBy         User?     @relation("itVerifiedBy", fields: [itVerifiedById], references: [id], onDelete: Restrict)
+```
+
+add `@@index([itVerifiedAt])` beside the finance indexes, and on `User` beside the two existing back-relations (lines 150-151) add `itVerifiedAssets Asset[] @relation("itVerifiedBy")`.
+
+- [ ] **Step 3: Seed** — line 12 "twelve accounts" → "five accounts"; line 20 the same in the error string. In `mk` (line ~121) add after `cls: cats[cat].cls,`:
 
 ```ts
-    // Phase 14: Purchasing owns its class. /approvals opens to the purchasing
-    // workspace; the queue is class-scoped server-side (approval-access.ts).
+    // Phase 14: IT-registered rows are born checked; a car never carries a stamp.
+    itVerifiedAt: cats[cat].cls === "IT" ? day(-720) : null,
+```
+
+- [ ] **Step 4: Apply**
+
+```bash
+docker compose up -d db
+npx prisma migrate deploy && npx prisma generate
+npm run db:seed
+```
+
+Expected: `1 migration applied`; seed completes; `npx prisma migrate status` → no pending. Then `npm run typecheck` → clean (the generated client now has the fields).
+
+- [ ] **Step 5: Commit** `feat(phase-14): Asset.itVerifiedAt/By -- migration 15, backfilled; seed stamps IT fixtures`
+
+---
+
+### Task 3: Path rules and nav
+
+**Files:** `src/lib/workspaces.ts:80-107, 157-225` · `src/lib/workspaces.test.ts:44-156, 212-229`
+
+- [ ] **Step 1: Failing cases** — insert into the `cases` array after the `/employees/import` block (line 148):
+
+```ts
+    // Phase 14: Purchasing owns its class and reads the directory. Approvals
+    // are class-scoped server-side (approval-access.ts), never here.
     ["/approvals", "purchasing_staff", true],
     ["/approvals/xyz", "purchasing_staff", true],
-    // /employees reads open to purchasing so "held by …" on a car is a link
-    // that opens. Every WRITE surface under it stays IT and is asserted for
-    // every role, the same first-match-wins reason as /employees/import.
     ["/employees", "purchasing_staff", true],
     ["/employees/abc", "purchasing_staff", true],
     ["/employees/abc/form", "purchasing_staff", true],
     ["/employees/export", "purchasing_staff", true],
+    // Every employee WRITE surface stays IT, asserted for every role — the same
+    // first-match-wins reason as /employees/import.
     ["/employees/new", "admin", true],
     ["/employees/new", "it_staff", true],
     ["/employees/new", "viewer", false],
@@ -227,51 +401,40 @@ Insert into the `cases` array, directly after the `/employees/import` block (lin
     ["/employees/abc/edit", "viewer", false],
     ["/employees/abc/edit", "purchasing_staff", false],
     ["/employees/abc/edit", "finance_staff", false],
-    // audit / offboarding / reservations stay IT even though they used to
-    // share one rule with /employees.
     ["/offboarding", "purchasing_staff", false],
     ["/reservations", "purchasing_staff", false],
-    // Reference data: each department creates categories and types of its own
-    // class (the action forces the class); departments stay IT.
     ["/admin/asset-categories", "purchasing_staff", true],
     ["/admin/asset-types", "purchasing_staff", true],
     ["/admin/asset-categories", "finance_staff", false],
     ["/admin/departments", "purchasing_staff", false],
     ["/admin/departments", "it_staff", true],
-    // Labels: a Purchasing sheet is a Purchasing artifact now.
     ["/inventory/labels", "purchasing_staff", true],
 ```
 
-Then **change** two existing cases that this phase flips: line 48 `["/employees", "purchasing_staff", false]` → `true`; line 56 `["/employees/export", "purchasing_staff", false]` → `true`; line 68 `["/approvals", "purchasing_staff", false]` → `true`; line 138 `["/inventory/labels", "purchasing_staff", false]` → `true`. (The duplicates you just added then agree with them; leave both — the explicit block documents the phase.)
+Flip four existing cases to `true`: line 48 `/employees` purchasing; line 56 `/employees/export` purchasing; line 68 `/approvals` purchasing; line 138 `/inventory/labels` purchasing.
 
-Add to the `WORKSPACE_NAV shape` describe:
+Add to `describe("WORKSPACE_NAV shape")`:
 
 ```ts
-  it("the Purchasing Approvals item carries the badge marker too (Phase 14)", () => {
+  it("Phase 14: the Purchasing Assets section carries Approvals (with badge) and Employees", () => {
     const assets = WORKSPACE_NAV.purchasing.find((s) => s.heading === "Assets");
     expect(assets?.items.find((i) => i.label === "Approvals")?.badge).toBe("approvals");
     expect(assets?.items.map((i) => i.href)).toContain("/employees");
   });
-  it("the Purchasing Records section offers categories and types, never departments", () => {
+  it("Phase 14: the Purchasing Records section offers categories and types, never departments", () => {
     const records = WORKSPACE_NAV.purchasing.find((s) => s.heading === "Records");
     expect(records?.items.map((i) => i.href)).toEqual(["/admin/asset-categories", "/admin/asset-types"]);
   });
 ```
 
-- [ ] **Step 2: Run to verify the new cases fail**
+- [ ] **Step 2: Run** → FAIL on the new cases.
 
-Run: `npx vitest run src/lib/workspaces.test.ts`
-Expected: FAIL on the purchasing `/approvals`, `/employees*`, `/admin/asset-*`, `/inventory/labels` cases and the two nav tests.
-
-- [ ] **Step 3: Edit `PATH_RULES`**
-
-Replace the rule at lines 159-163 with two rules:
+- [ ] **Step 3: `PATH_RULES`** — replace lines 159-163 with:
 
 ```ts
   // Phase 14: each department creates categories and types of its OWN class
-  // (reference-actions.ts forces the class from MANAGEABLE_CLASSES), so both
-  // workspaces are admitted. Departments are org structure, not class data,
-  // and stay IT.
+  // (reference-actions.ts forces the class from MANAGEABLE_CLASSES). Departments
+  // are org structure, not class data, and stay IT.
   {
     test: /^\/admin\/(asset-categories|asset-types)(\/|$)/,
     workspaces: ["it", "purchasing"],
@@ -280,45 +443,34 @@ Replace the rule at lines 159-163 with two rules:
   { test: /^\/admin\/departments(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
 ```
 
-Replace the `/inventory/labels` rule at line 190 with:
+Replace line 190 with:
 
 ```ts
-  // Phase 14: a label sheet is each class's own artifact; the page filters
-  // ?ids= to the classes the role manages. Still MUST precede the general
-  // /inventory rule below, which admits finance and viewer.
+  // Phase 14: a label sheet is each class's own artifact; the page prints only
+  // the classes the role manages. Still MUST precede the general /inventory rule.
   { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
 ```
 
-Replace lines 206-218 (the `/employees/import` rule, the shared employees/audit/offboarding/reservations rule, and the `/approvals` rule) with:
+Replace lines 212-218 with:
 
 ```ts
-  // Task 12, E-7: the W-1 trap exactly. The general /employees rule below
-  // has NO `roles` key at all, so `viewer` — whose workspaces are `["it"]`,
-  // same as it_staff — passes it. Import writes up to 2,000 employees plus
-  // an audit row each, the identical write-surface hazard `/inventory/
-  // import` already guards above; this MUST precede the general rule
-  // (first-match-wins), for the same reason.
   { test: /^\/employees\/import(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
-  // Phase 14: the two remaining employee WRITE surfaces get the same
-  // treatment, because the general /employees rule right after them now
-  // admits purchasing (reads only). Both MUST precede it.
+  // Phase 14: the two other employee WRITE surfaces get the same treatment,
+  // because the general /employees rule right after them now admits
+  // purchasing (reads only). Both MUST precede it.
   { test: /^\/employees\/new(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   { test: /^\/employees\/[^/]+\/edit(\/|$)/, workspaces: ["it"], roles: ["admin", "it_staff"] },
   // Phase 14: purchasing READS the directory so "held by …" on a car opens.
-  // Covers /employees/export too (prefix + "(\/|$)"): an export route
-  // intentionally has no separate rule — it matches its list page's access
-  // exactly because it IS that page's data, downloaded instead of rendered.
+  // Covers /employees/export too: an export matches its list page's access.
   { test: /^\/employees(\/|$)/, workspaces: ["it", "purchasing"] },
-  // Covers /audit/export and /offboarding/*/report/export by the same rule.
   { test: /^\/(audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
-  // Phase 14: purchasing approves lifecycle changes on its own class; the
-  // queue is scoped server-side (approval-access.ts), never here.
+  // Phase 14: purchasing approves lifecycle changes on its own class.
   { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance", "purchasing"] },
 ```
 
-- [ ] **Step 4: Edit the purchasing nav**
+(Keep the existing long comment above the import rule.)
 
-Replace lines 99-106 (the "Assets" section and the "Reference" section) with:
+- [ ] **Step 4: Nav** — replace lines 99-106 with:
 
 ```ts
     {
@@ -340,218 +492,498 @@ Replace lines 99-106 (the "Assets" section and the "Reference" section) with:
     { heading: "Reference", items: [{ label: "IT inventory", href: "/inventory" }] },
 ```
 
-- [ ] **Step 5: Run the tests**
-
-Run: `npx vitest run src/lib/workspaces.test.ts`
-Expected: PASS. Then `npm test` — everything else still green (`ownedParamsFor` derives from the nav, so no other test moves).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/lib/workspaces.ts src/lib/workspaces.test.ts
-git commit -m "feat(phase-14): purchasing workspace reaches approvals, employees (read), categories, types, labels"
-```
+- [ ] **Step 5: Run** `npm test` → PASS.
+- [ ] **Step 6: Commit** `feat(phase-14): purchasing workspace reaches approvals, employees (read), categories, types, labels`
 
 ---
 
-### Task 3: Approvals by class
+### Task 4: Visibility on the register
 
 **Files:**
-- Modify: `src/server/modules/approvals/queries.ts:22-55`
-- Modify: `src/server/modules/approvals/actions.ts:31-58`
-- Modify: `src/app/(app)/approvals/page.tsx:17-20`
-- Modify: `src/app/(app)/approvals/[id]/page.tsx:22`
-- Modify: `src/components/shell/sidebar.tsx:14-22`, `src/app/(app)/layout.tsx:18`
+- Modify: `src/server/modules/inventory/queries.ts` (append after `getAsset`, line 325)
+- Create: `src/components/inventory/tag-ref.tsx`
+- Modify: `src/app/(app)/inventory/page.tsx:32-37, 133-135, 139-146, 171`
+- Modify: `src/components/inventory/inventory-toolbar.tsx` (props + lines 81-96)
+- Modify: `src/app/(app)/inventory/[id]/{layout,page,documents/page,history/page,timeline/page,reservations/page,secrets/page}.tsx` (the `getAsset(id)` call in each)
+- Modify: `src/app/(app)/inventory/[id]/edit/page.tsx:12-19`
+- Modify: `src/app/(app)/inventory/export/route.ts:14, 37-41`
+- Modify: `src/server/palette.ts:53-57`
+- Modify: `src/app/(app)/inventory/scan/[tag]/page.tsx:31-72`
+- Modify: `src/app/(app)/inventory/activity/page.tsx:19-30`
+- Modify: `src/lib/audit-list.ts:16-27` (+ test), `src/server/modules/audit/queries.ts` (`listAudit`), `src/app/(app)/audit/page.tsx:26-35`, `src/app/(app)/audit/export/route.ts`
 
-**Interfaces:**
-- Consumes: `approvalClassWhere`, `canActOnApproval`, `isApprover` (Task 1).
-- Produces: `listApprovals(tab, userId, role)`, `tabCounts(userId, role)`, `getApprovalsBadge(role)`. Task 10 reuses `approvalClassWhere` directly.
+**Interfaces — Produces:** `getVisibleAsset(id, role)`, `invisibleAssetIds(role): Promise<string[]>`, `<TagRef id tag visible />`, `InventoryToolbar.classes: readonly AssetClass[]`, `buildAuditWhere(state, hiddenAssetIds = [])`.
 
-- [ ] **Step 1: Scope the queries**
-
-In `queries.ts`:
+- [ ] **Step 1: Queries**
 
 ```ts
 import type { Role } from "@prisma/client";
-import { approvalClassWhere } from "@/lib/approval-access";
-// ...
-export async function listApprovals(tab: QueueTab, userId: string, role: Role): Promise<ApprovalRow[]> {
-  const approvals = await prisma.approval.findMany({
-    where: { AND: [tabWhere(tab, userId), approvalClassWhere(role)] },
-    // ... rest unchanged
-```
+import { ASSET_CLASSES, canSeeClass } from "@/lib/asset-class";
 
-```ts
-export async function tabCounts(userId: string, role: Role): Promise<Record<QueueTab, number>> {
-  const counts = await Promise.all(
-    QUEUE_TABS.map((t) => prisma.approval.count({ where: { AND: [tabWhere(t.id, userId), approvalClassWhere(role)] } })),
-  );
-  return Object.fromEntries(QUEUE_TABS.map((t, i) => [t.id, counts[i]])) as Record<QueueTab, number>;
+/** getAsset, but a class the role cannot see reads as absent (spec §3.1). */
+export async function getVisibleAsset(id: string, role: Role) {
+  const asset = await getAsset(id);
+  return asset && canSeeClass(role, asset.cls) ? asset : null;
+}
+
+/**
+ * Ids of the assets a role may NOT see — for excluding their audit rows. Empty
+ * for an all-class role; for IT it is the Purchasing fleet, which is small.
+ */
+export async function invisibleAssetIds(role: Role): Promise<string[]> {
+  const hidden = ASSET_CLASSES.filter((c) => !canSeeClass(role, c));
+  if (hidden.length === 0) return [];
+  const rows = await prisma.asset.findMany({ where: { cls: { in: hidden } }, select: { id: true } });
+  return rows.map((r) => r.id);
 }
 ```
 
-- [ ] **Step 2: Guard the transition by class**
+- [ ] **Step 2: `TagRef`**
 
-In `actions.ts`, change the imports and the head of `transition()`:
+```tsx
+// src/components/inventory/tag-ref.tsx
+import Link from "next/link";
 
-```ts
-import { actionUser } from "@/server/auth/guards";
-import { canActOnApproval, isApprover } from "@/lib/approval-access";
-// ...
-  const user = await actionUser();
-  if (!user || !isApprover(user.role)) return forbidden();
-  const rate = await checkRate(user.id);
-  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
-```
-
-and inside the transaction, load the asset's class and check it before the pure transition:
-
-```ts
-    const approval = await tx.approval.findUnique({
-      where: { id },
-      select: { id: true, refNo: true, state: true, priority: true, claimedById: true, asset: { select: { cls: true } } },
-    });
-    if (!approval) return conflict("That approval no longer exists.");
-    // Phase 14: the approver is whoever manages the asset's class. A
-    // class-less approval (no asset) is any approver's to reject.
-    if (!canActOnApproval(user.role, approval.asset?.cls ?? null)) return forbidden();
-    const ctx = { isOwner: approval.claimedById === user.id, isAdmin: user.role === "admin" };
-```
-
-`build(approval, user.id)` receives the same five scalar fields it did; the extra `asset` key is ignored by every builder. Remove the now-unused `actionRole` import.
-
-- [ ] **Step 3: Pages**
-
-`approvals/page.tsx`:
-
-```ts
-import { isApprover } from "@/lib/approval-access";
-// ...
-  const canAct = isApprover(user.role);
-  const tab = parseTab(toSearchParams(await searchParams).get("tab"));
-  const [rows, counts] = await Promise.all([listApprovals(tab, user.id, user.role), tabCounts(user.id, user.role)]);
-```
-
-`approvals/[id]/page.tsx`:
-
-```ts
-import { canActOnApproval } from "@/lib/approval-access";
-// ...
-  const canAct = canActOnApproval(user.role, approval.asset?.cls ?? null);
-```
-
-- [ ] **Step 4: Badge**
-
-`sidebar.tsx`:
-
-```ts
-import type { Role, User } from "@prisma/client";
-import { approvalClassWhere } from "@/lib/approval-access";
-
-export async function getApprovalsBadge(role: Role): Promise<ApprovalsBadge> {
-  const scope = approvalClassWhere(role);
-  const [open, overdue] = await Promise.all([
-    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, scope] } }),
-    prisma.approval.count({
-      where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: new Date() } }, scope] },
-    }),
-  ]);
-  return { open, overdue };
+/**
+ * Phase 14 (spec §3.3): person-centric pages list every asset a person holds,
+ * but a tag the viewer cannot open is text, not a link that lands on not-found.
+ */
+export function TagRef({ id, tag, visible, className }: { id: string; tag: string; visible: boolean; className?: string }) {
+  if (!visible) {
+    return <span className="font-mono text-fg-secondary" title="Outside your register">{tag}</span>;
+  }
+  return <Link href={`/inventory/${id}`} className={className ?? "font-mono text-accent hover:underline"}>{tag}</Link>;
 }
 ```
 
-`layout.tsx:18`: `const badge = await getApprovalsBadge(user.role);`
+- [ ] **Step 3: The list page** — replace lines 36-37 with:
 
-- [ ] **Step 5: Typecheck and reason about the existing e2e**
-
-Run: `npm run typecheck && npm run lint`
-Expected: clean.
-
-`e2e/approvals-audit.spec.ts` asserts `it@` sees Open 3 · Unclaimed 2 · badge 3. The seed's open rows are `APR-2041` (IT asset), `APR-2040` (no asset) and `APR-2039` (IT asset). Under `approvalClassWhere("it_staff")` all three still match (two by class, one by `assetId: null`). No expectation changes. Write that sentence into the commit body.
-
-- [ ] **Step 6: Run the approvals e2e**
-
-Run: `npx playwright test e2e/approvals-audit.spec.ts`
-Expected: PASS, unchanged counts.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/server/modules/approvals src/app/\(app\)/approvals src/components/shell/sidebar.tsx src/app/\(app\)/layout.tsx
-git commit -m "feat(phase-14): approvals queue, badge and actions scoped to the classes a role manages
-
-Seeded IT counts are unchanged: APR-2041 and APR-2039 match by class, APR-2040 by having no asset."
+```ts
+  const visible = VISIBLE_CLASSES[user.role];
+  const requested = parseCls(sp.get("cls"));
+  // Phase 14 (spec §3.1): a class this role cannot see is not a view it can
+  // ask for. Redirect to the bare list rather than render an empty table under
+  // a heading that names the other department's assets.
+  if (requested && !canSeeClass(user.role, requested)) redirect("/inventory");
+  const cls: AssetClass = requested ?? visible[0];
+  const canMutate = canManageClass(user.role, cls);
+  const canRegister = canRegisterClass(user.role, cls);
 ```
+
+Import `VISIBLE_CLASSES, canRegisterClass, canSeeClass` from `@/lib/asset-class`. Line 134-135: the Import link keeps `canMutate && cls === "IT"`; the **New asset** link becomes `{canRegister && <ButtonLink … >New asset</ButtonLink>}` and the same in the empty state (line 199). Pass `classes={visible}` to `<InventoryToolbar>`.
+
+- [ ] **Step 4: Toolbar** — add prop `classes: readonly AssetClass[]` and replace the class-switch block (lines 81-96) so it renders only when `classes.length > 1` and maps over `classes` instead of `ASSET_CLASSES`:
+
+```tsx
+      {classes.length > 1 && (
+        <div className="flex items-center gap-1.5" role="navigation" aria-label="Asset class">
+          {classes.map((c) => { /* body unchanged */ })}
+        </div>
+      )}
+```
+
+Remove the now-unused `ASSET_CLASSES` import if nothing else uses it.
+
+- [ ] **Step 5: The record and its tabs** — in `layout.tsx`, `page.tsx`, `documents/page.tsx`, `history/page.tsx`, `timeline/page.tsx`, `reservations/page.tsx`, `secrets/page.tsx` replace `const asset = await getAsset(id);` with `const asset = await getVisibleAsset(id, user.role);` and import it. `page.tsx` (Overview) has no `user`: add `const user = await requireUser();` (import from `@/server/auth/guards`). `secrets/page.tsx` keeps its extra `cls === "PURCHASING"` guard.
+
+`edit/page.tsx` line 12-19:
+
+```ts
+  const asset = await prisma.asset.findUnique({ where: { id } });
+  if (!asset || !canSeeClass(user.role, asset.cls)) notFound();
+  // Spec §5.4: the managing department, or the registrant while IT has not
+  // checked it. The Edit button is hidden by the same predicate (layout.tsx).
+  if (!canEditAsset(user.role, asset)) redirect(`/inventory/${id}`);
+```
+
+(imports: `canEditAsset, canSeeClass`). The layout's own `canMutate` split is done in Task 6.
+
+- [ ] **Step 6: Export route** — `const user = await requireUser();` and
+
+```ts
+  const scope = visibleClassWhere(user.role);
+  const where: Prisma.AssetWhereInput = ids
+    ? { AND: [{ id: { in: ids } }, scope] }
+    : cutIds !== null
+      ? { AND: [{ id: { in: cutIds } }, scope] }
+      : { AND: [buildAssetWhere(state, purchaseYear, cls), scope] };
+```
+
+(import `visibleClassWhere`, `type Prisma` from `@prisma/client`).
+
+- [ ] **Step 7: Palette** — the asset query's `where` becomes `{ AND: [{ OR: [ …the two contains… ] }, visibleClassWhere(user.role)] }`.
+
+- [ ] **Step 8: Scan page** — `const user = await requireUser();`, add `cls: true` to the `select`, and after the `!asset` branch:
+
+```tsx
+  // Phase 14 (spec §3.1): the sticker is real, so not "unknown" — but the
+  // record is another department's. Name the tag, show nothing else.
+  if (!canSeeClass(user.role, asset.cls)) {
+    return (
+      <>
+        <PageHeader title={asset.tag} breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Scan" }]} />
+        <Banner tone="attention" title={`${asset.tag} is not in your register.`}>
+          It belongs to {CLASS_PHRASE[asset.cls]} register. Ask that department if you need its details.
+        </Banner>
+        <div className="pt-3"><ButtonLink href="/inventory">Back to inventory</ButtonLink></div>
+      </>
+    );
+  }
+```
+
+- [ ] **Step 9: Activity page** — `const user = await requireUser();` then
+
+```ts
+  const hidden = await invisibleAssetIds(user.role);
+  const where = { entityType: "asset", ...(hidden.length ? { entityId: { notIn: hidden } } : {}) };
+```
+
+and use `where` in both the `count` and the `findMany`.
+
+- [ ] **Step 10: Audit** — `buildAuditWhere(state, hiddenAssetIds: string[] = [])`: after the entity filter add
+
+```ts
+  // Phase 14 (spec §3.1): rows about assets this role cannot see are not its
+  // audit trail either. Empty for an all-class role — no clause at all.
+  if (hiddenAssetIds.length) where.NOT = { entityType: "asset", entityId: { in: hiddenAssetIds } };
+```
+
+Add to `src/lib/audit-list.test.ts` (create the file if absent, mirroring `inventory-list.test.ts`'s imports):
+
+```ts
+  it("excludes hidden asset rows only when given ids", () => {
+    const state = parseListState(new URLSearchParams(""), AUDIT_LIST_CONFIG);
+    expect(buildAuditWhere(state)).not.toHaveProperty("NOT");
+    expect(buildAuditWhere(state, ["a1"])).toMatchObject({ NOT: { entityType: "asset", entityId: { in: ["a1"] } } });
+  });
+```
+
+`listAudit(state, hidden)` threads the second argument to `buildAuditWhere`; `audit/page.tsx` computes `const hidden = await invisibleAssetIds(user.role)` (it needs `const user = await requireUser()`) and passes it to both `listAudit` and the `groupBy` where; `audit/export/route.ts` does the same (grep `buildAuditWhere` for every caller).
+
+- [ ] **Step 11: Verify** `npm run typecheck && npm run lint && npm test` → clean. In the dev server as `it@`: `/inventory?cls=PURCHASING` → lands on `/inventory`; no class switch; a car's record → not found; `/inventory/scan/BR-VH-0001` → "not in your register". As `purchasing@`: the switch shows, the car opens.
+
+- [ ] **Step 12: Commit** `feat(phase-14): IT sees IT -- list, record, export, palette, scan, activity and audit scoped by VISIBLE_CLASSES`
 
 ---
 
-### Task 4: `requestAssign` / `requestReturn` class-guarded
+### Task 5: Registration by Purchasing, the IT stamp
 
 **Files:**
-- Modify: `src/server/modules/employees/actions.ts:24-31, 96-103`
+- Modify: `src/server/modules/purchases/receiving.ts:81-90, 117-139`
+- Modify: `src/server/modules/inventory/actions.ts:196-200, 224-238` (createAsset), `:306-316` (updateAsset)
+- Modify: `src/server/modules/import/asset-actions.ts` (the asset create)
+- Modify: `src/app/(app)/inventory/register/page.tsx:16-25`, `src/app/(app)/inventory/new/page.tsx:22-31`
 
-**Interfaces:**
-- Produces: the two actions accept any approver and refuse by class after loading the asset. Signatures unchanged; Task 5's component calls them as-is.
-
-- [ ] **Step 1: Edit the guards**
-
-Imports:
+- [ ] **Step 1: `registerAssets`** — the gate (line 86-90) becomes:
 
 ```ts
-import { actionRole, actionUser } from "@/server/auth/guards";
-import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass } from "@/lib/asset-class";
-import { isApprover } from "@/lib/approval-access";
+  // Spec §4: Purchasing registers both classes, IT its own. Registering is not
+  // managing — an IT asset Purchasing registers is IT's from this moment.
+  if (!canRegisterClass(user.role, category.cls)) {
+    return validationError({
+      categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not register ${CLASS_LABEL[category.cls]} assets.`,
+    });
+  }
+  // Spec §4 stamping: born checked when the registrant manages the class.
+  const selfChecked = category.cls === "IT" && canManageClass(user.role, "IT");
 ```
 
-`requestAssign` head (replacing lines 25-26):
+and in the `tx.asset.create` data add:
+
+```ts
+            itVerifiedAt: selfChecked ? new Date() : null,
+            itVerifiedById: selfChecked ? user.id : null,
+```
+
+Import `canRegisterClass` beside `canManageClass`.
+
+- [ ] **Step 2: `createAsset`** — identical gate wording with "create", identical `selfChecked` and the two data fields.
+
+- [ ] **Step 3: Import wizard** — `grep -n "asset.create\|createMany" src/server/modules/import/asset-actions.ts`; at each create of a NEW asset add `itVerifiedAt: new Date(), itVerifiedById: user.id` (the wizard is admin/it_staff only and IT-class only, so every row is self-checked). Updates of existing rows are untouched.
+
+- [ ] **Step 4: `updateAsset`** — line 316: `if (!canEditAsset(user.role, asset)) return forbidden();` (import `canEditAsset`). The cross-class category guard below it stays.
+
+- [ ] **Step 5: Pages** — `register/page.tsx` lines 17 and 22: `MANAGEABLE_CLASSES` → `REGISTRABLE_CLASSES` (and the import; update the comment to say registering, not managing). `new/page.tsx` line 22: `canManageClass(user.role, cls)` → `canRegisterClass(user.role, cls)`; lines 25 and 29: `MANAGEABLE_CLASSES` → `REGISTRABLE_CLASSES`.
+
+- [ ] **Step 6: Verify** `npm run typecheck && npm run lint` → clean. `npx playwright test e2e/receiving.spec.ts` → PASS (IT registers → stamped → Finance confirms; Task 6 adds the gate but stamped rows pass it).
+
+- [ ] **Step 7: Commit** `feat(phase-14): Purchasing registers both classes; IT-registered assets are born checked`
+
+---
+
+### Task 6: The IT check — action, record, Finance gate, Home rows
+
+**Files:**
+- Modify: `src/server/modules/inventory/actions.ts` (append `verifyAssetDetails`; edit `confirmAssetDetails` lines 460-471)
+- Create: `src/components/inventory/it-check.tsx`
+- Modify: `src/app/(app)/inventory/[id]/layout.tsx:27-33, 44-53, 58-65`
+- Modify: `src/server/modules/finance/queries.ts:38`
+- Modify: `src/lib/home.ts` (`ShiftKind`), `src/components/home/your-shift.tsx:8-14`, `src/server/modules/home/queries.ts` (`yourShift`)
+- Modify: `src/lib/activity.ts` (+ test)
+
+- [ ] **Step 1: Action**
+
+```ts
+const verifySchema = z.object({ id: z.string().min(1) });
+
+/**
+ * Phase 14 (spec §5.2): IT marks a Purchasing-registered IT asset checked.
+ * Finance's register and confirm wait for this. Same shape as confirmAssetDetails:
+ * refuse-not-silence, null check IN the where.
+ */
+export async function verifyAssetDetails(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = verifySchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  const asset = await prisma.asset.findUnique({
+    where: { id: parsed.data.id },
+    select: { id: true, tag: true, cls: true, itVerifiedAt: true },
+  });
+  if (!asset) return conflict("That asset no longer exists.");
+  if (asset.cls !== "IT") return conflict(`${asset.tag} is ${CLASS_PHRASE[asset.cls]} asset — Purchasing assets are not IT-checked.`);
+  if (asset.itVerifiedAt) return conflict(`${asset.tag} was already checked.`);
+
+  const hit = await prisma.$transaction(async (tx) => {
+    const r = await tx.asset.updateMany({
+      where: { id: asset.id, itVerifiedAt: null },
+      data: { itVerifiedAt: new Date(), itVerifiedById: user.id },
+    });
+    if (r.count === 0) return false;
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name,
+      entityType: "asset", entityId: asset.id,
+      action: "it.verify",
+      diff: { itVerified: { from: null, to: user.name } },
+    });
+    return true;
+  });
+  if (!hit) return conflict(`${asset.tag} was checked by someone else just now.`);
+  revalidatePath(`/inventory/${asset.id}`);
+  revalidatePath("/inventory");
+  revalidatePath("/finance/assets");
+  return ok({ tag: asset.tag });
+}
+```
+
+`confirmAssetDetails`: add `cls: true, itVerifiedAt: true` to its `select` (line 463) and after the "already confirmed" refusal:
+
+```ts
+    if (isAwaitingItCheck(asset)) {
+      failure = conflict(`${asset.tag} is waiting for IT's check — Finance confirms after IT.`);
+      return;
+    }
+```
+
+- [ ] **Step 2: Activity sentence** — `grep -n "finance.confirm" src/lib/activity.ts src/lib/activity.test.ts`; beside the `finance.confirm` entry add `"it.verify"` with the verb `checked` (so the feed reads "J. Sarmiento checked BR-LT-0300"), and a test case mirroring the `finance.confirm` one.
+
+- [ ] **Step 3: `ItCheck` component**
+
+```tsx
+// src/components/inventory/it-check.tsx
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Banner } from "@/components/ui/banner";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/toast";
+import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { verifyAssetDetails } from "@/server/modules/inventory/actions";
+
+/** Phase 14 (spec §5.5): IT's one-click check on a Purchasing-registered IT asset. */
+export function ItCheck({ assetId, tag }: { assetId: string; tag: string }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+
+  function submit() {
+    setError(null);
+    startTransition(async () => {
+      const res = await verifyAssetDetails({ id: assetId });
+      if (res.ok) {
+        toast(`${res.data.tag} checked — Finance can see it now`, "settled");
+        setOpen(false);
+        router.refresh();
+      } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
+      else setError(res.message);
+    });
+  }
+
+  return (
+    <>
+      <Button variant="primary" onClick={() => setOpen(true)}>Mark checked</Button>
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`Mark ${tag} checked?`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="primary" loading={pending} onClick={submit}>Mark checked</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-fg-muted">
+            Confirms the details Purchasing registered are right for IT. Finance sees this record only after.
+            Edit first if something is wrong.
+          </p>
+          {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+          {error && <Banner tone="fault" title={error} />}
+        </div>
+      </Dialog>
+    </>
+  );
+}
+```
+
+- [ ] **Step 4: Layout** — replace lines 27-33 with:
+
+```ts
+  const awaitingIt = isAwaitingItCheck(asset);
+  const canMutate = canManageClass(user.role, asset.cls);          // status, holder
+  const canEdit = canEditAsset(user.role, asset);                  // spec §5.4
+  const canCheck = awaitingIt && (user.role === "admin" || user.role === "it_staff");
+  const returned = asset.financeReturnedAt !== null;
+  // Finance confirms after IT (spec §5.3) — absent while awaiting, not disabled.
+  const canConfirm = (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt && !awaitingIt;
+  const canResubmit = canManageClass(user.role, asset.cls) && returned;
+  const pending = asset.approvals[0];
+```
+
+Pill block (lines 44-53): insert the awaiting state between RETURNED and AWAITING FINANCE:
+
+```tsx
+            ) : awaitingIt ? (
+              <Pill tone="accent">AWAITING IT CHECK</Pill>
+            ) : (
+              <Pill tone="accent">AWAITING FINANCE</Pill>
+            )}
+```
+
+Actions (lines 58-65): the outer condition becomes `canMutate || canEdit || canCheck || canConfirm || canResubmit`; inside:
+
+```tsx
+              {canCheck && <ItCheck assetId={asset.id} tag={asset.tag} />}
+              {canMutate && <RequestStatusChange assetId={asset.id} currentStatus={asset.status} cls={asset.cls} />}
+              {canEdit && <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>}
+```
+
+Imports: `ASSIGNABLE_FROM` (Task 9 uses it), `canEditAsset`, `isAwaitingItCheck`, `ItCheck`.
+
+- [ ] **Step 5: Finance register** — `finance/queries.ts:38`:
+
+```ts
+  // Spec §5.3: Finance sees an IT asset only once IT has checked it. Purchasing
+  // rows never carry a stamp and are not gated.
+  const where: Prisma.AssetWhereInput = {
+    cls, cost: { not: null },
+    ...(cls === "IT" ? { itVerifiedAt: { not: null } } : {}),
+    ...(status ? { status } : {}),
+  };
+```
+
+- [ ] **Step 6: Home CHECK rows** — `src/lib/home.ts`: add `"CHECK"` to the `ShiftKind` union. `your-shift.tsx` `KIND_DOT`: `CHECK: "PENDING"`. In `yourShift` add to the `Promise.all` (after `orphaned`):
+
+```ts
+    // Phase 14 (spec §5.5): IT assets Purchasing registered, waiting for IT.
+    prisma.asset.findMany({
+      where: { cls: "IT", itVerifiedAt: null },
+      orderBy: { createdAt: "asc" },
+      take: 10,
+      select: { id: true, tag: true, model: true, createdAt: true },
+    }),
+```
+
+destructure it as `awaiting`, and push rows after the `orphaned` loop:
+
+```ts
+  for (const a of awaiting) {
+    rows.push({
+      key: `CHECK:${a.id}`,
+      kind: "CHECK",
+      title: `${a.tag} · ${a.model}`,
+      meta: `registered by Purchasing · ${daysSince(a.createdAt, now)} d waiting`,
+      href: `/inventory/${a.id}`,
+      action: "Check",
+      severity: daysSince(a.createdAt, now),
+    });
+  }
+```
+
+If a test in `src/lib/home.test.ts` enumerates `ShiftKind` values, extend it.
+
+- [ ] **Step 7: Verify** `npm run typecheck && npm run lint && npm test` → clean. Dev server: as `purchasing@` register a Laptop on `/inventory/register`; open it → AWAITING IT CHECK, Edit present, no Confirm for `finance@`, absent from Finance's IT tab; `it@` Home shows a CHECK row; Mark checked → AWAITING FINANCE; `finance@` lists and confirms.
+
+- [ ] **Step 8: Commit** `feat(phase-14): the IT check -- verifyAssetDetails, record pill and button, Finance waits for it, Home CHECK rows`
+
+---
+
+### Task 7: Approvals by class
+
+**Files:** `src/server/modules/approvals/queries.ts:22-55` · `src/server/modules/approvals/actions.ts:31-58` · `src/app/(app)/approvals/page.tsx:17-20` · `src/app/(app)/approvals/[id]/page.tsx:22, 74` · `src/components/shell/sidebar.tsx:14-22` · `src/app/(app)/layout.tsx:18` · `src/server/modules/home/queries.ts` (`yourShift` breached/failed, `claimedByYou`) · `src/app/(app)/page.tsx` (their callers)
+
+- [ ] **Step 1: Queries** — `listApprovals(tab, userId, role)` and `tabCounts(userId, role)` AND `approvalClassWhere(role)`:
+
+```ts
+    where: { AND: [tabWhere(tab, userId), approvalClassWhere(role)] },
+```
+
+- [ ] **Step 2: Actions** — `transition()` head:
 
 ```ts
   const user = await actionUser();
   if (!user || !isApprover(user.role)) return forbidden();
 ```
 
-and after `if (!asset) return conflict("That asset no longer exists.");` (line 45):
+and inside the transaction load `asset: { select: { cls: true } }` in the `select`, then before the pure transition:
 
 ```ts
-      // Phase 14: each department assigns its own class. Checked here, after
-      // the load, because the class lives on the asset.
-      if (!canManageClass(user.role, asset.cls)) return forbidden();
+    // Phase 14: the approver is whoever manages the asset's class; a class-less
+    // approval (no asset) is any approver's to reject.
+    if (!canActOnApproval(user.role, approval.asset?.cls ?? null)) return forbidden();
 ```
 
-`requestReturn` head (replacing lines 97-98): the same two lines as above; and after `if (!asset) return conflict("That asset no longer exists.");` (line 109) the same `canManageClass` check.
+- [ ] **Step 3: Pages** — list: `const canAct = isApprover(user.role);` and pass `user.role` to both queries. Detail: `const canAct = canActOnApproval(user.role, approval.asset?.cls ?? null);` and replace the asset `<Link>` (line 73-76) with `<TagRef id={approval.asset.id} tag={`${approval.asset.tag} · ${approval.asset.model}`} visible={canSeeClass(user.role, approval.asset.cls)} className="text-accent hover:underline" />`.
 
-Both actions: add `revalidatePath(`/inventory/${d.assetId}`);` beside the existing two revalidates, so the asset record's banner refreshes when Task 5's control fires from there.
+- [ ] **Step 4: Badge** — `getApprovalsBadge(role: Role)` ANDs `approvalClassWhere(role)` into both counts; `layout.tsx:18` passes `user.role`.
 
-`requestAssignReserved` and `updateEmployee` keep `actionRole("admin", "it_staff")`.
+- [ ] **Step 5: Home** — `yourShift(userId, role, now?)` ANDs the scope into the `breached` and `failed` queries; `claimedByYou(userId, role)` likewise; `page.tsx` passes `user.role` to both.
 
-- [ ] **Step 2: Typecheck**
+- [ ] **Step 6: Verify** `npm run typecheck && npm run lint` → clean; `npx playwright test e2e/approvals-audit.spec.ts` → PASS with unchanged counts (`APR-2041`, `APR-2039` match by class; `APR-2040` by having no asset).
 
-Run: `npm run typecheck && npm run lint`
-Expected: clean.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/server/modules/employees/actions.ts
-git commit -m "feat(phase-14): assign and return refuse by the asset's class, not by role literal"
-```
+- [ ] **Step 7: Commit** `feat(phase-14): approvals queue, badge, Home rows and actions scoped to the classes a role manages`
 
 ---
 
-### Task 5: `<HolderControl>` on the asset record
+### Task 8: `requestAssign` / `requestReturn` by class
+
+**Files:** `src/server/modules/employees/actions.ts:24-31, 96-103`
+
+- [ ] **Step 1:** Both actions: `const user = await actionUser(); if (!user || !isApprover(user.role)) return forbidden();` and after each `if (!asset) return conflict(…)`: `if (!canManageClass(user.role, asset.cls)) return forbidden();`. Add `revalidatePath(`/inventory/${d.assetId}`)` to both. Imports: `actionUser`, `canManageClass`, `isApprover`. `requestAssignReserved` and `updateEmployee` keep `actionRole("admin","it_staff")`.
+- [ ] **Step 2:** `npm run typecheck && npm run lint` → clean.
+- [ ] **Step 3: Commit** `feat(phase-14): assign and return refuse by the asset's class`
+
+---
+
+### Task 9: `<HolderControl>` and tag-as-text on person pages
 
 **Files:**
 - Create: `src/components/inventory/holder-control.tsx`
 - Modify: `src/server/modules/employees/queries.ts` (append `activeEmployeeOptions`)
-- Modify: `src/app/(app)/inventory/[id]/layout.tsx:1-78`
+- Modify: `src/app/(app)/inventory/[id]/layout.tsx` (actions)
+- Modify: `src/app/(app)/employees/[id]/page.tsx:48-56, 70-90`, `src/components/employees/loadout-view.tsx` (types + lines 265, 283, 299)
+- Modify: `src/app/(app)/offboarding/[employeeId]/page.tsx:200, 418`
 
-**Interfaces:**
-- Consumes: `requestAssign`, `requestReturn` (Task 4); `EntityCombobox`, `ComboOption` from `@/components/patterns/entity-combobox`.
-- Produces: `HolderControl` props `{ assetId: string; tag: string; mode: "assign"; employees: ComboOption[] } | { assetId: string; tag: string; mode: "return"; holder: { id: string; name: string } }`. `activeEmployeeOptions(): Promise<ComboOption[]>`.
-
-- [ ] **Step 1: The query**
-
-Append to `src/server/modules/employees/queries.ts`:
+- [ ] **Step 1: Query**
 
 ```ts
 import type { ComboOption } from "@/components/patterns/entity-combobox";
@@ -567,9 +999,7 @@ export async function activeEmployeeOptions(): Promise<ComboOption[]> {
 }
 ```
 
-(If `queries.ts` does not already import `prisma`, add `import { prisma } from "@/server/db/client";`.)
-
-- [ ] **Step 2: The component**
+- [ ] **Step 2: Component**
 
 ```tsx
 // src/components/inventory/holder-control.tsx
@@ -592,10 +1022,9 @@ type Props =
   | { assetId: string; tag: string; mode: "return"; holder: { id: string; name: string } };
 
 /**
- * Phase 14: the assign / return surface that lives on the asset itself, so a
- * department without the IT loadout view (Purchasing) can still hand a car
- * to a driver and take it back. Same two actions the loadout calls; the
- * result is the same lifecycle.assign / lifecycle.return approval.
+ * Phase 14 (spec §7): assign / return from the asset itself, so a department
+ * without IT's loadout view can hand a car to a driver and take it back. Same
+ * two actions the loadout calls; the same approvals result.
  */
 export function HolderControl(props: Props) {
   const router = useRouter();
@@ -607,23 +1036,18 @@ export function HolderControl(props: Props) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const isAssign = props.mode === "assign";
 
   function close() {
-    setOpen(false);
-    setReason("");
-    setEmployeeId(null);
-    setError(null);
-    setFieldErrors({});
+    setOpen(false); setReason(""); setEmployeeId(null); setError(null); setFieldErrors({});
   }
 
   function submit() {
-    setError(null);
-    setFieldErrors({});
+    setError(null); setFieldErrors({});
     startTransition(async () => {
-      const res =
-        props.mode === "assign"
-          ? await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason })
-          : await requestReturn({ employeeId: props.holder.id, assetId: props.assetId, reason });
+      const res = props.mode === "assign"
+        ? await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason })
+        : await requestReturn({ employeeId: props.holder.id, assetId: props.assetId, reason });
       if (res.ok) {
         toast(`${res.data.refNo} created — waiting in the approval queue`, "settled");
         close();
@@ -637,8 +1061,6 @@ export function HolderControl(props: Props) {
       } else setError(res.message);
     });
   }
-
-  const isAssign = props.mode === "assign";
 
   return (
     <>
@@ -658,33 +1080,22 @@ export function HolderControl(props: Props) {
       >
         <div className="flex flex-col gap-3">
           <p className="text-xs text-fg-muted">
-            {isAssign ? (
-              <>Creates a <span className="font-mono">lifecycle.assign</span> approval; {props.tag} stays where it is until it executes.</>
-            ) : (
-              <>Creates a <span className="font-mono">lifecycle.return</span> approval; {props.tag} stays with {props.holder.name} until it executes.</>
-            )}
+            {isAssign
+              ? <>Creates a <span className="font-mono">lifecycle.assign</span> approval; {props.tag} stays where it is until it executes.</>
+              : <>Creates a <span className="font-mono">lifecycle.return</span> approval; {props.tag} stays with {props.holder.name} until it executes.</>}
           </p>
           {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
           {error && <Banner tone="fault" title={error} />}
           {isAssign && (
             <FormField label="Assign to" required error={fieldErrors.employeeId}>
               {(p) => (
-                <EntityCombobox
-                  id={p.id}
-                  aria-describedby={p["aria-describedby"]}
-                  invalid={p.invalid}
-                  options={props.employees}
-                  value={employeeId}
-                  onChange={setEmployeeId}
-                  placeholder="Type a name or EMP number…"
-                />
+                <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                  options={props.employees} value={employeeId} onChange={setEmployeeId} placeholder="Type a name or EMP number…" />
               )}
             </FormField>
           )}
           <FormField label="Reason" required={!isAssign} error={fieldErrors.reason}>
-            {(p) => (
-              <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={reason} onChange={(e) => setReason(e.target.value)} />
-            )}
+            {(p) => <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={reason} onChange={(e) => setReason(e.target.value)} />}
           </FormField>
         </div>
       </Dialog>
@@ -693,190 +1104,60 @@ export function HolderControl(props: Props) {
 }
 ```
 
-Note `requestReturn`'s reason is `min(3)` on the server and `requestAssign`'s is optional — the `required` flag mirrors that.
-
-- [ ] **Step 3: Wire the layout**
-
-In `src/app/(app)/inventory/[id]/layout.tsx`:
+- [ ] **Step 3: Layout wiring** — after `const pending = asset.approvals[0];`:
 
 ```ts
-import { ASSIGNABLE_FROM, CLASS_LABEL, canManageClass } from "@/lib/asset-class";
-import { activeEmployeeOptions } from "@/server/modules/employees/queries";
-import { HolderControl } from "@/components/inventory/holder-control";
-// ...
-  const pending = asset.approvals[0];
-  // Phase 14: the holder control is offered only when the action it fires
-  // would be legal — unheld and idle → assign; held → return. A pending
-  // approval freezes both (the server would answer "already has an open
-  // request"). Absent, not disabled.
+  // Spec §7.1: offered only when the action would be legal; a pending approval
+  // freezes both (the server would answer "already has an open request").
   const canAssign = canMutate && !pending && !asset.assignee && asset.status === ASSIGNABLE_FROM[asset.cls];
   const canReturn = canMutate && !pending && asset.assignee !== null;
   const employees = canAssign ? await activeEmployeeOptions() : [];
 ```
 
-and inside the `canMutate && (...)` fragment, before `<RequestStatusChange …>`:
+and in the actions, before `RequestStatusChange`:
 
 ```tsx
-                  {canAssign && <HolderControl mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} />}
-                  {canReturn && asset.assignee && (
-                    <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} />
-                  )}
+              {canAssign && <HolderControl mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} />}
+              {canReturn && asset.assignee && (
+                <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} />
+              )}
 ```
 
-- [ ] **Step 4: Typecheck, lint, look at it**
+- [ ] **Step 4: Loadout tag-as-text** — `loadout-view.tsx`: add `visible: boolean` to the tile asset type and to `HoldingItem`; replace the three `<Link href={`/inventory/…`}>` at lines 265, 283 and 299 with `<TagRef id={…} tag={…} visible={….visible} className={…the existing className…} />`. In `employees/[id]/page.tsx`: `toTileAsset` adds `visible: canSeeClass(user.role, a.cls)`; the `reservations` holding adds `visible: canSeeClass(user.role, r.asset.cls)`; the `queued` holding adds `visible: canSeeClass(user.role, a.asset!.cls)`; the `held` table rows likewise (`held` rows carry `cls`).
 
-Run: `npm run typecheck && npm run lint`
-Expected: clean. Then `npm run dev`, sign in as `purchasing@thebackroomop.com`, open `BR-VH-0002` (STORED, unheld): **Assign holder** shows. Open `BR-VH-0001` (OPERATIONAL, held): **Return** shows. Open `BR-LT-0148` as `purchasing@`: neither, and no Edit.
+- [ ] **Step 5: Offboarding tag-as-text** — `offboarding/[employeeId]/page.tsx:200` and `:418`: replace the `<Link>` with `<TagRef id={i.assetId} tag={i.tag} visible={canSeeClass(user.role, i.cls)} className="text-accent hover:underline" />`. The wizard's items carry `cls` (offboarding/queries.ts selects it at lines 228, 277, 285); if a mapped item type lacks it, add `cls` to that mapping from the already-selected asset.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Verify** `npm run typecheck && npm run lint` → clean. Dev: `purchasing@` on `BR-VH-0002` → **Assign holder**; on `BR-VH-0001` → **Return**; `it@` on Dennis's page (`EMP-0090`) still sees his three IT items as links.
 
-```bash
-git add src/components/inventory/holder-control.tsx src/server/modules/employees/queries.ts "src/app/(app)/inventory/[id]/layout.tsx"
-git commit -m "feat(phase-14): Assign holder / Return on the asset record for whoever manages its class"
-```
+- [ ] **Step 7: Commit** `feat(phase-14): Assign holder / Return on the record; invisible tags render as text on person pages`
 
 ---
 
-### Task 6: Documents class-owned
+### Task 10: Documents by class
 
-**Files:**
-- Modify: `src/server/modules/inventory/document-actions.ts:30-33, 49-50, 81-88`
-- Modify: `src/app/(app)/inventory/[id]/documents/page.tsx:33`
+**Files:** `src/server/modules/inventory/document-actions.ts:30-33, 49-50, 81-88` · `src/app/(app)/inventory/[id]/documents/page.tsx:33`
 
-- [ ] **Step 1: Actions**
-
-Imports: replace `actionRole` with `actionUser`; add `import { canManageClass } from "@/lib/asset-class";` and `import { isApprover } from "@/lib/approval-access";`.
-
-`uploadDocument`:
-
-```ts
-  const user = await actionUser();
-  if (!user || !isApprover(user.role)) return forbidden();
-  // ... (rate limit, field checks unchanged)
-  const asset = await prisma.asset.findUnique({ where: { id: assetId } });
-  if (!asset) return conflict("That asset no longer exists.");
-  // Phase 14: each department files its own class's papers.
-  if (!canManageClass(user.role, asset.cls)) return forbidden();
-```
-
-`markDocumentSigned`:
-
-```ts
-  const user = await actionUser();
-  if (!user || !isApprover(user.role)) return forbidden();
-  const rate = await checkRate(user.id);
-  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
-
-  const doc = await prisma.assetDocument.findUnique({
-    where: { id: String(input.docId ?? "") },
-    include: { asset: { select: { cls: true } } },
-  });
-  if (!doc) return conflict("That document no longer exists.");
-  if (!canManageClass(user.role, doc.asset.cls)) return forbidden();
-  if (doc.signed) return ok(null);
-```
-
-- [ ] **Step 2: Page**
-
-`documents/page.tsx`: `import { canManageClass } from "@/lib/asset-class";` and `canMutate={canManageClass(user.role, asset.cls)}`.
-
-- [ ] **Step 3: Typecheck, commit**
-
-Run: `npm run typecheck && npm run lint` → clean.
-
-```bash
-git add src/server/modules/inventory/document-actions.ts "src/app/(app)/inventory/[id]/documents/page.tsx"
-git commit -m "feat(phase-14): documents upload and sign follow the asset's class"
-```
+- [ ] **Step 1:** Both actions: `const user = await actionUser(); if (!user || !isApprover(user.role)) return forbidden();`. `uploadDocument`: after the asset load, `if (!canManageClass(user.role, asset.cls)) return forbidden();`. `markDocumentSigned`: load with `include: { asset: { select: { cls: true } } }` and `if (!canManageClass(user.role, doc.asset.cls)) return forbidden();` before the idempotent return. Page: `canMutate={canManageClass(user.role, asset.cls)}`.
+- [ ] **Step 2:** `npm run typecheck && npm run lint` → clean.
+- [ ] **Step 3: Commit** `feat(phase-14): documents upload and sign follow the asset's class`
 
 ---
 
-### Task 7: Categories and types by class
+### Task 11: Categories and types by class
 
-**Files:**
-- Modify: `src/server/modules/admin/reference-actions.ts` (all three actions)
-- Modify: `src/components/admin/ref-table.tsx:28-48, 96, 103-110, 122`
-- Modify: `src/app/(app)/admin/asset-categories/page.tsx`, `src/app/(app)/admin/asset-types/page.tsx`
+**Files:** `src/server/modules/admin/reference-actions.ts` · `src/components/admin/ref-table.tsx:28-48, 103-110` · `src/app/(app)/admin/{asset-categories,asset-types}/page.tsx`
 
-**Interfaces:**
-- Produces: `RefTable` gains `fixedCls?: AssetClass`. `createRefRow` still accepts `cls?` but the server decides the class from the role (spec §6.1).
-
-- [ ] **Step 1: Actions**
-
-Replace the imports and add the helper at the top of `reference-actions.ts`:
+- [ ] **Step 1: Actions** — imports `Prisma, type AssetClass, type Role`, `actionRole, actionUser`, `MANAGEABLE_CLASSES, canManageClass`; helpers:
 
 ```ts
-import { Prisma, type AssetClass, type Role } from "@prisma/client";
-import { actionRole, actionUser } from "@/server/auth/guards";
-import { MANAGEABLE_CLASSES, canManageClass } from "@/lib/asset-class";
-
-/**
- * Phase 14 (spec §6.1): the class a role creates a category in. A single-class
- * role gets its class regardless of what the client sent; admin may pick and
- * defaults to the first; a role with no class creates nothing.
- */
+/** Spec §9: the class a role creates a category in — its own for a single-class role, a pick for admin, nothing for the rest. */
 function classFor(role: Role, requested: AssetClass | undefined): AssetClass | null {
   const mine = MANAGEABLE_CLASSES[role];
   if (mine.length === 0) return null;
   if (mine.length === 1) return mine[0];
   return requested ?? mine[0];
 }
-```
 
-`createRefRow` — replace lines 42-56 with:
-
-```ts
-  const user = await actionUser();
-  if (!user) return forbidden();
-  const rate = await checkRate(user.id);
-  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
-  const parsed = createSchema.safeParse(input);
-  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { entity, name, categoryId } = parsed.data;
-
-  // Departments are org structure, not class data — IT's, as before.
-  if (entity === "department" && user.role !== "admin" && user.role !== "it_staff") return forbidden();
-  const cls = entity === "category" ? classFor(user.role, parsed.data.cls) : null;
-  if (entity === "category" && cls === null) return forbidden();
-  if (entity === "type") {
-    if (!categoryId) return validationError({ categoryId: "Pick a category" });
-    const category = await prisma.assetCategory.findUnique({ where: { id: categoryId }, select: { cls: true } });
-    if (!category) return validationError({ categoryId: "That category no longer exists" });
-    if (!canManageClass(user.role, category.cls)) return forbidden();
-  }
-
-  try {
-    let id = "";
-    await prisma.$transaction(async (tx) => {
-      if (entity === "category") id = (await tx.assetCategory.create({ data: { name, cls: cls! } })).id;
-      else if (entity === "department") id = (await tx.department.create({ data: { name } })).id;
-      else id = (await tx.assetType.create({ data: { name, categoryId: categoryId! } })).id;
-```
-
-and in the audit diff replace both `cls ?? "IT"` with `cls`.
-
-`renameRefRow` — replace lines 75-88 with:
-
-```ts
-  const user = await actionUser();
-  if (!user) return forbidden();
-  const rate = await checkRate(user.id);
-  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
-  const parsed = renameSchema.safeParse(input);
-  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { entity, id, name } = parsed.data;
-
-  const row = await loadRow(entity, id);
-  if (!row) return conflict("That row no longer exists.");
-  if (!mayTouch(user.role, entity, row.cls)) return forbidden();
-  if (row.locked) return conflict(`"${row.name}" is locked and can't be renamed.`);
-  if (row.name === name) return ok(null);
-```
-
-Add these two helpers after `classFor`:
-
-```ts
-/** One shape for the three tables: the class is the category's own, a type's category's, and null for a department. */
 async function loadRow(entity: RefEntity, id: string): Promise<{ name: string; locked: boolean; cls: AssetClass | null } | null> {
   if (entity === "category") {
     const r = await prisma.assetCategory.findUnique({ where: { id }, select: { name: true, locked: true, cls: true } });
@@ -896,227 +1177,73 @@ function mayTouch(role: Role, entity: RefEntity, cls: AssetClass | null): boolea
 }
 ```
 
-`deleteRefRow` — replace lines 114-120 with the same `actionUser` head, then insert **before** the per-entity in-use checks:
+`createRefRow` head:
 
 ```ts
-  const touch = await loadRow(entity, id);
-  if (!touch) return conflict("That row no longer exists.");
-  if (!mayTouch(user.role, entity, touch.cls)) return forbidden();
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = createSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { entity, name, categoryId } = parsed.data;
+
+  if (entity === "department" && user.role !== "admin" && user.role !== "it_staff") return forbidden();
+  const cls = entity === "category" ? classFor(user.role, parsed.data.cls) : null;
+  if (entity === "category" && cls === null) return forbidden();
+  if (entity === "type") {
+    if (!categoryId) return validationError({ categoryId: "Pick a category" });
+    const category = await prisma.assetCategory.findUnique({ where: { id: categoryId }, select: { cls: true } });
+    if (!category) return validationError({ categoryId: "That category no longer exists" });
+    if (!canManageClass(user.role, category.cls)) return forbidden();
+  }
 ```
 
-(The existing in-use checks that follow reload the row with counts; keep them as they are.)
+then the create writes `cls: cls!` for categories and the audit diff uses `cls`. `renameRefRow` and `deleteRefRow`: `actionUser` head; `const row = await loadRow(entity, id); if (!row) return conflict("That row no longer exists."); if (!mayTouch(user.role, entity, row.cls)) return forbidden();` before the locked check (rename) and before the in-use checks (delete).
 
-Remove the now-unused `actionRole` import if nothing else uses it.
-
-- [ ] **Step 2: `RefTable`**
-
-Props:
-
-```ts
-export function RefTable({
-  entity,
-  rows,
-  categories,
-  fixedCls,
-}: {
-  entity: "category" | "type" | "department";
-  rows: RefRow[];
-  categories?: Array<{ id: string; name: string }>;
-  /** Phase 14: a single-class role creates categories in ITS class; no picker. */
-  fixedCls?: AssetClass;
-}) {
-  // ...
-  const [newCls, setNewCls] = useState<AssetClass>(fixedCls ?? ASSET_CLASSES[0]);
-```
-
-Replace the class cell in the add row (lines 103-110) with:
+- [ ] **Step 2: `RefTable`** — prop `fixedCls?: AssetClass`; `useState<AssetClass>(fixedCls ?? ASSET_CLASSES[0])`; the class cell renders text when fixed:
 
 ```tsx
-            {isCategory && (
-              <Td>
                 {fixedCls ? (
-                  <span className="font-mono text-[10.5px] text-fg-muted" aria-label="Class for the new category">
-                    {CLASS_LABEL[fixedCls].toUpperCase()}
-                  </span>
-                ) : (
-                  <Select aria-label="Class for the new category" value={newCls} className="py-1.5 text-xs"
-                    onChange={(e) => setNewCls(e.target.value as AssetClass)}>
-                    {ASSET_CLASSES.map((c) => <option key={c} value={c}>{CLASS_LABEL[c]}</option>)}
-                  </Select>
-                )}
-              </Td>
-            )}
+                  <span className="font-mono text-[10.5px] text-fg-muted" aria-label="Class for the new category">{CLASS_LABEL[fixedCls].toUpperCase()}</span>
+                ) : ( /* existing Select */ )}
 ```
 
-Both `createRefRow(...)` calls (lines 96 and 122) already send `cls: isCategory ? newCls : undefined`; `newCls` is `fixedCls` when fixed, and the server overrides anyway.
+- [ ] **Step 3: Pages** — categories: `requireRole("admin","it_staff","purchasing_staff")`, `const mine = MANAGEABLE_CLASSES[user.role]`, `where: { cls: { in: [...mine] } }`, `fixedCls={mine.length === 1 ? mine[0] : undefined}`. Types: same role set; rows `where: { category: { cls: { in: mine } } }`; categories `where: { locked: false, cls: { in: mine } }`.
 
-- [ ] **Step 3: Pages**
-
-`asset-categories/page.tsx`:
-
-```tsx
-import { requireRole } from "@/server/auth/guards";
-import { prisma } from "@/server/db/client";
-import { MANAGEABLE_CLASSES } from "@/lib/asset-class";
-import { PageHeader } from "@/components/ui/page-header";
-import { RefTable } from "@/components/admin/ref-table";
-
-export default async function AssetCategoriesPage() {
-  const user = await requireRole("admin", "it_staff", "purchasing_staff");
-  const mine = MANAGEABLE_CLASSES[user.role];
-  const rows = await prisma.assetCategory.findMany({
-    where: { cls: { in: [...mine] } },
-    include: { _count: { select: { types: true, assets: true } } },
-    orderBy: { name: "asc" },
-  });
-  return (
-    <>
-      <PageHeader title="Asset categories" />
-      <RefTable
-        entity="category"
-        fixedCls={mine.length === 1 ? mine[0] : undefined}
-        rows={rows.map((r) => ({
-          id: r.id, name: r.name, locked: r.locked, cls: r.cls,
-          usage: `${r._count.types} types · ${r._count.assets} assets`,
-        }))}
-      />
-    </>
-  );
-}
-```
-
-`asset-types/page.tsx`:
-
-```tsx
-export default async function AssetTypesPage() {
-  const user = await requireRole("admin", "it_staff", "purchasing_staff");
-  const mine = [...MANAGEABLE_CLASSES[user.role]];
-  const [rows, categories] = await Promise.all([
-    prisma.assetType.findMany({
-      where: { category: { cls: { in: mine } } },
-      include: { category: true, _count: { select: { assets: true, policySlots: true } } },
-      orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
-    }),
-    // Phase 14: a type is filed under a category of the creator's class only —
-    // the picker used to mix both classes.
-    prisma.assetCategory.findMany({ where: { locked: false, cls: { in: mine } }, orderBy: { name: "asc" } }),
-  ]);
-```
-
-(add the `MANAGEABLE_CLASSES` import; the JSX is unchanged).
-
-- [ ] **Step 4: Typecheck, run the existing e2e that touches this**
-
-Run: `npm run typecheck && npm run lint` → clean.
-Run: `npx playwright test e2e/asset-classes.spec.ts -g "12\."` (category created with a class) and `e2e/admin.spec.ts`.
-Expected: PASS. Case 12 signs in as admin, who still sees the picker.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/server/modules/admin/reference-actions.ts src/components/admin/ref-table.tsx "src/app/(app)/admin/asset-categories/page.tsx" "src/app/(app)/admin/asset-types/page.tsx"
-git commit -m "feat(phase-14): each department creates, renames and deletes categories and types of its own class"
-```
+- [ ] **Step 4:** `npm run typecheck && npm run lint` → clean; `npx playwright test e2e/asset-classes.spec.ts -g "12\."` → PASS (admin keeps the picker).
+- [ ] **Step 5: Commit** `feat(phase-14): each department creates, renames and deletes categories and types of its own class`
 
 ---
 
-### Task 8: Labels for the classes a role manages
+### Task 12: Labels
 
-**Files:**
-- Modify: `src/app/(app)/inventory/labels/page.tsx:16-21, 33-35, 66-73`
-- Modify: `src/components/inventory/bulk-drawer.tsx:36-46`
-- Test: `e2e/labels.spec.ts:156` (copy change)
+**Files:** `src/app/(app)/inventory/labels/page.tsx:16-21, 33-35, 72` · `src/components/inventory/bulk-drawer.tsx:36-46` · `e2e/labels.spec.ts:156`
 
-- [ ] **Step 1: Page**
-
-```ts
-import { MANAGEABLE_CLASSES } from "@/lib/asset-class";
-// ...
-  // A SET, not a floor — admin must pass. Phase 14 admits purchasing; the
-  // query below prints only the classes the role manages.
-  const user = await requireRole("admin", "it_staff", "purchasing_staff");
-  // ...
-  const assets = ids.length
-    ? await prisma.asset.findMany({
-        where: { id: { in: ids }, cls: { in: [...MANAGEABLE_CLASSES[user.role]] } },
-        select: { tag: true, model: true },
-        orderBy: { tag: "asc" },
-      })
-    : [];
-```
-
-Replace the `missing` banner's copy (line 72) — it is no longer only "not found", it may be "not yours to print" — with a cause-neutral sentence:
-
-```tsx
-            <Banner tone="attention" title={`${missing} selected asset${missing === 1 ? "" : "s"} could not be printed and ${missing === 1 ? "was" : "were"} skipped.`} />
-```
-
-and update the comment above it to say the count now also covers ids of a class the role does not manage.
-
-- [ ] **Step 2: Bulk drawer**
-
-Replace lines 36-46 with:
-
-```tsx
-        {/* Phase 14: /inventory/labels admits both departments and prints the
-            classes the role manages, so the link is offered for any explicit
-            selection; the drawer's `cls` is already the user's own view. */}
-        {!allMatching && selectedIds.length > 0 && (
-          <a
-            href={`/inventory/labels?ids=${selectedIds.join(",")}`}
-            className="text-xs text-accent hover:underline"
-          >
-            Print labels for {selectedIds.length} selected
-          </a>
-        )}
-```
-
-- [ ] **Step 3: Update the copy assertion**
-
-`e2e/labels.spec.ts:156`: `"1 selected asset was not found and skipped."` → `"1 selected asset could not be printed and was skipped."`
-
-- [ ] **Step 4: Run**
-
-Run: `npm run typecheck && npm run lint && npx playwright test e2e/labels.spec.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add "src/app/(app)/inventory/labels/page.tsx" src/components/inventory/bulk-drawer.tsx e2e/labels.spec.ts
-git commit -m "feat(phase-14): label sheets for whichever classes the role manages"
-```
+- [ ] **Step 1:** `const user = await requireRole("admin","it_staff","purchasing_staff");` query `where: { id: { in: ids }, cls: { in: [...MANAGEABLE_CLASSES[user.role]] } }`; banner copy → `${missing} selected asset${…} could not be printed and ${…} skipped.`; update its comment. Bulk drawer: drop `&& cls === "IT"` and rewrite the comment (the page admits both departments and prints what the role manages). `labels.spec.ts:156` → `"1 selected asset could not be printed and was skipped."`.
+- [ ] **Step 2:** `npx playwright test e2e/labels.spec.ts` → PASS.
+- [ ] **Step 3: Commit** `feat(phase-14): label sheets for whichever classes the role manages`
 
 ---
 
-### Task 9: `/employees/new`
+### Task 13: `/employees/new`
 
-**Files:**
-- Modify: `src/server/modules/employees/actions.ts` (append `createEmployee` after `updateEmployee`)
-- Modify: `src/components/employees/employee-form.tsx`
-- Create: `src/app/(app)/employees/new/page.tsx`
-- Modify: `src/app/(app)/employees/[id]/edit/page.tsx:26-36`
-- Modify: `src/app/(app)/employees/page.tsx:56, 131-135`
-
-**Interfaces:**
-- Produces: `createEmployee(input): ActionResult<{ id: string }>`; `EmployeeForm` props become a discriminated union on `mode`.
+**Files:** `src/server/modules/employees/actions.ts` (append) · `src/components/employees/employee-form.tsx` · `src/app/(app)/employees/new/page.tsx` (new) · `src/app/(app)/employees/[id]/edit/page.tsx:26` · `src/app/(app)/employees/page.tsx:56, 131-135`
 
 - [ ] **Step 1: Action**
-
-Append to `employees/actions.ts`:
 
 ```ts
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
 
 const createEmployeeSchema = employeeSchema.omit({ id: true }).extend({
-  // No format rule: Employee.employeeNo has none anywhere, and the importer
+  // No format rule: Employee.employeeNo has none anywhere and the importer
   // (import-employees.ts, E-2) refuses to invent one. Uniqueness is
   // case-insensitive, matching the importer's refKey.
   employeeNo: z.string().trim().min(1, "Give an employee number").max(60),
   joinedAt: dateStr,
 });
 
-/** Phase 14: the first manual create path — before this, employees arrived only by import or seed. */
+/** Phase 14 (spec §11): the first manual create path — before this, employees arrived only by import or seed. */
 export async function createEmployee(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
@@ -1159,7 +1286,6 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
       });
     });
   } catch (err) {
-    // The unique index is the backstop for two creates racing the check above.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return validationError({ employeeNo: "That employee number is already in use" });
     }
@@ -1170,18 +1296,14 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
 }
 ```
 
-- [ ] **Step 2: Form**
-
-Rewrite the props and state of `employee-form.tsx`:
+- [ ] **Step 2: Form** — props become a union on `mode`:
 
 ```tsx
 import { createEmployee, updateEmployee } from "@/server/modules/employees/actions";
 
 const CUSTOM = "__custom";
 const today = () => new Date().toISOString().slice(0, 10);
-
 type Initial = { name: string; title: string; departmentId: string; employment: string; m365Status: string | null };
-
 type Props = { departments: Array<{ id: string; name: string }> } & (
   | { mode: "edit"; employeeId: string; initial: Initial }
   | { mode: "new" }
@@ -1189,47 +1311,26 @@ type Props = { departments: Array<{ id: string; name: string }> } & (
 
 export function EmployeeForm(props: Props) {
   const { departments } = props;
-  const initial: Initial =
-    props.mode === "edit"
-      ? props.initial
-      : { name: "", title: "", departmentId: departments[0]?.id ?? "", employment: "ACTIVE", m365Status: null };
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const isCustom = initial.m365Status !== null && !(M365_CANONICAL as readonly string[]).includes(initial.m365Status);
-  const [form, setForm] = useState({
-    employeeNo: "",
-    joinedAt: today(),
-    name: initial.name,
-    title: initial.title,
-    departmentId: initial.departmentId,
-    employment: initial.employment,
-    m365Select: initial.m365Status === null ? "" : isCustom ? CUSTOM : initial.m365Status,
-    m365Custom: isCustom ? initial.m365Status! : "",
-  });
+  const initial: Initial = props.mode === "edit"
+    ? props.initial
+    : { name: "", title: "", departmentId: departments[0]?.id ?? "", employment: "ACTIVE", m365Status: null };
+  // … existing hooks; add `employeeNo: ""` and `joinedAt: today()` to the form state
 ```
 
-In `submit`, replace the `updateEmployee` call with:
+`submit`:
 
 ```ts
       const common = { name: form.name, title: form.title, departmentId: form.departmentId, employment: form.employment, m365Status };
-      const res =
-        props.mode === "edit"
-          ? await updateEmployee({ id: props.employeeId, ...common })
-          : await createEmployee({ ...common, employeeNo: form.employeeNo, joinedAt: form.joinedAt });
+      const res = props.mode === "edit"
+        ? await updateEmployee({ id: props.employeeId, ...common })
+        : await createEmployee({ ...common, employeeNo: form.employeeNo, joinedAt: form.joinedAt });
       if (res.ok) {
-        if (props.mode === "new") {
-          router.push(`/employees/${res.data.id}`);
-          return;
-        }
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
-        router.refresh();
+        if (props.mode === "new") { router.push(`/employees/${res.data.id}`); return; }
+        setSaved(true); setTimeout(() => setSaved(false), 3000); router.refresh();
       }
 ```
 
-and add `fe.employeeNo`-aware unclaimed handling: `const unclaimed = fe._form ?? fe.id;` stays; `employeeNo` and `joinedAt` are claimed by the two new fields below.
-
-In the "Person" card, insert before the Name field, rendered only in `new` mode:
+In the "Person" card, before Name, only in `new` mode:
 
 ```tsx
           {props.mode === "new" && (
@@ -1246,16 +1347,11 @@ In the "Person" card, insert before the Name field, rendered only in `new` mode:
           )}
 ```
 
-Submit button label: `{props.mode === "new" ? "Create employee" : saved ? "✓ Saved" : "Save changes"}`.
+Submit label: `{props.mode === "new" ? "Create employee" : saved ? "✓ Saved" : "Save changes"}`.
 
-- [ ] **Step 3: Edit page**
-
-`employees/[id]/edit/page.tsx:26`: `<EmployeeForm mode="edit" employeeId={id} departments={…} initial={…} />` — add `mode="edit"`, nothing else changes.
-
-- [ ] **Step 4: New page**
+- [ ] **Step 3: Pages** — edit page passes `mode="edit"`. New page:
 
 ```tsx
-// src/app/(app)/employees/new/page.tsx
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
@@ -1273,155 +1369,71 @@ export default async function NewEmployeePage() {
 }
 ```
 
-- [ ] **Step 5: List page**
+List page: after Import, `{canMutate && <ButtonLink variant="primary" href="/employees/new">New employee</ButtonLink>}`; empty state description `"Add one with New employee, or import a sheet."` with action `href="/employees/new"`.
 
-`employees/page.tsx:56`: after the Import link add `{canMutate && <ButtonLink variant="primary" href="/employees/new">New employee</ButtonLink>}`.
-Lines 131-135 (the no-employees empty state):
-
-```tsx
-          <EmptyState
-            title="No employees yet"
-            description="Add one with New employee, or import a sheet."
-            actions={canMutate ? <ButtonLink href="/employees/new">New employee</ButtonLink> : undefined}
-          />
-```
-
-- [ ] **Step 6: Typecheck, try it**
-
-Run: `npm run typecheck && npm run lint` → clean. In the dev server as `it@`, create `EMP-9001 / Test Person / Analyst / IT`; you land on the record. Try `emp-9001` again → the field error.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/server/modules/employees/actions.ts src/components/employees/employee-form.tsx "src/app/(app)/employees/new/page.tsx" "src/app/(app)/employees/[id]/edit/page.tsx" "src/app/(app)/employees/page.tsx"
-git commit -m "feat(phase-14): /employees/new -- the first manual create path, employeeNo unique case-insensitively"
-```
+- [ ] **Step 4:** `npm run typecheck && npm run lint` → clean; dev: create `EMP-9001`, then `emp-9001` → field error.
+- [ ] **Step 5: Commit** `feat(phase-14): /employees/new -- employeeNo unique case-insensitively`
 
 ---
 
-### Task 10: Purchasing Home — "Approvals waiting"
+### Task 14: Purchasing Home stats
 
-**Files:**
-- Modify: `src/server/modules/home/queries.ts:325-333, 341-344, 82-88` (relative to the excerpt: the `PurchasingHome` interface, the `Promise.all`, the return)
-- Modify: `src/app/(app)/page.tsx` purchasing branch (the `Stat` grid)
+**Files:** `src/server/modules/home/queries.ts` (`PurchasingHome`, `purchasingHome`) · `src/app/(app)/page.tsx` (purchasing grid)
 
-- [ ] **Step 1: Query**
+- [ ] **Step 1:** Interface adds `approvalsWaiting: number; awaitingItCheck: number;`. `purchasingHome(userId, role, now?)` adds two counts to its `Promise.all`:
 
 ```ts
-import type { Role } from "@prisma/client";
-import { approvalClassWhere } from "@/lib/approval-access";
-
-export interface PurchasingHome {
-  todo: TodoRow[];
-  draftCount: number;
-  awaitingIT: number;
-  awaitingFinance: number;
-  /** completed this calendar month, preformatted */
-  spendThisMonth: string;
-  /** Phase 14: open lifecycle approvals on the classes this role manages */
-  approvalsWaiting: number;
-}
-
-export async function purchasingHome(userId: string, role: Role, now: Date = new Date()): Promise<PurchasingHome> {
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [mine, counts, completed, approvalsWaiting] = await Promise.all([
-    // ... the three existing queries unchanged ...
     prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, approvalClassWhere(role)] } }),
-  ]);
-  // ...
-  return { todo, draftCount: count("DRAFT"), awaitingIT: count("SUBMITTED"), awaitingFinance: count("IT_REVIEWED"),
-    spendThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)), approvalsWaiting };
-}
+    prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null } }),
 ```
 
-Search for other callers: `grep -rn "purchasingHome(" src` — only `page.tsx`. Update it: `purchasingHome(user.id, user.role)`.
+and returns them. Caller: `purchasingHome(user.id, user.role)`.
 
-- [ ] **Step 2: Page**
-
-In the purchasing branch, the grid becomes five stats:
+- [ ] **Step 2:** Grid `grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6` with two more stats:
 
 ```tsx
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-                  <Stat label="Drafts" value={d.draftCount} />
-                  <Stat label="Awaiting IT" value={d.awaitingIT} />
-                  <Stat label="Awaiting finance" value={d.awaitingFinance} />
-                  <Stat label="Spend this month" value={d.spendThisMonth} />
                   <Stat label="Approvals waiting" value={<Link href="/approvals" className="hover:underline">{d.approvalsWaiting}</Link>} hint="lifecycle changes on your assets" />
-                </div>
+                  <Stat label="Awaiting IT check" value={d.awaitingItCheck} hint="IT assets you registered" />
 ```
 
-(`Link` is already imported in `page.tsx`.)
-
-- [ ] **Step 3: Typecheck, commit**
-
-Run: `npm run typecheck && npm run lint` → clean.
-
-```bash
-git add src/server/modules/home/queries.ts "src/app/(app)/page.tsx"
-git commit -m "feat(phase-14): Purchasing Home counts the approvals waiting on its class"
-```
+- [ ] **Step 3:** `npm run typecheck && npm run lint` → clean. **Commit** `feat(phase-14): Purchasing Home counts approvals waiting and IT checks pending`
 
 ---
 
-### Task 11: End-to-end — `e2e/department-owned.spec.ts`
+### Task 15: End-to-end
 
-**Files:**
-- Create: `e2e/department-owned.spec.ts`
-- Modify: `e2e/axe-sweep.spec.ts:97-104`
+**Files:** `e2e/asset-classes.spec.ts` (cases 2, 10, 17, 18) · `e2e/axe-sweep.spec.ts:97-118` · Create `e2e/department-owned.spec.ts`
 
-Selectors verified against the components in this plan and the existing ones: `Assign holder` / `Return` buttons; dialogs named `Assign a holder` / `Request a return`; the combobox is `getByRole("combobox")` inside the dialog; documents use `Select aria-label="Document kind"`, a hidden `input[type="file"]` and a `Mark signed` button; ref-table's add input is `New category name` / `New type name`, the class picker `Class for the new category`, the type's category picker `Category for the new type`; the queue is `getByRole("group", { name: /Approval queue/ })`; the sidebar badge is `span[aria-label*="open approval"]`.
+- [ ] **Step 1: Flip the Phase 13 cases**
 
-- [ ] **Step 1: Write the spec**
+Case 2 (line 94-102): title → `"2. Purchasing is offered both classes' categories; IT only its own (Phase 14)"`; line 100 → `expect(options).toContain("Laptop");`.
+
+Case 10 (line 271-302): the first half runs as **`purchasing@`** (line 272 email), asserting the car and the Filters panel exactly as written; then append, before the class-switch clicks:
 
 ```ts
-// e2e/department-owned.spec.ts
-import { test, expect, type Page } from "@playwright/test";
-import { execSync } from "node:child_process";
-import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+    // Phase 14: IT cannot ask for the Purchasing view at all.
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory?cls=PURCHASING");
+    await expect(page).toHaveURL(/\/inventory$/);
+    await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Asset class" })).toHaveCount(0);
+    await login(page, "purchasing@thebackroomop.com");
+```
 
-/**
- * Phase 14 — each department owns its class. Eleven cases: Purchasing approves
- * its own lifecycle changes through the real actions (closing PICKUP §5's
- * D-19 gap), IT cannot touch them, admin sees both; Assign holder / Return on
- * the asset record; documents by class; categories and types by class; labels;
- * the new-employee form; the Home stat.
- *
- * Never reference a raw cuid. Assets by tag, employees by employeeNo,
- * categories by name, approvals by refNo read back from the DB.
- */
-const db = new PrismaClient();
-const P = "purchasing@thebackroomop.com";
-const IT = "it@thebackroomop.com";
-const ADMIN = "admin@thebackroomop.com";
+and keep the `?status=SPARE` → switch → `cls=PURCHASING` tail as `purchasing@`.
 
-test.beforeAll(() => {
-  execSync("npm run db:seed", { timeout: 120_000 });
-});
-test.afterAll(async () => {
-  await db.$disconnect();
-});
+Case 17 (line 369-385): the `it@` half (lines 370-373) becomes: `await page.goto(`/inventory/${carId}/edit`)` then the same not-found assertion case 5 uses at line 142. The `purchasing@` half is unchanged (`BR-LT-0148` is seeded checked, so Edit redirects to the record).
 
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-}
+Case 18 (line 391-392): `expect(options).toContain("Laptop");`.
 
-const idOf = async (tag: string) => (await db.asset.findUniqueOrThrow({ where: { tag }, select: { id: true } })).id;
+- [ ] **Step 2: axe** — `IT_STAFF_ROUTES` + `"/employees/new"`; `PURCHASING_STAFF_ROUTES` + `"/approvals", "/employees", "/admin/asset-categories", "/admin/asset-types", "/inventory?cls=PURCHASING"`; remove `"/inventory?cls=PURCHASING"` from `VIEWER_STATIC_ROUTES`.
 
-/** Drives the worker exactly like asset-classes.spec.ts — the job was enqueued by the REAL approve action this time. */
-function runWorkerOnce() {
-  execSync("npm run worker:once", { timeout: 60_000, stdio: "inherit" });
-}
+- [ ] **Step 3: The new spec** — write `e2e/department-owned.spec.ts` with the header, `login`, `idOf` and `runWorkerOnce` helpers exactly as in `asset-classes.spec.ts`, and these cases. Selectors verified against the components in this plan: buttons **Assign holder** / **Return** / **Mark checked** / **Confirm details** / **Edit**; dialogs **Assign a holder** / **Request a return**; `Document kind` select, `input[type="file"]`, **Mark signed**; `New category name`, `New type name`, `Class for the new category`, `Category for the new type`; the queue `getByRole("group", { name: /Approval queue/ })`.
 
+```ts
 test.describe.serial("Purchasing owns its approvals", () => {
-  let refNo = "";
-
-  test("1. Purchasing requests, sees, claims, approves; the worker executes; IT never saw it", async ({ page }) => {
-    const id = await idOf("BR-VH-0002"); // STORED, unheld
+  test("1. request → Purchasing's queue, not IT's → claim → approve → worker executes", async ({ page }) => {
+    const id = await idOf("BR-VH-0002");
     await login(page, P);
     await page.goto(`/inventory/${id}`);
     await page.getByRole("button", { name: "Request status change" }).click();
@@ -1429,17 +1441,12 @@ test.describe.serial("Purchasing owns its approvals", () => {
     await page.getByLabel("Reason").fill("e2e — brake pads");
     await page.getByRole("dialog", { name: "Request a status change" }).getByRole("button", { name: "Request", exact: true }).click();
     await expect(page.getByText(/created — waiting in the approval queue/)).toBeVisible();
-    refNo = (await db.approval.findFirstOrThrow({ where: { assetId: id, state: "PENDING" } })).refNo;
-
-    // Purchasing's queue shows it; IT's does not.
+    const refNo = (await db.approval.findFirstOrThrow({ where: { assetId: id, state: "PENDING" } })).refNo;
     await page.goto("/approvals");
     await expect(page.getByRole("row", { name: new RegExp(refNo) })).toBeVisible();
-    await expect(page.getByText("J/K move")).toBeVisible(); // canAct copy
     await login(page, IT);
     await page.goto("/approvals");
     await expect(page.getByRole("row", { name: new RegExp(refNo) })).toHaveCount(0);
-
-    // Back as Purchasing: claim and approve through the real buttons.
     await login(page, P);
     await page.goto("/approvals");
     await page.getByRole("link", { name: refNo }).click();
@@ -1448,276 +1455,116 @@ test.describe.serial("Purchasing owns its approvals", () => {
     await expect(page.getByText(`${refNo} claimed`)).toBeVisible();
     await page.getByRole("button", { name: "Approve" }).click();
     await expect(page.getByText(`${refNo} approved`)).toBeVisible();
-
-    // The real action enqueued the job — nothing is created by hand here.
-    expect(await db.job.count({ where: { type: "EXECUTE_APPROVAL", payload: { path: ["approvalId"], equals: (await db.approval.findUniqueOrThrow({ where: { refNo } })).id } } })).toBe(1);
     runWorkerOnce();
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).status).toBe("REPAIRING");
     expect((await db.approval.findUniqueOrThrow({ where: { refNo } })).state).toBe("EXECUTED");
   });
-
-  test("2. IT cannot act on a Purchasing approval, even by URL", async ({ page }) => {
-    const id = await idOf("BR-FN-0003"); // STORED furniture
-    await login(page, P);
-    await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
-    await page.getByLabel("New status").selectOption("RETIRED");
-    await page.getByLabel("Reason").fill("e2e — broken leg");
-    await page.getByRole("dialog", { name: "Request a status change" }).getByRole("button", { name: "Request", exact: true }).click();
-    await expect(page.getByText(/created — waiting in the approval queue/)).toBeVisible();
-    const approval = await db.approval.findFirstOrThrow({ where: { assetId: id, state: "PENDING" } });
-
-    await login(page, IT);
-    await page.goto(`/approvals/${approval.id}`);
-    await expect(page.getByRole("heading", { name: approval.refNo })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("button", { name: "Claim" })).toHaveCount(0);
-    expect((await db.approval.findUniqueOrThrow({ where: { id: approval.id } })).state).toBe("PENDING");
-  });
-
-  test("3. admin's queue shows both classes", async ({ page }) => {
-    await login(page, ADMIN);
-    await page.goto("/approvals");
-    await expect(page.getByRole("row", { name: /APR-2041/ })).toBeVisible(); // seeded IT
-    const fn = await db.approval.findFirstOrThrow({ where: { asset: { tag: "BR-FN-0003" }, state: "PENDING" } });
-    await expect(page.getByRole("row", { name: new RegExp(fn.refNo) })).toBeVisible();
-  });
+  test("2. IT cannot act on a Purchasing approval, even by URL", …)   // as drafted in the previous plan version
+  test("3. admin's queue shows both classes", …)
 });
+test.describe.serial("Assign holder / Return", () => { test("4. …") ; test("5. …") });
+test.describe("documents by class", () => { test("6. …") });
+test.describe.serial("categories and types by class", () => { test("7. …") });
+test.describe("labels", () => { test("8. …") });
+test.describe.serial("new employee", () => { test("9. …"); test("10. …") });
+test.describe("Purchasing Home", () => { test("11. Approvals waiting and Awaiting IT check", …) });
 
-test.describe.serial("Assign holder / Return from the asset record", () => {
-  test("4. Purchasing assigns a stored car, approves, the car is held; then returns it", async ({ page }) => {
-    // BR-VH-0002 was executed to REPAIRING in case 1 — put it back to STORED via Prisma, which the trigger allows.
-    await db.asset.update({ where: { tag: "BR-VH-0002" }, data: { status: "STORED" } });
-    const id = await idOf("BR-VH-0002");
-    await login(page, P);
-    await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Assign holder" }).click();
-    const dialog = page.getByRole("dialog", { name: "Assign a holder" });
-    await dialog.getByRole("combobox").fill("EMP-0097");
-    await dialog.getByRole("option", { name: /EMP-0097/ }).click();
-    await dialog.getByLabel("Reason").fill("e2e — pool car to Nina");
-    await dialog.getByRole("button", { name: "Request assign" }).click();
-    await expect(page.getByText(/created — waiting in the approval queue/)).toBeVisible();
-    const assign = await db.approval.findFirstOrThrow({ where: { assetId: id, state: "PENDING", type: "lifecycle_assign" } });
-    // The control is absent while the approval is open.
-    await page.reload();
-    await expect(page.getByRole("button", { name: "Assign holder" })).toHaveCount(0);
-
-    await page.goto(`/approvals/${assign.id}`);
-    await page.getByRole("button", { name: "Claim" }).click();
-    await expect(page.getByText(`${assign.refNo} claimed`)).toBeVisible();
-    await page.getByRole("button", { name: "Approve" }).click();
-    await expect(page.getByText(`${assign.refNo} approved`)).toBeVisible();
-    runWorkerOnce();
-    const held = await db.asset.findUniqueOrThrow({ where: { id }, include: { assignee: true } });
-    expect(held.status).toBe("OPERATIONAL");
-    expect(held.assignee?.employeeNo).toBe("EMP-0097");
-
-    await page.goto(`/inventory/${id}`);
-    await expect(page.getByText(/held by/)).toBeVisible();
-    await page.getByRole("button", { name: "Return" }).click();
-    const ret = page.getByRole("dialog", { name: "Request a return" });
-    await ret.getByLabel("Reason").fill("e2e — back to the pool");
-    await ret.getByRole("button", { name: "Request return" }).click();
-    await expect(page.getByText(/created — waiting in the approval queue/)).toBeVisible();
-    const returned = await db.approval.findFirstOrThrow({ where: { assetId: id, state: "PENDING", type: "lifecycle_return" } });
-    expect((returned.payload as { to: { status: string } }).to.status).toBe("STORED");
-  });
-
-  test("5. on a laptop, Purchasing has no holder control and the holder link opens read-only", async ({ page }) => {
-    const id = await idOf("BR-LT-0148"); // DEPLOYED, held
-    await login(page, P);
-    await page.goto(`/inventory/${id}`);
-    await expect(page.getByRole("button", { name: "Return" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Assign holder" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Edit" })).toHaveCount(0);
-    await page.getByRole("link", { name: /held by/ }).or(page.locator('a[href^="/employees/"]').first()).click();
-    await expect(page).toHaveURL(/\/employees\/[^/]+$/);
-    await expect(page.getByRole("region", { name: "Loadout view" }).or(page.getByLabel("Loadout view"))).toBeVisible();
-    await expect(page.getByRole("link", { name: "Edit" })).toHaveCount(0);
-  });
-});
-
-test.describe("documents by class", () => {
-  const pdf = { name: "orcr.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%e2e\n") };
-
-  test("6. Purchasing files a car's papers and signs them; a laptop's panel is read-only for Purchasing", async ({ page }) => {
+test.describe("visibility", () => {
+  test("12. IT is redirected off the Purchasing view, cannot open a car, and the scan card says so", async ({ page }) => {
     const car = await idOf("BR-VH-0001");
-    await login(page, P);
-    await page.goto(`/inventory/${car}/documents`);
-    await page.getByLabel("Document kind").selectOption("other");
-    await page.locator('input[type="file"]').setInputFiles(pdf);
-    await expect(page.getByText("orcr.pdf")).toBeVisible();
-    await page.getByRole("button", { name: "Mark signed" }).click();
-    await expect(page.getByText("SIGNED")).toBeVisible();
-    expect(await db.assetDocument.count({ where: { assetId: car, signed: true } })).toBe(1);
-
-    const laptop = await idOf("BR-LT-0148");
-    await page.goto(`/inventory/${laptop}/documents`);
-    await expect(page.getByRole("button", { name: "Choose file" })).toHaveCount(0);
-    await expect(page.getByLabel("Document kind")).toHaveCount(0);
-  });
-});
-
-test.describe.serial("categories and types by class", () => {
-  test("7. Purchasing creates Office Supplies (class forced) and a Shredder under it; IT never sees the row", async ({ page }) => {
-    await login(page, P);
-    await page.goto("/admin/asset-categories");
-    await expect(page.getByRole("combobox", { name: "Class for the new category" })).toHaveCount(0);
-    await expect(page.getByLabel("Class for the new category")).toHaveText("PURCHASING");
-    await page.getByLabel("New category name").fill("Office Supplies");
-    await page.getByRole("button", { name: "Add" }).click();
-    await expect(page.getByRole("row", { name: /Office Supplies/ })).toBeVisible();
-    const cat = await db.assetCategory.findUniqueOrThrow({ where: { name: "Office Supplies" } });
-    expect(cat.cls).toBe("PURCHASING");
-    await expect(page.getByRole("row", { name: /Laptop/ })).toHaveCount(0);
-
-    await page.goto("/admin/asset-types");
-    const picker = page.getByLabel("Category for the new type");
-    const offered = await picker.locator("option").allTextContents();
-    expect(offered).toContain("Office Supplies");
-    expect(offered).not.toContain("Laptop");
-    await picker.selectOption({ label: "Office Supplies" });
-    await page.getByLabel("New type name").fill("Shredder");
-    await page.getByRole("button", { name: "Add" }).click();
-    await expect(page.getByRole("row", { name: /Shredder/ })).toBeVisible();
-
     await login(page, IT);
-    await page.goto("/admin/asset-categories");
-    await expect(page.getByRole("row", { name: /Office Supplies/ })).toHaveCount(0);
-    await expect(page.getByRole("row", { name: /Laptop/ })).toBeVisible();
-
-    await login(page, ADMIN);
-    await page.goto("/admin/asset-categories");
-    await expect(page.getByRole("row", { name: /Office Supplies/ })).toContainText("PURCHASING");
-    await expect(page.getByRole("combobox", { name: "Class for the new category" })).toBeVisible();
-  });
-});
-
-test.describe("labels", () => {
-  test("8. Purchasing prints two cars; a smuggled laptop id is skipped and counted", async ({ page }) => {
-    const [a, b, lt] = await Promise.all([idOf("BR-VH-0001"), idOf("BR-VH-0002"), idOf("BR-LT-0148")]);
+    await page.goto("/inventory?cls=PURCHASING");
+    await expect(page).toHaveURL(/\/inventory$/);
+    await expect(page.getByRole("navigation", { name: "Asset class" })).toHaveCount(0);
+    await page.goto(`/inventory/${car}`);
+    await expect(page.getByText(/not found/i)).toBeVisible();
+    await page.goto("/inventory/scan/BR-VH-0001");
+    await expect(page.getByText("BR-VH-0001 is not in your register.")).toBeVisible();
     await login(page, P);
-    await page.goto(`/inventory/labels?ids=${a},${b}`);
-    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("img", { name: "Barcode BR-VH-0001" })).toBeVisible();
-    await expect(page.getByRole("img", { name: "Barcode BR-VH-0002" })).toBeVisible();
-    await expect(page.getByText("2 labels · 1 sheet")).toBeVisible();
-
-    await page.goto(`/inventory/labels?ids=${a},${lt}`);
-    await expect(page.getByText("1 selected asset could not be printed and was skipped.")).toBeVisible();
-    await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toHaveCount(0);
+    await page.goto(`/inventory/${car}`);
+    await expect(page.getByRole("heading", { name: "BR-VH-0001" })).toBeVisible();
+    await page.goto("/inventory/scan/BR-VH-0001");
+    await expect(page.getByRole("button", { name: "Open full record" }).or(page.getByRole("link", { name: "Open full record" }))).toBeVisible();
   });
 });
 
-test.describe.serial("new employee", () => {
-  test("9. IT creates an employee and a case-variant duplicate is refused", async ({ page }) => {
+test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
+  let tag = "";
+  let id = "";
+  test("13a. Purchasing registers a laptop; it awaits IT; Purchasing can still edit", async ({ page }) => {
+    tag = tagOf("LT", (await highestNumber("LT")) + 1);
+    await login(page, P);
+    await page.goto("/inventory/register");
+    await page.getByLabel("Category").selectOption({ label: "Laptop" });
+    await page.getByLabel("Model").fill("ThinkPad T14 Gen 5 (e2e)");
+    await page.getByLabel("Quantity").fill("1");
+    await expect(page.getByLabel("Tag 1")).toHaveValue(tag);
+    await page.getByRole("button", { name: "Register asset" }).click();
+    await page.waitForURL((url) => url.pathname === "/inventory");
+    const a = await db.asset.findUniqueOrThrow({ where: { tag } });
+    id = a.id;
+    expect(a.cls).toBe("IT");
+    expect(a.itVerifiedAt).toBeNull();
+    await page.goto(`/inventory/${id}`);
+    await expect(page.getByText("AWAITING IT CHECK")).toBeVisible();
+    await page.getByRole("link", { name: "Edit" }).click();
+    await page.getByLabel("Model").fill("ThinkPad T14 Gen 5 (e2e, corrected)");
+    await page.getByRole("button", { name: /Save/ }).click();
+    await expect(page.getByText(/Saved|saved/)).toBeVisible();
+  });
+  test("13b. Finance cannot see or confirm it yet", async ({ page }) => {
+    await login(page, FIN);
+    await page.goto("/finance/assets");
+    await expect(page.getByRole("link", { name: tag })).toHaveCount(0);
+    await page.goto(`/inventory/${id}`);
+    await expect(page.getByRole("button", { name: "Confirm details" })).toHaveCount(0);
+  });
+  test("13c. IT's Home lists it under CHECK; IT marks it checked; Purchasing's Edit is gone", async ({ page }) => {
     await login(page, IT);
-    await page.goto("/employees");
-    await page.getByRole("link", { name: "New employee" }).click();
-    await expect(page).toHaveURL(/\/employees\/new$/);
-    await page.getByLabel("Employee number").fill("EMP-9001");
-    await page.getByLabel("Name").fill("Test Person");
-    await page.getByLabel("Title").fill("Analyst");
-    await page.getByLabel("Department").selectOption({ label: "IT" });
-    await page.getByRole("button", { name: "Create employee" }).click();
-    await expect(page).toHaveURL(/\/employees\/[^/]+$/);
-    await expect(page.getByRole("heading", { name: "Test Person" })).toBeVisible();
-    const row = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-9001" } });
-    expect(row.employment).toBe("ACTIVE");
-    expect(await db.auditEntry.count({ where: { entityType: "employee", entityId: row.id, action: "create" } })).toBe(1);
-
-    await page.goto("/employees/new");
-    await page.getByLabel("Employee number").fill("emp-9001");
-    await page.getByLabel("Name").fill("Someone Else");
-    await page.getByLabel("Title").fill("Clerk");
-    await page.getByRole("button", { name: "Create employee" }).click();
-    await expect(page.getByText("That employee number is already in use")).toBeVisible();
-    expect(await db.employee.count({ where: { employeeNo: { equals: "emp-9001", mode: "insensitive" } } })).toBe(1);
-  });
-
-  test("10. Purchasing cannot open the create or edit forms", async ({ page }) => {
-    const emp = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0097" } });
-    await login(page, P);
-    await page.goto("/employees/new");
-    await expect(page).not.toHaveURL(/\/employees\/new/);
-    await page.goto(`/employees/${emp.id}/edit`);
-    await expect(page).not.toHaveURL(/\/edit$/);
-    await page.goto(`/employees/${emp.id}`);
-    await expect(page.getByRole("heading", { name: emp.name })).toBeVisible();
-  });
-});
-
-test.describe("Purchasing Home", () => {
-  test("11. Approvals waiting counts the open Purchasing approvals", async ({ page }) => {
-    const expected = await db.approval.count({
-      where: { state: { in: ["PENDING", "CLAIMED"] }, OR: [{ assetId: null }, { asset: { cls: "PURCHASING" } }] },
-    });
-    await login(page, P);
     await page.goto("/");
-    await expect(page.getByText("Approvals waiting")).toBeVisible();
-    await expect(page.getByRole("link", { name: String(expected), exact: true })).toBeVisible();
+    await expect(page.getByText(new RegExp(tag))).toBeVisible();
+    await page.goto(`/inventory/${id}`);
+    await page.getByRole("button", { name: "Mark checked" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Mark checked" }).click();
+    await expect(page.getByText(/checked — Finance can see it now/)).toBeVisible();
+    await expect(page.getByText("AWAITING FINANCE")).toBeVisible();
+    expect((await db.asset.findUniqueOrThrow({ where: { id } })).itVerifiedAt).not.toBeNull();
+    await login(page, P);
+    await page.goto(`/inventory/${id}`);
+    await expect(page.getByRole("link", { name: "Edit" })).toHaveCount(0);
+  });
+  test("13d. Finance now lists and confirms it", async ({ page }) => {
+    await login(page, FIN);
+    await page.goto("/finance/assets");
+    await expect(page.getByRole("link", { name: tag })).toBeVisible();
+    await page.goto(`/inventory/${id}`);
+    await page.getByRole("button", { name: "Confirm details" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByText(/FINANCE CONFIRMED/)).toBeVisible();
   });
 });
 ```
 
-- [ ] **Step 2: axe sweep**
+Where a case says "as drafted in the previous plan version", the full bodies are in git at `600949c:docs/superpowers/plans/2026-09-07-phase-14-department-owned-classes.md` Task 11 — copy them verbatim, then apply one change to case 5: the laptop `BR-LT-0148` is seeded checked, so Purchasing has **no** Edit link (assert `toHaveCount(0)`). Constants: `P`, `IT`, `ADMIN`, `FIN` = the four seed emails; `tagOf`/`highestNumber` copied from `asset-classes.spec.ts:43-48`.
 
-In `e2e/axe-sweep.spec.ts`, extend `IT_STAFF_ROUTES` with `"/employees/new"` and `PURCHASING_STAFF_ROUTES` with `"/approvals", "/employees", "/admin/asset-categories", "/admin/asset-types"`.
+- [ ] **Step 4: Run** `npx playwright test e2e/department-owned.spec.ts e2e/asset-classes.spec.ts` → PASS. Fix selectors against the rendered DOM in the **test**, recording each as a `D-` amendment at the top of this plan.
 
-- [ ] **Step 3: Run the new file alone, then fix selectors against reality**
+- [ ] **Step 5: The whole battery** — `npm run typecheck && npm run lint && npm test && npx playwright test`. Record exact counts in the commit body.
 
-Run: `npx playwright test e2e/department-owned.spec.ts`
-Expected: PASS, 11 tests. If a selector in this plan does not match the rendered DOM, fix the **test**, and record the fix as a `D-` amendment at the top of this plan (the Phase 13 plan shows the form). Case 5's holder-link and loadout selectors are the most likely to need it; the component's `aria-label="Loadout view"` is on a `section`-like element, so `getByLabel("Loadout view")` is the fallback already written in.
-
-- [ ] **Step 4: Run the whole battery**
-
-Run: `npm run typecheck && npm run lint && npm test && npx playwright test`
-Expected: unit `51 + 1 files`, `908 + 22 + N` tests (N = the workspaces cases added in Task 2); e2e `187 + 11`. Record the exact numbers in the commit body.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add e2e/department-owned.spec.ts e2e/axe-sweep.spec.ts
-git commit -m "test(phase-14): department-owned e2e -- Purchasing approves through the real actions (closes D-19)"
-```
+- [ ] **Step 6: Commit** `test(phase-14): department-owned e2e; Phase 13 cases 2/10/17/18 flipped for asymmetric visibility`
 
 ---
 
-### Task 12: The record — PICKUP, HANDOVER, seed comment, spec status
+### Task 16: The record
 
-**Files:**
-- Modify: `prisma/seed.ts:12, 20`
-- Modify: `docs/PICKUP.md` §1 table (Last two phases, Battery), §3 third bullet, §4 item 3, §5
-- Modify: `docs/HANDOVER.md` §8 Phase 13 block (line ≈2476)
-- Modify: `docs/superpowers/specs/2026-09-07-department-owned-classes-design.md` Status line
+**Files:** `docs/PICKUP.md` §1, §3, §4, §5 · `docs/HANDOVER.md` §8 Phase 13 block (≈2476) and §7 migration count · the spec's **Status** line
 
-- [ ] **Step 1: Seed comment**
+- [ ] **Step 1: PICKUP** — §1: migrations 14 → 15; battery numbers from Task 15; "Last two phases" → Phase 13 and Phase 14 summaries. §3: replace the "Each class is registered…" bullet with: "**IT sees and manages IT assets only. Purchasing sees everything, registers both classes and manages Purchasing assets. A Purchasing-registered IT asset is IT's and waits for IT's check before Finance sees it. Finance confirms everything.** Offboarding stays IT-run and shared; the class owner approves the return. Person-centric pages show every class, with invisible tags as text. (Phase 14.)" §4: item 3 → Phase 15 candidates: the depreciation module (user's choice, own brainstorm), Purchasing bulk import, an unassigned-holder detector for Purchasing, the year-chip empty state, one markup for the class switches. §5: drop the D-19 bullet; add "`/audit` and `/inventory/activity` exclude invisible assets by id list — fine while the Purchasing fleet is small; revisit if it grows past a few thousand rows."
+- [ ] **Step 2: HANDOVER** — §8: strike the closed items (Purchasing-owned approvals, assign/return surface, class-aware documents, Purchasing label sheet, D-19 real-approve gap); add "**Phase 14** closed the above on YYYY-MM-DD; spec `2026-09-07-department-owned-classes-design.md`." §7: migration count 15.
+- [ ] **Step 3: Spec Status** → "implemented on branch `phase-14-department-owned-classes`, YYYY-MM-DD; amendments, if any, are `D-` entries at the top of the plan."
+- [ ] **Step 4: Commit** `docs(phase-14): PICKUP, HANDOVER and spec status reflect department-owned classes`
 
-Line 12: "twelve accounts" → "five accounts". Line 20: `"…so all twelve accounts "` → `"…so all five accounts "`. Nothing else in the seed changes.
-
-- [ ] **Step 2: PICKUP**
-
-- §3 third bullet becomes: "**Each class is registered, created, edited, requested, approved, assigned, returned, documented, categorised and labelled by its own department; everything else is shared.** Offboarding and Finance review are deliberately not class-gated. Reads are shared: Purchasing can open `/employees` and IT can open a car. (Phase 14; the Phase 13 asymmetry on approvers is closed.)"
-- §4 item 3 is replaced by the Phase 14 leftovers: Purchasing bulk import (Phase 15), the unassigned-holder detector for Purchasing, the year-chip empty state, one markup for the two class switches.
-- §5: remove the D-19 bullet ("no test drives a Purchasing approval through the real approve action") — case 1 now does.
-- §1 "Last two phases": Phase 13 → Phase 14 summary; update the battery numbers from Task 11 Step 4.
-
-- [ ] **Step 3: HANDOVER §8**
-
-In the Phase 13 deferred block, strike the four items this phase closed (Purchasing-owned approvals, assign/return surface, class-aware documents, Purchasing label sheet) and the D-19 real-approve gap; leave the rest. Add one line: "**Phase 14** closed the above on 2026-09-XX; spec `2026-09-07-department-owned-classes-design.md`."
-
-- [ ] **Step 4: Spec status**
-
-Change the spec's **Status** line to: "implemented on branch `phase-14-department-owned-classes`, YYYY-MM-DD; amendments, if any, are `D-` entries at the top of the plan."
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add prisma/seed.ts docs/PICKUP.md docs/HANDOVER.md docs/superpowers/specs/2026-09-07-department-owned-classes-design.md
-git commit -m "docs(phase-14): PICKUP, HANDOVER and seed comment reflect department-owned classes"
-```
-
-Then stop. Merging `phase-14-department-owned-classes` into `main` and pushing are the user's decisions (PICKUP §3).
+Then stop. Merging and pushing are the user's decisions.
 
 ---
 
@@ -1725,19 +1572,20 @@ Then stop. Merging `phase-14-department-owned-classes` into `main` and pushing a
 
 | Spec | Task |
 |---|---|
-| §2 table, every verb | 3 (approvals), 4 (assign/return), 6 (documents), 7 (categories/types), 8 (labels) |
-| §3.1–3.3 approvals, no-asset rule | 1, 3 |
-| §3.4 surfaces: path, nav, Home stat | 2, 10 |
-| §4.1–4.2 HolderControl and guards | 4, 5 |
-| §4.3 Purchasing reads `/employees` | 2 (+ e2e 5, 10) |
-| §5 documents | 6 |
-| §6.1–6.4 reference data | 2, 7 |
-| §7 labels | 2, 8 |
-| §8 new-employee form | 2 (path), 9 |
-| §9 path table | 2 |
-| §10 seed comment | 12 |
-| §11.1 unit tests | 1, 2 |
-| §11.2 e2e 1–11, axe routes | 11 |
-| §13 docs | 12 |
+| §2 three maps, invariant, helpers | 1 |
+| §3.1 list, record, export, palette, scan, activity, audit | 4 |
+| §3.3 person pages, `<TagRef>` | 9 (loadout, offboarding), 7 (approval detail) |
+| §4 registration, stamping, import wizard | 5 |
+| §5.2 action · §5.3 Finance gate · §5.4 `canEditAsset` · §5.5 surfaces | 6 (action, pill, button, Finance query/confirm, CHECK rows), 4 & 5 (edit page / `updateAsset`), 14 (Purchasing stat) |
+| §6 approvals, badge, Home rows, no-asset rule | 1, 7 |
+| §7 HolderControl, guards, directory reads | 8, 9, 3 |
+| §8 documents | 10 |
+| §9 reference data | 11 |
+| §10 labels | 12 |
+| §11 employee form | 13, 3 (path) |
+| §12 paths and nav, class switch | 3, 4 |
+| §13 migration and seed | 2 |
+| §14.1 unit · §14.2 flips · §14.3 e2e · axe | 1, 3, 4 (audit-list), 6 (activity), 15 |
+| §16 docs | 16 |
 
-Type consistency checked: `isApprover`, `canActOnApproval`, `approvalClassWhere` (Task 1) are the names used in Tasks 3, 4, 6, 10; `activeEmployeeOptions` (Task 5) returns `ComboOption[]`, the type `HolderControl` and `EntityCombobox` consume; `RefTable.fixedCls` (Task 7) is passed by the categories page only; `listApprovals(tab, userId, role)` / `tabCounts(userId, role)` / `getApprovalsBadge(role)` / `purchasingHome(userId, role)` are the only signature changes and each has exactly one caller updated in its task.
+Type consistency: `canSeeClass`, `canRegisterClass`, `canEditAsset`, `isAwaitingItCheck`, `visibleClassWhere` (Task 1) are the names used in Tasks 4–7, 9, 14; `getVisibleAsset(id, role)` and `invisibleAssetIds(role)` (Task 4) are the only new query names; `TagRef` props `{ id, tag, visible, className? }` everywhere; `listApprovals(tab, userId, role)`, `tabCounts(userId, role)`, `getApprovalsBadge(role)`, `yourShift(userId, role, now?)`, `claimedByYou(userId, role)`, `purchasingHome(userId, role, now?)` each have exactly one caller updated in their task; `buildAuditWhere(state, hiddenAssetIds = [])` keeps every existing single-argument caller valid.
