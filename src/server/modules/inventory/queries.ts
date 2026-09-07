@@ -1,11 +1,11 @@
 import { cache } from "react";
-import type { AssetClass, Prisma } from "@prisma/client";
+import type { AssetClass, Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
   buildAssetOrderBy, buildAssetWhere, type PurchaseYearValue,
 } from "@/lib/inventory-list";
-import { statusesFor } from "@/lib/asset-class";
+import { ASSET_CLASSES, canSeeClass, statusesFor } from "@/lib/asset-class";
 import type { ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage } from "@/lib/repairs";
@@ -323,3 +323,20 @@ export const getAsset = cache((id: string) =>
     },
   }),
 );
+
+/** getAsset, but a class the role cannot see reads as absent (spec §3.1). */
+export async function getVisibleAsset(id: string, role: Role) {
+  const asset = await getAsset(id);
+  return asset && canSeeClass(role, asset.cls) ? asset : null;
+}
+
+/**
+ * Ids of the assets a role may NOT see — for excluding their audit rows. Empty
+ * for an all-class role; for IT it is the Purchasing fleet, which is small.
+ */
+export async function invisibleAssetIds(role: Role): Promise<string[]> {
+  const hidden = ASSET_CLASSES.filter((c) => !canSeeClass(role, c));
+  if (hidden.length === 0) return [];
+  const rows = await prisma.asset.findMany({ where: { cls: { in: hidden } }, select: { id: true } });
+  return rows.map((r) => r.id);
+}

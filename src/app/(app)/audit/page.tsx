@@ -6,6 +6,7 @@ import {
 } from "@/lib/url-state";
 import { AUDIT_ENTITY_TYPES, AUDIT_LIST_CONFIG, buildAuditWhere } from "@/lib/audit-list";
 import { listAudit } from "@/server/modules/audit/queries";
+import { invisibleAssetIds } from "@/server/modules/inventory/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
@@ -23,15 +24,16 @@ export default async function AuditPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const state = parseListState(toSearchParams(await searchParams), AUDIT_LIST_CONFIG);
+  const hidden = await invisibleAssetIds(user.role);
 
   // Entity facet counts read WITHOUT the entity filter applied (so unchecking
   // never zeroes the other options out) — one groupBy, no filter loop.
   const withoutEntity = { ...state, filters: { ...state.filters, entity: [] } };
   const [{ rows, total, pageCount }, entityGroups] = await Promise.all([
-    listAudit(state),
-    prisma.auditEntry.groupBy({ by: ["entityType"], where: buildAuditWhere(withoutEntity), _count: true }),
+    listAudit(state, hidden),
+    prisma.auditEntry.groupBy({ by: ["entityType"], where: buildAuditWhere(withoutEntity, hidden), _count: true }),
   ]);
 
   const entityOptions: FacetOptionLike[] = AUDIT_ENTITY_TYPES.map((t) => ({

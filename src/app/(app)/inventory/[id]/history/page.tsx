@@ -1,14 +1,16 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
-import { getAsset } from "@/server/modules/inventory/queries";
+import { requireUser } from "@/server/auth/guards";
+import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { historyRows } from "@/lib/history";
 import { fmtDate } from "@/lib/format";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function AssetHistoryPage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUser();
   const { id } = await params;
-  const asset = await getAsset(id);
+  const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   const entries = await prisma.auditEntry.findMany({
     where: { entityType: "asset", entityId: id },

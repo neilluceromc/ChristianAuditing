@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
-import { getAsset } from "@/server/modules/inventory/queries";
+import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { fmtDate } from "@/lib/format";
 import { SecretsPanel } from "@/components/inventory/secrets-panel";
 
 export default async function AssetSecretsPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const asset = await getAsset(id);
+  const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   // A car has no credentials. 404 rather than 403: the tab is not rendered
   // for this class, so a request here is a typed URL, and "there is nothing

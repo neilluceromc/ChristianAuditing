@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
-import { getAsset } from "@/server/modules/inventory/queries";
+import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
 import { CLASS_LABEL, canManageClass } from "@/lib/asset-class";
@@ -22,7 +22,7 @@ export default async function AssetRecordLayout({
 }) {
   const user = await requireUser();
   const { id } = await params;
-  const asset = await getAsset(id);
+  const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   const canMutate = canManageClass(user.role, asset.cls);
   const returned = asset.financeReturnedAt !== null;

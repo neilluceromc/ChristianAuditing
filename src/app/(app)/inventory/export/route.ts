@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { toXlsxBuffer } from "@/server/xlsx/write";
@@ -6,12 +7,12 @@ import { capRefusal, exportFilename, idsRefusal, xlsxResponse } from "@/server/e
 import {
   buildAssetOrderBy, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
-import { parseCls } from "@/lib/asset-class";
+import { parseCls, visibleClassWhere } from "@/lib/asset-class";
 import { parseListState, withFilter } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 
 export async function GET(req: Request) {
-  await requireUser();
+  const user = await requireUser();
   const url = new URL(req.url);
 
   const idsParam = url.searchParams.get("ids");
@@ -34,11 +35,12 @@ export async function GET(req: Request) {
   // CANDIDATE set in SQL, so a stage-filtered export must resolve to the same
   // exact ids the list screen shows, or the row count won't match the UI.
   const cutIds = ids ? null : await repairStageIds(state, purchaseYear, cls);
-  const where = ids
-    ? { id: { in: ids } }
+  const scope = visibleClassWhere(user.role);
+  const where: Prisma.AssetWhereInput = ids
+    ? { AND: [{ id: { in: ids } }, scope] }
     : cutIds !== null
-      ? { id: { in: cutIds } }
-      : buildAssetWhere(state, purchaseYear, cls);
+      ? { AND: [{ id: { in: cutIds } }, scope] }
+      : { AND: [buildAssetWhere(state, purchaseYear, cls), scope] };
 
   const count = await prisma.asset.count({ where });
   if (count > EXPORT_CAP) return capRefusal(count);

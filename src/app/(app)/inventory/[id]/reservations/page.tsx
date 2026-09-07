@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
-import { getAsset } from "@/server/modules/inventory/queries";
+import { requireUser } from "@/server/auth/guards";
+import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { fmtDate } from "@/lib/format";
 import { DEFAULT_STATUS } from "@/lib/asset-class";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
@@ -8,8 +9,9 @@ import { StatusDot } from "@/components/ui/status";
 import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function AssetReservationsPage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUser();
   const { id } = await params;
-  const asset = await getAsset(id);
+  const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   const reservations = await prisma.reservation.findMany({
     where: { assetId: id },

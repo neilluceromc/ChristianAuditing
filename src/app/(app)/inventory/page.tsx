@@ -8,7 +8,9 @@ import {
   INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
   type PurchaseYearValue,
 } from "@/lib/inventory-list";
-import { CLASS_LABEL, canManageClass, isStatusOf, parseCls, withClsQS } from "@/lib/asset-class";
+import {
+  CLASS_LABEL, VISIBLE_CLASSES, canManageClass, canRegisterClass, canSeeClass, isStatusOf, parseCls, withClsQS,
+} from "@/lib/asset-class";
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
@@ -33,8 +35,15 @@ export default async function InventoryPage({
   const sp = toSearchParams(await searchParams);
   let state = parseListState(sp, INVENTORY_LIST_CONFIG);
   const purchaseYear = parsePurchaseYear(sp.get("purchaseYear"));
-  const cls: AssetClass = parseCls(sp.get("cls")) ?? "IT";
+  const visible = VISIBLE_CLASSES[user.role];
+  const requested = parseCls(sp.get("cls"));
+  // Phase 14 (spec §3.1): a class this role cannot see is not a view it can
+  // ask for. Redirect to the bare list rather than render an empty table under
+  // a heading that names the other department's assets.
+  if (requested && !canSeeClass(user.role, requested)) redirect("/inventory");
+  const cls: AssetClass = requested ?? visible[0];
   const canMutate = canManageClass(user.role, cls);
+  const canRegister = canRegisterClass(user.role, cls);
 
   // A status from the other class is dropped by buildAssetWhere; drop it from
   // the state too, or the chip row advertises a filter that isn't applied and
@@ -131,7 +140,7 @@ export default async function InventoryPage({
                 stays IT-only regardless of the view: there is no Purchasing
                 import wizard yet (Task 10). */}
             {canMutate && cls === "IT" && <ButtonLink href="/inventory/import">Import</ButtonLink>}
-            {canMutate && <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>}
+            {canRegister && <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>}
           </>
         }
       />
@@ -143,6 +152,7 @@ export default async function InventoryPage({
           yearChips={yearChips}
           purchaseYear={purchaseYear}
           cls={cls}
+          classes={visible}
         >
           <ColumnChooser visible={visibleColumns} />
           {/* Saved views are named URLs (README): Repairs is one of them. */}
@@ -196,7 +206,7 @@ export default async function InventoryPage({
                 ? "Register the first asset, or use Import to bring in a spreadsheet."
                 : "Register the first asset — Purchasing assets are registered one batch at a time; there is no spreadsheet import for them yet."
             }
-            actions={canMutate ? <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink> : undefined}
+            actions={canRegister ? <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink> : undefined}
           />
         )}
       </div>

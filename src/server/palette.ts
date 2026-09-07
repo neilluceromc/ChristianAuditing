@@ -3,6 +3,7 @@
 import { prisma } from "./db/client";
 import { requireUser } from "./auth/guards";
 import { pathAllowedForRole } from "@/lib/workspaces";
+import { visibleClassWhere } from "@/lib/asset-class";
 
 export interface PaletteHit {
   label: string;
@@ -51,7 +52,12 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
   const [assets, people, requests] = await Promise.all([
     canAssets
       ? prisma.asset.findMany({
-          where: { OR: [{ tag: { contains: q, mode: "insensitive" } }, { model: { contains: q, mode: "insensitive" } }] },
+          where: {
+            AND: [
+              { OR: [{ tag: { contains: q, mode: "insensitive" } }, { model: { contains: q, mode: "insensitive" } }] },
+              visibleClassWhere(user.role),
+            ],
+          },
           take: 5,
           orderBy: { tag: "asc" },
         })
