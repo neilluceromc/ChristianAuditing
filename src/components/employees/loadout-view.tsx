@@ -9,6 +9,7 @@ import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field";
+import { Menu, type MenuItem } from "@/components/ui/menu";
 import { Pill } from "@/components/ui/pill";
 import { Select } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -18,8 +19,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { TagRef } from "@/components/inventory/tag-ref";
+import { AddSlotDialog, RemoveExceptionButton, WaiveSlotDialog } from "@/components/employees/slot-exception-controls";
 import { requestAssign, requestAssignReserved, requestReturn } from "@/server/modules/employees/actions";
 import { assignAsset, assignReserved, replaceAsset, returnAsset } from "@/server/modules/lifecycle/actions";
+import { removeSlotException } from "@/server/modules/employees/exception-actions";
 import { RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, reasonRequiredFor, type ReturnOutcome } from "@/lib/lifecycle";
 import type { ActionResult } from "@/server/action-result";
 
@@ -30,6 +33,12 @@ export interface SlotTile {
   typeName: string;
   required: boolean;
   asset: { id: string; tag: string; model: string; status: string; age: string; pendingRef: string | null; visible: boolean } | null;
+  /** Phase 16: filled only by a device on loan (TEMPORARY). */
+  loaner: boolean;
+  /** Phase 16: set when this slot came from an ADD exception — its row id, so the tile can remove it. */
+  exceptionId: string | null;
+  /** Phase 16: the reason recorded for the exception this tile came from, if any — surfaced as the EXCEPTION pill's tooltip. */
+  exceptionReason: string | null;
 }
 
 export interface SpareOption {
@@ -56,6 +65,9 @@ export function LoadoutView({
   employeeId,
   slots,
   unslotted,
+  onLoan,
+  waived,
+  itTypes,
   spares,
   holding,
   frozen,
@@ -65,6 +77,12 @@ export function LoadoutView({
   employeeId: string;
   slots: SlotTile[];
   unslotted: SlotTile["asset"][];
+  /** Phase 16: TEMPORARY devices no loaner slot claimed — never "extras". */
+  onLoan: SlotTile["asset"][];
+  /** Phase 16: this person's own WAIVE exceptions. */
+  waived: Array<{ id: string; slotName: string; reason: string }>;
+  /** Phase 16: IT asset types offered by the "Add a slot" dialog. */
+  itTypes: Array<{ id: string; name: string }>;
   spares: SpareOption[];
   holding: HoldingItem[];
   frozen: boolean;
@@ -82,6 +100,8 @@ export function LoadoutView({
   const [replacing, setReplacing] = useState<SlotTile["asset"] | null>(null);
   const [replacementId, setReplacementId] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<ReturnOutcome>("TRIAGE");
+  const [waivingSlot, setWaivingSlot] = useState<SlotTile | null>(null);
+  const [addingSlot, setAddingSlot] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
@@ -173,6 +193,16 @@ export function LoadoutView({
     });
   }
 
+  function removeException(id: string) {
+    setError(null);
+    startTransition(async () => {
+      handle(await removeSlotException({ id }), () => {
+        toast("Exception removed", "settled");
+        router.refresh();
+      });
+    });
+  }
+
   function submitReservedBatch() {
     setError(null);
     startTransition(async () => {
@@ -237,11 +267,18 @@ export function LoadoutView({
           value={view}
           onChange={setView}
         />
-        {mayAct && dayOne && reservedCount > 0 && (
-          <Button variant="primary" size="sm" loading={pending} onClick={submitReservedBatch}>
-            {direct ? `Assign all ${reservedCount} reserved` : `Request assign for all ${reservedCount} reserved`}
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {mayAct && dayOne && reservedCount > 0 && (
+            <Button variant="primary" size="sm" loading={pending} onClick={submitReservedBatch}>
+              {direct ? `Assign all ${reservedCount} reserved` : `Request assign for all ${reservedCount} reserved`}
+            </Button>
+          )}
+          {mayAct && (
+            <Button variant="secondary" size="sm" onClick={() => setAddingSlot(true)}>
+              Add a slot for this person…
+            </Button>
+          )}
+        </div>
       </div>
 
       {slots.length === 0 && (
@@ -256,12 +293,24 @@ export function LoadoutView({
             const a = tile.asset;
             const name = `${tile.name} slot, ${a ? a.model : "empty"}, ${tile.required ? "required" : "optional"}`;
             const showReplace = !!a && direct && mayAct && !a.pendingRef;
+            // Waiving is a policy-slot affordance (an ADD-exception slot is
+            // already only for this person — "Remove exception" is its
+            // undo); an exception tile never offers both at once.
+            const showWaive = mayAct && !tile.exceptionId;
+            const showRemoveException = mayAct && !!tile.exceptionId;
+            const menuItems: MenuItem[] = [];
+            if (showReplace && a) menuItems.push({ label: "⇄ Replace", onSelect: () => setReplacing(a) });
+            if (showWaive) menuItems.push({ label: "Waive for this person…", onSelect: () => setWaivingSlot(tile) });
+            if (showRemoveException && tile.exceptionId) {
+              const exceptionId = tile.exceptionId;
+              menuItems.push({ label: "Remove exception", onSelect: () => removeException(exceptionId) });
+            }
             return (
-              // A real Replace <button> cannot nest inside the tile's own
+              // A real Menu trigger cannot nest inside the tile's own
               // <button> (axe: nested-interactive / no-focusable-content) —
               // it renders as an absolutely positioned SIBLING instead, both
               // inside this "group relative" wrapper so hover/focus reveal
-              // still works via group-hover / focus-visible.
+              // still works via group-hover / focus-within.
               <div key={tile.slotId} className="group relative">
                 <button
                   ref={(el) => { tileRefs.current[i] = el; }}
@@ -290,6 +339,12 @@ export function LoadoutView({
                       <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-muted">{tile.name}</span>
                       <span className={cn("text-[11.5px] font-medium", a.pendingRef ? "text-fg-muted" : "text-fg")}>{a.model}</span>
                       <span className="font-mono text-[11px] text-accent">{a.tag}</span>
+                      {(tile.loaner || tile.exceptionId) && (
+                        <span className="flex flex-wrap items-center gap-1">
+                          {tile.loaner && <Pill>LOAN</Pill>}
+                          {tile.exceptionId && <Pill title={tile.exceptionReason ?? undefined}>EXCEPTION</Pill>}
+                        </span>
+                      )}
                       <span className="flex items-center justify-between font-mono text-[10px] text-fg-muted">
                         {a.pendingRef ?? a.age}
                         {mayAct && !a.pendingRef && (
@@ -306,6 +361,12 @@ export function LoadoutView({
                       <span className="font-mono text-[10px] text-fg-muted">
                         {tile.typeName} · {tile.required ? "required" : "optional"}
                       </span>
+                      {(tile.loaner || tile.exceptionId) && (
+                        <span className="flex flex-wrap items-center gap-1">
+                          {tile.loaner && <Pill>LOAN</Pill>}
+                          {tile.exceptionId && <Pill title={tile.exceptionReason ?? undefined}>EXCEPTION</Pill>}
+                        </span>
+                      )}
                       {tile.required && (
                         <span className="font-mono text-[10px] font-medium" style={{ color: "var(--st-attention-text)" }}>
                           policy gap
@@ -314,15 +375,23 @@ export function LoadoutView({
                     </>
                   )}
                 </button>
-                {showReplace && a && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setReplacing(a)}
-                    className="absolute right-1.5 top-1.5 h-auto rounded-[4px] border border-transparent bg-surface/90 px-1.5 py-0.5 font-mono text-[10px] text-fg-muted opacity-0 shadow-card transition-opacity duration-(--dur-1) hover:bg-surface hover:text-fg group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    ⇄ replace
-                  </Button>
+                {menuItems.length > 0 && (
+                  <div className="absolute right-1.5 top-1.5 opacity-0 transition-opacity duration-(--dur-1) group-hover:opacity-100 focus-within:opacity-100">
+                    <Menu
+                      align="end"
+                      trigger={(props) => (
+                        <button
+                          type="button"
+                          {...props}
+                          aria-label={`Actions for the ${tile.name} slot`}
+                          className="h-auto rounded-[4px] border border-transparent bg-surface/90 px-1.5 py-0.5 font-mono text-[10px] text-fg-muted shadow-card hover:bg-surface hover:text-fg"
+                        >
+                          ⋯
+                        </button>
+                      )}
+                      items={menuItems}
+                    />
+                  </div>
                 )}
               </div>
             );
@@ -354,6 +423,22 @@ export function LoadoutView({
             ))}
           </TBody>
         </Table>
+      )}
+
+      {onLoan.length > 0 && view === "slots" && (
+        <Card>
+          <CardHeader title="On loan" />
+          <CardBody className="flex flex-col gap-1.5">
+            {onLoan.filter(Boolean).map((a) => (
+              <div key={a!.id} className="flex items-center gap-2 text-xs text-fg-secondary">
+                <StatusDot value={a!.status} />
+                <TagRef id={a!.id} tag={a!.tag} visible={a!.visible} className="font-mono text-accent hover:underline" />
+                {a!.model}
+                <span className="ml-auto font-mono text-[10px] text-fg-muted">on loan</span>
+              </div>
+            ))}
+          </CardBody>
+        </Card>
       )}
 
       {unslotted.length > 0 && view === "slots" && (
@@ -391,6 +476,27 @@ export function LoadoutView({
             ))}
           </CardBody>
         </Card>
+      )}
+
+      {waived.length > 0 && (
+        <details className="rounded-(--radius-card) border border-border-faint">
+          <summary className="cursor-pointer select-none px-4 py-2.5 text-xs font-medium text-fg-secondary">
+            Waived for this person ({waived.length})
+          </summary>
+          <div className="flex flex-col gap-1.5 border-t border-border-faint px-4 py-3">
+            {waived.map((w) => (
+              <div key={w.id} className="flex items-center gap-2 text-xs text-fg-secondary">
+                <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-muted">{w.slotName}</span>
+                <span className="text-fg-muted">{w.reason}</span>
+                {mayAct && (
+                  <span className="ml-auto">
+                    <RemoveExceptionButton id={w.id} label="Restore" />
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       {/* Fill-slot dialog (the right-panel behaviour, rendered as an overlay for keyboard/mobile sanity) */}
@@ -572,6 +678,20 @@ export function LoadoutView({
           </FormField>
         </div>
       </Dialog>
+
+      <WaiveSlotDialog
+        employeeId={employeeId}
+        slot={{ id: waivingSlot?.slotId ?? "", name: waivingSlot?.name ?? "" }}
+        open={waivingSlot !== null}
+        onClose={() => setWaivingSlot(null)}
+      />
+
+      <AddSlotDialog
+        employeeId={employeeId}
+        itTypes={itTypes}
+        open={addingSlot}
+        onClose={() => setAddingSlot(false)}
+      />
     </div>
   );
 }

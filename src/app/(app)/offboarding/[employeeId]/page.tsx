@@ -114,14 +114,15 @@ export default async function OffboardingWizardPage({
             <Stat label="Book value out" value={fmtMoney(heldItems.reduce((s, i) => s + (i.cost ?? 0), 0))} />
             <Stat label="M365" value={employee.m365Status ?? "no sync yet"} />
           </div>
-          {/* keyed on the POLICY, not the slot count: resolvePolicy matches on
-              title/department regardless of how many slots the policy defines,
-              so a policy with none would otherwise report itself as absent */}
-          {data.policyName !== null && data.slots.length > 0 ? (
+          {/* keyed on the SLOT COUNT, not the policy: a person with no policy
+              can still carry ADD exceptions of their own (Phase 16, ruling
+              R6), and those slots deserve the same card — just under a title
+              that doesn't claim a policy that isn't there. */}
+          {data.slots.length > 0 ? (
             <Card>
               <CardHeader
-                title="Against their policy"
-                actions={<span className="font-mono text-[10.5px] text-fg-muted">{data.policyName}</span>}
+                title={data.policyName ? "Against their policy" : "Personal loadout"}
+                actions={data.policyName && <span className="font-mono text-[10.5px] text-fg-muted">{data.policyName}</span>}
               />
               <CardBody className="grid grid-cols-2 gap-[11px] lg:grid-cols-4">
                 {data.slots.map((s) => (
@@ -157,18 +158,9 @@ export default async function OffboardingWizardPage({
               </CardBody>
             </Card>
           ) : (
-            <Banner
-              tone="neutral"
-              title={
-                data.policyName === null
-                  ? "No equipment policy applies to this person"
-                  : `${data.policyName} defines no slots`
-              }
-            >
+            <Banner tone="neutral" title="No equipment policy applies to this person">
               {employee.title} · {employee.department}{" "}
-              {data.policyName === null
-                ? "has no policy, so there are no slots to check against"
-                : "matches a policy that lists no equipment, so there is nothing to check against"}{" "}
+              has no policy, so there are no slots to check against{" "}
               — the holdings below are the whole picture.
             </Banner>
           )}

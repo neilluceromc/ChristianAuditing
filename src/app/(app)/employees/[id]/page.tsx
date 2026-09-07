@@ -21,7 +21,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
   const employee = await prisma.employee.findUnique({ where: { id }, include: { department: true } });
   if (!employee) notFound();
 
-  const [held, reservations, openApprovals, policies, spareAssets, exceptions] = await Promise.all([
+  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes] = await Promise.all([
     prisma.asset.findMany({ where: { assigneeId: id }, orderBy: { tag: "asc" } }),
     prisma.reservation.findMany({ where: { employeeId: id, state: "ACTIVE" }, include: { asset: true } }),
     prisma.approval.findMany({
@@ -43,6 +43,11 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       include: { assetType: { select: { name: true } }, slot: { select: { name: true } } },
     }),
+    prisma.assetType.findMany({
+      where: { category: { cls: "IT" } },
+      select: { id: true, name: true },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    }),
   ]);
 
   const policy = resolvePolicy(employee, policies);
@@ -57,14 +62,28 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     visible: canSeeClass(user.role, a.cls),
   });
 
-  const slots: SlotTile[] = loadout.slots.map(({ slot, asset }) => ({
-    slotId: slot.id,
-    name: slot.name,
-    typeId: slot.assetTypeId,
-    typeName: typeName.get(slot.id) ?? "any",
-    required: slot.required,
-    asset: asset ? toTileAsset(asset) : null,
-  }));
+  const slots: SlotTile[] = loadout.slots.map(({ slot, asset }) => {
+    // An ADD-exception slot's id isn't a real PolicySlot id, so `typeName`
+    // (keyed on policy slot ids) never has it — fall back to the exception
+    // row's own assetType.name, which the query above included for exactly
+    // this reason.
+    const exception = exceptions.find((e) => e.id === slot.exceptionId);
+    return {
+      slotId: slot.id,
+      name: slot.name,
+      typeId: slot.assetTypeId,
+      typeName: typeName.get(slot.id) ?? exception?.assetType?.name ?? "any",
+      required: slot.required,
+      asset: asset ? toTileAsset(asset) : null,
+      loaner: slot.loaner,
+      exceptionId: slot.exceptionId ?? null,
+      exceptionReason: exception?.reason ?? null,
+    };
+  });
+
+  const waived = exceptions
+    .filter((e) => e.kind === "WAIVE")
+    .map((e) => ({ id: e.id, slotName: e.slot?.name ?? "removed slot", reason: e.reason }));
 
   const spares: SpareOption[] = spareAssets.map((a) => ({
     id: a.id, tag: a.tag, model: a.model, typeId: a.typeId,
@@ -156,6 +175,9 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             employeeId={id}
             slots={slots}
             unslotted={loadout.unslotted.map(toTileAsset)}
+            onLoan={loadout.onLoan.map(toTileAsset)}
+            waived={waived}
+            itTypes={itTypes}
             spares={spares}
             holding={holding}
             frozen={employee.employment !== "ACTIVE"}

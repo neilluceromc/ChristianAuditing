@@ -3,14 +3,18 @@ import { cn } from "@/lib/cn";
 export function Pill({
   tone = "neutral",
   className,
+  title,
   children,
 }: {
   tone?: "neutral" | "accent";
   className?: string;
+  /** Phase 16: a native tooltip — the EXCEPTION pill uses it to surface the reason. */
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center gap-1 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.06em]",
         tone === "accent"
