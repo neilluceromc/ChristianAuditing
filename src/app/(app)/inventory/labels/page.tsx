@@ -7,6 +7,7 @@ import { PrintButton } from "@/components/ui/print-button";
 import { LabelSheet } from "@/components/inventory/label-sheet";
 import { BULK_MAX } from "@/lib/inventory-list";
 import { CALIBRATION_MM, labelPages } from "@/lib/label-geometry";
+import { MANAGEABLE_CLASSES } from "@/lib/asset-class";
 
 export default async function LabelsPage({
   searchParams,
@@ -15,7 +16,7 @@ export default async function LabelsPage({
 }) {
   // A SET, not a floor — matching both importers. requireRole("it_staff")
   // alone would lock out admin, the role that runs this app.
-  await requireRole("admin", "it_staff");
+  const user = await requireRole("admin", "it_staff", "purchasing_staff");
   const raw = (await searchParams).ids;
   const idsParam = Array.isArray(raw) ? raw.join(",") : raw ?? "";
   const ids = [...new Set(idsParam.split(",").map((s) => s.trim()).filter(Boolean))];
@@ -31,7 +32,7 @@ export default async function LabelsPage({
   }
 
   const assets = ids.length
-    ? await prisma.asset.findMany({ where: { id: { in: ids } }, select: { tag: true, model: true }, orderBy: { tag: "asc" } })
+    ? await prisma.asset.findMany({ where: { id: { in: ids }, cls: { in: [...MANAGEABLE_CLASSES[user.role]] } }, select: { tag: true, model: true }, orderBy: { tag: "asc" } })
     : [];
 
   if (assets.length === 0) {
@@ -64,12 +65,11 @@ export default async function LabelsPage({
             {rows.length} label{rows.length === 1 ? "" : "s"} · {sheets} sheet{sheets === 1 ? "" : "s"}
           </p>
           {/* A stale selection must not silently print fewer stickers than the
-              operator counted. Cause-neutral (A-13's class): `ids.length -
-              assets.length` also counts an id that never existed, e.g. a
-              hand-edited `?ids=` — "no longer exist" would be false for
-              that case, "not found" is exact either way. */}
+              operator counted. Cause-neutral: `ids.length - assets.length`
+              counts an id whose asset was not found, or whose class this role
+              cannot manage — "could not be printed" covers both. */}
           {missing > 0 && (
-            <Banner tone="attention" title={`${missing} selected asset${missing === 1 ? "" : "s"} ${missing === 1 ? "was" : "were"} not found and skipped.`} />
+            <Banner tone="attention" title={`${missing} selected asset${missing === 1 ? "" : "s"} could not be printed and ${missing === 1 ? "was" : "were"} skipped.`} />
           )}
           <Banner tone="neutral" title="Before you print">
             Set <span className="font-mono">Scale: 100%</span>,{" "}

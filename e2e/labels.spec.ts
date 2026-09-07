@@ -91,8 +91,8 @@ test.describe("label sheet", () => {
   // a ruler on the first sheet says nothing about the second, and a test that
   // only ever renders one page could never catch a regression there.
   test("13 ids paginate into two sheets, each with its own accurate calibration bar", async ({ page }) => {
-    const assets = await db.asset.findMany({ orderBy: { tag: "asc" }, take: 13, select: { id: true } });
-    expect(assets.length).toBe(13); // the seed must still carry at least 13 assets for this to mean anything
+    const assets = await db.asset.findMany({ where: { cls: "IT" }, orderBy: { tag: "asc" }, take: 13, select: { id: true } });
+    expect(assets.length).toBe(13); // the seed must still carry at least 13 IT assets for this to mean anything
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/labels?ids=${assets.map((a) => a.id).join(",")}`);
     await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
@@ -153,7 +153,7 @@ test.describe("label sheet", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/labels?ids=${asset.id},nope1`);
     await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("1 selected asset was not found and skipped.")).toBeVisible();
+    await expect(page.getByText("1 selected asset could not be printed and was skipped.")).toBeVisible();
     await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toBeVisible();
   });
 

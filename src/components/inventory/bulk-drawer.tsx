@@ -116,10 +116,10 @@ export function BulkDrawer({
             rendered with an empty, non-allMatching selection. Kept anyway so
             the link stays ABSENT, not disabled, if that caller ever changes —
             the house rule for affordances that cannot act. */}
-        {/* /inventory/labels is IT-workspace-only (workspaces.ts PATH_RULES);
-            for a Purchasing selection the affordance is absent, not a link
-            that would eject the user out of the workspace. */}
-        {!allMatching && selectedIds.length > 0 && cls === "IT" && (
+        {/* /inventory/labels admits both departments (and prints what the role
+            manages). Labels need an explicit selection, so the affordance is
+            absent when "all matching" mode is on. */}
+        {!allMatching && selectedIds.length > 0 && (
           <a
             href={`/inventory/labels?ids=${selectedIds.join(",")}`}
             className="text-xs text-accent hover:underline"
