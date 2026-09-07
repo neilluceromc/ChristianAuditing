@@ -79,9 +79,9 @@ export function BulkDrawer({
       setRetryAfter(res.retryAfterSec ?? 60);
     } else if (res.kind === "validation") {
       setFieldErrors(res.fieldErrors ?? {});
-      // Field errors no FormField below claims (ids/filters/_form) must not
+      // Field errors no FormField below claims (ids/filters/status/_form) must not
       // dead-end silently — surface them in the banner.
-      const unclaimed = res.fieldErrors?.ids ?? res.fieldErrors?.filters ?? res.fieldErrors?._form;
+      const unclaimed = res.fieldErrors?.ids ?? res.fieldErrors?.filters ?? res.fieldErrors?.status ?? res.fieldErrors?._form;
       if (unclaimed) setError(unclaimed);
     } else {
       setError(res.message);
