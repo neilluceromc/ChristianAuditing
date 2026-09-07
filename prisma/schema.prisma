@@ -150,6 +150,8 @@ model User {
   financeConfirmed Asset[] @relation("financeConfirmedBy")
   financeReturned  Asset[] @relation("financeReturnedBy")
   itVerifiedAssets Asset[] @relation("itVerifiedBy")
+  slotExceptionsCreated EmployeeSlotException[] @relation("slotExceptionCreatedBy")
+  acknowledgementsRecorded Acknowledgement[] @relation("acknowledgementRecordedBy")
 }
 
 model UserPreference {
@@ -199,6 +201,7 @@ model AssetType {
   locked     Boolean       @default(false)
   assets     Asset[]
   policySlots PolicySlot[]
+  slotExceptions EmployeeSlotException[]
 
   @@unique([categoryId, name])
 }
@@ -229,6 +232,8 @@ model Employee {
   assets       Asset[]
   reservations Reservation[]
   approvals    Approval[]
+  slotExceptions EmployeeSlotException[]
+  acknowledgements Acknowledgement[]
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @default(now()) @updatedAt
 
@@ -288,6 +293,12 @@ model Asset {
   /// "back, not checked" and leaves the spare pool until IT triages it, which
   /// clears this. Any other status write clears it too.
   returnedAt           DateTime?
+  /// Phase 16: when a loan (status TEMPORARY) is due back. Set by an assignment
+  /// that lands on TEMPORARY; every other status write clears it.
+  loanDueAt            DateTime?
+  brand                String?
+  /// supplier invoice or receipt number, as Purchasing registered it
+  invoiceRef           String?
   secrets           AssetSecret[]
   documents         AssetDocument[]
   reservations      Reservation[]
@@ -306,6 +317,7 @@ model Asset {
   @@index([financeReturnedAt])
   @@index([itVerifiedAt])
   @@index([returnedAt])
+  @@index([loanDueAt])
   @@index([cls])
 }
 
@@ -475,6 +487,56 @@ model PolicySlot {
   assetTypeId String?
   assetType   AssetType?      @relation(fields: [assetTypeId], references: [id], onDelete: Restrict)
   required    Boolean         @default(true)
+  /// Phase 16: filled only by a device on loan (status TEMPORARY); standard
+  /// slots never are. computeLoadout applies the rule.
+  loaner      Boolean         @default(false)
+  waivers     EmployeeSlotException[]
+}
+
+enum SlotExceptionKind {
+  ADD
+  WAIVE
+}
+
+/// Phase 16 (spec §3.2): one person's deviation from their resolved policy.
+/// WAIVE names a policy slot they do not need (cascades away with the slot);
+/// ADD is an extra slot for them alone. Applied by effectiveSlots().
+model EmployeeSlotException {
+  id          String            @id @default(cuid())
+  employeeId  String
+  employee    Employee          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  kind        SlotExceptionKind
+  slotId      String?
+  slot        PolicySlot?       @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  name        String?
+  assetTypeId String?
+  assetType   AssetType?        @relation(fields: [assetTypeId], references: [id], onDelete: Restrict)
+  required    Boolean           @default(true)
+  loaner      Boolean           @default(false)
+  reason      String
+  createdById String
+  createdBy   User              @relation("slotExceptionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime          @default(now())
+
+  @@index([employeeId])
+}
+
+/// Phase 16 (spec §6): the signed accountability form, on the person.
+model Acknowledgement {
+  id           String   @id @default(cuid())
+  employeeId   String
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  signedAt     DateTime
+  fileName     String
+  path         String
+  checksum     String
+  /// [{ assetId, tag, model, serial }] held when the form was recorded
+  items        Json
+  recordedById String
+  recordedBy   User     @relation("acknowledgementRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime @default(now())
+
+  @@index([employeeId, signedAt])
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────
