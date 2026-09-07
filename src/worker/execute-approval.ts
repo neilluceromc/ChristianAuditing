@@ -3,9 +3,7 @@ import { prisma } from "../server/db/client";
 import { executionPlan } from "../lib/approval-execution";
 import { APPROVAL_TYPE_LABEL } from "../lib/labels";
 import { emitWebhook } from "../server/webhooks/emit";
-import { ASSIGNABLE_FROM, HOLDER_STATUSES } from "../lib/asset-class";
-
-type Diff = Record<string, { from: unknown; to: unknown }>;
+import { commitLifecycle, prepareLifecycle, type LifecycleChange } from "../server/modules/lifecycle/apply";
 
 /**
  * Entry criterion #1: a 48h-old approval trusts NOTHING from request time.
@@ -68,31 +66,14 @@ async function runExecution(approvalId: string): Promise<void> {
     const plan = executionPlan(approval.type, approval.payload, asset.cls);
     if (!plan.ok) return fail(plan.error);
 
-    // Per-type live re-validation.
-    let assigneeLabelFrom: string | null = null;
-    let assigneeLabelTo: string | null = null;
-    if (approval.type === "lifecycle_assign") {
-      const employee = plan.updates.assigneeId
-        ? await tx.employee.findUnique({ where: { id: plan.updates.assigneeId } })
-        : null;
-      if (!employee) return fail("Execution guard: target employee no longer exists — assignment refused");
-      if (employee.employment !== "ACTIVE") {
-        return fail(`Execution guard: target employee ${employee.employeeNo} is ${employee.employment} — assignment refused`);
-      }
-      if (asset.status !== ASSIGNABLE_FROM[asset.cls]) {
-        return fail(`Execution guard: ${asset.tag} reads ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — assignment refused`);
-      }
-      assigneeLabelTo = employee.employeeNo;
-    }
+    // The payload-shape checks stay here (they are about the approval, not the
+    // asset); the live asset guards and the write live in prepare/commitLifecycle,
+    // shared with Phase 15's direct actions so the two paths cannot drift.
     if (approval.type === "lifecycle_return") {
       const payload = approval.payload as { from?: { assigneeId?: unknown } } | null;
       const expected = typeof payload?.from?.assigneeId === "string" ? payload.from.assigneeId : null;
       if (asset.assigneeId !== expected) {
         return fail(`Execution guard: ${asset.tag} is no longer held by the expected employee — return refused`);
-      }
-      if (asset.assigneeId) {
-        const holder = await tx.employee.findUnique({ where: { id: asset.assigneeId } });
-        assigneeLabelFrom = holder?.employeeNo ?? asset.assigneeId;
       }
     }
     if (approval.type === "lifecycle_change_status") {
@@ -101,14 +82,15 @@ async function runExecution(approvalId: string): Promise<void> {
       if (expectedFrom && asset.status !== expectedFrom) {
         return fail(`Execution guard: ${asset.tag} reads ${asset.status}, payload expected ${expectedFrom} — refused`);
       }
-      // A held asset can't be status-changed out from under its holder — that
-      // would strand the assignment invisibly. Returns go through
-      // lifecycle.return; only holder-compatible statuses may apply here.
-      const keepsHolder = (HOLDER_STATUSES[asset.cls] as readonly string[]).includes(plan.updates.status);
-      if (asset.assigneeId && !keepsHolder) {
-        return fail(`Execution guard: ${asset.tag} is still assigned — request a lifecycle.return first, then change its status`);
-      }
     }
+    const change: LifecycleChange =
+      approval.type === "lifecycle_assign"
+        ? { kind: "assign", employeeId: plan.updates.assigneeId as string, status: plan.updates.status }
+        : approval.type === "lifecycle_return"
+          ? { kind: "return", status: plan.updates.status }
+          : { kind: "change-status", status: plan.updates.status };
+    const prepared = await prepareLifecycle(tx, asset, change);
+    if (!prepared.ok) return fail(prepared.error);
 
     // Claim the approval row FIRST (state-guarded): if a concurrent transition
     // got there, no asset write happens at all.
@@ -118,51 +100,17 @@ async function runExecution(approvalId: string): Promise<void> {
     });
     if (claimed.count === 0) return;
 
-    // Apply + audit the ASSET diff in the same transaction (entry criterion #2).
-    // The repairs view derives its Down clock and its stage chips from
-    // defectiveSince, so an item ENTERING defective has to start that clock —
-    // the offboarding wizard's Defective outcome arrives right here. It is
-    // never cleared: "has a defectiveSince but no longer reads DEFECTIVE" is
-    // precisely what the RETURNED OK stage means.
-    const updates: Prisma.AssetUpdateInput = { ...plan.updates };
-    if (plan.updates.status === "DEFECTIVE" && asset.status !== "DEFECTIVE") {
-      updates.defectiveSince = new Date();
-    }
-    await tx.asset.update({ where: { id: asset.id }, data: updates });
-    const diff: Diff = {};
-    if (plan.updates.status !== asset.status) diff.status = { from: asset.status, to: plan.updates.status };
-    // The diff is built from plan.updates, so a defectiveSince stamped just
-    // above would otherwise change the field that drives the Down column and
-    // three of the four stage chips with no AuditEntry at all — and the asset
-    // history pane is the only place anyone could look for when that clock
-    // started. It also matters on a second breakage: the stamp overwrites the
-    // first repair's start date, and this is the only record that it moved.
-    if (updates.defectiveSince !== undefined) {
-      diff.defectiveSince = { from: asset.defectiveSince, to: updates.defectiveSince as Date };
-    }
-    if (plan.updates.assigneeId !== undefined && plan.updates.assigneeId !== asset.assigneeId) {
-      diff.assignee = {
-        from: assigneeLabelFrom ?? asset.assigneeId,
-        to: plan.updates.assigneeId ? (assigneeLabelTo ?? plan.updates.assigneeId) : null,
-      };
-    }
+    await commitLifecycle(tx, asset.id, prepared.prepared);
+    const diff = prepared.prepared.diff;
     await tx.auditEntry.create({
       data: {
         actorLabel: "worker",
         entityType: "asset",
         entityId: asset.id,
         action: `${APPROVAL_TYPE_LABEL[approval.type]} executed`,
-        diff: Object.keys(diff).length ? (diff as Prisma.InputJsonObject) : undefined,
+        diff: Object.keys(diff).length ? (diff as unknown as Prisma.InputJsonObject) : undefined,
       },
     });
-
-    // Deploying a reserved asset settles the hold (recorded decision #5).
-    if (approval.type === "lifecycle_assign" && plan.updates.assigneeId) {
-      await tx.reservation.updateMany({
-        where: { assetId: asset.id, employeeId: plan.updates.assigneeId, state: "ACTIVE" },
-        data: { state: "FULFILLED", resolvedAt: new Date() },
-      });
-    }
 
     await tx.auditEntry.create({
       data: {
