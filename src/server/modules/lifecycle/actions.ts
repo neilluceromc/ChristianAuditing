@@ -8,7 +8,7 @@ import { actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { emitWebhook } from "@/server/webhooks/emit";
-import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
+import { OPEN_APPROVAL_STATES, createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
@@ -27,6 +27,15 @@ import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleC
 
 type Tx = Prisma.TransactionClient;
 type Actor = { id: string; name: string };
+
+/**
+ * Thrown inside a `$transaction` callback to force a rollback of every write
+ * made so far in that transaction. Prisma's interactive transactions only
+ * roll back on a thrown exception — a plain `return` from the callback
+ * commits whatever writes already happened. Caught just outside the
+ * `$transaction` call and converted back into a `conflict()` result.
+ */
+class DirectRefusal extends Error {}
 
 const assetSelect = {
   id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, returnedAt: true, model: true,
@@ -211,40 +220,51 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
   }
   const now = new Date();
   let out: { oldTag: string; newTag: string } | null = null;
-  const failure = await prisma.$transaction(async (tx) => {
-    const oldL = await loadDirect(tx, user, d.oldAssetId);
-    if ("failure" in oldL) return oldL.failure;
-    const newL = await loadDirect(tx, user, d.newAssetId);
-    if ("failure" in newL) return newL.failure;
-    const oldAsset = oldL.asset, newAsset = newL.asset;
-    if (oldAsset.assigneeId !== d.employeeId) return conflict(`${oldAsset.tag} isn't held by this person.`);
-    if (oldAsset.cls !== newAsset.cls) return conflict("Replace within one class only.");
-    if (!isAssignable(newAsset)) {
-      return conflict(newAsset.returnedAt
-        ? `${newAsset.tag} is back but not yet triaged — triage it first.`
-        : `${newAsset.tag} is ${newAsset.status}, not a spare.`);
-    }
-    let plan: ReturnType<typeof replacePlan>;
-    try { plan = replacePlan({ status: oldAsset.status }, d.outcome); }
-    catch { return conflict(`${oldAsset.tag} is ${oldAsset.status} — nothing to replace.`); }
+  let failure: ActionResult<never> | null | undefined;
+  try {
+    failure = await prisma.$transaction(async (tx) => {
+      const oldL = await loadDirect(tx, user, d.oldAssetId);
+      if ("failure" in oldL) return oldL.failure;
+      const newL = await loadDirect(tx, user, d.newAssetId);
+      if ("failure" in newL) return newL.failure;
+      const oldAsset = oldL.asset, newAsset = newL.asset;
+      if (oldAsset.assigneeId !== d.employeeId) return conflict(`${oldAsset.tag} isn't held by this person.`);
+      if (oldAsset.cls !== newAsset.cls) return conflict("Replace within one class only.");
+      if (!isAssignable(newAsset)) {
+        return conflict(newAsset.returnedAt
+          ? `${newAsset.tag} is back but not yet triaged — triage it first.`
+          : `${newAsset.tag} is ${newAsset.status}, not a spare.`);
+      }
+      let plan: ReturnType<typeof replacePlan>;
+      try { plan = replacePlan({ status: oldAsset.status }, d.outcome); }
+      catch { return conflict(`${oldAsset.tag} is ${oldAsset.status} — nothing to replace.`); }
 
-    const ret = await recordDirect(tx, {
-      actor: user, asset: oldAsset, now, type: "lifecycle_return", action: "lifecycle.replace", employeeId: d.employeeId,
-      change: { kind: "return", status: plan.oldStatus },
-      payload: { from: { assigneeId: d.employeeId }, to: { assigneeId: null, status: plan.oldStatus }, reason: d.reason || `replaced by ${newAsset.tag}` },
-      extraDiff: { replacedBy: { from: null, to: newAsset.tag } },
+      // From here on, the old asset's return may already have written to the
+      // database (asset row, approval, audit, webhook). If the new asset's
+      // assign then refuses, a plain `return` would let that first write
+      // commit while telling the caller the whole operation failed. Throw
+      // instead, so Prisma rolls back both legs together.
+      const ret = await recordDirect(tx, {
+        actor: user, asset: oldAsset, now, type: "lifecycle_return", action: "lifecycle.replace", employeeId: d.employeeId,
+        change: { kind: "return", status: plan.oldStatus },
+        payload: { from: { assigneeId: d.employeeId }, to: { assigneeId: null, status: plan.oldStatus }, reason: d.reason || `replaced by ${newAsset.tag}` },
+        extraDiff: { replacedBy: { from: null, to: newAsset.tag } },
+      });
+      if (!ret.ok) throw new DirectRefusal(ret.error);
+      const asg = await recordDirect(tx, {
+        actor: user, asset: newAsset, now, type: "lifecycle_assign", action: "lifecycle.replace", employeeId: d.employeeId,
+        change: { kind: "assign", employeeId: d.employeeId, status: plan.newStatus },
+        payload: { to: { assigneeId: d.employeeId, status: plan.newStatus }, reason: `replaces ${oldAsset.tag}` },
+        extraDiff: { replaces: { from: null, to: oldAsset.tag } },
+      });
+      if (!asg.ok) throw new DirectRefusal(asg.error);
+      out = { oldTag: oldAsset.tag, newTag: newAsset.tag };
+      return null;
     });
-    if (!ret.ok) return conflict(ret.error);
-    const asg = await recordDirect(tx, {
-      actor: user, asset: newAsset, now, type: "lifecycle_assign", action: "lifecycle.replace", employeeId: d.employeeId,
-      change: { kind: "assign", employeeId: d.employeeId, status: plan.newStatus },
-      payload: { to: { assigneeId: d.employeeId, status: plan.newStatus }, reason: `replaces ${oldAsset.tag}` },
-      extraDiff: { replaces: { from: null, to: oldAsset.tag } },
-    });
-    if (!asg.ok) return conflict(asg.error);
-    out = { oldTag: oldAsset.tag, newTag: newAsset.tag };
-    return null;
-  });
+  } catch (err) {
+    if (err instanceof DirectRefusal) return conflict(err.message);
+    throw err;
+  }
   if (failure) return failure;
   revalidateAsset(d.oldAssetId, [d.employeeId]);
   revalidatePath(`/inventory/${d.newAssetId}`);
@@ -340,7 +360,7 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
     if (!isDirectLifecycle(user.role, cls)) return forbidden();
     if (!isStatusOf(cls, to)) return validationError({ to: `${to} is not ${CLASS_PHRASE[cls]} status.` });
     const open = await tx.approval.findMany({
-      where: { assetId: { in: assets.map((a) => a.id) }, state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
+      where: { assetId: { in: assets.map((a) => a.id) }, state: { in: [...OPEN_APPROVAL_STATES] } },
       select: { assetId: true },
     });
     const blocked = new Set(open.map((o) => o.assetId));
