@@ -12,11 +12,11 @@ assistant memory until now — that is why this file exists.
 | | |
 |---|---|
 | Repository | `github.com/neilluceromc/ChristianAuditing` — **public**, by choice. Never commit `.env` or any real secret; scan before every push. |
-| Branch | `main`, **ahead of `origin/main`** since the Phase 14 merge (`dc0121d`, 2026-09-07) — pushing is the user's decision. Phase branches (`phase-10-polish` … `phase-13-asset-classes`) exist only on the old dev laptop; `phase-14-department-owned-classes` was deleted after its merge. All are fully contained in `main`. |
+| Branch | `main`, **ahead of `origin/main`** since the Phase 14 merge (`dc0121d`, 2026-09-07) — pushing is the user's decision. Phase branches (`phase-10-polish` … `phase-14-department-owned-classes`) exist only on the old dev laptop; `phase-15-direct-it-lifecycle` is on this branch, UNMERGED and UNPUSHED. All are fully contained or point to `main`. |
 | Stack | Next.js 15 App Router · Prisma 6 · PostgreSQL 16 (Docker) · Auth.js v5 · Tailwind v4 · Playwright · vitest. Node ≥ 22, npm ≥ 11 (dev machine ran Node 24). |
-| Database | 15 migrations, additive only. `prisma migrate reset` is **not** used in this project. |
-| Battery, last run 2026-09-07 | `tsc` clean · `lint` clean · **971 unit / 52 files** · `npm run build` · `docker compose --profile prod build` · **203 e2e / 15 files** in five foreground parts (36 · 46 · 54 · 34 · 33). Commands and history: `HANDOVER.md` §0 item 9. |
-| Last two phases | **Phase 13** — asset classes: one register, two classes (`IT`, `PURCHASING`), each with its own status vocabulary, class-gated write paths and pages, `?cls=` views, Finance tabs, Home pinned to IT, import refuses Purchasing rows by name. Spec `superpowers/specs/2026-09-06-asset-classes-design.md`, plan `superpowers/plans/2026-09-06-phase-13-asset-classes.md` (19 amendments, `D-1`…`D-19`, each a lesson). **Phase 14** — department-owned classes: IT sees IT only (VISIBLE_CLASSES), Purchasing registers both classes (REGISTRABLE_CLASSES), an IT asset Purchasing registers waits for IT's check (`Asset.itVerifiedAt`) before Finance sees it, Purchasing approves/assigns/documents/categorises/labels its own class from the asset record, `/employees/new`. Spec `superpowers/specs/2026-09-07-department-owned-classes-design.md`, plan `superpowers/plans/2026-09-07-phase-14-department-owned-classes.md`. |
+| Database | 16 migrations, additive only. `prisma migrate reset` is **not** used in this project. |
+| Battery, last run 2026-09-07 | `tsc` clean · `lint` clean · **993 unit / 54 files** · `npm run build` · `docker compose --profile prod build` · **213 e2e / 16 files** in five foreground parts (31 · 67 · 98 / 46 · 36 · 33 / 6). Commands and history: `HANDOVER.md` §0 item 9. |
+| Last two phases | **Phase 14** — department-owned classes: IT sees IT only (VISIBLE_CLASSES), Purchasing registers both classes (REGISTRABLE_CLASSES), an IT asset Purchasing registers waits for IT's check (`Asset.itVerifiedAt`) before Finance sees it, Purchasing approves/assigns/documents/categorises/labels its own class from the asset record, `/employees/new`. Spec `superpowers/specs/2026-09-07-department-owned-classes-design.md`, plan `superpowers/plans/2026-09-07-phase-14-department-owned-classes.md`. **Phase 15** — direct IT lifecycle: for a role that manages an IT asset (`DIRECT_LIFECYCLE_CLASSES = ["IT"]`, `isDirectLifecycle`), status change, assign, return, replace, bulk, deploy-at-creation and offboarding decisions apply on confirm and are recorded as already-EXECUTED approvals plus audit (`lifecycle.*` actions); one shared executor `prepareLifecycle`/`commitLifecycle` serves the worker and the direct actions; a returned IT device waits for triage (`Asset.returnedAt`, migration 16, `isAssignable`); one `Replace` action; IT's Home is a grouped worklist with `/inventory/work`. Purchasing keeps its queue. Spec `superpowers/specs/2026-09-07-direct-it-lifecycle-design.md`, plan `superpowers/plans/2026-09-07-phase-15-direct-it-lifecycle.md`. |
 
 ## 2. Dev environment on the new device
 
@@ -71,6 +71,7 @@ These were made with the user and would be invisible to anyone reading only the 
 - **Finance confirmation is a label, not a gate.** An unconfirmed asset is fully live. Do not "fix" this into
   a hold.
 - **IT sees and manages IT assets only. Purchasing sees everything, registers both classes and manages Purchasing assets. A Purchasing-registered IT asset is IT's and waits for IT's check before Finance sees it. Finance confirms everything.** Offboarding stays IT-run and shared; the class owner approves the return. Person-centric pages show every class, with invisible tags as text. (Phase 14.)
+- **IT lifecycle changes apply on confirm** and are recorded as EXECUTED approvals plus audit; Purchasing keeps its queue; a returned IT device waits for triage before it is a spare again; offboarding decisions on IT devices are immediate, a leaver's car still goes to Purchasing's queue. (Phase 15.)
 - **Deployment is a prototype on the office LAN.** The Cloudflare Tunnel idea was withdrawn; the label URL
   is a reserved LAN address or a UniFi DNS name. Staging runs on a dedicated laptop and is updated by pushing
   `main` from dev and running `scripts/deploy-staging.ps1` on the laptop. Comparison of hosting options that
@@ -83,7 +84,7 @@ These were made with the user and would be invisible to anyone reading only the 
   cheapest model that can do each job: mechanical work to a small model, implementers and spec review to a
   mid model, judgment reviews to the strongest. Long mechanical runs (the battery) belong in the controller's
   own foreground calls — a subagent dies with the session.
-- **Review the rule, not the diff.** Across Phases 7–13 almost every real defect was in the *plan* and was
+- **Review the rule, not the diff.** Across Phases 7–15 almost every real defect was in the *plan* and was
   transcribed faithfully by the implementer; the reviews are where correctness comes from. The 119 rules
   distilled from this are `HANDOVER.md` §6a.
 
@@ -99,13 +100,12 @@ These were made with the user and would be invisible to anyone reading only the 
 2. **Two visual checks never done by a human:** the inventory class-switch chips and Finance's IT/Purchasing
    tabs by eye, and the Register form signed in as `purchasing@`. Both are asserted by e2e and axe, never
    looked at.
-3. **Phase 15 candidates**, in value order:
+3. **Phase 15b candidates**, in value order:
    - The **depreciation module** (user's choice, own brainstorm).
    - **Purchasing bulk import**.
-   - An **unassigned-holder detector for Purchasing** (IT's Home has one).
-   - The **year-chip empty state** ("0 active filters" when no filters render).
-   - One **markup for the class switches** (Finance's tab is a `<nav>`, inventory toolbar's is `role="navigation"`).
-   - Rank the Home `CHECK` row above `DATA` or add an "Awaiting your check" stat — with `SHIFT_LIMIT` 5 the seed already starves it; and a DB `CHECK ("cls" = 'IT' OR "itVerifiedAt" IS NULL)` so §5.1 is database-guaranteed like the Phase 13 invariants.
+   - A real **`loanDueAt`** for TEMPORARY loans (30-day proxy today).
+   - The scanner's **"already decided" re-scan verdict for IT items** (unreachable now that a direct decision clears the holder — see the follow-up chip).
+   - The Replace dialog's headerless **"other spares" list** when no same-type spare exists.
 4. **The §9 subsystems from the Admin meeting** — vendor master data, purchasing extensions, consumables.
    Consumables is a second domain, not an extension of assets; it needs its own brainstorm and must not be
    modelled as an `Asset`.
@@ -124,6 +124,7 @@ These were made with the user and would be invisible to anyone reading only the 
   about Purchasing objects still appear for IT with resolved labels (spec §3.1 asked for asset rows only).
 - `resubmitAssetToFinance`'s `canManageClass` refusal is no longer reachable from e2e (IT now gets not-found
   on a Purchasing record), like D-13/D-15's gates — server guard unchanged, review-covered.
+- **Direct IT changes leave no PENDING row,** so the record's pending banner and `Open requests` stat only ever show Purchasing or legacy approvals for IT devices.
 - Backups land on the same disk as the data; copy them off periodically.
 
 ## 6. If you are an assistant reading this

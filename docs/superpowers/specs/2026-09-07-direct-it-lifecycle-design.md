@@ -1,7 +1,6 @@
 # Phase 15 — Direct IT Lifecycle, Replace, Triage and the Worklist — Design
 
-**Status:** designed 2026-09-07 with the user, who chose approach A of three and answered three
-questions (pain points, the kind of confirmation, the worklist's contents). The offboarding decision is
+**Status:** implemented on branch `phase-15-direct-it-lifecycle`, 2026-09-07; amendments are `D-` entries at the top of the plan. The offboarding decision is
 the user's; the loans default is the assistant's (§1 row 9). The depreciation module the user chose in
 Phase 14 remains a separate Phase 15b spec; this document does not touch it.
 

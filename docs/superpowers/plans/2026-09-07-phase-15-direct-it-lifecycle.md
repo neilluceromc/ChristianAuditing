@@ -12,6 +12,18 @@
 
 **Baselines on `main` at `a3b7b05`:** 971 unit / 52 files · 203 e2e / 15 files · `tsc` and `lint` clean · 15 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
+> ### AMENDED DURING EXECUTION — D-1 through D-5
+>
+> **D-1. Task 4 replaceAsset refusal handling:** originally `return`ed a second-leg refusal inside the transaction, which would have committed the first leg — fixed to throw a `DirectRefusal` and convert to `conflict` outside. Lesson: inside `prisma.$transaction`, a refusal after a write must throw, not return.
+>
+> **D-2. Task 6 create form class prop:** replaced the static `direct` boolean prop with `directClasses` because admin switches category between classes client-side, so the direct-mode disclosure must update live.
+>
+> **D-3. Task 6 loadout tile DOM:** restructured to avoid an axe `nested-interactive` violation (interactive elements nested inside `<label>` with no `pointer-events: none` on the outer).
+>
+> **D-4. Task 9 scanner.spec.ts "already decided" verdict:** a direct IT decision clears the holder at once, so a re-scan of that same tag cannot find it in the held array. Adapted the test's scenario to use a Purchasing-class car (same technique as `asset-classes.spec.ts` case 8) — Purchasing returns still QUEUE, so the asset stays held with a PENDING decision, and the "held AND decided" state the verdict needs is genuinely reachable. The "already decided" verdict is now unreachable for IT items post-Phase-15; filed `task_4e151341` for a product decision.
+>
+> **D-5. Commit fceecbf e2e count error:** the message claimed "264 e2e tests passed"; the correct figure after Task 9 is **213 e2e tests across 16 spec files**. Reason: the 98-test "Step A+B combined" row was a re-run of already-counted tests, not additional ones. The true total is 31 + 67 + 46 + 36 + 33 + 6 = 213.
+
 ## Global Constraints
 
 - **Exactly one migration**, `20260907100000_asset_returned_at`, hand-written, additive, no backfill. Never `prisma migrate dev` or `reset`; `npm run db:seed` is the sanctioned reset. Add no seed fixtures (`home-finance.spec.ts` pins the fleet at 25 IT assets).
