@@ -74,6 +74,12 @@ export function defaultLoanDue(today: Date): string {
   return floor.toISOString().slice(0, 10);
 }
 
+/** The earliest date a loan may be due: the UTC day after `today`, as YYYY-MM-DD. */
+export function minLoanDue(today: Date): string {
+  const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1));
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * What `loanDueAt` an assignment stores. Only a loan (TEMPORARY) carries one,
  * and it may not be in the past. Dates are day-precision UTC, like every

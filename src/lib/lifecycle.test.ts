@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_OUTCOMES,
-  defaultLoanDue, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
+  defaultLoanDue, humanizeGuard, loanDueFor, minLoanDue, reasonRequiredFor, replacePlan,
 } from "./lifecycle";
 import { RETURN_TARGETS } from "./asset-class";
 
@@ -65,5 +65,14 @@ describe("loanDueFor (Phase 16 §4.2)", () => {
 describe("defaultLoanDue", () => {
   it("is DEFAULT_LOAN_DAYS out from today, UTC", () => {
     expect(defaultLoanDue(new Date("2026-09-07T10:00:00Z"))).toBe("2026-10-07");
+  });
+});
+
+describe("minLoanDue", () => {
+  it("is the UTC day after today", () => {
+    expect(minLoanDue(new Date("2026-09-07T23:30:00Z"))).toBe("2026-09-08");
+  });
+  it("rolls over the year boundary", () => {
+    expect(minLoanDue(new Date("2026-12-31T10:00:00Z"))).toBe("2027-01-01");
   });
 });

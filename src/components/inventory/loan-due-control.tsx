@@ -10,15 +10,8 @@ import { Banner } from "@/components/ui/banner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { setLoanDue } from "@/server/modules/lifecycle/actions";
-import { defaultLoanDue } from "@/lib/lifecycle";
+import { defaultLoanDue, minLoanDue } from "@/lib/lifecycle";
 import { fmtDate } from "@/lib/format";
-
-/** The date input's floor — a loan is due back tomorrow at the earliest. */
-const tomorrow = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-};
 
 /**
  * Phase 16 (spec §4.2): the record's own view of a loan's due date — separate
@@ -65,7 +58,10 @@ export function LoanDueControl({ assetId, tag, loanDueAt }: { assetId: string; t
     <>
       <p className="flex items-center gap-1.5 text-[13px]">
         {loanDueAt ? (
-          <span className="text-fg-secondary">On loan until {fmtDate(loanDueAt)}</span>
+          <>
+            <span className="text-fg-secondary">On loan until {fmtDate(loanDueAt)}</span>
+            <span className="text-fg-secondary">·</span>
+          </>
         ) : (
           <span className="font-medium" style={{ color: "var(--st-attention-text)" }}>No due date — set one</span>
         )}
@@ -88,7 +84,7 @@ export function LoanDueControl({ assetId, tag, loanDueAt }: { assetId: string; t
           <FormField label="Loan until" required error={fieldErrors.loanDueAt}>
             {(p) => (
               <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} type="date"
-                min={tomorrow()} value={value} onChange={(e) => setValue(e.target.value)} />
+                min={minLoanDue(new Date())} value={value} onChange={(e) => setValue(e.target.value)} />
             )}
           </FormField>
         </div>

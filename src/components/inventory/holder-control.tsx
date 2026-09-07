@@ -15,14 +15,9 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { requestAssign, requestReturn } from "@/server/modules/employees/actions";
 import { assignAsset, returnAsset } from "@/server/modules/lifecycle/actions";
-import { DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, type ReturnOutcome } from "@/lib/lifecycle";
-
-/** The date input's floor — a loan starts tomorrow at the earliest in these dialogs. */
-const tomorrow = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-};
+import {
+  DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, minLoanDue, type ReturnOutcome,
+} from "@/lib/lifecycle";
 
 type Props =
   | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[]; direct: boolean }
@@ -136,7 +131,7 @@ export function HolderControl(props: Props) {
             <FormField label="Loan until" required error={fieldErrors.loanDueAt} hint={`Defaults to ${DEFAULT_LOAN_DAYS} days.`}>
               {(p) => (
                 <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} type="date"
-                  min={tomorrow()} value={loanDueAt} onChange={(e) => setLoanDueAt(e.target.value)} />
+                  min={minLoanDue(new Date())} value={loanDueAt} onChange={(e) => setLoanDueAt(e.target.value)} />
               )}
             </FormField>
           )}

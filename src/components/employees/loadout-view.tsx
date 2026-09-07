@@ -25,16 +25,10 @@ import { requestAssign, requestAssignReserved, requestReturn } from "@/server/mo
 import { assignAsset, assignReserved, replaceAsset, returnAsset } from "@/server/modules/lifecycle/actions";
 import { removeSlotException } from "@/server/modules/employees/exception-actions";
 import {
-  DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, reasonRequiredFor, type ReturnOutcome,
+  DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, minLoanDue, reasonRequiredFor,
+  type ReturnOutcome,
 } from "@/lib/lifecycle";
 import type { ActionResult } from "@/server/action-result";
-
-/** The date input's floor — a loan starts tomorrow at the earliest in this dialog. */
-const tomorrow = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-};
 
 export interface SlotTile {
   slotId: string;
@@ -567,7 +561,7 @@ export function LoadoutView({
             <FormField label="Loan until" required error={fieldErrors.loanDueAt} hint={`Defaults to ${DEFAULT_LOAN_DAYS} days.`}>
               {(p) => (
                 <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} type="date"
-                  min={tomorrow()} value={loanDueAt} onChange={(e) => setLoanDueAt(e.target.value)} />
+                  min={minLoanDue(new Date())} value={loanDueAt} onChange={(e) => setLoanDueAt(e.target.value)} />
               )}
             </FormField>
           )}
