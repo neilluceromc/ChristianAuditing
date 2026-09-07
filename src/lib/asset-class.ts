@@ -1,4 +1,4 @@
-import type { AssetClass, AssetStatus, Role } from "@prisma/client";
+import type { AssetClass, AssetStatus, Prisma, Role } from "@prisma/client";
 
 /**
  * Phase 13. THE partition of AssetStatus into the two classes, and every rule
@@ -129,4 +129,64 @@ export function parseCls(raw: string | null | undefined): AssetClass | null {
 export function withClsQS(qs: string, cls: AssetClass | null): string {
   if (cls !== "PURCHASING") return qs;
   return qs ? `${qs}&cls=PURCHASING` : "?cls=PURCHASING";
+}
+
+/**
+ * Phase 14 (spec §2). Which classes a role SEES on the register — list, record,
+ * export, search, scan, activity. IT's department sees IT only; Purchasing,
+ * Finance and admin see everything; the viewer is IT's read-only seat.
+ * Person-centric pages (an employee's holdings, offboarding) are NOT scoped by
+ * this map — they render an invisible tag as text (spec §3.3).
+ */
+export const VISIBLE_CLASSES: Record<Role, readonly AssetClass[]> = {
+  admin: ["IT", "PURCHASING"],
+  it_staff: ["IT"],
+  purchasing_staff: ["IT", "PURCHASING"],
+  finance_staff: ["IT", "PURCHASING"],
+  viewer: ["IT"],
+};
+
+/**
+ * Which classes a role may REGISTER or CREATE into. Purchasing buys for the
+ * whole company, so it registers both; IT registers its own. Registering is
+ * not managing: a laptop Purchasing registers is IT's from that moment.
+ */
+export const REGISTRABLE_CLASSES: Record<Role, readonly AssetClass[]> = {
+  admin: ["IT", "PURCHASING"],
+  it_staff: ["IT"],
+  purchasing_staff: ["IT", "PURCHASING"],
+  finance_staff: [],
+  viewer: [],
+};
+
+export function canSeeClass(role: Role, cls: AssetClass): boolean {
+  return VISIBLE_CLASSES[role].includes(cls);
+}
+
+export function canRegisterClass(role: Role, cls: AssetClass): boolean {
+  return REGISTRABLE_CLASSES[role].includes(cls);
+}
+
+/** AND this into any asset read a single-class role may reach. `{}` for an all-class role. */
+export function visibleClassWhere(role: Role): Prisma.AssetWhereInput {
+  const mine = VISIBLE_CLASSES[role];
+  return mine.length === ASSET_CLASSES.length ? {} : { cls: { in: [...mine] } };
+}
+
+/**
+ * Spec §5.1. An IT asset registered by a department that does not manage IT
+ * waits for IT's check. The class is part of the predicate on purpose: a
+ * Purchasing asset never carries a stamp and is never "awaiting".
+ */
+export function isAwaitingItCheck(a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
+  return a.cls === "IT" && a.itVerifiedAt === null;
+}
+
+/**
+ * Spec §5.4. Who may EDIT: the managing department always; the registering
+ * department only while IT has not yet checked it (so Purchasing can fix its
+ * own typo). Status, assign and return follow canManageClass alone.
+ */
+export function canEditAsset(role: Role, a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
+  return canManageClass(role, a.cls) || (isAwaitingItCheck(a) && canRegisterClass(role, a.cls));
 }
