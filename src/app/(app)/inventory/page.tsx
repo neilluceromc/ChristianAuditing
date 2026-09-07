@@ -14,6 +14,7 @@ import {
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
+import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
@@ -64,6 +65,11 @@ export default async function InventoryPage({
     const hit = await exactTagMatch(state.q);
     if (hit) redirect(`/inventory/${hit.id}`);
   }
+
+  // Task 9: the bulk drawer's assign mode needs a name to assign to. Loaded
+  // only for a role that can mutate this class at all — the same condition
+  // InventoryTable already uses to decide whether the drawer exists.
+  const employees = canMutate ? await activeEmployeeOptions() : [];
 
   const [{ rows, total, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
     listAssets(state, purchaseYear, cls),
@@ -184,6 +190,7 @@ export default async function InventoryPage({
               total={total}
               cls={cls}
               direct={direct}
+              employees={employees}
               repairMode={repairMode}
               sortHrefs={sortHrefs}
             />

@@ -362,6 +362,22 @@ export async function triageAsset(input: unknown): Promise<ActionResult<{ tag: s
   return ok(out!);
 }
 
+/**
+ * The `where` clause every bulk action resolves the same way: an explicit id
+ * list, or the current list filters re-parsed server-side (repair-stage aware,
+ * same as the list page itself). Shared by `bulkChangeStatus` and `bulkAssign`
+ * so the two never drift.
+ */
+async function resolveBulkWhere(ids: string[] | undefined, filters: string | undefined): Promise<Prisma.AssetWhereInput> {
+  if (ids?.length) return { id: { in: ids } };
+  const fp = new URLSearchParams(filters);
+  const state: ListState = parseListState(fp, INVENTORY_LIST_CONFIG);
+  const purchaseYear = parsePurchaseYear(fp.get("purchaseYear"));
+  const cls = parseCls(fp.get("cls")) ?? "IT";
+  const cutIds = await repairStageIds(state, purchaseYear, cls);
+  return cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear, cls);
+}
+
 // ── bulkChangeStatus ────────────────────────────────────────────────────────
 const bulkSchema = z
   .object({
@@ -381,16 +397,7 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { ids, filters, to, reason } = parsed.data;
 
-  let where: Prisma.AssetWhereInput;
-  if (ids?.length) where = { id: { in: ids } };
-  else {
-    const fp = new URLSearchParams(filters);
-    const state: ListState = parseListState(fp, INVENTORY_LIST_CONFIG);
-    const purchaseYear = parsePurchaseYear(fp.get("purchaseYear"));
-    const cls = parseCls(fp.get("cls")) ?? "IT";
-    const cutIds = await repairStageIds(state, purchaseYear, cls);
-    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear, cls);
-  }
+  const where = await resolveBulkWhere(ids, filters);
 
   const now = new Date();
   let changed = 0, skipped = 0;
@@ -431,6 +438,69 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
   revalidatePath("/inventory");
   revalidatePath("/");
   return ok({ changed, skipped });
+}
+
+// ── bulkAssign ──────────────────────────────────────────────────────────────
+const bulkAssignSchema = z
+  .object({
+    ids: z.array(z.string().min(1)).max(500).optional(),
+    filters: z.string().max(2000).optional(),
+    employeeId: z.string().min(1, "Pick a person"),
+    status: z.enum(["DEPLOYED", "TEMPORARY"]),
+    loanDueAt: dateStr.optional(),
+    reason: reasonOpt,
+  })
+  .refine((v) => (v.ids?.length ?? 0) > 0 || v.filters !== undefined, { message: "Nothing is selected", path: ["ids"] });
+
+/** Spec §5: several spares to one person, one transaction, the same record per asset a single assign writes. */
+export async function bulkAssign(input: unknown): Promise<ActionResult<{ assigned: number; skipped: Array<{ tag: string; reason: string }> }>> {
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = bulkAssignSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+  const now = new Date();
+  const due = loanDueFor(d.status, d.loanDueAt, now);
+  if (!due.ok) return validationError({ loanDueAt: due.error });
+
+  const where = await resolveBulkWhere(d.ids, d.filters);
+
+  let assigned = 0;
+  const skipped: Array<{ tag: string; reason: string }> = [];
+  const failure = await prisma.$transaction(async (tx) => {
+    const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { name: true, employment: true } });
+    if (!employee) return validationError({ employeeId: "Unknown employee" });
+    if (employee.employment !== "ACTIVE") return conflict(`${employee.name} is ${employee.employment.toLowerCase()} — assignments are frozen.`);
+    const assets = await tx.asset.findMany({ where, take: BULK_MAX + 1, orderBy: [{ tag: "asc" }, { id: "asc" }], select: assetSelect });
+    if (assets.length === 0) return conflict("Nothing matched the selection.");
+    if (assets.length > BULK_MAX) return conflict(`That selection exceeds the ${BULK_MAX}-asset bulk cap — narrow the filter and repeat.`);
+    const classes = new Set(assets.map((a) => a.cls));
+    if (classes.size > 1) return conflict("Select assets of one class — IT and Purchasing assets cannot share an assignment.");
+    const cls = assets[0].cls;
+    if (!isDirectLifecycle(user.role, cls)) return forbidden();
+    if (!(ASSIGN_TARGETS[cls] as readonly string[]).includes(d.status)) {
+      return validationError({ status: `${d.status} is not an assign target for ${CLASS_PHRASE[cls]} asset.` });
+    }
+    for (const asset of assets) {
+      const open = await openApprovalForAsset(tx, asset.id);
+      if (open) { skipped.push({ tag: asset.tag, reason: `held by ${open.refNo}` }); continue; }
+      const r = await recordDirect(tx, {
+        actor: user, asset, now, type: "lifecycle_assign", action: "lifecycle.assign", employeeId: d.employeeId,
+        change: { kind: "assign", employeeId: d.employeeId, status: d.status, loanDueAt: due.value },
+        payload: { to: { assigneeId: d.employeeId, status: d.status, ...(due.value ? { loanDueAt: due.value.toISOString() } : {}) }, reason: d.reason || "bulk assigned" },
+      });
+      if (!r.ok) { skipped.push({ tag: asset.tag, reason: r.error }); continue; }
+      assigned += 1;
+    }
+    return null;
+  }, { timeout: 60_000, maxWait: 10_000 });
+  if (failure) return failure;
+  revalidatePath("/inventory");
+  revalidatePath(`/employees/${d.employeeId}`);
+  revalidatePath("/");
+  return ok({ assigned, skipped });
 }
 
 // ── assignReserved ──────────────────────────────────────────────────────────
