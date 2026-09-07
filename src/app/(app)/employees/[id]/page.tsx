@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
-import { computeLoadout, resolvePolicy } from "@/lib/loadout";
+import { computeLoadout, effectiveSlots, resolvePolicy } from "@/lib/loadout";
 import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
 import { fmtDate, fmtMoney, fmtRelativeDays } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
@@ -21,7 +21,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
   const employee = await prisma.employee.findUnique({ where: { id }, include: { department: true } });
   if (!employee) notFound();
 
-  const [held, reservations, openApprovals, policies, spareAssets] = await Promise.all([
+  const [held, reservations, openApprovals, policies, spareAssets, exceptions] = await Promise.all([
     prisma.asset.findMany({ where: { assigneeId: id }, orderBy: { tag: "asc" } }),
     prisma.reservation.findMany({ where: { employeeId: id, state: "ACTIVE" }, include: { asset: true } }),
     prisma.approval.findMany({
@@ -38,10 +38,15 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       include: { reservations: { where: { state: "ACTIVE" }, include: { employee: true } } },
       orderBy: { tag: "asc" },
     }),
+    prisma.employeeSlotException.findMany({
+      where: { employeeId: id },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      include: { assetType: { select: { name: true } }, slot: { select: { name: true } } },
+    }),
   ]);
 
   const policy = resolvePolicy(employee, policies);
-  const loadout = computeLoadout(policy?.slots ?? [], held);
+  const loadout = computeLoadout(effectiveSlots(policy?.slots ?? [], exceptions), held);
   const pendingByAsset = new Map(openApprovals.filter((a) => a.assetId).map((a) => [a.assetId!, a.refNo]));
   const typeName = new Map(policies.flatMap((p) => p.slots).map((s) => [s.id, s.assetType?.name ?? "any"]));
 

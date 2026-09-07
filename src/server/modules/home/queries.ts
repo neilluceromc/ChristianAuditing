@@ -4,7 +4,7 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 import { slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { approvalClassWhere } from "@/lib/approval-access";
-import { computeLoadout, resolvePolicy } from "@/lib/loadout";
+import { computeLoadout, effectiveSlots, resolvePolicy } from "@/lib/loadout";
 import { beyondRepair, downDays, repairStage, REPAIR_STAGE_LABEL } from "@/lib/repairs";
 import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
@@ -18,6 +18,22 @@ const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() 
 /** ACTIVE employees who started recently are the ones whose kit is still landing. */
 const HIRE_WINDOW_DAYS = 30;
 const WARRANTY_WINDOW_DAYS = 90;
+
+/**
+ * Phase 16: `worklist`'s hires section and `fleet`'s coverage line both need
+ * a recent hire's exceptions to compute `effectiveSlots` — one findMany's
+ * rows grouped for per-employee lookup, shared here so the loop stays one
+ * expression, not two that can drift.
+ */
+function groupExceptionsByEmployee<E extends { employeeId: string }>(exceptions: E[]): Map<string, E[]> {
+  const byEmployee = new Map<string, E[]>();
+  for (const e of exceptions) {
+    const list = byEmployee.get(e.employeeId);
+    if (list) list.push(e);
+    else byEmployee.set(e.employeeId, [e]);
+  }
+  return byEmployee;
+}
 
 /**
  * The worklist (Phase 15, spec §5): grouped sections in a fixed order, each
@@ -131,6 +147,13 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
         orderBy: [{ name: "asc" }],
       })
     : [];
+  const hireExceptions = hires.length
+    ? await prisma.employeeSlotException.findMany({
+        where: { employeeId: { in: hires.map((e) => e.id) } },
+        orderBy: [{ employeeId: "asc" }, { id: "asc" }],
+      })
+    : [];
+  const hireExceptionsByEmployee = groupExceptionsByEmployee(hireExceptions);
 
   const rows: WorkRow[] = [];
 
@@ -183,14 +206,15 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
 
   for (const e of hires) {
     const policy = resolvePolicy({ title: e.title, departmentId: e.departmentId }, policies);
-    if (!policy) continue;
-    const loadout = computeLoadout(policy.slots, e.assets);
+    const exceptions = hireExceptionsByEmployee.get(e.id) ?? [];
+    if (!policy && !exceptions.some((x) => x.kind === "ADD")) continue;
+    const loadout = computeLoadout(effectiveSlots(policy?.slots ?? [], exceptions), e.assets);
     if (loadout.missingRequired === 0) continue;
     rows.push({
       key: `hires:${e.id}`,
       section: "hires",
       title: `${e.name} started ${daysSince(e.joinedAt, now)} d ago`,
-      meta: `${e.employeeNo} · ${loadout.missingRequired} required slot${loadout.missingRequired === 1 ? "" : "s"} empty · ${policy.name}`,
+      meta: `${e.employeeNo} · ${loadout.missingRequired} required slot${loadout.missingRequired === 1 ? "" : "s"} empty · ${policy?.name ?? "personal loadout"}`,
       href: `/employees/${e.id}`,
       action: "Fill loadout",
       severity: daysSince(e.joinedAt, now),
@@ -335,7 +359,7 @@ export async function fleet(now: Date = new Date()): Promise<Fleet> {
     prisma.employee.findMany({
       where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
       select: {
-        title: true, departmentId: true,
+        id: true, title: true, departmentId: true,
         assets: { where: { cls: "IT" }, select: { id: true, tag: true, model: true, typeId: true, status: true } },
       },
     }),
@@ -358,17 +382,25 @@ export async function fleet(now: Date = new Date()): Promise<Fleet> {
 
   const neededByType: Record<string, number> = {};
   if (hires.length) {
-    const policies = await prisma.equipmentPolicy.findMany({
-      select: {
-        id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
-        slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true } },
-      },
-      orderBy: [{ name: "asc" }],
-    });
+    const [policies, exceptions] = await Promise.all([
+      prisma.equipmentPolicy.findMany({
+        select: {
+          id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
+          slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true } },
+        },
+        orderBy: [{ name: "asc" }],
+      }),
+      prisma.employeeSlotException.findMany({
+        where: { employeeId: { in: hires.map((e) => e.id) } },
+        orderBy: [{ employeeId: "asc" }, { id: "asc" }],
+      }),
+    ]);
+    const exceptionsByEmployee = groupExceptionsByEmployee(exceptions);
     for (const e of hires) {
       const policy = resolvePolicy({ title: e.title, departmentId: e.departmentId }, policies);
-      if (!policy) continue;
-      const { slots } = computeLoadout(policy.slots, e.assets);
+      const employeeExceptions = exceptionsByEmployee.get(e.id) ?? [];
+      if (!policy && !employeeExceptions.some((x) => x.kind === "ADD")) continue;
+      const { slots } = computeLoadout(effectiveSlots(policy?.slots ?? [], employeeExceptions), e.assets);
       for (const { slot, asset } of slots) {
         if (asset || !slot.required) continue;
         const key = slot.assetTypeId ?? "untyped";
