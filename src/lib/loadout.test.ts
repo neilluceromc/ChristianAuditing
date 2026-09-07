@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLoadout, resolvePolicy } from "./loadout";
+import { computeLoadout, effectiveSlots, resolvePolicy, type ExceptionLike } from "./loadout";
 
 const policies = [
   { id: "p-dept", name: "Finance standard", appliesToTitle: null, appliesToDepartmentId: "dept-fin", slots: [] },
@@ -19,13 +19,14 @@ describe("resolvePolicy — role (title) policy beats department policy", () => 
 });
 
 const slots = [
-  { id: "s1", name: "laptop", assetTypeId: "t-laptop", required: true },
-  { id: "s2", name: "monitor", assetTypeId: "t-monitor", required: true },
-  { id: "s3", name: "second monitor", assetTypeId: "t-monitor", required: false },
-  { id: "s4", name: "headset", assetTypeId: "t-headset", required: true },
+  { id: "s1", name: "laptop", assetTypeId: "t-laptop", required: true, loaner: false },
+  { id: "s2", name: "monitor", assetTypeId: "t-monitor", required: true, loaner: false },
+  { id: "s3", name: "second monitor", assetTypeId: "t-monitor", required: false, loaner: false },
+  { id: "s4", name: "headset", assetTypeId: "t-headset", required: true, loaner: false },
 ];
+const loanerSlot = { id: "s5", name: "loaner laptop", assetTypeId: "t-laptop", required: false, loaner: true };
 
-const asset = (id: string, typeId: string | null) => ({ id, tag: id, model: "m", typeId, status: "DEPLOYED" });
+const asset = (id: string, typeId: string | null, status = "DEPLOYED") => ({ id, tag: id, model: "m", typeId, status });
 
 describe("computeLoadout", () => {
   it("fills slots by asset type, one asset per slot, leftovers unslotted", () => {
@@ -52,5 +53,53 @@ describe("computeLoadout", () => {
     expect(l.totalSlots).toBe(0);
     expect(l.missingRequired).toBe(0);
     expect(l.unslotted).toHaveLength(1);
+  });
+});
+
+describe("computeLoadout — loaner rule (Phase 16 §3.3)", () => {
+  it("a TEMPORARY device never fills a standard slot; it is on loan", () => {
+    const l = computeLoadout(slots, [asset("a1", "t-laptop", "TEMPORARY")]);
+    expect(l.slots[0].asset).toBeNull();
+    expect(l.onLoan.map((a) => a.id)).toEqual(["a1"]);
+    expect(l.unslotted).toEqual([]);
+    expect(l.missingRequired).toBe(3);
+  });
+  it("a loaner slot takes only a TEMPORARY device of its type", () => {
+    const l = computeLoadout([...slots, loanerSlot], [asset("a1", "t-laptop", "DEPLOYED"), asset("a2", "t-laptop", "TEMPORARY")]);
+    expect(l.slots.find((s) => s.slot.id === "s1")?.asset?.id).toBe("a1");
+    expect(l.slots.find((s) => s.slot.id === "s5")?.asset?.id).toBe("a2");
+    expect(l.onLoan).toEqual([]);
+  });
+  it("a DEPLOYED device never fills a loaner slot", () => {
+    const l = computeLoadout([loanerSlot], [asset("a1", "t-laptop", "DEPLOYED")]);
+    expect(l.slots[0].asset).toBeNull();
+    expect(l.unslotted.map((a) => a.id)).toEqual(["a1"]);
+  });
+  it("a required loaner slot left empty counts as missing", () => {
+    expect(computeLoadout([{ ...loanerSlot, required: true }], []).missingRequired).toBe(1);
+  });
+});
+
+describe("effectiveSlots (Phase 16 §3.3)", () => {
+  const waive = (slotId: string): ExceptionLike =>
+    ({ id: `w-${slotId}`, kind: "WAIVE", slotId, name: null, assetTypeId: null, required: true, loaner: false });
+  const add: ExceptionLike =
+    { id: "x1", kind: "ADD", slotId: null, name: "tablet", assetTypeId: "t-tablet", required: true, loaner: false };
+  it("drops waived slots", () => {
+    expect(effectiveSlots(slots, [waive("s4")]).map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
+  });
+  it("ignores a waiver whose slot is not in this policy", () => {
+    expect(effectiveSlots(slots, [waive("gone")])).toHaveLength(4);
+  });
+  it("appends ADD rows after the policy's slots, carrying the exception id", () => {
+    const out = effectiveSlots(slots, [add]);
+    expect(out[4]).toEqual({ id: "x:x1", name: "tablet", assetTypeId: "t-tablet", required: true, loaner: false, exceptionId: "x1" });
+  });
+  it("orders several ADD rows by name then id", () => {
+    const b: ExceptionLike = { ...add, id: "x2", name: "camera" };
+    expect(effectiveSlots([], [add, b]).map((s) => s.name)).toEqual(["camera", "tablet"]);
+  });
+  it("ADD-only with no policy gives a personal loadout", () => {
+    expect(computeLoadout(effectiveSlots([], [add]), [asset("a1", "t-tablet")]).filled).toBe(1);
   });
 });

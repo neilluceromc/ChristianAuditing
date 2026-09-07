@@ -126,7 +126,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
     ? await prisma.equipmentPolicy.findMany({
         select: {
           id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
-          slots: { select: { id: true, name: true, assetTypeId: true, required: true } },
+          slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true } },
         },
         orderBy: [{ name: "asc" }],
       })
@@ -361,7 +361,7 @@ export async function fleet(now: Date = new Date()): Promise<Fleet> {
     const policies = await prisma.equipmentPolicy.findMany({
       select: {
         id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
-        slots: { select: { id: true, name: true, assetTypeId: true, required: true } },
+        slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true } },
       },
       orderBy: [{ name: "asc" }],
     });
