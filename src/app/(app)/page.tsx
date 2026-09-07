@@ -171,8 +171,8 @@ export default async function Home() {
   const [shift, claims, fleetData, age, warranty] = await Promise.all([
     isViewer
       ? Promise.resolve({ ok: true as const, data: [] })
-      : safeSection("Your shift", () => yourShift(user.id)),
-    safeSection("Claimed by you", () => claimedByYou(user.id)),
+      : safeSection("Your shift", () => yourShift(user.id, user.role)),
+    safeSection("Claimed by you", () => claimedByYou(user.id, user.role)),
     safeSection("Fleet", () => fleet()),
     safeSection("Age", () => ageHistogram()),
     safeSection("Warranty runway", () => warrantyRunway()),

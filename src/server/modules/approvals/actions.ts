@@ -2,15 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
+import { Prisma, type AssetClass } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { actionRole } from "@/server/auth/guards";
+import { actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { approvalTransition, escalatePriority, type QueueAction } from "@/lib/approval-flow";
+import { canActOnApproval, isApprover } from "@/lib/approval-access";
 
 const idSchema = z.object({ id: z.string().min(1) });
 const rejectSchema = z.object({
@@ -31,7 +32,7 @@ interface Acted {
 async function transition(
   action: QueueAction,
   id: string,
-  build: (a: { id: string; refNo: string; state: string; priority: string; claimedById: string | null }, userId: string) => {
+  build: (a: { id: string; refNo: string; state: string; priority: string; claimedById: string | null; asset: { cls: AssetClass } | null }, userId: string) => {
     guardWhere: Prisma.ApprovalWhereInput;
     data: Prisma.ApprovalUpdateManyMutationInput & { claimedById?: string | null };
     auditAction: string;
@@ -39,8 +40,8 @@ async function transition(
     enqueue?: boolean;
   },
 ): Promise<ActionResult<Acted>> {
-  const user = await actionRole("admin", "it_staff");
-  if (!user) return forbidden();
+  const user = await actionUser();
+  if (!user || !isApprover(user.role)) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
@@ -50,9 +51,12 @@ async function transition(
     failure = await prisma.$transaction(async (tx) => {
     const approval = await tx.approval.findUnique({
       where: { id },
-      select: { id: true, refNo: true, state: true, priority: true, claimedById: true },
+      select: { id: true, refNo: true, state: true, priority: true, claimedById: true, asset: { select: { cls: true } } },
     });
     if (!approval) return conflict("That approval no longer exists.");
+    // Phase 14: the approver is whoever manages the asset's class; a class-less
+    // approval (no asset) is any approver's to reject.
+    if (!canActOnApproval(user.role, approval.asset?.cls ?? null)) return forbidden();
     const ctx = { isOwner: approval.claimedById === user.id, isAdmin: user.role === "admin" };
     const t = approvalTransition(approval.state, action, ctx);
     if (!t.ok) return conflict(t.error);

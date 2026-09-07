@@ -1,5 +1,6 @@
-import type { User } from "@prisma/client";
+import type { Role, User } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { approvalClassWhere } from "@/lib/approval-access";
 import { Avatar } from "@/components/ui/avatar";
 import {
   WORKSPACE_META,
@@ -11,11 +12,12 @@ import { AccountMenu } from "./account-menu";
 import { NavList, type ApprovalsBadge } from "./nav-list";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
-export async function getApprovalsBadge(): Promise<ApprovalsBadge> {
+export async function getApprovalsBadge(role: Role): Promise<ApprovalsBadge> {
+  const scope = approvalClassWhere(role);
   const [open, overdue] = await Promise.all([
-    prisma.approval.count({ where: { state: { in: ["PENDING", "CLAIMED"] } } }),
+    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, scope] } }),
     prisma.approval.count({
-      where: { state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: new Date() } },
+      where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: new Date() } }, scope] },
     }),
   ]);
   return { open, overdue };

@@ -3,6 +3,7 @@ import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { parseTab, QUEUE_TABS } from "@/lib/approvals-list";
 import { listApprovals, tabCounts } from "@/server/modules/approvals/queries";
+import { isApprover } from "@/lib/approval-access";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -15,9 +16,12 @@ export default async function ApprovalsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
-  const canAct = user.role === "admin" || user.role === "it_staff";
+  const canAct = isApprover(user.role);
   const tab = parseTab(toSearchParams(await searchParams).get("tab"));
-  const [rows, counts] = await Promise.all([listApprovals(tab, user.id), tabCounts(user.id)]);
+  const [rows, counts] = await Promise.all([
+    listApprovals(tab, user.id, user.role),
+    tabCounts(user.id, user.role),
+  ]);
 
   return (
     <>

@@ -1,7 +1,9 @@
+import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
+import { approvalClassWhere } from "@/lib/approval-access";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
 import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine, shiftOrder,
@@ -20,16 +22,17 @@ const WARRANTY_WINDOW_DAYS = 90;
  * one action that clears it. Every row is a real record — nothing here is a
  * count for its own sake.
  */
-export async function yourShift(userId: string, now: Date = new Date()): Promise<ShiftRow[]> {
+export async function yourShift(userId: string, role: Role, now: Date = new Date()): Promise<ShiftRow[]> {
+  const scope = approvalClassWhere(role);
   const [breached, failed, leavers, hires, missing, orphaned, awaiting, pref] = await Promise.all([
     prisma.approval.findMany({
-      where: { state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } },
+      where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] },
       orderBy: { slaAt: "asc" },
       take: 10,
       include: { asset: true, employee: true },
     }),
     prisma.approval.findMany({
-      where: { state: "EXECUTION_FAILED" },
+      where: { AND: [{ state: "EXECUTION_FAILED" as const }, scope] },
       orderBy: { updatedAt: "asc" },
       take: 10,
       include: { asset: true, employee: true },
@@ -194,9 +197,9 @@ export interface ClaimRow {
 }
 
 /** README: claims sit ABOVE the pool — a forgotten claim is worse than an unclaimed item. */
-export async function claimedByYou(userId: string, now: Date = new Date()): Promise<ClaimRow[]> {
+export async function claimedByYou(userId: string, role: Role, now: Date = new Date()): Promise<ClaimRow[]> {
   const rows = await prisma.approval.findMany({
-    where: { state: "CLAIMED", claimedById: userId },
+    where: { AND: [{ state: "CLAIMED" as const, claimedById: userId }, approvalClassWhere(role)] },
     orderBy: { slaAt: "asc" },
     take: 5,
     include: { asset: true, employee: true },

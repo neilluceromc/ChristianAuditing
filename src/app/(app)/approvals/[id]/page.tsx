@@ -6,12 +6,15 @@ import { summarizeApproval } from "@/lib/approval-execution";
 import { slaLabel } from "@/lib/approvals-list";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
+import { canActOnApproval } from "@/lib/approval-access";
+import { canSeeClass } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
 import { Pill } from "@/components/ui/pill";
 import { StatusDot, StatusPill } from "@/components/ui/status";
 import { ApprovalActions } from "@/components/approvals/approval-actions";
+import { TagRef } from "@/components/inventory/tag-ref";
 
 export default async function ApprovalPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -19,7 +22,7 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
   const approval = await getApproval(id);
   if (!approval) notFound();
   const checks = await systemChecks(approval);
-  const canAct = user.role === "admin" || user.role === "it_staff";
+  const canAct = canActOnApproval(user.role, approval.asset?.cls ?? null);
   const mine = approval.claimedById === user.id;
   const sla = slaLabel(approval.slaAt);
   const s = summarizeApproval(approval.type, approval.payload, {
@@ -71,9 +74,12 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
                 {
                   label: "Asset",
                   value: approval.asset ? (
-                    <Link href={`/inventory/${approval.asset.id}`} className="text-accent hover:underline">
-                      {approval.asset.tag} · {approval.asset.model}
-                    </Link>
+                    <TagRef
+                      id={approval.asset.id}
+                      tag={`${approval.asset.tag} · ${approval.asset.model}`}
+                      visible={canSeeClass(user.role, approval.asset.cls)}
+                      className="text-accent hover:underline"
+                    />
                   ) : ("—"),
                 },
                 {
