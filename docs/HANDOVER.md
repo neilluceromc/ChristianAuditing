@@ -13,6 +13,9 @@ looks + tokens). The client's 39 routes are enumerated in the brief §7; 38 page
 
 ## 0. Start here (next session, in order)
 
+> **On a new device?** Read [`PICKUP.md`](PICKUP.md) first — it is the short front door (setup, decisions,
+> what is next) and points back here for depth. Added 2026-09-07 when development moved machines.
+
 **Phases 1–11 are all merged into `main` and pushed. PHASE 12 is CODE-COMPLETE on
 `phase-12-receiving` — all 8 tasks, battery green, UNMERGED and UNPUSHED. That branch is where the
 live work is.** What remains is the merge and push decisions (separately), plus the two physical checks
