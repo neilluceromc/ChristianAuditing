@@ -9,7 +9,7 @@ import {
   type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import {
-  CLASS_LABEL, VISIBLE_CLASSES, canManageClass, canRegisterClass, canSeeClass, isStatusOf, parseCls, withClsQS,
+  CLASS_LABEL, VISIBLE_CLASSES, canManageClass, canRegisterClass, canSeeClass, isDirectLifecycle, isStatusOf, parseCls, withClsQS,
 } from "@/lib/asset-class";
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
@@ -44,6 +44,7 @@ export default async function InventoryPage({
   const cls: AssetClass = requested ?? visible[0];
   const canMutate = canManageClass(user.role, cls);
   const canRegister = canRegisterClass(user.role, cls);
+  const direct = isDirectLifecycle(user.role, cls);
 
   // A status from the other class is dropped by buildAssetWhere; drop it from
   // the state too, or the chip row advertises a filter that isn't applied and
@@ -182,6 +183,7 @@ export default async function InventoryPage({
               filtersQS={exportQS.replace(/^\?/, "")}
               total={total}
               cls={cls}
+              direct={direct}
               repairMode={repairMode}
               sortHrefs={sortHrefs}
             />

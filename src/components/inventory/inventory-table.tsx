@@ -49,6 +49,7 @@ export function InventoryTable({
   filtersQS,
   total,
   cls,
+  direct,
   repairMode = false,
   sortHrefs,
 }: {
@@ -59,6 +60,7 @@ export function InventoryTable({
   filtersQS: string; // serialized current list state, no leading "?"
   total: number;
   cls: AssetClass;
+  direct: boolean;
   /** the repairs saved view: adds Stage + Down (README 7b) */
   repairMode?: boolean;
   /**
@@ -253,6 +255,7 @@ export function InventoryTable({
           filtersQS={filtersQS}
           total={total}
           cls={cls}
+          direct={direct}
           onDone={clearSelection}
         />
       )}

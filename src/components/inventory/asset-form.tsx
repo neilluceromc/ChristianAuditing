@@ -40,6 +40,7 @@ export function AssetForm({
   vendors = [],
   initial,
   action,
+  directClasses = [],
 }: {
   mode: "new" | "edit";
   categories: Array<{ id: string; name: string; cls: AssetClass }>;
@@ -48,6 +49,11 @@ export function AssetForm({
   vendors?: Array<{ id: string; name: string }>;
   initial?: AssetFormInitial;
   action: (payload: Record<string, unknown>) => Promise<ActionResult<{ id: string }>>;
+  /** Classes `role` is direct-lifecycle for — passed as a set, not a single
+   * boolean, because the category control (and so the class) can change
+   * client-side without a page reload; a static boolean would go stale the
+   * moment an admin switches from a Laptop to a Vehicle category. */
+  directClasses?: readonly AssetClass[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -88,6 +94,7 @@ export function AssetForm({
   // would be wrong for them (D-14b, D-15).
   const cls: AssetClass = categories.find((c) => c.id === form.categoryId)?.cls ?? categories[0]?.cls ?? "IT";
   const creatable = CREATABLE_BY_CLASS[cls];
+  const direct = directClasses.includes(cls);
   // Derived, not reset by an effect: what the control shows and what the
   // payload carries are the same expression, so they cannot disagree, and a
   // class switch never paints an out-of-class selection for a frame.
@@ -248,8 +255,12 @@ export function AssetForm({
             {effectiveStatus !== DEFAULT_STATUS[cls] && (
               <>
                 <p className="text-xs text-fg-muted">
-                  Assignment routes through a <span className="font-mono">lifecycle.assign</span> approval —
-                  the asset is registered as {DEFAULT_STATUS[cls]} and flips once the request executes.
+                  {direct ? (
+                    "Deployed to the chosen person at registration — recorded in the audit trail."
+                  ) : (
+                    <>Assignment routes through a <span className="font-mono">lifecycle.assign</span> approval —
+                    the asset is registered as {DEFAULT_STATUS[cls]} and flips once the request executes.</>
+                  )}
                 </p>
                 <FormField label="Assign to" required error={errors.assigneeId}>
                   {(p) => (

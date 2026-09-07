@@ -10,6 +10,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field";
 import { Pill } from "@/components/ui/pill";
+import { Select } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
@@ -18,6 +19,8 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { TagRef } from "@/components/inventory/tag-ref";
 import { requestAssign, requestAssignReserved, requestReturn } from "@/server/modules/employees/actions";
+import { assignAsset, assignReserved, replaceAsset, returnAsset } from "@/server/modules/lifecycle/actions";
+import { RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, reasonRequiredFor, type ReturnOutcome } from "@/lib/lifecycle";
 import type { ActionResult } from "@/server/action-result";
 
 export interface SlotTile {
@@ -57,6 +60,7 @@ export function LoadoutView({
   holding,
   frozen,
   canMutate,
+  direct,
 }: {
   employeeId: string;
   slots: SlotTile[];
@@ -65,6 +69,7 @@ export function LoadoutView({
   holding: HoldingItem[];
   frozen: boolean;
   canMutate: boolean;
+  direct: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -74,6 +79,9 @@ export function LoadoutView({
   const [reason, setReason] = useState("");
   const [returning, setReturning] = useState<SlotTile["asset"] | null>(null);
   const [returnReason, setReturnReason] = useState("");
+  const [replacing, setReplacing] = useState<SlotTile["asset"] | null>(null);
+  const [replacementId, setReplacementId] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<ReturnOutcome>("TRIAGE");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
@@ -99,13 +107,23 @@ export function LoadoutView({
     setError(null);
     setFieldErrors({});
     startTransition(async () => {
-      handle(await requestAssign({ employeeId, assetId: pickedSpare, reason }), ({ refNo }) => {
-        toast(`${refNo} created — tile shows pending until it executes`, "settled");
-        setFillSlot(null);
-        setPickedSpare(null);
-        setReason("");
-        router.refresh();
-      });
+      if (direct) {
+        handle(await assignAsset({ assetId: pickedSpare, employeeId, reason }), ({ tag, employeeName }) => {
+          toast(`${tag} assigned to ${employeeName}`, "settled");
+          setFillSlot(null);
+          setPickedSpare(null);
+          setReason("");
+          router.refresh();
+        });
+      } else {
+        handle(await requestAssign({ employeeId, assetId: pickedSpare, reason }), ({ refNo }) => {
+          toast(`${refNo} created — tile shows pending until it executes`, "settled");
+          setFillSlot(null);
+          setPickedSpare(null);
+          setReason("");
+          router.refresh();
+        });
+      }
     });
   }
 
@@ -114,22 +132,61 @@ export function LoadoutView({
     setError(null);
     setFieldErrors({});
     startTransition(async () => {
-      handle(await requestReturn({ employeeId, assetId: returning.id, reason: returnReason }), ({ refNo }) => {
-        toast(`${refNo} created — return is queued`, "settled");
-        setReturning(null);
-        setReturnReason("");
-        router.refresh();
-      });
+      if (direct) {
+        handle(await returnAsset({ assetId: returning.id, outcome, reason: returnReason }), ({ tag, status }) => {
+          toast(`${tag} returned · now ${status}`, "settled");
+          setReturning(null);
+          setReturnReason("");
+          setOutcome("TRIAGE");
+          router.refresh();
+        });
+      } else {
+        handle(await requestReturn({ employeeId, assetId: returning.id, reason: returnReason }), ({ refNo }) => {
+          toast(`${refNo} created — return is queued`, "settled");
+          setReturning(null);
+          setReturnReason("");
+          router.refresh();
+        });
+      }
+    });
+  }
+
+  function submitReplace() {
+    if (!replacing || !replacementId) {
+      setFieldErrors({ replacement: "Pick the replacement" });
+      return;
+    }
+    setError(null);
+    setFieldErrors({});
+    startTransition(async () => {
+      handle(
+        await replaceAsset({ employeeId, oldAssetId: replacing.id, newAssetId: replacementId, outcome, reason: returnReason }),
+        ({ oldTag, newTag }) => {
+          toast(`${oldTag} replaced by ${newTag}`, "settled");
+          setReplacing(null);
+          setReplacementId(null);
+          setReturnReason("");
+          setOutcome("TRIAGE");
+          router.refresh();
+        },
+      );
     });
   }
 
   function submitReservedBatch() {
     setError(null);
     startTransition(async () => {
-      handle(await requestAssignReserved({ employeeId }), ({ created }) => {
-        toast(`${created} assign request${created === 1 ? "" : "s"} created from reservations`, "settled");
-        router.refresh();
-      });
+      if (direct) {
+        handle(await assignReserved({ employeeId }), ({ assigned }) => {
+          toast(`${assigned} reserved spare${assigned === 1 ? "" : "s"} assigned`, "settled");
+          router.refresh();
+        });
+      } else {
+        handle(await requestAssignReserved({ employeeId }), ({ created }) => {
+          toast(`${created} assign request${created === 1 ? "" : "s"} created from reservations`, "settled");
+          router.refresh();
+        });
+      }
     });
   }
 
@@ -151,6 +208,13 @@ export function LoadoutView({
   }
 
   const sparesForSlot = fillSlot ? spares.filter((s) => s.typeId && s.typeId === fillSlot.typeId) : [];
+
+  // The tile a Replace dialog opened for isn't self-describing its slot's
+  // type — look it up from `slots` so the radiogroup can rank same-type
+  // spares first. Not `slotTypeOf(replacing)`: no such helper exists.
+  const replacingTypeId = replacing ? slots.find((s) => s.asset?.id === replacing.id)?.typeId ?? null : null;
+  const sameTypeSpares = replacing ? spares.filter((s) => s.typeId === replacingTypeId) : [];
+  const otherSpares = replacing ? spares.filter((s) => s.typeId !== replacingTypeId) : [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -175,7 +239,7 @@ export function LoadoutView({
         />
         {mayAct && dayOne && reservedCount > 0 && (
           <Button variant="primary" size="sm" loading={pending} onClick={submitReservedBatch}>
-            Request assign for all {reservedCount} reserved
+            {direct ? `Assign all ${reservedCount} reserved` : `Request assign for all ${reservedCount} reserved`}
           </Button>
         )}
       </div>
@@ -191,59 +255,76 @@ export function LoadoutView({
           {slots.map((tile, i) => {
             const a = tile.asset;
             const name = `${tile.name} slot, ${a ? a.model : "empty"}, ${tile.required ? "required" : "optional"}`;
+            const showReplace = !!a && direct && mayAct && !a.pendingRef;
             return (
-              <button
-                key={tile.slotId}
-                ref={(el) => { tileRefs.current[i] = el; }}
-                type="button"
-                aria-label={name}
-                onClick={() => {
-                  if (!mayAct) return;
-                  if (!a) { setFillSlot(tile); setPickedSpare(null); setFieldErrors({}); }
-                  else if (!a.pendingRef) setReturning(a);
-                }}
-                className={cn(
-                  "group flex flex-col gap-1.5 rounded-(--radius-card) border p-3 text-left transition-colors duration-(--dur-1)",
-                  a ? "border-border bg-surface shadow-card" : "border-dashed border-border-strong",
-                  !a && tile.required && "bg-[var(--st-attention-bg)]/40",
-                  mayAct && "hover:border-accent",
-                )}
-              >
-                {a ? (
-                  <>
-                    <span aria-hidden className="relative h-[56px] w-full rounded-[6px]" style={{ background: STRIPES }}>
-                      <span className="absolute left-1.5 top-1.5"><StatusDot value={a.status} /></span>
-                      {a.pendingRef && (
-                        <span className="absolute right-1.5 top-1.5"><Pill tone="accent">PENDING</Pill></span>
-                      )}
-                    </span>
-                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-muted">{tile.name}</span>
-                    <span className={cn("text-[11.5px] font-medium", a.pendingRef ? "text-fg-muted" : "text-fg")}>{a.model}</span>
-                    <span className="font-mono text-[11px] text-accent">{a.tag}</span>
-                    <span className="flex items-center justify-between font-mono text-[10px] text-fg-muted">
-                      {a.pendingRef ?? a.age}
-                      {mayAct && !a.pendingRef && (
-                        <span aria-hidden className="opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100">− return</span>
-                      )}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span aria-hidden className="grid h-[56px] w-full place-items-center rounded-[6px]">
-                      <span className="grid size-[30px] place-items-center rounded-full border border-border-strong text-fg-muted">+</span>
-                    </span>
-                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-secondary">{tile.name}</span>
-                    <span className="font-mono text-[10px] text-fg-muted">
-                      {tile.typeName} · {tile.required ? "required" : "optional"}
-                    </span>
-                    {tile.required && (
-                      <span className="font-mono text-[10px] font-medium" style={{ color: "var(--st-attention-text)" }}>
-                        policy gap
+              // A real Replace <button> cannot nest inside the tile's own
+              // <button> (axe: nested-interactive / no-focusable-content) —
+              // it renders as an absolutely positioned SIBLING instead, both
+              // inside this "group relative" wrapper so hover/focus reveal
+              // still works via group-hover / focus-visible.
+              <div key={tile.slotId} className="group relative">
+                <button
+                  ref={(el) => { tileRefs.current[i] = el; }}
+                  type="button"
+                  aria-label={name}
+                  onClick={() => {
+                    if (!mayAct) return;
+                    if (!a) { setFillSlot(tile); setPickedSpare(null); setFieldErrors({}); }
+                    else if (!a.pendingRef) setReturning(a);
+                  }}
+                  className={cn(
+                    "flex w-full flex-col gap-1.5 rounded-(--radius-card) border p-3 text-left transition-colors duration-(--dur-1)",
+                    a ? "border-border bg-surface shadow-card" : "border-dashed border-border-strong",
+                    !a && tile.required && "bg-[var(--st-attention-bg)]/40",
+                    mayAct && "hover:border-accent",
+                  )}
+                >
+                  {a ? (
+                    <>
+                      <span aria-hidden className="relative h-[56px] w-full rounded-[6px]" style={{ background: STRIPES }}>
+                        <span className="absolute left-1.5 top-1.5"><StatusDot value={a.status} /></span>
+                        {a.pendingRef && (
+                          <span className="absolute right-1.5 top-1.5"><Pill tone="accent">PENDING</Pill></span>
+                        )}
                       </span>
-                    )}
-                  </>
+                      <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-muted">{tile.name}</span>
+                      <span className={cn("text-[11.5px] font-medium", a.pendingRef ? "text-fg-muted" : "text-fg")}>{a.model}</span>
+                      <span className="font-mono text-[11px] text-accent">{a.tag}</span>
+                      <span className="flex items-center justify-between font-mono text-[10px] text-fg-muted">
+                        {a.pendingRef ?? a.age}
+                        {mayAct && !a.pendingRef && (
+                          <span aria-hidden className="opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100">− return</span>
+                        )}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span aria-hidden className="grid h-[56px] w-full place-items-center rounded-[6px]">
+                        <span className="grid size-[30px] place-items-center rounded-full border border-border-strong text-fg-muted">+</span>
+                      </span>
+                      <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-secondary">{tile.name}</span>
+                      <span className="font-mono text-[10px] text-fg-muted">
+                        {tile.typeName} · {tile.required ? "required" : "optional"}
+                      </span>
+                      {tile.required && (
+                        <span className="font-mono text-[10px] font-medium" style={{ color: "var(--st-attention-text)" }}>
+                          policy gap
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+                {showReplace && a && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setReplacing(a)}
+                    className="absolute right-1.5 top-1.5 h-auto rounded-[4px] border border-transparent bg-surface/90 px-1.5 py-0.5 font-mono text-[10px] text-fg-muted opacity-0 shadow-card transition-opacity duration-(--dur-1) hover:bg-surface hover:text-fg group-hover:opacity-100 focus-visible:opacity-100"
+                  >
+                    ⇄ replace
+                  </Button>
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
@@ -320,7 +401,7 @@ export function LoadoutView({
         footer={
           <>
             <Button variant="ghost" onClick={() => setFillSlot(null)}>Cancel</Button>
-            <Button variant="primary" loading={pending} onClick={submitFill}>Request assign</Button>
+            <Button variant="primary" loading={pending} onClick={submitFill}>{direct ? "Confirm" : "Request assign"}</Button>
           </>
         }
       >
@@ -356,7 +437,11 @@ export function LoadoutView({
               ))}
             </div>
           )}
-          <FormField label="Reason" hint="Optional — lands in the approval payload." error={fieldErrors.reason}>
+          <FormField
+            label="Reason"
+            hint={direct ? "Optional — recorded in the audit trail." : "Optional — lands in the approval payload."}
+            error={fieldErrors.reason}
+          >
             {(p) => (
               <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -373,16 +458,113 @@ export function LoadoutView({
         footer={
           <>
             <Button variant="ghost" onClick={() => setReturning(null)}>Cancel</Button>
-            <Button variant="danger" loading={pending} onClick={submitReturn}>Request return</Button>
+            <Button variant="danger" loading={pending} onClick={submitReturn}>{direct ? "Confirm" : "Request return"}</Button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           <p className="text-xs text-fg-muted">
-            Creates a <span className="font-mono">lifecycle.return</span> approval — the item stays on
-            this loadout until the return executes.
+            {direct ? (
+              "Comes off this loadout now; pick what happens to it."
+            ) : (
+              <>Creates a <span className="font-mono">lifecycle.return</span> approval — the item stays on
+              this loadout until the return executes.</>
+            )}
           </p>
-          <FormField label="Reason" required error={fieldErrors.reason}>
+          {direct && (
+            <FormField label="What happens to it" required error={fieldErrors.outcome}>
+              {(p) => (
+                <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                  value={outcome} onChange={(e) => setOutcome(e.target.value as ReturnOutcome)}>
+                  {RETURN_OUTCOMES.map((o) => <option key={o} value={o}>{RETURN_OUTCOME_LABEL[o]}</option>)}
+                </Select>
+              )}
+            </FormField>
+          )}
+          <FormField label="Reason" required={!direct || reasonRequiredFor(outcome)} error={fieldErrors.reason}>
+            {(p) => (
+              <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                value={returnReason} onChange={(e) => setReturnReason(e.target.value)} />
+            )}
+          </FormField>
+        </div>
+      </Dialog>
+
+      {/* Replace dialog (direct mode only — the tile's ⇄ replace affordance) */}
+      <Dialog
+        open={replacing !== null}
+        onClose={() => setReplacing(null)}
+        title={replacing ? `Replace ${replacing.tag}` : ""}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setReplacing(null)}>Cancel</Button>
+            <Button variant="primary" loading={pending} onClick={submitReplace}>Confirm</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <div role="radiogroup" aria-label="Pick the replacement" className="flex flex-col gap-1">
+            {fieldErrors.replacement && <p role="alert" className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{fieldErrors.replacement}</p>}
+            {sameTypeSpares.length === 0 && otherSpares.length === 0 && (
+              <p className="text-xs text-fg-muted">No spares in stock — register one or route a purchase.</p>
+            )}
+            {sameTypeSpares.map((s) => (
+              <label
+                key={s.id}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                  replacementId === s.id ? "border-accent bg-accent-tint" : "border-border hover:bg-surface-subtle",
+                )}
+              >
+                <input
+                  type="radio"
+                  name="replacement"
+                  className="sr-only"
+                  checked={replacementId === s.id}
+                  onChange={() => setReplacementId(s.id)}
+                />
+                <span className="font-mono text-accent">{s.tag}</span>
+                <span className="text-fg-secondary">{s.model}</span>
+                <span className="ml-auto font-mono text-[10px] text-fg-muted">
+                  {s.reservedForThis ? "reserved for them" : s.reservedFor ? `reserved for ${s.reservedFor}` : "spare"}
+                </span>
+              </label>
+            ))}
+            {sameTypeSpares.length > 0 && otherSpares.length > 0 && (
+              <p className="pt-1 font-mono text-[10px] uppercase tracking-[0.06em] text-fg-muted">other spares</p>
+            )}
+            {otherSpares.map((s) => (
+              <label
+                key={s.id}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                  replacementId === s.id ? "border-accent bg-accent-tint" : "border-border hover:bg-surface-subtle",
+                )}
+              >
+                <input
+                  type="radio"
+                  name="replacement"
+                  className="sr-only"
+                  checked={replacementId === s.id}
+                  onChange={() => setReplacementId(s.id)}
+                />
+                <span className="font-mono text-accent">{s.tag}</span>
+                <span className="text-fg-secondary">{s.model}</span>
+                <span className="ml-auto font-mono text-[10px] text-fg-muted">
+                  {s.reservedForThis ? "reserved for them" : s.reservedFor ? `reserved for ${s.reservedFor}` : "spare"}
+                </span>
+              </label>
+            ))}
+          </div>
+          <FormField label="What happens to it" required error={fieldErrors.outcome}>
+            {(p) => (
+              <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                value={outcome} onChange={(e) => setOutcome(e.target.value as ReturnOutcome)}>
+                {RETURN_OUTCOMES.map((o) => <option key={o} value={o}>{RETURN_OUTCOME_LABEL[o]}</option>)}
+              </Select>
+            )}
+          </FormField>
+          <FormField label="Reason" required={reasonRequiredFor(outcome)} error={fieldErrors.reason}>
             {(p) => (
               <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 value={returnReason} onChange={(e) => setReturnReason(e.target.value)} />
