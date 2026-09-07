@@ -88,8 +88,24 @@ test.beforeAll(async () => {
   thinkpadTypeId = (await db.assetType.findFirstOrThrow({ where: { name: "ThinkPad", categoryId: laptop.id } })).id;
   financeUserId = (await db.user.findUniqueOrThrow({ where: { email: "finance@thebackroomop.com" } })).id;
 
+  // Phase 14: an IT-class asset with itVerifiedAt still null reads as
+  // "awaiting IT check" (isAwaitingItCheck, src/lib/asset-class.ts), which
+  // hides BOTH Confirm details and Send back to IT — the whole point of this
+  // block. These fixtures stand in for Task 5's real registration screen,
+  // where IT registering its own class self-checks on creation
+  // (`itVerifiedAt: selfChecked ? new Date() : null`, actions.ts ~line 245),
+  // so match that here rather than leaving Finance-review fixtures stuck
+  // behind a check they were never meant to exercise.
   const mk = (tag: string) =>
-    db.asset.create({ data: { tag, model: "e2e fixture — Finance review", categoryId: laptopCategoryId, status: "SPARE" } });
+    db.asset.create({
+      data: {
+        tag,
+        model: "e2e fixture — Finance review",
+        categoryId: laptopCategoryId,
+        status: "SPARE",
+        itVerifiedAt: new Date(),
+      },
+    });
   assetReturn = await mk("BR-ZZ-0001");
   assetShortReason = await mk("BR-ZZ-0002");
   assetConfirmed = await mk("BR-ZZ-0003");

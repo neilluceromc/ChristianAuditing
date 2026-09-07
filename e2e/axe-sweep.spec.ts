@@ -97,11 +97,14 @@ const ADMIN_ROUTES = ["/admin/users", "/admin/flags", "/admin/webhooks", "/admin
 const IT_STAFF_ROUTES = [
   "/inventory/new", "/inventory/import", "/inventory/register",
   "/admin/asset-categories", "/admin/asset-types", "/admin/departments",
-  "/employees/import",
+  "/employees/import", "/employees/new",
 ];
 
 // ── purchasing_staff: requireRole(...DRAFT_ROLES) = [purchasing_staff, admin] ─
-const PURCHASING_STAFF_ROUTES = ["/purchases/new"];
+const PURCHASING_STAFF_ROUTES = [
+  "/purchases/new", "/approvals", "/employees",
+  "/admin/asset-categories", "/admin/asset-types", "/inventory?cls=PURCHASING",
+];
 
 // ── finance_staff: PATH_RULES workspace "finance" only ─────────────────────
 const FINANCE_STAFF_ROUTES = ["/finance/assets", "/finance/activity", "/finance/assets?cls=PURCHASING"];
@@ -113,7 +116,7 @@ const FINANCE_STAFF_ROUTES = ["/finance/assets", "/finance/activity", "/finance/
 // admin-logged-in sweep would show (a "READ-ONLY · VIEWER" pill, hidden
 // mutate actions) and therefore the render most likely to have gone unchecked.
 const VIEWER_STATIC_ROUTES = [
-  "/inventory", "/inventory/activity", "/inventory?cls=PURCHASING",
+  "/inventory", "/inventory/activity",
   "/employees", "/employees?gaps=1", "/employees/activity",
   "/approvals", "/audit", "/offboarding", "/reservations",
   "/admin/equipment-policies",

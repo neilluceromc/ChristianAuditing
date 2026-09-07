@@ -91,13 +91,13 @@ test.describe("registration — each class is its own department's", () => {
     expect(a.financeConfirmedAt).toBeNull();
   });
 
-  test("2. Purchasing is never offered an IT category, and nothing is written", async ({ page }) => {
+  test("2. Purchasing is offered both classes' categories; IT only its own (Phase 14)", async ({ page }) => {
     const before = await db.asset.count();
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory/register");
     const options = await page.getByLabel("Category").locator("option").allTextContents();
     expect(options).toContain("Vehicle");
-    expect(options).not.toContain("Laptop");
+    expect(options).toContain("Laptop");
     expect(await db.asset.count()).toBe(before);
   });
 
@@ -269,7 +269,7 @@ test.describe("the database is the guarantee", () => {
 
 test.describe("the inventory view", () => {
   test("10. ?cls=PURCHASING lists Purchasing assets and scopes the Filters panel; the plain URL is unchanged", async ({ page }) => {
-    await login(page, "it@thebackroomop.com");
+    await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory?cls=PURCHASING");
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toHaveCount(0);
@@ -292,6 +292,15 @@ test.describe("the inventory view", () => {
     await page.goto("/inventory");
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
+
+    // Phase 14: IT cannot ask for the Purchasing view at all.
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory?cls=PURCHASING");
+    await expect(page).toHaveURL(/\/inventory$/);
+    await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Asset class" })).toHaveCount(0);
+    await login(page, "purchasing@thebackroomop.com");
+
     // Switching class clears the facet filters — none of them can apply to the other class (D-12).
     await page.goto("/inventory?status=SPARE");
     await expect(page.getByText("status: SPARE")).toBeVisible();
@@ -344,15 +353,19 @@ test.describe("Finance send-back and resubmit speak the class", () => {
     // on "AWAITING FINANCE" below regardless of whether the pill ever changed.
     await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
 
-    // IT cannot resubmit while the record still reads RETURNED BY FINANCE —
-    // asserted here, before Purchasing's resubmit clears financeReturnedAt,
-    // because once it's null the control is absent for every role and the
-    // check below (moved after the resubmit) could not fail even with the
-    // class guard dropped.
+    // IT cannot resubmit — and, as of Phase 14's asymmetric visibility, cannot
+    // even see this record: BR-FN-0003 is Purchasing-class furniture, and IT
+    // only sees the IT class now (VISIBLE_CLASSES, src/lib/asset-class.ts).
+    // getVisibleAsset returns null for it_staff here, so AssetRecordLayout's
+    // OWN notFound() fires. D-: this is NOT the scoped "Asset not found"
+    // EmptyState case 5 uses — that page (inventory/[id]/not-found.tsx) is a
+    // SIBLING of the layout, and per Next.js's not-found convention a
+    // segment's own not-found.tsx cannot catch a notFound() thrown by that
+    // same segment's layout; it bubbles to the app's root not-found.tsx
+    // instead ("This page doesn't exist").
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Mark corrected" })).toHaveCount(0);
+    await expect(page.getByText("This page doesn't exist", { exact: true })).toBeVisible();
 
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
@@ -369,8 +382,14 @@ test.describe("page gates speak the class", () => {
   test("17. a wrong-class edit URL lands on the record, and the Secrets tab is absent by role", async ({ page }) => {
     const carId = await idOf("BR-VH-0001");
     await login(page, "it@thebackroomop.com");
+    // Phase 14: IT cannot see a Purchasing asset at all (not just its Edit
+    // link) — the edit URL is under the same AssetRecordLayout as the record
+    // itself, so it 404s via the layout's own notFound(). D-: that lands on
+    // the app's root not-found page ("This page doesn't exist"), not the
+    // scoped "Asset not found" EmptyState case 5 uses for a child route's own
+    // notFound() — see the D- note on case 16 for why the two differ.
     await page.goto(`/inventory/${carId}/edit`);
-    await expect(page).toHaveURL(new RegExp(`/inventory/${carId}$`));
+    await expect(page.getByText("This page doesn't exist", { exact: true })).toBeVisible();
 
     const laptopId = await idOf("BR-LT-0148");
     await login(page, "purchasing@thebackroomop.com");
@@ -389,7 +408,7 @@ test.describe("page gates speak the class", () => {
     await page.goto("/inventory/new");
     let options = await page.getByLabel("Category").locator("option").allTextContents();
     expect(options).toContain("Vehicle");
-    expect(options).not.toContain("Laptop");
+    expect(options).toContain("Laptop");
 
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/new");
