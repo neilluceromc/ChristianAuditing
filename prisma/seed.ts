@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000);
 
 async function main() {
-  // The seed creates twelve accounts sharing one password, and README publishes
+  // The seed creates five accounts sharing one password, and README publishes
   // what that password is. That is fine for a loopback dev database and is not
   // fine for anything a phone can reach. The production image sets
   // NODE_ENV=production (Dockerfile), so this catches the one dangerous case —
@@ -17,7 +17,7 @@ async function main() {
   // e2e, where the fixture default is what every login helper expects.
   if (process.env.NODE_ENV === "production" && !process.env.SEED_PASSWORD) {
     throw new Error(
-      "Refusing to seed: NODE_ENV=production and SEED_PASSWORD is unset, so all twelve accounts " +
+      "Refusing to seed: NODE_ENV=production and SEED_PASSWORD is unset, so all five accounts " +
         "would share the password published in README. Set SEED_PASSWORD to something only you know.",
     );
   }
@@ -120,6 +120,8 @@ async function main() {
   ) => ({
     tag, model, categoryId: cats[cat].id, typeId: cats[cat].typeIds[0],
     cls: cats[cat].cls,
+    // Phase 14: IT-registered rows are born checked; a car never carries a stamp.
+    itVerifiedAt: cats[cat].cls === "IT" ? day(-720) : null,
     status: status as AssetStatus,
     purchasedAt: day(-720), cost: 55_000, warrantyUntil: day(180), ...extra,
   });

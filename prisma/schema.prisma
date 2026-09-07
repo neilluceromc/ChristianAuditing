@@ -149,6 +149,7 @@ model User {
   rateEvents       RateEvent[]
   financeConfirmed Asset[] @relation("financeConfirmedBy")
   financeReturned  Asset[] @relation("financeReturnedBy")
+  itVerifiedAssets Asset[] @relation("itVerifiedBy")
 }
 
 model UserPreference {
@@ -277,6 +278,12 @@ model Asset {
   financeReturnedById  String?
   financeReturnedBy    User?     @relation("financeReturnedBy", fields: [financeReturnedById], references: [id], onDelete: Restrict)
   financeReturnReason  String?
+  /// Phase 14: set when IT checked a Purchasing-registered IT asset, or at
+  /// creation when IT registered it. NULL on an IT asset = awaiting IT's check.
+  /// Always NULL on a Purchasing asset (isAwaitingItCheck includes the class).
+  itVerifiedAt         DateTime?
+  itVerifiedById       String?
+  itVerifiedBy         User?     @relation("itVerifiedBy", fields: [itVerifiedById], references: [id], onDelete: Restrict)
   secrets           AssetSecret[]
   documents         AssetDocument[]
   reservations      Reservation[]
@@ -293,6 +300,7 @@ model Asset {
   @@index([vendorId])
   @@index([financeConfirmedAt])
   @@index([financeReturnedAt])
+  @@index([itVerifiedAt])
   @@index([cls])
 }
 
