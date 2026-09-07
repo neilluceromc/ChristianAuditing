@@ -12,7 +12,7 @@ assistant memory until now — that is why this file exists.
 | | |
 |---|---|
 | Repository | `github.com/neilluceromc/ChristianAuditing` — **public**, by choice. Never commit `.env` or any real secret; scan before every push. |
-| Branch | `main`, **ahead of `origin/main`** since the Phase 14 merge (`dc0121d`, 2026-09-07) — pushing is the user's decision. Phase branches (`phase-10-polish` … `phase-14-department-owned-classes`) exist only on the old dev laptop; `phase-15-direct-it-lifecycle` is on this branch, UNMERGED and UNPUSHED. All are fully contained or point to `main`. |
+| Branch | `main`, **level with `origin/main`** after the Phase 15 push (merge `c087f8d`, 2026-09-07) — count with `git rev-list --count origin/main..main` before trusting this. Phase branches (`phase-10-polish` … `phase-14-department-owned-classes`) exist only on the old dev laptop; `phase-15-direct-it-lifecycle` was merged and deleted on the staging laptop. All are fully contained in `main`. **Staging is behind `main`** until `scripts/deploy-staging.ps1` runs again (it applies migration 16). |
 | Stack | Next.js 15 App Router · Prisma 6 · PostgreSQL 16 (Docker) · Auth.js v5 · Tailwind v4 · Playwright · vitest. Node ≥ 22, npm ≥ 11 (dev machine ran Node 24). |
 | Database | 16 migrations, additive only. `prisma migrate reset` is **not** used in this project. |
 | Battery, last run 2026-09-07 | `tsc` clean · `lint` clean · **993 unit / 54 files** · `npm run build` · `docker compose --profile prod build` · **214 e2e / 16 files** by `--list` (the full battery last ran at 213 across five foreground chunks — 31 · 67 · 46 · 36 · 33 — before plan D-9 added one scanner case; `scanner` + `offboarding`, 23 cases, re-ran green). Commands and history: `HANDOVER.md` §0 item 9. |
