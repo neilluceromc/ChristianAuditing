@@ -2473,33 +2473,24 @@ entry to find the next free number gives you 81, which is taken. **Append at 101
   no in-app recovery**. A last-admin guard would not have prevented it — that prevents removing the
   last admin, it cannot conjure one.
 - Entra SSO real wiring (needs tenant creds). Real product photography, brand mark, barcode generation (striped placeholders today). Off-device backups (nightly `pg_dump` to a local volume ships; copying elsewhere is the user's call). HR review of the accountability-form acknowledgement copy. `WebhookEndpoint.secret` encryption (Phase 8). CI workflow + jsdom component tests (declined in Phase 1, revisitable).
-- **Phase 13 (asset classes) — deferred, with D- references.** **Purchasing-owned approvals** (spec §7's
-  first follow-up: `purchasing_staff` cannot reach `/approvals` today, `PATH_RULES` admits `it` and
-  `finance` workspaces only). A **Purchasing assign/return surface** — `/employees` is IT's workspace,
-  and a car is assigned to its driver at create time only (D-13). A **detector for an unassigned holder
-  status on the Purchasing side** — IT's Home flags an unassigned `DEPLOYED` laptop; nothing does the
-  same for an unassigned `OPERATIONAL` car, and a pool car with no driver is legitimately correct today
-  (D-13). **Class-aware document permissions** — `documents/page.tsx` and `document-actions.ts` are
-  role-hardcoded to IT, so Purchasing cannot attach a car's OR/CR while IT can (D-14). A **policy slot
-  naming a type whose empty category was later flipped** to Purchasing — reachable only by a direct-DB
-  edit, after which `resolvePolicy` reports a permanent gap (D-14). A **label sheet for Purchasing
-  assets** — nothing OFFERS one (`/inventory/labels` is IT-only), but `?ids=` prints one regardless, so
-  `e2e/labels.spec.ts`'s numbers still pass while **4 of its 13 printed labels are now Purchasing**
-  (tag-ascending `take: 13`, the sheet unscoped by design — D-15/D-19). The **year chip's empty-state
-  count** — `purchaseYear` survives the class switch into a view that may have no such year, and
-  `hasFilters` counts it while no chip renders it, so the empty state reads "0 active filters" (D-16,
-  pre-existing). **One markup for a class switch** — Finance's tab is a `<nav>`, the inventory
-  toolbar's is `role="navigation"` (D-16; this is also why the axe sweep's `landmark-unique` count is
-  1). **Task 6's wrong-class register POST and mixed-class bulk gates are unreachable from the UI** and
-  are covered only by the trigger and by review, not by e2e (D-13). **`updateAsset`'s cross-class guard
-  is likewise unreachable** — Task 7 filtered the edit form's categories to the asset's own class
-  first, so case 15 was dropped from Task 11's e2e rather than written (D-15). **Home's leaver card
-  pins `cls: "IT"`** on a leaver's holdings while the offboarding queue does not — the first seeded
-  leaver holding a car will make the two disagree (D-19). **No test drives a Purchasing approval
-  through the real approve action** — cases 7 and 14 use the Prisma shortcut, and
-  `approvals-audit.spec.ts` is IT-only (D-19). **`worker:once` in e2e drains the whole job queue**, so
-  those same cases also fire the seed's webhook delivery — pre-existing behaviour, not introduced by
-  this phase, and bounded (D-19).
+- **Phase 13 (asset classes) — deferred, with D- references.** An **unassigned-holder detector for
+  Purchasing** — IT's Home flags an unassigned `DEPLOYED` laptop; nothing does the same for an
+  unassigned `OPERATIONAL` car, and a pool car with no driver is legitimately correct today (D-13).
+  A **policy slot naming a type whose empty category was later flipped** to Purchasing — reachable only
+  by a direct-DB edit, after which `resolvePolicy` reports a permanent gap (D-14). The **year chip's
+  empty-state count** — `purchaseYear` survives the class switch into a view that may have no such
+  year, and `hasFilters` counts it while no chip renders it, so the empty state reads "0 active
+  filters" (D-16, pre-existing). **One markup for a class switch** — Finance's tab is a `<nav>`, the
+  inventory toolbar's is `role="navigation"` (D-16; this is also why the axe sweep's `landmark-unique`
+  count is 1). **Task 6's wrong-class register POST and mixed-class bulk gates are unreachable from
+  the UI** and are covered only by the trigger and by review, not by e2e (D-13). **`updateAsset`'s
+  cross-class guard is likewise unreachable** — Task 7 filtered the edit form's categories to the
+  asset's own class first, so case 15 was dropped from Task 11's e2e rather than written (D-15).
+  **Home's leaver card pins `cls: "IT"`** on a leaver's holdings while the offboarding queue does not
+  — the first seeded leaver holding a car will make the two disagree (D-19). **`worker:once` in e2e
+  drains the whole job queue**, so those same cases also fire the seed's webhook delivery — pre-existing
+  behaviour, not introduced by this phase, and bounded (D-19).
+- **Phase 14** closed the above on 2026-09-07; spec `2026-09-07-department-owned-classes-design.md`.
 
 ---
 

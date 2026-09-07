@@ -14,9 +14,9 @@ assistant memory until now — that is why this file exists.
 | Repository | `github.com/neilluceromc/ChristianAuditing` — **public**, by choice. Never commit `.env` or any real secret; scan before every push. |
 | Branch | `main`, level with `origin/main`. Phase branches (`phase-10-polish` … `phase-13-asset-classes`) exist only on the old dev laptop and are fully contained in `main`; nothing on them is needed. |
 | Stack | Next.js 15 App Router · Prisma 6 · PostgreSQL 16 (Docker) · Auth.js v5 · Tailwind v4 · Playwright · vitest. Node ≥ 22, npm ≥ 11 (dev machine ran Node 24). |
-| Database | 14 migrations, additive only. `prisma migrate reset` is **not** used in this project. |
-| Battery, last run 2026-09-07 | `tsc` clean · `lint` clean · **908 unit / 51 files** · `npm run build` · `docker compose --profile prod build` · **187 e2e / 14 files** in five foreground parts (52 · 47 · 59 · 23 · 6). Commands and history: `HANDOVER.md` §0 item 9. |
-| Last two phases | **Phase 12** — register already-purchased assets (`/inventory/register`, auto-numbered tags) with Finance confirm / send-back / mark-corrected; `main` also carries the deploy-hardening branch (uploads backup, env-driven seed password). **Phase 13** — asset classes: one register, two classes (`IT`, `PURCHASING`), each with its own status vocabulary, class-gated write paths and pages, `?cls=` views, Finance tabs, Home pinned to IT, import refuses Purchasing rows by name. Spec `superpowers/specs/2026-09-06-asset-classes-design.md`, plan `superpowers/plans/2026-09-06-phase-13-asset-classes.md` (19 amendments, `D-1`…`D-19`, each a lesson). |
+| Database | 15 migrations, additive only. `prisma migrate reset` is **not** used in this project. |
+| Battery, last run 2026-09-07 | `tsc` clean · `lint` clean · **971 unit / 52 files** · `npm run build` · `docker compose --profile prod build` · **203 e2e / 15 files** in five foreground parts (36 · 46 · 54 · 34 · 33). Commands and history: `HANDOVER.md` §0 item 9. |
+| Last two phases | **Phase 13** — asset classes: one register, two classes (`IT`, `PURCHASING`), each with its own status vocabulary, class-gated write paths and pages, `?cls=` views, Finance tabs, Home pinned to IT, import refuses Purchasing rows by name. Spec `superpowers/specs/2026-09-06-asset-classes-design.md`, plan `superpowers/plans/2026-09-06-phase-13-asset-classes.md` (19 amendments, `D-1`…`D-19`, each a lesson). **Phase 14** — department-owned classes: IT sees IT only (VISIBLE_CLASSES), Purchasing registers both classes (REGISTRABLE_CLASSES), an IT asset Purchasing registers waits for IT's check (`Asset.itVerifiedAt`) before Finance sees it, Purchasing approves/assigns/documents/categorises/labels its own class from the asset record, `/employees/new`. Spec `superpowers/specs/2026-09-07-department-owned-classes-design.md`, plan `superpowers/plans/2026-09-07-phase-14-department-owned-classes.md`. |
 
 ## 2. Dev environment on the new device
 
@@ -70,9 +70,7 @@ These were made with the user and would be invisible to anyone reading only the 
   carries the warning.
 - **Finance confirmation is a label, not a gate.** An unconfirmed asset is fully live. Do not "fix" this into
   a hold.
-- **Each class is registered, created, edited and requested by its own department; everything else is
-  shared.** Assign/return through `/employees`, offboarding, approvals and Finance review are deliberately
-  not class-gated. Approvers stay `admin`/`it_staff` for both classes — the first follow-up (§5).
+- **IT sees and manages IT assets only. Purchasing sees everything, registers both classes and manages Purchasing assets. A Purchasing-registered IT asset is IT's and waits for IT's check before Finance sees it. Finance confirms everything.** Offboarding stays IT-run and shared; the class owner approves the return. Person-centric pages show every class, with invisible tags as text. (Phase 14.)
 - **Deployment is a prototype on the office LAN.** The Cloudflare Tunnel idea was withdrawn; the label URL
   is a reserved LAN address or a UniFi DNS name. Staging runs on a dedicated laptop and is updated by pushing
   `main` from dev and running `scripts/deploy-staging.ps1` on the laptop. Comparison of hosting options that
@@ -101,14 +99,12 @@ These were made with the user and would be invisible to anyone reading only the 
 2. **Two visual checks never done by a human:** the inventory class-switch chips and Finance's IT/Purchasing
    tabs by eye, and the Register form signed in as `purchasing@`. Both are asserted by e2e and axe, never
    looked at.
-3. **Phase 13 follow-ups** (`HANDOVER.md` §8, Phase 13 block), in value order:
-   - **Purchasing-owned approvals** — today IT staff approve lifecycle changes on cars and desks. Smallest,
-     most visible gap. Brainstorm first; it is permissions plus a queue view.
-   - **A Purchasing assign / return surface** — a car is assigned only at create time; only an admin can
-     return it, because `/employees` is IT's workspace.
-   - **Class-aware document permissions** — Purchasing cannot attach a car's papers; IT can.
-   - Smaller: an unassigned-holder detector for Purchasing (IT's Home has one), a label-sheet path for
-     Purchasing assets, the year-chip "0 active filters" empty state, one markup for the two class switches.
+3. **Phase 15 candidates**, in value order:
+   - The **depreciation module** (user's choice, own brainstorm).
+   - **Purchasing bulk import**.
+   - An **unassigned-holder detector for Purchasing** (IT's Home has one).
+   - The **year-chip empty state** ("0 active filters" when no filters render).
+   - One **markup for the class switches** (Finance's tab is a `<nav>`, inventory toolbar's is `role="navigation"`).
 4. **The §9 subsystems from the Admin meeting** — vendor master data, purchasing extensions, consumables.
    Consumables is a second domain, not an extension of assets; it needs its own brainstorm and must not be
    modelled as an `Asset`.
@@ -121,8 +117,8 @@ These were made with the user and would be invisible to anyone reading only the 
 - Two server-side gates are unreachable from the UI and covered by the database trigger and review only:
   a wrong-class register request and a mixed-class bulk request (`D-13`); likewise `updateAsset`'s
   cross-class guard (`D-15`).
-- Home's leaver card pins IT holdings while the offboarding queue does not; no test drives a Purchasing
-  approval through the real approve action (`D-19`).
+- `/audit` and `/inventory/activity` exclude invisible assets by id list — fine while the Purchasing fleet is
+  small; revisit if it grows past a few thousand rows.
 - Backups land on the same disk as the data; copy them off periodically.
 
 ## 6. If you are an assistant reading this

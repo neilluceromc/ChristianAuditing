@@ -12,6 +12,26 @@
 
 **Baselines on `main` at `600949c`:** 908 unit / 51 files · 187 e2e / 14 files · `tsc` and `lint` clean · 14 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
+> ### AMENDED DURING EXECUTION — D-1 through D-9
+>
+> **D-1. Case 16 assertion adapted:** `it@` viewing a Purchasing asset now asserts "This page doesn't exist" (landing at the root not-found page) rather than the spec's generic guess. IT cannot see Purchasing records at all under asymmetric visibility, a stronger assertion than the old "no Mark corrected button". Verified against Next.js not-found-boundary behavior.
+>
+> **D-2. Case 17 adapted for consistency:** same reasoning — `it@` hitting the edit URL now lands on the not-found page, not the record.
+>
+> **D-3. Case 6 selector fix:** `Document kind` select uses `"accountability-form"` (not the plan's `"other"`) — only that kind renders `Mark signed`. Selector made `exact: true` to avoid false-positive match against the "Mark signed" button's label.
+>
+> **D-4. Case 7 timing fix:** waits for `New category name` / `New type name` inputs to clear before asserting the new row, avoiding a race where the un-cleared input value itself satisfied the row-text assertion.
+>
+> **D-5. Case 13a fixture enhancement:** added `Cost (₱)` fill — `financeAssets` only lists assets with `cost: { not: null }`, and case 13d needs this asset to show in Finance's list.
+>
+> **D-6. Case 13c headroom:** added loop clearing up to 5 higher-ranked Home shift rows before asserting the new `CHECK` row is visible. `SHIFT_LIMIT = 5` and `KIND_RANK` rank `CHECK` last; the seed gives this user six higher-ranked candidates, so the new row would not be visible without clearing.
+>
+> **D-7. Case 12 selector fix:** `getByText(/not found/i)` corrected to `getByText("This page doesn't exist", { exact: true })` — the regex would not match the real rendered text.
+>
+> **D-8. Fixture gap in receiving.spec.ts:** the three Finance-review IT-class asset fixtures were created via raw Prisma without `itVerifiedAt`, which reads as "awaiting IT check" and hides both `Confirm details` and `Send back to IT`. Fixed by setting `itVerifiedAt: new Date()`, matching what the registration action does. Exposed by Phase 14 asymmetric visibility, not an app regression.
+>
+> **D-9. Task 5 amendment:** the `createAsset` refusal copy briefly shipped saying "register" and was fixed to "create" in a review round, correcting the spec's language.
+
 ## Global Constraints
 
 - **Exactly one migration**, `20260907090000_asset_it_verified`, hand-written SQL (HANDOVER §7). Never `prisma migrate reset`; `npm run db:seed` is the sanctioned reset, and a reseed TRUNCATEs, so anything a migration backfills the seed must also set.

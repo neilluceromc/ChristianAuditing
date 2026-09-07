@@ -1,9 +1,9 @@
 # Phase 14 — Department-Owned Classes — Design
 
-**Status:** revised 2026-09-07 after the user's direction, superseding the same-day first draft. The
-first draft was written under *"think about it and proceed with what is best"*; the user then set the
-register workflow and answered two design questions. §1 marks which decisions are the user's and which
-the assistant took to fill the gaps. Every assistant decision is reversible until the plan is executed.
+**Status:** implemented on branch `phase-14-department-owned-classes`, 2026-09-07; amendments, if any, are
+`D-` entries at the top of the plan. The first draft was written under *"think about it and proceed with
+what is best"*; the user then set the register workflow and answered two design questions. §1 marks
+which decisions are the user's and which the assistant took to fill the gaps.
 
 **Goal:** IT sees and manages IT assets only. Purchasing sees every asset, registers assets of both
 classes, and manages the Purchasing class end to end. An IT asset that Purchasing registers is handed to
