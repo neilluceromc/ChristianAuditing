@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
-import { UPLOAD_TYPES } from "@/server/uploads";
+import { contentDisposition, UPLOAD_TYPES } from "@/server/uploads";
 
 export async function GET(
   _req: Request,
@@ -23,7 +23,7 @@ export async function GET(
   return new Response(new Uint8Array(bytes), {
     headers: {
       "content-type": UPLOAD_TYPES[path.extname(row.fileName).toLowerCase()] ?? "application/octet-stream",
-      "content-disposition": `attachment; filename="${row.fileName.replaceAll('"', "")}"`,
+      "content-disposition": contentDisposition(row.fileName),
     },
   });
 }

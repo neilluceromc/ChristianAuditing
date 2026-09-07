@@ -8,7 +8,7 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { storeUpload, validateUpload } from "@/server/uploads";
 import { conflict, forbidden, ok, rateLimited, validationError, type ActionResult } from "@/server/action-result";
-import type { AckItem } from "@/lib/acknowledgement";
+import { latestSigningDate, type AckItem } from "@/lib/acknowledgement";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -22,8 +22,11 @@ export async function recordAcknowledgement(formData: FormData): Promise<ActionR
   const signedRaw = String(formData.get("signedAt") ?? "");
   if (!employeeId) return conflict("Missing employee.");
   if (!DAY.test(signedRaw)) return validationError({ signedAt: "Use the date picker" });
+  // Ruling R10: compare calendar dates, not instants -- someone signing just
+  // after local midnight ahead of UTC (e.g. Manila) must still be able to
+  // pick "today" even though `now` in UTC still reads as yesterday.
+  if (signedRaw > latestSigningDate(new Date())) return validationError({ signedAt: "A signing date cannot be in the future" });
   const signedAt = new Date(`${signedRaw}T00:00:00Z`);
-  if (signedAt.getTime() > Date.now()) return validationError({ signedAt: "A signing date cannot be in the future" });
   const checked = validateUpload(formData.get("file"));
   if (!checked.ok) return validationError({ file: checked.error });
 

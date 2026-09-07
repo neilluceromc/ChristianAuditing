@@ -3,6 +3,7 @@ import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { canSeeClass } from "@/lib/asset-class";
+import { contentDisposition } from "@/server/uploads";
 
 const TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -34,7 +35,7 @@ export async function GET(
   return new Response(new Uint8Array(bytes), {
     headers: {
       "content-type": TYPES[path.extname(doc.fileName).toLowerCase()] ?? "application/octet-stream",
-      "content-disposition": `attachment; filename="${doc.fileName.replaceAll('"', "")}"`,
+      "content-disposition": contentDisposition(doc.fileName),
     },
   });
 }

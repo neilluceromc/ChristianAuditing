@@ -22,6 +22,18 @@ export function validateUpload(value: unknown): { ok: true; file: File } | { ok:
   return error ? { ok: false, error } : { ok: true, file: value };
 }
 
+/**
+ * Ruling R11: `content-disposition: attachment; filename="<name>"` throws at
+ * the http layer when `<name>` carries a char outside Latin-1, or a raw
+ * CR/LF (header injection). Emit the RFC 6266 pair instead: an ASCII-safe
+ * `filename` fallback plus a `filename*` carrying the real name.
+ */
+export function contentDisposition(fileName: string): string {
+  const ascii = fileName.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "");
+  const encoded = encodeURIComponent(fileName.replace(/[\r\n\0]/g, ""));
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 /** Writes under uploads/<relDir>/<timestamp>-<safeName>; returns the relative posix path the row stores. */
 export async function storeUpload(relDir: string, file: File): Promise<{ relPath: string; checksum: string; fileName: string }> {
   const bytes = Buffer.from(await file.arrayBuffer());

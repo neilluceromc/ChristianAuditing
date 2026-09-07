@@ -186,7 +186,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           <AcknowledgementCard
             employeeId={id}
             latest={latest}
-            history={acks}
+            history={acks.slice(1)}
             uncovered={uncovered}
             canRecord={canMutate}
           />

@@ -13,7 +13,7 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { recordAcknowledgement } from "@/server/modules/employees/acknowledgement-actions";
 import { fmtDate } from "@/lib/format";
-import type { AckItem } from "@/lib/acknowledgement";
+import { latestSigningDate, type AckItem } from "@/lib/acknowledgement";
 
 export interface AckRow {
   id: string;
@@ -87,16 +87,15 @@ export function AcknowledgementCard({
               {history.map((row) => {
                 const n = itemCount(row.items);
                 return (
-                  <div key={row.id} className="flex items-center gap-2 text-[11px] text-fg-secondary">
-                    <span className="font-mono text-[10.5px] text-fg-muted">{fmtDate(row.signedAt)}</span>
-                    <span>{n} item{plural(n)}</span>
+                  <p key={row.id} className="text-[11px] text-fg-secondary">
+                    {fmtDate(row.signedAt)} · {n} item{plural(n)} ·{" "}
                     <a
                       href={`/employees/${employeeId}/acknowledgements/${row.id}/download`}
-                      className="ml-auto text-accent hover:underline"
+                      className="text-accent hover:underline"
                     >
                       Download
                     </a>
-                  </div>
+                  </p>
                 );
               })}
             </div>
@@ -155,7 +154,7 @@ function RecordAcknowledgementDialog({ employeeId }: { employeeId: string }) {
         footer={
           <>
             <Button variant="ghost" onClick={close}>Cancel</Button>
-            <Button variant="primary" loading={pending} onClick={submit} disabled={!file}>Save</Button>
+            <Button variant="primary" loading={pending} onClick={submit} disabled={!file || !signedAt}>Save</Button>
           </>
         }
       >
@@ -169,7 +168,7 @@ function RecordAcknowledgementDialog({ employeeId }: { employeeId: string }) {
                 aria-describedby={p["aria-describedby"]}
                 invalid={p.invalid}
                 type="date"
-                max={today()}
+                max={latestSigningDate(new Date())}
                 value={signedAt}
                 onChange={(e) => setSignedAt(e.target.value)}
               />

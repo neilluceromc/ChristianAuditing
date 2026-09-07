@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { uncoveredItems } from "./acknowledgement";
+import { latestSigningDate, uncoveredItems } from "./acknowledgement";
 
 const held = [{ assetId: "a", tag: "BR-LT-0001" }, { assetId: "b", tag: "BR-MN-0002" }];
 describe("uncoveredItems (Phase 16 §6)", () => {
@@ -11,5 +11,14 @@ describe("uncoveredItems (Phase 16 §6)", () => {
   });
   it("items issued since the last signature are named", () => {
     expect(uncoveredItems(held, [{ assetId: "a" }]).map((h) => h.tag)).toEqual(["BR-MN-0002"]);
+  });
+});
+
+describe("latestSigningDate (ruling R10)", () => {
+  it("returns the UTC calendar date one day after now", () => {
+    expect(latestSigningDate(new Date("2026-09-07T19:00:00Z"))).toBe("2026-09-08");
+  });
+  it("rolls over year boundaries", () => {
+    expect(latestSigningDate(new Date("2026-12-31T10:00:00Z"))).toBe("2027-01-01");
   });
 });
