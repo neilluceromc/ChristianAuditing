@@ -1,6 +1,6 @@
 # Inventory v2 — Session Handover
 
-**Last updated:** 2026-09-02 (**PHASES 1–11 ARE ALL MERGED AND PUSHED.** Phase 11 merged via `--no-ff` `b6aa5e2` and pushed the same day; Phase 10 on 2026-08-27. **PHASE 12 IS MERGED TO `main` (2026-09-03) AND NOT PUSHED.** Two `--no-ff` merges: `f368344` (Phase 12) and `09a54ba` (phase-12a deployment hardening). **It is NOT “receiving” any more:** amendment `C-5` replaced it with **registering already-purchased assets**, and `C-11` then deleted the receiving code outright — see §0 item 4e. ⚠️ **`main` is 48 commits ahead of `origin/main`**) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **BATTERY, AND EXACTLY HOW FAR IT GOT.** On `phase-12-receiving` at code-complete (2026-09-03), FULL and green: `tsc` · `lint` · **843 unit / 50 files** · `npm run build` (38 static pages) · `docker compose --profile prod build` (3 images) · **167 e2e / 13 files in five parts, zero failed, zero did-not-run**. **11 migrations; `main` has 8.** ⚠️ **The “153 e2e” this line used to claim for `main` was wrong by one — Phase 12 added exactly one e2e file (13 tests) and a one-line axe change, so `main`’s real baseline is **154 / 12 files**. Verified with `npx playwright test --list`, which counts without running; use it rather than trusting any number in this doc.** · **THE FULL BATTERY IS GREEN ON THE MERGED `main` (2026-09-04):** `tsc`, `lint`, **843 unit / 50 files**, 11 migrations, and **167 e2e / 13 files across five parts — 52 · 47 · 39 · 23 · 6, zero failed, zero did-not-run**. The merged tree is **byte-identical** to the tested branch tip (`git diff phase-12a-deploy-hardening..main` is empty), and no source file has changed since the last proven `docker compose --profile prod build` — only docs. **The risk that run existed to test was the `SEED_PASSWORD` change desynchronising the seed from every spec's login; all 13 files log in and all pass.** · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **`main` IS PUSHED and level with `origin/main` at `b6aa5e2`** (180 commits on 2026-08-27, then 30 more carrying Phase 11 on 2026-09-02). **All three phase branches are local only and have NEVER been pushed** — deliberately; only `main` is ever authorised. `phase-10-polish` and `phase-11-label-qr` are now fully contained in `main` and safe to delete. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.** · **NEW 2026-09-02: §9 records FOUR unplanned subsystems from an Admin stakeholder meeting (inventory digitization, vendor master data, purchasing extensions, consumables/stock control). Read §9 before scoping anything — one of the four cannot be modelled as an `Asset` and would break four existing surfaces if it were.**
+**Last updated:** 2026-09-07 (**PHASE 13 (asset classes) IS CODE-COMPLETE on `phase-13-asset-classes`, UNMERGED and UNPUSHED** — 12 tasks, 19 amendments (`D-1`…`D-19`); the branch is **59 commits ahead of `main`, 0 behind** (measured 2026-09-07: `git rev-list --count main..phase-13-asset-classes`). Battery: `tsc` clean · `lint` clean · **908 unit / 51 files** · `npm run build` compiled (route table printed) · `docker compose --profile prod build` completed earlier the same night (the run that produced the rebuilt `inventory-app:latest` image was interrupted before it could report, and was not repeated) · **187 e2e / 14 files** across five foreground parts, `--workers=1 --global-timeout=540000` — **52 (3.1m) · 47 (5.2m) · 59 (6.8m, then 6.2m on repeat) · 23 (2.0m) · 6 (3.9m) = 187**. Part 3 ran twice: the first pass was 58/59 with `e2e/purchases.spec.ts:90` failing, then 59/59 on repeat — recorded as one non-reproduced failure of the cold-compile/headroom class §7 already documents, not a Phase 13 regression. See §0 items 4f and 9. **PHASES 1–11 ARE ALL MERGED AND PUSHED.** Phase 11 merged via `--no-ff` `b6aa5e2` and pushed the same day; Phase 10 on 2026-08-27. **PHASE 12 IS MERGED TO `main` (2026-09-03) AND NOT PUSHED.** Two `--no-ff` merges: `f368344` (Phase 12) and `09a54ba` (phase-12a deployment hardening). **It is NOT “receiving” any more:** amendment `C-5` replaced it with **registering already-purchased assets**, and `C-11` then deleted the receiving code outright — see §0 item 4e. ⚠️ **`main` is 50 commits ahead of `origin/main`** (measured 2026-09-07: `git rev-list --count origin/main..main`; count both yourself before trusting either number, since every correction to this line is itself a commit) · **Phases 1–9 ALL MERGED to `main`** (Phase 9 via `--no-ff` `7284c10`; `phase-9-import-export` deleted). · **PHASE 10 (polish) IS COMPLETE AND MERGED TO `main`** via `--no-ff` `bd78813` on 2026-08-27, after a green battery on the merged result. `phase-10-polish` was deliberately NOT deleted. The label sheet and the offboarding scanner both ship end to end; the axe sweep covers 46 of 47 routes; `README.md` is a deployment document that has actually been executed. · **BATTERY, AND EXACTLY HOW FAR IT GOT.** On `phase-12-receiving` at code-complete (2026-09-03), FULL and green: `tsc` · `lint` · **843 unit / 50 files** · `npm run build` (38 static pages) · `docker compose --profile prod build` (3 images) · **167 e2e / 13 files in five parts, zero failed, zero did-not-run**. **11 migrations; `main` has 8.** ⚠️ **The “153 e2e” this line used to claim for `main` was wrong by one — Phase 12 added exactly one e2e file (13 tests) and a one-line axe change, so `main`’s real baseline is **154 / 12 files**. Verified with `npx playwright test --list`, which counts without running; use it rather than trusting any number in this doc.** · **THE FULL BATTERY IS GREEN ON THE MERGED `main` (2026-09-04):** `tsc`, `lint`, **843 unit / 50 files**, 11 migrations, and **167 e2e / 13 files across five parts — 52 · 47 · 39 · 23 · 6, zero failed, zero did-not-run**. The merged tree is **byte-identical** to the tested branch tip (`git diff phase-12a-deploy-hardening..main` is empty), and no source file has changed since the last proven `docker compose --profile prod build` — only docs. **The risk that run existed to test was the `SEED_PASSWORD` change desynchronising the seed from every spec's login; all 13 files log in and all pass.** · **ONE ENTRY CRITERION REMAINS AND NO AGENT CAN CLOSE IT: Task 11 Step 4 — print a real label sheet and measure the 100 mm calibration bar with a tape measure.** It needs a physical printer and a human. · **`main` IS PUSHED and level with `origin/main` at `b6aa5e2`** (180 commits on 2026-08-27, then 30 more carrying Phase 11 on 2026-09-02). **All three phase branches are local only and have NEVER been pushed** — deliberately; only `main` is ever authorised. `phase-10-polish` and `phase-11-label-qr` are now fully contained in `main` and safe to delete. Count before trusting this line: `git rev-list --count origin/main..main`. · **Merging and pushing are the user's decisions; do neither unprompted.** · **NEW 2026-09-02: §9 records FOUR unplanned subsystems from an Admin stakeholder meeting (inventory digitization, vendor master data, purchasing extensions, consumables/stock control). Read §9 before scoping anything — one of the four cannot be modelled as an `Asset` and would break four existing surfaces if it were.**
 
 This is the pick-up doc for a fresh session. Read this first, then the spec
 (`docs/superpowers/specs/2026-08-14-inventory-v2-design.md`) and the two design-handover files
@@ -204,6 +204,34 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    `superpowers:brainstorming`, then `superpowers:writing-plans` — do not improvise changes onto a
    branch that is being held for a merge decision.
 
+   **(f) PHASE 13 (asset classes) IS CODE-COMPLETE on `phase-13-asset-classes` — spec
+   `docs/superpowers/specs/2026-09-06-asset-classes-design.md`, plan
+   `docs/superpowers/plans/2026-09-06-phase-13-asset-classes.md`.** Read the plan's amendment banner
+   (`D-1`…`D-19`) before the task bodies, same rule as Phase 11/12.
+
+   Two premise-level facts: **Purchasing assets carry their OWN status vocabulary** —
+   `OPERATIONAL STORED REPAIRING RETIRED SOLD LOST`, disjoint from IT's eight — and there is **ONE
+   register with a class column**: `AssetClass { IT, PURCHASING }` lives on `AssetCategory.cls` and is
+   copied onto `Asset.cls` at creation, never chosen per item.
+
+   Two accepted defaults, both presented to the user for pushback and kept: **approvers stay `admin` /
+   `it_staff` for both classes** — `purchasing_staff` cannot reach `/approvals` today, and
+   Purchasing-owned approvals is the first follow-up (§8); **categories are created by `admin` /
+   `it_staff` only**, not by `purchasing_staff`.
+
+   Two triggers make the class dimension a database property, not an application discipline:
+   `asset_class_invariants` (class↔status, plus `Asset.cls = category.cls` under a **`FOR SHARE`** lock
+   on the category row so a concurrent class flip cannot slip between the read and the write — D-3),
+   and `category_class_frozen` (refuses to change a category's class once any asset references it).
+
+   The user's naming decision, on the record so nobody builds a third meaning: *"remember admin =
+   purchasing"* — the business's **Admin department IS Purchasing**; in the codebase `admin` is the
+   sysadmin role, and Purchasing is the `purchasing` workspace / `purchasing_staff` role. §9 below is
+   corrected accordingly.
+
+   What remains: the merge and push decisions, the user's and separate as always (§0 items 4b/4c above
+   apply the same way); and the deferred follow-ups now recorded in §8.
+
 5. **Execution mode: subagent-driven, and the user asked for it explicitly.** `superpowers:subagent-driven-development`.
    Fresh implementer per task, then review. Tasks 1–4 used two reviewers; 5–9 used one, escalating only
    if the first found something structural. **The reviews are where correctness came from** — see item 7.
@@ -254,17 +282,25 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    a long-lived dev server degrades the suite into phantom failures. Use `preview_stop`/`preview_start`,
    never raw Bash.
 
-9. **Running the e2e suite — 147 tests across 12 files, and the split below is MEASURED, not estimated.**
-   Task 11 ran all four parts: **51 in 4.1m · 56 in 5.1m · 34 in 3.9m · 6 in 3.9m = 147.** No
-   re-balancing was needed. Note the correction: a previous revision of this doc recorded `axe-sweep` as
-   **5** tests and it is **6** — the total was right while one of its components was wrong, which is
-   exactly what a total is worst at catching. It does **not** fit one foreground run. Split it, each
-   part with `--global-timeout` so Playwright reaps itself rather than being killed:
+9. **Running the e2e suite — 187 tests across 14 files, and the split below is MEASURED, not estimated.**
+   Task 12 (Phase 13) ran all five parts, foreground, `--workers=1 --global-timeout=540000` (part 3 at
+   600000): **52 in 3.1m · 47 in 5.2m · 59 in 6.8m (58/59 on the first pass — `e2e/purchases.spec.ts:90`,
+   the bounce-back centrepiece, failed; it passed alone in 34.5s and the full part passed 59/59 on
+   repeat, in 6.2m — recorded as one non-reproduced failure of the cold-compile/headroom class §7
+   already documents, not a Phase 13 regression) · 23 in 2.0m · 6 in 3.9m = 187.** Correction history,
+   one line: **147 / 12 files** at Phase 10's close → **167 / 13 files** at Phase 12 → **187 / 14
+   files** now (+20 from `asset-classes.spec.ts`: D-8, D-13, D-14, D-15, D-17 add cases; case 15
+   dropped as unreachable from the UI). Note the older correction too, since a total is the worst place
+   to catch drift: a previous revision of this doc recorded `axe-sweep` as **5** tests when it was
+   **6** — the total was right while one of its components was wrong. It does **not** fit one
+   foreground run. Split it, each part with `--global-timeout` so Playwright reaps itself rather than
+   being killed:
 
    ```bash
    npx playwright test e2e/admin.spec.ts e2e/approvals-audit.spec.ts e2e/auth-shell.spec.ts e2e/home-finance.spec.ts --workers=1 --global-timeout=540000
-   npx playwright test e2e/import-export.spec.ts e2e/it-core.spec.ts e2e/kitchen-sink.spec.ts e2e/labels.spec.ts --workers=1 --global-timeout=540000
-   npx playwright test e2e/offboarding.spec.ts e2e/purchases.spec.ts e2e/scanner.spec.ts --workers=1 --global-timeout=540000
+   npx playwright test e2e/import-export.spec.ts e2e/it-core.spec.ts e2e/kitchen-sink.spec.ts --workers=1 --global-timeout=540000
+   npx playwright test e2e/offboarding.spec.ts e2e/purchases.spec.ts e2e/receiving.spec.ts e2e/asset-classes.spec.ts --workers=1 --global-timeout=600000
+   npx playwright test e2e/scanner.spec.ts e2e/labels.spec.ts --workers=1 --global-timeout=540000
    npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=1200000
    ```
 
@@ -361,7 +397,7 @@ git worktree — the repo root IS the app root and this is a single workstream. 
 - **Dev app:** never via Bash — use the Browser-pane preview (`preview_start` name `app-dev`, port 3000). The controller owns this server; subagents must not start one.
 - **Worker:** `npm run worker` (poll loop) or `npm run worker:once` (drain and exit — what e2e uses). In prod it's the compose `worker` service.
 - **NEVER run `npm run build` while a dev server is running** — they share `.next` and it bricks the dev server.
-- **Full battery:** `npx tsc --noEmit && npm run lint && npm run test && npm run build`, then `docker compose --profile prod build` to prove the production image, then the e2e suite. **The e2e half no longer fits one command** — **147 tests across 12 files** as of Phase 10 Task 9 (123 at Phase 9's close, 8.2 minutes at Phase 9 Task 10, ~5 when this line was first written). **The split (now FOUR parts, 147 tests across 12 files) and the reasoning are in §0 item 9; use those commands.** Whatever you do, **run Playwright in the foreground.** A backgrounded run that is never reaped keeps its own `beforeAll` reseed racing yours, which produces FK/unique errors and a cascade of unrelated timeouts in specs that pass in isolation — diagnose by listing live `node.exe` command lines, not by editing assertions.
+- **Full battery:** `npx tsc --noEmit && npm run lint && npm run test && npm run build`, then `docker compose --profile prod build` to prove the production image, then the e2e suite. **The e2e half no longer fits one command** — **187 tests across 14 files** as of Phase 13 Task 12 (167 across 13 files at Phase 12's close, 147 across 12 files at Phase 10 Task 9, 123 at Phase 9's close, 8.2 minutes at Phase 9 Task 10, ~5 when this line was first written). **The split (now FIVE parts, 187 tests across 14 files — part 3 now includes `asset-classes.spec.ts`) and the reasoning are in §0 item 9; use those commands.** Whatever you do, **run Playwright in the foreground.** A backgrounded run that is never reaped keeps its own `beforeAll` reseed racing yours, which produces FK/unique errors and a cascade of unrelated timeouts in specs that pass in isolation — diagnose by listing live `node.exe` command lines, not by editing assertions.
 - **Seeded accounts** (all `@thebackroomop.com`): `admin@` (admin, permanent) · `it@` (it_staff) · `purchasing@` (purchasing_staff) · `finance@` (finance_staff) · `viewer@` (viewer). **The password is `SEED_PASSWORD` in `prisma/fixtures.ts` — one owner, imported by `prisma/seed.ts` and by every e2e `login` helper.** It was `ChangeMe123!` hardcoded in fourteen places until 2026-08-24; the user changed it to **`admin123`** for their own local deployment. **Do not hardcode it anywhere** (rules 26/37/38) — a missed copy fails as "wrong email or password", not as the edit it was. **And note the asymmetry:** `signupUser` refuses anything under **10 characters**, so the seeded value is one the app's own signup would reject. Sign-in is unaffected (`authorize` does a plain `bcrypt.compare` with no length rule, which is the right place for that asymmetry — a policy change must never lock out existing accounts), but do not read `SEED_PASSWORD` as evidence of what the policy permits, and do not reuse it as the fixture for a signup test.
 - **Seed contents:** **25 assets** (all 8 statuses; **not one of them has a `serial` — `count(serial)` is 0, and `prisma/seed.ts` never sets one**, which is why Phase 9 Task 13's duplicate-serial fixture had to be built by the importer itself rather than taken from the seed), 10 employees (one equipment policy, "Finance standard", targeting the Finance department — so **three** employees currently have policy gaps: EMP-0042, EMP-0088, EMP-0097. Marites EMP-0042 holds 4 items against that policy and is short **1** required slot; do not read her "1 gap" as the seed's total, which is what misled a Phase 9 task; Dennis EMP-0090 is OFFBOARDING; Nina EMP-0097 has a reserved monitor), 7 approvals (all 6 states; APR-2040 past SLA → badge reads "3, urgent"; APR-2035 is APPROVED with a **deliberately malformed payload** + a queued job — the worker's EXECUTION_FAILED demo), 5 PRs (one per state; **PR-0198 is the bounce-back with a three-party note thread**, still the fixture the purchasing e2e leans on; `purchase_request_ref_seq` sits at 201 so the first drafted ref is PR-0202), 4 reservations. **As of Phase 8 Task 12: 2 `WebhookEndpoint` rows** (`hooks.thebackroomop.com/inventory`
 active, subscribed to `approval.executed` + `offboarding.completed`; `legacy.thebackroomop.com/erp-bridge`
@@ -514,7 +550,7 @@ scoped feed, so the only one showing the domain pill).
   print surfaces keep their margins. `PrintButton` moved to `components/ui/` on its third caller.
 - **T4 · the gate and the entry point** — a `PATH_RULES` entry for `/inventory/labels` **before** the
   general `/inventory` rule (which admits purchasing and finance), a "Print labels" link in the bulk
-  drawer for an explicit selection only, and `e2e/labels.spec.ts` (9 tests) which **measures** the bar,
+  drawer for an explicit selection only, and `e2e/labels.spec.ts` (15 tests) which **measures** the bar,
   the page box and the two-sheet break rather than asserting visibility.
 - **T5 · `src/lib/scan.ts`** — the pure four-way scan verdict (`match` / `unknown` / `already-decided` /
   `blocked`, plus `ignored`), over a minimal structural `ScanItem` rather than the wizard's own type.
@@ -583,7 +619,7 @@ because each stage exists to make the next one honest:
   fix each, a fix that re-plans and never writes.
 - **T12 · `/employees/import`** — the same chain on `Employee`, sharing the vocabulary, the wizard, the
   key rules and the date convention rather than mirroring them.
-- **T13 · `e2e/import-export.spec.ts`** — 20 tests over both halves plus all four export routes, and
+- **T13 · `e2e/import-export.spec.ts`** — 21 tests over both halves plus all four export routes, and
   `e2e/fixtures/make.ts` with its ten generated `.xlsx` files. Script and output both committed: every
   sheet is written by `toXlsxBuffer` through the app's own export column specs, so each is a file this
   application could genuinely have produced — which matters because the flagship workflow is
@@ -750,6 +786,58 @@ minute:
    `delivery` namespace exists precisely so a healthy `QUEUED` row does not read as amber like a
    failing one — plus the table at **375px** with a long endpoint URL and a long `lastError` beneath
    it, and where the dead-lettered banner sits relative to the tabs.
+
+**Phase 13 — asset classes (CODE-COMPLETE, all 12 tasks, on `phase-13-asset-classes`, UNMERGED and
+UNPUSHED)** (`docs/superpowers/plans/2026-09-06-phase-13-asset-classes.md`, spec
+`docs/superpowers/specs/2026-09-06-asset-classes-design.md`):
+
+- **T1 · schema + triggers** — `AssetClass { IT, PURCHASING }` on `AssetCategory.cls` and `Asset.cls`;
+  six new `AssetStatus` values (`OPERATIONAL STORED REPAIRING RETIRED SOLD LOST`); three migrations
+  (`asset_status_purchasing_values`, `asset_classes`, `asset_class_invariants_lock`);
+  `asset_class_invariants` (class↔status, and `Asset.cls = category.cls` under a `FOR SHARE` lock on
+  the category row — D-3) and `category_class_frozen` (a category's class is immutable once it has
+  assets).
+- **T2 · `src/lib/asset-class.ts`** — the partition: `STATUSES_BY_CLASS`, `DEFAULT_STATUS`,
+  `DEFAULT_ASSIGN_STATUS`, `parseCls`, `CLASS_LABEL`/`CLASS_PHRASE`, pinned to the trigger's own
+  literal lists by reading the migration file.
+- **T3 · `approval-execution.ts` + the worker** — class-aware assign/return/change-status targets,
+  each rule mutation-tested to fail when its class check is removed; `ASSIGNABLE_FROM` its own literal.
+- **T4 · offboarding** — `OUTCOME_STATUS` keyed by class; no Buyout offered for a Purchasing item;
+  `outcomeOfStatus` searches both maps; `Decision.toStatus` carries the payload's real target instead
+  of re-deriving it through two maps (D-10).
+- **T5 · the class-scoped list layer** — `cls` in `buildAssetWhere`, facet counts, CSV export and the
+  bulk drawer's "act on all matching".
+- **T6 · the write-path gates** — class gates on register, create, edit, request-status-change and
+  bulk, including `resubmitAssetToFinance` (D-13); `CLASS_PHRASE` so no bare article precedes a class
+  label anywhere.
+- **T7 · routing and page gates** — `/inventory/register` and `/inventory/new` widened to Purchasing;
+  the Secrets tab hidden by role AND class, and `/inventory/[id]/secrets` renders the not-found page
+  rather than an ejecting redirect (D-18); the wrong-class edit redirect goes to the record, not
+  `ROLE_LANDING` (D-14).
+- **T8 · class-aware controls** — status pickers, the create/register forms (`ASSET_CLASSES` /
+  `CLASS_LABEL` / `CLASS_EXAMPLE`, no hand-typed literals left in a component), the category table's
+  Class column.
+- **T9 · `?cls=`, the two Finance tabs, Home pinned to IT** — the `/inventory` class switch (a nav
+  destination, modelled on `?purchaseYear=`); `/finance/assets`'s IT/Purchasing tabs; Home's alerts
+  stay IT-only and pinned (D-16; D-19 records that the leaver card pins `cls: "IT"` on holdings while
+  the offboarding queue does not).
+- **T10 · the import wizard** — a Purchasing row is refused by name (`wrong-class`), reworded twice
+  under review to name who can act and what the row actually is (D-17).
+- **T11 · seed + `e2e/asset-classes.spec.ts`** — four Purchasing categories (Vehicle, Furniture,
+  Pantry Equipment, Building) with seven assets; 20 e2e cases (D-8/D-13/D-14/D-15/D-17 add cases; case
+  15 dropped as unreachable from the UI).
+- **T12 · this handover, the amendments, the battery** — §0 items 4f and 9, §6a rules 101+, §8, §9.
+
+**TWO VISUAL CHECKS WERE NEVER DONE, same shape as Phase 8's two above, and they need a human at a
+keyboard.** Both are asserted behaviourally — through the DOM and through Playwright — so what's
+missing is only what the eye catches:
+
+1. **The class switch's chips (`/inventory?cls=`) and the two Finance tabs have been axe-scanned and
+   driven, never LOOKED at.** Neither blocks anything and nothing depends on either.
+2. **The Register form (`/inventory/register`) has never been seen through a `purchasing_staff`
+   login.** It has only been verified through `admin`/`it_staff` and the DOM — the Vehicle/Furniture
+   copy and the `CLASS_EXAMPLE` placeholders are unverified by eye for the role that will actually use
+   them day to day.
 
 ### Conventions every later phase must follow
 
@@ -1417,7 +1505,7 @@ any task in the phase. All of them were fixtures that the running code could not
 55. **The cheap in-session reseed is a Playwright spec.** `npm run db:seed` is *sometimes*
     classifier-blocked for agents (it ran fine in Task 13's session), but every spec reseeds via
     `execSync` in `beforeAll` and that is never blocked.
-    `npx playwright test e2e/auth-shell.spec.ts --workers=1` is ~60s / 15 tests and doubles as a
+    `npx playwright test e2e/auth-shell.spec.ts --workers=1` is ~60s / 16 tests and doubles as a
     regression check on the fixture you just changed. This is how Task 12 verified its numbers against a
     genuinely fresh database rather than reasoning about them.
 56. **A refusal enforced by a DATABASE INDEX is still a refusal the page owes the operator — and it is
@@ -1744,6 +1832,129 @@ any task in the phase. All of them were fixtures that the running code could not
      unless you reorder the assertions and check each independently** — which is exactly what the
      implementer did. State which layer you expect to catch a mutation, not merely that something will
      fail.
+
+101. **A default is scaffolding; the trigger is the guarantee.** Every existing category becomes `IT`
+     through `AssetCategory.cls @default(IT)`, but a default only ever describes the common case — it
+     is Phase 13's `asset_class_invariants` and `category_class_frozen` triggers that make a wrong
+     class or a wrong status *impossible* to write, not merely unusual. Spec §2.4's "no drift path,
+     enforced by Postgres, not trusted" was true only once the trigger existed, and D-3 (rule 102)
+     shows it was still false for one release even then.
+
+102. **A trigger that reads another table is a concurrency question, not just a logic question — lock
+     what you read.** `asset_class_invariants` read `AssetCategory.cls` with a plain `SELECT` under READ
+     COMMITTED; a concurrent insert and a concurrent `category_class_frozen` flip could each pass
+     against a snapshot that never saw the other, and an asset's class could permanently disagree with
+     its category with no trigger ever revisiting it. Fixed with `FOR SHARE` on the category read — not
+     `FOR KEY SHARE`, which is what FK checks take and does not conflict with an update of a non-key
+     column (D-3). Ask what the *other* transaction sees before calling a database check a guarantee.
+
+103. **Review a new module's NAMES as hard as its values.** Every entry in `src/lib/asset-class.ts`'s
+     six maps was correct against the four consumers that held the IT literals today; `canActOnClass`
+     was not, because it mapped `finance_staff` to `[]` when Finance actually acts on assets of both
+     classes through confirm/send-back — a later task reaching for that guard would have locked Finance
+     out of a feature Phase 12 had already shipped. Renamed `canManageClass`/`MANAGEABLE_CLASSES` while
+     it still had zero call sites (D-6).
+
+104. **When a task deletes an export, the plan must grep every consumer at planning time, not trust the
+     one call site it happens to name.** Task 4's step named a single `<ItemDecision>` render of
+     `OUTCOME_STATUS`; the same page had three more bare reads and the farewell report imported it too
+     — five consumers, one named in the plan (D-9).
+
+105. **When the stored value IS the fact, print it — don't re-derive it through two maps.** Every
+     offboarding page rendered `outcomeStatus(cls, decision.outcome)`, a lossy round-trip through
+     `forward`/`reverse` that equalled the stored status only when the payload's status belonged to the
+     asset's own class, and rendered a bare null otherwise. The decision row already knew the payload's
+     real target; `Decision.toStatus` now stores and prints it directly (D-10). Derived-state-beats-
+     stored-state has an inverse: a stored fact is not improved by being re-derived.
+
+106. **A shape change breaks every whole-object assertion, not just the one you remember.** Making
+     `cls` an unconditional key of `buildAssetWhere`'s return value broke the `toHaveLength(8)` check
+     the plan named — and three more `toEqual({})` comparisons on the whole object that it didn't
+     (D-11). Grep the test file for whole-object assertions before widening a function's output shape.
+
+107. **Scope every list in a function by the same key, or write down why not.** Task 5 scoped
+     `facetOptions`' categories and types by `cls` and left the assignee list global, so the IT view's
+     Assigned facet would offer a driver who holds only a car — an option that can never have rows in
+     that view, not merely a rare one (D-12). The review that caught it also confirmed which OTHER
+     asset queries are right to stay global (labels' `?ids=`, the scanner's `exactTagMatch`, import
+     dedupe) — the rule needs a reason recorded on both sides, not just a fix on one.
+
+108. **A default parameter added so intermediate commits compile is removed in the commit where the
+     last caller finally passes the real value.** The `cls = "IT"` defaults Task 5 put on four query
+     functions kept `tsc` green while `?cls=` didn't exist yet; left in place past Task 9 they become a
+     trap the moment the page threads a real `cls` and some caller forgets to pass it. Removed in the
+     same commit that wired the last caller (D-12).
+
+109. **A control gated by a predicate has its action gated by the same predicate, in the same phase.**
+     Task 7 rendered Resubmit for whoever `canManageClass` allows, but `resubmitAssetToFinance` was
+     still `actionRole("admin", "it_staff")` — a Purchasing user would have seen a working-looking
+     button and gotten `forbidden()` on the click (D-13).
+
+110. **The vocabulary carries the article — never `a ${label}`.** "not a IT status" and "a Purchasing
+     category" both read as broken English, and both shipped more than once: D-8 fixed three worker
+     strings, and D-13 reintroduced the same bug at six more sites before Task 6 was even done.
+     `CLASS_PHRASE` ("an IT", "a Purchasing") is now the one place that decides, with a test.
+
+111. **When a route opens to a new role, walk every link and redirect that role can now reach, and ask
+     where it lands.** Task 7 closed every write gate correctly and left six dead affordances an
+     unreachable role could still click: a wrong-class edit redirect to `ROLE_LANDING` instead of the
+     record, an unguarded `/inventory/new`, two nav items lit at once, a Secrets tab hidden by class but
+     not by role, a register form telling a Purchasing user to model a car on a ThinkPad (D-14). Gates
+     were reviewed; affordances were not, and five of six led off a cliff.
+
+112. **When a fix's own text contains the word "simplest," read the call site before believing it.**
+     The prescribed fix for a double nav-highlight — `search.size === 0` — was not correct: the sidebar
+     feeds `navIsActive` the LIVE search params, so every page-owned query param de-highlighted the
+     bare nav item on six entries across four workspaces, with a green suite, because nothing tested a
+     bare item under a filter (D-14b). The rule that was actually right derives which params a bare
+     link yields to from the sibling nav item's own declaration (`WORKSPACE_NAV`), so it cannot drift.
+
+113. **When a phase creates a vocabulary module, grep the plan's own code blocks for the literals it
+     replaces — and when a defect is fixed on one of two sibling surfaces, name the other in the same
+     amendment.** Task 8's plan text hard-coded `useState<"IT" | "PURCHASING">` and two hand-typed
+     `<option>` labels the day after `asset-class.ts` was created to be the only copy of that
+     enumeration; the same plan repeated `register-form.tsx`'s already-fixed `?? "IT"` fallback and
+     ThinkPad placeholder on its sibling `asset-form.tsx`, missed because the amendment that fixed the
+     first didn't name the second (D-15).
+
+114. **"Every X in the file" is a grep, not a rule — read what each X serves before writing the
+     instruction.** Task 9's step said "every `prisma.asset` read in the file"; one of them was
+     `financeHome`'s Capitalized tile, which the spec gives BOTH classes, so pinning it to IT would have
+     made Finance's headline silently disagree with the page it fronts by the entire Purchasing total,
+     with a green suite (D-16).
+
+115. **A fix that names an action must be true for every role that can read it, and for every row the
+     card can hold.** Task 10's `wrong-class` refusal told the reader to "Register Purchasing assets"
+     and linked to a screen `it_staff` cannot use that way — true only for `admin` (D-17). The same
+     cause then had to hold true for a second row shape (a Purchasing asset matched by an existing tag)
+     under one shared headline; "the route exists" proved neither claim.
+
+116. **Assert the outcome the user sees, not the transport, unless the transport IS the contract.**
+     "The URL 404s" was a claim about an HTTP status this app's `notFound()` cannot produce past a
+     Suspense boundary — `/inventory/[id]/secrets` streams 200 with the not-found page in the body, and
+     the guard had fired correctly the whole time (D-18). Assert the rendered outcome; reserve a
+     status-code assertion for a route that is genuinely unmatched.
+
+117. **When a task changes a fixture every spec shares, its verification is the whole suite, not its
+     own file.** Task 11 validated only the new spec; the code-quality review walked every OTHER spec
+     against the new seed and found `import-export.spec.ts` comparing an unscoped `db.asset.findMany`
+     (36 rows) to a class-pinned export (29) — a failure the plan's own heuristic ("a moving IT count
+     means an unpinned query") would have misdiagnosed, because the export query was right and the
+     test's own Prisma read was the unpinned side (D-19).
+
+118. **A negative assertion is proven only when the same locator matches in the other branch — write
+     the pair or write nothing.** Two of Task 11's cases could never fail: "IT cannot resubmit" ran at
+     a moment the control is absent for every role, and "no Reveal button" has no secrets in the seed
+     to reveal regardless of the guard (D-19). Both moved to a moment, or a text, that actually
+     distinguishes the branches.
+
+119. **A subagent brief that allows a Playwright run must say the run completes inside the tool call,
+     with a timeout that covers `--global-timeout` — no monitors, no waiting.** Task 11's first
+     implementer stopped mid-run "with a monitor" and left an orphaned `next dev` behind; the second
+     agent correctly refused to race an unowned process rather than guess at its state (D-18's process
+     note). Reuse of an orphan, if it happens, is the controller's call, made against a diff proving the
+     orphan is current code.
+
 75. **This document is a surface, and rule 16 applies to it exactly as it applies to a comment.** §6a
     rule 61 told three tasks to prove hydration by waiting for a server-rendered field's initial value,
     which proves nothing (rule 76). §7's own bullet on the same subject already said the opposite — "a
@@ -2259,10 +2470,42 @@ entry to find the next free number gives you 81, which is taken. **Append at 101
   no in-app recovery**. A last-admin guard would not have prevented it — that prevents removing the
   last admin, it cannot conjure one.
 - Entra SSO real wiring (needs tenant creds). Real product photography, brand mark, barcode generation (striped placeholders today). Off-device backups (nightly `pg_dump` to a local volume ships; copying elsewhere is the user's call). HR review of the accountability-form acknowledgement copy. `WebhookEndpoint.secret` encryption (Phase 8). CI workflow + jsdom component tests (declined in Phase 1, revisitable).
+- **Phase 13 (asset classes) — deferred, with D- references.** **Purchasing-owned approvals** (spec §7's
+  first follow-up: `purchasing_staff` cannot reach `/approvals` today, `PATH_RULES` admits `it` and
+  `finance` workspaces only). A **Purchasing assign/return surface** — `/employees` is IT's workspace,
+  and a car is assigned to its driver at create time only (D-13). A **detector for an unassigned holder
+  status on the Purchasing side** — IT's Home flags an unassigned `DEPLOYED` laptop; nothing does the
+  same for an unassigned `OPERATIONAL` car, and a pool car with no driver is legitimately correct today
+  (D-13). **Class-aware document permissions** — `documents/page.tsx` and `document-actions.ts` are
+  role-hardcoded to IT, so Purchasing cannot attach a car's OR/CR while IT can (D-14). A **policy slot
+  naming a type whose empty category was later flipped** to Purchasing — reachable only by a direct-DB
+  edit, after which `resolvePolicy` reports a permanent gap (D-14). A **label sheet for Purchasing
+  assets** — nothing OFFERS one (`/inventory/labels` is IT-only), but `?ids=` prints one regardless, so
+  `e2e/labels.spec.ts`'s numbers still pass while **4 of its 13 printed labels are now Purchasing**
+  (tag-ascending `take: 13`, the sheet unscoped by design — D-15/D-19). The **year chip's empty-state
+  count** — `purchaseYear` survives the class switch into a view that may have no such year, and
+  `hasFilters` counts it while no chip renders it, so the empty state reads "0 active filters" (D-16,
+  pre-existing). **One markup for a class switch** — Finance's tab is a `<nav>`, the inventory
+  toolbar's is `role="navigation"` (D-16; this is also why the axe sweep's `landmark-unique` count is
+  1). **Task 6's wrong-class register POST and mixed-class bulk gates are unreachable from the UI** and
+  are covered only by the trigger and by review, not by e2e (D-13). **`updateAsset`'s cross-class guard
+  is likewise unreachable** — Task 7 filtered the edit form's categories to the asset's own class
+  first, so case 15 was dropped from Task 11's e2e rather than written (D-15). **Home's leaver card
+  pins `cls: "IT"`** on a leaver's holdings while the offboarding queue does not — the first seeded
+  leaver holding a car will make the two disagree (D-19). **No test drives a Purchasing approval
+  through the real approve action** — cases 7 and 14 use the Prisma shortcut, and
+  `approvals-audit.spec.ts` is IT-only (D-19). **`worker:once` in e2e drains the whole job queue**, so
+  those same cases also fire the seed's webhook delivery — pre-existing behaviour, not introduced by
+  this phase, and bounded (D-19).
 
 ---
 
 ## 9. Stakeholder requirements from the 2026-09-02 Admin meeting (NOT yet planned)
+
+> ⚠️ **"Admin" below means the PURCHASING DEPARTMENT** — confirmed by the user on 2026-09-06
+> (*"remember admin = purchasing"*). In this codebase `admin` is the sysadmin role and Purchasing is
+> the `purchasing` workspace / `purchasing_staff` role. Phase 13 built item **A** on that reading;
+> nothing here should be read as concerning the `admin` role.
 
 Raised by **Anj, Maynard, Neil, Salem and Mary**. Recorded verbatim-in-substance because none of it is
 specced yet and it is the only record. **Four distinct subsystems, not one feature** — the decomposition
