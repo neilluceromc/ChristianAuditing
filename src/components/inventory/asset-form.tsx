@@ -138,12 +138,18 @@ export function AssetForm({
         // The field this response is about may no longer hold the value we
         // checked — ignore it rather than label whatever is there now.
         // Tag is compared the same way `checkIdentifiers` itself normalises
-        // it (trim + upper-case); serial is compared as-is, matching the
-        // server, which does not normalise serials.
+        // it (trim + upper-case, `tagKey`); serial is compared as typed —
+        // the server trims a serial (`createSchema`, `identifiersSchema`)
+        // but does not case-fold it, so raw equality is the right test for
+        // "has this field changed since we scheduled the check".
         const latest = latestRef.current[kind];
         const stale = kind === "tag" ? tagKey(value) !== tagKey(latest) : value !== latest;
         if (stale) return;
-        const hit = kind === "tag" ? res.data.tags.includes(value) : res.data.serials.includes(value);
+        // R9: a value only counts as "taken" once normalised the same way
+        // the server normalises it before matching — otherwise a lower-case
+        // typed tag, or a serial carrying incidental padding, never matches
+        // a normalised server hit even though the server would refuse it.
+        const hit = kind === "tag" ? res.data.tags.includes(tagKey(value)) : res.data.serials.includes(value.trim());
         setErrors((e) => {
           if (hit) return { ...e, [kind]: "Already registered" };
           if (!(kind in e)) return e;

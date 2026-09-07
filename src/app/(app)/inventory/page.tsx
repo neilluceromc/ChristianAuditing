@@ -147,6 +147,7 @@ export default async function InventoryPage({
                 stays IT-only regardless of the view: there is no Purchasing
                 import wizard yet (Task 10). */}
             {canMutate && cls === "IT" && <ButtonLink href="/inventory/import">Import</ButtonLink>}
+            {canRegister && <ButtonLink href="/inventory/register">Register several</ButtonLink>}
             {canRegister && <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>}
           </>
         }
@@ -215,7 +216,14 @@ export default async function InventoryPage({
                 ? "Register the first asset, or use Import to bring in a spreadsheet."
                 : "Register the first asset — Purchasing assets are registered one batch at a time; there is no spreadsheet import for them yet."
             }
-            actions={canRegister ? <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink> : undefined}
+            actions={
+              canRegister ? (
+                <>
+                  <ButtonLink href="/inventory/register">Register several</ButtonLink>
+                  <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>
+                </>
+              ) : undefined
+            }
           />
         )}
       </div>

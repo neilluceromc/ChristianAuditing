@@ -47,6 +47,10 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       heading: "Tracking",
       items: [
         { label: "Inventory", href: "/inventory" },
+        // Task 13: the batch register page — same roles as the
+        // `/inventory/register` PATH_RULE below (admin, it_staff; purchasing
+        // reaches it through the Purchasing workspace's own nav instead).
+        { label: "Register several", href: "/inventory/register", roles: ["admin", "it_staff"] },
         { label: "Employees", href: "/employees" },
         { label: "Worklist", href: "/inventory/work" },
         { label: "Approvals", href: "/approvals", badge: "approvals" },
