@@ -199,7 +199,11 @@ export async function applyAssetImport(
       // outcome, switch on it after it resolves.
       const outcome = await prisma.$transaction(async (tx) => {
         if (row.kind === "create") {
-          const asset = await tx.asset.create({ data: row.data });
+          // Spec §4 stamping: this wizard is admin/it_staff only and IT-class
+          // only (import-assets.ts), so every row it creates is self-checked.
+          const asset = await tx.asset.create({
+            data: { ...row.data, itVerifiedAt: new Date(), itVerifiedById: actor.id },
+          });
           // A-5: `createAsset` can hardcode tag/model/status as a from-null
           // because `creationPlan` guarantees DEFAULT_STATUS[cls]-only direct
           // creation (SPARE for IT, STORED for Purchasing).

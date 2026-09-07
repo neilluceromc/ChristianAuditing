@@ -8,7 +8,9 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { TAG_SHAPE } from "@/lib/tag-key";
-import { CLASS_LABEL, CLASS_PHRASE, DEFAULT_STATUS, canManageClass } from "@/lib/asset-class";
+import {
+  CLASS_LABEL, CLASS_PHRASE, DEFAULT_STATUS, canManageClass, canRegisterClass,
+} from "@/lib/asset-class";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -76,18 +78,22 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
 
   // The category decides the class; the class decides who may register into
   // it. Finance and viewers never reach here (actionRole above), so the only
-  // refusal this produces is IT registering a Purchasing category or vice
-  // versa — named, because "forbidden" would not say what to do instead.
+  // refusal this produces is IT registering a Purchasing category — named,
+  // because "forbidden" would not say what to do instead.
   const category = await prisma.assetCategory.findUnique({
     where: { id: d.categoryId },
     select: { name: true, cls: true },
   });
   if (!category) return validationError({ categoryId: "Unknown category" });
-  if (!canManageClass(user.role, category.cls)) {
+  // Spec §4: Purchasing registers both classes, IT its own. Registering is not
+  // managing — an IT asset Purchasing registers is IT's from this moment.
+  if (!canRegisterClass(user.role, category.cls)) {
     return validationError({
-      categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — ${CLASS_LABEL[category.cls]} staff register ${CLASS_LABEL[category.cls]} assets.`,
+      categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not register ${CLASS_LABEL[category.cls]} assets.`,
     });
   }
+  // Spec §4 stamping: born checked when the registrant manages the class.
+  const selfChecked = category.cls === "IT" && canManageClass(user.role, "IT");
 
   let done: Registered | null = null;
   let failure: ActionResult<Registered> | null = null;
@@ -135,6 +141,8 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             cost: d.cost ? d.cost : null,
             vendorId: d.vendorId || null,
             purchaseRequestId: d.requestId || null,
+            itVerifiedAt: selfChecked ? new Date() : null,
+            itVerifiedById: selfChecked ? user.id : null,
           },
         });
         created++;

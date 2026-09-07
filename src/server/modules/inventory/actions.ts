@@ -14,7 +14,9 @@ import {
 import {
   ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
-import { CLASS_LABEL, CLASS_PHRASE, canManageClass, isStatusOf, parseCls } from "@/lib/asset-class";
+import {
+  CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isStatusOf, parseCls,
+} from "@/lib/asset-class";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
@@ -195,9 +197,15 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
 
   const category = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
   if (!category) return validationError({ categoryId: "Unknown category" });
-  if (!canManageClass(user.role, category.cls)) {
-    return validationError({ categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — ${CLASS_LABEL[category.cls]} staff create ${CLASS_LABEL[category.cls]} assets.` });
+  // Spec §4: Purchasing registers both classes, IT its own. Registering is not
+  // managing — an IT asset Purchasing registers is IT's from this moment.
+  if (!canRegisterClass(user.role, category.cls)) {
+    return validationError({
+      categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not register ${CLASS_LABEL[category.cls]} assets.`,
+    });
   }
+  // Spec §4 stamping: born checked when the registrant manages the class.
+  const selfChecked = category.cls === "IT" && canManageClass(user.role, "IT");
   const plan = creationPlan(d.requestedStatus, d.assigneeId || null, category.cls);
   if (!plan.ok) {
     return plan.error === "assignee_required"
@@ -234,6 +242,8 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           cost: toCost(d.cost),
           warrantyUntil: toDate(d.warrantyUntil),
           notes: d.notes || null,
+          itVerifiedAt: selfChecked ? new Date() : null,
+          itVerifiedById: selfChecked ? user.id : null,
         },
       });
       await writeAudit(tx, {
@@ -313,7 +323,7 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
 
   const asset = await prisma.asset.findUnique({ where: { id: d.id } });
   if (!asset) return conflict("That asset no longer exists.");
-  if (!canManageClass(user.role, asset.cls)) return forbidden();
+  if (!canEditAsset(user.role, asset)) return forbidden();
   if (d.categoryId !== asset.categoryId) {
     // Same class only. A category change across classes would flip the
     // asset's class and invalidate its status; the trigger would refuse it,
