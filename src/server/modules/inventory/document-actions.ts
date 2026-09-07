@@ -1,8 +1,5 @@
 "use server";
 
-import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { actionUser } from "@/server/auth/guards";
@@ -13,15 +10,9 @@ import {
 } from "@/server/action-result";
 import { canManageClass } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
-
-const ALLOWED: Record<string, string> = {
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-};
-const MAX_BYTES = 10 * 1024 * 1024;
-const KINDS = ["receipt", "accountability-form", "photo", "other"] as const;
+import { DOCUMENT_KINDS } from "@/lib/documents";
+import { BULK_MAX } from "@/lib/inventory-list";
+import { storeUpload, validateUpload } from "@/server/uploads";
 
 /**
  * Files land on the local uploads/ volume (single-machine deploy, no object
@@ -37,34 +28,23 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult<{
 
   const assetId = String(formData.get("assetId") ?? "");
   const kind = String(formData.get("kind") ?? "");
-  const file = formData.get("file");
   if (!assetId) return conflict("Missing asset.");
-  if (!(KINDS as readonly string[]).includes(kind)) return validationError({ kind: "Pick a document kind" });
-  if (!(file instanceof File) || file.size === 0) return validationError({ file: "Pick a file first" });
-  if (file.size > MAX_BYTES) return validationError({ file: "Too big — the cap is 10 MB" });
-
-  const ext = path.extname(file.name).toLowerCase();
-  if (!ALLOWED[ext] || (file.type && file.type !== ALLOWED[ext])) {
-    return validationError({ file: `That type isn't allowed. Accepted: PDF, PNG, JPG.` });
-  }
+  if (!(DOCUMENT_KINDS as readonly string[]).includes(kind)) return validationError({ kind: "Pick a document kind" });
+  const checked = validateUpload(formData.get("file"));
+  if (!checked.ok) return validationError({ file: checked.error });
 
   const asset = await prisma.asset.findUnique({ where: { id: assetId } });
   if (!asset) return conflict("That asset no longer exists.");
   if (!canManageClass(user.role, asset.cls)) return forbidden();
 
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const checksum = createHash("sha256").update(bytes).digest("hex");
-  const safeName = path.basename(file.name).replace(/[^A-Za-z0-9._-]/g, "_").slice(-80);
-  const relPath = path.posix.join("assets", assetId, `${Date.now()}-${safeName}`);
-  await mkdir(path.join(process.cwd(), "uploads", "assets", assetId), { recursive: true });
-  await writeFile(path.join(process.cwd(), "uploads", relPath), bytes);
+  const stored = await storeUpload(`assets/${assetId}`, checked.file);
 
   const doc = await prisma.$transaction(async (tx) => {
     const created = await tx.assetDocument.create({
       data: {
         assetId, kind,
-        fileName: path.basename(file.name),
-        path: relPath, checksum,
+        fileName: stored.fileName,
+        path: stored.relPath, checksum: stored.checksum,
         uploadedById: user.id,
       },
     });
@@ -78,6 +58,41 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult<{
   });
   revalidatePath(`/inventory/${assetId}/documents`);
   return ok({ id: doc.id });
+}
+
+/** Spec §2.3: one invoice, stored once, one document row per unit of the batch. */
+export async function uploadBatchDocument(formData: FormData): Promise<ActionResult<{ created: number }>> {
+  const user = await actionUser();
+  if (!user || !isApprover(user.role)) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const assetIds = [...new Set(formData.getAll("assetIds").map(String).filter(Boolean))];
+  const kind = String(formData.get("kind") ?? "");
+  if (assetIds.length === 0) return conflict("Missing assets.");
+  if (assetIds.length > BULK_MAX) return conflict(`A batch document covers at most ${BULK_MAX} assets.`);
+  if (!(DOCUMENT_KINDS as readonly string[]).includes(kind)) return validationError({ kind: "Pick a document kind" });
+  const checked = validateUpload(formData.get("file"));
+  if (!checked.ok) return validationError({ file: checked.error });
+
+  const assets = await prisma.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true, cls: true } });
+  if (assets.length !== assetIds.length) return conflict("One of those assets no longer exists.");
+  if (assets.some((a) => !canManageClass(user.role, a.cls))) return forbidden();
+
+  const stored = await storeUpload("batches", checked.file);
+  const created = await prisma.$transaction(async (tx) => {
+    for (const a of assets) {
+      const doc = await tx.assetDocument.create({
+        data: { assetId: a.id, kind, fileName: stored.fileName, path: stored.relPath, checksum: stored.checksum, uploadedById: user.id },
+      });
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: a.id,
+        action: "document.uploaded", diff: { document: { from: null, to: doc.fileName } },
+      });
+    }
+    return assets.length;
+  });
+  for (const a of assets) revalidatePath(`/inventory/${a.id}/documents`);
+  return ok({ created });
 }
 
 /** Accountability forms scan back in and get flagged SIGNED. */

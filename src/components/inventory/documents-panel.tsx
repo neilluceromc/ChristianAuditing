@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { markDocumentSigned, uploadDocument } from "@/server/modules/inventory/document-actions";
+import { DOCUMENT_KINDS } from "@/lib/documents";
 
 export interface DocumentRow {
   id: string;
@@ -22,12 +23,14 @@ export interface DocumentRow {
   downloadHref: string;
 }
 
-const KIND_OPTIONS = [
-  { value: "receipt", label: "Receipt" },
-  { value: "accountability-form", label: "Accountability form" },
-  { value: "photo", label: "Photo" },
-  { value: "other", label: "Other" },
-];
+const KIND_LABELS: Record<(typeof DOCUMENT_KINDS)[number], string> = {
+  receipt: "Receipt",
+  "accountability-form": "Accountability form",
+  photo: "Photo",
+  other: "Other",
+  invoice: "Invoice",
+};
+const KIND_OPTIONS = DOCUMENT_KINDS.map((value) => ({ value, label: KIND_LABELS[value] }));
 
 export function DocumentsPanel({
   assetId,
