@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { SEED_PASSWORD } from "../prisma/fixtures";
+import { E2E_BASE_URL } from "../playwright.config";
 
 async function login(page: Page, email: string) {
   await page.goto("/logout");
@@ -295,7 +296,7 @@ test.describe("admin home", () => {
     await login(page, "admin@thebackroomop.com");
     // The admin role holds four workspaces; br.dept selects which one Home renders.
     await page.context().addCookies([
-      { name: "br.dept", value: "admin", url: "http://localhost:3000" },
+      { name: "br.dept", value: "admin", url: E2E_BASE_URL },
     ]);
     await page.goto("/");
     await expect(page.getByText("Who can get in")).toBeVisible({ timeout: 20_000 });
