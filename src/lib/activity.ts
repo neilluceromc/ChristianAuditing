@@ -61,6 +61,24 @@ export function auditSentence(entry: ActivityEntryLike): string {
       const n = Array.isArray(items) ? items.length : 0;
       return `${entry.actorLabel} completed offboarding for ${entry.entityLabel}${n ? ` · ${n} item${n === 1 ? "" : "s"} settled` : ""}`;
     }
+    // Phase 15: direct IT lifecycle changes. Subject-first, no refNo — the
+    // approval row exists (already EXECUTED) but the sentence is about the asset.
+    case "lifecycle.assign":
+      return `${entry.actorLabel} assigned ${entry.entityLabel} to ${String(diff?.assignee?.to ?? "someone")}`;
+    case "lifecycle.return": {
+      const to = diff?.status?.to;
+      return diff?.returnedAt?.to
+        ? `${entry.actorLabel} returned ${entry.entityLabel} for triage`
+        : `${entry.actorLabel} returned ${entry.entityLabel} as ${String(to ?? "?")}`;
+    }
+    case "lifecycle.change-status":
+      return `${entry.actorLabel} changed ${entry.entityLabel} to ${String(diff?.status?.to ?? "?")}`;
+    case "lifecycle.replace":
+      return diff?.replacedBy
+        ? `${entry.actorLabel} replaced ${entry.entityLabel} with ${String(diff.replacedBy.to)}`
+        : `${entry.actorLabel} put ${entry.entityLabel} in place of ${String(diff?.replaces?.to ?? "?")} for ${String(diff?.assignee?.to ?? "someone")}`;
+    case "lifecycle.triage":
+      return `${entry.actorLabel} triaged ${entry.entityLabel}: ${String(diff?.triage?.to ?? "?")}`;
     case "comment":
       return `${entry.actorLabel} commented on ${entry.entityLabel}`;
     case "unit-update":
