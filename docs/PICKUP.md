@@ -125,6 +125,8 @@ These were made with the user and would be invisible to anyone reading only the 
 - `resubmitAssetToFinance`'s `canManageClass` refusal is no longer reachable from e2e (IT now gets not-found
   on a Purchasing record), like D-13/D-15's gates — server guard unchanged, review-covered.
 - **Direct IT changes leave no PENDING row,** so the record's pending banner and `Open requests` stat only ever show Purchasing or legacy approvals for IT devices.
+- Worklist section totals are capped by their queries' `take` (10 for missing/records, 50 for triage/repairs), so "See all N" can understate on a very large fleet.
+- Phase 15 changed Home dismissal keys from `KIND:id` to `section:id`, so dismissals made earlier on deploy day reappear until cleared again — one-day effect.
 - Backups land on the same disk as the data; copy them off periodically.
 
 ## 6. If you are an assistant reading this

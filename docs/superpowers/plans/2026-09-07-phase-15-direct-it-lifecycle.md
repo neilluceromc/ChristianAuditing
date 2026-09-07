@@ -12,7 +12,7 @@
 
 **Baselines on `main` at `a3b7b05`:** 971 unit / 52 files · 203 e2e / 15 files · `tsc` and `lint` clean · 15 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
-> ### AMENDED DURING EXECUTION — D-1 through D-7
+> ### AMENDED DURING EXECUTION — D-1 through D-8
 >
 > **D-1. Task 4 replaceAsset refusal handling:** originally `return`ed a second-leg refusal inside the transaction, which would have committed the first leg — fixed to throw a `DirectRefusal` and convert to `conflict` outside. Lesson: inside `prisma.$transaction`, a refusal after a write must throw, not return.
 >
@@ -27,6 +27,8 @@
 > **D-6. Task 9 locator ambiguities resolved at the DOM:** the Replace dialog's combobox is targeted by its label ("Replacement") because an adjacent `<select>` also matched `getByRole("combobox")`, and the offboarding wizard renders "Continue to Accounts" twice (mobile and desktop), so the test takes `.first()`. Lesson: a dialog with two form controls of the same role needs role+name, never role alone.
 >
 > **D-7. Task 9 spec row compliance — missing assertions:** cases 5, 7 and 8 asserted less than their spec rows specify (no zero-open-approvals check; DB state for one of three offboarding decisions; no section count). Fixed in the same task by adding the DB and count assertions. Lesson: an e2e case proves its spec row only when every clause of the row is an assertion, not a toast.
+>
+> **D-8. Final whole-branch review — three Important findings, plus polish:** (1) `createAsset`'s catch-all `if (err instanceof Error) return conflict(err.message)` turned every error — Prisma P2028, unknown request errors, genuine bugs — into a user-facing banner; fixed by throwing a module-local `DirectRefusal` at the direct branch and catching only that type, so everything else still falls through to `throw err`. Lesson: a catch that converts every `Error` into user copy masks 500s and can leak driver text. (2) `bulkChangeStatus`'s per-asset `recordDirect` loop ran inside one `$transaction` with no options; at `BULK_MAX` (200) it could exceed Prisma's 5s default. Fixed with `{ timeout: 60_000, maxWait: 10_000 }`. Lesson: a per-row loop inside one interactive transaction needs an explicit timeout once N is in the hundreds. (3) Home's fleet-coverage spare-pool query counted a returned-but-untriaged SPARE as available stock; fixed by adding `returnedAt: null` (spec §4.2 already names this site). Lesson: a hand-written query needs the same untriaged exclusion `isAssignable()` encodes, even where it isn't calling that predicate directly. Also in this pass: direct-dialog guard text now runs through a new `humanizeGuard()` (`src/lib/lifecycle.ts`, unit-tested) that strips the worker's `Execution guard:` framing so IT reads a plain sentence instead of retry-UI copy — the worker's stored `workerError` text is untouched; and worklist queue rows keep their old SLA → EXEC → LEAVE sub-order via a new optional `WorkRow.rank`, sorted before severity.
 
 ## Global Constraints
 

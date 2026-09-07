@@ -109,6 +109,10 @@ worker emits it. `src/lib/activity.ts` gains sentences for the five actions — 
 BR-LT-0148 to EMP-0097"*, *"returned BR-LT-0148 for triage"*, *"changed BR-LT-0122 to DEFECTIVE"*,
 *"replaced BR-LT-0148 with BR-LT-0201 for EMP-0097"*, *"triaged BR-LT-0148: keep as spare"*.
 
+Direct dialogs show the executor's guard without the worker's `Execution guard:` prefix, and the two
+guards that told the worker to "request a lifecycle.return" say "return it first" instead; the worker's
+stored `workerError` text is unchanged.
+
 An asset with an **open** approval (PENDING/CLAIMED/APPROVED — legacy or Purchasing) refuses every direct
 action: *"BR-LT-0148 is held by APR-2041 — resolve it in Approvals first."*
 
