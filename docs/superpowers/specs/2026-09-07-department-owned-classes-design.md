@@ -89,16 +89,20 @@ That guard becomes: load the approval **with its asset**, then require `canActOn
 A new pure module `src/lib/approval-access.ts`:
 
 ```ts
+export function isApprover(role: Role): boolean
+// manages at least one class → admin, it_staff, purchasing_staff
+
 export function canActOnApproval(role: Role, assetCls: AssetClass | null): boolean
-// admin → true
-// null cls (no asset on the approval) → admin only
+// null cls (no asset on the approval) → any approver
 // otherwise → canManageClass(role, assetCls)
 
 export function approvalClassWhere(role: Role): Prisma.ApprovalWhereInput
-// admin → {}
-// otherwise → { asset: { cls: { in: MANAGEABLE_CLASSES[role] } } }
-// finance_staff / viewer → in: [] → nothing (they cannot reach /approvals anyway)
+// manages every class (admin) or no class (finance_staff, viewer) → {} — unfiltered
+// otherwise → { OR: [{ assetId: null }, { asset: { cls: { in: MANAGEABLE_CLASSES[role] } } }] }
 ```
+
+Finance and the viewer already read `/approvals` today (`approvals-audit.spec.ts` asserts Finance's read-only
+queue), so a role that manages no class reads everything and acts on nothing, exactly as before.
 
 The pure state machine `approvalTransition` in `approval-flow.ts` is unchanged; `isAdmin` still means
 the `admin` role. `it_staff` and `purchasing_staff` are peers: each is an ordinary approver inside its
@@ -107,14 +111,17 @@ own class.
 ### 3.2 Queue scope
 
 `listApprovals` and `tabCounts` in `queries.ts` take the role and AND `approvalClassWhere(role)` into
-every tab's where-clause. `it_staff` sees IT approvals; `purchasing_staff` sees Purchasing approvals;
-`admin` sees all. The detail page computes `canAct` from `canActOnApproval`, so a Purchasing user who
-follows a link to an IT approval sees it read-only with the existing "you cannot act on this" state.
+every tab's where-clause; the sidebar badge (`getApprovalsBadge`) takes the same scope. `it_staff` sees
+IT approvals; `purchasing_staff` sees Purchasing approvals; `admin`, Finance and the viewer see all. The
+detail page computes `canAct` from `canActOnApproval`, so a Purchasing user who follows a link to an IT
+approval sees it read-only with the existing "you cannot act on this" state.
 
 ### 3.3 Approvals with no asset
 
 `Approval.assetId` is nullable and `systemChecks` already treats a missing asset as a failing check.
-Such rows are visible to and actionable by `admin` only. No new UI.
+Such a row has no class, so no class filter can exclude it: it is visible to and actionable (rejectable)
+by every approver. The seed carries two (`APR-2040`, `APR-2035`) and `approvals-audit.spec.ts` counts
+them in IT's queue; this rule keeps those counts unchanged. No new UI.
 
 ### 3.4 Surfaces
 
@@ -251,7 +258,8 @@ section with **Categories** and **Types**.
 | Path | Workspaces today | Workspaces after | Roles after |
 |---|---|---|---|
 | `/approvals`, `/approvals/[id]` | it, finance | it, finance, **purchasing** | admin, it_staff, finance_staff (read), **purchasing_staff** |
-| `/employees`, `/employees/[id]`, `.../history`, `.../form` | it | it, **purchasing** | today's roles plus **purchasing_staff**; nav item added for purchasing |
+| `/employees` reads — list, `[id]`, `history`, `form`, `activity`, `export` | it | it, **purchasing** | today's roles plus **purchasing_staff**; nav item added for purchasing |
+| `/employees/[id]/edit` | it (general rule) | it, own rule | admin, it_staff — a write surface stopped at layer 1, like `/employees/import` |
 | `/employees/new` | — | it | admin, it_staff |
 | `/employees/[id]/edit`, `/employees/import` | it | unchanged | unchanged |
 | `/admin/asset-categories`, `/admin/asset-types` | it | it, **purchasing** | admin, it_staff, **purchasing_staff** |
@@ -275,9 +283,10 @@ at line 20.
 
 ### 11.1 Unit (pure, `src/lib`, vitest)
 
-- `approval-access.test.ts`: `canActOnApproval` table-driven over all five roles × {IT, PURCHASING, null};
-  `approvalClassWhere` returns `{}` for admin, the `in` list otherwise, `in: []` for finance and viewer.
-  Mutation check: swapping `MANAGEABLE_CLASSES` for a literal `["IT"]` must fail the purchasing rows.
+- `approval-access.test.ts`: `isApprover` per role; `canActOnApproval` table-driven over all five roles ×
+  {IT, PURCHASING, null}; `approvalClassWhere` returns `{}` for admin, finance and viewer and the
+  `OR [assetId null, cls in …]` fragment for the two staff roles. Mutation check: a literal `["IT"]` in
+  place of the map fails the purchasing row.
 - `workspaces.test.ts`: every row of §9 per role, including the negatives that stay negative
   (purchasing on `/employees/import`, `/employees/new`, `/admin/departments`, `/inventory/import`).
 - `asset-class.test.ts`: unchanged; the map is not touched.
@@ -326,7 +335,8 @@ New: `src/lib/approval-access.ts` + test · `src/components/inventory/holder-con
 `src/app/(app)/employees/new/page.tsx` · `e2e/department-owned.spec.ts`.
 
 Changed: `src/lib/workspaces.ts` (+test) · `src/server/modules/approvals/{actions,queries}.ts` ·
-`src/app/(app)/approvals/{page,[id]/page}.tsx` · `src/server/modules/employees/actions.ts` ·
+`src/app/(app)/approvals/{page,[id]/page}.tsx` · `src/components/shell/sidebar.tsx` · `src/app/(app)/layout.tsx` ·
+`src/server/modules/employees/{actions,queries}.ts` · `e2e/labels.spec.ts` (one copy assertion) ·
 `src/app/(app)/inventory/[id]/layout.tsx` · `src/server/modules/inventory/document-actions.ts` ·
 `src/app/(app)/inventory/[id]/documents/page.tsx` · `src/server/modules/admin/reference-actions.ts` ·
 `src/components/admin/ref-table.tsx` · `src/app/(app)/admin/{asset-categories,asset-types}/page.tsx` ·
