@@ -4,7 +4,7 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 import { slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { approvalClassWhere } from "@/lib/approval-access";
-import { computeLoadout, effectiveSlots, resolvePolicy } from "@/lib/loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { beyondRepair, downDays, repairStage, REPAIR_STAGE_LABEL } from "@/lib/repairs";
 import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
@@ -18,22 +18,6 @@ const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() 
 /** ACTIVE employees who started recently are the ones whose kit is still landing. */
 const HIRE_WINDOW_DAYS = 30;
 const WARRANTY_WINDOW_DAYS = 90;
-
-/**
- * Phase 16: `worklist`'s hires section and `fleet`'s coverage line both need
- * a recent hire's exceptions to compute `effectiveSlots` — one findMany's
- * rows grouped for per-employee lookup, shared here so the loop stays one
- * expression, not two that can drift.
- */
-function groupExceptionsByEmployee<E extends { employeeId: string }>(exceptions: E[]): Map<string, E[]> {
-  const byEmployee = new Map<string, E[]>();
-  for (const e of exceptions) {
-    const list = byEmployee.get(e.employeeId);
-    if (list) list.push(e);
-    else byEmployee.set(e.employeeId, [e]);
-  }
-  return byEmployee;
-}
 
 /**
  * The worklist (Phase 15, spec §5): grouped sections in a fixed order, each

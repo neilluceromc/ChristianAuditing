@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { buildEmployeeWhere } from "@/lib/employees-list";
-import { computeLoadout, effectiveSlots, resolvePolicy, type ExceptionLike } from "@/lib/loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate } from "@/lib/format";
 import type { ListState } from "@/lib/url-state";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
@@ -16,14 +16,15 @@ export interface EmployeeListRow {
   employment: string;
   m365: string | null;
   items: number;
-  /** null = no policy applies */
+  /** null only when neither a resolved policy nor an ADD exception applies */
   missingRequired: number | null;
   joined: string;
 }
 
 /**
- * One employee, with its loadout resolved. `missingRequired` is `null` when
- * no policy applies (never "0 missing" — those read differently on screen).
+ * One employee, with its loadout resolved. `missingRequired` is `null` only
+ * when neither a resolved policy nor an ADD exception applies (never
+ * "0 missing" — those read differently on screen).
  */
 interface ResolvedEmployee {
   employee: Awaited<ReturnType<typeof fetchCandidates>>[number];
@@ -62,12 +63,7 @@ async function filteredEmployees(state: ListState, gapsOnly: boolean): Promise<R
     where: { employeeId: { in: employees.map((e) => e.id) } },
     orderBy: [{ employeeId: "asc" }, { id: "asc" }],
   });
-  const byEmployee = new Map<string, ExceptionLike[]>();
-  for (const ex of exceptions) {
-    const list = byEmployee.get(ex.employeeId);
-    if (list) list.push(ex);
-    else byEmployee.set(ex.employeeId, [ex]);
-  }
+  const byEmployee = groupExceptionsByEmployee(exceptions);
 
   const all = employees.map((employee): ResolvedEmployee => {
     const policy = resolvePolicy(employee, policies);

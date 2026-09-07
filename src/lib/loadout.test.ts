@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLoadout, effectiveSlots, resolvePolicy, type ExceptionLike } from "./loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy, type ExceptionLike } from "./loadout";
 
 const policies = [
   { id: "p-dept", name: "Finance standard", appliesToTitle: null, appliesToDepartmentId: "dept-fin", slots: [] },
@@ -101,5 +101,22 @@ describe("effectiveSlots (Phase 16 §3.3)", () => {
   });
   it("ADD-only with no policy gives a personal loadout", () => {
     expect(computeLoadout(effectiveSlots([], [add]), [asset("a1", "t-tablet")]).filled).toBe(1);
+  });
+});
+
+describe("groupExceptionsByEmployee", () => {
+  it("buckets rows by employeeId, preserving each employee's insertion order", () => {
+    const rows = [
+      { employeeId: "e1", id: "r1" },
+      { employeeId: "e2", id: "r2" },
+      { employeeId: "e1", id: "r3" },
+    ];
+    const grouped = groupExceptionsByEmployee(rows);
+    expect([...grouped.keys()]).toEqual(["e1", "e2"]);
+    expect(grouped.get("e1")).toEqual([{ employeeId: "e1", id: "r1" }, { employeeId: "e1", id: "r3" }]);
+    expect(grouped.get("e2")).toEqual([{ employeeId: "e2", id: "r2" }]);
+  });
+  it("empty input gives an empty map", () => {
+    expect(groupExceptionsByEmployee([]).size).toBe(0);
   });
 });

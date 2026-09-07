@@ -69,6 +69,23 @@ export function effectiveSlots(slots: SlotLike[], exceptions: ExceptionLike[]): 
   return [...kept, ...added];
 }
 
+/**
+ * Bucket exception rows by the employee they belong to, preserving each
+ * employee's row order. Every consumer that fetches exceptions for a set of
+ * employees (the employees list, Home's hires/fleet, offboarding) needs this
+ * same grouping — sharing it is what keeps the loop from drifting between
+ * call sites.
+ */
+export function groupExceptionsByEmployee<E extends { employeeId: string }>(rows: E[]): Map<string, E[]> {
+  const byEmployee = new Map<string, E[]>();
+  for (const row of rows) {
+    const list = byEmployee.get(row.employeeId);
+    if (list) list.push(row);
+    else byEmployee.set(row.employeeId, [row]);
+  }
+  return byEmployee;
+}
+
 export interface Loadout<A extends HeldAssetLike> {
   slots: Array<{ slot: SlotLike; asset: A | null }>;
   /** held assets no slot claimed — shown in the holding area / table view */
