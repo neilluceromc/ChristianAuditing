@@ -4,7 +4,7 @@ import { resolveWorkspace, WORKSPACE_NAV, type WorkspaceId } from "@/lib/workspa
 import { filterSectionsForRole } from "@/components/shell/sidebar";
 import { safeSection } from "@/lib/section";
 import {
-  ageHistogram, claimedByYou, financeHome, fleet, purchasingHome, warrantyRunway, yourShift,
+  ageHistogram, claimedByYou, financeHome, fleet, purchasingHome, warrantyRunway, worklist,
 } from "@/server/modules/home/queries";
 import { adminHome } from "@/server/modules/admin/queries";
 import { AdminHomeBody } from "@/components/home/admin-home";
@@ -14,7 +14,7 @@ import { Stat } from "@/components/ui/stat";
 import { StatusDot } from "@/components/ui/status";
 import { SectionCard } from "@/components/home/section-card";
 import { FocusToggle } from "@/components/home/focus-toggle";
-import { YourShift } from "@/components/home/your-shift";
+import { Worklist } from "@/components/home/worklist";
 import { FleetBar } from "@/components/home/fleet-bar";
 import { AgeHistogram } from "@/components/home/age-histogram";
 import { WarrantyRunway } from "@/components/home/warranty-runway";
@@ -173,7 +173,7 @@ export default async function Home() {
   const [shift, claims, fleetData, age, warranty] = await Promise.all([
     isViewer
       ? Promise.resolve({ ok: true as const, data: [] })
-      : safeSection("Your shift", () => yourShift(user.id, user.role)),
+      : safeSection("Worklist", () => worklist(user.id, user.role, { limit: 2 })),
     safeSection("Claimed by you", () => claimedByYou(user.id, user.role)),
     safeSection("Fleet", () => fleet()),
     safeSection("Age", () => ageHistogram()),
@@ -186,8 +186,8 @@ export default async function Home() {
       <div className="flex max-w-[980px] flex-col gap-4">
         {/* Viewer has no action queue, so it doesn't get one (entry criterion #3). */}
         {!isViewer && (
-          <SectionCard title="Your shift" result={shift}>
-            {(rows) => <YourShift rows={rows} canAct />}
+          <SectionCard title="Worklist" result={shift}>
+            {(groups) => <Worklist groups={groups} canAct seeAllBase="/inventory/work" />}
           </SectionCard>
         )}
 

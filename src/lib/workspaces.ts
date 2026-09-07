@@ -48,6 +48,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       items: [
         { label: "Inventory", href: "/inventory" },
         { label: "Employees", href: "/employees" },
+        { label: "Worklist", href: "/inventory/work" },
         { label: "Approvals", href: "/approvals", badge: "approvals" },
         { label: "Purchase reviews", href: "/purchases?state=SUBMITTED", roles: ["admin", "it_staff"] },
         { label: "Audit log", href: "/audit" },
@@ -213,6 +214,12 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Same treatment as /inventory/register (spec §5): a write surface stops
   // finance and viewer at layer 1, not only at the page's requireRole.
   { test: /^\/inventory\/new(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
+  // Phase 15: the worklist is IT-workspace only — viewer shares that
+  // workspace read-only, but purchasing and finance, who both share the
+  // general /inventory rule right below, are excluded. MUST precede that
+  // general rule (first-match-wins), same shape as /inventory/import,
+  // /inventory/labels and /inventory/register above.
+  { test: /^\/inventory\/work(\/|$)/, workspaces: ["it"] },
   // Finance joins IT and purchasing here because /finance/assets is a register
   // of these very records — a capitalized-asset row whose tag leads nowhere is
   // a dead end on the page built for that role. The secrets rule above still

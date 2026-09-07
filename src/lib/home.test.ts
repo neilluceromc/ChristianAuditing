@@ -1,57 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  AGE_BUCKETS, KIND_RANK, activeDismissals, ageBucket, coverageLine, shiftOrder,
-  warrantyClusters, warrantyDaysLeft, withDismissal, type ShiftRow,
+  AGE_BUCKETS, activeDismissals, ageBucket, coverageLine,
+  warrantyClusters, warrantyDaysLeft, withDismissal,
 } from "./home";
 
 const NOW = new Date("2026-08-17T09:00:00+08:00");
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
 const daysAhead = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
-
-const row = (over: Partial<ShiftRow>): ShiftRow => ({
-  key: "SLA:a1", kind: "SLA", title: "APR-2040", meta: "1 d overdue",
-  href: "/approvals/a1", action: "Open", severity: 1, ...over,
-});
-
-describe("shiftOrder — what breaks first, not what happened last", () => {
-  it("ranks the kinds SLA → EXEC → LEAVE → HIRE → DATA", () => {
-    expect(KIND_RANK.SLA).toBeLessThan(KIND_RANK.EXEC);
-    expect(KIND_RANK.EXEC).toBeLessThan(KIND_RANK.LEAVE);
-    expect(KIND_RANK.LEAVE).toBeLessThan(KIND_RANK.HIRE);
-    expect(KIND_RANK.HIRE).toBeLessThan(KIND_RANK.DATA);
-  });
-
-  it("puts an overdue approval above a data finding regardless of age", () => {
-    const ordered = shiftOrder([
-      row({ key: "DATA:x", kind: "DATA", severity: 99 }),
-      row({ key: "SLA:y", kind: "SLA", severity: 1 }),
-    ]);
-    expect(ordered.map((r) => r.key)).toEqual(["SLA:y", "DATA:x"]);
-  });
-
-  it("within a kind, the worse one goes first", () => {
-    const ordered = shiftOrder([
-      row({ key: "SLA:mild", severity: 1 }),
-      row({ key: "SLA:bad", severity: 12 }),
-    ]);
-    expect(ordered.map((r) => r.key)).toEqual(["SLA:bad", "SLA:mild"]);
-  });
-
-  it("is stable for equal rank and severity, and never mutates its input", () => {
-    const input = [row({ key: "DATA:a", kind: "DATA", severity: 0 }), row({ key: "DATA:b", kind: "DATA", severity: 0 })];
-    const snapshot = input.map((r) => r.key);
-    expect(shiftOrder(input).map((r) => r.key)).toEqual(["DATA:a", "DATA:b"]);
-    expect(input.map((r) => r.key)).toEqual(snapshot);
-  });
-
-  it("drops dismissed rows before taking the top 5", () => {
-    const rows = Array.from({ length: 8 }, (_, i) => row({ key: `DATA:${i}`, kind: "DATA", severity: i }));
-    const kept = shiftOrder(rows, new Set(["DATA:7", "DATA:6"])).map((r) => r.key);
-    expect(kept).not.toContain("DATA:7");
-    expect(kept).toHaveLength(5);
-    expect(kept[0]).toBe("DATA:5"); // 7 and 6 dismissed, 5 is now the worst
-  });
-});
 
 describe("ageBucket", () => {
   it("names the five buckets in order", () => {
