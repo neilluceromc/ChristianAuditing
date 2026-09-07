@@ -1,19 +1,21 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
-import { getVisibleAsset } from "@/server/modules/inventory/queries";
+import { getVisibleAsset, spareOptions } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
-import { ASSIGNABLE_FROM, CLASS_LABEL, canEditAsset, canManageClass, isAwaitingItCheck } from "@/lib/asset-class";
+import { CLASS_LABEL, canEditAsset, canManageClass, isAssignable, isAwaitingItCheck, isDirectLifecycle } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
 import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
 import { RecordTabs } from "@/components/inventory/record-tabs";
-import { RequestStatusChange } from "@/components/inventory/request-status-change";
+import { StatusControl } from "@/components/inventory/status-control";
 import { FinanceReview } from "@/components/inventory/finance-review";
 import { ItCheck } from "@/components/inventory/it-check";
 import { HolderControl } from "@/components/inventory/holder-control";
+import { ReplaceControl } from "@/components/inventory/replace-control";
+import { TriageControl } from "@/components/inventory/triage-control";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 
 export default async function AssetRecordLayout({
@@ -38,11 +40,15 @@ export default async function AssetRecordLayout({
   // already enforces this — b521e14.
   const canResubmit = canManageClass(user.role, asset.cls) && returned;
   const pending = asset.approvals[0];
+  const direct = isDirectLifecycle(user.role, asset.cls);
   // Spec §7.1: offered only when the action would be legal; a pending approval
   // freezes both (the server would answer "already has an open request").
-  const canAssign = canMutate && !pending && !asset.assignee && asset.status === ASSIGNABLE_FROM[asset.cls];
+  const canAssign = canMutate && !pending && !asset.assignee && isAssignable(asset);
   const canReturn = canMutate && !pending && asset.assignee !== null;
+  const canReplace = direct && canReturn;
+  const canTriage = direct && !pending && asset.returnedAt !== null;
   const employees = canAssign ? await activeEmployeeOptions() : [];
+  const spares = canReplace ? await spareOptions(asset.typeId) : [];
 
   return (
     <>
@@ -65,18 +71,23 @@ export default async function AssetRecordLayout({
               // Rendered neutral, "awaiting" is indistinguishable from "done".
               <Pill tone="accent">AWAITING FINANCE</Pill>
             )}
+            {asset.returnedAt && <Pill tone="accent">BACK · NOT CHECKED</Pill>}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
         }
         actions={
-          canMutate || canEdit || canCheck || canConfirm || canResubmit || canAssign || canReturn ? (
+          canMutate || canEdit || canCheck || canConfirm || canResubmit || canAssign || canReturn || canReplace || canTriage ? (
             <>
               {canCheck && <ItCheck assetId={asset.id} tag={asset.tag} />}
-              {canAssign && <HolderControl mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} />}
+              {canTriage && <TriageControl assetId={asset.id} tag={asset.tag} />}
+              {canAssign && <HolderControl mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} direct={direct} />}
               {canReturn && asset.assignee && (
-                <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} />
+                <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} direct={direct} />
               )}
-              {canMutate && <RequestStatusChange assetId={asset.id} currentStatus={asset.status} cls={asset.cls} />}
+              {canReplace && asset.assignee && (
+                <ReplaceControl assetId={asset.id} tag={asset.tag} employeeId={asset.assignee.id} employeeName={asset.assignee.name} spares={spares} />
+              )}
+              {canMutate && <StatusControl assetId={asset.id} tag={asset.tag} currentStatus={asset.status} cls={asset.cls} direct={direct} />}
               {canEdit && <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>}
               {(canConfirm || canResubmit) && (
                 <FinanceReview

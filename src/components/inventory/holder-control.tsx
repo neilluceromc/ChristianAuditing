@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
@@ -11,15 +12,21 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { requestAssign, requestReturn } from "@/server/modules/employees/actions";
+import { assignAsset, returnAsset } from "@/server/modules/lifecycle/actions";
+import { RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, type ReturnOutcome } from "@/lib/lifecycle";
 
 type Props =
-  | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[] }
-  | { assetId: string; tag: string; mode: "return"; holder: { id: string; name: string } };
+  | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[]; direct: boolean }
+  | { assetId: string; tag: string; mode: "return"; holder: { id: string; name: string }; direct: boolean };
 
 /**
  * Phase 14 (spec §7): assign / return from the asset itself, so a department
  * without IT's loadout view can hand a car to a driver and take it back. Same
  * two actions the loadout calls; the same approvals result.
+ *
+ * Phase 15 (spec §2.1): `direct` applies at once instead of opening an
+ * approval, and the return dialog offers RETURN_OUTCOMES instead of only
+ * "return".
  */
 export function HolderControl(props: Props) {
   const router = useRouter();
@@ -27,6 +34,7 @@ export function HolderControl(props: Props) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<ReturnOutcome>("TRIAGE");
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -34,17 +42,22 @@ export function HolderControl(props: Props) {
   const isAssign = props.mode === "assign";
 
   function close() {
-    setOpen(false); setReason(""); setEmployeeId(null); setError(null); setFieldErrors({}); setRetryAfter(null);
+    setOpen(false); setReason(""); setEmployeeId(null); setOutcome("TRIAGE"); setError(null); setFieldErrors({}); setRetryAfter(null);
   }
 
   function submit() {
     setError(null); setFieldErrors({});
     startTransition(async () => {
       const res = props.mode === "assign"
-        ? await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason })
-        : await requestReturn({ employeeId: props.holder.id, assetId: props.assetId, reason });
+        ? (props.direct ? await assignAsset({ assetId: props.assetId, employeeId: employeeId ?? "", reason }) : await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason }))
+        : (props.direct ? await returnAsset({ assetId: props.assetId, outcome, reason }) : await requestReturn({ employeeId: props.holder.id, assetId: props.assetId, reason }));
       if (res.ok) {
-        toast(`${res.data.refNo} created — waiting in the approval queue`, "settled");
+        toast(
+          props.direct
+            ? (props.mode === "assign" ? `${props.tag} assigned to ${(res.data as { employeeName: string }).employeeName}` : `${props.tag} returned · now ${(res.data as { status: string }).status}`)
+            : `${(res.data as { refNo: string }).refNo} created — waiting in the approval queue`,
+          "settled",
+        );
         close();
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
@@ -57,27 +70,39 @@ export function HolderControl(props: Props) {
     });
   }
 
+  const returnReasonRequired = props.mode === "return" && (props.direct ? outcome === "MISSING" : true);
+
   return (
     <>
-      <Button onClick={() => setOpen(true)}>{isAssign ? "Assign holder" : "Return"}</Button>
+      <Button onClick={() => setOpen(true)}>
+        {isAssign ? (props.direct ? "Assign" : "Assign holder") : "Return"}
+      </Button>
       <Dialog
         open={open}
         onClose={close}
-        title={isAssign ? "Assign a holder" : "Request a return"}
+        title={
+          props.direct
+            ? (isAssign ? `Assign ${props.tag}` : `Return ${props.tag}`)
+            : (isAssign ? "Assign a holder" : "Request a return")
+        }
         footer={
           <>
             <Button variant="ghost" onClick={close}>Cancel</Button>
             <Button variant="primary" loading={pending} onClick={submit} disabled={isAssign && !employeeId}>
-              {isAssign ? "Request assign" : "Request return"}
+              {props.direct ? "Confirm" : (isAssign ? "Request assign" : "Request return")}
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           <p className="text-xs text-fg-muted">
-            {isAssign
-              ? <>Creates a <span className="font-mono">lifecycle.assign</span> approval; {props.tag} stays where it is until it executes.</>
-              : <>Creates a <span className="font-mono">lifecycle.return</span> approval; {props.tag} stays with {props.holder.name} until it executes.</>}
+            {props.direct ? (
+              <>Applies now and is recorded in the audit trail under your name.</>
+            ) : isAssign ? (
+              <>Creates a <span className="font-mono">lifecycle.assign</span> approval; {props.tag} stays where it is until it executes.</>
+            ) : (
+              <>Creates a <span className="font-mono">lifecycle.return</span> approval; {props.tag} stays with {props.holder.name} until it executes.</>
+            )}
           </p>
           {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
           {error && <Banner tone="fault" title={error} />}
@@ -89,7 +114,16 @@ export function HolderControl(props: Props) {
               )}
             </FormField>
           )}
-          <FormField label="Reason" required={!isAssign} error={fieldErrors.reason}>
+          {!isAssign && props.direct && (
+            <FormField label="What happens to it" required error={fieldErrors.outcome}>
+              {(p) => (
+                <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={outcome} onChange={(e) => setOutcome(e.target.value as ReturnOutcome)}>
+                  {RETURN_OUTCOMES.map((o) => <option key={o} value={o}>{RETURN_OUTCOME_LABEL[o]}</option>)}
+                </Select>
+              )}
+            </FormField>
+          )}
+          <FormField label="Reason" required={!isAssign && returnReasonRequired} error={fieldErrors.reason}>
             {(p) => <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={reason} onChange={(e) => setReason(e.target.value)} />}
           </FormField>
         </div>
