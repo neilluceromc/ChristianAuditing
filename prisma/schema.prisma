@@ -284,6 +284,10 @@ model Asset {
   itVerifiedAt         DateTime?
   itVerifiedById       String?
   itVerifiedBy         User?     @relation("itVerifiedBy", fields: [itVerifiedById], references: [id], onDelete: Restrict)
+  /// Phase 15: set when a return lands an IT device on SPARE; the device is
+  /// "back, not checked" and leaves the spare pool until IT triages it, which
+  /// clears this. Any other status write clears it too.
+  returnedAt           DateTime?
   secrets           AssetSecret[]
   documents         AssetDocument[]
   reservations      Reservation[]
@@ -301,6 +305,7 @@ model Asset {
   @@index([financeConfirmedAt])
   @@index([financeReturnedAt])
   @@index([itVerifiedAt])
+  @@index([returnedAt])
   @@index([cls])
 }
 
