@@ -47,6 +47,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
         initial={{
           tag: asset.tag,
           model: asset.model,
+          brand: asset.brand ?? "",
           serial: asset.serial ?? "",
           categoryId: asset.categoryId,
           typeId: asset.typeId ?? "",
@@ -55,6 +56,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
           warrantyUntil: date(asset.warrantyUntil),
           notes: asset.notes ?? "",
           vendorId: asset.vendorId ?? "",
+          invoiceRef: asset.invoiceRef ?? "",
           rmaRef: asset.rmaRef ?? "",
           repairQuote: asset.repairQuote === null ? "" : String(asset.repairQuote),
         }}

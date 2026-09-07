@@ -10,17 +10,9 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { nextTags, preferredPrefix, type TagRun } from "@/lib/receiving";
+import { nextTags, preferredPrefix, RUN_REFUSAL, type TagRun } from "@/lib/receiving";
 import { CLASS_EXAMPLE, withClsQS } from "@/lib/asset-class";
 import type { ActionResult } from "@/server/action-result";
-
-// Mirrors the discriminated union `nextTags` returns (`./lib/receiving.ts`) —
-// the reason for each refusal, in words a form can show next to Submit.
-const RUN_REFUSAL: Record<Exclude<TagRun, { ok: true }>["reason"], string> = {
-  "bad-prefix": "Prefix must be two capital letters",
-  overflow: "That run passes BR-XX-9999 — register fewer, or use another prefix",
-  "bad-count": "Quantity must be at least 1",
-};
 
 export function RegisterForm({
   categories,

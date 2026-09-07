@@ -3,17 +3,26 @@ import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset, stageOf } from "@/server/modules/inventory/queries";
 import { warrantyProgress } from "@/lib/asset-rules";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { toSearchParams } from "@/lib/url-state";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { StatusPill } from "@/components/ui/status";
 import { Banner } from "@/components/ui/banner";
 import { Pill } from "@/components/ui/pill";
+import { CreatedNotice } from "@/components/inventory/created-notice";
 import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
 
-export default async function AssetOverviewPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AssetOverviewPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireUser();
   const { id } = await params;
+  const sp = toSearchParams(await searchParams);
   const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   const warranty = warrantyProgress(asset.purchasedAt, asset.warrantyUntil);
@@ -27,6 +36,11 @@ export default async function AssetOverviewPage({ params }: { params: Promise<{ 
 
   return (
     <div className="grid max-w-[860px] grid-cols-1 gap-4 lg:grid-cols-2">
+      {sp.get("created") === "1" && (
+        <div className="lg:col-span-2">
+          <CreatedNotice tag={asset.tag} id={asset.id} />
+        </div>
+      )}
       <Card>
         <CardHeader title="Identity" />
         <CardBody>
@@ -34,6 +48,7 @@ export default async function AssetOverviewPage({ params }: { params: Promise<{ 
             items={[
               { label: "Tag", value: asset.tag, mono: true },
               { label: "Model", value: asset.model },
+              { label: "Brand", value: asset.brand ?? "—" },
               { label: "Serial", value: asset.serial ?? "—", mono: true },
               { label: "Category", value: asset.category.name },
               { label: "Type", value: asset.type?.name ?? "—" },
@@ -57,6 +72,8 @@ export default async function AssetOverviewPage({ params }: { params: Promise<{ 
             items={[
               { label: "Purchased", value: fmtDate(asset.purchasedAt), mono: true },
               { label: "Cost", value: fmtMoney(asset.cost === null ? null : Number(asset.cost)), mono: true },
+              { label: "Vendor", value: asset.vendor?.name ?? "—" },
+              { label: "Invoice / receipt no.", value: asset.invoiceRef ?? "—", mono: true },
               {
                 label: "Warranty",
                 value: warranty ? (
@@ -79,7 +96,7 @@ export default async function AssetOverviewPage({ params }: { params: Promise<{ 
         record, precisely while someone is deciding replace-versus-repair. That
         is what this page showed before repair mode existed.
       */}
-      {(stage !== null || asset.vendor || asset.rmaRef || quote !== null) && (
+      {(stage !== null || asset.rmaRef || quote !== null) && (
         <Card className="lg:col-span-2">
           <CardHeader
             title="Repair"
