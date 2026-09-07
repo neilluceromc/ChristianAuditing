@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { actionRole } from "@/server/auth/guards";
+import { actionRole, actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
@@ -12,7 +12,8 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { diffOf } from "@/lib/audit-diff";
-import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS } from "@/lib/asset-class";
+import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass } from "@/lib/asset-class";
+import { isApprover } from "@/lib/approval-access";
 
 const assignSchema = z.object({
   employeeId: z.string().min(1),
@@ -22,8 +23,8 @@ const assignSchema = z.object({
 
 /** `+` on a slot: lifecycle.assign approval. The asset stays SPARE until execution. */
 export async function requestAssign(input: unknown): Promise<ActionResult<{ refNo: string }>> {
-  const user = await actionRole("admin", "it_staff");
-  if (!user) return forbidden();
+  const user = await actionUser();
+  if (!user || !isApprover(user.role)) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = assignSchema.safeParse(input);
@@ -43,6 +44,7 @@ export async function requestAssign(input: unknown): Promise<ActionResult<{ refN
         include: { reservations: { where: { state: "ACTIVE" }, include: { employee: true } } },
       });
       if (!asset) return conflict("That asset no longer exists.");
+      if (!canManageClass(user.role, asset.cls)) return forbidden();
       if (asset.status !== ASSIGNABLE_FROM[asset.cls]) {
         return conflict(`${asset.tag} is ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — only idle stock can be assigned.`);
       }
@@ -83,6 +85,7 @@ export async function requestAssign(input: unknown): Promise<ActionResult<{ refN
   }
   revalidatePath(`/employees/${d.employeeId}`);
   revalidatePath("/inventory");
+  revalidatePath(`/inventory/${d.assetId}`);
   return ok({ refNo });
 }
 
@@ -94,8 +97,8 @@ const returnSchema = z.object({
 
 /** `−` on a filled tile: lifecycle.return approval. */
 export async function requestReturn(input: unknown): Promise<ActionResult<{ refNo: string }>> {
-  const user = await actionRole("admin", "it_staff");
-  if (!user) return forbidden();
+  const user = await actionUser();
+  if (!user || !isApprover(user.role)) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = returnSchema.safeParse(input);
@@ -107,6 +110,7 @@ export async function requestReturn(input: unknown): Promise<ActionResult<{ refN
     const failure = await prisma.$transaction(async (tx) => {
       const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
       if (!asset) return conflict("That asset no longer exists.");
+      if (!canManageClass(user.role, asset.cls)) return forbidden();
       if (asset.assigneeId !== d.employeeId) return conflict(`${asset.tag} isn't held by this person.`);
       if (await openApprovalForAsset(tx, asset.id)) return conflict(`${asset.tag} already has an open request.`);
       const approval = await createApproval(tx, {
@@ -140,6 +144,7 @@ export async function requestReturn(input: unknown): Promise<ActionResult<{ refN
   }
   revalidatePath(`/employees/${d.employeeId}`);
   revalidatePath("/inventory");
+  revalidatePath(`/inventory/${d.assetId}`);
   return ok({ refNo });
 }
 
