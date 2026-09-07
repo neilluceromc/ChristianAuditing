@@ -108,7 +108,8 @@ export default async function AssetOverviewPage({
             {warning && <Banner tone="attention" title="Repairing costs too much of a new unit">{warning}</Banner>}
             <DescriptionList
               items={[
-                // the clock rows belong to a stage; the vendor rows belong to the data
+                // the clock rows belong to a stage; RMA/quote belong to the data
+                // (Vendor lives in Procurement & warranty now — shown once, not here)
                 ...(stage !== null
                   ? [
                       {
@@ -125,7 +126,6 @@ export default async function AssetOverviewPage({
                       { label: "Defective since", value: fmtDate(asset.defectiveSince), mono: true },
                     ]
                   : []),
-                { label: "Vendor", value: asset.vendor?.name ?? "—" },
                 { label: "RMA", value: asset.rmaRef ?? "—", mono: true },
                 { label: "Quote", value: fmtMoney(quote), mono: true },
               ]}

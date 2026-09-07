@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition, type MutableRefObject } from "react";
 import { useRouter } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
+import { tagKey } from "@/lib/tag-key";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -99,9 +100,20 @@ export function AssetForm({
   // cancel an in-flight check for Serial, or vice versa.
   const tagCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const serialCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Staleness guard for the two checks above: a 300 ms response can land
+  // after the user has already changed the field again (edit without an
+  // intervening blur, or Enter to submit) — `latestRef` always holds
+  // whatever the fields currently say, kept fresh every render (a plain
+  // assignment, not an effect, so it is current before the timer's .then
+  // ever runs), so a response for an old value can be told apart from one
+  // for the value that's still on screen.
+  const latestRef = useRef({ tag: form.tag, serial: form.serial });
+  latestRef.current = { tag: form.tag, serial: form.serial };
+  const mountedRef = useRef(true);
   useEffect(() => {
     return () => {
-      // Both refs hold a live setTimeout id (never a DOM node) that
+      mountedRef.current = false;
+      // Both timer refs hold a live setTimeout id (never a DOM node) that
       // `scheduleIdentifierCheck` keeps reassigning outside this effect —
       // reading `.current` at unmount time is exactly the point.
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -114,7 +126,7 @@ export function AssetForm({
   function scheduleIdentifierCheck(
     kind: "tag" | "serial",
     value: string,
-    timer: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
+    timer: MutableRefObject<ReturnType<typeof setTimeout> | null>,
   ) {
     if (timer.current) clearTimeout(timer.current);
     if (!value) return;
@@ -122,7 +134,15 @@ export function AssetForm({
       // Never blocks submit — this only ever paints an early hint; the
       // server's unique constraint remains the authority at submit time.
       void checkIdentifiers(kind === "tag" ? { tags: [value] } : { serials: [value] }).then((res) => {
-        if (!res.ok) return;
+        if (!mountedRef.current || !res.ok) return;
+        // The field this response is about may no longer hold the value we
+        // checked — ignore it rather than label whatever is there now.
+        // Tag is compared the same way `checkIdentifiers` itself normalises
+        // it (trim + upper-case); serial is compared as-is, matching the
+        // server, which does not normalise serials.
+        const latest = latestRef.current[kind];
+        const stale = kind === "tag" ? tagKey(value) !== tagKey(latest) : value !== latest;
+        if (stale) return;
         const hit = kind === "tag" ? res.data.tags.includes(value) : res.data.serials.includes(value);
         setErrors((e) => {
           if (hit) return { ...e, [kind]: "Already registered" };
@@ -185,8 +205,15 @@ export function AssetForm({
             fd.set("assetId", res.data.id);
             fd.set("kind", kind);
             fd.set("file", file);
-            const up = await uploadDocument(fd);
-            if (!up.ok) failed += 1;
+            try {
+              const up = await uploadDocument(fd);
+              if (!up.ok) failed += 1;
+            } catch {
+              // storeUpload can throw (disk I/O) — a thrown upload counts as a
+              // failure exactly like `!up.ok`; it must never abort the loop or
+              // strand the user on the form after the asset was already created.
+              failed += 1;
+            }
           }
           router.push(
             failed
