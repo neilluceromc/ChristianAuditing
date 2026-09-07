@@ -258,25 +258,51 @@ test.describe.serial("offboarding scanner", () => {
   });
 
   test("scanning an already-decided item says so instead of re-opening it", async ({ page }) => {
+    // Phase 15: every IT-class decision now applies at once — assigneeId
+    // clears in the SAME transaction as the decision (lifecycle/apply.ts's
+    // "return" branch always disconnects the holder) — so an IT item can
+    // never be "held" (still in `items.filter(i => i.held)`, the pool this
+    // verdict is matched against) AND "decided" at the same time any more,
+    // which is exactly the state this test needs. Dennis's three seeded
+    // items are all IT, so none of them can reach it post-Phase-15. A
+    // Purchasing item still queues (isDirectLifecycle is false for a class
+    // it_staff doesn't manage) and stays held until a worker executes it —
+    // a car manufactured onto Dennis's own holdings, the same way case 8 of
+    // e2e/asset-classes.spec.ts builds its own leaver-with-a-car fixture,
+    // reproduces the scenario without touching any of his seeded IT items
+    // the rest of this file still relies on being freely decidable.
+    const dennis = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
+    const vehicleCategory = await db.assetCategory.findFirstOrThrow({ where: { name: "Vehicle" } });
+    const sedanType = await db.assetType.findFirstOrThrow({ where: { name: "Sedan", categoryId: vehicleCategory.id } });
+    const car = await db.asset.create({
+      data: {
+        tag: "BR-VH-0091", model: "Toyota Vios (e2e scanner)", categoryId: vehicleCategory.id, typeId: sedanType.id,
+        cls: "PURCHASING", status: "OPERATIONAL", assigneeId: dennis.id,
+      },
+    });
+
     await login(page, "it@thebackroomop.com");
     await openCollect(page);
-    const card = page.getByRole("group", { name: "Decide BR-HS-0510" });
-    await waitForHydration(card.getByRole("radiogroup"));
-    await card.getByRole("radiogroup").getByText("Returned").click();
-    await card.getByRole("button", { name: "Confirm decision" }).click();
-    await expect(page.getByText(/APR-\d+ created — BR-HS-0510/)).toBeVisible({ timeout: 30_000 });
+    const group = page.getByRole("group", { name: `Decide ${car.tag}` });
+    await waitForHydration(group.getByRole("radiogroup"));
+    await group.getByRole("radiogroup").getByText("Returned").click();
+    await group.getByRole("button", { name: "Confirm decision" }).click();
+    await expect(page.getByText(new RegExp(`APR-\\d+ created — ${car.tag}`))).toBeVisible({ timeout: 30_000 });
 
     // The toast fires the instant decideItem() resolves, but router.refresh()
     // is not awaited — it kicks off a background re-fetch that lands some
     // moments later. Scanning right after the toast can still see the OLD
     // `items` prop (decided: false) and produce a "match" verdict instead of
     // "already-decided" (observed: flaky exactly this way without this wait).
-    // This card's own <ItemDecision> unmounts once the refreshed data lands
-    // and `i.decision` becomes truthy, so its disappearance is the real signal.
-    await expect(card).toHaveCount(0, { timeout: 30_000 });
+    // A Purchasing return only QUEUES, so the card for `car.tag` stays on
+    // screen — but its body swaps from <ItemDecision> to the decided summary
+    // once the refresh lands (offboarding/[employeeId]/page.tsx: the
+    // `i.decision` branch never mounts ItemDecision at all), which is what
+    // un-renders THIS group.
+    await expect(group).toHaveCount(0, { timeout: 30_000 });
 
-    await scan(page, "BR-HS-0510");
-    await expect(page.getByText("BR-HS-0510 is already decided.")).toBeVisible();
+    await scan(page, car.tag);
+    await expect(page.getByText(`${car.tag} is already decided.`)).toBeVisible();
   });
 
   // A-26: zero blocked cards render anywhere in the seed, so the verdict

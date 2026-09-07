@@ -95,7 +95,7 @@ const ADMIN_ROUTES = ["/admin/users", "/admin/flags", "/admin/webhooks", "/admin
 
 // ── it_staff: PATH_RULES roles:[admin,it_staff], or page-level requireRole ─
 const IT_STAFF_ROUTES = [
-  "/inventory/new", "/inventory/import", "/inventory/register",
+  "/inventory/new", "/inventory/import", "/inventory/register", "/inventory/work",
   "/admin/asset-categories", "/admin/asset-types", "/admin/departments",
   "/employees/import", "/employees/new",
 ];

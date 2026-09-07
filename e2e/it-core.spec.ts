@@ -2,7 +2,10 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { readSheet } from "read-excel-file/node";
+import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
+
+const db = new PrismaClient();
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login (see
@@ -71,6 +74,9 @@ async function waitForHydration(target: Locator) {
 // BR-LT-0181 and drains the badge, which broke auth-shell/it-core).
 test.beforeAll(() => {
   execSync("npm run db:seed", { timeout: 120_000 });
+});
+test.afterAll(async () => {
+  await db.$disconnect();
 });
 
 test.describe("inventory list", () => {
@@ -147,26 +153,31 @@ test.describe("inventory list", () => {
     await expect(page.getByRole("checkbox")).toHaveCount(0);
   });
 
-  test("bulk selection creates one approval per asset", async ({ page }) => {
+  test("bulk selection changes status on every selected asset at once", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    // The plan's original combo (DONATED + BUYOUT → DISPOSE) is a no-op by
-    // design: bulkRequestStatusChange skips any source asset whose CURRENT
-    // status is already "closed" family (DONATED/BUYOUT/DISPOSE) — reviving
-    // off-the-books stock is deliberately a single-record action, never a
-    // bulk one (src/server/modules/inventory/actions.ts, statusFamily check).
-    // Both seeded assets are closed-family, so targets.length would be 0 and
-    // the drawer would report "0 approvals created" instead of 2. Use two
-    // SPARE (neutral-family) assets with no open approval in the seed
-    // instead — BR-MN-0911 and BR-PH-0301 are untouched by any other test in
-    // this file, so this stays isolated.
+    // Phase 15: IT's bulk action is direct (bulkChangeStatus, lifecycle/
+    // actions.ts) — one confirm applies the status to every target asset
+    // immediately instead of opening one approval per asset. The plan's
+    // original combo (DONATED + BUYOUT → DISPOSE) is still a no-op by design:
+    // a source asset already in the "closed" family (DONATED/BUYOUT/DISPOSE)
+    // is skipped — reviving off-the-books stock stays a single-record action,
+    // never a bulk one. Two SPARE (neutral-family) assets with no open
+    // approval instead — BR-MN-0911 and BR-PH-0301 are untouched by any
+    // other test in this file, so this stays isolated.
     await page.goto("/inventory?status=SPARE");
     await page.getByLabel(/Select BR-MN-0911/).check();
     await page.getByLabel(/Select BR-PH-0301/).check();
     await page.getByRole("button", { name: "Bulk actions…" }).click();
     await page.getByLabel(/Target status/).selectOption("DISPOSE");
-    await page.getByLabel(/Reason/).fill("e2e bulk disposal run");
-    await page.getByRole("button", { name: "Request status change" }).click();
-    await expect(page.getByText(/2 approvals created/)).toBeVisible();
+    await page.getByRole("button", { name: "Confirm" }).click();
+    await expect(page.getByText("2 assets now DISPOSE")).toBeVisible();
+    const [mn, ph] = await Promise.all([
+      db.asset.findUniqueOrThrow({ where: { tag: "BR-MN-0911" } }),
+      db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0301" } }),
+    ]);
+    expect(mn.status).toBe("DISPOSE");
+    expect(ph.status).toBe("DISPOSE");
+    expect(await db.approval.count({ where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] }, assetId: { in: [mn.id, ph.id] } } })).toBe(0);
   });
 
   // Was a CSV assertion until Phase 9 Task 3 converted this route to .xlsx
@@ -375,14 +386,19 @@ test.describe("employees & loadout", () => {
     await expectNoSeriousAxe(page);
   });
 
-  test("filling a slot creates an assign approval and a pending tile", async ({ page }) => {
+  test("filling a slot assigns the spare immediately, with no PENDING pill", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees");
     await page.getByRole("link", { name: /Marites Bautista/ }).click();
     await page.getByRole("button", { name: /headset slot, empty, required/ }).click();
     await page.getByRole("radiogroup", { name: "Pick a spare" }).getByText("BR-HS-0502").click();
-    await page.getByRole("button", { name: "Request assign" }).click();
-    await expect(page.getByText(/APR-\d+ created/)).toBeVisible();
+    // Phase 15: direct — the fill dialog's button is "Confirm", not "Request
+    // assign", and the assignment lands the moment it's clicked.
+    await page.getByRole("button", { name: "Confirm" }).click();
+    await expect(page.getByText("BR-HS-0502 assigned to Marites Bautista")).toBeVisible();
+    const tile = page.getByRole("button", { name: /headset slot/ });
+    await expect(tile).toContainText("BR-HS-0502");
+    await expect(tile.getByText("PENDING")).toHaveCount(0);
   });
 
   test("a leaver's grid is frozen", async ({ page }) => {

@@ -47,7 +47,7 @@ test.afterAll(async () => {
 });
 
 test.describe("home — IT dashboard leads with work, not KPIs", () => {
-  test("the six card headings render in the documented order; no KPI row sits above Your shift", async ({ page }) => {
+  test("the six card headings render in the documented order; no KPI row sits above the Worklist", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
@@ -55,40 +55,55 @@ test.describe("home — IT dashboard leads with work, not KPIs", () => {
     // "Tracking", …) and would otherwise pollute this list.
     const headings = page.locator("main").getByRole("heading", { level: 2 });
     await expect(headings).toHaveText([
-      "Your shift", "Claimed by you", "Fleet", "Age", "Warranty runway", "Jump to",
+      "Worklist", "Claimed by you", "Fleet", "Age", "Warranty runway", "Jump to",
     ]);
 
-    // Structural proof there's no KPI-tile row above it: the "Your shift"
-    // card is literally the first child of the page's content column (the
-    // h1 "Hello, …" lives in a sibling <header>, not this container).
+    // Structural proof there's no KPI-tile row above it: the Worklist card
+    // is literally the first child of the page's content column (the h1
+    // "Hello, …" lives in a sibling <header>, not this container).
     const firstCard = page.locator("main > div > *").first();
-    await expect(firstCard.getByRole("heading", { level: 2 })).toHaveText("Your shift");
+    await expect(firstCard.getByRole("heading", { level: 2 })).toHaveText("Worklist");
   });
 });
 
-test.describe("home — shift ordering: what breaks first", () => {
-  test("SLA (APR-2040) leads; a DATA row never outranks a HIRE row for a slot", async ({ page }) => {
+// Phase 15: "Your shift" (a flat, globally 5-row-capped list) is gone —
+// replaced by the Worklist, whose fixed sections (worklist.ts,
+// WORK_SECTIONS) are each capped independently (limit: 2 on Home). The seeded
+// SLA row (APR-2040), the EXECUTION_FAILED retry (APR-2025) and Dennis Ong's
+// leaver row all land in the same "Approvals & leavers" (queue) section, so
+// that section alone now needs a "See all" escape — and, the actual payoff of
+// independent per-section caps, a DATA row (BR-LT-0027, MISSING) in a
+// DIFFERENT section is no longer crowded out by the queue's own volume.
+test.describe("home — worklist sections: what breaks first", () => {
+  test("APR-2040 leads the Approvals & leavers section, capped at 2 with a See all link to the rest", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
-    // Only "Your shift" rows carry a Clear button — a stable way to scope to
-    // just those five <li>s regardless of card DOM nesting.
-    const shiftRows = page.locator("li").filter({ has: page.getByRole("button", { name: /^Clear "/ }) });
-    await expect(shiftRows).toHaveCount(5);
+    const queueSection = page.locator("section#queue");
+    await expect(queueSection.getByRole("heading", { name: "Approvals & leavers" })).toBeVisible();
+    // Severity for the queue section is days since the row went stale — the
+    // breached SLA (1 day over) outranks the same-day EXECUTION_FAILED retry
+    // and Dennis Ong's leaver row, so it is the first of the (at most two)
+    // rows Home shows.
+    const queueRows = queueSection.locator("ol > li");
+    await expect(queueRows.first()).toContainText("APR-2040");
 
-    const kinds: string[] = [];
-    for (let i = 0; i < 5; i++) {
-      const chip = shiftRows.nth(i).getByText(/^(SLA|EXEC|LEAVE|HIRE|DATA)$/);
-      kinds.push(((await chip.textContent()) ?? "").trim());
-    }
-    expect(kinds).toEqual(["SLA", "EXEC", "LEAVE", "HIRE", "HIRE"]);
+    // Three real rows (APR-2040, APR-2025, Dennis Ong) feed this section but
+    // Home caps it at 2 — the third is behind "See all 3", not silently gone.
+    const seeAll = queueSection.getByRole("link", { name: /See all 3/ });
+    await expect(seeAll).toBeVisible();
 
-    await expect(shiftRows.nth(0)).toContainText("APR-2040");
+    // The actual point of per-section caps replacing one flat 5-row list:
+    // BR-LT-0027 (MISSING) is a real "Missing & records" candidate in the
+    // seed, and it is NOT crowded out by the queue section's own volume any
+    // more — it renders directly on Home, in its own section.
+    await expect(page.getByText("BR-LT-0027")).toBeVisible();
 
-    // BR-LT-0027 (MISSING) is a real DATA candidate in the seed — it only
-    // fails to appear because SLA/EXEC/LEAVE/HIRE×2 already fill the 5-row
-    // cap, which is exactly "DATA never outranks HIRE" proven with live data.
-    await expect(page.getByText("BR-LT-0027")).toHaveCount(0);
+    await seeAll.click();
+    await expect(page).toHaveURL(/\/inventory\/work#queue$/);
+    const fullQueue = page.locator("section#queue");
+    await expect(fullQueue).toContainText("APR-2040");
+    await expect(fullQueue).toContainText("Dennis Ong is leaving");
   });
 });
 
@@ -109,12 +124,12 @@ test.describe("home — claims sit above the pool", () => {
 });
 
 test.describe("home — viewer is read-only", () => {
-  test("no Your shift, no clear buttons, READ-ONLY badge shows, Fleet still renders", async ({ page }) => {
+  test("no Worklist, no clear buttons, READ-ONLY badge shows, Fleet still renders", async ({ page }) => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/");
 
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Your shift", level: 2 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Worklist", level: 2 })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^Clear "/ })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toBeVisible();
   });
@@ -286,15 +301,18 @@ test.describe("home — axe", () => {
 // dismissal writes a per-user, per-day UserPreference row that is meant to
 // survive (that's the point of the test), and Focus writes a durable
 // br.focus cookie. Neither is undone afterward, so they run last, in this
-// order, in a serial block — nothing above depends on the shift queue or the
+// order, in a serial block — nothing above depends on the worklist or the
 // focus cookie being untouched, but something below would if it ran first.
 test.describe("home — dismissal and focus mode (mutating, serial)", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("clearing a shift row removes it, and it stays gone after a reload", async ({ page }) => {
+  test("clearing a worklist row removes it, and it stays gone after a reload", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
+    // Nina Robles' row lives in the "New hires" section — any section's row
+    // clears the same way (DismissButton, home/dismiss-button.tsx), this one
+    // is simply the one the seed already pins a stable assertion to.
     const ninaRow = page.locator("li").filter({ hasText: "Nina Robles" });
     await expect(ninaRow).toHaveCount(1);
     await ninaRow.getByRole("button", { name: /^Clear "Nina Robles/ }).click();
@@ -305,14 +323,14 @@ test.describe("home — dismissal and focus mode (mutating, serial)", () => {
     await expect(page.locator("li").filter({ hasText: "Nina Robles" })).toHaveCount(0, { timeout: 15_000 });
   });
 
-  test("Focus collapses to Your shift + Claimed by you, survives a reload, and never touches the URL", async ({ page }) => {
+  test("Focus collapses to the Worklist + Claimed by you, survives a reload, and never touches the URL", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
     await page.getByRole("button", { name: "Focus" }).click();
     await expect(page.getByRole("button", { name: "Show everything" })).toBeVisible({ timeout: 15_000 });
 
-    await expect(page.getByRole("heading", { name: "Your shift", level: 2 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Worklist", level: 2 })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Claimed by you", level: 2 })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Age", level: 2 })).toHaveCount(0);

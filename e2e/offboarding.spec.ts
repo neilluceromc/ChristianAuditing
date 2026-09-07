@@ -1,7 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
+import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
+
+const db = new PrismaClient();
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login, which keeps this
@@ -34,6 +37,9 @@ async function expectNoSeriousAxe(page: Page) {
 test.beforeAll(() => {
   execSync("npm run db:seed", { timeout: 120_000 });
 });
+test.afterAll(async () => {
+  await db.$disconnect();
+});
 
 // Hoisted to module scope: the "server gate" describe below reuses gotoStep,
 // and a function declared inside a different test.describe callback is out of
@@ -62,7 +68,7 @@ async function gotoStep(page: Page, label: RegExp) {
 }
 
 test.describe("offboarding queue", () => {
-  test("lists the leaver with what is still out, and Home's LEAVE row opens the wizard", async ({ page }) => {
+  test("lists the leaver with what is still out, and the Worklist's LEAVE row opens the wizard", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/offboarding");
     await expectNoSeriousAxe(page);
@@ -73,7 +79,11 @@ test.describe("offboarding queue", () => {
     await expect(row).toContainText("0 of 3");
     await expect(row).toContainText("3 to go");
 
-    await page.goto("/");
+    // Phase 15: Home's Worklist caps "Approvals & leavers" at 2 rows, and the
+    // seed's breached SLA (APR-2040) plus the EXECUTION_FAILED retry
+    // (APR-2025) already fill it — Dennis's leaver row is the section's
+    // third, reached through the uncapped /inventory/work page instead.
+    await page.goto("/inventory/work");
     const leave = page.locator("li").filter({ hasText: "Dennis Ong is leaving" });
     await expect(leave).toContainText("3 items still out");
     await expect(leave.getByRole("link", { name: "Collect equipment" })).toHaveAttribute(
@@ -113,7 +123,7 @@ test.describe.serial("the 4-step wizard", () => {
     await expect(phone.getByText(/Missing needs a reason/)).toBeVisible();
   });
 
-  test("each decision becomes its own approval, and Continue unblocks only when none are undecided", async ({ page }) => {
+  test("each decision applies at once, and Continue unblocks only when none are undecided", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await openWizard(page);
     await gotoStep(page, /Collect items/);
@@ -122,12 +132,16 @@ test.describe.serial("the 4-step wizard", () => {
     await expect(page.getByRole("button", { name: /Continue to Accounts/ })).toBeDisabled();
     await expect(page.getByText(/3 items undecided/)).toBeVisible();
 
+    // Phase 15: Dennis's three items are all IT class, so IT confirming a
+    // decision applies it immediately (decideItem, offboarding/actions.ts) —
+    // the toast reads "<tag> → <STATUS>", never "APR-… created — <tag>" (that
+    // wording survives only for a Purchasing asset's own queued path).
     const decide = async (tag: string, outcome: string, reason: string) => {
       const card = page.getByRole("group", { name: `Decide ${tag}` });
       await card.getByRole("radiogroup", { name: new RegExp(`Outcome for ${tag}`) }).getByText(outcome).click();
       if (reason) await card.getByLabel(/Reason/).fill(reason);
       await card.getByRole("button", { name: "Confirm decision" }).click();
-      await expect(page.getByText(new RegExp(`APR-\\d+ created — ${tag}`))).toBeVisible();
+      await expect(page.getByText(new RegExp(`${tag} → `))).toBeVisible();
     };
 
     await decide("BR-PH-0312", "Missing", "never handed back — investigation open");
@@ -136,8 +150,32 @@ test.describe.serial("the 4-step wizard", () => {
 
     // Every decided item now shows its request and its landing status.
     await expect(page.getByText("MISSING").first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /Continue to Accounts/ })).toBeVisible();
+    // Two identical "Continue to Accounts & M365" links render at once (a
+    // mobile/desktop action-bar duplicate) — .first() disambiguates without
+    // weakening the assertion.
+    await expect(page.getByRole("link", { name: /Continue to Accounts/ }).first()).toBeVisible();
     await expect(page.getByRole("list", { name: "Offboarding steps" }).getByRole("link")).toHaveCount(4);
+
+    // The write actually happened — not just the wizard's own optimistic copy.
+    const [phone, laptop, headset] = await Promise.all([
+      db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0312" } }),
+      db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0166" } }),
+      db.asset.findUniqueOrThrow({ where: { tag: "BR-HS-0510" } }),
+    ]);
+    expect(phone.status).toBe("MISSING");
+    expect(phone.assigneeId).toBeNull();
+    expect(laptop.status).toBe("DEFECTIVE");
+    expect(laptop.assigneeId).toBeNull();
+    // RETURNED lands an IT device on its default status (SPARE) with
+    // returnedAt set — "back, not checked" (spec §4.1) — not a plain clean
+    // return with nothing left to triage.
+    expect(headset.status).toBe("SPARE");
+    expect(headset.assigneeId).toBeNull();
+    expect(headset.returnedAt).not.toBeNull();
+    for (const a of [phone, laptop, headset]) {
+      const approval = await db.approval.findFirstOrThrow({ where: { assetId: a.id, type: "lifecycle_return" } });
+      expect(approval.state).toBe("EXECUTED");
+    }
   });
 
   test("step 3 closes the account; completion is refused until it does", async ({ page }) => {
@@ -191,33 +229,25 @@ test.describe.serial("the 4-step wizard", () => {
     await expect(page.getByText("never handed back — investigation open")).toBeVisible();
   });
 
-  test("a MISSING return now executes to MISSING instead of failing (the Task 1 payoff)", async ({ page }) => {
+  test("a MISSING decision executes to MISSING immediately, with nothing left in the queue (the Task 1 payoff)", async ({ page }) => {
+    // Phase 15: the decision above already applied — there is no PENDING
+    // approval left to claim and approve for BR-PH-0312 (the old flow this
+    // test used to drive), so the payoff is asserted directly against the
+    // asset and the approval record rather than through the queue and the
+    // worker. Before Task 1, a MISSING return died as EXECUTION_FAILED; now
+    // it lands the asset on MISSING in the same transaction as the decision.
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0312" } });
+    expect(asset.status).toBe("MISSING");
+    expect(asset.assigneeId).toBeNull();
+    const approval = await db.approval.findFirstOrThrow({
+      where: { assetId: asset.id, type: "lifecycle_return" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(approval.state).toBe("EXECUTED");
+    expect(await db.approval.count({ where: { assetId: asset.id, state: { in: ["PENDING", "CLAIMED", "APPROVED"] } } })).toBe(0);
+
     await login(page, "admin@thebackroomop.com");
-    await page.goto("/approvals");
-    const row = page.getByRole("row", { name: /BR-PH-0312/ });
-    // The queue's change cell must name the real target, not a hard-coded SPARE.
-    await expect(row).toContainText("→ MISSING");
-    await row.getByRole("link").first().click();
-    // Wait for the navigation itself, with headroom, before asserting on the
-    // detail page's content. Without this the next assertion's default 5s
-    // budget has to cover the whole click → route → server-render round trip,
-    // and a dev server ~70 tests into a full suite run does not always make
-    // it: this failed in the full run and passed in isolation and in a
-    // single-file run, and the dump showed the browser still sitting on
-    // /approvals with the row rendered correctly. Same class as the "✓ Saved"
-    // flash race in HANDOVER §7 — the fix is headroom, not a weaker assertion.
-    await expect(page).toHaveURL(/\/approvals\/[a-z0-9]+$/i, { timeout: 20_000 });
-
-    // "What the system checked" must pass on a Missing return, not cross it.
-    await expect(page.getByText("returns as MISSING")).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("button", { name: "Claim" }).click();
-    await page.getByRole("button", { name: "Approve" }).click();
-
-    execSync("npm run worker:once", { timeout: 60_000, stdio: "inherit" });
-
-    await page.goto("/inventory?q=BR-PH-0312");
-    // the scanner contract redirects an exact tag match to the record
-    await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 15_000 });
+    await page.goto(`/inventory/${asset.id}`);
     await expect(page.getByText("MISSING").first()).toBeVisible();
     await expect(page.getByText("Dennis Ong")).toHaveCount(0);
   });
@@ -230,22 +260,38 @@ test.describe("offboarding — the server gate does not trust the wizard", () =>
     // decided, not silently skipped) and completion must refuse. An earlier
     // version counted it as decided server-side and let the offboarding finish
     // with the item still assigned to the departed employee.
+    //
+    // Phase 15: IT's return is now direct — filing it through the UI (the
+    // employee record's − affordance) would execute at once and leave
+    // nothing "held" behind, so there is no longer a UI path that produces a
+    // real PENDING lifecycle_return the way this test needs. The legacy row
+    // is manufactured through Prisma instead, exactly the way
+    // e2e/scanner.spec.ts manufactures its own blocked-verdict fixture. Not
+    // the laptop slot: BR-LT-0148 already carries the seeded APR-2039
+    // (CLAIMED), which owns that asset's one open-approval slot — the
+    // monitor (BR-MN-0902) has none, so it's the one free to carry a fresh
+    // legacy return.
+    const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    const monitor = await db.asset.findUniqueOrThrow({ where: { tag: "BR-MN-0902" } });
+    const itStaff = await db.user.findFirstOrThrow({ where: { email: "it@thebackroomop.com" } });
+    const refNo = "APR-OFFTEST-BLOCK-1";
+    await db.approval.create({
+      data: {
+        refNo,
+        type: "lifecycle_return",
+        state: "PENDING",
+        payload: { from: { assigneeId: marites.id }, to: { assigneeId: null, status: "SPARE" }, reason: "routine swap, pre-offboarding" },
+        slaAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        requestedById: itStaff.id,
+        assetId: monitor.id,
+        employeeId: marites.id,
+      },
+    });
+
     await login(page, "it@thebackroomop.com");
 
-    // file a routine return on a held item while the employee is still ACTIVE-ish,
-    // by using the employee record's − affordance BEFORE touching the wizard.
-    // Not the laptop slot: BR-LT-0148 already carries the seeded APR-2039
-    // (CLAIMED), which owns that asset's one open-approval slot — the monitor
-    // (BR-MN-0902) has none, so it's the one free to file a fresh return on.
-    await page.goto("/employees?q=Marites");
-    await page.getByRole("link", { name: /Marites Bautista/ }).click();
-    await page.getByRole("button", { name: /^monitor slot/ }).click();
-    await page.getByLabel(/Reason/).fill("routine swap, pre-offboarding");
-    await page.getByRole("button", { name: "Request return" }).click();
-    await expect(page.getByText(/APR-\d+ created/)).toBeVisible();
-
     // now mark her offboarding — the anchor lands AFTER that approval
-    await page.getByRole("link", { name: "Edit" }).click();
+    await page.goto(`/employees/${marites.id}/edit`);
     await page.getByLabel(/Employment/).selectOption("OFFBOARDING");
     await page.getByRole("button", { name: /Save/ }).click();
     // Save is a React transition with no redirect (it stays on /edit and flips
@@ -259,8 +305,9 @@ test.describe("offboarding — the server gate does not trust the wizard", () =>
 
     // the item names its blocker instead of offering a control or claiming a decision.
     // BR-LT-0148 (the seeded APR-2039) is blocked too, alongside BR-MN-0902 —
-    // both are genuinely held, so this matches more than one row.
-    await expect(page.getByText(/is held by APR-\d+/).first()).toBeVisible();
+    // both are genuinely held, so both refNos must appear.
+    await expect(page.getByText(`is held by ${refNo}`)).toBeVisible();
+    await expect(page.getByText(/is held by APR-2039/)).toBeVisible();
     await expect(page.getByRole("button", { name: /Continue to Accounts/ })).toBeDisabled();
   });
 });

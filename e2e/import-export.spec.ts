@@ -704,7 +704,10 @@ test.describe.serial("the farewell sheet matches the printed report", () => {
       await card.getByRole("radiogroup", { name: new RegExp(`Outcome for ${tag}`) }).getByText(outcome).click();
       if (reason) await card.getByLabel(/Reason/).fill(reason);
       await card.getByRole("button", { name: "Confirm decision" }).click();
-      await expect(page.getByText(new RegExp(`APR-\\d+ created — ${tag}`))).toBeVisible({ timeout: 30_000 });
+      // Phase 15: an IT decision applies at once (item-decision.tsx) — the
+      // toast reads "<tag> → <STATUS>", never "APR-… created — <tag>" (that
+      // wording survives only for a Purchasing asset's own queued path).
+      await expect(page.getByText(new RegExp(`${tag} → `))).toBeVisible({ timeout: 30_000 });
     };
     await decide("BR-PH-0312", "Missing", "never handed back — investigation open");
     await decide("BR-LT-0166", "Defective", "screen cracked in transit");
