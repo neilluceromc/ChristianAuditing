@@ -283,6 +283,8 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
 
+  const joinedAt = new Date(`${d.joinedAt}T00:00:00Z`);
+  if (Number.isNaN(joinedAt.getTime())) return validationError({ joinedAt: "Use the date picker" });
   if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) {
     return validationError({ departmentId: "Unknown department" });
   }
@@ -299,7 +301,7 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
     departmentId: d.departmentId,
     employment: d.employment,
     m365Status: d.m365Status === "" ? null : d.m365Status,
-    joinedAt: new Date(`${d.joinedAt}T00:00:00Z`),
+    joinedAt,
     offboardingAt: d.employment === "OFFBOARDING" ? new Date() : null,
   };
 

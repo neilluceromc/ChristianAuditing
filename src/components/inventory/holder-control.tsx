@@ -34,7 +34,7 @@ export function HolderControl(props: Props) {
   const isAssign = props.mode === "assign";
 
   function close() {
-    setOpen(false); setReason(""); setEmployeeId(null); setError(null); setFieldErrors({});
+    setOpen(false); setReason(""); setEmployeeId(null); setError(null); setFieldErrors({}); setRetryAfter(null);
   }
 
   function submit() {

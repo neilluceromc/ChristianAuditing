@@ -549,7 +549,7 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id },
-      select: { id: true, tag: true, financeConfirmedAt: true },
+      select: { id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true },
     });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
@@ -557,6 +557,10 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
     }
     if (asset.financeConfirmedAt) {
       failure = conflict(`${asset.tag} is already confirmed and cannot be sent back.`);
+      return;
+    }
+    if (isAwaitingItCheck(asset)) {
+      failure = conflict(`${asset.tag} is waiting for IT's check — Finance reviews after IT.`);
       return;
     }
     // State-guarded, the same shape as confirmAssetDetails: the confirmed-is-

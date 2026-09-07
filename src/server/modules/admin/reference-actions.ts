@@ -62,7 +62,7 @@ const createSchema = z.object({
   entity: entitySchema,
   name: nameSchema,
   categoryId: z.string().optional(), // types only
-  cls: z.enum(["IT", "PURCHASING"]).optional(), // categories only (Phase 13); defaults to IT
+  cls: z.enum(["IT", "PURCHASING"]).optional(), // categories only; the server decides the class from the role (classFor, Phase 14) — this is a hint admin may send
 });
 
 export async function createRefRow(input: unknown): Promise<ActionResult<{ id: string }>> {
