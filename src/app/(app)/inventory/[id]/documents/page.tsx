@@ -3,6 +3,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { fmtDate } from "@/lib/format";
+import { canManageClass } from "@/lib/asset-class";
 import { DocumentsPanel, type DocumentRow } from "@/components/inventory/documents-panel";
 
 export default async function AssetDocumentsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -30,7 +31,7 @@ export default async function AssetDocumentsPage({ params }: { params: Promise<{
     <DocumentsPanel
       assetId={id}
       docs={rows}
-      canMutate={user.role === "admin" || user.role === "it_staff"}
+      canMutate={canManageClass(user.role, asset.cls)}
     />
   );
 }

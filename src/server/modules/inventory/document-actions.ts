@@ -5,12 +5,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
-import { actionRole } from "@/server/auth/guards";
+import { actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import {
   conflict, forbidden, ok, rateLimited, validationError, type ActionResult,
 } from "@/server/action-result";
+import { canManageClass } from "@/lib/asset-class";
+import { isApprover } from "@/lib/approval-access";
 
 const ALLOWED: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -28,8 +30,8 @@ const KINDS = ["receipt", "accountability-form", "photo", "other"] as const;
  * as display text.
  */
 export async function uploadDocument(formData: FormData): Promise<ActionResult<{ id: string }>> {
-  const user = await actionRole("admin", "it_staff");
-  if (!user) return forbidden();
+  const user = await actionUser();
+  if (!user || !isApprover(user.role)) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
@@ -48,6 +50,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult<{
 
   const asset = await prisma.asset.findUnique({ where: { id: assetId } });
   if (!asset) return conflict("That asset no longer exists.");
+  if (!canManageClass(user.role, asset.cls)) return forbidden();
 
   const bytes = Buffer.from(await file.arrayBuffer());
   const checksum = createHash("sha256").update(bytes).digest("hex");
@@ -79,13 +82,17 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult<{
 
 /** Accountability forms scan back in and get flagged SIGNED. */
 export async function markDocumentSigned(input: { docId: string }): Promise<ActionResult<null>> {
-  const user = await actionRole("admin", "it_staff");
-  if (!user) return forbidden();
+  const user = await actionUser();
+  if (!user || !isApprover(user.role)) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
-  const doc = await prisma.assetDocument.findUnique({ where: { id: String(input.docId ?? "") } });
+  const doc = await prisma.assetDocument.findUnique({
+    where: { id: String(input.docId ?? "") },
+    include: { asset: { select: { cls: true } } },
+  });
   if (!doc) return conflict("That document no longer exists.");
+  if (!canManageClass(user.role, doc.asset.cls)) return forbidden();
   if (doc.signed) return ok(null);
 
   await prisma.$transaction(async (tx) => {
