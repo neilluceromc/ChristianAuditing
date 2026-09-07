@@ -282,7 +282,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
         if (isDirectLifecycle(user.role, category.cls)) {
           const asset: LifecycleAsset = created;
           const prepared = await prepareLifecycle(tx, asset, {
-            kind: "assign", employeeId: plan.approval.assigneeId, status: plan.approval.toStatus,
+            kind: "assign", employeeId: plan.approval.assigneeId, status: plan.approval.toStatus, loanDueAt: null,
           });
           if (!prepared.ok) throw new DirectRefusal(humanizeGuard(prepared.error));
           await commitLifecycle(tx, created.id, prepared.prepared);

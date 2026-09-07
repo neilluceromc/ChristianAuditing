@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LOAN_DAYS, WORK_SECTIONS, groupWork, type WorkRow } from "./worklist";
+import { DEFAULT_LOAN_DAYS, WORK_SECTIONS, groupWork, type WorkRow } from "./worklist";
 
 const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>
   ({ key, section, title: key, meta: "", href: "/x", action: "Do", severity, rank });
@@ -8,7 +8,7 @@ describe("WORK_SECTIONS", () => {
   it("is the spec's order", () => {
     expect(WORK_SECTIONS.map((s) => s.id)).toEqual(["triage", "repairs", "check", "hires", "loans", "missing", "queue"]);
   });
-  it("loans wait 30 days", () => expect(LOAN_DAYS).toBe(30));
+  it("the default loan is 30 days", () => expect(DEFAULT_LOAN_DAYS).toBe(30));
 });
 
 describe("groupWork", () => {

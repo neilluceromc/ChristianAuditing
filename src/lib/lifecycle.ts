@@ -59,3 +59,21 @@ export function humanizeGuard(error: string): string {
   out = out.replace("— return refused", "");
   return out.trimEnd();
 }
+
+/** Phase 16 (spec §4.2): the dialogs' default loan length. */
+export const DEFAULT_LOAN_DAYS = 30;
+
+/**
+ * What `loanDueAt` an assignment stores. Only a loan (TEMPORARY) carries one,
+ * and it may not be in the past. Dates are day-precision UTC, like every
+ * other date field this app stores (asset-diff.ts's toDay).
+ */
+export function loanDueFor(status: string, raw: string | undefined, today: Date):
+  { ok: true; value: Date | null } | { ok: false; error: string } {
+  if (status !== "TEMPORARY") return { ok: true, value: null };
+  if (!raw) return { ok: false, error: "A loan needs a due date." };
+  const value = new Date(`${raw}T00:00:00Z`);
+  const floor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  if (Number.isNaN(value.getTime()) || value < floor) return { ok: false, error: "A loan needs a due date on or after today." };
+  return { ok: true, value };
+}

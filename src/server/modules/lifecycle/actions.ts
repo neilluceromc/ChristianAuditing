@@ -21,7 +21,7 @@ import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, isAssignable, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, reasonRequiredFor, replacePlan,
+  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
 } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange } from "./apply";
 
@@ -38,7 +38,7 @@ type Actor = { id: string; name: string };
 class DirectRefusal extends Error {}
 
 const assetSelect = {
-  id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, returnedAt: true, model: true,
+  id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, returnedAt: true, loanDueAt: true, model: true,
 } as const;
 
 /** Load + the three refusals every direct action shares: exists, direct for this role, no open approval. */
@@ -91,6 +91,7 @@ function revalidateAsset(assetId: string, employeeIds: Array<string | null | und
 }
 
 const reasonOpt = z.string().trim().max(500).optional();
+const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
 
 // ── changeStatus ────────────────────────────────────────────────────────────
 const changeStatusSchema = z.object({ assetId: z.string().min(1), to: z.enum(ASSET_STATUSES), reason: reasonOpt });
@@ -128,7 +129,7 @@ export async function changeStatus(input: unknown): Promise<ActionResult<{ tag: 
 // ── assignAsset ─────────────────────────────────────────────────────────────
 const assignSchema = z.object({
   assetId: z.string().min(1), employeeId: z.string().min(1),
-  status: z.enum(ASSET_STATUSES).optional(), reason: reasonOpt,
+  status: z.enum(ASSET_STATUSES).optional(), loanDueAt: dateStr.optional(), reason: reasonOpt,
 });
 
 export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: string; employeeName: string }>> {
@@ -151,10 +152,15 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
     }
     const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { name: true } });
     if (!employee) return validationError({ employeeId: "Unknown employee" });
+    const due = loanDueFor(status, d.loanDueAt, now);
+    if (!due.ok) return validationError({ loanDueAt: due.error });
     const r = await recordDirect(tx, {
       actor: user, asset, now, type: "lifecycle_assign", action: "lifecycle.assign", employeeId: d.employeeId,
-      change: { kind: "assign", employeeId: d.employeeId, status },
-      payload: { to: { assigneeId: d.employeeId, status }, reason: d.reason || "assigned" },
+      change: { kind: "assign", employeeId: d.employeeId, status, loanDueAt: due.value },
+      payload: {
+        to: { assigneeId: d.employeeId, status, ...(due.value ? { loanDueAt: due.value.toISOString() } : {}) },
+        reason: d.reason || "assigned",
+      },
     });
     if (!r.ok) return conflict(r.error);
     out = { tag: asset.tag, employeeName: employee.name };
@@ -162,6 +168,41 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
   });
   if (failure) return failure;
   revalidateAsset(d.assetId, [d.employeeId]);
+  return ok(out!);
+}
+
+// ── setLoanDue ──────────────────────────────────────────────────────────────
+const loanDueSchema = z.object({ assetId: z.string().min(1), loanDueAt: dateStr });
+
+/** Spec §4.2: a due date is metadata, like notes — audited, no approval row. */
+export async function setLoanDue(input: unknown): Promise<ActionResult<{ tag: string; loanDueAt: string }>> {
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = loanDueSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+  const now = new Date();
+  const due = loanDueFor("TEMPORARY", d.loanDueAt, now);
+  if (!due.ok) return validationError({ loanDueAt: due.error });
+  let out: { tag: string; loanDueAt: string } | null = null;
+  const failure = await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({ where: { id: d.assetId }, select: assetSelect });
+    if (!asset) return conflict("That asset no longer exists.");
+    if (!isDirectLifecycle(user.role, asset.cls)) return forbidden();
+    if (asset.status !== "TEMPORARY") return conflict(`${asset.tag} is not on loan — it reads ${asset.status}.`);
+    await tx.asset.update({ where: { id: asset.id }, data: { loanDueAt: due.value } });
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
+      action: "loan.due-changed", diff: { loanDueAt: { from: asset.loanDueAt, to: due.value } },
+    });
+    out = { tag: asset.tag, loanDueAt: d.loanDueAt };
+    return null;
+  });
+  if (failure) return failure;
+  revalidateAsset(d.assetId, []);
+  revalidatePath("/inventory/work");
   return ok(out!);
 }
 
@@ -256,7 +297,7 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
       if (!ret.ok) throw new DirectRefusal(ret.error);
       const asg = await recordDirect(tx, {
         actor: user, asset: newAsset, now, type: "lifecycle_assign", action: "lifecycle.replace", employeeId: d.employeeId,
-        change: { kind: "assign", employeeId: d.employeeId, status: plan.newStatus },
+        change: { kind: "assign", employeeId: d.employeeId, status: plan.newStatus, loanDueAt: null },
         payload: { to: { assigneeId: d.employeeId, status: plan.newStatus }, reason: `replaces ${oldAsset.tag}` },
         extraDiff: { replaces: { from: null, to: oldAsset.tag } },
       });
@@ -415,7 +456,7 @@ export async function assignReserved(input: unknown): Promise<ActionResult<{ ass
       if (await openApprovalForAsset(tx, hold.assetId)) continue;
       const r = await recordDirect(tx, {
         actor: user, asset: hold.asset, now, type: "lifecycle_assign", action: "lifecycle.assign", employeeId,
-        change: { kind: "assign", employeeId, status: DEFAULT_ASSIGN_STATUS[hold.asset.cls] },
+        change: { kind: "assign", employeeId, status: DEFAULT_ASSIGN_STATUS[hold.asset.cls], loanDueAt: null },
         payload: { to: { assigneeId: employeeId, status: DEFAULT_ASSIGN_STATUS[hold.asset.cls] }, reason: "reserved — day-one setup" },
       });
       if (r.ok) assigned += 1;

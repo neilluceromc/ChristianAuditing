@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_OUTCOMES, humanizeGuard, reasonRequiredFor, replacePlan,
+  DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_OUTCOMES,
+  humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
 } from "./lifecycle";
 import { RETURN_TARGETS } from "./asset-class";
 
@@ -43,4 +44,20 @@ describe("humanizeGuard", () => {
   it("passes through text that isn't a worker guard unchanged", () => {
     expect(humanizeGuard("Already DEPLOYED.")).toBe("Already DEPLOYED.");
   });
+});
+
+describe("loanDueFor (Phase 16 §4.2)", () => {
+  const today = new Date("2026-09-07T10:00:00Z");
+  it("DEPLOYED ignores any date and stores null", () => {
+    expect(loanDueFor("DEPLOYED", "2026-10-01", today)).toEqual({ ok: true, value: null });
+  });
+  it("TEMPORARY needs a date", () => {
+    expect(loanDueFor("TEMPORARY", undefined, today)).toEqual({ ok: false, error: "A loan needs a due date." });
+    expect(loanDueFor("TEMPORARY", "", today)).toEqual({ ok: false, error: "A loan needs a due date." });
+  });
+  it("TEMPORARY accepts today or later, refuses the past", () => {
+    expect(loanDueFor("TEMPORARY", "2026-09-07", today)).toEqual({ ok: true, value: new Date("2026-09-07T00:00:00Z") });
+    expect(loanDueFor("TEMPORARY", "2026-09-06", today).ok).toBe(false);
+  });
+  it("the default loan is 30 days", () => expect(DEFAULT_LOAN_DAYS).toBe(30));
 });

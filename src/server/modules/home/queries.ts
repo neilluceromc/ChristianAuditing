@@ -10,7 +10,7 @@ import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
-import { LOAN_DAYS, groupWork, type WorkGroup, type WorkRow } from "@/lib/worklist";
+import { DEFAULT_LOAN_DAYS, groupWork, type WorkGroup, type WorkRow } from "@/lib/worklist";
 
 const DAY_MS = 86_400_000;
 const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY_MS));
@@ -280,7 +280,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
       key: `loans:${a.id}`,
       section: "loans",
       title: `${a.tag} · ${a.model}`,
-      meta: `${a.assignee?.name ?? "unassigned"} · out ${n} d${n > LOAN_DAYS ? " · overdue" : ""}`,
+      meta: `${a.assignee?.name ?? "unassigned"} · out ${n} d${n > DEFAULT_LOAN_DAYS ? " · overdue" : ""}`,
       href: `/inventory/${a.id}`,
       action: "Review",
       severity: n,
