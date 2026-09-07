@@ -54,6 +54,7 @@ export default async function EmployeesPage({
                 canMutate is exactly admin/it_staff, matching the PATH_RULES
                 entry that gates /employees/import itself (E-7). */}
             {canMutate && <ButtonLink href="/employees/import">Import</ButtonLink>}
+            {canMutate && <ButtonLink variant="primary" href="/employees/new">New employee</ButtonLink>}
           </>
         }
       />
@@ -130,8 +131,8 @@ export default async function EmployeesPage({
         ) : (
           <EmptyState
             title="No employees yet"
-            description="Employees arrive via import or the seed — there is no create form by design."
-            actions={canMutate ? <ButtonLink href="/employees/import">Import</ButtonLink> : undefined}
+            description="Add one with New employee, or import a sheet."
+            actions={canMutate ? <ButtonLink href="/employees/new">New employee</ButtonLink> : undefined}
           />
         )}
       </div>

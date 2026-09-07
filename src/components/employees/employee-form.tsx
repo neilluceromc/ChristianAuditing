@@ -10,23 +10,27 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { M365_CANONICAL } from "@/lib/labels";
-import { updateEmployee } from "@/server/modules/employees/actions";
+import { createEmployee, updateEmployee } from "@/server/modules/employees/actions";
 
 const CUSTOM = "__custom";
+const today = () => new Date().toISOString().slice(0, 10);
+type Initial = { name: string; title: string; departmentId: string; employment: string; m365Status: string | null };
+type Props = { departments: Array<{ id: string; name: string }> } & (
+  | { mode: "edit"; employeeId: string; initial: Initial }
+  | { mode: "new" }
+);
 
-export function EmployeeForm({
-  employeeId,
-  departments,
-  initial,
-}: {
-  employeeId: string;
-  departments: Array<{ id: string; name: string }>;
-  initial: { name: string; title: string; departmentId: string; employment: string; m365Status: string | null };
-}) {
+export function EmployeeForm(props: Props) {
+  const { departments } = props;
+  const initial: Initial = props.mode === "edit"
+    ? props.initial
+    : { name: "", title: "", departmentId: departments[0]?.id ?? "", employment: "ACTIVE", m365Status: null };
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const isCustom = initial.m365Status !== null && !(M365_CANONICAL as readonly string[]).includes(initial.m365Status);
   const [form, setForm] = useState({
+    employeeNo: "",
+    joinedAt: today(),
     name: initial.name,
     title: initial.title,
     departmentId: initial.departmentId,
@@ -46,18 +50,13 @@ export function EmployeeForm({
     startTransition(async () => {
       const m365Status =
         form.m365Select === "" ? null : form.m365Select === CUSTOM ? form.m365Custom.trim() || null : form.m365Select;
-      const res = await updateEmployee({
-        id: employeeId,
-        name: form.name,
-        title: form.title,
-        departmentId: form.departmentId,
-        employment: form.employment,
-        m365Status,
-      });
+      const common = { name: form.name, title: form.title, departmentId: form.departmentId, employment: form.employment, m365Status };
+      const res = props.mode === "edit"
+        ? await updateEmployee({ id: props.employeeId, ...common })
+        : await createEmployee({ ...common, employeeNo: form.employeeNo, joinedAt: form.joinedAt });
       if (res.ok) {
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
-        router.refresh();
+        if (props.mode === "new") { router.push(`/employees/${res.data.id}`); return; }
+        setSaved(true); setTimeout(() => setSaved(false), 3000); router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
         const fe = res.fieldErrors ?? {};
@@ -76,6 +75,18 @@ export function EmployeeForm({
       <Card>
         <CardHeader title="Person" />
         <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {props.mode === "new" && (
+            <>
+              <FormField label="Employee number" required error={errors.employeeNo} hint="Any text up to 60 characters; must be unique.">
+                {(p) => <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                  value={form.employeeNo} onChange={(e) => setForm((f) => ({ ...f, employeeNo: e.target.value }))} />}
+              </FormField>
+              <FormField label="Joined" required error={errors.joinedAt}>
+                {(p) => <Input id={p.id} type="date" aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                  value={form.joinedAt} onChange={(e) => setForm((f) => ({ ...f, joinedAt: e.target.value }))} />}
+              </FormField>
+            </>
+          )}
           <FormField label="Name" required error={errors.name}>
             {(p) => <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
               value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />}
@@ -128,7 +139,7 @@ export function EmployeeForm({
       </Card>
       <div className="flex items-center gap-3">
         <Button type="submit" variant="primary" loading={pending}>
-          {saved ? "✓ Saved" : "Save changes"}
+          {props.mode === "new" ? "Create employee" : saved ? "✓ Saved" : "Save changes"}
         </Button>
         {saved && <span className="text-xs text-fg-muted">audit entry written</span>}
       </div>

@@ -262,3 +262,65 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   revalidatePath("/employees");
   return ok({ id: employee.id });
 }
+
+const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
+
+const createEmployeeSchema = employeeSchema.omit({ id: true }).extend({
+  // No format rule: Employee.employeeNo has none anywhere and the importer
+  // (import-employees.ts, E-2) refuses to invent one. Uniqueness is
+  // case-insensitive, matching the importer's refKey.
+  employeeNo: z.string().trim().min(1, "Give an employee number").max(60),
+  joinedAt: dateStr,
+});
+
+/** Phase 14 (spec §11): the first manual create path — before this, employees arrived only by import or seed. */
+export async function createEmployee(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = createEmployeeSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+
+  if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) {
+    return validationError({ departmentId: "Unknown department" });
+  }
+  const taken = await prisma.employee.findFirst({
+    where: { employeeNo: { equals: d.employeeNo, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (taken) return validationError({ employeeNo: "That employee number is already in use" });
+
+  const data = {
+    employeeNo: d.employeeNo,
+    name: d.name,
+    title: d.title,
+    departmentId: d.departmentId,
+    employment: d.employment,
+    m365Status: d.m365Status === "" ? null : d.m365Status,
+    joinedAt: new Date(`${d.joinedAt}T00:00:00Z`),
+    offboardingAt: d.employment === "OFFBOARDING" ? new Date() : null,
+  };
+
+  let id = "";
+  try {
+    await prisma.$transaction(async (tx) => {
+      const created = await tx.employee.create({ data });
+      id = created.id;
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name,
+        entityType: "employee", entityId: created.id,
+        action: "create",
+        diff: { employeeNo: { from: null, to: d.employeeNo }, name: { from: null, to: d.name } },
+      });
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return validationError({ employeeNo: "That employee number is already in use" });
+    }
+    throw err;
+  }
+  revalidatePath("/employees");
+  return ok({ id });
+}
