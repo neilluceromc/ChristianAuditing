@@ -119,6 +119,11 @@ export function RegisterForm({
    * Called on blur (debounced) and once more, undebounced, at submit — never
    * awaited by either caller, because the check is advisory only (R9 note:
    * the server remains the authority, and refuses with the same words).
+   *
+   * Staleness guard (below) compares array structures using JSON.stringify
+   * rather than join(""), which is non-injective (e.g. ["A","BC"] and ["AB","C"]
+   * both become "ABC"), so a response for a different array could incorrectly
+   * pass as current.
    */
   function runIdentifierCheck() {
     const snapshot = latestRef.current;
@@ -131,9 +136,10 @@ export function RegisterForm({
     const serialsToCheck = snapshot.serials.filter((s) => s.trim().length > 0);
     void checkIdentifiers({ tags: tagsToCheck, serials: serialsToCheck }).then((res) => {
       if (!mountedRef.current || !res.ok) return;
+      const same = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
       const stale =
-        tagsToCheck.join("") !== latestRef.current.tags.join("") ||
-        serialsToCheck.join("") !== latestRef.current.serials.filter((s) => s.trim().length > 0).join("");
+        !same(tagsToCheck, latestRef.current.tags) ||
+        !same(serialsToCheck, latestRef.current.serials.filter((s) => s.trim().length > 0));
       if (stale) return;
       // R9: normalise both sides the way the server does — tags via
       // `tagKey`, serials trimmed — so a lower-case typed tag or a
