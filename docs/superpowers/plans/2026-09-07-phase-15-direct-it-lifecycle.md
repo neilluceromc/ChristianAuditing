@@ -12,7 +12,7 @@
 
 **Baselines on `main` at `a3b7b05`:** 971 unit / 52 files · 203 e2e / 15 files · `tsc` and `lint` clean · 15 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
-> ### AMENDED DURING EXECUTION — D-1 through D-5
+> ### AMENDED DURING EXECUTION — D-1 through D-7
 >
 > **D-1. Task 4 replaceAsset refusal handling:** originally `return`ed a second-leg refusal inside the transaction, which would have committed the first leg — fixed to throw a `DirectRefusal` and convert to `conflict` outside. Lesson: inside `prisma.$transaction`, a refusal after a write must throw, not return.
 >
@@ -22,7 +22,11 @@
 >
 > **D-4. Task 9 scanner.spec.ts "already decided" verdict:** a direct IT decision clears the holder at once, so a re-scan of that same tag cannot find it in the held array. Adapted the test's scenario to use a Purchasing-class car (same technique as `asset-classes.spec.ts` case 8) — Purchasing returns still QUEUE, so the asset stays held with a PENDING decision, and the "held AND decided" state the verdict needs is genuinely reachable. The "already decided" verdict is now unreachable for IT items post-Phase-15; filed `task_4e151341` for a product decision.
 >
-> **D-5. Commit fceecbf e2e count error:** the message claimed "264 e2e tests passed"; the correct figure after Task 9 is **213 e2e tests across 16 spec files**. Reason: the 98-test "Step A+B combined" row was a re-run of already-counted tests, not additional ones. The true total is 31 + 67 + 46 + 36 + 33 + 6 = 213.
+> **D-5. Commit fceecbf e2e count error:** the message claimed "264 e2e tests passed"; the correct figure after Task 9 is **213 e2e tests across 16 spec files**. Reason: the 98-test "Step A+B combined" row was a re-run of already-counted tests, not additional ones. The true total is 31 · 67 · 46 · 36 · 33 = 213.
+>
+> **D-6. Task 9 locator ambiguities resolved at the DOM:** the Replace dialog's combobox is targeted by its label ("Replacement") because an adjacent `<select>` also matched `getByRole("combobox")`, and the offboarding wizard renders "Continue to Accounts" twice (mobile and desktop), so the test takes `.first()`. Lesson: a dialog with two form controls of the same role needs role+name, never role alone.
+>
+> **D-7. Task 9 spec row compliance — missing assertions:** cases 5, 7 and 8 asserted less than their spec rows specify (no zero-open-approvals check; DB state for one of three offboarding decisions; no section count). Fixed in the same task by adding the DB and count assertions. Lesson: an e2e case proves its spec row only when every clause of the row is an assertion, not a toast.
 
 ## Global Constraints
 
