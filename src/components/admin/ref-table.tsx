@@ -29,10 +29,12 @@ export function RefTable({
   entity,
   rows,
   categories,
+  fixedCls,
 }: {
   entity: "category" | "type" | "department";
   rows: RefRow[];
   categories?: Array<{ id: string; name: string }>;
+  fixedCls?: AssetClass;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -43,7 +45,7 @@ export function RefTable({
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  const [newCls, setNewCls] = useState<AssetClass>(ASSET_CLASSES[0]);
+  const [newCls, setNewCls] = useState<AssetClass>(fixedCls ?? ASSET_CLASSES[0]);
   const isType = entity === "type";
   const isCategory = entity === "category";
 
@@ -102,10 +104,14 @@ export function RefTable({
             </Td>
             {isCategory && (
               <Td>
-                <Select aria-label="Class for the new category" value={newCls} className="py-1.5 text-xs"
-                  onChange={(e) => setNewCls(e.target.value as AssetClass)}>
-                  {ASSET_CLASSES.map((c) => <option key={c} value={c}>{CLASS_LABEL[c]}</option>)}
-                </Select>
+                {fixedCls ? (
+                  <span className="font-mono text-[10.5px] text-fg-muted" aria-label="Class for the new category">{CLASS_LABEL[fixedCls].toUpperCase()}</span>
+                ) : (
+                  <Select aria-label="Class for the new category" value={newCls} className="py-1.5 text-xs"
+                    onChange={(e) => setNewCls(e.target.value as AssetClass)}>
+                    {ASSET_CLASSES.map((c) => <option key={c} value={c}>{CLASS_LABEL[c]}</option>)}
+                  </Select>
+                )}
               </Td>
             )}
             {isType && (
