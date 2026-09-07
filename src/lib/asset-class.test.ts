@@ -9,6 +9,7 @@ import {
   DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
   MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, VISIBLE_CLASSES,
   canManageClass, canEditAsset, canRegisterClass, canSeeClass, isAwaitingItCheck, isStatusOf, parseCls, statusesFor, visibleClassWhere, withClsQS,
+  DIRECT_LIFECYCLE_CLASSES, isDirectLifecycle, isAssignable,
 } from "./asset-class";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
@@ -236,4 +237,34 @@ describe("Phase 14 — the IT check", () => {
       expect(canEditAsset(role, car)).toBe(p);
     },
   );
+});
+
+const ROLES: Role[] = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"];
+
+describe("Phase 15 — direct lifecycle", () => {
+  it("IT is the only direct class, and it is a real class", () => {
+    expect(DIRECT_LIFECYCLE_CLASSES).toEqual(["IT"]);
+    for (const c of DIRECT_LIFECYCLE_CLASSES) expect(ASSET_CLASSES).toContain(c);
+  });
+  it.each([
+    ["admin", "IT", true], ["admin", "PURCHASING", false],
+    ["it_staff", "IT", true], ["it_staff", "PURCHASING", false],
+    ["purchasing_staff", "IT", false], ["purchasing_staff", "PURCHASING", false],
+    ["finance_staff", "IT", false], ["viewer", "IT", false],
+  ] as Array<[Role, "IT" | "PURCHASING", boolean]>)("isDirectLifecycle(%s, %s) → %s", (role, cls, expected) => {
+    expect(isDirectLifecycle(role, cls)).toBe(expected);
+  });
+  it("direct implies manageable, for every role and class", () => {
+    for (const r of ROLES) for (const c of ASSET_CLASSES) {
+      if (isDirectLifecycle(r, c)) expect(canManageClass(r, c)).toBe(true);
+    }
+  });
+  it("isAssignable: idle status AND not waiting for triage", () => {
+    const d = new Date();
+    expect(isAssignable({ cls: "IT", status: "SPARE", returnedAt: null })).toBe(true);
+    expect(isAssignable({ cls: "IT", status: "SPARE", returnedAt: d })).toBe(false);
+    expect(isAssignable({ cls: "IT", status: "DEPLOYED", returnedAt: null })).toBe(false);
+    expect(isAssignable({ cls: "PURCHASING", status: "STORED", returnedAt: null })).toBe(true);
+    expect(isAssignable({ cls: "PURCHASING", status: "OPERATIONAL", returnedAt: null })).toBe(false);
+  });
 });

@@ -190,3 +190,22 @@ export function isAwaitingItCheck(a: { cls: AssetClass; itVerifiedAt: Date | nul
 export function canEditAsset(role: Role, a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
   return canManageClass(role, a.cls) || (isAwaitingItCheck(a) && canRegisterClass(role, a.cls));
 }
+
+/**
+ * Phase 15 (spec §2.1). Classes whose lifecycle changes APPLY ON CONFIRM for the
+ * department that manages them, instead of waiting in the approval queue. IT
+ * asked for it ("fast paced"); Purchasing kept its queue.
+ */
+export const DIRECT_LIFECYCLE_CLASSES = ["IT"] as const satisfies readonly AssetClass[];
+
+export function isDirectLifecycle(role: Role, cls: AssetClass): boolean {
+  return canManageClass(role, cls) && (DIRECT_LIFECYCLE_CLASSES as readonly AssetClass[]).includes(cls);
+}
+
+/**
+ * Spec §4.2. The ONE assignability predicate: idle status for the class, and
+ * not waiting for triage. Replaces every bare `status === ASSIGNABLE_FROM[cls]`.
+ */
+export function isAssignable(a: { cls: AssetClass; status: AssetStatus; returnedAt: Date | null }): boolean {
+  return a.status === ASSIGNABLE_FROM[a.cls] && a.returnedAt === null;
+}

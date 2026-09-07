@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
-import { ASSIGNABLE_FROM, canSeeClass } from "@/lib/asset-class";
+import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
 import { fmtDate, fmtMoney, fmtRelativeDays } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
@@ -34,7 +34,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       // Purchasing assets are assigned at create time (spec §5 has no assign
       // row; recorded as a follow-up). Pinned to the IT class explicitly so
       // this picker never offers a STORED car by accident.
-      where: { cls: "IT", status: ASSIGNABLE_FROM.IT },
+      where: { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null },
       include: { reservations: { where: { state: "ACTIVE" }, include: { employee: true } } },
       orderBy: { tag: "asc" },
     }),
@@ -88,6 +88,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
   const oldest = held.reduce<Date | null>((min, a) =>
     a.purchasedAt && (!min || a.purchasedAt < min) ? a.purchasedAt : min, null);
   const canMutate = user.role === "admin" || user.role === "it_staff";
+  const direct = isDirectLifecycle(user.role, "IT");
 
   return (
     <>
@@ -154,6 +155,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             holding={holding}
             frozen={employee.employment !== "ACTIVE"}
             canMutate={canMutate}
+            direct={direct}
           />
         </div>
       </div>

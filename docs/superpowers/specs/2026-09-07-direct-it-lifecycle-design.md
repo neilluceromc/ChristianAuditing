@@ -1,7 +1,6 @@
 # Phase 15 — Direct IT Lifecycle, Replace, Triage and the Worklist — Design
 
-**Status:** designed 2026-09-07 with the user, who chose approach A of three and answered three
-questions (pain points, the kind of confirmation, the worklist's contents). The offboarding decision is
+**Status:** implemented on branch `phase-15-direct-it-lifecycle`, 2026-09-07; amendments are `D-` entries at the top of the plan. The offboarding decision is
 the user's; the loans default is the assistant's (§1 row 9). The depreciation module the user chose in
 Phase 14 remains a separate Phase 15b spec; this document does not touch it.
 
@@ -109,6 +108,10 @@ the same type and payload the request path would have produced, `requestedById =
 worker emits it. `src/lib/activity.ts` gains sentences for the five actions — *"J. Sarmiento assigned
 BR-LT-0148 to EMP-0097"*, *"returned BR-LT-0148 for triage"*, *"changed BR-LT-0122 to DEFECTIVE"*,
 *"replaced BR-LT-0148 with BR-LT-0201 for EMP-0097"*, *"triaged BR-LT-0148: keep as spare"*.
+
+Direct dialogs show the executor's guard without the worker's `Execution guard:` prefix, and the two
+guards that told the worker to "request a lifecycle.return" say "return it first" instead; the worker's
+stored `workerError` text is unchanged.
 
 An asset with an **open** approval (PENDING/CLAIMED/APPROVED — legacy or Purchasing) refuses every direct
 action: *"BR-LT-0148 is held by APR-2041 — resolve it in Approvals first."*

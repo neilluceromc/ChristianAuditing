@@ -23,6 +23,8 @@ export async function createApproval(
     assetId?: string;
     employeeId?: string;
     priority?: Priority;
+    /** Phase 15: a direct change is recorded as an approval that was never open — a decision, not a request. */
+    executed?: { by: string; at: Date };
   },
 ) {
   const [{ nextval }] = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('approval_ref_seq')`;
@@ -36,6 +38,9 @@ export async function createApproval(
       employeeId: input.employeeId,
       priority: input.priority ?? "NORMAL",
       slaAt: newSlaAt(),
+      ...(input.executed
+        ? { state: "EXECUTED" as const, claimedById: input.executed.by, claimedAt: input.executed.at, resolvedAt: input.executed.at }
+        : {}),
     },
   });
 }

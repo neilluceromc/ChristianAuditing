@@ -5,10 +5,12 @@ import { slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { approvalClassWhere } from "@/lib/approval-access";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
+import { beyondRepair, downDays, repairStage, REPAIR_STAGE_LABEL } from "@/lib/repairs";
 import {
-  AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine, shiftOrder,
-  todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket, type ShiftRow,
+  AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
+  todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
+import { LOAN_DAYS, groupWork, type WorkGroup, type WorkRow } from "@/lib/worklist";
 
 const DAY_MS = 86_400_000;
 const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY_MS));
@@ -18,13 +20,13 @@ const HIRE_WINDOW_DAYS = 30;
 const WARRANTY_WINDOW_DAYS = 90;
 
 /**
- * "Your shift" (README): five rows ordered by what breaks first, each with the
- * one action that clears it. Every row is a real record — nothing here is a
- * count for its own sake.
+ * The worklist (Phase 15, spec §5): grouped sections in a fixed order, each
+ * row with the one action that clears it. Every row is a real record —
+ * nothing here is a count for its own sake.
  */
-export async function yourShift(userId: string, role: Role, now: Date = new Date()): Promise<ShiftRow[]> {
+export async function worklist(userId: string, role: Role, opts: { limit?: number }, now: Date = new Date()): Promise<WorkGroup[]> {
   const scope = approvalClassWhere(role);
-  const [breached, failed, leavers, hires, missing, orphaned, awaiting, pref] = await Promise.all([
+  const [breached, failed, leavers, hires, missing, orphaned, awaiting, pref, triage, repairs, loans] = await Promise.all([
     prisma.approval.findMany({
       where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] },
       orderBy: { slaAt: "asc" },
@@ -76,7 +78,49 @@ export async function yourShift(userId: string, role: Role, now: Date = new Date
       where: { userId_key: { userId, key: DISMISS_PREF_KEY } },
       select: { value: true },
     }),
+    // Phase 15 (spec §5): back from a person, sitting on SPARE unchecked.
+    prisma.asset.findMany({
+      where: { cls: "IT", returnedAt: { not: null } },
+      orderBy: { returnedAt: "asc" },
+      take: 50,
+      select: { id: true, tag: true, model: true, returnedAt: true },
+    }),
+    // Repairs to chase — the same fields the Repairs saved view derives its
+    // stage and down-clock from (src/lib/repairs.ts).
+    prisma.asset.findMany({
+      where: { cls: "IT", status: "DEFECTIVE" },
+      orderBy: { defectiveSince: "asc" },
+      take: 50,
+      select: {
+        id: true, tag: true, model: true, status: true, vendorId: true, rmaRef: true,
+        repairQuote: true, cost: true, defectiveSince: true, vendor: { select: { name: true } },
+      },
+    }),
+    // Loans: ALL of them, not just the overdue ones — LOAN_DAYS only decides
+    // whether the row reads "overdue", not whether it's on the list.
+    prisma.asset.findMany({
+      where: { cls: "IT", status: "TEMPORARY" },
+      select: { id: true, tag: true, model: true, updatedAt: true, assignee: { select: { name: true } } },
+    }),
   ]);
+
+  // When a loan most recently became TEMPORARY — falls back to updatedAt
+  // when no such audit row exists (e.g. seeded directly).
+  const loanAudits = loans.length
+    ? await prisma.auditEntry.findMany({
+        where: {
+          entityType: "asset",
+          entityId: { in: loans.map((a) => a.id) },
+          diff: { path: ["status", "to"], equals: "TEMPORARY" },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { entityId: true, createdAt: true },
+      })
+    : [];
+  const loanSince = new Map<string, Date>();
+  for (const entry of loanAudits) {
+    if (!loanSince.has(entry.entityId)) loanSince.set(entry.entityId, entry.createdAt);
+  }
 
   const policies = hires.length
     ? await prisma.equipmentPolicy.findMany({
@@ -88,38 +132,40 @@ export async function yourShift(userId: string, role: Role, now: Date = new Date
       })
     : [];
 
-  const rows: ShiftRow[] = [];
+  const rows: WorkRow[] = [];
 
   for (const a of breached) {
     const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
     rows.push({
-      key: `SLA:${a.id}`,
-      kind: "SLA",
+      key: `queue:${a.id}`,
+      section: "queue",
       title: `${a.refNo} · ${s.line1}`,
       meta: `${slaLabel(a.slaAt, now).text} · ${a.priority.toLowerCase()}`,
       href: `/approvals/${a.id}`,
       action: a.state === "PENDING" ? "Claim" : "Open",
       severity: daysSince(a.slaAt, now),
+      rank: 0,
     });
   }
 
   for (const a of failed) {
     const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
     rows.push({
-      key: `EXEC:${a.id}`,
-      kind: "EXEC",
+      key: `queue:${a.id}`,
+      section: "queue",
       title: `${a.refNo} · ${s.line1}`,
       meta: `execution failed ${daysSince(a.updatedAt, now)} d ago`,
       href: `/approvals/${a.id}`,
       action: "Retry",
       severity: daysSince(a.updatedAt, now),
+      rank: 1,
     });
   }
 
   for (const e of leavers) {
     rows.push({
-      key: `LEAVE:${e.id}`,
-      kind: "LEAVE",
+      key: `queue:${e.id}`,
+      section: "queue",
       title: `${e.name} is leaving`,
       // "0 items still out" is true but useless as a call to action — when the
       // kit is already back, what's left is the accounts half of offboarding
@@ -131,6 +177,7 @@ export async function yourShift(userId: string, role: Role, now: Date = new Date
       href: `/offboarding/${e.id}`,
       action: e._count.assets > 0 ? "Collect equipment" : "Close accounts",
       severity: daysSince(e.updatedAt, now),
+      rank: 2,
     });
   }
 
@@ -140,8 +187,8 @@ export async function yourShift(userId: string, role: Role, now: Date = new Date
     const loadout = computeLoadout(policy.slots, e.assets);
     if (loadout.missingRequired === 0) continue;
     rows.push({
-      key: `HIRE:${e.id}`,
-      kind: "HIRE",
+      key: `hires:${e.id}`,
+      section: "hires",
       title: `${e.name} started ${daysSince(e.joinedAt, now)} d ago`,
       meta: `${e.employeeNo} · ${loadout.missingRequired} required slot${loadout.missingRequired === 1 ? "" : "s"} empty · ${policy.name}`,
       href: `/employees/${e.id}`,
@@ -152,8 +199,8 @@ export async function yourShift(userId: string, role: Role, now: Date = new Date
 
   for (const a of missing) {
     rows.push({
-      key: `DATA:${a.id}`,
-      kind: "DATA",
+      key: `missing:${a.id}`,
+      section: "missing",
       title: `${a.tag} is MISSING`,
       meta: `${a.model} · custody lost ${daysSince(a.updatedAt, now)} d ago`,
       href: `/inventory/${a.id}`,
@@ -164,8 +211,8 @@ export async function yourShift(userId: string, role: Role, now: Date = new Date
 
   for (const a of orphaned) {
     rows.push({
-      key: `DATA:${a.id}`,
-      kind: "DATA",
+      key: `missing:${a.id}`,
+      section: "missing",
       title: `${a.tag} reads DEPLOYED with no holder`,
       meta: `${a.model} · assign it or return it to the pool`,
       href: `/inventory/${a.id}`,
@@ -176,8 +223,8 @@ export async function yourShift(userId: string, role: Role, now: Date = new Date
 
   for (const a of awaiting) {
     rows.push({
-      key: `CHECK:${a.id}`,
-      kind: "CHECK",
+      key: `check:${a.id}`,
+      section: "check",
       title: `${a.tag} · ${a.model}`,
       meta: `registered by Purchasing · ${daysSince(a.createdAt, now)} d waiting`,
       href: `/inventory/${a.id}`,
@@ -186,7 +233,53 @@ export async function yourShift(userId: string, role: Role, now: Date = new Date
     });
   }
 
-  return shiftOrder(rows, activeDismissals(pref?.value, todayStamp(now)));
+  for (const a of triage) {
+    const n = daysSince(a.returnedAt!, now);
+    rows.push({
+      key: `triage:${a.id}`,
+      section: "triage",
+      title: `${a.tag} · ${a.model}`,
+      meta: `back ${n} d · triage it`,
+      href: `/inventory/${a.id}`,
+      action: "Triage",
+      severity: n,
+    });
+  }
+
+  for (const a of repairs) {
+    const quote = a.repairQuote === null ? null : Number(a.repairQuote);
+    const cost = a.cost === null ? null : Number(a.cost);
+    const stage = repairStage({
+      status: a.status, vendorId: a.vendorId, rmaRef: a.rmaRef,
+      repairQuote: quote, cost, defectiveSince: a.defectiveSince,
+    }) ?? "to-assess";
+    const down = downDays({ status: a.status, defectiveSince: a.defectiveSince }, now) ?? 0;
+    const beyond = beyondRepair(quote, cost);
+    rows.push({
+      key: `repairs:${a.id}`,
+      section: "repairs",
+      title: `${a.tag} · ${a.model}`,
+      meta: `${REPAIR_STAGE_LABEL[stage]} · ${a.vendor?.name ?? "no vendor"}${a.rmaRef ? ` · ${a.rmaRef}` : ""} · down ${down} d${beyond ? " · beyond repair" : ""}`,
+      href: `/inventory/${a.id}`,
+      action: "Chase",
+      severity: down,
+    });
+  }
+
+  for (const a of loans) {
+    const n = daysSince(loanSince.get(a.id) ?? a.updatedAt, now);
+    rows.push({
+      key: `loans:${a.id}`,
+      section: "loans",
+      title: `${a.tag} · ${a.model}`,
+      meta: `${a.assignee?.name ?? "unassigned"} · out ${n} d${n > LOAN_DAYS ? " · overdue" : ""}`,
+      href: `/inventory/${a.id}`,
+      action: "Review",
+      severity: n,
+    });
+  }
+
+  return groupWork(rows, activeDismissals(pref?.value, todayStamp(now)), opts);
 }
 
 export interface ClaimRow {
@@ -232,9 +325,11 @@ export interface Fleet {
 export async function fleet(now: Date = new Date()): Promise<Fleet> {
   const [groups, spares, hires] = await Promise.all([
     prisma.asset.groupBy({ by: ["status"], where: { cls: "IT" }, _count: { _all: true } }),
-    // a spare under an ACTIVE hold is already promised to someone
+    // a spare under an ACTIVE hold is already promised to someone; a spare
+    // back from a person and not yet triaged isn't a spare yet either
+    // (spec §4.2) — an untriaged device is not stock IT can hand out.
     prisma.asset.findMany({
-      where: { status: "SPARE", reservations: { none: { state: "ACTIVE" } }, cls: "IT" },
+      where: { status: "SPARE", reservations: { none: { state: "ACTIVE" } }, returnedAt: null, cls: "IT" },
       select: { typeId: true },
     }),
     prisma.employee.findMany({

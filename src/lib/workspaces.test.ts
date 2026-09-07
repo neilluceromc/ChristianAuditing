@@ -137,6 +137,16 @@ describe("pathAllowedForRole", () => {
     ["/inventory/labels", "viewer", false],
     ["/inventory/labels", "purchasing_staff", true],
     ["/inventory/labels", "finance_staff", false],
+    // Phase 15: the worklist is IT-workspace only (viewer shares that
+    // workspace read-only) — purchasing and finance, who both share the
+    // general /inventory rule right after this one, are excluded. MUST
+    // precede that general rule (first-match-wins), same shape as
+    // /inventory/import and /inventory/labels above.
+    ["/inventory/work", "it_staff", true],
+    ["/inventory/work", "viewer", true],
+    ["/inventory/work", "admin", true],
+    ["/inventory/work", "purchasing_staff", false],
+    ["/inventory/work", "finance_staff", false],
     // Task 12, E-7: the identical trap, one route over. /employees/import
     // sits under the general /employees rule (workspaces: ["it"], no
     // `roles` key), which viewer shares with it_staff — every role asserted

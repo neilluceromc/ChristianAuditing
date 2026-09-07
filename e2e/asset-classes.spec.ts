@@ -479,8 +479,15 @@ test.describe("the create form's initial-state control follows the class", () =>
     await expect(initialStatus.getByRole("radio", { name: "SPARE" })).toBeChecked();
     await expect(initialStatus.getByRole("radio", { name: "OPERATIONAL" })).toHaveCount(0);
 
+    // Phase 15: admin is direct-lifecycle for IT (DIRECT_LIFECYCLE_CLASSES),
+    // so picking DEPLOYED for a Laptop now shows the direct-apply disclosure
+    // instead of the old "routes through a lifecycle.assign approval" copy —
+    // asset-form.tsx's `direct` branch never mentions "registered as SPARE"
+    // at all, so that old assertion would now fail outright rather than pass
+    // on the wrong text. Purchasing (Vehicle, below) is still queue-only, so
+    // its copy is untouched.
     await initialStatus.getByText("DEPLOYED").click();
-    await expect(page.getByText(/registered as SPARE/)).toBeVisible();
+    await expect(page.getByText("Deployed to the chosen person at registration — recorded in the audit trail.")).toBeVisible();
 
     await page.getByLabel("Category").selectOption({ label: "Vehicle" });
     await initialStatus.getByText("OPERATIONAL").click();

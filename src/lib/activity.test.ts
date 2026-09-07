@@ -31,6 +31,25 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     expect(auditSentence({ ...base, action: "it.verify", diff: { itVerified: { from: null, to: "R. Bautista" } } }))
       .toBe("J. Sarmiento checked BR-LT-0148");
   });
+  it("Phase 15 direct actions read as sentences", () => {
+    const base = { actorLabel: "J. Sarmiento", entityLabel: "BR-LT-0148" };
+    expect(auditSentence({ ...base, action: "lifecycle.assign", diff: { assignee: { from: null, to: "EMP-0097" } } }))
+      .toBe("J. Sarmiento assigned BR-LT-0148 to EMP-0097");
+    expect(auditSentence({ ...base, action: "lifecycle.return", diff: { status: { from: "DEPLOYED", to: "SPARE" }, returnedAt: { from: null, to: "x" } } }))
+      .toBe("J. Sarmiento returned BR-LT-0148 for triage");
+    expect(auditSentence({ ...base, action: "lifecycle.return", diff: { status: { from: "DEPLOYED", to: "MISSING" } } }))
+      .toBe("J. Sarmiento returned BR-LT-0148 as MISSING");
+    expect(auditSentence({ ...base, action: "lifecycle.change-status", diff: { status: { from: "SPARE", to: "DEFECTIVE" } } }))
+      .toBe("J. Sarmiento changed BR-LT-0148 to DEFECTIVE");
+    expect(auditSentence({ ...base, action: "lifecycle.replace", diff: { replacedBy: { from: null, to: "BR-LT-0201" } } }))
+      .toBe("J. Sarmiento replaced BR-LT-0148 with BR-LT-0201");
+    expect(auditSentence({
+      ...base, entityLabel: "BR-LT-0201", action: "lifecycle.replace",
+      diff: { replaces: { from: null, to: "BR-LT-0148" }, assignee: { from: null, to: "EMP-0097" } },
+    })).toBe("J. Sarmiento put BR-LT-0201 in place of BR-LT-0148 for EMP-0097");
+    expect(auditSentence({ ...base, action: "lifecycle.triage", diff: { triage: { from: null, to: "Keep as spare" } } }))
+      .toBe("J. Sarmiento triaged BR-LT-0148: Keep as spare");
+  });
   it("finance.return carries the reason — the reason IS the record", () => {
     expect(auditSentence({ ...base, action: "finance.return", diff: { financeReturn: { from: null, to: "Serial does not match the box" } } }))
       .toBe("J. Sarmiento sent BR-LT-0148 back to IT \u00b7 Serial does not match the box");

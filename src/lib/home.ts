@@ -3,40 +3,6 @@
  * what breaks first, how old the fleet is, whether the spare pool covers the
  * people starting next week, and what "cleared for the rest of the day" means.
  */
-export type ShiftKind = "SLA" | "EXEC" | "HIRE" | "LEAVE" | "DATA" | "CHECK";
-
-export interface ShiftRow {
-  /** stable identity for dismissal: "<kind>:<entityId>" */
-  key: string;
-  kind: ShiftKind;
-  title: string;
-  /** the mono metadata line */
-  meta: string;
-  href: string;
-  /** the one action that clears it */
-  action: string;
-  /** higher = worse, compared only within a kind (days overdue, days stuck, …) */
-  severity: number;
-}
-
-/**
- * README: the rows are ordered by *what breaks first*, not recency. A breached
- * SLA outranks a failed execution outranks a leaver mid-offboarding outranks a
- * hire without kit outranks a data finding.
- */
-export const KIND_RANK: Record<ShiftKind, number> = {
-  SLA: 0, EXEC: 1, LEAVE: 2, HIRE: 3, DATA: 4, CHECK: 5,
-};
-
-export const SHIFT_LIMIT = 5;
-
-export function shiftOrder(rows: ShiftRow[], dismissed: Set<string> = new Set()): ShiftRow[] {
-  return [...rows]
-    .filter((r) => !dismissed.has(r.key))
-    .sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || b.severity - a.severity)
-    .slice(0, SHIFT_LIMIT);
-}
-
 export const AGE_BUCKETS = ["<1y", "1–2y", "2–3y", "3–4y", "4y+"] as const;
 
 export type AgeBucket = (typeof AGE_BUCKETS)[number];

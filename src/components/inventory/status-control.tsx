@@ -13,15 +13,21 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import type { AssetClass } from "@prisma/client";
 import { statusesFor } from "@/lib/asset-class";
 import { requestStatusChange } from "@/server/modules/inventory/actions";
+import { changeStatus } from "@/server/modules/lifecycle/actions";
 
-export function RequestStatusChange({
+/** Phase 15 (spec §2.1): direct mode applies at once instead of opening an approval. */
+export function StatusControl({
   assetId,
+  tag,
   currentStatus,
   cls,
+  direct,
 }: {
   assetId: string;
+  tag: string;
   currentStatus: string;
   cls: AssetClass;
+  direct: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -38,9 +44,16 @@ export function RequestStatusChange({
     setError(null);
     setFieldErrors({});
     startTransition(async () => {
-      const res = await requestStatusChange({ assetId, to, reason });
+      const res = direct
+        ? await changeStatus({ assetId, to, reason })
+        : await requestStatusChange({ assetId, to, reason });
       if (res.ok) {
-        toast(`${res.data.refNo} created — waiting in the approval queue`, "settled");
+        toast(
+          direct
+            ? `${tag} is now ${to}`
+            : `${(res.data as { refNo: string }).refNo} created — waiting in the approval queue`,
+          "settled",
+        );
         setOpen(false);
         setReason("");
         router.refresh();
@@ -57,22 +70,28 @@ export function RequestStatusChange({
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>Request status change</Button>
+      <Button onClick={() => setOpen(true)}>{direct ? "Change status" : "Request status change"}</Button>
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Request a status change"
+        title={direct ? "Change status" : "Request a status change"}
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button variant="primary" loading={pending} onClick={submit}>Request</Button>
+            <Button variant="primary" loading={pending} onClick={submit}>{direct ? "Confirm" : "Request"}</Button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           <p className="text-xs text-fg-muted">
-            Creates a <span className="font-mono">lifecycle.change-status</span> approval; the asset
-            stays <span className="font-mono">{currentStatus}</span> until it executes.
+            {direct ? (
+              <>Applies now and is recorded in the audit trail under your name.</>
+            ) : (
+              <>
+                Creates a <span className="font-mono">lifecycle.change-status</span> approval; the asset
+                stays <span className="font-mono">{currentStatus}</span> until it executes.
+              </>
+            )}
           </p>
           {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
           {error && <Banner tone="fault" title={error} />}
@@ -83,7 +102,7 @@ export function RequestStatusChange({
               </Select>
             )}
           </FormField>
-          <FormField label="Reason" required error={fieldErrors.reason}>
+          <FormField label="Reason" required={!direct} error={fieldErrors.reason}>
             {(p) => (
               <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={reason} onChange={(e) => setReason(e.target.value)} />
             )}

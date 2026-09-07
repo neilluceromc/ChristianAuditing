@@ -68,7 +68,8 @@ export function actionDot(action: string): string {
     action === "create" ||
     action === "import-create" ||
     action === "register" ||
-    action.includes("executed")
+    action.includes("executed") ||
+    action.startsWith("lifecycle.")
   )
     return "DEPLOYED"; // settled
   // I-5 (Task 10 round two): "import-update" is deliberately EXPLICIT here

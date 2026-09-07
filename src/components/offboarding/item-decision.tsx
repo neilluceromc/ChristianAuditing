@@ -31,11 +31,13 @@ export function ItemDecision({
   assetId,
   tag,
   cls,
+  direct,
 }: {
   employeeId: string;
   assetId: string;
   tag: string;
   cls: AssetClass;
+  direct: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -94,7 +96,12 @@ export function ItemDecision({
     startTransition(async () => {
       const res = await decideItem({ employeeId, assetId, outcome: picked, reason });
       if (res.ok) {
-        toast(`${res.data.refNo} created — ${tag} → ${outcomeStatus(cls, picked)}`, "settled");
+        toast(
+          res.data.applied
+            ? `${tag} → ${res.data.applied}`
+            : `${res.data.refNo} created — ${tag} → ${outcomeStatus(cls, picked)}`,
+          "settled",
+        );
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
@@ -136,7 +143,13 @@ export function ItemDecision({
           Confirm decision
         </Button>
         <span className="font-mono text-[10px] text-fg-muted">
-          {picked ? `creates a lifecycle.return → ${outcomeStatus(cls, picked)}` : "creates its own request the moment you confirm"}
+          {direct
+            ? picked
+              ? `applies now → ${outcomeStatus(cls, picked)}`
+              : "applies the moment you confirm"
+            : picked
+              ? `creates a lifecycle.return → ${outcomeStatus(cls, picked)}`
+              : "creates its own request the moment you confirm"}
         </span>
       </div>
       <FormError id={outcomeErrorId}>{fieldErrors.outcome}</FormError>
@@ -145,7 +158,7 @@ export function ItemDecision({
         required={picked ? reasonRequired(picked) : false}
         hint={
           picked && reasonRequired(picked)
-            ? `${OUTCOME_LABEL[picked]} needs a reason — it lands in the approval and on the farewell report.`
+            ? `${OUTCOME_LABEL[picked]} needs a reason — it lands${direct ? "" : " in the approval and"} on the farewell report.`
             : "Optional for a clean return."
         }
         error={fieldErrors.reason}

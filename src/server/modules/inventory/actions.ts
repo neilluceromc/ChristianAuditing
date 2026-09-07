@@ -7,6 +7,7 @@ import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
+import { emitWebhook } from "@/server/webhooks/emit";
 import { createApproval, newSlaAt, OPEN_APPROVAL_STATES, openApprovalForAsset } from "@/server/modules/approvals/create";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
@@ -15,7 +16,7 @@ import {
   ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
 import {
-  CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isAwaitingItCheck, isStatusOf, parseCls,
+  CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
@@ -23,6 +24,21 @@ import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
 import { assetDiff } from "@/lib/asset-diff";
 import { TAG_SHAPE } from "@/lib/tag-key";
+import { humanizeGuard } from "@/lib/lifecycle";
+import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
+
+/** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
+const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
+
+/**
+ * Thrown inside createAsset's `$transaction` callback to force a rollback of
+ * the asset just created when the direct-registration branch's lifecycle
+ * guard refuses. Narrower than `Error`: the catch below must only turn THIS
+ * into a user-facing conflict() — every other Error (a Prisma driver fault,
+ * an unrelated bug) has to keep falling through to `throw err` instead of
+ * being repainted as a banner (final review, plan D-8).
+ */
+class DirectRefusal extends Error {}
 
 const bulkSchema = z
   .object({
@@ -100,6 +116,7 @@ export async function bulkRequestStatusChange(
       if (classes.size > 1) return conflict("Select assets of one class — IT and Purchasing assets cannot share a status change.");
       const cls = assets[0].cls;
       if (!canManageClass(user.role, cls)) return forbidden();
+      if (isDirectLifecycle(user.role, cls)) return conflict(DIRECT_REFUSAL);
       if (!isStatusOf(cls, to)) return validationError({ to: `${to} is not ${CLASS_PHRASE[cls]} status.` });
 
       const open = await tx.approval.findMany({
@@ -259,24 +276,58 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
         },
       });
       if (plan.approval) {
-        const approval = await createApproval(tx, {
-          type: "lifecycle_assign",
-          payload: {
-            to: { assigneeId: plan.approval.assigneeId, status: plan.approval.toStatus },
-            reason: d.assignReason || "assigned at registration",
-          },
-          requestedById: user.id,
-          assetId: created.id,
-          employeeId: plan.approval.assigneeId,
-        });
-        await writeAudit(tx, {
-          actorId: user.id,
-          actorLabel: user.name,
-          entityType: "asset",
-          entityId: created.id,
-          action: "approval.requested",
-          diff: { approval: { from: null, to: approval.refNo } },
-        });
+        // Phase 15 (spec §2.1): IT registering its own deploy applies directly —
+        // asset write + EXECUTED approval row + audit + webhook, same as every
+        // other direct lifecycle change — instead of waiting in the queue.
+        if (isDirectLifecycle(user.role, category.cls)) {
+          const asset: LifecycleAsset = created;
+          const prepared = await prepareLifecycle(tx, asset, {
+            kind: "assign", employeeId: plan.approval.assigneeId, status: plan.approval.toStatus,
+          });
+          if (!prepared.ok) throw new DirectRefusal(humanizeGuard(prepared.error));
+          await commitLifecycle(tx, created.id, prepared.prepared);
+          const approval = await createApproval(tx, {
+            type: "lifecycle_assign",
+            payload: {
+              to: { assigneeId: plan.approval.assigneeId, status: plan.approval.toStatus },
+              reason: d.assignReason || "assigned at registration",
+            },
+            requestedById: user.id,
+            assetId: created.id,
+            employeeId: plan.approval.assigneeId,
+            executed: { by: user.id, at: new Date() },
+          });
+          await writeAudit(tx, {
+            actorId: user.id,
+            actorLabel: user.name,
+            entityType: "asset",
+            entityId: created.id,
+            action: "lifecycle.assign",
+            diff: prepared.prepared.diff,
+          });
+          await emitWebhook(tx, "approval.executed", {
+            approvalId: approval.id, refNo: approval.refNo, type: approval.type, assetId: created.id, assetTag: created.tag,
+          });
+        } else {
+          const approval = await createApproval(tx, {
+            type: "lifecycle_assign",
+            payload: {
+              to: { assigneeId: plan.approval.assigneeId, status: plan.approval.toStatus },
+              reason: d.assignReason || "assigned at registration",
+            },
+            requestedById: user.id,
+            assetId: created.id,
+            employeeId: plan.approval.assigneeId,
+          });
+          await writeAudit(tx, {
+            actorId: user.id,
+            actorLabel: user.name,
+            entityType: "asset",
+            entityId: created.id,
+            action: "approval.requested",
+            diff: { approval: { from: null, to: approval.refNo } },
+          });
+        }
       }
       return created;
     });
@@ -289,6 +340,11 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
     const target = uniqueTarget(err);
     if (target.includes("tag")) return validationError({ tag: "That tag is already registered" });
     if (target.includes("serial")) return validationError({ serial: "That serial is already registered" });
+    // The direct path's prepareLifecycle guard throws DirectRefusal inside the
+    // transaction (e.g. the assignee went inactive mid-request) — surface it
+    // as the conflict it is. Anything else (a driver fault, an unrelated bug)
+    // is NOT ours to repaint as user copy — it falls through to `throw err`.
+    if (err instanceof DirectRefusal) return conflict(err.message);
     throw err;
   }
 }
@@ -407,6 +463,7 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
       const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
       if (!asset) return conflict("That asset no longer exists.");
       if (!canManageClass(user.role, asset.cls)) return forbidden();
+      if (isDirectLifecycle(user.role, asset.cls)) return conflict(DIRECT_REFUSAL);
       if (!isStatusOf(asset.cls, d.to)) {
         return validationError({ to: `${d.to} is not ${CLASS_PHRASE[asset.cls]} status.` });
       }

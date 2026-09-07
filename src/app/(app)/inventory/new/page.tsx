@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { AssetForm } from "@/components/inventory/asset-form";
 import { createAsset } from "@/server/modules/inventory/actions";
 import { toSearchParams } from "@/lib/url-state";
-import { REGISTRABLE_CLASSES, canRegisterClass, parseCls, withClsQS } from "@/lib/asset-class";
+import { ASSET_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, isDirectLifecycle, parseCls, withClsQS } from "@/lib/asset-class";
 
 export default async function NewAssetPage({
   searchParams,
@@ -20,6 +20,11 @@ export default async function NewAssetPage({
   // opened a form whose categories were whichever class's names sort first,
   // not Purchasing's (D-14).
   const scopedCls = cls !== null && canRegisterClass(user.role, cls) ? cls : null;
+  // The category control can switch class client-side without a reload (an
+  // admin registering IT or Purchasing from the same unscoped /inventory/new),
+  // so the form needs every class this role is direct-lifecycle for, not a
+  // single boolean pinned to scopedCls.
+  const directClasses = ASSET_CLASSES.filter((c) => isDirectLifecycle(user.role, c));
   const [categories, types, employees] = await Promise.all([
     prisma.assetCategory.findMany({
       where: scopedCls ? { cls: scopedCls } : { cls: { in: [...REGISTRABLE_CLASSES[user.role]] } },
@@ -44,6 +49,7 @@ export default async function NewAssetPage({
         types={types.map((t) => ({ id: t.id, name: t.name, categoryId: t.categoryId }))}
         employees={employees.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }))}
         action={createAsset}
+        directClasses={directClasses}
       />
     </>
   );

@@ -5,11 +5,12 @@ import { fmtDate } from "@/lib/format";
 import {
   buildAssetOrderBy, buildAssetWhere, type PurchaseYearValue,
 } from "@/lib/inventory-list";
-import { ASSET_CLASSES, canSeeClass, statusesFor } from "@/lib/asset-class";
+import { ASSET_CLASSES, ASSIGNABLE_FROM, canSeeClass, statusesFor } from "@/lib/asset-class";
 import type { ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 
 export const PAGE_SIZE = 25;
 
@@ -339,4 +340,16 @@ export async function invisibleAssetIds(role: Role): Promise<string[]> {
   if (hidden.length === 0) return [];
   const rows = await prisma.asset.findMany({ where: { cls: { in: hidden } }, select: { id: true } });
   return rows.map((r) => r.id);
+}
+
+/** Phase 15: the Replace picker — same-type spares first, then any assignable IT spare. */
+export async function spareOptions(preferTypeId: string | null): Promise<ComboOption[]> {
+  const rows = await prisma.asset.findMany({
+    where: { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null, reservations: { none: { state: "ACTIVE" } } },
+    select: { id: true, tag: true, model: true, typeId: true },
+    orderBy: { tag: "asc" },
+  });
+  const rank = (t: string | null) => (preferTypeId && t === preferTypeId ? 0 : 1);
+  return rows.sort((a, b) => rank(a.typeId) - rank(b.typeId) || a.tag.localeCompare(b.tag))
+    .map((a) => ({ value: a.id, label: a.tag, sub: a.model }));
 }

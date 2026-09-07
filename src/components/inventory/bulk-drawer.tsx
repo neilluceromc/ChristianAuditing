@@ -13,6 +13,8 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { DEFAULT_STATUS, statusesFor } from "@/lib/asset-class";
 import { bulkRequestStatusChange } from "@/server/modules/inventory/actions";
+import { bulkChangeStatus } from "@/server/modules/lifecycle/actions";
+import type { ActionResult } from "@/server/action-result";
 
 export function BulkDrawer({
   open,
@@ -22,6 +24,7 @@ export function BulkDrawer({
   filtersQS,
   total,
   cls,
+  direct,
   onDone,
 }: {
   open: boolean;
@@ -31,6 +34,7 @@ export function BulkDrawer({
   filtersQS: string; // serialized current list state, no leading "?"
   total: number;
   cls: AssetClass;
+  direct: boolean;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -54,34 +58,46 @@ export function BulkDrawer({
     setFieldErrors({});
     setRetryAfter(null);
     startTransition(async () => {
-      const res = await bulkRequestStatusChange({
+      const payload = {
         ids: allMatching ? undefined : selectedIds,
         filters: allMatching ? filtersQS : undefined,
         to: effectiveTo,
         reason,
-      });
-      if (res.ok) {
-        toast(
-          `${res.data.created} approval${res.data.created === 1 ? "" : "s"} created` +
-            (res.data.skipped ? ` · ${res.data.skipped} skipped (already there or already requested)` : ""),
-          "settled",
-        );
+      };
+      const res = direct
+        ? handleResult(await bulkChangeStatus(payload), ({ changed, skipped }) =>
+            `${changed} asset${changed === 1 ? "" : "s"} now ${effectiveTo}` +
+            (skipped ? ` · ${skipped} skipped (held, already there, or already requested)` : ""))
+        : handleResult(await bulkRequestStatusChange(payload), ({ created, skipped }) =>
+            `${created} approval${created === 1 ? "" : "s"} created` +
+            (skipped ? ` · ${skipped} skipped (already there or already requested)` : ""));
+      if (res === "ok") {
         setReason(""); // a fresh batch never inherits the last batch's reason
         onDone();
         handleClose();
         router.refresh();
-      } else if (res.kind === "rate_limited") {
-        setRetryAfter(res.retryAfterSec ?? 60);
-      } else if (res.kind === "validation") {
-        setFieldErrors(res.fieldErrors ?? {});
-        // Field errors no FormField below claims (ids/filters/_form) must not
-        // dead-end silently — surface them in the banner.
-        const unclaimed = res.fieldErrors?.ids ?? res.fieldErrors?.filters ?? res.fieldErrors?._form;
-        if (unclaimed) setError(unclaimed);
-      } else {
-        setError(res.message);
       }
     });
+  }
+
+  /** Shared result handling for both the direct and approval-request calls — they share every ActionResult failure shape and differ only in the success payload's field names. */
+  function handleResult<T>(res: ActionResult<T>, successMessage: (data: T) => string): "ok" | "failed" {
+    if (res.ok) {
+      toast(successMessage(res.data), "settled");
+      return "ok";
+    }
+    if (res.kind === "rate_limited") {
+      setRetryAfter(res.retryAfterSec ?? 60);
+    } else if (res.kind === "validation") {
+      setFieldErrors(res.fieldErrors ?? {});
+      // Field errors no FormField below claims (ids/filters/_form) must not
+      // dead-end silently — surface them in the banner.
+      const unclaimed = res.fieldErrors?.ids ?? res.fieldErrors?.filters ?? res.fieldErrors?._form;
+      if (unclaimed) setError(unclaimed);
+    } else {
+      setError(res.message);
+    }
+    return "failed";
   }
 
   function handleClose() {
@@ -95,9 +111,14 @@ export function BulkDrawer({
     <Drawer open={open} onClose={handleClose} title="Bulk actions">
       <div className="flex flex-col gap-4">
         <p className="text-xs text-fg-muted">
-          Acting on <span className="font-medium text-fg-secondary">{scope}</span>. Each asset gets its
-          own <span className="font-mono">lifecycle.change-status</span> approval — nothing changes until
-          it&apos;s approved and executed.
+          {direct ? (
+            <>Changes the status of <b>{scope}</b> now. Held devices and off-the-books stock are
+            skipped — return or handle those one at a time.</>
+          ) : (
+            <>Acting on <span className="font-medium text-fg-secondary">{scope}</span>. Each asset gets its
+            own <span className="font-mono">lifecycle.change-status</span> approval — nothing changes until
+            it&apos;s approved and executed.</>
+          )}
         </p>
         <a
           href={allMatching || selectedIds.length === 0
@@ -152,7 +173,7 @@ export function BulkDrawer({
             </Select>
           )}
         </FormField>
-        <FormField label="Reason" required error={fieldErrors.reason} hint="Goes into every approval's payload.">
+        <FormField label="Reason" required={!direct} error={fieldErrors.reason} hint="Goes into every approval's payload.">
           {(props) => (
             <Textarea
               id={props.id}
@@ -166,7 +187,7 @@ export function BulkDrawer({
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={handleClose}>Cancel</Button>
           <Button variant="primary" loading={pending} onClick={submit}>
-            Request status change
+            {direct ? "Confirm" : "Request status change"}
           </Button>
         </div>
       </div>
