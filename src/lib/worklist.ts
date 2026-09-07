@@ -30,6 +30,13 @@ export interface WorkRow {
   action: string;
   /** higher = worse, compared within a section */
   severity: number;
+  /**
+   * Sub-rank within a section, lower first — for a section like "queue" that
+   * mixes SLA breaches, execution failures and leavers and wants those kept
+   * apart before severity breaks ties within each. Default 0 (all rows rank
+   * together, unaffected) when a section has no such grouping.
+   */
+  rank?: number;
 }
 
 export interface WorkGroup { section: WorkSection; rows: WorkRow[]; total: number }
@@ -37,7 +44,9 @@ export interface WorkGroup { section: WorkSection; rows: WorkRow[]; total: numbe
 export function groupWork(rows: WorkRow[], dismissed: Set<string>, opts: { limit?: number }): WorkGroup[] {
   const live = rows.filter((r) => !dismissed.has(r.key));
   return WORK_SECTIONS.flatMap((section) => {
-    const mine = live.filter((r) => r.section === section.id).sort((a, b) => b.severity - a.severity);
+    const mine = live
+      .filter((r) => r.section === section.id)
+      .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || b.severity - a.severity);
     if (mine.length === 0) return [];
     return [{ section, rows: opts.limit ? mine.slice(0, opts.limit) : mine, total: mine.length }];
   });

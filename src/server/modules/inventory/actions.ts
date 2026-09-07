@@ -24,10 +24,21 @@ import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
 import { assetDiff } from "@/lib/asset-diff";
 import { TAG_SHAPE } from "@/lib/tag-key";
+import { humanizeGuard } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
+
+/**
+ * Thrown inside createAsset's `$transaction` callback to force a rollback of
+ * the asset just created when the direct-registration branch's lifecycle
+ * guard refuses. Narrower than `Error`: the catch below must only turn THIS
+ * into a user-facing conflict() — every other Error (a Prisma driver fault,
+ * an unrelated bug) has to keep falling through to `throw err` instead of
+ * being repainted as a banner (final review, plan D-8).
+ */
+class DirectRefusal extends Error {}
 
 const bulkSchema = z
   .object({
@@ -273,7 +284,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           const prepared = await prepareLifecycle(tx, asset, {
             kind: "assign", employeeId: plan.approval.assigneeId, status: plan.approval.toStatus,
           });
-          if (!prepared.ok) throw new Error(prepared.error);
+          if (!prepared.ok) throw new DirectRefusal(humanizeGuard(prepared.error));
           await commitLifecycle(tx, created.id, prepared.prepared);
           const approval = await createApproval(tx, {
             type: "lifecycle_assign",
@@ -329,10 +340,11 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
     const target = uniqueTarget(err);
     if (target.includes("tag")) return validationError({ tag: "That tag is already registered" });
     if (target.includes("serial")) return validationError({ serial: "That serial is already registered" });
-    // The direct path's prepareLifecycle guard throws a plain Error inside the
+    // The direct path's prepareLifecycle guard throws DirectRefusal inside the
     // transaction (e.g. the assignee went inactive mid-request) — surface it
-    // as the conflict it is rather than an unhandled 500.
-    if (err instanceof Error) return conflict(err.message);
+    // as the conflict it is. Anything else (a driver fault, an unrelated bug)
+    // is NOT ours to repaint as user copy — it falls through to `throw err`.
+    if (err instanceof DirectRefusal) return conflict(err.message);
     throw err;
   }
 }

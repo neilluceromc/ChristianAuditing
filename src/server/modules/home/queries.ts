@@ -144,6 +144,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
       href: `/approvals/${a.id}`,
       action: a.state === "PENDING" ? "Claim" : "Open",
       severity: daysSince(a.slaAt, now),
+      rank: 0,
     });
   }
 
@@ -157,6 +158,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
       href: `/approvals/${a.id}`,
       action: "Retry",
       severity: daysSince(a.updatedAt, now),
+      rank: 1,
     });
   }
 
@@ -175,6 +177,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
       href: `/offboarding/${e.id}`,
       action: e._count.assets > 0 ? "Collect equipment" : "Close accounts",
       severity: daysSince(e.updatedAt, now),
+      rank: 2,
     });
   }
 
@@ -322,9 +325,11 @@ export interface Fleet {
 export async function fleet(now: Date = new Date()): Promise<Fleet> {
   const [groups, spares, hires] = await Promise.all([
     prisma.asset.groupBy({ by: ["status"], where: { cls: "IT" }, _count: { _all: true } }),
-    // a spare under an ACTIVE hold is already promised to someone
+    // a spare under an ACTIVE hold is already promised to someone; a spare
+    // back from a person and not yet triaged isn't a spare yet either
+    // (spec §4.2) — an untriaged device is not stock IT can hand out.
     prisma.asset.findMany({
-      where: { status: "SPARE", reservations: { none: { state: "ACTIVE" } }, cls: "IT" },
+      where: { status: "SPARE", reservations: { none: { state: "ACTIVE" } }, returnedAt: null, cls: "IT" },
       select: { typeId: true },
     }),
     prisma.employee.findMany({

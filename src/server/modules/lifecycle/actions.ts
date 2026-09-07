@@ -21,7 +21,7 @@ import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, isAssignable, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, reasonRequiredFor, replacePlan,
+  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, reasonRequiredFor, replacePlan,
 } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange } from "./apply";
 
@@ -62,7 +62,10 @@ async function recordDirect(tx: Tx, input: {
   payload: Prisma.InputJsonObject; employeeId?: string; action: string; extraDiff?: AuditDiff; now: Date;
 }): Promise<{ ok: true; diff: AuditDiff } | { ok: false; error: string }> {
   const prepared = await prepareLifecycle(tx, input.asset, input.change, input.now);
-  if (!prepared.ok) return prepared;
+  // The direct dialogs are IT talking to IT, not the worker's retry UI — strip
+  // the worker's framing so the same guard reads as a plain sentence here
+  // (final review, plan D-8; the worker's own workerError stays verbatim).
+  if (!prepared.ok) return { ok: false, error: humanizeGuard(prepared.error) };
   await commitLifecycle(tx, input.asset.id, prepared.prepared, input.now);
   const approval = await createApproval(tx, {
     type: input.type, payload: input.payload, requestedById: input.actor.id,
@@ -376,6 +379,12 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
       changed += 1;
     }
     return null;
+  }, {
+    // ~8 statements per asset (recordDirect: prepareLifecycle reads + the asset
+    // update, approval, audit and webhook writes) × BULK_MAX (200) assets can
+    // clear Prisma's 5s interactive-transaction default well before the loop
+    // finishes; maxWait only bounds how long this waits to acquire a slot.
+    timeout: 60_000, maxWait: 10_000,
   });
   if (failure) return failure;
   revalidatePath("/inventory");

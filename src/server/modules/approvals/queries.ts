@@ -2,7 +2,7 @@ import { cache } from "react";
 import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { summarizeApproval } from "@/lib/approval-execution";
-import { ASSIGNABLE_FROM, RETURN_TARGETS } from "@/lib/asset-class";
+import { RETURN_TARGETS, isAssignable } from "@/lib/asset-class";
 import { approvalClassWhere } from "@/lib/approval-access";
 import { slaLabel, tabWhere, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
 
@@ -104,7 +104,7 @@ export async function systemChecks(
       return [
         assetCheck,
         asset
-          ? { label: "Asset is assignable", pass: asset.status === ASSIGNABLE_FROM[asset.cls], detail: `reads ${asset.status} right now` }
+          ? { label: "Asset is assignable", pass: isAssignable(asset), detail: `reads ${asset.status} right now` }
           : { label: "Asset is assignable", pass: false, detail: "—" },
         employee
           ? { label: "Recipient is active", pass: employee.employment === "ACTIVE", detail: `${employee.employeeNo} · ${employee.employment}` }

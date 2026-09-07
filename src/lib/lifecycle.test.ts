@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_OUTCOMES, reasonRequiredFor, replacePlan,
+  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_OUTCOMES, humanizeGuard, reasonRequiredFor, replacePlan,
 } from "./lifecycle";
 import { RETURN_TARGETS } from "./asset-class";
 
@@ -24,5 +24,23 @@ describe("replacePlan", () => {
   });
   it("a device that is not held cannot be replaced", () => {
     expect(() => replacePlan({ status: "SPARE" }, "TRIAGE")).toThrow(/not held/);
+  });
+});
+
+describe("humanizeGuard", () => {
+  it("strips the worker's 'Execution guard: ' prefix and the trailing refusal tag", () => {
+    expect(humanizeGuard("Execution guard: target employee no longer exists — assignment refused"))
+      .toBe("target employee no longer exists");
+  });
+  it("rewrites the request-a-return sentence for a reader who isn't the worker", () => {
+    expect(humanizeGuard("Execution guard: BR-LT-0201 is still assigned — request a lifecycle.return first, then change its status"))
+      .toBe("BR-LT-0201 is still assigned — return it first, then change its status");
+  });
+  it("drops the return-refused tag", () => {
+    expect(humanizeGuard("Execution guard: BR-LT-0201 is not held by anyone — return refused"))
+      .toBe("BR-LT-0201 is not held by anyone");
+  });
+  it("passes through text that isn't a worker guard unchanged", () => {
+    expect(humanizeGuard("Already DEPLOYED.")).toBe("Already DEPLOYED.");
   });
 });

@@ -12,7 +12,7 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { diffOf } from "@/lib/audit-diff";
-import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass, isDirectLifecycle } from "@/lib/asset-class";
+import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass, isAssignable, isDirectLifecycle } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
@@ -49,7 +49,7 @@ export async function requestAssign(input: unknown): Promise<ActionResult<{ refN
       if (!asset) return conflict("That asset no longer exists.");
       if (!canManageClass(user.role, asset.cls)) return forbidden();
       if (isDirectLifecycle(user.role, asset.cls)) return conflict(DIRECT_REFUSAL);
-      if (asset.status !== ASSIGNABLE_FROM[asset.cls]) {
+      if (!isAssignable(asset)) {
         return conflict(`${asset.tag} is ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — only idle stock can be assigned.`);
       }
       const hold = asset.reservations[0];
@@ -179,7 +179,7 @@ export async function requestAssignReserved(input: unknown): Promise<ActionResul
         // Reservations for a direct-lifecycle class are fulfilled through
         // assignReserved (lifecycle/actions.ts), not this request path.
         if (isDirectLifecycle(user.role, hold.asset.cls)) continue;
-        if (hold.asset.status !== ASSIGNABLE_FROM[hold.asset.cls]) continue;
+        if (!isAssignable(hold.asset)) continue;
         if (await openApprovalForAsset(tx, hold.assetId)) continue;
         const approval = await createApproval(tx, {
           type: "lifecycle_assign",

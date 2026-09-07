@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { LOAN_DAYS, WORK_SECTIONS, groupWork, type WorkRow } from "./worklist";
 
-const row = (section: WorkRow["section"], key: string, severity = 0): WorkRow =>
-  ({ key, section, title: key, meta: "", href: "/x", action: "Do", severity });
+const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>
+  ({ key, section, title: key, meta: "", href: "/x", action: "Do", severity, rank });
 
 describe("WORK_SECTIONS", () => {
   it("is the spec's order", () => {
@@ -25,5 +25,16 @@ describe("groupWork", () => {
   it("drops dismissed rows and empty sections", () => {
     const g = groupWork(rows, new Set(["r1"]), {});
     expect(g.map((x) => x.section.id)).toEqual(["triage", "queue"]);
+  });
+  it("within queue, sorts by rank (SLA, then EXEC, then LEAVE) before severity", () => {
+    // ranks 2/0/1 and severities 9/1/5 — rank must win even though severity
+    // order would put q-leave first.
+    const queueRows = [
+      row("queue", "q-leave", 9, 2),
+      row("queue", "q-sla", 1, 0),
+      row("queue", "q-exec", 5, 1),
+    ];
+    const g = groupWork(queueRows, new Set(), {});
+    expect(g[0].rows.map((r) => r.key)).toEqual(["q-sla", "q-exec", "q-leave"]);
   });
 });

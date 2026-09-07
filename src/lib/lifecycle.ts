@@ -40,3 +40,22 @@ export function replacePlan(old: { status: AssetStatus }, outcome: ReturnOutcome
   }
   return { oldStatus: RETURN_OUTCOME_STATUS[outcome], newStatus: old.status };
 }
+
+/**
+ * Phase 15 final review (plan D-8). prepareLifecycle's guard text is the
+ * worker's, verbatim — the retry UI shows it as-is (see apply.ts). The direct
+ * dialogs are a different audience: no queue, no retry, just IT telling IT
+ * what refused. Strip the worker framing so the same guard reads as a normal
+ * sentence there, without touching the stored `workerError` text at all.
+ */
+export function humanizeGuard(error: string): string {
+  const PREFIX = "Execution guard: ";
+  let out = error.startsWith(PREFIX) ? error.slice(PREFIX.length) : error;
+  out = out.replace(
+    "— request a lifecycle.return first, then change its status",
+    "— return it first, then change its status",
+  );
+  out = out.replace("— assignment refused", "");
+  out = out.replace("— return refused", "");
+  return out.trimEnd();
+}
