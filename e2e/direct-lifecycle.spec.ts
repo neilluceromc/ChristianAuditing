@@ -97,7 +97,10 @@ test.describe.serial("direct changes", () => {
     // "phone" slot of BR-PH-0301's own type — the direct assign lands
     // straight in that tile, not just "somewhere on her holdings".
     await page.goto(`/employees/${nina.id}`);
-    const tile = page.getByRole("button", { name: /phone slot/ });
+    // Anchored: Phase 16 added a per-tile "Actions for the phone slot" ⋯
+    // menu button, whose own aria-label also contains "phone slot" as a
+    // substring — an unanchored match now resolves to both.
+    const tile = page.getByRole("button", { name: /^phone slot,/ });
     await expect(tile).toContainText("BR-PH-0301");
     await expect(tile.getByText("PENDING")).toHaveCount(0);
   });

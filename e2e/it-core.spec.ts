@@ -341,7 +341,11 @@ test.describe("employees & loadout", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees");
     const marites = page.getByRole("row", { name: /Marites Bautista/ });
-    await expect(marites).toContainText("1 missing");
+    // Phase 16: a standard (non-loaner) slot no longer counts a TEMPORARY
+    // device as filling it (computeLoadout) — her phone is on loan
+    // (BR-PH-0287, TEMPORARY), so the phone slot now reads missing
+    // alongside headset, which was always missing. 1 missing -> 2.
+    await expect(marites).toContainText("2 missing");
     await page.getByRole("link", { name: "Policy gaps only" }).click();
     await expect(page).toHaveURL(/gaps=1/);
     await expect(page.getByRole("row", { name: /Marites Bautista/ })).toBeVisible();
@@ -396,7 +400,10 @@ test.describe("employees & loadout", () => {
     // assign", and the assignment lands the moment it's clicked.
     await page.getByRole("button", { name: "Confirm" }).click();
     await expect(page.getByText("BR-HS-0502 assigned to Marites Bautista")).toBeVisible();
-    const tile = page.getByRole("button", { name: /headset slot/ });
+    // Anchored: Phase 16 added a per-tile "Actions for the headset slot" ⋯
+    // menu button, whose own aria-label also contains "headset slot" as a
+    // substring — an unanchored match now resolves to both.
+    const tile = page.getByRole("button", { name: /^headset slot,/ });
     await expect(tile).toContainText("BR-HS-0502");
     await expect(tile.getByText("PENDING")).toHaveCount(0);
   });
