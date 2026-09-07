@@ -105,6 +105,7 @@ These were made with the user and would be invisible to anyone reading only the 
    - An **unassigned-holder detector for Purchasing** (IT's Home has one).
    - The **year-chip empty state** ("0 active filters" when no filters render).
    - One **markup for the class switches** (Finance's tab is a `<nav>`, inventory toolbar's is `role="navigation"`).
+   - Rank the Home `CHECK` row above `DATA` or add an "Awaiting your check" stat — with `SHIFT_LIMIT` 5 the seed already starves it; and a DB `CHECK ("cls" = 'IT' OR "itVerifiedAt" IS NULL)` so §5.1 is database-guaranteed like the Phase 13 invariants.
 4. **The §9 subsystems from the Admin meeting** — vendor master data, purchasing extensions, consumables.
    Consumables is a second domain, not an extension of assets; it needs its own brainstorm and must not be
    modelled as an `Asset`.
@@ -119,6 +120,10 @@ These were made with the user and would be invisible to anyone reading only the 
   cross-class guard (`D-15`).
 - `/audit` and `/inventory/activity` exclude invisible assets by id list — fine while the Purchasing fleet is
   small; revisit if it grows past a few thousand rows.
+- `/audit` excludes only `asset` rows of the other class; `approval`, `asset-category` and `asset-type` rows
+  about Purchasing objects still appear for IT with resolved labels (spec §3.1 asked for asset rows only).
+- `resubmitAssetToFinance`'s `canManageClass` refusal is no longer reachable from e2e (IT now gets not-found
+  on a Purchasing record), like D-13/D-15's gates — server guard unchanged, review-covered.
 - Backups land on the same disk as the data; copy them off periodically.
 
 ## 6. If you are an assistant reading this
