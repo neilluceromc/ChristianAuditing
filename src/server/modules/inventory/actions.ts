@@ -201,7 +201,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   // managing — an IT asset Purchasing registers is IT's from this moment.
   if (!canRegisterClass(user.role, category.cls)) {
     return validationError({
-      categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not register ${CLASS_LABEL[category.cls]} assets.`,
+      categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not create ${CLASS_LABEL[category.cls]} assets.`,
     });
   }
   // Spec §4 stamping: born checked when the registrant manages the class.
