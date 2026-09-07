@@ -351,6 +351,8 @@ export interface PurchasingHome {
   awaitingFinance: number;
   /** completed this calendar month, preformatted */
   spendThisMonth: string;
+  approvalsWaiting: number;
+  awaitingItCheck: number;
 }
 
 const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
@@ -360,9 +362,9 @@ const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
  * Purchasing Home leads with what this person still has to do: drafts nobody
  * has sent, and anything that came back to them.
  */
-export async function purchasingHome(userId: string, now: Date = new Date()): Promise<PurchasingHome> {
+export async function purchasingHome(userId: string, role: Role, now: Date = new Date()): Promise<PurchasingHome> {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [mine, counts, completed] = await Promise.all([
+  const [mine, counts, completed, approvalsWaiting, awaitingItCheck] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
       orderBy: { updatedAt: "asc" },
@@ -383,6 +385,8 @@ export async function purchasingHome(userId: string, now: Date = new Date()): Pr
       where: { state: "COMPLETED", completedAt: { gte: monthStart } },
       select: { units: { select: { qty: true, unitPrice: true } } },
     }),
+    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, approvalClassWhere(role)] } }),
+    prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null } }),
   ]);
 
   const count = (state: string) => counts.find((c) => c.state === state)?._count._all ?? 0;
@@ -406,6 +410,8 @@ export async function purchasingHome(userId: string, now: Date = new Date()): Pr
     awaitingIT: count("SUBMITTED"),
     awaitingFinance: count("IT_REVIEWED"),
     spendThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
+    approvalsWaiting,
+    awaitingItCheck,
   };
 }
 
