@@ -27,6 +27,10 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     expect(auditSentence({ ...base, action: "finance.confirm", diff: { financeConfirmed: { from: null, to: "M. Cruz" } } }))
       .toBe("J. Sarmiento confirmed BR-LT-0148's details");
   });
+  it("it.verify reads as IT's check, not the raw verb", () => {
+    expect(auditSentence({ ...base, action: "it.verify", diff: { itVerified: { from: null, to: "R. Bautista" } } }))
+      .toBe("J. Sarmiento checked BR-LT-0148");
+  });
   it("finance.return carries the reason — the reason IS the record", () => {
     expect(auditSentence({ ...base, action: "finance.return", diff: { financeReturn: { from: null, to: "Serial does not match the box" } } }))
       .toBe("J. Sarmiento sent BR-LT-0148 back to IT \u00b7 Serial does not match the box");

@@ -1,14 +1,15 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
-import { getAsset } from "@/server/modules/inventory/queries";
+import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { fmtDate } from "@/lib/format";
+import { canManageClass } from "@/lib/asset-class";
 import { DocumentsPanel, type DocumentRow } from "@/components/inventory/documents-panel";
 
 export default async function AssetDocumentsPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const asset = await getAsset(id);
+  const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   const docs = await prisma.assetDocument.findMany({
     where: { assetId: id },
@@ -30,7 +31,7 @@ export default async function AssetDocumentsPage({ params }: { params: Promise<{
     <DocumentsPanel
       assetId={id}
       docs={rows}
-      canMutate={user.role === "admin" || user.role === "it_staff"}
+      canMutate={canManageClass(user.role, asset.cls)}
     />
   );
 }

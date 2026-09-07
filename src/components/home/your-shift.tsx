@@ -11,6 +11,7 @@ const KIND_DOT: Record<ShiftKind, string> = {
   LEAVE: "SUBMITTED", // in flight
   HIRE: "PENDING",    // attention
   DATA: "TEMPORARY",  // attention, quieter
+  CHECK: "PENDING",   // attention — IT has not checked it yet
 };
 
 export function YourShift({ rows, canAct }: { rows: ShiftRow[]; canAct: boolean }) {

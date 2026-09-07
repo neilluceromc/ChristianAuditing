@@ -45,7 +45,7 @@ describe("pathAllowedForRole", () => {
     // IT workspace paths
     ["/inventory", "it_staff", true],
     ["/inventory/abc/history", "viewer", true],
-    ["/employees", "purchasing_staff", false],
+    ["/employees", "purchasing_staff", true],
     ["/audit", "finance_staff", false],
     ["/audit", "it_staff", true],
     // export routes match their list page's access exactly (no dedicated
@@ -53,7 +53,7 @@ describe("pathAllowedForRole", () => {
     ["/audit/export", "it_staff", true],
     ["/audit/export", "finance_staff", false],
     ["/employees/export", "it_staff", true],
-    ["/employees/export", "purchasing_staff", false],
+    ["/employees/export", "purchasing_staff", true],
     ["/offboarding/emp1/report/export", "it_staff", true],
     ["/offboarding/emp1/report/export", "purchasing_staff", false],
     // inventory is shared with purchasing (Reference nav)
@@ -65,7 +65,7 @@ describe("pathAllowedForRole", () => {
     ["/inventory/abc/secrets", "finance_staff", false],
     // approvals shared IT + finance
     ["/approvals", "finance_staff", true],
-    ["/approvals", "purchasing_staff", false],
+    ["/approvals", "purchasing_staff", true],
     ["/approvals/xyz", "viewer", true],
     // purchases: purchasing + finance own it; IT joins because brief §6.1 makes
     // IT the second party (it-review / it-reject). Page-level requireRole still
@@ -135,7 +135,7 @@ describe("pathAllowedForRole", () => {
     ["/inventory/labels", "admin", true],
     ["/inventory/labels", "it_staff", true],
     ["/inventory/labels", "viewer", false],
-    ["/inventory/labels", "purchasing_staff", false],
+    ["/inventory/labels", "purchasing_staff", true],
     ["/inventory/labels", "finance_staff", false],
     // Task 12, E-7: the identical trap, one route over. /employees/import
     // sits under the general /employees rule (workspaces: ["it"], no
@@ -146,6 +146,34 @@ describe("pathAllowedForRole", () => {
     ["/employees/import", "viewer", false],
     ["/employees/import", "purchasing_staff", false],
     ["/employees/import", "finance_staff", false],
+    // Phase 14: Purchasing owns its class and reads the directory. Approvals
+    // are class-scoped server-side (approval-access.ts), never here.
+    ["/approvals", "purchasing_staff", true],
+    ["/approvals/xyz", "purchasing_staff", true],
+    ["/employees", "purchasing_staff", true],
+    ["/employees/abc", "purchasing_staff", true],
+    ["/employees/abc/form", "purchasing_staff", true],
+    ["/employees/export", "purchasing_staff", true],
+    // Every employee WRITE surface stays IT, asserted for every role — the same
+    // first-match-wins reason as /employees/import.
+    ["/employees/new", "admin", true],
+    ["/employees/new", "it_staff", true],
+    ["/employees/new", "viewer", false],
+    ["/employees/new", "purchasing_staff", false],
+    ["/employees/new", "finance_staff", false],
+    ["/employees/abc/edit", "admin", true],
+    ["/employees/abc/edit", "it_staff", true],
+    ["/employees/abc/edit", "viewer", false],
+    ["/employees/abc/edit", "purchasing_staff", false],
+    ["/employees/abc/edit", "finance_staff", false],
+    ["/offboarding", "purchasing_staff", false],
+    ["/reservations", "purchasing_staff", false],
+    ["/admin/asset-categories", "purchasing_staff", true],
+    ["/admin/asset-types", "purchasing_staff", true],
+    ["/admin/asset-categories", "finance_staff", false],
+    ["/admin/departments", "purchasing_staff", false],
+    ["/admin/departments", "it_staff", true],
+    ["/inventory/labels", "purchasing_staff", true],
     // default-deny: unenumerated routes are forbidden for everyone, admin included
     ["/export/assets", "viewer", false],
     ["/api/export/audit", "finance_staff", false],
@@ -219,6 +247,15 @@ describe("WORKSPACE_NAV shape", () => {
   it("the IT Approvals item carries the badge marker", () => {
     const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking");
     expect(tracking?.items.find((i) => i.label === "Approvals")?.badge).toBe("approvals");
+  });
+  it("Phase 14: the Purchasing Assets section carries Approvals (with badge) and Employees", () => {
+    const assets = WORKSPACE_NAV.purchasing.find((s) => s.heading === "Assets");
+    expect(assets?.items.find((i) => i.label === "Approvals")?.badge).toBe("approvals");
+    expect(assets?.items.map((i) => i.href)).toContain("/employees");
+  });
+  it("Phase 14: the Purchasing Records section offers categories and types, never departments", () => {
+    const records = WORKSPACE_NAV.purchasing.find((s) => s.heading === "Records");
+    expect(records?.items.map((i) => i.href)).toEqual(["/admin/asset-categories", "/admin/asset-types"]);
   });
   it("Records & admin items are role-restricted", () => {
     const records = WORKSPACE_NAV.it.find((s) => s.heading === "Records & admin");

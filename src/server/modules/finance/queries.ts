@@ -35,7 +35,13 @@ export async function financeAssets(
   cls: AssetClass,
   now: Date = new Date(),
 ): Promise<{ rows: FinanceAssetRow[]; total: number; page: number; pageCount: number; totalCost: string }> {
-  const where: Prisma.AssetWhereInput = { cls, cost: { not: null }, ...(status ? { status } : {}) };
+  // Spec §5.3: Finance sees an IT asset only once IT has checked it. Purchasing
+  // rows never carry a stamp and are not gated.
+  const where: Prisma.AssetWhereInput = {
+    cls, cost: { not: null },
+    ...(cls === "IT" ? { itVerifiedAt: { not: null } } : {}),
+    ...(status ? { status } : {}),
+  };
   const [total, sum] = await Promise.all([
     prisma.asset.count({ where }),
     prisma.asset.aggregate({ where, _sum: { cost: true } }),

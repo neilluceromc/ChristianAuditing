@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { fmtDate } from "@/lib/format";
+import { CLASS_PHRASE, canSeeClass } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Banner } from "@/components/ui/banner";
@@ -28,7 +29,7 @@ import { ButtonLink } from "@/components/ui/button-link";
  * form page, which does the same for the same reason: one read, no reuse.
  */
 export default async function ScanCardPage({ params }: { params: Promise<{ tag: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { tag: raw } = await params;
   const tag = decodeURIComponent(raw).trim().toUpperCase();
 
@@ -40,6 +41,7 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
       model: true,
       serial: true,
       status: true,
+      cls: true,
       purchasedAt: true,
       warrantyUntil: true,
       category: { select: { name: true } },
@@ -65,6 +67,20 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
         <PageHeader title="Unknown tag" breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Scan" }]} />
         <Banner tone="attention" title={`No asset is registered as ${tag}.`}>
           The label may belong to an asset that has been disposed, or the code may have been misread.
+        </Banner>
+        <div className="pt-3"><ButtonLink href="/inventory">Back to inventory</ButtonLink></div>
+      </>
+    );
+  }
+
+  // Phase 14 (spec §3.1): the sticker is real, so not "unknown" — but the
+  // record is another department's. Name the tag, show nothing else.
+  if (!canSeeClass(user.role, asset.cls)) {
+    return (
+      <>
+        <PageHeader title={asset.tag} breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Scan" }]} />
+        <Banner tone="attention" title={`${asset.tag} is not in your register.`}>
+          It belongs to {CLASS_PHRASE[asset.cls]} register. Ask that department if you need its details.
         </Banner>
         <div className="pt-3"><ButtonLink href="/inventory">Back to inventory</ButtonLink></div>
       </>

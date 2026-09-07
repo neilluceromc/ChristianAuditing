@@ -1,6 +1,7 @@
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { entityLabels } from "@/server/modules/audit/queries";
+import { invisibleAssetIds } from "@/server/modules/inventory/queries";
 import { auditSentence } from "@/lib/activity";
 import { fmtDateTime } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
@@ -16,14 +17,16 @@ export default async function InventoryActivityPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const rawPage = Math.max(1, Number.parseInt(toSearchParams(await searchParams).get("page") ?? "1", 10) || 1);
 
-  const total = await prisma.auditEntry.count({ where: { entityType: "asset" } });
+  const hidden = await invisibleAssetIds(user.role);
+  const where = { entityType: "asset", ...(hidden.length ? { entityId: { notIn: hidden } } : {}) };
+  const total = await prisma.auditEntry.count({ where });
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(rawPage, pageCount); // unbounded ?page= must not become a huge OFFSET
   const entries = await prisma.auditEntry.findMany({
-    where: { entityType: "asset" },
+    where,
     orderBy: { createdAt: "desc" },
     skip: (page - 1) * PAGE_SIZE,
     take: PAGE_SIZE,

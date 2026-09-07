@@ -102,7 +102,7 @@ export default async function Home() {
 
   // ── Purchasing: a to-do list and spend ─────────────────────────────────
   if (ws === "purchasing") {
-    const home = await safeSection("Your requests", () => purchasingHome(user.id));
+    const home = await safeSection("Your requests", () => purchasingHome(user.id, user.role));
     return (
       <>
         {header}
@@ -110,11 +110,13 @@ export default async function Home() {
           <SectionCard title="Your requests" result={home}>
             {(d) => (
               <div className="flex flex-col gap-4">
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
                   <Stat label="Drafts" value={d.draftCount} />
                   <Stat label="Awaiting IT" value={d.awaitingIT} />
                   <Stat label="Awaiting finance" value={d.awaitingFinance} />
                   <Stat label="Spend this month" value={d.spendThisMonth} />
+                  <Stat label="Approvals waiting" value={<Link href="/approvals" className="hover:underline">{d.approvalsWaiting}</Link>} hint="lifecycle changes on your assets" />
+                  <Stat label="Awaiting IT check" value={d.awaitingItCheck} hint="IT assets you registered" />
                 </div>
                 <TodoList rows={d.todo} empty="Nothing of yours is waiting — every request has moved on." />
               </div>
@@ -171,8 +173,8 @@ export default async function Home() {
   const [shift, claims, fleetData, age, warranty] = await Promise.all([
     isViewer
       ? Promise.resolve({ ok: true as const, data: [] })
-      : safeSection("Your shift", () => yourShift(user.id)),
-    safeSection("Claimed by you", () => claimedByYou(user.id)),
+      : safeSection("Your shift", () => yourShift(user.id, user.role)),
+    safeSection("Claimed by you", () => claimedByYou(user.id, user.role)),
     safeSection("Fleet", () => fleet()),
     safeSection("Age", () => ageHistogram()),
     safeSection("Warranty runway", () => warrantyRunway()),

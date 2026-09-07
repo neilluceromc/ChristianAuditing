@@ -20,4 +20,9 @@ describe("buildAuditWhere", () => {
   it("entity facet filters entityType", () => {
     expect(buildAuditWhere(parse("entity=asset,employee")).entityType).toEqual({ in: ["asset", "employee"] });
   });
+  it("excludes hidden asset rows only when given ids", () => {
+    const state = parse("");
+    expect(buildAuditWhere(state)).not.toHaveProperty("NOT");
+    expect(buildAuditWhere(state, ["a1"])).toMatchObject({ NOT: { entityType: "asset", entityId: { in: ["a1"] } } });
+  });
 });

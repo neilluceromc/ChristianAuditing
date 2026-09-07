@@ -16,6 +16,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { TagRef } from "@/components/inventory/tag-ref";
 import { requestAssign, requestAssignReserved, requestReturn } from "@/server/modules/employees/actions";
 import type { ActionResult } from "@/server/action-result";
 
@@ -25,7 +26,7 @@ export interface SlotTile {
   typeId: string | null;
   typeName: string;
   required: boolean;
-  asset: { id: string; tag: string; model: string; status: string; age: string; pendingRef: string | null } | null;
+  asset: { id: string; tag: string; model: string; status: string; age: string; pendingRef: string | null; visible: boolean } | null;
 }
 
 export interface SpareOption {
@@ -43,6 +44,7 @@ export interface HoldingItem {
   model: string;
   note: string; // "reserved · expires 23 Aug 2026" | "assignment queued · APR-2042"
   kind: "reserved" | "queued";
+  visible: boolean;
 }
 
 const STRIPES = "repeating-linear-gradient(135deg, var(--border-faint) 0 6px, var(--surface-subtle) 6px 12px)";
@@ -262,7 +264,7 @@ export function LoadoutView({
               ...unslotted.filter(Boolean).map((a) => ({ a: a!, slot: "—" }))].map(({ a, slot }) => (
               <Tr key={a.id}>
                 <Td className="pr-0"><StatusDot value={a.status} /></Td>
-                <Td mono><Link href={`/inventory/${a.id}`} className="text-accent hover:underline">{a.tag}</Link></Td>
+                <Td mono><TagRef id={a.id} tag={a.tag} visible={a.visible} className="text-accent hover:underline" /></Td>
                 <Td>{a.model}</Td>
                 <Td mono className="text-[10.5px]">{slot}</Td>
                 <Td mono className="text-[10.5px]">{a.status}</Td>
@@ -280,7 +282,7 @@ export function LoadoutView({
             {unslotted.filter(Boolean).map((a) => (
               <div key={a!.id} className="flex items-center gap-2 text-xs text-fg-secondary">
                 <StatusDot value={a!.status} />
-                <Link href={`/inventory/${a!.id}`} className="font-mono text-accent hover:underline">{a!.tag}</Link>
+                <TagRef id={a!.id} tag={a!.tag} visible={a!.visible} className="font-mono text-accent hover:underline" />
                 {a!.model}
                 {a!.pendingRef && <Pill tone="accent">{a!.pendingRef}</Pill>}
               </div>
@@ -296,9 +298,12 @@ export function LoadoutView({
             {holding.map((h) => (
               <div key={h.id} className="flex items-center gap-2 text-xs text-fg-secondary">
                 <StatusDot value={h.kind === "reserved" ? "ACTIVE" : "PENDING"} />
-                <Link href={`/inventory/${h.id}`} className={cn("font-mono hover:underline", h.kind === "queued" ? "text-fg-muted" : "text-accent")}>
-                  {h.tag}
-                </Link>
+                <TagRef
+                  id={h.id}
+                  tag={h.tag}
+                  visible={h.visible}
+                  className={cn("font-mono hover:underline", h.kind === "queued" ? "text-fg-muted" : "text-accent")}
+                />
                 <span className={cn(h.kind === "queued" && "text-fg-muted")}>{h.model}</span>
                 <span className="ml-auto font-mono text-[10px] text-fg-muted">{h.note}</span>
               </div>

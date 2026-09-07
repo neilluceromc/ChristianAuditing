@@ -13,7 +13,7 @@ export const AUDIT_LIST_CONFIG: ListConfig = {
   defaultSort: [],
 };
 
-export function buildAuditWhere(state: ListState): Prisma.AuditEntryWhereInput {
+export function buildAuditWhere(state: ListState, hiddenAssetIds: string[] = []): Prisma.AuditEntryWhereInput {
   const where: Prisma.AuditEntryWhereInput = {};
   if (state.q) {
     where.OR = [
@@ -23,5 +23,8 @@ export function buildAuditWhere(state: ListState): Prisma.AuditEntryWhereInput {
     ];
   }
   if (state.filters.entity?.length) where.entityType = { in: state.filters.entity };
+  // Phase 14 (spec §3.1): rows about assets this role cannot see are not its
+  // audit trail either. Empty for an all-class role — no clause at all.
+  if (hiddenAssetIds.length) where.NOT = { entityType: "asset", entityId: { in: hiddenAssetIds } };
   return where;
 }

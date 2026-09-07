@@ -6,6 +6,7 @@ import { canContinue, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
 import { fmtMoney } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { canSeeClass } from "@/lib/asset-class";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -16,6 +17,7 @@ import { Pill } from "@/components/ui/pill";
 import { Stat } from "@/components/ui/stat";
 import { StatusDot, StatusPill } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+import { TagRef } from "@/components/inventory/tag-ref";
 import { AccountsPanel } from "@/components/offboarding/accounts-panel";
 import { CompleteButton } from "@/components/offboarding/complete-button";
 import { ItemDecision } from "@/components/offboarding/item-decision";
@@ -197,7 +199,7 @@ export default async function OffboardingWizardPage({
                     <Tr key={i.assetId}>
                       <Td className="pr-0"><StatusDot value={i.status} /></Td>
                       <Td mono>
-                        <Link href={`/inventory/${i.assetId}`} className="text-accent hover:underline">{i.tag}</Link>
+                        <TagRef id={i.assetId} tag={i.tag} visible={canSeeClass(user.role, i.cls)} className="text-accent hover:underline" />
                       </Td>
                       <Td>{i.model}</Td>
                       <Td mono className="text-[10.5px]">{i.category}</Td>
@@ -415,7 +417,7 @@ export default async function OffboardingWizardPage({
                   {decided.map((i) => (
                     <Tr key={i.assetId}>
                       <Td mono>
-                        <Link href={`/inventory/${i.assetId}`} className="text-accent hover:underline">{i.tag}</Link>
+                        <TagRef id={i.assetId} tag={i.tag} visible={canSeeClass(user.role, i.cls)} className="text-accent hover:underline" />
                       </Td>
                       <Td>{i.model}</Td>
                       <Td>

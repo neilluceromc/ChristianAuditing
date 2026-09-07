@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
+import { canSeeClass } from "@/lib/asset-class";
 
 const TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -14,10 +15,14 @@ export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string; docId: string }> },
 ) {
-  await requireUser();
+  const user = await requireUser();
   const { id, docId } = await ctx.params;
-  const doc = await prisma.assetDocument.findUnique({ where: { id: docId } });
+  const doc = await prisma.assetDocument.findUnique({
+    where: { id: docId },
+    include: { asset: { select: { cls: true } } },
+  });
   if (!doc || doc.assetId !== id) return new Response("Not found", { status: 404 });
+  if (!canSeeClass(user.role, doc.asset.cls)) return new Response("Not found", { status: 404 });
 
   const root = path.resolve(process.cwd(), "uploads");
   const abs = path.resolve(root, doc.path);

@@ -24,6 +24,7 @@ export default async function EditEmployeePage({ params }: { params: Promise<{ i
         ]}
       />
       <EmployeeForm
+        mode="edit"
         employeeId={id}
         departments={departments.map((d) => ({ id: d.id, name: d.name }))}
         initial={{

@@ -1,7 +1,9 @@
 import { cache } from "react";
+import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { ASSIGNABLE_FROM, RETURN_TARGETS } from "@/lib/asset-class";
+import { approvalClassWhere } from "@/lib/approval-access";
 import { slaLabel, tabWhere, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
 
 export const QUEUE_PAGE_SIZE = 50;
@@ -19,9 +21,9 @@ export interface ApprovalRow {
   mine: boolean;
 }
 
-export async function listApprovals(tab: QueueTab, userId: string): Promise<ApprovalRow[]> {
+export async function listApprovals(tab: QueueTab, userId: string, role: Role): Promise<ApprovalRow[]> {
   const approvals = await prisma.approval.findMany({
-    where: tabWhere(tab, userId),
+    where: { AND: [tabWhere(tab, userId), approvalClassWhere(role)] },
     include: { asset: true, employee: true, claimedBy: true },
     // Open work orders by what breaks first; closed history reads newest-first.
     orderBy: tab === "closed" ? { updatedAt: "desc" } : { slaAt: "asc" },
@@ -47,9 +49,11 @@ export async function listApprovals(tab: QueueTab, userId: string): Promise<Appr
   });
 }
 
-export async function tabCounts(userId: string): Promise<Record<QueueTab, number>> {
+export async function tabCounts(userId: string, role: Role): Promise<Record<QueueTab, number>> {
   const counts = await Promise.all(
-    QUEUE_TABS.map((t) => prisma.approval.count({ where: tabWhere(t.id, userId) })),
+    QUEUE_TABS.map((t) =>
+      prisma.approval.count({ where: { AND: [tabWhere(t.id, userId), approvalClassWhere(role)] } }),
+    ),
   );
   return Object.fromEntries(QUEUE_TABS.map((t, i) => [t.id, counts[i]])) as Record<QueueTab, number>;
 }

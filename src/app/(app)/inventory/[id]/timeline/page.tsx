@@ -1,14 +1,16 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
-import { getAsset } from "@/server/modules/inventory/queries";
+import { requireUser } from "@/server/auth/guards";
+import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TimelineList, type TimelineItem } from "@/components/patterns/timeline-list";
 
 export default async function AssetTimelinePage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUser();
   const { id } = await params;
-  const asset = await getAsset(id);
+  const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
 
   const [entries, approvals] = await Promise.all([

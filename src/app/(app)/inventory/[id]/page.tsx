@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getAsset, stageOf } from "@/server/modules/inventory/queries";
+import { requireUser } from "@/server/auth/guards";
+import { getVisibleAsset, stageOf } from "@/server/modules/inventory/queries";
 import { warrantyProgress } from "@/lib/asset-rules";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -11,8 +12,9 @@ import { Pill } from "@/components/ui/pill";
 import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
 
 export default async function AssetOverviewPage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUser();
   const { id } = await params;
-  const asset = await getAsset(id);
+  const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   const warranty = warrantyProgress(asset.purchasedAt, asset.warrantyUntil);
   const cost = asset.cost === null ? null : Number(asset.cost);

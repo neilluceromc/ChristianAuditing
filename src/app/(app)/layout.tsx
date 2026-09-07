@@ -15,7 +15,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const jar = await cookies();
   const ws = resolveWorkspace(user.role, jar.get("br.dept")?.value);
   const sections = filterSectionsForRole(WORKSPACE_NAV[ws], user.role);
-  const badge = await getApprovalsBadge();
+  const badge = await getApprovalsBadge(user.role);
 
   return (
     <div className="flex min-h-screen">

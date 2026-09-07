@@ -3,23 +3,23 @@ import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { RegisterForm } from "@/components/inventory/register-form";
 import { registerAssets, prefixCountsForCategory, highestTagNumber } from "@/server/modules/purchases/receiving";
-import { MANAGEABLE_CLASSES } from "@/lib/asset-class";
+import { REGISTRABLE_CLASSES } from "@/lib/asset-class";
 
 export default async function RegisterAssetsPage() {
-  // Phase 13: registering is each department's own — IT registers IT-class
-  // categories, Purchasing registers Purchasing-class ones. The class check
-  // itself lives server-side in `registerAssets`; this just scopes what the
-  // form offers to pick from.
+  // Phase 14: Purchasing registers assets of BOTH classes, IT registers IT
+  // only — registering is not managing. The class check itself lives
+  // server-side in `registerAssets`; this just scopes what the form offers
+  // to pick from.
   const user = await requireRole("admin", "it_staff", "purchasing_staff");
 
   const [categories, types, vendors, requests] = await Promise.all([
     prisma.assetCategory.findMany({
-      where: { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } },
+      where: { cls: { in: [...REGISTRABLE_CLASSES[user.role]] } },
       select: { id: true, name: true, cls: true },
       orderBy: { name: "asc" },
     }),
     prisma.assetType.findMany({
-      where: { category: { cls: { in: [...MANAGEABLE_CLASSES[user.role]] } } },
+      where: { category: { cls: { in: [...REGISTRABLE_CLASSES[user.role]] } } },
       select: { id: true, name: true, categoryId: true },
       orderBy: { name: "asc" },
     }),

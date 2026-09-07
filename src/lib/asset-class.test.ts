@@ -2,11 +2,13 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { Role } from "@prisma/client";
 import { AssetClass, AssetStatus } from "@prisma/client";
 import {
   ASSET_CLASSES, ASSIGN_TARGETS, ASSIGNABLE_FROM, CLASS_EXAMPLE, CLASS_LABEL, CLASS_PHRASE, CREATABLE_BY_CLASS,
   DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
-  canManageClass, isStatusOf, parseCls, statusesFor, withClsQS,
+  MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, VISIBLE_CLASSES,
+  canManageClass, canEditAsset, canRegisterClass, canSeeClass, isAwaitingItCheck, isStatusOf, parseCls, statusesFor, visibleClassWhere, withClsQS,
 } from "./asset-class";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
@@ -170,4 +172,68 @@ describe("the trigger's literal lists are pinned to STATUSES_BY_CLASS", () => {
   };
   it("IT", () => expect(sorted(listAfter("IT"))).toEqual(sorted(STATUSES_BY_CLASS.IT)));
   it("PURCHASING", () => expect(sorted(listAfter("PURCHASING"))).toEqual(sorted(STATUSES_BY_CLASS.PURCHASING)));
+});
+
+describe("Phase 14 — the three maps", () => {
+  it("VISIBLE: IT and the viewer see IT only; everyone else sees everything", () => {
+    expect(VISIBLE_CLASSES.it_staff).toEqual(["IT"]);
+    expect(VISIBLE_CLASSES.viewer).toEqual(["IT"]);
+    for (const r of ["admin", "purchasing_staff", "finance_staff"] as Role[]) {
+      expect(VISIBLE_CLASSES[r]).toEqual([...ASSET_CLASSES]);
+    }
+  });
+  it("REGISTRABLE: Purchasing registers both, IT its own, Finance and viewer nothing", () => {
+    expect(REGISTRABLE_CLASSES.purchasing_staff).toEqual(["IT", "PURCHASING"]);
+    expect(REGISTRABLE_CLASSES.it_staff).toEqual(["IT"]);
+    expect(REGISTRABLE_CLASSES.finance_staff).toEqual([]);
+    expect(REGISTRABLE_CLASSES.viewer).toEqual([]);
+  });
+  it("MANAGEABLE ⊆ REGISTRABLE ⊆ VISIBLE for every role", () => {
+    const ROLES: Role[] = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"];
+    for (const r of ROLES) {
+      for (const c of MANAGEABLE_CLASSES[r]) expect(REGISTRABLE_CLASSES[r]).toContain(c);
+      for (const c of REGISTRABLE_CLASSES[r]) expect(VISIBLE_CLASSES[r]).toContain(c);
+    }
+  });
+  it("canSeeClass / canRegisterClass read the maps", () => {
+    expect(canSeeClass("it_staff", "PURCHASING")).toBe(false);
+    expect(canSeeClass("purchasing_staff", "IT")).toBe(true);
+    expect(canRegisterClass("purchasing_staff", "IT")).toBe(true);
+    expect(canRegisterClass("it_staff", "PURCHASING")).toBe(false);
+    expect(canRegisterClass("finance_staff", "IT")).toBe(false);
+  });
+  it("visibleClassWhere is empty for an all-class role and an `in` list otherwise", () => {
+    expect(visibleClassWhere("admin")).toEqual({});
+    expect(visibleClassWhere("purchasing_staff")).toEqual({});
+    expect(visibleClassWhere("finance_staff")).toEqual({});
+    expect(visibleClassWhere("it_staff")).toEqual({ cls: { in: ["IT"] } });
+    expect(visibleClassWhere("viewer")).toEqual({ cls: { in: ["IT"] } });
+  });
+});
+
+describe("Phase 14 — the IT check", () => {
+  const d = new Date();
+  it("only an IT asset with no stamp is awaiting", () => {
+    expect(isAwaitingItCheck({ cls: "IT", itVerifiedAt: null })).toBe(true);
+    expect(isAwaitingItCheck({ cls: "IT", itVerifiedAt: d })).toBe(false);
+    expect(isAwaitingItCheck({ cls: "PURCHASING", itVerifiedAt: null })).toBe(false);
+    expect(isAwaitingItCheck({ cls: "PURCHASING", itVerifiedAt: d })).toBe(false);
+  });
+  const awaiting = { cls: "IT" as const, itVerifiedAt: null };
+  const checked = { cls: "IT" as const, itVerifiedAt: d };
+  const car = { cls: "PURCHASING" as const, itVerifiedAt: null };
+  it.each([
+    ["admin", true, true, true],
+    ["it_staff", true, true, false],
+    ["purchasing_staff", true, false, true],
+    ["finance_staff", false, false, false],
+    ["viewer", false, false, false],
+  ] as Array<[Role, boolean, boolean, boolean]>)(
+    "canEditAsset %s: awaiting IT %s · checked IT %s · car %s",
+    (role, a, c, p) => {
+      expect(canEditAsset(role, awaiting)).toBe(a);
+      expect(canEditAsset(role, checked)).toBe(c);
+      expect(canEditAsset(role, car)).toBe(p);
+    },
+  );
 });

@@ -88,8 +88,11 @@ export async function entityLabels(
   return map;
 }
 
-export async function listAudit(state: ListState): Promise<{ rows: AuditRow[]; total: number; pageCount: number }> {
-  const where = buildAuditWhere(state);
+export async function listAudit(
+  state: ListState,
+  hiddenAssetIds: string[] = [],
+): Promise<{ rows: AuditRow[]; total: number; pageCount: number }> {
+  const where = buildAuditWhere(state, hiddenAssetIds);
   const total = await prisma.auditEntry.count({ where });
   const pageCap = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE));
   const page = Math.min(state.page, pageCap); // unbounded ?page= must not become a huge OFFSET

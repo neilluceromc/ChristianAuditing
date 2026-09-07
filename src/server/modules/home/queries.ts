@@ -1,7 +1,9 @@
+import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
+import { approvalClassWhere } from "@/lib/approval-access";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
 import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine, shiftOrder,
@@ -20,16 +22,17 @@ const WARRANTY_WINDOW_DAYS = 90;
  * one action that clears it. Every row is a real record — nothing here is a
  * count for its own sake.
  */
-export async function yourShift(userId: string, now: Date = new Date()): Promise<ShiftRow[]> {
-  const [breached, failed, leavers, hires, missing, orphaned, pref] = await Promise.all([
+export async function yourShift(userId: string, role: Role, now: Date = new Date()): Promise<ShiftRow[]> {
+  const scope = approvalClassWhere(role);
+  const [breached, failed, leavers, hires, missing, orphaned, awaiting, pref] = await Promise.all([
     prisma.approval.findMany({
-      where: { state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } },
+      where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] },
       orderBy: { slaAt: "asc" },
       take: 10,
       include: { asset: true, employee: true },
     }),
     prisma.approval.findMany({
-      where: { state: "EXECUTION_FAILED" },
+      where: { AND: [{ state: "EXECUTION_FAILED" as const }, scope] },
       orderBy: { updatedAt: "asc" },
       take: 10,
       include: { asset: true, employee: true },
@@ -61,6 +64,13 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
       orderBy: { updatedAt: "asc" },
       take: 10,
       select: { id: true, tag: true, model: true, updatedAt: true },
+    }),
+    // Phase 14 (spec §5.5): IT assets Purchasing registered, waiting for IT.
+    prisma.asset.findMany({
+      where: { cls: "IT", itVerifiedAt: null },
+      orderBy: { createdAt: "asc" },
+      take: 10,
+      select: { id: true, tag: true, model: true, createdAt: true },
     }),
     prisma.userPreference.findUnique({
       where: { userId_key: { userId, key: DISMISS_PREF_KEY } },
@@ -164,6 +174,18 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
     });
   }
 
+  for (const a of awaiting) {
+    rows.push({
+      key: `CHECK:${a.id}`,
+      kind: "CHECK",
+      title: `${a.tag} · ${a.model}`,
+      meta: `registered by Purchasing · ${daysSince(a.createdAt, now)} d waiting`,
+      href: `/inventory/${a.id}`,
+      action: "Check",
+      severity: daysSince(a.createdAt, now),
+    });
+  }
+
   return shiftOrder(rows, activeDismissals(pref?.value, todayStamp(now)));
 }
 
@@ -175,9 +197,9 @@ export interface ClaimRow {
 }
 
 /** README: claims sit ABOVE the pool — a forgotten claim is worse than an unclaimed item. */
-export async function claimedByYou(userId: string, now: Date = new Date()): Promise<ClaimRow[]> {
+export async function claimedByYou(userId: string, role: Role, now: Date = new Date()): Promise<ClaimRow[]> {
   const rows = await prisma.approval.findMany({
-    where: { state: "CLAIMED", claimedById: userId },
+    where: { AND: [{ state: "CLAIMED" as const, claimedById: userId }, approvalClassWhere(role)] },
     orderBy: { slaAt: "asc" },
     take: 5,
     include: { asset: true, employee: true },
@@ -329,6 +351,8 @@ export interface PurchasingHome {
   awaitingFinance: number;
   /** completed this calendar month, preformatted */
   spendThisMonth: string;
+  approvalsWaiting: number;
+  awaitingItCheck: number;
 }
 
 const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
@@ -338,9 +362,9 @@ const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
  * Purchasing Home leads with what this person still has to do: drafts nobody
  * has sent, and anything that came back to them.
  */
-export async function purchasingHome(userId: string, now: Date = new Date()): Promise<PurchasingHome> {
+export async function purchasingHome(userId: string, role: Role, now: Date = new Date()): Promise<PurchasingHome> {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [mine, counts, completed] = await Promise.all([
+  const [mine, counts, completed, approvalsWaiting, awaitingItCheck] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
       orderBy: { updatedAt: "asc" },
@@ -361,6 +385,8 @@ export async function purchasingHome(userId: string, now: Date = new Date()): Pr
       where: { state: "COMPLETED", completedAt: { gte: monthStart } },
       select: { units: { select: { qty: true, unitPrice: true } } },
     }),
+    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, approvalClassWhere(role)] } }),
+    prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null } }),
   ]);
 
   const count = (state: string) => counts.find((c) => c.state === state)?._count._all ?? 0;
@@ -384,6 +410,8 @@ export async function purchasingHome(userId: string, now: Date = new Date()): Pr
     awaitingIT: count("SUBMITTED"),
     awaitingFinance: count("IT_REVIEWED"),
     spendThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
+    approvalsWaiting,
+    awaitingItCheck,
   };
 }
 

@@ -46,6 +46,8 @@ export function auditSentence(entry: ActivityEntryLike): string {
       return `${entry.actorLabel} registered ${entry.entityLabel}`;
     case "finance.confirm":
       return `${entry.actorLabel} confirmed ${entry.entityLabel}'s details`;
+    case "it.verify":
+      return `${entry.actorLabel} checked ${entry.entityLabel}`;
     case "finance.return": {
       // The reason is the entire point of a return, so it belongs in the
       // sentence rather than one click away in the diff.

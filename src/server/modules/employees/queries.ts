@@ -3,6 +3,7 @@ import { buildEmployeeWhere } from "@/lib/employees-list";
 import { computeLoadout, resolvePolicy } from "@/lib/loadout";
 import { fmtDate } from "@/lib/format";
 import type { ListState } from "@/lib/url-state";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 
 export const PAGE_SIZE = 25;
 
@@ -156,4 +157,14 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
       value: s, label: s, count: empGroups.find((g) => g.employment === s)?._count ?? 0,
     })),
   };
+}
+
+/** The holder picker's options — the same shape /inventory/new builds inline. */
+export async function activeEmployeeOptions(): Promise<ComboOption[]> {
+  const rows = await prisma.employee.findMany({
+    where: { employment: "ACTIVE" },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, employeeNo: true },
+  });
+  return rows.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }));
 }

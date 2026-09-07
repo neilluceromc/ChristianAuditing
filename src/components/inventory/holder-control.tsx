@@ -1,0 +1,99 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { FormField } from "@/components/ui/form-field";
+import { Banner } from "@/components/ui/banner";
+import { useToast } from "@/components/ui/toast";
+import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import { requestAssign, requestReturn } from "@/server/modules/employees/actions";
+
+type Props =
+  | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[] }
+  | { assetId: string; tag: string; mode: "return"; holder: { id: string; name: string } };
+
+/**
+ * Phase 14 (spec §7): assign / return from the asset itself, so a department
+ * without IT's loadout view can hand a car to a driver and take it back. Same
+ * two actions the loadout calls; the same approvals result.
+ */
+export function HolderControl(props: Props) {
+  const router = useRouter();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const isAssign = props.mode === "assign";
+
+  function close() {
+    setOpen(false); setReason(""); setEmployeeId(null); setError(null); setFieldErrors({}); setRetryAfter(null);
+  }
+
+  function submit() {
+    setError(null); setFieldErrors({});
+    startTransition(async () => {
+      const res = props.mode === "assign"
+        ? await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason })
+        : await requestReturn({ employeeId: props.holder.id, assetId: props.assetId, reason });
+      if (res.ok) {
+        toast(`${res.data.refNo} created — waiting in the approval queue`, "settled");
+        close();
+        router.refresh();
+      } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
+      else if (res.kind === "validation") {
+        const fe = res.fieldErrors ?? {};
+        setFieldErrors(fe);
+        const unclaimed = fe.assetId ?? fe._form;
+        if (unclaimed) setError(unclaimed);
+      } else setError(res.message);
+    });
+  }
+
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>{isAssign ? "Assign holder" : "Return"}</Button>
+      <Dialog
+        open={open}
+        onClose={close}
+        title={isAssign ? "Assign a holder" : "Request a return"}
+        footer={
+          <>
+            <Button variant="ghost" onClick={close}>Cancel</Button>
+            <Button variant="primary" loading={pending} onClick={submit} disabled={isAssign && !employeeId}>
+              {isAssign ? "Request assign" : "Request return"}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-fg-muted">
+            {isAssign
+              ? <>Creates a <span className="font-mono">lifecycle.assign</span> approval; {props.tag} stays where it is until it executes.</>
+              : <>Creates a <span className="font-mono">lifecycle.return</span> approval; {props.tag} stays with {props.holder.name} until it executes.</>}
+          </p>
+          {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+          {error && <Banner tone="fault" title={error} />}
+          {isAssign && (
+            <FormField label="Assign to" required error={fieldErrors.employeeId}>
+              {(p) => (
+                <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                  options={props.employees} value={employeeId} onChange={setEmployeeId} placeholder="Type a name or EMP number…" />
+              )}
+            </FormField>
+          )}
+          <FormField label="Reason" required={!isAssign} error={fieldErrors.reason}>
+            {(p) => <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={reason} onChange={(e) => setReason(e.target.value)} />}
+          </FormField>
+        </div>
+      </Dialog>
+    </>
+  );
+}

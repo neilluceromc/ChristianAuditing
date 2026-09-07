@@ -3,7 +3,7 @@
  * what breaks first, how old the fleet is, whether the spare pool covers the
  * people starting next week, and what "cleared for the rest of the day" means.
  */
-export type ShiftKind = "SLA" | "EXEC" | "HIRE" | "LEAVE" | "DATA";
+export type ShiftKind = "SLA" | "EXEC" | "HIRE" | "LEAVE" | "DATA" | "CHECK";
 
 export interface ShiftRow {
   /** stable identity for dismissal: "<kind>:<entityId>" */
@@ -25,7 +25,7 @@ export interface ShiftRow {
  * hire without kit outranks a data finding.
  */
 export const KIND_RANK: Record<ShiftKind, number> = {
-  SLA: 0, EXEC: 1, LEAVE: 2, HIRE: 3, DATA: 4,
+  SLA: 0, EXEC: 1, LEAVE: 2, HIRE: 3, DATA: 4, CHECK: 5,
 };
 
 export const SHIFT_LIMIT = 5;
