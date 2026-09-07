@@ -100,13 +100,13 @@ export default async function AccountabilityFormPage({ params }: { params: Promi
             file imports neither — so the clause instructed an operator to scan
             something that has never been on the page. The remaining "signed
             scan" is a different sense of the word and is true: it means the
-            signed paper, scanned and uploaded, which `uploadDocument` in
-            src/server/modules/inventory/document-actions.ts really does.
-            Putting a real code here is a separate piece of work, not a
-            reword — a different sheet, a different payload and a different
-            reader from the asset label's. */}
+            signed paper, scanned and uploaded — which now happens on the
+            PERSON, not the equipment (Phase 16 §6): `recordAcknowledgement`
+            in src/server/modules/employees/acknowledgement-actions.ts stores
+            it as an Acknowledgement on the employee, shown under the
+            "Accountability form" card on their page. */}
         <p className="font-mono text-[8.5px] text-[#667085]">
-          {employee.employeeNo} · the signed scan uploads back into the equipment&apos;s documents
+          After signing, IT records the scan on this person&apos;s page under Accountability form.
         </p>
       </div>
     </div>
