@@ -4,7 +4,9 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
@@ -13,7 +15,14 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { requestAssign, requestReturn } from "@/server/modules/employees/actions";
 import { assignAsset, returnAsset } from "@/server/modules/lifecycle/actions";
-import { RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, type ReturnOutcome } from "@/lib/lifecycle";
+import { DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, type ReturnOutcome } from "@/lib/lifecycle";
+
+/** The date input's floor — a loan starts tomorrow at the earliest in these dialogs. */
+const tomorrow = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
 
 type Props =
   | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[]; direct: boolean }
@@ -34,6 +43,8 @@ export function HolderControl(props: Props) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [mode, setMode] = useState<"DEPLOYED" | "TEMPORARY">("DEPLOYED");
+  const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
   const [outcome, setOutcome] = useState<ReturnOutcome>("TRIAGE");
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -42,19 +53,29 @@ export function HolderControl(props: Props) {
   const isAssign = props.mode === "assign";
 
   function close() {
-    setOpen(false); setReason(""); setEmployeeId(null); setOutcome("TRIAGE"); setError(null); setFieldErrors({}); setRetryAfter(null);
+    setOpen(false); setReason(""); setEmployeeId(null); setMode("DEPLOYED"); setLoanDueAt(defaultLoanDue(new Date()));
+    setOutcome("TRIAGE"); setError(null); setFieldErrors({}); setRetryAfter(null);
   }
 
   function submit() {
     setError(null); setFieldErrors({});
     startTransition(async () => {
       const res = props.mode === "assign"
-        ? (props.direct ? await assignAsset({ assetId: props.assetId, employeeId: employeeId ?? "", reason }) : await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason }))
+        ? (props.direct
+            ? await assignAsset({
+                assetId: props.assetId, employeeId: employeeId ?? "", status: mode,
+                loanDueAt: mode === "TEMPORARY" ? loanDueAt : undefined, reason,
+              })
+            : await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason }))
         : (props.direct ? await returnAsset({ assetId: props.assetId, outcome, reason }) : await requestReturn({ employeeId: props.holder.id, assetId: props.assetId, reason }));
       if (res.ok) {
         toast(
           props.direct
-            ? (props.mode === "assign" ? `${props.tag} assigned to ${(res.data as { employeeName: string }).employeeName}` : `${props.tag} returned · now ${(res.data as { status: string }).status}`)
+            ? (props.mode === "assign"
+                ? (mode === "TEMPORARY"
+                    ? `${props.tag} on loan to ${(res.data as { employeeName: string }).employeeName} until ${loanDueAt}`
+                    : `${props.tag} assigned to ${(res.data as { employeeName: string }).employeeName}`)
+                : `${props.tag} returned · now ${(res.data as { status: string }).status}`)
             : `${(res.data as { refNo: string }).refNo} created — waiting in the approval queue`,
           "settled",
         );
@@ -106,6 +127,19 @@ export function HolderControl(props: Props) {
           </p>
           {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
           {error && <Banner tone="fault" title={error} />}
+          {isAssign && props.direct && (
+            <SegmentedControl aria-label="Assignment kind" value={mode}
+              options={[{ value: "DEPLOYED", label: "Deployed" }, { value: "TEMPORARY", label: "Loan" }]}
+              onChange={(v) => setMode(v as "DEPLOYED" | "TEMPORARY")} />
+          )}
+          {isAssign && props.direct && mode === "TEMPORARY" && (
+            <FormField label="Loan until" required error={fieldErrors.loanDueAt} hint={`Defaults to ${DEFAULT_LOAN_DAYS} days.`}>
+              {(p) => (
+                <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} type="date"
+                  min={tomorrow()} value={loanDueAt} onChange={(e) => setLoanDueAt(e.target.value)} />
+              )}
+            </FormField>
+          )}
           {isAssign && (
             <FormField label="Assign to" required error={fieldErrors.employeeId}>
               {(p) => (

@@ -64,6 +64,17 @@ export function humanizeGuard(error: string): string {
 export const DEFAULT_LOAN_DAYS = 30;
 
 /**
+ * What the assign/loan dialogs' date field starts at before anyone touches
+ * it: DEFAULT_LOAN_DAYS out from today, day-precision UTC — same convention
+ * as loanDueFor's own dates below.
+ */
+export function defaultLoanDue(today: Date): string {
+  const floor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  floor.setUTCDate(floor.getUTCDate() + DEFAULT_LOAN_DAYS);
+  return floor.toISOString().slice(0, 10);
+}
+
+/**
  * What `loanDueAt` an assignment stores. Only a loan (TEMPORARY) carries one,
  * and it may not be in the past. Dates are day-precision UTC, like every
  * other date field this app stores (asset-diff.ts's toDay).

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_OUTCOMES,
-  humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
+  defaultLoanDue, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
 } from "./lifecycle";
 import { RETURN_TARGETS } from "./asset-class";
 
@@ -60,4 +60,10 @@ describe("loanDueFor (Phase 16 §4.2)", () => {
     expect(loanDueFor("TEMPORARY", "2026-09-06", today).ok).toBe(false);
   });
   it("the default loan is 30 days", () => expect(DEFAULT_LOAN_DAYS).toBe(30));
+});
+
+describe("defaultLoanDue", () => {
+  it("is DEFAULT_LOAN_DAYS out from today, UTC", () => {
+    expect(defaultLoanDue(new Date("2026-09-07T10:00:00Z"))).toBe("2026-10-07");
+  });
 });

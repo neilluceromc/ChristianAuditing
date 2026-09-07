@@ -14,6 +14,7 @@ import { StatusControl } from "@/components/inventory/status-control";
 import { FinanceReview } from "@/components/inventory/finance-review";
 import { ItCheck } from "@/components/inventory/it-check";
 import { HolderControl } from "@/components/inventory/holder-control";
+import { LoanDueControl } from "@/components/inventory/loan-due-control";
 import { ReplaceControl } from "@/components/inventory/replace-control";
 import { TriageControl } from "@/components/inventory/triage-control";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
@@ -109,17 +110,22 @@ export default async function AssetRecordLayout({
           </Banner>
         </div>
       )}
-      <p className="-mt-2 pb-3 text-[13px] text-fg-secondary">
-        {asset.model}
-        {asset.assignee && (
-          <>
-            {" · held by "}
-            <a href={`/employees/${asset.assignee.id}`} className="text-accent underline hover:text-accent-hover">
-              {asset.assignee.name}
-            </a>
-          </>
+      <div className="-mt-2 pb-3">
+        <p className="text-[13px] text-fg-secondary">
+          {asset.model}
+          {asset.assignee && (
+            <>
+              {" · held by "}
+              <a href={`/employees/${asset.assignee.id}`} className="text-accent underline hover:text-accent-hover">
+                {asset.assignee.name}
+              </a>
+            </>
+          )}
+        </p>
+        {asset.status === "TEMPORARY" && canMutate && direct && (
+          <LoanDueControl assetId={asset.id} tag={asset.tag} loanDueAt={asset.loanDueAt?.toISOString().slice(0, 10) ?? null} />
         )}
-      </p>
+      </div>
       {pending && (
         <div className="pb-3">
           <Banner

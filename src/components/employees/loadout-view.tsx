@@ -9,6 +9,7 @@ import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
 import { Menu, type MenuItem } from "@/components/ui/menu";
 import { Pill } from "@/components/ui/pill";
 import { Select } from "@/components/ui/select";
@@ -23,8 +24,17 @@ import { AddSlotDialog, RemoveExceptionButton, WaiveSlotDialog } from "@/compone
 import { requestAssign, requestAssignReserved, requestReturn } from "@/server/modules/employees/actions";
 import { assignAsset, assignReserved, replaceAsset, returnAsset } from "@/server/modules/lifecycle/actions";
 import { removeSlotException } from "@/server/modules/employees/exception-actions";
-import { RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, reasonRequiredFor, type ReturnOutcome } from "@/lib/lifecycle";
+import {
+  DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, reasonRequiredFor, type ReturnOutcome,
+} from "@/lib/lifecycle";
 import type { ActionResult } from "@/server/action-result";
+
+/** The date input's floor — a loan starts tomorrow at the earliest in this dialog. */
+const tomorrow = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
 
 export interface SlotTile {
   slotId: string;
@@ -95,6 +105,7 @@ export function LoadoutView({
   const [fillSlot, setFillSlot] = useState<SlotTile | null>(null);
   const [pickedSpare, setPickedSpare] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
   const [returning, setReturning] = useState<SlotTile["asset"] | null>(null);
   const [returnReason, setReturnReason] = useState("");
   const [replacing, setReplacing] = useState<SlotTile["asset"] | null>(null);
@@ -128,13 +139,21 @@ export function LoadoutView({
     setFieldErrors({});
     startTransition(async () => {
       if (direct) {
-        handle(await assignAsset({ assetId: pickedSpare, employeeId, reason }), ({ tag, employeeName }) => {
-          toast(`${tag} assigned to ${employeeName}`, "settled");
-          setFillSlot(null);
-          setPickedSpare(null);
-          setReason("");
-          router.refresh();
-        });
+        const isLoan = fillSlot?.loaner ?? false;
+        handle(
+          await assignAsset({
+            assetId: pickedSpare, employeeId, status: isLoan ? "TEMPORARY" : undefined,
+            loanDueAt: isLoan ? loanDueAt : undefined, reason,
+          }),
+          ({ tag, employeeName }) => {
+            toast(isLoan ? `${tag} on loan to ${employeeName} until ${loanDueAt}` : `${tag} assigned to ${employeeName}`, "settled");
+            setFillSlot(null);
+            setPickedSpare(null);
+            setReason("");
+            setLoanDueAt(defaultLoanDue(new Date()));
+            router.refresh();
+          },
+        );
       } else {
         handle(await requestAssign({ employeeId, assetId: pickedSpare, reason }), ({ refNo }) => {
           toast(`${refNo} created — tile shows pending until it executes`, "settled");
@@ -318,7 +337,7 @@ export function LoadoutView({
                   aria-label={name}
                   onClick={() => {
                     if (!mayAct) return;
-                    if (!a) { setFillSlot(tile); setPickedSpare(null); setFieldErrors({}); }
+                    if (!a) { setFillSlot(tile); setPickedSpare(null); setFieldErrors({}); setLoanDueAt(defaultLoanDue(new Date())); }
                     else if (!a.pendingRef) setReturning(a);
                   }}
                   className={cn(
@@ -504,7 +523,7 @@ export function LoadoutView({
       <Dialog
         open={fillSlot !== null}
         onClose={() => setFillSlot(null)}
-        title={fillSlot ? `Fill the ${fillSlot.name} slot` : ""}
+        title={fillSlot ? (fillSlot.loaner && direct ? `Lend for the ${fillSlot.name} slot` : `Fill the ${fillSlot.name} slot`) : ""}
         footer={
           <>
             <Button variant="ghost" onClick={() => setFillSlot(null)}>Cancel</Button>
@@ -543,6 +562,14 @@ export function LoadoutView({
                 </label>
               ))}
             </div>
+          )}
+          {fillSlot?.loaner && direct && (
+            <FormField label="Loan until" required error={fieldErrors.loanDueAt} hint={`Defaults to ${DEFAULT_LOAN_DAYS} days.`}>
+              {(p) => (
+                <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} type="date"
+                  min={tomorrow()} value={loanDueAt} onChange={(e) => setLoanDueAt(e.target.value)} />
+              )}
+            </FormField>
           )}
           <FormField
             label="Reason"
