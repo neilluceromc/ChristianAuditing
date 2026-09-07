@@ -974,7 +974,7 @@ the battery is unrunnable in one sitting.
 
 ---
 
-## 6a. What Phases 8, 9 and 10 have established (93 rules — read before executing anything)
+## 6a. What Phases 8 to 13 have established (119 rules — Phases 8-13 — read before executing anything)
 
 The plan's **Recorded scope decisions** are the full list (14). These are the ones the review
 sharpened, and the ones a later task can silently break. **Phase 8 is finished, but this section is
