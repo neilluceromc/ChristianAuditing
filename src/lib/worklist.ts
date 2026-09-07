@@ -3,9 +3,9 @@
  * user chose, each row with the one action that clears it. Pure; the queries
  * live in home/queries.ts.
  */
-import { DEFAULT_LOAN_DAYS } from "./lifecycle";
-
 export { DEFAULT_LOAN_DAYS } from "./lifecycle";
+/** A loan due within this many days is already on the list. */
+export const LOAN_DUE_SOON_DAYS = 7;
 
 export type WorkSectionId = "triage" | "repairs" | "check" | "hires" | "loans" | "missing" | "queue";
 
@@ -16,7 +16,7 @@ export const WORK_SECTIONS: readonly WorkSection[] = [
   { id: "repairs", title: "Repairs to chase", blurb: "Defective devices, longest down first." },
   { id: "check", title: "Awaiting IT check", blurb: "Registered by Purchasing; Finance sees them after you." },
   { id: "hires", title: "New hires", blurb: "Started within 30 days with required slots still empty." },
-  { id: "loans", title: "Loans", blurb: `Temporary devices out longer than ${DEFAULT_LOAN_DAYS} days.` },
+  { id: "loans", title: "Loans", blurb: "Loans overdue, due this week, or with no due date." },
   { id: "missing", title: "Missing & records", blurb: "Custody lost, or a record that does not add up." },
   { id: "queue", title: "Approvals & leavers", blurb: "What still goes through the queue, and who is leaving." },
 ];
@@ -41,6 +41,26 @@ export interface WorkRow {
 }
 
 export interface WorkGroup { section: WorkSection; rows: WorkRow[]; total: number }
+
+export interface LoanLike { id: string; tag: string; model: string; loanDueAt: Date | null; holder: string | null }
+
+const DAY_MS = 86_400_000;
+const daysBetween = (a: Date, b: Date) => Math.floor((b.getTime() - a.getTime()) / DAY_MS);
+
+/** Spec §4.3: the Loans section's one rule. Null when the loan is not due soon. */
+export function loanRow(a: LoanLike, now: Date): WorkRow | null {
+  const base = { key: `loans:${a.id}`, section: "loans" as const, href: `/inventory/${a.id}` };
+  const holder = a.holder ?? "unassigned";
+  if (a.loanDueAt === null) {
+    return { ...base, title: `${a.tag} on loan with no due date`, meta: `${holder} · set a due date`, action: "Set date", severity: 1000 };
+  }
+  const due = a.loanDueAt.toISOString().slice(0, 10);
+  const overdue = daysBetween(a.loanDueAt, now);
+  if (overdue > 0) return { ...base, title: `${a.tag} overdue by ${overdue} d`, meta: `${holder} · due ${due}`, action: "Review", severity: 500 + overdue };
+  const until = -overdue;
+  if (until <= LOAN_DUE_SOON_DAYS) return { ...base, title: `${a.tag} due in ${until} d`, meta: `${holder} · due ${due}`, action: "Review", severity: LOAN_DUE_SOON_DAYS - until };
+  return null;
+}
 
 export function groupWork(rows: WorkRow[], dismissed: Set<string>, opts: { limit?: number }): WorkGroup[] {
   const live = rows.filter((r) => !dismissed.has(r.key));

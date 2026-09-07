@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LOAN_DAYS, WORK_SECTIONS, groupWork, type WorkRow } from "./worklist";
+import { DEFAULT_LOAN_DAYS, LOAN_DUE_SOON_DAYS, WORK_SECTIONS, groupWork, loanRow, type WorkRow } from "./worklist";
 
 const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>
   ({ key, section, title: key, meta: "", href: "/x", action: "Do", severity, rank });
@@ -36,5 +36,35 @@ describe("groupWork", () => {
     ];
     const g = groupWork(queueRows, new Set(), {});
     expect(g[0].rows.map((r) => r.key)).toEqual(["q-sla", "q-exec", "q-leave"]);
+  });
+});
+
+describe("loanRow (Phase 16 §4.3)", () => {
+  const now = new Date("2026-09-07T12:00:00Z");
+  const loan = (loanDueAt: Date | null) => ({ id: "a1", tag: "BR-LT-0210", model: "T14", loanDueAt, holder: "Ana Cruz" });
+  it("no due date sits on top and asks for one", () => {
+    const r = loanRow(loan(null), now)!;
+    expect(r.title).toBe("BR-LT-0210 on loan with no due date");
+    expect(r.meta).toBe("Ana Cruz · set a due date");
+    expect(r.severity).toBe(1000);
+    expect(r.action).toBe("Set date");
+    expect(r.href).toBe("/inventory/a1");
+  });
+  it("overdue by N days", () => {
+    const r = loanRow(loan(new Date("2026-09-04T00:00:00Z")), now)!;
+    expect(r.title).toBe("BR-LT-0210 overdue by 3 d");
+    expect(r.severity).toBe(503);
+    expect(r.action).toBe("Review");
+  });
+  it("due within the week", () => {
+    const r = loanRow(loan(new Date("2026-09-10T00:00:00Z")), now)!;
+    expect(r.title).toBe("BR-LT-0210 due in 3 d");
+    expect(r.severity).toBe(LOAN_DUE_SOON_DAYS - 3);
+  });
+  it("due later is not on the list", () => {
+    expect(loanRow(loan(new Date("2026-10-30T00:00:00Z")), now)).toBeNull();
+  });
+  it("section blurb names the three cases", () => {
+    expect(WORK_SECTIONS.find((s) => s.id === "loans")?.blurb).toBe("Loans overdue, due this week, or with no due date.");
   });
 });

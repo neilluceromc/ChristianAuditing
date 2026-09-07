@@ -10,7 +10,7 @@ import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
-import { DEFAULT_LOAN_DAYS, groupWork, type WorkGroup, type WorkRow } from "@/lib/worklist";
+import { loanRow, groupWork, type WorkGroup, type WorkRow } from "@/lib/worklist";
 
 const DAY_MS = 86_400_000;
 const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY_MS));
@@ -96,31 +96,14 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
         repairQuote: true, cost: true, defectiveSince: true, vendor: { select: { name: true } },
       },
     }),
-    // Loans: ALL of them, not just the overdue ones — LOAN_DAYS only decides
-    // whether the row reads "overdue", not whether it's on the list.
+    // Loans: ordered by due date (nulls first), limited to 50
     prisma.asset.findMany({
       where: { cls: "IT", status: "TEMPORARY" },
-      select: { id: true, tag: true, model: true, updatedAt: true, assignee: { select: { name: true } } },
+      orderBy: [{ loanDueAt: { sort: "asc", nulls: "first" } }, { id: "asc" }],
+      take: 50,
+      select: { id: true, tag: true, model: true, loanDueAt: true, assignee: { select: { name: true } } },
     }),
   ]);
-
-  // When a loan most recently became TEMPORARY — falls back to updatedAt
-  // when no such audit row exists (e.g. seeded directly).
-  const loanAudits = loans.length
-    ? await prisma.auditEntry.findMany({
-        where: {
-          entityType: "asset",
-          entityId: { in: loans.map((a) => a.id) },
-          diff: { path: ["status", "to"], equals: "TEMPORARY" },
-        },
-        orderBy: { createdAt: "desc" },
-        select: { entityId: true, createdAt: true },
-      })
-    : [];
-  const loanSince = new Map<string, Date>();
-  for (const entry of loanAudits) {
-    if (!loanSince.has(entry.entityId)) loanSince.set(entry.entityId, entry.createdAt);
-  }
 
   const policies = hires.length
     ? await prisma.equipmentPolicy.findMany({
@@ -275,16 +258,8 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
   }
 
   for (const a of loans) {
-    const n = daysSince(loanSince.get(a.id) ?? a.updatedAt, now);
-    rows.push({
-      key: `loans:${a.id}`,
-      section: "loans",
-      title: `${a.tag} · ${a.model}`,
-      meta: `${a.assignee?.name ?? "unassigned"} · out ${n} d${n > DEFAULT_LOAN_DAYS ? " · overdue" : ""}`,
-      href: `/inventory/${a.id}`,
-      action: "Review",
-      severity: n,
-    });
+    const r = loanRow({ id: a.id, tag: a.tag, model: a.model, loanDueAt: a.loanDueAt, holder: a.assignee?.name ?? null }, now);
+    if (r) rows.push(r);
   }
 
   return groupWork(rows, activeDismissals(pref?.value, todayStamp(now)), opts);
