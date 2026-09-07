@@ -48,6 +48,10 @@ export default async function OffboardingWizardPage({
   // the surviving row instead of asserting it later
   const decided = items.flatMap((i) => (i.decision ? [{ ...i, decision: i.decision }] : []));
   const heldItems = items.filter((i) => i.held);
+  // how many of the still-held items this viewer would decide directly vs
+  // by request — the collect banner describes whichever paths are in play
+  const directHeld = heldItems.filter((i) => isDirectLifecycle(user.role, i.cls)).length;
+  const queuedHeld = heldItems.length - directHeld;
 
   return (
     <>
@@ -224,19 +228,46 @@ export default async function OffboardingWizardPage({
       {step === "collect" && (
         <ScanProvider
           canDecide={canDecide}
-          items={items
-            .filter((i) => i.held)
-            .map((i) => ({
-              assetId: i.assetId,
-              tag: i.tag,
-              decided: !!i.decision,
-              blockedBy: i.blockedBy?.refNo ?? null,
-            }))}
+          // The scan pool is the WHOLE union `items` carries (held ∪ decided-
+          // and-gone), not just the held half. A direct IT decision clears
+          // the holder in the same transaction it is recorded in, so the item
+          // is only reachable through the decided half from that moment on —
+          // filtering to `held` made a re-scan of a just-decided sticker read
+          // "not one of this person's items" instead of "already decided".
+          // Every decided-and-gone item carries a decision, so it can only
+          // ever produce the already-decided verdict, never a match.
+          items={items.map((i) => ({
+            assetId: i.assetId,
+            tag: i.tag,
+            decided: !!i.decision,
+            blockedBy: i.blockedBy?.refNo ?? null,
+          }))}
         >
           <Banner tone="neutral" title="Each decision is recorded the moment you confirm it">
-            Every item becomes its own <span className="font-mono">lifecycle.return</span> request, so a
-            half-finished offboarding is still N correct records. Nothing moves until the approval
-            executes — the asset keeps reading its current status meanwhile.
+            Every item becomes its own <span className="font-mono">lifecycle.return</span> record, so a
+            half-finished offboarding is still N correct records.
+            {/* Which mechanism applies is per item — isDirectLifecycle(role, cls),
+                the same predicate that picks each card's mode — so the sentence
+                is only rendered for the person whose confirm it describes, and
+                names both paths when their items mix. */}
+            {canDecide && directHeld > 0 && queuedHeld > 0 && (
+              <>
+                {" "}Items that say “applies now” move the moment you confirm and leave this list; the
+                others file a request and keep their current status until the approval executes.
+              </>
+            )}
+            {canDecide && directHeld > 0 && queuedHeld === 0 && (
+              <>
+                {" "}Each one applies the moment you confirm — the record is filed as already executed,
+                and the item leaves this list.
+              </>
+            )}
+            {canDecide && directHeld === 0 && queuedHeld > 0 && (
+              <>
+                {" "}Nothing moves until the approval executes — the asset keeps reading its current
+                status meanwhile.
+              </>
+            )}
           </Banner>
 
           {items.filter((i) => i.held).length === 0 ? (

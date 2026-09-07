@@ -11,8 +11,8 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  * verdict banners), and `item-decision.tsx` (each card's own reaction).
  *
  * A scan must write nothing — Confirm is what files an approval. Only the
- * "already-decided" test below performs a real write, and only by clicking
- * Confirm by hand, never by scanning.
+ * two "already-decided" tests below perform a real write, and only by
+ * clicking Confirm by hand, never by scanning.
  *
  * Seeded fixtures this file depends on (prisma/seed.ts): Dennis Ong EMP-0090
  * is the only OFFBOARDING employee and holds exactly three items —
@@ -257,20 +257,52 @@ test.describe.serial("offboarding scanner", () => {
     await expect(card.getByRole("radio", { name: "Returned" })).toBeChecked();
   });
 
-  test("scanning an already-decided item says so instead of re-opening it", async ({ page }) => {
-    // Phase 15: every IT-class decision now applies at once — assigneeId
-    // clears in the SAME transaction as the decision (lifecycle/apply.ts's
-    // "return" branch always disconnects the holder) — so an IT item can
-    // never be "held" (still in `items.filter(i => i.held)`, the pool this
-    // verdict is matched against) AND "decided" at the same time any more,
-    // which is exactly the state this test needs. Dennis's three seeded
-    // items are all IT, so none of them can reach it post-Phase-15. A
-    // Purchasing item still queues (isDirectLifecycle is false for a class
-    // it_staff doesn't manage) and stays held until a worker executes it —
-    // a car manufactured onto Dennis's own holdings, the same way case 8 of
+  test("scanning a just-decided IT item says so, even though the decision already took it out of their name", async ({
+    page,
+  }) => {
+    // Phase 15: an IT-class decision applies at once — assigneeId clears in
+    // the SAME transaction as the decision (lifecycle/apply.ts's "return"
+    // branch always disconnects the holder). The scan pool used to be
+    // `items.filter(i => i.held)`, so from that instant the item was simply
+    // gone from it and a re-scan of the same sticker read "not one of this
+    // person's items" — the wrong one of the four verdicts. The pool is now
+    // the whole held ∪ decided-and-gone union the page already carries
+    // (plan D-9), which is what this test guards. BR-HS-0510 is the one
+    // seeded item no later test in this file needs decidable: the blocker
+    // test below manufactures its approval on BR-LT-0166 and hydrates
+    // against BR-PH-0312.
+    await login(page, "it@thebackroomop.com");
+    await openCollect(page);
+    const group = page.getByRole("group", { name: "Decide BR-HS-0510" });
+    await waitForHydration(group.getByRole("radiogroup"));
+    await group.getByRole("radiogroup").getByText("Returned").click();
+    await group.getByRole("button", { name: "Confirm decision" }).click();
+    // direct mode's toast is "<tag> → <STATUS>", never "APR-… created"
+    await expect(page.getByText(/BR-HS-0510 → [A-Z_]+/)).toBeVisible({ timeout: 30_000 });
+
+    // The regression's precondition, proven rather than assumed: the
+    // decision has already left the asset with no holder, so a held-only
+    // pool could not contain it.
+    const headset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-HS-0510" } });
+    expect(headset.assigneeId).toBeNull();
+
+    // router.refresh() is not awaited after decideItem() — wait for the
+    // re-fetch to land (the card leaves the collect step once the item is no
+    // longer held) before scanning, or the OLD `items` prop can still answer.
+    await expect(group).toHaveCount(0, { timeout: 30_000 });
+
+    await scan(page, "BR-HS-0510");
+    await expect(page.getByText("BR-HS-0510 is already decided.")).toBeVisible();
+    await expect(page.getByText("BR-HS-0510 is not one of this person's items.")).toHaveCount(0);
+  });
+
+  test("scanning a decided-but-still-held Purchasing item says so too", async ({ page }) => {
+    // The other half of the pool's union: a Purchasing item still QUEUES
+    // (isDirectLifecycle is false for a class it_staff doesn't manage) and
+    // stays held with a PENDING decision until a worker executes it. A car
+    // manufactured onto Dennis's own holdings, the same way case 8 of
     // e2e/asset-classes.spec.ts builds its own leaver-with-a-car fixture,
-    // reproduces the scenario without touching any of his seeded IT items
-    // the rest of this file still relies on being freely decidable.
+    // reaches that state without touching his seeded IT items.
     const dennis = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
     const vehicleCategory = await db.assetCategory.findFirstOrThrow({ where: { name: "Vehicle" } });
     const sedanType = await db.assetType.findFirstOrThrow({ where: { name: "Sedan", categoryId: vehicleCategory.id } });
