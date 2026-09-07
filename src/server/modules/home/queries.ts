@@ -21,7 +21,7 @@ const WARRANTY_WINDOW_DAYS = 90;
  * count for its own sake.
  */
 export async function yourShift(userId: string, now: Date = new Date()): Promise<ShiftRow[]> {
-  const [breached, failed, leavers, hires, missing, orphaned, pref] = await Promise.all([
+  const [breached, failed, leavers, hires, missing, orphaned, awaiting, pref] = await Promise.all([
     prisma.approval.findMany({
       where: { state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } },
       orderBy: { slaAt: "asc" },
@@ -61,6 +61,13 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
       orderBy: { updatedAt: "asc" },
       take: 10,
       select: { id: true, tag: true, model: true, updatedAt: true },
+    }),
+    // Phase 14 (spec §5.5): IT assets Purchasing registered, waiting for IT.
+    prisma.asset.findMany({
+      where: { cls: "IT", itVerifiedAt: null },
+      orderBy: { createdAt: "asc" },
+      take: 10,
+      select: { id: true, tag: true, model: true, createdAt: true },
     }),
     prisma.userPreference.findUnique({
       where: { userId_key: { userId, key: DISMISS_PREF_KEY } },
@@ -161,6 +168,18 @@ export async function yourShift(userId: string, now: Date = new Date()): Promise
       href: `/inventory/${a.id}`,
       action: "Fix record",
       severity: daysSince(a.updatedAt, now),
+    });
+  }
+
+  for (const a of awaiting) {
+    rows.push({
+      key: `CHECK:${a.id}`,
+      kind: "CHECK",
+      title: `${a.tag} · ${a.model}`,
+      meta: `registered by Purchasing · ${daysSince(a.createdAt, now)} d waiting`,
+      href: `/inventory/${a.id}`,
+      action: "Check",
+      severity: daysSince(a.createdAt, now),
     });
   }
 

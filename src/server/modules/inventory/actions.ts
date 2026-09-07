@@ -15,7 +15,7 @@ import {
   ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
 import {
-  CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isStatusOf, parseCls,
+  CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isAwaitingItCheck, isStatusOf, parseCls,
 } from "@/lib/asset-class";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
@@ -469,7 +469,7 @@ export async function confirmAssetDetails(input: unknown): Promise<ActionResult<
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id: parsed.data.id },
-      select: { id: true, tag: true, financeConfirmedAt: true },
+      select: { id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true },
     });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
@@ -477,6 +477,10 @@ export async function confirmAssetDetails(input: unknown): Promise<ActionResult<
     }
     if (asset.financeConfirmedAt) {
       failure = conflict(`${asset.tag} was already confirmed.`);
+      return;
+    }
+    if (isAwaitingItCheck(asset)) {
+      failure = conflict(`${asset.tag} is waiting for IT's check — Finance confirms after IT.`);
       return;
     }
     // State-guarded write: the null check is IN the where clause, so two
@@ -654,4 +658,48 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
   revalidatePath(`/inventory/${id}`);
   revalidatePath("/inventory");
   return ok(out!);
+}
+
+const verifySchema = z.object({ id: z.string().min(1) });
+
+/**
+ * Phase 14 (spec §5.2): IT marks a Purchasing-registered IT asset checked.
+ * Finance's register and confirm wait for this. Same shape as confirmAssetDetails:
+ * refuse-not-silence, null check IN the where.
+ */
+export async function verifyAssetDetails(input: unknown): Promise<ActionResult<{ tag: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = verifySchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+
+  const asset = await prisma.asset.findUnique({
+    where: { id: parsed.data.id },
+    select: { id: true, tag: true, cls: true, itVerifiedAt: true },
+  });
+  if (!asset) return conflict("That asset no longer exists.");
+  if (asset.cls !== "IT") return conflict(`${asset.tag} is ${CLASS_PHRASE[asset.cls]} asset — Purchasing assets are not IT-checked.`);
+  if (asset.itVerifiedAt) return conflict(`${asset.tag} was already checked.`);
+
+  const hit = await prisma.$transaction(async (tx) => {
+    const r = await tx.asset.updateMany({
+      where: { id: asset.id, itVerifiedAt: null },
+      data: { itVerifiedAt: new Date(), itVerifiedById: user.id },
+    });
+    if (r.count === 0) return false;
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name,
+      entityType: "asset", entityId: asset.id,
+      action: "it.verify",
+      diff: { itVerified: { from: null, to: user.name } },
+    });
+    return true;
+  });
+  if (!hit) return conflict(`${asset.tag} was checked by someone else just now.`);
+  revalidatePath(`/inventory/${asset.id}`);
+  revalidatePath("/inventory");
+  revalidatePath("/finance/assets");
+  return ok({ tag: asset.tag });
 }

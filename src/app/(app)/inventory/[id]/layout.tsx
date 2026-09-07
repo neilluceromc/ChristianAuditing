@@ -3,7 +3,7 @@ import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
-import { CLASS_LABEL, canManageClass } from "@/lib/asset-class";
+import { CLASS_LABEL, canEditAsset, canManageClass, isAwaitingItCheck } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
@@ -12,6 +12,7 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { RecordTabs } from "@/components/inventory/record-tabs";
 import { RequestStatusChange } from "@/components/inventory/request-status-change";
 import { FinanceReview } from "@/components/inventory/finance-review";
+import { ItCheck } from "@/components/inventory/it-check";
 
 export default async function AssetRecordLayout({
   params,
@@ -24,9 +25,13 @@ export default async function AssetRecordLayout({
   const { id } = await params;
   const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
-  const canMutate = canManageClass(user.role, asset.cls);
+  const awaitingIt = isAwaitingItCheck(asset);
+  const canMutate = canManageClass(user.role, asset.cls);          // status, holder
+  const canEdit = canEditAsset(user.role, asset);                  // spec §5.4
+  const canCheck = awaitingIt && canManageClass(user.role, "IT");
   const returned = asset.financeReturnedAt !== null;
-  const canConfirm = (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt;
+  // Finance confirms after IT (spec §5.3) — absent while awaiting, not disabled.
+  const canConfirm = (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt && !awaitingIt;
   // Purchasing marks its own registrations corrected. The server action
   // already enforces this — b521e14.
   const canResubmit = canManageClass(user.role, asset.cls) && returned;
@@ -45,6 +50,8 @@ export default async function AssetRecordLayout({
               <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
             ) : returned ? (
               <Pill tone="accent">RETURNED BY FINANCE</Pill>
+            ) : awaitingIt ? (
+              <Pill tone="accent">AWAITING IT CHECK</Pill>
             ) : (
               // Accent, not neutral: the same shape as the repair-stage pill on
               // page.tsx, where settled reads neutral and in-flight reads accent.
@@ -55,14 +62,11 @@ export default async function AssetRecordLayout({
           </span>
         }
         actions={
-          canMutate || canConfirm || canResubmit ? (
+          canMutate || canEdit || canCheck || canConfirm || canResubmit ? (
             <>
-              {canMutate && (
-                <>
-                  <RequestStatusChange assetId={asset.id} currentStatus={asset.status} cls={asset.cls} />
-                  <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>
-                </>
-              )}
+              {canCheck && <ItCheck assetId={asset.id} tag={asset.tag} />}
+              {canMutate && <RequestStatusChange assetId={asset.id} currentStatus={asset.status} cls={asset.cls} />}
+              {canEdit && <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>}
               {(canConfirm || canResubmit) && (
                 <FinanceReview
                   assetId={asset.id}
