@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Role } from "@prisma/client";
 import {
   navIsActive,
   pathAllowedForRole,
@@ -6,7 +7,20 @@ import {
   ROLE_LANDING,
   ROLE_WORKSPACES,
   WORKSPACE_NAV,
+  type WorkspaceId,
 } from "./workspaces";
+
+/**
+ * Flattens one workspace's nav into the items a role actually sees — the
+ * same `!i.roles || i.roles.includes(role)` predicate `filterSectionsForRole`
+ * (`components/shell/sidebar.tsx`) and the command palette apply at render
+ * time. Kept local to the test rather than imported from `sidebar.tsx`: that
+ * module pulls in Prisma and the approvals query, which this lib-level suite
+ * has no business depending on for a pure nav-shape assertion.
+ */
+function navFor(role: Role, ws: WorkspaceId = "it") {
+  return WORKSPACE_NAV[ws].flatMap((s) => s.items).filter((i) => !i.roles || i.roles.includes(role));
+}
 
 describe("role → workspaces (brief §2)", () => {
   it("matches the brief's table", () => {
@@ -295,5 +309,15 @@ describe("IT workspace nav", () => {
   it("highlights it only when the state param matches", () => {
     expect(navIsActive("/purchases?state=SUBMITTED", "/purchases", new URLSearchParams("state=SUBMITTED"))).toBe(true);
     expect(navIsActive("/purchases?state=SUBMITTED", "/purchases", new URLSearchParams("state=DRAFT"))).toBe(false);
+  });
+
+  // Task 13: the batch register page's own nav entry, same shape as Purchase
+  // reviews above — reachable for admin/it_staff, not for a viewer sharing
+  // the same IT workspace.
+  it("IT can reach the batch register page", () => {
+    expect(navFor("it_staff").some((i) => i.href === "/inventory/register")).toBe(true);
+  });
+  it("does not hand a viewer the batch register link", () => {
+    expect(navFor("viewer").some((i) => i.href === "/inventory/register")).toBe(false);
   });
 });

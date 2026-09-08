@@ -52,8 +52,9 @@ function asset(
   row: Partial<AssetSheetRow> & Pick<AssetSheetRow, "tag" | "model" | "categoryName">,
 ): AssetSheetRow {
   return {
-    serial: null, typeName: null, status: "", assigneeName: null, assigneeNo: null,
-    purchasedAt: null, cost: null, warrantyUntil: null, vendorName: null, rmaRef: null, notes: null,
+    brand: null, serial: null, typeName: null, status: "", assigneeName: null, assigneeNo: null,
+    purchasedAt: null, cost: null, warrantyUntil: null, loanDueAt: null, vendorName: null,
+    invoiceRef: null, rmaRef: null, notes: null,
     ...row,
   };
 }

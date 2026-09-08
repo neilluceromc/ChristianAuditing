@@ -48,6 +48,30 @@ describe("assetDiff", () => {
     expect(changed).not.toHaveProperty("model");
   });
 
+  it("day-normalises loanDueAt the same way as warrantyUntil — a genuine day change is the ONLY key, a same-day round trip is not a diff", () => {
+    const before = {
+      model: "ThinkPad X1",
+      cost: decimal(11000),
+      purchasedAt: new Date("2024-09-01T00:00:00Z"),
+      loanDueAt: new Date("2026-09-01T07:59:47.133Z"),
+    };
+    const patch = {
+      model: "ThinkPad X1",
+      cost: "11000.00",
+      purchasedAt: new Date("2024-09-01T00:00:00Z"), // same day, time-of-day round trip
+      loanDueAt: new Date("2026-09-02T00:00:00Z"), // a real day change
+    };
+    const { diff, changed } = assetDiff(before, patch);
+    expect(diff).toEqual({
+      loanDueAt: { from: "2026-09-01T00:00:00.000Z", to: "2026-09-02T00:00:00.000Z" },
+    });
+    // Only loanDueAt should be written — purchasedAt round-tripped at the
+    // same day and must not be dragged along (same discipline as C-1).
+    expect(changed).toEqual({ loanDueAt: patch.loanDueAt });
+    expect(changed).not.toHaveProperty("purchasedAt");
+    expect(changed).not.toHaveProperty("model");
+  });
+
   it("a present-null cost is a real, recorded change", () => {
     const before = { model: "ThinkPad X1", cost: decimal(11000) };
     const patch = { model: "ThinkPad X1", cost: null };

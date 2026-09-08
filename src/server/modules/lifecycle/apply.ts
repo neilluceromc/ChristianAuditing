@@ -6,11 +6,11 @@ import {
 
 export type LifecycleAsset = {
   id: string; tag: string; cls: AssetClass; status: AssetStatus;
-  assigneeId: string | null; defectiveSince: Date | null; returnedAt: Date | null;
+  assigneeId: string | null; defectiveSince: Date | null; returnedAt: Date | null; loanDueAt: Date | null;
 };
 
 export type LifecycleChange =
-  | { kind: "assign"; employeeId: string; status: AssetStatus }
+  | { kind: "assign"; employeeId: string; status: AssetStatus; loanDueAt: Date | null }
   | { kind: "return"; status: AssetStatus }
   | { kind: "change-status"; status: AssetStatus };
 
@@ -82,6 +82,15 @@ export async function prepareLifecycle(
     if (asset.assigneeId && !keepsHolder) {
       return { ok: false, error: `Execution guard: ${asset.tag} is still assigned — request a lifecycle.return first, then change its status` };
     }
+  }
+
+  // Phase 16 (spec §4.1): only a loan carries a due date; every other status
+  // write clears it. No guard here — a legacy queued assign without a date
+  // still executes (worker messages are frozen).
+  const nextDue = change.kind === "assign" && change.status === "TEMPORARY" ? change.loanDueAt : null;
+  if ((nextDue?.getTime() ?? null) !== (asset.loanDueAt?.getTime() ?? null)) {
+    updates.loanDueAt = nextDue;
+    diff.loanDueAt = { from: asset.loanDueAt, to: nextDue };
   }
 
   // The repairs view's Down clock starts when a device ENTERS defective, and

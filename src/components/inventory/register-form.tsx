@@ -1,26 +1,47 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import type { AssetClass } from "@prisma/client";
+import { tagKey } from "@/lib/tag-key";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { FormField } from "@/components/ui/form-field";
+import { FormError, FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { nextTags, preferredPrefix, type TagRun } from "@/lib/receiving";
-import { CLASS_EXAMPLE, withClsQS } from "@/lib/asset-class";
+import { nextTags, preferredPrefix, RUN_REFUSAL, type TagRun } from "@/lib/receiving";
+import { CLASS_EXAMPLE } from "@/lib/asset-class";
+import { checkIdentifiers } from "@/server/modules/inventory/actions";
+import { uploadBatchDocument } from "@/server/modules/inventory/document-actions";
+import { RegisterSuccess } from "./register-success";
 import type { ActionResult } from "@/server/action-result";
 
-// Mirrors the discriminated union `nextTags` returns (`./lib/receiving.ts`) —
-// the reason for each refusal, in words a form can show next to Submit.
-const RUN_REFUSAL: Record<Exclude<TagRun, { ok: true }>["reason"], string> = {
-  "bad-prefix": "Prefix must be two capital letters",
-  overflow: "That run passes BR-XX-9999 — register fewer, or use another prefix",
-  "bad-count": "Quantity must be at least 1",
-};
+/**
+ * The first serial that repeats when scanning left to right — same rule and
+ * same wording as `registerAssets`'s own in-batch dupe check (`receiving.ts`):
+ * `arr.find((s, i) => arr.indexOf(s) !== i)`. Kept here rather than shared,
+ * because it operates on the CLIENT's live array (not yet trimmed/filtered)
+ * and returns both the offending value and the full set of rows it touches —
+ * `registerAssets` only ever needs the single value to refuse with.
+ */
+function firstDuplicate(values: string[]): { value: string | null; all: Set<string> } {
+  const seen = new Set<string>();
+  const dup = new Set<string>();
+  let value: string | null = null;
+  for (const raw of values) {
+    const v = raw.trim();
+    if (!v) continue;
+    if (seen.has(v)) {
+      dup.add(v);
+      if (value === null) value = v;
+    } else {
+      seen.add(v);
+    }
+  }
+  return { value, all: dup };
+}
 
 export function RegisterForm({
   categories,
@@ -37,9 +58,8 @@ export function RegisterForm({
   requests: Array<{ id: string; refNo: string }>;
   prefixCountsByCategory: Record<string, Array<{ prefix: string; n: number }>>;
   highestByPrefix: Record<string, number | null>;
-  action: (payload: Record<string, unknown>) => Promise<ActionResult<{ created: number }>>;
+  action: (payload: Record<string, unknown>) => Promise<ActionResult<{ created: number; ids: string[] }>>;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [categoryId, setCategoryId] = useState("");
@@ -53,11 +73,102 @@ export function RegisterForm({
   const [cost, setCost] = useState("");
   const [vendorId, setVendorId] = useState("");
   const [requestId, setRequestId] = useState("");
+  const [warrantyUntil, setWarrantyUntil] = useState("");
+  const [brand, setBrand] = useState("");
+  const [notes, setNotes] = useState("");
+  const [invoiceRef, setInvoiceRef] = useState("");
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const invoiceInputId = useId();
 
   const [run, setRun] = useState<TagRun | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const [registered, setRegistered] = useState<{ ids: string[]; tags: string[] } | null>(null);
+  const [docError, setDocError] = useState(false);
+
+  // Task 13's live check: it runs the SAME `checkIdentifiers` call whichever
+  // cell was blurred, because a batch's duplicate hazard is cross-row (any
+  // tag against any other tag, any serial against any other serial) rather
+  // than per-field the way the single-asset form's is. `dupSerials` is
+  // computed client-side only — no round trip needed to know a batch repeats
+  // itself. `registeredTags`/`registeredSerials` hold the normalised values
+  // the server has already reported as taken; membership is re-tested against
+  // whatever is currently typed on every render, so a row that is edited away
+  // from a flagged value stops being invalid without needing its own clear.
+  const [dupSerials, setDupSerials] = useState<Set<string>>(new Set());
+  const [registeredTags, setRegisteredTags] = useState<Set<string>>(new Set());
+  const [registeredSerials, setRegisteredSerials] = useState<Set<string>>(new Set());
+  const checkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Staleness guard, same shape as `asset-form.tsx`'s `latestRef`: a 300ms
+  // response can land after the arrays on screen have already moved on.
+  const latestRef = useRef({ tags, serials });
+  latestRef.current = { tags, serials };
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (checkTimer.current) clearTimeout(checkTimer.current);
+    };
+  }, []);
+
+  /**
+   * Runs the in-batch duplicate-serial check synchronously (no server round
+   * trip needed) and, unless that already found something, fires the shared
+   * `checkIdentifiers` lookup for both arrays as they stand right now.
+   * Called on blur (debounced) and once more, undebounced, at submit — never
+   * awaited by either caller, because the check is advisory only (R9 note:
+   * the server remains the authority, and refuses with the same words).
+   *
+   * Staleness guard (below) compares array structures using JSON.stringify
+   * rather than join(""), which is non-injective (e.g. ["A","BC"] and ["AB","C"]
+   * both become "ABC"), so a response for a different array could incorrectly
+   * pass as current.
+   */
+  function runIdentifierCheck() {
+    const snapshot = latestRef.current;
+    const { value: dupValue, all: dupAll } = firstDuplicate(snapshot.serials);
+    setDupSerials(dupAll);
+    if (dupValue) {
+      setErrors((e) => ({ ...e, serials: `Serial ${dupValue} appears twice in this batch.` }));
+    }
+    const tagsToCheck = snapshot.tags;
+    const serialsToCheck = snapshot.serials.filter((s) => s.trim().length > 0);
+    void checkIdentifiers({ tags: tagsToCheck, serials: serialsToCheck }).then((res) => {
+      if (!mountedRef.current || !res.ok) return;
+      const same = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
+      const stale =
+        !same(tagsToCheck, latestRef.current.tags) ||
+        !same(serialsToCheck, latestRef.current.serials.filter((s) => s.trim().length > 0));
+      if (stale) return;
+      // R9: normalise both sides the way the server does — tags via
+      // `tagKey`, serials trimmed — so a lower-case typed tag or a
+      // padded serial still matches a normalised server hit.
+      const takenTags = new Set(res.data.tags.map(tagKey));
+      const takenSerials = new Set(res.data.serials.map((s) => s.trim()));
+      setRegisteredTags(takenTags);
+      setRegisteredSerials(takenSerials);
+      setErrors((e) => {
+        const next = { ...e };
+        if (takenTags.size) next.tags = `Already registered: ${[...new Set(res.data.tags)].join(", ")}`;
+        else delete next.tags;
+        // The in-batch duplicate found above keeps the one text slot for
+        // `errors.serials` — same precedence `registerAssets` uses server
+        // side (it refuses the in-batch dupe before it ever queries for an
+        // existing one).
+        if (!dupValue) {
+          if (takenSerials.size) next.serials = `Already registered: ${[...new Set(res.data.serials)].join(", ")}`;
+          else delete next.serials;
+        }
+        return next;
+      });
+    });
+  }
+
+  function scheduleIdentifierCheck() {
+    if (checkTimer.current) clearTimeout(checkTimer.current);
+    checkTimer.current = setTimeout(runIdentifierCheck, 300);
+  }
 
   const typesForCategory = types.filter((t) => t.categoryId === categoryId);
   const cls: AssetClass = categories.find((c) => c.id === categoryId)?.cls ?? categories[0]?.cls ?? "IT";
@@ -111,6 +222,10 @@ export function RegisterForm({
     setErrors({});
     setConflictMsg(null);
     setRetryAfter(null);
+    // Step 2's other trigger point: fired here too (undebounced, unawaited)
+    // so a batch submitted without ever blurring a cell still gets painted —
+    // the actual submission below does not wait on it either way.
+    runIdentifierCheck();
     startTransition(async () => {
       const res = await action({
         categoryId,
@@ -122,9 +237,36 @@ export function RegisterForm({
         cost: cost || undefined,
         vendorId: vendorId || undefined,
         requestId: requestId || undefined,
+        warrantyUntil: warrantyUntil || undefined,
+        brand: brand || undefined,
+        notes: notes || undefined,
+        invoiceRef: invoiceRef || undefined,
       });
       if (res.ok) {
-        router.push("/inventory" + withClsQS("", cls));
+        if (invoiceFile) {
+          const fd = new FormData();
+          for (const id of res.data.ids) fd.append("assetIds", id);
+          fd.set("kind", "invoice");
+          fd.set("file", invoiceFile);
+          try {
+            const up = await uploadBatchDocument(fd);
+            if (!up.ok) setDocError(true);
+          } catch {
+            // Same reasoning as `AssetForm`'s per-file upload loop: the
+            // assets themselves are already committed, so a thrown upload
+            // must read as "the invoice didn't attach", never as the
+            // registration having failed.
+            setDocError(true);
+          }
+        }
+        // Freeze the tags this submission actually sent, not the live `tags`
+        // state: a later successful registration revalidates `/inventory`,
+        // and if that also refreshes this page's server-supplied
+        // `highestByPrefix` prop, the [prefix, quantity, highestByPrefix]
+        // effect above recomputes a NEW suggested run for the next batch —
+        // silently replacing what the success panel would otherwise display,
+        // even though the assets already created keep their real tags.
+        setRegistered({ ids: res.data.ids, tags });
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
         const fe = res.fieldErrors ?? {};
@@ -133,6 +275,45 @@ export function RegisterForm({
         if (unclaimed) setConflictMsg(unclaimed);
       } else setConflictMsg(res.message);
     });
+  }
+
+  /** Clears every field and the tag run — the whole form, back to its initial state. */
+  function reset() {
+    setCategoryId("");
+    setTypeId("");
+    setModel("");
+    setQuantity(1);
+    setPrefix("");
+    setTags([]);
+    setSerials([]);
+    setPurchasedAt("");
+    setCost("");
+    setVendorId("");
+    setRequestId("");
+    setWarrantyUntil("");
+    setBrand("");
+    setNotes("");
+    setInvoiceRef("");
+    setInvoiceFile(null);
+    setRun(null);
+    setErrors({});
+    setConflictMsg(null);
+    setRetryAfter(null);
+    setDupSerials(new Set());
+    setRegisteredTags(new Set());
+    setRegisteredSerials(new Set());
+    setRegistered(null);
+    setDocError(false);
+  }
+
+  if (registered) {
+    return (
+      <RegisterSuccess tags={registered.tags} ids={registered.ids} cls={cls} onAgain={reset}>
+        {docError && (
+          <Banner tone="attention" title="Registered — the invoice did not attach. Add it from any unit's Documents tab." />
+        )}
+      </RegisterSuccess>
+    );
   }
 
   return (
@@ -224,23 +405,31 @@ export function RegisterForm({
                 <div key={i} className="grid grid-cols-2 gap-2">
                   <Input
                     aria-label={`Tag ${i + 1}`}
+                    invalid={registeredTags.has(tagKey(tag))}
                     value={tag}
                     onChange={(e) => {
                       const t = e.target.value.toUpperCase();
                       setTags((prev) => prev.map((x, j) => (j === i ? t : x)));
                     }}
+                    onBlur={scheduleIdentifierCheck}
                   />
                   <Input
                     aria-label={`Serial ${i + 1}`}
                     placeholder="Serial (optional)"
+                    invalid={
+                      !!serials[i]?.trim() &&
+                      (dupSerials.has(serials[i].trim()) || registeredSerials.has(serials[i].trim()))
+                    }
                     value={serials[i] ?? ""}
                     onChange={(e) => {
                       const s = e.target.value;
                       setSerials((prev) => prev.map((x, j) => (j === i ? s : x)));
                     }}
+                    onBlur={scheduleIdentifierCheck}
                   />
                 </div>
               ))}
+              <FormError>{errors.serials}</FormError>
             </div>
           )}
         </CardBody>
@@ -255,7 +444,18 @@ export function RegisterForm({
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 type="date"
                 value={purchasedAt}
-                onChange={(e) => setPurchasedAt(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setPurchasedAt(value);
+                  // Derived, pre-filled, never blank — same +12 month rule as
+                  // `asset-form.tsx:79-84`, only offered when warranty is
+                  // still empty so a hand-edited date never clobbers it.
+                  if (value && !warrantyUntil) {
+                    const d = new Date(`${value}T00:00:00Z`);
+                    d.setUTCFullYear(d.getUTCFullYear() + 1);
+                    setWarrantyUntil(d.toISOString().slice(0, 10));
+                  }
+                }}
               />
             )}
           </FormField>
@@ -296,6 +496,54 @@ export function RegisterForm({
               </Select>
             )}
           </FormField>
+          <FormField label="Warranty until" hint="Pre-filled at purchase + 12 months — adjust if the quote says otherwise." error={errors.warrantyUntil}>
+            {(p) => (
+              <Input
+                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                type="date"
+                value={warrantyUntil}
+                onChange={(e) => setWarrantyUntil(e.target.value)}
+              />
+            )}
+          </FormField>
+          <FormField label="Brand" error={errors.brand}>
+            {(p) => (
+              <Input
+                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+              />
+            )}
+          </FormField>
+          <FormField label="Invoice / receipt no." error={errors.invoiceRef}>
+            {(p) => (
+              <Input
+                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                value={invoiceRef}
+                onChange={(e) => setInvoiceRef(e.target.value)}
+              />
+            )}
+          </FormField>
+          <FormField label="Notes" error={errors.notes} className="sm:col-span-2">
+            {(p) => (
+              <Textarea
+                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            )}
+          </FormField>
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <label htmlFor={invoiceInputId} className="text-xs font-medium text-fg">Invoice document</label>
+            <input
+              id={invoiceInputId}
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg"
+              className="text-xs text-fg-secondary"
+              onChange={(e) => setInvoiceFile(e.target.files?.[0] ?? null)}
+            />
+            <p className="text-[11px] text-fg-muted">Attached to every unit in this batch.</p>
+          </div>
         </CardBody>
       </Card>
 

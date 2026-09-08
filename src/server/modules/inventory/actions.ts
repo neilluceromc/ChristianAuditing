@@ -23,7 +23,7 @@ import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
 import { assetDiff } from "@/lib/asset-diff";
-import { TAG_SHAPE } from "@/lib/tag-key";
+import { TAG_SHAPE, tagKey } from "@/lib/tag-key";
 import { humanizeGuard } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
 
@@ -184,6 +184,9 @@ const createSchema = z.object({
   cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000).multipleOf(0.01, "Whole centavos only")]).optional(),
   warrantyUntil: dateStr.optional(),
   notes: z.string().trim().max(2000).optional(),
+  vendorId: z.string().optional(),
+  brand: z.string().trim().max(60).optional(),
+  invoiceRef: z.string().trim().max(60).optional(),
   requestedStatus: z.enum(CREATABLE_STATUSES),
   assigneeId: z.string().optional(),
   assignReason: z.string().trim().max(500).optional(),
@@ -259,6 +262,9 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           cost: toCost(d.cost),
           warrantyUntil: toDate(d.warrantyUntil),
           notes: d.notes || null,
+          vendorId: d.vendorId || null,
+          brand: d.brand || null,
+          invoiceRef: d.invoiceRef || null,
           itVerifiedAt: selfChecked ? new Date() : null,
           itVerifiedById: selfChecked ? user.id : null,
         },
@@ -282,7 +288,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
         if (isDirectLifecycle(user.role, category.cls)) {
           const asset: LifecycleAsset = created;
           const prepared = await prepareLifecycle(tx, asset, {
-            kind: "assign", employeeId: plan.approval.assigneeId, status: plan.approval.toStatus,
+            kind: "assign", employeeId: plan.approval.assigneeId, status: plan.approval.toStatus, loanDueAt: null,
           });
           if (!prepared.ok) throw new DirectRefusal(humanizeGuard(prepared.error));
           await commitLifecycle(tx, created.id, prepared.prepared);
@@ -360,6 +366,8 @@ const updateSchema = z.object({
   warrantyUntil: dateStr.optional(),
   notes: z.string().trim().max(2000).optional(),
   vendorId: z.string().optional(),
+  brand: z.string().trim().max(60).optional(),
+  invoiceRef: z.string().trim().max(60).optional(),
   rmaRef: z.string().trim().max(60).optional(),
   repairQuote: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000).multipleOf(0.01, "Whole centavos only")]).optional(),
 });
@@ -410,6 +418,8 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
     warrantyUntil: toDate(d.warrantyUntil),
     notes: d.notes || null,
     vendorId: d.vendorId || null,
+    brand: d.brand || null,
+    invoiceRef: d.invoiceRef || null,
     rmaRef: d.rmaRef || null,
     repairQuote: toCost(d.repairQuote),
   };
@@ -763,4 +773,24 @@ export async function verifyAssetDetails(input: unknown): Promise<ActionResult<{
   revalidatePath("/inventory");
   revalidatePath("/finance/assets");
   return ok({ tag: asset.tag });
+}
+
+const identifiersSchema = z.object({
+  tags: z.array(z.string().trim().max(20)).max(200).optional(),
+  serials: z.array(z.string().trim().max(120)).max(200).optional(),
+});
+
+/** Spec §2.4: which of these tags/serials already exist, on any asset of any class. Echoes identifiers only. */
+export async function checkIdentifiers(input: unknown): Promise<ActionResult<{ tags: string[]; serials: string[] }>> {
+  const user = await actionRole("admin", "it_staff", "purchasing_staff");
+  if (!user) return forbidden();
+  const parsed = identifiersSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const tags = [...new Set((parsed.data.tags ?? []).map(tagKey).filter(Boolean))];
+  const serials = [...new Set((parsed.data.serials ?? []).filter(Boolean))];
+  const [byTag, bySerial] = await Promise.all([
+    tags.length ? prisma.asset.findMany({ where: { tag: { in: tags } }, select: { tag: true } }) : [],
+    serials.length ? prisma.asset.findMany({ where: { serial: { in: serials } }, select: { serial: true } }) : [],
+  ]);
+  return ok({ tags: byTag.map((a) => a.tag), serials: bySerial.map((a) => a.serial as string) });
 }

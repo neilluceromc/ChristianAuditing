@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { markDocumentSigned, uploadDocument } from "@/server/modules/inventory/document-actions";
+import { DOCUMENT_KINDS } from "@/lib/documents";
 
 export interface DocumentRow {
   id: string;
@@ -22,21 +23,28 @@ export interface DocumentRow {
   downloadHref: string;
 }
 
-const KIND_OPTIONS = [
-  { value: "receipt", label: "Receipt" },
-  { value: "accountability-form", label: "Accountability form" },
-  { value: "photo", label: "Photo" },
-  { value: "other", label: "Other" },
-];
+const KIND_LABELS: Record<(typeof DOCUMENT_KINDS)[number], string> = {
+  receipt: "Receipt",
+  "accountability-form": "Accountability form",
+  photo: "Photo",
+  other: "Other",
+  invoice: "Invoice",
+};
+const KIND_OPTIONS = DOCUMENT_KINDS.map((value) => ({ value, label: KIND_LABELS[value] }));
 
 export function DocumentsPanel({
   assetId,
   docs,
-  canMutate,
+  canUpload,
+  canSign,
 }: {
   assetId: string;
   docs: DocumentRow[];
-  canMutate: boolean;
+  /** Phase 16 (ruling R14): the managing department, or the registering
+   * department while IT has not yet checked this asset — `canAttachDocuments`. */
+  canUpload: boolean;
+  /** Marking an accountability form signed stays `canManageClass` — unchanged by R14. */
+  canSign: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -97,7 +105,7 @@ export function DocumentsPanel({
               {doc.signed ? (
                 <Pill tone="accent">SIGNED</Pill>
               ) : (
-                canMutate && doc.kind === "accountability-form" && (
+                canSign && doc.kind === "accountability-form" && (
                   <Button size="sm" variant="ghost" onClick={() => sign(doc.id)}>Mark signed</Button>
                 )
               )}
@@ -109,7 +117,7 @@ export function DocumentsPanel({
         </ul>
       )}
 
-      {canMutate && (
+      {canUpload && (
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}

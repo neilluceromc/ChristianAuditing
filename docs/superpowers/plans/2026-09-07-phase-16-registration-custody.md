@@ -12,6 +12,82 @@
 
 **Baselines on `main` at `7712524`:** 998 unit / 54 files · 214 e2e / 16 files · `tsc` and `lint` clean · 16 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
+> ### AMENDED DURING EXECUTION — D-1 through D-20
+>
+> *(Ruling R4 — adding `.superpowers/` to `.gitignore` in Task 1's commit range — was raised at pre-flight and withdrawn before Task 1 started: the directory was already line 16 of `.gitignore`, and the earlier `check-ignore` miss was because a trailing-slash pattern only matches an existing directory. No plan change resulted, so it carries no `D-` number.)*
+>
+> **D-1. Task 2 `SlotLike.exceptionId`:** the ADD-slot shape the implementer emitted carries an additive `exceptionId` field (alongside `id`/`name`/`assetTypeId`/`required`/`loaner`) beyond what the plan's Task 2 steps named — accepted, since Task 5's `SlotTile` needs exactly this id to route a waive/remove action at the right exception row. Lesson: a plan that specifies a pure function's inputs sometimes under-specifies the shape a later task's UI will need from its output; the reviewer checked the consumer before objecting.
+>
+> **D-2. Task 4 `groupExceptionsByEmployee`:** the first pass duplicated one grouping loop verbatim across `employees/queries.ts` and `home/queries.ts` (Important, fix round 1) — extracted into `src/lib/loadout.ts` and reused by both, then by `offboarding/queries.ts` too (D-3). Lesson: two call sites computing the same grouping is the review's job to catch even when each one is individually correct.
+>
+> **D-3. Task 4 offboarding applies exceptions too (Ruling R5):** spec §3.3 says EVERY loadout consumer applies exceptions; the offboarding list (`offboarding/queries.ts:316-317`) was still computing loadouts without them and had been called out of scope by the implementer. Fixed in the same review round. — Why: the spec's word "every" is not qualified by which screen. — Cost if wrong: an extra small query on the offboarding list.
+>
+> **D-4. Task 4→5 offboarding policy-card gate (Ruling R6):** the offboarding wizard's policy card gated on `policyName !== null`, hiding a person's ADD-only personal slots entirely. Folded into Task 5: render the card whenever slots exist, titled "Personal loadout" when there is no policy name. — Cost if wrong: one conditional silently hiding real slots.
+>
+> **D-5. Task 5 `Pill` gains a `title` prop:** an additive, backward-compatible prop (native tooltip text) the plan's component list didn't mention — accepted as a small, contained addition rather than a new component.
+>
+> **D-6. Task 5 the add-a-slot control (Ruling R7):** the plan's brief named a "slots card header" for the Add-a-slot button that does not exist anywhere in the actual page; the button living in the existing Slots/Table control bar instead is accepted as a plan defect with no functional cost. Lesson: a brief describing UI structure from memory can simply be wrong about the DOM; the reviewer checks the rendered page, not the brief's prose.
+>
+> **D-7. Task 6 every `{ kind: "assign" }` literal gains `loanDueAt` (Ruling R1):** `LifecycleChange.assign.loanDueAt` is required on the union member — tsc forces it — but plan Task 6 Step 4 named only `LifecycleAsset` literals. Every `assign` literal (the worker, `assignAsset`/`assignReserved`/`replaceAsset`, `createAsset`'s direct branch) gains it (the parsed date where the caller has one, `null` otherwise), and every asset loaded for `prepareLifecycle` now carries `loanDueAt`. Lesson: a plan naming one type in a union as the thing to update doesn't excuse the type-checker from enforcing every literal of a sibling member too.
+>
+> **D-8. Task 7 `minLoanDue`/`defaultLoanDue` (fix round 1):** a `tomorrow()`-shaped min-date helper had been duplicated across `loadout-view.tsx`, `bulk-drawer.tsx` and `holder-control.tsx` (Important, mixed local getters with UTC serialization). Unified into `src/lib/lifecycle.ts` as `minLoanDue`/`defaultLoanDue`, consumed by all three components and by `loan-due-control.tsx`. Lesson: three components independently computing "tomorrow" is the same defect as D-2's grouping loop, one layer down the stack.
+>
+> **D-9. Task 9 `resolveBulkWhere`:** `bulkChangeStatus` and the new `bulkAssign` both resolve a selection (`ids` or `filters`) to a `Prisma.AssetWhereInput` the same way; extracted once in `lifecycle/actions.ts` rather than writing the rule twice. Not plan-mandated, but the same "one rule, every reader" discipline the plan's Global Constraints already require of `buildAssetWhere`.
+>
+> **D-10. Task 9 the bulk drawer surfaces `status` field errors (fix round 1):** `bulkAssign`'s `status` validation error was computed server-side but never rendered in the drawer (Important, spec ❌) — fixed to show alongside the other field errors, same round as D-9.
+>
+> **D-11. Task 12 Vendor shown once (Ruling R8):** the record page shows Vendor once, under Procurement; the Repair card no longer lists Vendor and no longer renders for an RMA-less vendor-only asset. Half-fixed at first pass (Vendor still duplicated in the Repair card), completed in fix round 1. — Cost if wrong: an RMA-less vendor asset shows no Repair card at all.
+>
+> **D-12. Task 13 `tagKey` normalisation in both live checks (Ruling R9):** `asset-form.tsx`'s live duplicate check compared the raw blurred tag against the server's `tagKey`-normalised tags, so a lower-case typed tag could miss a real hit. Both `asset-form.tsx` and the new `register-form.tsx` batch check normalise tags via `tagKey` and serials via trim, matching the server exactly. Lesson: a client-side "does this match what the server already flagged" check needs the server's own normalisation function, not a fresh guess at one.
+>
+> **D-13. Task 14 signing-date tolerance (Ruling R10):** signing dates are calendar dates, not instants; the server originally refused same-day signing near local midnight (comparing a UTC-midnight boundary against `Date.now()`, spec ❌ at review). Fixed to refuse only a date later than the UTC date of `now + 1 day`, with the date-picker's `max` mirroring that same value. — Cost if wrong: a "tomorrow" signing date is accepted rather than refused.
+>
+> **D-14. Task 14 safe content-disposition in both download routes (Ruling R11):** the new acknowledgement-download route copied the pre-existing asset-document route's content-disposition header, and both threw on a non-Latin-1 or CR/LF-bearing filename (spec ❌ at review). Fixed in both: an ASCII fallback filename plus RFC 5987 `filename*`, with CR/LF/quotes stripped. Fixing the inherited route was in scope because the new one had copied its bug. Lesson: a "copy the existing route's pattern" instruction inherits that pattern's bugs along with its shape.
+>
+> **D-15. Task 14 acknowledgement History lists earlier rows only (Ruling R12):** spec §6 says History "collapses earlier rows"; the first pass included the current signature too. Fixed to `acks.slice(1)` (fix round 1).
+>
+> **D-16. Task 15 seeded fixtures carry no `serial`:** `prisma/seed.ts` never sets `serial` on any asset, so `registration.spec.ts` cases 3 and 5 (the "already registered" duplicate-serial path) stamp a serial onto an existing, otherwise-untouched seeded asset directly via Prisma rather than relying on one the seed provides. Not a plan defect exactly — the plan didn't anticipate the seed having no serials at all — but a necessary adaptation the task reviewer checked.
+>
+> **D-17. Task 15 case 7 written from the real DOM (Ruling R3):** the plan's sketch of case 7 was a soft placeholder ("write against the real DOM"); the implementer's version still asserts both halves spec §9.2 row 7 requires — the loaner slot holds the TEMPORARY device, AND the standard laptop slot stays empty — not just the happy path. Reviewer-checked per the ruling.
+>
+> **D-18. Task 16 the register success panel freezes its submitted tags, found during the battery:** `RegisterSuccess` displayed the live `tags` state; after a successful batch registration the `[prefix, quantity, highestByPrefix]` effect in `register-form.tsx` could recompute a fresh suggestion once the page's `highestByPrefix` prop reflected the asset just created — one tag number ahead of what had actually been written, even though the asset itself was created correctly. `registered` now freezes the submitted `tags` alongside the returned `ids`, so the headline always names what was created. Found 100%-reproducibly (not a flake) by `department-owned.spec.ts` case 13a; `receiving.spec.ts` and `asset-classes.spec.ts` needed the same `waitForURL("/inventory")` → "wait for the success panel" locator fix, since Task 13 replaced the register page's post-submit redirect with an in-place success panel and none of the three pre-existing specs had been updated for it. Lesson: a UI component that mirrors "what the server just did" from live form state, not from the server's own response, can drift the instant anything else re-renders that state in between.
+>
+> **D-19. Whole-branch review, ruling R14 — registrants may attach documents until IT checks the asset:**
+> `REGISTRABLE_CLASSES.purchasing_staff` includes IT (Phase 14's spec §4), but `uploadDocument` and
+> `uploadBatchDocument` (`src/server/modules/inventory/document-actions.ts`) gated on `canManageClass`
+> alone, so a Purchasing batch registering IT-class devices — spec §2.3's own worked example — could never
+> attach the invoice it just chose, and always ended "Registered — the invoice did not attach." Fixed with
+> a new pure predicate `canAttachDocuments(role, { cls, itVerifiedAt })` in `src/lib/asset-class.ts` —
+> `canManageClass(role, cls) || (canRegisterClass(role, cls) && itVerifiedAt === null)`, the mirror of
+> Phase 14's `canEditAsset` — used by both upload actions in place of `canManageClass`, and by
+> `documents-panel.tsx`/`documents/page.tsx` to decide whether the upload form renders (`canUpload`, a new
+> prop, split apart from the existing `canMutate` — renamed `canSign` — which still gates the accountability-
+> form "Mark signed" button on `canManageClass` alone, since R14 does not touch who may sign). The download
+> route's `canSeeClass` visibility check is unchanged (spec's own instruction). Five unit tests in
+> `asset-class.test.ts`; e2e case 7 in `registration.spec.ts` (Purchasing registers a 2-unit IT batch with
+> an invoice, the success panel shows no attention banner, each unit gets one `invoice` document and stays
+> `itVerifiedAt === null`). Spec §2.3/§2.5 amended with the R14 wording and a new decisions-table row 14.
+> Lesson: a capability added to one map (`REGISTRABLE_CLASSES`, Phase 14) is not automatically threaded
+> through every action that assumes the OLD, narrower map (`MANAGEABLE_CLASSES`) was the only one that
+> mattered — the two diverge exactly where a department registers into a class it does not manage.
+>
+> **D-20. Whole-branch review — axe coverage of Phase 16's new dialogs and drawer states:** spec §9.2's
+> `axe-sweep.spec.ts` row covered the batch success panel and new routes, but not the dialogs and drawer
+> states this phase actually added: the Waive and Add-a-slot dialogs, the Assign dialog in Loan mode, the
+> bulk drawer in assign mode (and again on its skipped list), and the Record-a-signed-form dialog.
+> `expectNoSeriousAxe` (copied from `e2e/it-core.spec.ts:24`, house rule: never import across spec files)
+> added to both `registration.spec.ts` and `custody.spec.ts`, called with each surface open. **The first run
+> failed once**, on `custody.spec.ts` case 8's Waive dialog: a SERIOUS 3.6:1 contrast violation on the
+> "Waive" `Button variant="primary"`. This is the same phantom class `axe-sweep.spec.ts`'s own `scanRoute`
+> already documents (measured three times in that file) — the button samples mid-transition or with the
+> pointer resting on it, and passes at rest — because every call this ruling added follows a click, unlike
+> `it-core.spec.ts`'s callers, which are all fresh `page.goto`s. Fixed by giving both files' copied
+> `expectNoSeriousAxe` the same pointer-settle step `scanRoute` uses (`page.mouse.move(0, 0)` + a 700 ms
+> wait) before analysing, not by weakening the assertion — re-run, all 13 cases across both files passed
+> with zero serious/critical violations. Lesson: a helper copied verbatim from a file whose every caller is
+> a fresh navigation does not carry that file's implicit precondition into a file whose callers are all
+> post-click — the precondition has to be re-derived, not assumed to travel with the copy.
+
 **Dev environment on the staging laptop (PICKUP §2, memory):** work in a git worktree under `.claude/worktrees/`, with its own `.env`: `DATABASE_URL` pointing at the `inventory_dev` database in the same Postgres container, `APP_BASE_URL=http://192.168.203.153:3100`, no `SEED_PASSWORD`. Dev server on port 3100; Playwright with `E2E_PORT=3100`, always foreground, `--workers=1`. Never touch the `inventory` database or port 3000.
 
 ## Global Constraints

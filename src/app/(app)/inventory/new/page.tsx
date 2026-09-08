@@ -3,6 +3,7 @@ import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { AssetForm } from "@/components/inventory/asset-form";
 import { createAsset } from "@/server/modules/inventory/actions";
+import { tagSuggestions } from "@/server/modules/inventory/tag-suggest";
 import { toSearchParams } from "@/lib/url-state";
 import { ASSET_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, isDirectLifecycle, parseCls, withClsQS } from "@/lib/asset-class";
 
@@ -25,7 +26,7 @@ export default async function NewAssetPage({
   // so the form needs every class this role is direct-lifecycle for, not a
   // single boolean pinned to scopedCls.
   const directClasses = ASSET_CLASSES.filter((c) => isDirectLifecycle(user.role, c));
-  const [categories, types, employees] = await Promise.all([
+  const [categories, types, employees, vendors] = await Promise.all([
     prisma.assetCategory.findMany({
       where: scopedCls ? { cls: scopedCls } : { cls: { in: [...REGISTRABLE_CLASSES[user.role]] } },
       orderBy: { name: "asc" },
@@ -35,7 +36,9 @@ export default async function NewAssetPage({
       orderBy: { name: "asc" },
     }),
     prisma.employee.findMany({ where: { employment: "ACTIVE" }, orderBy: { name: "asc" } }),
+    prisma.vendor.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
+  const suggestions = await tagSuggestions(categories.map((c) => c.id));
 
   return (
     <>
@@ -48,6 +51,8 @@ export default async function NewAssetPage({
         categories={categories.map((c) => ({ id: c.id, name: c.name, cls: c.cls }))}
         types={types.map((t) => ({ id: t.id, name: t.name, categoryId: t.categoryId }))}
         employees={employees.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }))}
+        vendors={vendors}
+        suggestions={suggestions}
         action={createAsset}
         directClasses={directClasses}
       />

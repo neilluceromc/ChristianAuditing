@@ -1,7 +1,7 @@
 import type { ApprovalType, AssetClass, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
-import { computeLoadout, resolvePolicy } from "@/lib/loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import {
   decisionOf, reportTotals, returnTargetStatus,
@@ -213,7 +213,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   });
   if (!employee) return null;
 
-  const [held, allReturns, blockers, policies] = await Promise.all([
+  const [held, allReturns, blockers, policies, exceptions] = await Promise.all([
     prisma.asset.findMany({
       where: { assigneeId: employeeId },
       include: { category: true },
@@ -247,6 +247,13 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     prisma.equipmentPolicy.findMany({
       include: { slots: { include: { assetType: true }, orderBy: [{ name: "asc" }, { id: "asc" }] } },
       orderBy: [{ name: "asc" }],
+    }),
+    // Phase 16 (spec §3.3): this person's own slot exceptions — every
+    // computeLoadout/resolvePolicy consumer computes over effectiveSlots, and
+    // the wizard's Step 1 loadout (entry criterion #7) is no exception.
+    prisma.employeeSlotException.findMany({
+      where: { employeeId },
+      orderBy: [{ employeeId: "asc" }, { id: "asc" }],
     }),
   ]);
 
@@ -314,7 +321,8 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   // src/lib/offboarding.ts's tiebreaker makes the same choice for the same reason
   const rows = [...items.values()].sort((x, y) => (x.tag < y.tag ? -1 : x.tag > y.tag ? 1 : 0));
   const policy = resolvePolicy(employee, policies);
-  const loadout = computeLoadout(policy?.slots ?? [], held);
+  const employeeExceptions = groupExceptionsByEmployee(exceptions).get(employeeId) ?? [];
+  const loadout = computeLoadout(effectiveSlots(policy?.slots ?? [], employeeExceptions), held);
   // computeLoadout is generic over assets, not slots, so the slot it hands back
   // is typed SlotLike and has lost its assetType include — look the name back up.
   const typeName = new Map((policy?.slots ?? []).map((s) => [s.id, s.assetType?.name ?? "any"]));

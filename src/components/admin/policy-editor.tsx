@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FormError } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Menu } from "@/components/ui/menu";
+import { Pill } from "@/components/ui/pill";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
@@ -23,6 +24,7 @@ export interface PolicySlotRow {
   name: string;
   typeName: string;
   required: boolean;
+  loaner: boolean;
 }
 
 export interface PolicyCard {
@@ -93,6 +95,7 @@ export function PolicyEditor({
   const [name, setName] = useState("");
   const [typeId, setTypeId] = useState(types[0]?.id ?? "");
   const [required, setRequired] = useState(true);
+  const [loaner, setLoaner] = useState(false);
 
   return (
     <Card>
@@ -146,7 +149,7 @@ export function PolicyEditor({
                 <button
                   type="button"
                   disabled={pending}
-                  aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"} — click to toggle`}
+                  aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"}${slot.loaner ? " · loaner" : ""} — click to toggle`}
                   onClick={() =>
                     run(
                       () => setSlotRequired({ slotId: slot.id, required: !slot.required }),
@@ -162,11 +165,12 @@ export function PolicyEditor({
                   )}
                 >
                   {slot.name}
+                  {slot.loaner && <Pill>LOAN</Pill>}
                   <span className="text-[9px]">{slot.typeName}</span>
                 </button>
               ) : (
                 <span
-                  aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"}`}
+                  aria-label={`${slot.name} · ${slot.typeName} · ${slot.required ? "required" : "optional"}${slot.loaner ? " · loaner" : ""}`}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
                     slot.required
@@ -175,6 +179,7 @@ export function PolicyEditor({
                   )}
                 >
                   {slot.name}
+                  {slot.loaner && <Pill>LOAN</Pill>}
                   <span className="text-[9px]">{slot.typeName}</span>
                 </span>
               )}
@@ -224,15 +229,24 @@ export function PolicyEditor({
               <Checkbox checked={required} onChange={(e) => setRequired(e.target.checked)} />
               required
             </label>
+            <label className="inline-flex items-center gap-2 text-xs">
+              <Checkbox checked={loaner} onChange={(e) => setLoaner(e.target.checked)} />
+              loaner slot — filled by a device on loan (TEMPORARY)
+            </label>
             <Button
               size="sm"
               variant="primary"
               loading={pending}
               onClick={() =>
                 run(
-                  () => addSlot({ policyId: policy.id, name, assetTypeId: typeId, required }),
+                  () => addSlot({
+                    policyId: policy.id, name, assetTypeId: typeId, required, loaner,
+                  }),
                   "Slot added — existing assignments are untouched",
-                  () => setName(""),
+                  () => {
+                    setName("");
+                    setLoaner(false);
+                  },
                 )
               }
             >

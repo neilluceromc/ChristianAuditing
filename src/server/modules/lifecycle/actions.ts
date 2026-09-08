@@ -21,7 +21,7 @@ import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, isAssignable, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, reasonRequiredFor, replacePlan,
+  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
 } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange } from "./apply";
 
@@ -38,7 +38,7 @@ type Actor = { id: string; name: string };
 class DirectRefusal extends Error {}
 
 const assetSelect = {
-  id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, returnedAt: true, model: true,
+  id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, returnedAt: true, loanDueAt: true, model: true,
 } as const;
 
 /** Load + the three refusals every direct action shares: exists, direct for this role, no open approval. */
@@ -91,6 +91,7 @@ function revalidateAsset(assetId: string, employeeIds: Array<string | null | und
 }
 
 const reasonOpt = z.string().trim().max(500).optional();
+const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
 
 // ── changeStatus ────────────────────────────────────────────────────────────
 const changeStatusSchema = z.object({ assetId: z.string().min(1), to: z.enum(ASSET_STATUSES), reason: reasonOpt });
@@ -128,7 +129,7 @@ export async function changeStatus(input: unknown): Promise<ActionResult<{ tag: 
 // ── assignAsset ─────────────────────────────────────────────────────────────
 const assignSchema = z.object({
   assetId: z.string().min(1), employeeId: z.string().min(1),
-  status: z.enum(ASSET_STATUSES).optional(), reason: reasonOpt,
+  status: z.enum(ASSET_STATUSES).optional(), loanDueAt: dateStr.optional(), reason: reasonOpt,
 });
 
 export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: string; employeeName: string }>> {
@@ -151,10 +152,15 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
     }
     const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { name: true } });
     if (!employee) return validationError({ employeeId: "Unknown employee" });
+    const due = loanDueFor(status, d.loanDueAt, now);
+    if (!due.ok) return validationError({ loanDueAt: due.error });
     const r = await recordDirect(tx, {
       actor: user, asset, now, type: "lifecycle_assign", action: "lifecycle.assign", employeeId: d.employeeId,
-      change: { kind: "assign", employeeId: d.employeeId, status },
-      payload: { to: { assigneeId: d.employeeId, status }, reason: d.reason || "assigned" },
+      change: { kind: "assign", employeeId: d.employeeId, status, loanDueAt: due.value },
+      payload: {
+        to: { assigneeId: d.employeeId, status, ...(due.value ? { loanDueAt: due.value.toISOString() } : {}) },
+        reason: d.reason || "assigned",
+      },
     });
     if (!r.ok) return conflict(r.error);
     out = { tag: asset.tag, employeeName: employee.name };
@@ -162,6 +168,41 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
   });
   if (failure) return failure;
   revalidateAsset(d.assetId, [d.employeeId]);
+  return ok(out!);
+}
+
+// ── setLoanDue ──────────────────────────────────────────────────────────────
+const loanDueSchema = z.object({ assetId: z.string().min(1), loanDueAt: dateStr });
+
+/** Spec §4.2: a due date is metadata, like notes — audited, no approval row. */
+export async function setLoanDue(input: unknown): Promise<ActionResult<{ tag: string; loanDueAt: string }>> {
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = loanDueSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+  const now = new Date();
+  const due = loanDueFor("TEMPORARY", d.loanDueAt, now);
+  if (!due.ok) return validationError({ loanDueAt: due.error });
+  let out: { tag: string; loanDueAt: string } | null = null;
+  const failure = await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.findUnique({ where: { id: d.assetId }, select: assetSelect });
+    if (!asset) return conflict("That asset no longer exists.");
+    if (!isDirectLifecycle(user.role, asset.cls)) return forbidden();
+    if (asset.status !== "TEMPORARY") return conflict(`${asset.tag} is not on loan — it reads ${asset.status}.`);
+    await tx.asset.update({ where: { id: asset.id }, data: { loanDueAt: due.value } });
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
+      action: "loan.due-changed", diff: { loanDueAt: { from: asset.loanDueAt, to: due.value } },
+    });
+    out = { tag: asset.tag, loanDueAt: d.loanDueAt };
+    return null;
+  });
+  if (failure) return failure;
+  revalidateAsset(d.assetId, []);
+  revalidatePath("/inventory/work");
   return ok(out!);
 }
 
@@ -256,7 +297,7 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
       if (!ret.ok) throw new DirectRefusal(ret.error);
       const asg = await recordDirect(tx, {
         actor: user, asset: newAsset, now, type: "lifecycle_assign", action: "lifecycle.replace", employeeId: d.employeeId,
-        change: { kind: "assign", employeeId: d.employeeId, status: plan.newStatus },
+        change: { kind: "assign", employeeId: d.employeeId, status: plan.newStatus, loanDueAt: null },
         payload: { to: { assigneeId: d.employeeId, status: plan.newStatus }, reason: `replaces ${oldAsset.tag}` },
         extraDiff: { replaces: { from: null, to: oldAsset.tag } },
       });
@@ -321,6 +362,22 @@ export async function triageAsset(input: unknown): Promise<ActionResult<{ tag: s
   return ok(out!);
 }
 
+/**
+ * The `where` clause every bulk action resolves the same way: an explicit id
+ * list, or the current list filters re-parsed server-side (repair-stage aware,
+ * same as the list page itself). Shared by `bulkChangeStatus` and `bulkAssign`
+ * so the two never drift.
+ */
+async function resolveBulkWhere(ids: string[] | undefined, filters: string | undefined): Promise<Prisma.AssetWhereInput> {
+  if (ids?.length) return { id: { in: ids } };
+  const fp = new URLSearchParams(filters);
+  const state: ListState = parseListState(fp, INVENTORY_LIST_CONFIG);
+  const purchaseYear = parsePurchaseYear(fp.get("purchaseYear"));
+  const cls = parseCls(fp.get("cls")) ?? "IT";
+  const cutIds = await repairStageIds(state, purchaseYear, cls);
+  return cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear, cls);
+}
+
 // ── bulkChangeStatus ────────────────────────────────────────────────────────
 const bulkSchema = z
   .object({
@@ -340,16 +397,7 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { ids, filters, to, reason } = parsed.data;
 
-  let where: Prisma.AssetWhereInput;
-  if (ids?.length) where = { id: { in: ids } };
-  else {
-    const fp = new URLSearchParams(filters);
-    const state: ListState = parseListState(fp, INVENTORY_LIST_CONFIG);
-    const purchaseYear = parsePurchaseYear(fp.get("purchaseYear"));
-    const cls = parseCls(fp.get("cls")) ?? "IT";
-    const cutIds = await repairStageIds(state, purchaseYear, cls);
-    where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear, cls);
-  }
+  const where = await resolveBulkWhere(ids, filters);
 
   const now = new Date();
   let changed = 0, skipped = 0;
@@ -392,6 +440,69 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
   return ok({ changed, skipped });
 }
 
+// ── bulkAssign ──────────────────────────────────────────────────────────────
+const bulkAssignSchema = z
+  .object({
+    ids: z.array(z.string().min(1)).max(500).optional(),
+    filters: z.string().max(2000).optional(),
+    employeeId: z.string().min(1, "Pick a person"),
+    status: z.enum(["DEPLOYED", "TEMPORARY"]),
+    loanDueAt: dateStr.optional(),
+    reason: reasonOpt,
+  })
+  .refine((v) => (v.ids?.length ?? 0) > 0 || v.filters !== undefined, { message: "Nothing is selected", path: ["ids"] });
+
+/** Spec §5: several spares to one person, one transaction, the same record per asset a single assign writes. */
+export async function bulkAssign(input: unknown): Promise<ActionResult<{ assigned: number; skipped: Array<{ tag: string; reason: string }> }>> {
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = bulkAssignSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+  const now = new Date();
+  const due = loanDueFor(d.status, d.loanDueAt, now);
+  if (!due.ok) return validationError({ loanDueAt: due.error });
+
+  const where = await resolveBulkWhere(d.ids, d.filters);
+
+  let assigned = 0;
+  const skipped: Array<{ tag: string; reason: string }> = [];
+  const failure = await prisma.$transaction(async (tx) => {
+    const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { name: true, employment: true } });
+    if (!employee) return validationError({ employeeId: "Unknown employee" });
+    if (employee.employment !== "ACTIVE") return conflict(`${employee.name} is ${employee.employment.toLowerCase()} — assignments are frozen.`);
+    const assets = await tx.asset.findMany({ where, take: BULK_MAX + 1, orderBy: [{ tag: "asc" }, { id: "asc" }], select: assetSelect });
+    if (assets.length === 0) return conflict("Nothing matched the selection.");
+    if (assets.length > BULK_MAX) return conflict(`That selection exceeds the ${BULK_MAX}-asset bulk cap — narrow the filter and repeat.`);
+    const classes = new Set(assets.map((a) => a.cls));
+    if (classes.size > 1) return conflict("Select assets of one class — IT and Purchasing assets cannot share an assignment.");
+    const cls = assets[0].cls;
+    if (!isDirectLifecycle(user.role, cls)) return forbidden();
+    if (!(ASSIGN_TARGETS[cls] as readonly string[]).includes(d.status)) {
+      return validationError({ status: `${d.status} is not an assign target for ${CLASS_PHRASE[cls]} asset.` });
+    }
+    for (const asset of assets) {
+      const open = await openApprovalForAsset(tx, asset.id);
+      if (open) { skipped.push({ tag: asset.tag, reason: `held by ${open.refNo}` }); continue; }
+      const r = await recordDirect(tx, {
+        actor: user, asset, now, type: "lifecycle_assign", action: "lifecycle.assign", employeeId: d.employeeId,
+        change: { kind: "assign", employeeId: d.employeeId, status: d.status, loanDueAt: due.value },
+        payload: { to: { assigneeId: d.employeeId, status: d.status, ...(due.value ? { loanDueAt: due.value.toISOString() } : {}) }, reason: d.reason || "bulk assigned" },
+      });
+      if (!r.ok) { skipped.push({ tag: asset.tag, reason: r.error }); continue; }
+      assigned += 1;
+    }
+    return null;
+  }, { timeout: 60_000, maxWait: 10_000 });
+  if (failure) return failure;
+  revalidatePath("/inventory");
+  revalidatePath(`/employees/${d.employeeId}`);
+  revalidatePath("/");
+  return ok({ assigned, skipped });
+}
+
 // ── assignReserved ──────────────────────────────────────────────────────────
 const reservedSchema = z.object({ employeeId: z.string().min(1) });
 
@@ -415,7 +526,7 @@ export async function assignReserved(input: unknown): Promise<ActionResult<{ ass
       if (await openApprovalForAsset(tx, hold.assetId)) continue;
       const r = await recordDirect(tx, {
         actor: user, asset: hold.asset, now, type: "lifecycle_assign", action: "lifecycle.assign", employeeId,
-        change: { kind: "assign", employeeId, status: DEFAULT_ASSIGN_STATUS[hold.asset.cls] },
+        change: { kind: "assign", employeeId, status: DEFAULT_ASSIGN_STATUS[hold.asset.cls], loanDueAt: null },
         payload: { to: { assigneeId: employeeId, status: DEFAULT_ASSIGN_STATUS[hold.asset.cls] }, reason: "reserved — day-one setup" },
       });
       if (r.ok) assigned += 1;

@@ -12,6 +12,7 @@ import { BULK_MAX } from "@/lib/inventory-list";
 import type { ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { BulkDrawer } from "./bulk-drawer";
 
 export interface ColumnDef {
@@ -50,6 +51,7 @@ export function InventoryTable({
   total,
   cls,
   direct,
+  employees,
   repairMode = false,
   sortHrefs,
 }: {
@@ -61,6 +63,8 @@ export function InventoryTable({
   total: number;
   cls: AssetClass;
   direct: boolean;
+  /** ACTIVE employees for the bulk drawer's assign mode (Task 9); empty when the caller can't mutate. */
+  employees: ComboOption[];
   /** the repairs saved view: adds Stage + Down (README 7b) */
   repairMode?: boolean;
   /**
@@ -256,6 +260,7 @@ export function InventoryTable({
           total={total}
           cls={cls}
           direct={direct}
+          employees={employees}
           onDone={clearSelection}
         />
       )}

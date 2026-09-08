@@ -9,7 +9,7 @@ import {
   DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, HOLDER_STATUSES, RETURN_TARGETS, STATUSES_BY_CLASS,
   MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, VISIBLE_CLASSES,
   canManageClass, canEditAsset, canRegisterClass, canSeeClass, isAwaitingItCheck, isStatusOf, parseCls, statusesFor, visibleClassWhere, withClsQS,
-  DIRECT_LIFECYCLE_CLASSES, isDirectLifecycle, isAssignable,
+  DIRECT_LIFECYCLE_CLASSES, isDirectLifecycle, isAssignable, canAttachDocuments,
 } from "./asset-class";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
@@ -266,5 +266,26 @@ describe("Phase 15 — direct lifecycle", () => {
     expect(isAssignable({ cls: "IT", status: "DEPLOYED", returnedAt: null })).toBe(false);
     expect(isAssignable({ cls: "PURCHASING", status: "STORED", returnedAt: null })).toBe(true);
     expect(isAssignable({ cls: "PURCHASING", status: "OPERATIONAL", returnedAt: null })).toBe(false);
+  });
+});
+
+describe("canAttachDocuments — ruling R14: a registrant may attach documents until IT checks the asset", () => {
+  const d = new Date();
+  it("purchasing_staff on an unverified IT asset (its own Phase-16 registration) may attach", () => {
+    expect(canAttachDocuments("purchasing_staff", { cls: "IT", itVerifiedAt: null })).toBe(true);
+  });
+  it("purchasing_staff on a verified IT asset may not attach — IT has already checked it", () => {
+    expect(canAttachDocuments("purchasing_staff", { cls: "IT", itVerifiedAt: d })).toBe(false);
+  });
+  it("it_staff on IT may always attach, verified or not", () => {
+    expect(canAttachDocuments("it_staff", { cls: "IT", itVerifiedAt: null })).toBe(true);
+    expect(canAttachDocuments("it_staff", { cls: "IT", itVerifiedAt: d })).toBe(true);
+  });
+  it("finance_staff manages nothing and registers nothing — never attaches", () => {
+    expect(canAttachDocuments("finance_staff", { cls: "IT", itVerifiedAt: null })).toBe(false);
+    expect(canAttachDocuments("finance_staff", { cls: "PURCHASING", itVerifiedAt: null })).toBe(false);
+  });
+  it("purchasing_staff on its own PURCHASING class asset may always attach", () => {
+    expect(canAttachDocuments("purchasing_staff", { cls: "PURCHASING", itVerifiedAt: null })).toBe(true);
   });
 });

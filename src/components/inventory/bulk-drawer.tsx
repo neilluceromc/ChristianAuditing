@@ -6,15 +6,21 @@ import type { AssetClass } from "@prisma/client";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { DEFAULT_STATUS, statusesFor } from "@/lib/asset-class";
+import { DEFAULT_LOAN_DAYS, defaultLoanDue, minLoanDue } from "@/lib/lifecycle";
 import { bulkRequestStatusChange } from "@/server/modules/inventory/actions";
-import { bulkChangeStatus } from "@/server/modules/lifecycle/actions";
+import { bulkAssign, bulkChangeStatus } from "@/server/modules/lifecycle/actions";
 import type { ActionResult } from "@/server/action-result";
+
+type Mode = "status" | "assign";
 
 export function BulkDrawer({
   open,
@@ -25,6 +31,7 @@ export function BulkDrawer({
   total,
   cls,
   direct,
+  employees,
   onDone,
 }: {
   open: boolean;
@@ -35,6 +42,7 @@ export function BulkDrawer({
   total: number;
   cls: AssetClass;
   direct: boolean;
+  employees: ComboOption[];
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -51,13 +59,63 @@ export function BulkDrawer({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
+  // Phase 16 (spec §5): assign mode only exists where direct lifecycle IT
+  // assignment does — the same gate `assignAsset` itself enforces server-side.
+  // A drawer that outlived a class switch would otherwise keep "assign" mode
+  // selected against Purchasing, which has no such target.
+  const canAssignMode = direct && cls === "IT";
+  const [mode, setMode] = useState<Mode>("status");
+  const effectiveMode: Mode = canAssignMode ? mode : "status";
+  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [assignKind, setAssignKind] = useState<"DEPLOYED" | "TEMPORARY">("DEPLOYED");
+  const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
+  const [skippedList, setSkippedList] = useState<Array<{ tag: string; reason: string }>>([]);
+
   const scope = allMatching ? `all ${total} matching assets` : `${selectedIds.length} selected asset${selectedIds.length === 1 ? "" : "s"}`;
+
+  /** Failure handling shared by every bulk call — they share every ActionResult failure shape. */
+  function applyFailure(res: Extract<ActionResult<unknown>, { ok: false }>) {
+    if (res.kind === "rate_limited") {
+      setRetryAfter(res.retryAfterSec ?? 60);
+    } else if (res.kind === "validation") {
+      setFieldErrors(res.fieldErrors ?? {});
+      // Field errors no FormField below claims (ids/filters/status/_form) must not
+      // dead-end silently — surface them in the banner.
+      const unclaimed = res.fieldErrors?.ids ?? res.fieldErrors?.filters ?? res.fieldErrors?.status ?? res.fieldErrors?._form;
+      if (unclaimed) setError(unclaimed);
+    } else {
+      setError(res.message);
+    }
+  }
 
   function submit() {
     setError(null);
     setFieldErrors({});
     setRetryAfter(null);
     startTransition(async () => {
+      if (effectiveMode === "assign") {
+        const res = await bulkAssign({
+          ids: allMatching ? undefined : selectedIds,
+          filters: allMatching ? filtersQS : undefined,
+          employeeId: employeeId ?? "",
+          status: assignKind,
+          loanDueAt: assignKind === "TEMPORARY" ? loanDueAt : undefined,
+          reason,
+        });
+        if (res.ok) {
+          const { assigned, skipped } = res.data;
+          const name = employees.find((e) => e.value === employeeId)?.label ?? "them";
+          toast(`${assigned} asset${assigned === 1 ? "" : "s"} assigned to ${name}`, "settled");
+          setReason(""); // a fresh batch never inherits the last batch's reason
+          onDone();
+          router.refresh();
+          if (skipped.length > 0) setSkippedList(skipped);
+          else handleClose();
+        } else {
+          applyFailure(res);
+        }
+        return;
+      }
       const payload = {
         ids: allMatching ? undefined : selectedIds,
         filters: allMatching ? filtersQS : undefined,
@@ -86,17 +144,7 @@ export function BulkDrawer({
       toast(successMessage(res.data), "settled");
       return "ok";
     }
-    if (res.kind === "rate_limited") {
-      setRetryAfter(res.retryAfterSec ?? 60);
-    } else if (res.kind === "validation") {
-      setFieldErrors(res.fieldErrors ?? {});
-      // Field errors no FormField below claims (ids/filters/_form) must not
-      // dead-end silently — surface them in the banner.
-      const unclaimed = res.fieldErrors?.ids ?? res.fieldErrors?.filters ?? res.fieldErrors?._form;
-      if (unclaimed) setError(unclaimed);
-    } else {
-      setError(res.message);
-    }
+    applyFailure(res);
     return "failed";
   }
 
@@ -104,14 +152,26 @@ export function BulkDrawer({
     setError(null);
     setFieldErrors({});
     setRetryAfter(null);
+    setSkippedList([]);
     onClose();
   }
 
   return (
     <Drawer open={open} onClose={handleClose} title="Bulk actions">
       <div className="flex flex-col gap-4">
+        {canAssignMode && (
+          <SegmentedControl
+            aria-label="Bulk action"
+            value={mode}
+            options={[{ value: "status", label: "Change status" }, { value: "assign", label: "Assign to a person" }]}
+            onChange={(v) => setMode(v as Mode)}
+          />
+        )}
         <p className="text-xs text-fg-muted">
-          {direct ? (
+          {effectiveMode === "assign" ? (
+            <>Assigns <b>{scope}</b> to one person now. Devices that are not spares, are untriaged, reserved for
+            someone else or held by an open request are skipped and listed.</>
+          ) : direct ? (
             <>Changes the status of <b>{scope}</b> now. Held devices and off-the-books stock are
             skipped — return or handle those one at a time.</>
           ) : (
@@ -158,38 +218,115 @@ export function BulkDrawer({
         {allMatching && <p className="text-xs text-fg-faint">Labels need an explicit selection.</p>}
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title={error} />}
-        <FormField label="Target status" required error={fieldErrors.to}>
-          {(props) => (
-            <Select
-              id={props.id}
-              aria-describedby={props["aria-describedby"]}
-              invalid={props.invalid}
-              value={effectiveTo}
-              onChange={(e) => setTo(e.target.value)}
-            >
-              {statusesFor(cls).map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <FormField label="Reason" required={!direct} error={fieldErrors.reason} hint="Goes into every approval's payload.">
-          {(props) => (
-            <Textarea
-              id={props.id}
-              aria-describedby={props["aria-describedby"]}
-              invalid={props.invalid}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          )}
-        </FormField>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-          <Button variant="primary" loading={pending} onClick={submit}>
-            {direct ? "Confirm" : "Request status change"}
-          </Button>
-        </div>
+        {skippedList.length > 0 && (
+          <Banner
+            tone="attention"
+            title={`${skippedList.length} skipped`}
+            actions={<Button size="sm" variant="ghost" onClick={handleClose}>Done</Button>}
+          >
+            <ul className="list-disc pl-4">
+              {skippedList.map((s) => <li key={s.tag}>{s.tag} — {s.reason}</li>)}
+            </ul>
+          </Banner>
+        )}
+        {/* Phase 16 fix: a partial result (some assets skipped) settles the
+            drawer on the skipped list — the form and its Confirm button would
+            otherwise still be sitting there, inviting a resubmission of a
+            batch that already partly ran. Done (in the Banner above) is the
+            only way forward from here. */}
+        {skippedList.length === 0 && (
+          <>
+            {effectiveMode === "assign" ? (
+              <>
+                <FormField label="Assign to" required error={fieldErrors.employeeId}>
+                  {(props) => (
+                    <EntityCombobox
+                      id={props.id}
+                      aria-describedby={props["aria-describedby"]}
+                      invalid={props.invalid}
+                      options={employees}
+                      value={employeeId}
+                      onChange={setEmployeeId}
+                      placeholder="Type a name or EMP number…"
+                    />
+                  )}
+                </FormField>
+                <SegmentedControl
+                  aria-label="Assignment kind"
+                  value={assignKind}
+                  options={[{ value: "DEPLOYED", label: "Deployed" }, { value: "TEMPORARY", label: "Loan" }]}
+                  onChange={(v) => setAssignKind(v as "DEPLOYED" | "TEMPORARY")}
+                />
+                {assignKind === "TEMPORARY" && (
+                  <FormField label="Loan until" required error={fieldErrors.loanDueAt} hint={`Defaults to ${DEFAULT_LOAN_DAYS} days.`}>
+                    {(props) => (
+                      <Input
+                        id={props.id}
+                        aria-describedby={props["aria-describedby"]}
+                        invalid={props.invalid}
+                        type="date"
+                        min={minLoanDue(new Date())}
+                        value={loanDueAt}
+                        onChange={(e) => setLoanDueAt(e.target.value)}
+                      />
+                    )}
+                  </FormField>
+                )}
+                <FormField label="Reason" error={fieldErrors.reason}>
+                  {(props) => (
+                    <Textarea
+                      id={props.id}
+                      aria-describedby={props["aria-describedby"]}
+                      invalid={props.invalid}
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  )}
+                </FormField>
+              </>
+            ) : (
+              <>
+                <FormField label="Target status" required error={fieldErrors.to}>
+                  {(props) => (
+                    <Select
+                      id={props.id}
+                      aria-describedby={props["aria-describedby"]}
+                      invalid={props.invalid}
+                      value={effectiveTo}
+                      onChange={(e) => setTo(e.target.value)}
+                    >
+                      {statusesFor(cls).map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </Select>
+                  )}
+                </FormField>
+                <FormField label="Reason" required={!direct} error={fieldErrors.reason} hint="Goes into every approval's payload.">
+                  {(props) => (
+                    <Textarea
+                      id={props.id}
+                      aria-describedby={props["aria-describedby"]}
+                      invalid={props.invalid}
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  )}
+                </FormField>
+              </>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={pending}
+                onClick={submit}
+                disabled={effectiveMode === "assign" && !employeeId}
+              >
+                {effectiveMode === "assign" ? "Confirm" : direct ? "Confirm" : "Request status change"}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </Drawer>
   );

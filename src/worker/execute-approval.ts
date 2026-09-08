@@ -83,9 +83,11 @@ async function runExecution(approvalId: string): Promise<void> {
         return fail(`Execution guard: ${asset.tag} reads ${asset.status}, payload expected ${expectedFrom} — refused`);
       }
     }
+    const rawDue = (approval.payload as { to?: { loanDueAt?: unknown } } | null)?.to?.loanDueAt;
+    const loanDueAt = typeof rawDue === "string" && !Number.isNaN(Date.parse(rawDue)) ? new Date(rawDue) : null;
     const change: LifecycleChange =
       approval.type === "lifecycle_assign"
-        ? { kind: "assign", employeeId: plan.updates.assigneeId as string, status: plan.updates.status }
+        ? { kind: "assign", employeeId: plan.updates.assigneeId as string, status: plan.updates.status, loanDueAt }
         : approval.type === "lifecycle_return"
           ? { kind: "return", status: plan.updates.status }
           : { kind: "change-status", status: plan.updates.status };

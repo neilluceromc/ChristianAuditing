@@ -11,7 +11,9 @@ describe("KNOWN_UNIMPORTED_COLUMNS", () => {
   // export gained/renamed a column or an import header did — a reader should
   // notice, not have it slide by silently the way a hand-typed list would.
   it("is exactly the export's columns with no import field, as of today", () => {
-    expect(KNOWN_UNIMPORTED_COLUMNS).toEqual(["RMA ref"]);
+    // Task 11: Brand, Loan until and Invoice / receipt no. joined RMA ref as
+    // export-only columns the sheet importer has no field for yet.
+    expect(KNOWN_UNIMPORTED_COLUMNS).toEqual(["Brand", "Loan until", "Invoice / receipt no.", "RMA ref"]);
   });
 
   // Task 11 round two, V-7: the whole point of deriving this is that it

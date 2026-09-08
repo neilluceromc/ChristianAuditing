@@ -56,6 +56,7 @@ export async function GET(req: Request) {
     assets.map((a) => ({
       tag: a.tag,
       model: a.model,
+      brand: a.brand,
       serial: a.serial,
       categoryName: a.category.name,
       typeName: a.type?.name ?? null,
@@ -68,7 +69,9 @@ export async function GET(req: Request) {
       // or Excel right-aligns nothing and SUM() returns 0.
       cost: a.cost ? a.cost.toNumber() : null,
       warrantyUntil: a.warrantyUntil,
+      loanDueAt: a.loanDueAt,
       vendorName: a.vendor?.name ?? null,
+      invoiceRef: a.invoiceRef,
       rmaRef: a.rmaRef,
       notes: a.notes,
     })),

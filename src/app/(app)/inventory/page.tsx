@@ -14,6 +14,7 @@ import {
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
+import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
@@ -64,6 +65,11 @@ export default async function InventoryPage({
     const hit = await exactTagMatch(state.q);
     if (hit) redirect(`/inventory/${hit.id}`);
   }
+
+  // Task 9: the bulk drawer's assign mode needs a name to assign to. Loaded
+  // only for a role that can mutate this class at all — the same condition
+  // InventoryTable already uses to decide whether the drawer exists.
+  const employees = canMutate ? await activeEmployeeOptions() : [];
 
   const [{ rows, total, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
     listAssets(state, purchaseYear, cls),
@@ -141,6 +147,7 @@ export default async function InventoryPage({
                 stays IT-only regardless of the view: there is no Purchasing
                 import wizard yet (Task 10). */}
             {canMutate && cls === "IT" && <ButtonLink href="/inventory/import">Import</ButtonLink>}
+            {canRegister && <ButtonLink href="/inventory/register">Register several</ButtonLink>}
             {canRegister && <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>}
           </>
         }
@@ -184,6 +191,7 @@ export default async function InventoryPage({
               total={total}
               cls={cls}
               direct={direct}
+              employees={employees}
               repairMode={repairMode}
               sortHrefs={sortHrefs}
             />
@@ -208,7 +216,14 @@ export default async function InventoryPage({
                 ? "Register the first asset, or use Import to bring in a spreadsheet."
                 : "Register the first asset — Purchasing assets are registered one batch at a time; there is no spreadsheet import for them yet."
             }
-            actions={canRegister ? <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink> : undefined}
+            actions={
+              canRegister ? (
+                <>
+                  <ButtonLink href="/inventory/register">Register several</ButtonLink>
+                  <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>
+                </>
+              ) : undefined
+            }
           />
         )}
       </div>

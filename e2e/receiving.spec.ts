@@ -134,7 +134,11 @@ test.describe("registration — the primary path", () => {
     await expect(page.getByLabel("Tag 3")).toHaveValue(tag3);
 
     await page.getByRole("button", { name: "Register 3 assets" }).click();
-    await page.waitForURL(/\/inventory$/);
+    // Phase 16 Task 13: the register page no longer redirects to /inventory
+    // on success — it swaps the form for a RegisterSuccess panel in place
+    // ("3 assets registered — <first> … <last>"). Wait for that panel
+    // instead of a navigation that no longer happens.
+    await expect(page.getByText(`3 assets registered — ${tag1} … ${tag3}`)).toBeVisible();
 
     const assets = await db.asset.findMany({ where: { tag: { in: [tag1, tag2, tag3] } }, orderBy: { tag: "asc" } });
     expect(assets).toHaveLength(3);

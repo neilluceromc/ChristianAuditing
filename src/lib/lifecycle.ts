@@ -59,3 +59,38 @@ export function humanizeGuard(error: string): string {
   out = out.replace("— return refused", "");
   return out.trimEnd();
 }
+
+/** Phase 16 (spec §4.2): the dialogs' default loan length. */
+export const DEFAULT_LOAN_DAYS = 30;
+
+/**
+ * What the assign/loan dialogs' date field starts at before anyone touches
+ * it: DEFAULT_LOAN_DAYS out from today, day-precision UTC — same convention
+ * as loanDueFor's own dates below.
+ */
+export function defaultLoanDue(today: Date): string {
+  const floor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  floor.setUTCDate(floor.getUTCDate() + DEFAULT_LOAN_DAYS);
+  return floor.toISOString().slice(0, 10);
+}
+
+/** The earliest date a loan may be due: the UTC day after `today`, as YYYY-MM-DD. */
+export function minLoanDue(today: Date): string {
+  const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * What `loanDueAt` an assignment stores. Only a loan (TEMPORARY) carries one,
+ * and it may not be in the past. Dates are day-precision UTC, like every
+ * other date field this app stores (asset-diff.ts's toDay).
+ */
+export function loanDueFor(status: string, raw: string | undefined, today: Date):
+  { ok: true; value: Date | null } | { ok: false; error: string } {
+  if (status !== "TEMPORARY") return { ok: true, value: null };
+  if (!raw) return { ok: false, error: "A loan needs a due date." };
+  const value = new Date(`${raw}T00:00:00Z`);
+  const floor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  if (Number.isNaN(value.getTime()) || value < floor) return { ok: false, error: "A loan needs a due date on or after today." };
+  return { ok: true, value };
+}

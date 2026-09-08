@@ -23,6 +23,18 @@ export type TagRun =
   | { ok: false; reason: "bad-prefix" | "bad-count" | "overflow" };
 
 /**
+ * The reason a refused `TagRun` carries, in words a form can show next to
+ * Submit. Lives here (not in a form component) because both `RegisterForm`
+ * (batch) and `AssetForm` (single, Phase 16 Task 12) need the same text for
+ * the same discriminated union.
+ */
+export const RUN_REFUSAL: Record<Exclude<TagRun, { ok: true }>["reason"], string> = {
+  "bad-prefix": "Prefix must be two capital letters",
+  overflow: "That run passes BR-XX-9999 — register fewer, or use another prefix",
+  "bad-count": "Quantity must be at least 1",
+};
+
+/**
  * The next `count` tags for `prefix`, starting after `highest`.
  *
  * A discriminated union rather than a throw or a truncated array: the caller
