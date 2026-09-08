@@ -10,9 +10,8 @@ import type { ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
+import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
-
-export const PAGE_SIZE = 25;
 
 /** Serializable DTO for the client table island — strings only, preformatted. */
 export interface AssetRow {
@@ -139,6 +138,7 @@ export async function listAssets(
 ): Promise<{
   rows: AssetRow[];
   total: number;
+  page: number;
   pageCount: number;
 }> {
   const where = buildAssetWhere(state, purchaseYear, cls);
@@ -156,26 +156,28 @@ export async function listAssets(
       .map(toRow)
       .filter((r) => r.stage !== null && stages.includes(r.stage));
     const total = matched.length;
+    const pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
     return {
       total,
-      pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)),
-      rows: matched.slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE),
+      page: pg.page,
+      pageCount: pg.pageCount,
+      rows: matched.slice(pg.skip, pg.skip + pg.take),
     };
   }
 
-  const [total, assets] = await Promise.all([
-    prisma.asset.count({ where }),
-    prisma.asset.findMany({
-      where,
-      orderBy,
-      skip: (state.page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      include: LIST_INCLUDE,
-    }),
-  ]);
+  const total = await prisma.asset.count({ where });
+  const pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
+  const assets = await prisma.asset.findMany({
+    where,
+    orderBy,
+    skip: pg.skip,
+    take: pg.take,
+    include: LIST_INCLUDE,
+  });
   return {
     total,
-    pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    page: pg.page,
+    pageCount: pg.pageCount,
     rows: assets.map(toRow),
   };
 }

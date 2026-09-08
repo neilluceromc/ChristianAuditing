@@ -1,6 +1,7 @@
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { PURCHASE_TABS, parsePurchaseState } from "@/lib/purchases-list";
+import { parsePage } from "@/lib/paging";
 import { listPurchases, stateCounts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
@@ -21,7 +22,7 @@ export default async function PurchasesPage({
   const params = toSearchParams(await searchParams);
   const state = parsePurchaseState(params.get("state"));
   const q = (params.get("q") ?? "").trim();
-  const page = Math.max(1, Number.parseInt(params.get("page") ?? "1", 10) || 1);
+  const page = parsePage(params);
 
   const [{ rows, total, page: current, pageCount }, counts] = await Promise.all([
     listPurchases(state, q, page),

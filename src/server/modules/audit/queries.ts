@@ -2,8 +2,7 @@ import { prisma } from "@/server/db/client";
 import { buildAuditWhere } from "@/lib/audit-list";
 import { fmtDateTime } from "@/lib/format";
 import type { ListState } from "@/lib/url-state";
-
-export const AUDIT_PAGE_SIZE = 50;
+import { LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
 
 export interface AuditRow {
   id: string;
@@ -91,21 +90,21 @@ export async function entityLabels(
 export async function listAudit(
   state: ListState,
   hiddenAssetIds: string[] = [],
-): Promise<{ rows: AuditRow[]; total: number; pageCount: number }> {
+): Promise<{ rows: AuditRow[]; total: number; page: number; pageCount: number }> {
   const where = buildAuditWhere(state, hiddenAssetIds);
   const total = await prisma.auditEntry.count({ where });
-  const pageCap = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE));
-  const page = Math.min(state.page, pageCap); // unbounded ?page= must not become a huge OFFSET
+  const pg = pageOf(total, state.page, LOG_PAGE_SIZE);
   const entries = await prisma.auditEntry.findMany({
     where,
-    orderBy: { createdAt: "desc" },
-    skip: (page - 1) * AUDIT_PAGE_SIZE,
-    take: AUDIT_PAGE_SIZE,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: pg.skip,
+    take: pg.take,
   });
   const labels = await entityLabels(entries);
   return {
     total,
-    pageCount: Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE)),
+    page: pg.page,
+    pageCount: pg.pageCount,
     rows: entries.map((e) => {
       const l = labels.get(`${e.entityType}:${e.entityId}`)!;
       return {

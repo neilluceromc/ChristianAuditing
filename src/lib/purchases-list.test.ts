@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  PURCHASE_PAGE_SIZE, PURCHASE_TABS, dwellLine, parsePurchaseState, purchaseWhere,
+  PURCHASE_TABS, dwellLine, parsePurchaseState, purchaseWhere,
 } from "./purchases-list";
 
 const NOW = new Date("2026-08-17T09:00:00+08:00");
@@ -70,9 +70,6 @@ describe("purchaseWhere", () => {
     const where = purchaseWhere("SUBMITTED", "PR-0198");
     expect(where.state).toBe("SUBMITTED");
     expect(where.OR).toHaveLength(2);
-  });
-  it("pages at 50", () => {
-    expect(PURCHASE_PAGE_SIZE).toBe(50);
   });
 });
 

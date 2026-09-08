@@ -3,8 +3,7 @@ import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { isStatusOf } from "@/lib/asset-class";
 import { ageBucket } from "@/lib/home";
-
-export const FINANCE_PAGE_SIZE = 25;
+import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 
 export interface FinanceAssetRow {
   id: string;
@@ -46,20 +45,19 @@ export async function financeAssets(
     prisma.asset.count({ where }),
     prisma.asset.aggregate({ where, _sum: { cost: true } }),
   ]);
-  const pageCount = Math.max(1, Math.ceil(total / FINANCE_PAGE_SIZE));
-  const safePage = Math.min(Math.max(1, page), pageCount);
+  const pg = pageOf(total, page, ENTITY_PAGE_SIZE);
   const assets = await prisma.asset.findMany({
     where,
-    orderBy: [{ cost: "desc" }, { tag: "asc" }],
-    skip: (safePage - 1) * FINANCE_PAGE_SIZE,
-    take: FINANCE_PAGE_SIZE,
+    orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
+    skip: pg.skip,
+    take: pg.take,
     include: { category: true, assignee: true },
   });
 
   return {
     total,
-    page: safePage,
-    pageCount,
+    page: pg.page,
+    pageCount: pg.pageCount,
     // Decimal never leaves this module
     totalCost: fmtMoney(sum._sum.cost === null ? 0 : Number(sum._sum.cost)),
     rows: assets.map((a): FinanceAssetRow => ({

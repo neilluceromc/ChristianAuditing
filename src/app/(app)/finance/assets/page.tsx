@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { ASSET_CLASSES, CLASS_LABEL, parseCls, statusesFor } from "@/lib/asset-class";
+import { parsePage } from "@/lib/paging";
 import { financeAssets, parseAssetStatus } from "@/server/modules/finance/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, TBody, THead, Th, Td, Tr } from "@/components/ui/table";
@@ -20,7 +21,7 @@ export default async function FinanceAssetsPage({
   const params = toSearchParams(await searchParams);
   const cls = parseCls(params.get("cls")) ?? "IT";
   const status = parseAssetStatus(params.get("status"), cls);
-  const page = Math.max(1, Number.parseInt(params.get("page") ?? "1", 10) || 1);
+  const page = parsePage(params);
   const { rows, total, page: current, pageCount, totalCost } = await financeAssets(status, page, cls);
 
   const hrefFor = (p: number) => {

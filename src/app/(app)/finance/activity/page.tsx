@@ -5,12 +5,11 @@ import { financeActivityWhere } from "@/server/modules/finance/queries";
 import { auditSentence } from "@/lib/activity";
 import { fmtDateTime } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
+import { LOG_PAGE_SIZE, pageOf, parsePage } from "@/lib/paging";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { ActivityFeed, actionDot, type ActivityItem } from "@/components/patterns/activity-feed";
-
-const PAGE_SIZE = 50;
 
 const DOMAIN: Record<string, string> = { "purchase-request": "PURCHASE", asset: "ASSET" };
 
@@ -20,16 +19,15 @@ export default async function FinanceActivityPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireUser();
-  const rawPage = Math.max(1, Number.parseInt(toSearchParams(await searchParams).get("page") ?? "1", 10) || 1);
+  const sp = toSearchParams(await searchParams);
 
   const total = await prisma.auditEntry.count({ where: financeActivityWhere });
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const page = Math.min(rawPage, pageCount); // unbounded ?page= must not become a huge OFFSET
+  const pg = pageOf(total, parsePage(sp), LOG_PAGE_SIZE);
   const entries = await prisma.auditEntry.findMany({
     where: financeActivityWhere,
-    orderBy: { createdAt: "desc" },
-    skip: (page - 1) * PAGE_SIZE,
-    take: PAGE_SIZE,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: pg.skip,
+    take: pg.take,
   });
   const labels = await entityLabels(entries);
 
@@ -56,8 +54,8 @@ export default async function FinanceActivityPage({
           <>
             <ActivityFeed items={items} />
             <div className="flex items-center justify-between pt-1">
-              <span className="font-mono text-[11px] text-fg-muted">page {page} of {pageCount}</span>
-              <Pagination page={page} pageCount={pageCount} hrefFor={(p) => `?page=${p}`} />
+              <span className="font-mono text-[11px] text-fg-muted">page {pg.page} of {pg.pageCount}</span>
+              <Pagination page={pg.page} pageCount={pg.pageCount} hrefFor={(p) => `?page=${p}`} />
             </div>
           </>
         ) : (

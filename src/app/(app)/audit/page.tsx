@@ -31,7 +31,7 @@ export default async function AuditPage({
   // Entity facet counts read WITHOUT the entity filter applied (so unchecking
   // never zeroes the other options out) — one groupBy, no filter loop.
   const withoutEntity = { ...state, filters: { ...state.filters, entity: [] } };
-  const [{ rows, total, pageCount }, entityGroups] = await Promise.all([
+  const [{ rows, total, page, pageCount }, entityGroups] = await Promise.all([
     listAudit(state, hidden),
     prisma.auditEntry.groupBy({ by: ["entityType"], where: buildAuditWhere(withoutEntity, hidden), _count: true }),
   ]);
@@ -99,8 +99,8 @@ export default async function AuditPage({
               </TBody>
             </Table>
             <div className="flex items-center justify-between pt-1">
-              <span className="font-mono text-[11px] text-fg-muted">page {state.page} of {pageCount}</span>
-              <Pagination page={state.page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
+              <span className="font-mono text-[11px] text-fg-muted">page {page} of {pageCount}</span>
+              <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
             </div>
           </>
         ) : hasFilters ? (

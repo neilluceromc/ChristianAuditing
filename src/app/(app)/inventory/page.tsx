@@ -71,7 +71,7 @@ export default async function InventoryPage({
   // InventoryTable already uses to decide whether the drawer exists.
   const employees = canMutate ? await activeEmployeeOptions() : [];
 
-  const [{ rows, total, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
+  const [{ rows, total, page, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
     listAssets(state, purchaseYear, cls),
     facetOptions(state, purchaseYear, cls),
     getInventoryColumns(user.id),
@@ -197,9 +197,9 @@ export default async function InventoryPage({
             />
             <div className="flex items-center justify-between pt-1">
               <span className="font-mono text-[11px] text-fg-muted">
-                page {state.page} of {pageCount}
+                page {page} of {pageCount}
               </span>
-              <Pagination page={state.page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
+              <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
             </div>
           </>
         ) : hasFilters ? (
