@@ -1,7 +1,7 @@
 # Phase 17 — The Scale Sweep — Design
 
-**Status:** approved in chat 2026-09-08 ("yep"); the user waived the spec-review and execution-choice
-gates ("no need for approval proceed to subagent development"). Amendments during execution are `D-`
+**Status:** implemented on branch `phase-17-scale-sweep`, 2026-09-08; the user waived the spec-review and
+execution-choice gates ("no need for approval proceed to subagent development"); amendments are `D-`
 entries at the top of the plan.
 
 **Goal:** every list that can grow pages properly at 1000 assets and 600 employees, with no list that

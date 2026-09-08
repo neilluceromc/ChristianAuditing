@@ -12,6 +12,75 @@
 
 **Baselines on `main` at `94a396b`:** 1040 unit / 56 files · 227 e2e / 18 files · `tsc` and `lint` clean · 17 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
+> ### AMENDED DURING EXECUTION — D-1 through D-9
+>
+> *(Task 1 — `prisma format` realigned the whole `schema.prisma` file when the new `@@index` blocks were
+> added: a cosmetically noisy diff with no semantic change, which is also why the implementer's own report
+> line-count looked off. No plan change resulted, so it carries no `D-` number.)*
+>
+> **D-1. Task 5 `employeeExportRows` return shape (Ruling P1):** the plan's Interfaces block carried a stray
+> comment — "throws ExportCapExceeded? NO" — alongside the return-type sketch, which read as ambiguous
+> against Task 5's own Step 3 prose. Ruled that the return type is `{ rows: EmployeeExportRow[] } | { over:
+> number }`, with the route checking `"over" in result`; the stray comment is plan noise and the Step 3 text
+> is binding. — Cost if wrong: a compile error. Lesson: a stray inline comment inside an Interfaces block is
+> not itself a requirement — when it conflicts with a step's prose, the prose wins.
+>
+> **D-2. Task 5 gaps candidate select scope (Ruling P2):** the brief's "no relations" wording for the gaps
+> candidate select was read narrowly, as "no `department` join" rather than "no nested select at all" — the
+> select keeps `assets: { select: { id, tag, model, typeId, status } }` (the `HeldAssetLike` shape
+> `computeLoadout` requires) alongside the plain scalars. — Cost if wrong: none. Lesson: "no relations" in a
+> brief can mean "no unnecessary joins," not "nothing nested" — check what the consuming function actually
+> needs before trimming a select.
+>
+> **D-3. Task 6 `TimelineList` gains `data-id` (Ruling P3):** rows render an additive, invisible
+> `data-id={item.id}` attribute so Task 8's e2e can assert row identity across cursor pages — nothing else in
+> the rendered list was stable enough to grep. — Cost if wrong: one attribute. Lesson: when an e2e assertion
+> needs identity and the DOM offers nothing stable, a single additive test-hook attribute is cheaper than
+> reverse-engineering visible text into a de facto identifier.
+>
+> **D-4. Plan unit/e2e counts are estimates (Ruling P4):** every commit message and doc update in this phase
+> states measured counts, never the plan's estimated ones. — Cost if wrong: a stale number. Lesson: numeric
+> estimates written into a plan before the work starts are scaffolding, not a spec; docs and commits report
+> what was actually measured.
+>
+> **D-5. Task 2 clamped-page rendering extended to inventory and audit:** the Global Constraints' "out-of-
+> range pages clamp to the last page on the server" rule was applied to the inventory and audit pages too,
+> beyond whatever narrower set Task 2's own steps named by name. Accepted as an extension, not a deviation.
+> Lesson: a global constraint declared once at the top of the plan binds every task that touches a paged
+> list, even a page a task's step-by-step instructions never called out individually.
+>
+> **D-6. Task 4 `DeliveryTable` takes `tab`, not an `hrefFor` function prop (Ruling P5):** `DeliveryTable` is
+> a client component, so it receives the `tab` value as a prop and builds its own pagination hrefs, rather
+> than the plan's `hrefFor` function-prop shape — a function cannot cross the server→client boundary. Plan
+> defect, accepted; the resulting URLs are identical either way. — Cost if wrong: none. Lesson: a plan's
+> proposed component interface can silently assume a server-component call site — check whether the actual
+> component is client or server before accepting a function-prop shape.
+>
+> **D-7. Task 5 pre-existing `employees-list.test.ts` preserved:** the first implementation pass overwrote
+> the pre-existing `src/lib/employees-list.test.ts`; caught before commit and restored, so the file carries
+> both the prior coverage and the new SQL-paging tests. Lesson: when a task's new tests target a file that
+> already has tests, confirm the new content is additive, not a wholesale replacement, before treating a
+> green run as proof nothing was lost.
+>
+> **D-8. Task 6 fix round 1 — the timeline cursor survives a tie longer than a page (Ruling P6):** Task 8's
+> e2e battery found that `mergeTimeline` truncated a tie group longer than one page — a `createMany` or bulk
+> assign stamping one `createdAt` across many rows on a single employee's timeline was silently dropped by
+> the old page-local `skip` and a fixed per-source `take`. Fixed so the cursor's `skip` accumulates across
+> pages at the same boundary instant and each source fetches `take = limit + 1 + cursor.skip`
+> (`timelineTake`); two new unit tests cover a 120-row single-source tie and a 60+3 two-source tie. — Cost if
+> wrong: a wrong cursor, caught by the new tests. Lesson: a cursor's "skip past what I've already shown at
+> this instant" state has to survive across pages, not just within one page's fetch — scale testing is
+> exactly what surfaces the difference.
+>
+> **D-9. Task 8 fix round 1 — case 7 made size-agnostic, two-source fixture restored:** review caught that
+> case 7 hardcoded page sizes (`[50, 48, 22]`) computed against the pre-fix `mergeTimeline`, which D-8's fix
+> (5930cce) had already changed to `[50, 50, 20]` — the suite would have failed on its very next run.
+> Rewritten to be size-agnostic, with the two-source timeline fixture (audit + approval entries on
+> BR-ZZ-0001) restored now that D-8 makes it safe to exercise at e2e scale again, and the assertion
+> strengthened to full DB id-set equality. Lesson: a test pinned to a specific numeric shape has to be
+> re-derived, not just left in place, once the code it pins changes underneath it — and a workaround fixture
+> used to unblock one task should be revisited once the thing it worked around is fixed.
+
 **Dev environment on the staging laptop (PICKUP §2, memory):** a git worktree under `.claude/worktrees/` with its own `.env` (`DATABASE_URL` → `inventory_dev`, `APP_BASE_URL=http://192.168.203.153:3100`, no `SEED_PASSWORD`), dev server on port 3100, Playwright with `E2E_PORT=3100`, always foreground, `--workers=1`. Never touch the `inventory` database or port 3000. `npm ci` in the worktree first.
 
 ## Global Constraints
