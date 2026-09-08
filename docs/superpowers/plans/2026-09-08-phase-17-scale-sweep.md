@@ -121,6 +121,26 @@
 > `parseTimelineCursor` clamp cases, less the loadout test's unchanged `it` count); `tsc` and `lint` clean;
 > `e2e/paging.spec.ts` and `e2e/it-core.spec.ts` (33 cases, the surfaces this wave touched) reran green,
 > foreground, `E2E_PORT=3100 --workers=1`; `npx playwright test --list` still reports 239 / 19 files.
+>
+> The scoped re-review of the wave (9 addressed, 0 open) raised one new Minor, deferred with 8–13:
+> `gapKeptIds` makes the gaps LIST path call `resolveMissing` twice — once over every candidate inside
+> the helper, once over the 25-row page — where the list previously reused the whole-candidate map. The
+> output is equivalent and the extra read is bounded by the page; the helper could return
+> `{ keptIds, missing }` instead. Cost if wrong: one extra query per gaps page.
+
+> **D-12. Final battery — custody case 7 raced its own toast:** with the fix wave in, the whole e2e
+> battery was re-run on the final tree in four foreground chunks. Chunk D (`admin`, `direct-lifecycle`,
+> `scanner`, `registration`, `custody`, `axe-sweep`, `kitchen-sink`) failed custody case 7 twice at the
+> same line — the loaner slot never appeared on Leo Tan's page — while `custody.spec.ts` alone passed
+> 6/6. Cause: the test waited on the "Slot added" toast with `.first()`, which the FIRST add's toast still
+> satisfied, so `page.goto` could outrun the second slot's insert; with `admin` and `axe-sweep` warming
+> the same server first, the timing tipped every time. Fixed in the test only (`2c1436c`): both waits now
+> target the new slot's Remove button inside the Contractor kit card, which renders only after the action
+> commits and `router.refresh()` returns the slot. Not a product defect — an operator clicking Add slot
+> twice gets both slots. Chunk D then passed 55/55; the full battery on the final tree is **239/239 e2e /
+> 19 files** (54 + 67 + 63 + 55) and **1056 unit / 58**, `tsc` and `lint` clean. — Cost if wrong: a
+> stricter wait. Lesson: assert on the state a step produces, never on a toast an earlier step may still
+> be showing — a `.first()` on a repeated success message is a race by construction.
 
 **Dev environment on the staging laptop (PICKUP §2, memory):** a git worktree under `.claude/worktrees/` with its own `.env` (`DATABASE_URL` → `inventory_dev`, `APP_BASE_URL=http://192.168.203.153:3100`, no `SEED_PASSWORD`), dev server on port 3100, Playwright with `E2E_PORT=3100`, always foreground, `--workers=1`. Never touch the `inventory` database or port 3000. `npm ci` in the worktree first.
 
