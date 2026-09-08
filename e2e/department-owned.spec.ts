@@ -350,7 +350,11 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await page.getByLabel("Quantity").fill("1");
     await expect(page.getByLabel("Tag 1")).toHaveValue(tag);
     await page.getByRole("button", { name: "Register asset" }).click();
-    await page.waitForURL((url) => url.pathname === "/inventory");
+    // Phase 16 Task 13: the register page no longer redirects to /inventory
+    // on success — it swaps the form for a RegisterSuccess panel in place
+    // ("1 asset registered — <tag>", Print labels / Open the list / Register
+    // another batch). Wait for that panel instead of a navigation.
+    await expect(page.getByText(`1 asset registered — ${tag}`)).toBeVisible();
     const a = await db.asset.findUniqueOrThrow({ where: { tag } });
     id = a.id;
     expect(a.cls).toBe("IT");
