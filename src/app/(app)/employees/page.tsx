@@ -27,7 +27,7 @@ export default async function EmployeesPage({
   const state = parseListState(sp, EMPLOYEES_LIST_CONFIG);
   const gapsOnly = sp.get("gaps") === "1";
 
-  const [{ rows, total, pageCount }, facets] = await Promise.all([
+  const [{ rows, total, page, pageCount }, facets] = await Promise.all([
     listEmployees(state, gapsOnly),
     employeeFacetOptions(state),
   ]);
@@ -47,7 +47,7 @@ export default async function EmployeesPage({
           <>
             {/* Carries the same q/facets/gaps as the list — the export
                 honours "Policy gaps only" exactly like listEmployees does,
-                via the shared filteredEmployees cut, so the sheet matches
+                via the same narrow-candidate-pass cut, so the sheet matches
                 what's on screen. */}
             <ButtonLink href={href(state, gapsOnly, "/employees/export")}>Export</ButtonLink>
             {/* Absent, not disabled, for a role that can't reach the page —
@@ -119,8 +119,8 @@ export default async function EmployeesPage({
               </TBody>
             </Table>
             <div className="flex items-center justify-between pt-1">
-              <span className="font-mono text-[11px] text-fg-muted">page {state.page} of {pageCount}</span>
-              <Pagination page={state.page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
+              <span className="font-mono text-[11px] text-fg-muted">page {page} of {pageCount}</span>
+              <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
             </div>
           </>
         ) : hasFilters ? (
