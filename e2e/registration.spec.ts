@@ -1,15 +1,19 @@
 import { test, expect, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
+import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 
 /**
- * Phase 16 — registration. Six cases per spec §9.2 rows 1–6: category-driven
- * tag prefill on the single-asset form, vendor/brand/a document landing on
- * the record, a live duplicate-serial check before submit, the batch page's
- * Purchasing fields with one invoice document shared across every unit in
- * the batch, duplicate-serial refusal (both in-batch and against the fleet),
- * and IT's nav link to the batch page.
+ * Phase 16 — registration. Seven cases per spec §9.2 rows 1–6 plus one added
+ * in the final-review fix wave (ruling R14): category-driven tag prefill on
+ * the single-asset form, vendor/brand/a document landing on the record, a
+ * live duplicate-serial check before submit, the batch page's Purchasing
+ * fields with one invoice document shared across every unit in the batch,
+ * duplicate-serial refusal (both in-batch and against the fleet), IT's nav
+ * link to the batch page, and — case 7 — Purchasing attaching an invoice to
+ * an IT-class batch it registers, which `canManageClass` alone could not do
+ * (D-19). Case 4 also axe-checks the batch success panel (D-20).
  *
  * Cases run serial but each registers its own fresh assets — none of them
  * shares or depends on state another case wrote, so the ordering only
@@ -47,6 +51,21 @@ async function login(page: Page, email: string) {
 // idOf (also part of the shared helper block at e2e/direct-lifecycle.spec.ts:24-51)
 // is not needed here — every case below looks assets up by tag directly — so
 // it is left out rather than copied unused.
+
+// Copied from e2e/it-core.spec.ts:24 — house rule: never import across spec
+// files. Adapted with the same pointer-settle step e2e/axe-sweep.spec.ts's
+// scanRoute already uses: unlike it-core.spec.ts's callers (every one a fresh
+// page.goto), every call here follows a click that opens a panel, and a
+// freshly-mounted Button variant="primary" reports a phantom SERIOUS
+// contrast violation when axe samples it mid-transition or with the pointer
+// resting on it — measured here on the batch success panel, it passes at
+// rest. Settling first, not weakening the assertion.
+async function expectNoSeriousAxe(page: Page) {
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(700);
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
+}
 
 /** Highest number in use under a prefix — never hardcode a literal; an earlier test may have registered more. */
 async function highestNumber(prefix: string): Promise<number> {
@@ -127,6 +146,7 @@ test.describe.serial("registration", () => {
     const tags = await Promise.all([1, 2, 3].map((i) => page.getByLabel(`Tag ${i}`).inputValue()));
     await page.getByRole("button", { name: "Register 3 assets" }).click();
     await expect(page.getByText(/3 assets registered/)).toBeVisible({ timeout: 30_000 });
+    await expectNoSeriousAxe(page); // D-20: the batch success panel
 
     // Ordered by tag ascending, same order registerAssets pushed its ids in
     // (it walks d.tags, which the client submitted in the same ascending
@@ -177,5 +197,36 @@ test.describe.serial("registration", () => {
     await page.getByRole("link", { name: "Register several" }).first().click();
     await expect(page).toHaveURL(/\/inventory\/register$/);
     await expect(page.getByRole("heading", { name: "Register assets" })).toBeVisible();
+  });
+
+  // Final-review fix wave, ruling R14: `REGISTRABLE_CLASSES.purchasing_staff`
+  // includes IT (Phase 14), but the batch invoice upload used to gate on
+  // `canManageClass`, so a Purchasing-registered IT batch always ended
+  // "Registered — the invoice did not attach." `canAttachDocuments` fixes it.
+  test("7. Purchasing attaches an invoice to an IT batch it registers", async ({ page }) => {
+    await login(page, P);
+    await page.goto("/inventory/register");
+    await page.getByLabel("Category").selectOption({ label: "Laptop" });
+    await page.getByLabel("Model").fill("ThinkPad E14 (e2e R14)");
+    await page.getByLabel("Quantity").fill("2");
+    await page.getByLabel("Invoice document").setInputFiles({
+      name: "it-inv.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 it-inv"),
+    });
+    const tags = await Promise.all([1, 2].map((i) => page.getByLabel(`Tag ${i}`).inputValue()));
+    await page.getByRole("button", { name: "Register 2 assets" }).click();
+    await expect(page.getByText(/2 assets registered/)).toBeVisible({ timeout: 30_000 });
+    // No attention banner: the invoice attached, so the "did not attach"
+    // banner registration.spec.ts's docError path renders never appears here.
+    await expect(page.getByText(/did not attach/)).toHaveCount(0);
+
+    const rows = await db.asset.findMany({ where: { tag: { in: tags } }, include: { documents: true } });
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r.cls).toBe("IT");
+      // Purchasing does not manage IT, so the asset is never self-checked —
+      // it still awaits IT's check even though its invoice is attached.
+      expect(r.itVerifiedAt).toBeNull();
+      expect(r.documents.map((d) => d.kind)).toEqual(["invoice"]);
+    }
   });
 });

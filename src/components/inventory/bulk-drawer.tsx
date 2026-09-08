@@ -229,95 +229,104 @@ export function BulkDrawer({
             </ul>
           </Banner>
         )}
-        {effectiveMode === "assign" ? (
+        {/* Phase 16 fix: a partial result (some assets skipped) settles the
+            drawer on the skipped list — the form and its Confirm button would
+            otherwise still be sitting there, inviting a resubmission of a
+            batch that already partly ran. Done (in the Banner above) is the
+            only way forward from here. */}
+        {skippedList.length === 0 && (
           <>
-            <FormField label="Assign to" required error={fieldErrors.employeeId}>
-              {(props) => (
-                <EntityCombobox
-                  id={props.id}
-                  aria-describedby={props["aria-describedby"]}
-                  invalid={props.invalid}
-                  options={employees}
-                  value={employeeId}
-                  onChange={setEmployeeId}
-                  placeholder="Type a name or EMP number…"
+            {effectiveMode === "assign" ? (
+              <>
+                <FormField label="Assign to" required error={fieldErrors.employeeId}>
+                  {(props) => (
+                    <EntityCombobox
+                      id={props.id}
+                      aria-describedby={props["aria-describedby"]}
+                      invalid={props.invalid}
+                      options={employees}
+                      value={employeeId}
+                      onChange={setEmployeeId}
+                      placeholder="Type a name or EMP number…"
+                    />
+                  )}
+                </FormField>
+                <SegmentedControl
+                  aria-label="Assignment kind"
+                  value={assignKind}
+                  options={[{ value: "DEPLOYED", label: "Deployed" }, { value: "TEMPORARY", label: "Loan" }]}
+                  onChange={(v) => setAssignKind(v as "DEPLOYED" | "TEMPORARY")}
                 />
-              )}
-            </FormField>
-            <SegmentedControl
-              aria-label="Assignment kind"
-              value={assignKind}
-              options={[{ value: "DEPLOYED", label: "Deployed" }, { value: "TEMPORARY", label: "Loan" }]}
-              onChange={(v) => setAssignKind(v as "DEPLOYED" | "TEMPORARY")}
-            />
-            {assignKind === "TEMPORARY" && (
-              <FormField label="Loan until" required error={fieldErrors.loanDueAt} hint={`Defaults to ${DEFAULT_LOAN_DAYS} days.`}>
-                {(props) => (
-                  <Input
-                    id={props.id}
-                    aria-describedby={props["aria-describedby"]}
-                    invalid={props.invalid}
-                    type="date"
-                    min={minLoanDue(new Date())}
-                    value={loanDueAt}
-                    onChange={(e) => setLoanDueAt(e.target.value)}
-                  />
+                {assignKind === "TEMPORARY" && (
+                  <FormField label="Loan until" required error={fieldErrors.loanDueAt} hint={`Defaults to ${DEFAULT_LOAN_DAYS} days.`}>
+                    {(props) => (
+                      <Input
+                        id={props.id}
+                        aria-describedby={props["aria-describedby"]}
+                        invalid={props.invalid}
+                        type="date"
+                        min={minLoanDue(new Date())}
+                        value={loanDueAt}
+                        onChange={(e) => setLoanDueAt(e.target.value)}
+                      />
+                    )}
+                  </FormField>
                 )}
-              </FormField>
+                <FormField label="Reason" error={fieldErrors.reason}>
+                  {(props) => (
+                    <Textarea
+                      id={props.id}
+                      aria-describedby={props["aria-describedby"]}
+                      invalid={props.invalid}
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  )}
+                </FormField>
+              </>
+            ) : (
+              <>
+                <FormField label="Target status" required error={fieldErrors.to}>
+                  {(props) => (
+                    <Select
+                      id={props.id}
+                      aria-describedby={props["aria-describedby"]}
+                      invalid={props.invalid}
+                      value={effectiveTo}
+                      onChange={(e) => setTo(e.target.value)}
+                    >
+                      {statusesFor(cls).map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </Select>
+                  )}
+                </FormField>
+                <FormField label="Reason" required={!direct} error={fieldErrors.reason} hint="Goes into every approval's payload.">
+                  {(props) => (
+                    <Textarea
+                      id={props.id}
+                      aria-describedby={props["aria-describedby"]}
+                      invalid={props.invalid}
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  )}
+                </FormField>
+              </>
             )}
-            <FormField label="Reason" error={fieldErrors.reason}>
-              {(props) => (
-                <Textarea
-                  id={props.id}
-                  aria-describedby={props["aria-describedby"]}
-                  invalid={props.invalid}
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                />
-              )}
-            </FormField>
-          </>
-        ) : (
-          <>
-            <FormField label="Target status" required error={fieldErrors.to}>
-              {(props) => (
-                <Select
-                  id={props.id}
-                  aria-describedby={props["aria-describedby"]}
-                  invalid={props.invalid}
-                  value={effectiveTo}
-                  onChange={(e) => setTo(e.target.value)}
-                >
-                  {statusesFor(cls).map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </Select>
-              )}
-            </FormField>
-            <FormField label="Reason" required={!direct} error={fieldErrors.reason} hint="Goes into every approval's payload.">
-              {(props) => (
-                <Textarea
-                  id={props.id}
-                  aria-describedby={props["aria-describedby"]}
-                  invalid={props.invalid}
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                />
-              )}
-            </FormField>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={pending}
+                onClick={submit}
+                disabled={effectiveMode === "assign" && !employeeId}
+              >
+                {effectiveMode === "assign" ? "Confirm" : direct ? "Confirm" : "Request status change"}
+              </Button>
+            </div>
           </>
         )}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-          <Button
-            variant="primary"
-            loading={pending}
-            onClick={submit}
-            disabled={effectiveMode === "assign" && !employeeId}
-          >
-            {effectiveMode === "assign" ? "Confirm" : direct ? "Confirm" : "Request status change"}
-          </Button>
-        </div>
       </div>
     </Drawer>
   );

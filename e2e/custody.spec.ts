@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
+import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 import { fmtDate } from "../src/lib/format";
@@ -11,7 +12,11 @@ import { fmtDate } from "../src/lib/format";
  * Loans worklist ranks a no-due-date loan above an overdue one; bulk-assign
  * skips an untriaged spare by name; and a signed accountability form covers
  * current holdings, downloads with the right headers, and the next issue
- * shows as uncovered.
+ * shows as uncovered. The final-review fix wave (D-20) adds axe coverage of
+ * this phase's new dialogs and drawer states: the Waive and Add-a-slot
+ * dialogs (case 8), the Assign dialog in Loan mode (case 9), the bulk drawer
+ * in assign mode and again on its skipped list (case 11), and the Record-a-
+ * signed-form dialog (case 12).
  *
  * Cases run serial: case 9 puts BR-MN-0910 through a full loan-then-triage
  * round trip so it reads as an ordinary assignable spare again by the time
@@ -43,6 +48,22 @@ const idOf = async (tag: string) => (await db.asset.findUniqueOrThrow({ where: {
 // highestNumber/tagOf (also part of the shared helper block at
 // e2e/direct-lifecycle.spec.ts:24-51) are not needed here — no case in this
 // file registers a fresh tag — so they are left out rather than copied unused.
+
+// Copied from e2e/it-core.spec.ts:24 — house rule: never import across spec
+// files. Adapted with the same pointer-settle step e2e/axe-sweep.spec.ts's
+// scanRoute already uses: unlike it-core.spec.ts's callers (every one a fresh
+// page.goto), every call here follows a click that opens a dialog or drawer,
+// and a freshly-mounted Button variant="primary" reports a phantom SERIOUS
+// contrast violation when axe samples it mid-transition or with the pointer
+// resting on it — measured here on the Waive dialog (3.6:1 against the
+// required 4.5:1, on the "Waive" button), it passes at rest. Settling first,
+// not weakening the assertion.
+async function expectNoSeriousAxe(page: Page) {
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(700);
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
+}
 
 const IT = "it@thebackroomop.com";
 const ADMIN = "admin@thebackroomop.com";
@@ -126,6 +147,8 @@ test.describe.serial("custody", () => {
     await page.getByRole("button", { name: "Actions for the headset slot" }).click();
     await page.getByRole("menuitem", { name: "Waive for this person…" }).click();
     const waiveDialog = page.getByRole("dialog", { name: "Waive the headset slot?" });
+    await expect(waiveDialog).toBeVisible();
+    await expectNoSeriousAxe(page); // D-20: the Waive dialog, open
     await waiveDialog.getByLabel("Reason").fill("piloting a BYOD headset policy");
     await waiveDialog.getByRole("button", { name: "Waive" }).click();
     await expect(page.getByText("headset waived for this person")).toBeVisible({ timeout: 10_000 });
@@ -155,6 +178,8 @@ test.describe.serial("custody", () => {
     // Add a "tablet" slot for this person only.
     await page.getByRole("button", { name: "Add a slot for this person…" }).click();
     const addDialog = page.getByRole("dialog", { name: "Add a slot for this person" });
+    await expect(addDialog).toBeVisible();
+    await expectNoSeriousAxe(page); // D-20: the Add-a-slot dialog, open
     await addDialog.getByLabel("Slot name").fill("tablet");
     await addDialog.getByLabel("Reason").fill("pilot device for field staff");
     await addDialog.getByRole("button", { name: "Add" }).click();
@@ -188,6 +213,8 @@ test.describe.serial("custody", () => {
     // visible label text is what direct-lifecycle.spec.ts's own "Initial
     // status" case does, and is what an operator actually clicks.
     await dialog.getByRole("radiogroup", { name: "Assignment kind" }).getByText("Loan", { exact: true }).click();
+    await expect(dialog.getByLabel("Loan until")).toBeVisible();
+    await expectNoSeriousAxe(page); // D-20: the Assign dialog in Loan mode
     const loanDueAt = await dialog.getByLabel("Loan until").inputValue();
     await dialog.getByLabel("Assign to").fill("EMP-0097");
     await dialog.getByRole("option", { name: /EMP-0097/ }).click();
@@ -263,6 +290,7 @@ test.describe.serial("custody", () => {
     // substring match of the "Assign to a person" radio's own accessible name.
     await drawer.getByRole("combobox", { name: "Assign to" }).fill("EMP-0071");
     await drawer.getByRole("option", { name: /EMP-0071/ }).click();
+    await expectNoSeriousAxe(page); // D-20: the bulk drawer in assign mode, before Confirm
     // BR-MN-0910 already carries one lifecycle_assign approval and audit
     // entry from case 9 (its loan to Nina) — scope the "this action wrote
     // two" checks below to writes from this point on, not just this asset.
@@ -272,6 +300,7 @@ test.describe.serial("custody", () => {
     await expect(page.getByText(`2 assets assigned to ${paolo.name}`)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("1 skipped")).toBeVisible();
     await expect(page.getByText("BR-PH-0301 — BR-PH-0301 is back but not yet triaged")).toBeVisible();
+    await expectNoSeriousAxe(page); // D-20: the bulk drawer's skipped list
     await page.getByRole("button", { name: "Done" }).click();
 
     const [mnA, mnB, ph] = await Promise.all([
@@ -308,6 +337,8 @@ test.describe.serial("custody", () => {
 
     await page.getByRole("button", { name: "Record a signed form…" }).click();
     const dialog = page.getByRole("dialog", { name: "Record a signed form" });
+    await expect(dialog).toBeVisible();
+    await expectNoSeriousAxe(page); // D-20: the Record-a-signed-form dialog, open
     const signedRaw = await dialog.getByLabel("Signed on").inputValue();
     await dialog.getByLabel("Signed form (scan or photo)").setInputFiles({
       name: "signed.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 signed"),

@@ -35,11 +35,16 @@ const KIND_OPTIONS = DOCUMENT_KINDS.map((value) => ({ value, label: KIND_LABELS[
 export function DocumentsPanel({
   assetId,
   docs,
-  canMutate,
+  canUpload,
+  canSign,
 }: {
   assetId: string;
   docs: DocumentRow[];
-  canMutate: boolean;
+  /** Phase 16 (ruling R14): the managing department, or the registering
+   * department while IT has not yet checked this asset — `canAttachDocuments`. */
+  canUpload: boolean;
+  /** Marking an accountability form signed stays `canManageClass` — unchanged by R14. */
+  canSign: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -100,7 +105,7 @@ export function DocumentsPanel({
               {doc.signed ? (
                 <Pill tone="accent">SIGNED</Pill>
               ) : (
-                canMutate && doc.kind === "accountability-form" && (
+                canSign && doc.kind === "accountability-form" && (
                   <Button size="sm" variant="ghost" onClick={() => sign(doc.id)}>Mark signed</Button>
                 )
               )}
@@ -112,7 +117,7 @@ export function DocumentsPanel({
         </ul>
       )}
 
-      {canMutate && (
+      {canUpload && (
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}

@@ -8,7 +8,7 @@ import { writeAudit } from "@/server/audit";
 import {
   conflict, forbidden, ok, rateLimited, validationError, type ActionResult,
 } from "@/server/action-result";
-import { canManageClass } from "@/lib/asset-class";
+import { canAttachDocuments, canManageClass } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
 import { DOCUMENT_KINDS } from "@/lib/documents";
 import { BULK_MAX } from "@/lib/inventory-list";
@@ -35,7 +35,10 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult<{
 
   const asset = await prisma.asset.findUnique({ where: { id: assetId } });
   if (!asset) return conflict("That asset no longer exists.");
-  if (!canManageClass(user.role, asset.cls)) return forbidden();
+  // Ruling R14: the managing department always, or the registering department
+  // while IT has not yet checked this asset (spec §2.3's own Purchasing
+  // registers-IT flow attaches its invoice at this exact moment).
+  if (!canAttachDocuments(user.role, asset)) return forbidden();
 
   const stored = await storeUpload(`assets/${assetId}`, checked.file);
 
@@ -74,9 +77,11 @@ export async function uploadBatchDocument(formData: FormData): Promise<ActionRes
   const checked = validateUpload(formData.get("file"));
   if (!checked.ok) return validationError({ file: checked.error });
 
-  const assets = await prisma.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true, cls: true } });
+  const assets = await prisma.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true, cls: true, itVerifiedAt: true } });
   if (assets.length !== assetIds.length) return conflict("One of those assets no longer exists.");
-  if (assets.some((a) => !canManageClass(user.role, a.cls))) return forbidden();
+  // Ruling R14: the same predicate as uploadDocument — the managing
+  // department, or the registering department before IT has checked it.
+  if (assets.some((a) => !canAttachDocuments(user.role, a))) return forbidden();
 
   const stored = await storeUpload("batches", checked.file);
   const created = await prisma.$transaction(async (tx) => {
@@ -90,6 +95,11 @@ export async function uploadBatchDocument(formData: FormData): Promise<ActionRes
       });
     }
     return assets.length;
+  }, {
+    // Same reasoning as bulkChangeStatus/bulkAssign (lifecycle/actions.ts):
+    // two writes per asset x BULK_MAX (200) assets can clear Prisma's 5s
+    // interactive-transaction default well before the loop finishes.
+    timeout: 60_000, maxWait: 10_000,
   });
   for (const a of assets) revalidatePath(`/inventory/${a.id}/documents`);
   return ok({ created });

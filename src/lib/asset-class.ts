@@ -192,6 +192,20 @@ export function canEditAsset(role: Role, a: { cls: AssetClass; itVerifiedAt: Dat
 }
 
 /**
+ * Phase 16 (spec §2.3/§2.5, ruling R14). Who may attach a document (receipt,
+ * invoice, photo…) to an asset: the managing department always, or — the
+ * mirror of Phase 14's `canEditAsset` — the department that registered it,
+ * for as long as IT has not yet checked it. Without this, a Purchasing batch
+ * registering IT-class devices (spec §2.3's own worked example) can never
+ * attach the invoice it just chose: `canManageClass(purchasing_staff, "IT")`
+ * is false, so the upload actions refused it and every such batch ended
+ * "Registered — the invoice did not attach."
+ */
+export function canAttachDocuments(role: Role, a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
+  return canManageClass(role, a.cls) || (canRegisterClass(role, a.cls) && a.itVerifiedAt === null);
+}
+
+/**
  * Phase 15 (spec §2.1). Classes whose lifecycle changes APPLY ON CONFIRM for the
  * department that manages them, instead of waiting in the approval queue. IT
  * asked for it ("fast paced"); Purchasing kept its queue.

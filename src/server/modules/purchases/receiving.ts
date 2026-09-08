@@ -15,6 +15,12 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 
+// Same shape createSchema uses (inventory/actions.ts) — a malformed date
+// string is a field error at the picker, never an Invalid Date reaching
+// Prisma's `new Date(...)` write.
+const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
+const toDate = (s: string | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
+
 const registerSchema = z.object({
   categoryId: z.string().min(1, "Pick a category"),
   typeId: z.string().optional(),
@@ -23,10 +29,10 @@ const registerSchema = z.object({
   // field, so the two cannot disagree.
   tags: z.array(z.string().trim().toUpperCase().regex(TAG_SHAPE, "Format: BR-XX-0000")).min(1).max(200),
   serials: z.array(z.string().trim().max(120)).optional(),
-  purchasedAt: z.string().optional(),
+  purchasedAt: dateStr.optional(),
   cost: z.string().optional(),
   vendorId: z.string().optional(),
-  warrantyUntil: z.string().optional(),
+  warrantyUntil: dateStr.optional(),
   brand: z.string().trim().max(60).optional(),
   notes: z.string().trim().max(2000).optional(),
   invoiceRef: z.string().trim().max(60).optional(),
@@ -121,7 +127,7 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             typeId: d.typeId || null,
             status: DEFAULT_STATUS[category.cls],
             cls: category.cls,
-            purchasedAt: d.purchasedAt ? new Date(d.purchasedAt) : null,
+            purchasedAt: toDate(d.purchasedAt),
             // NOT `toCost` from inventory/actions.ts (checked, see report): it
             // is a private, non-exported, synchronous helper inside a
             // top-of-file "use server" module, which under Next's Server
@@ -132,7 +138,7 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             // is a pass-through, not a re-implementation of its rule.
             cost: d.cost ? d.cost : null,
             vendorId: d.vendorId || null,
-            warrantyUntil: d.warrantyUntil ? new Date(d.warrantyUntil) : null,
+            warrantyUntil: toDate(d.warrantyUntil),
             brand: d.brand || null,
             notes: d.notes || null,
             invoiceRef: d.invoiceRef || null,
@@ -156,6 +162,12 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
         });
       }
       done = { created, ids };
+    }, {
+      // 200 units x (one create + one audit write) can clear Prisma's 5s
+      // interactive-transaction default well before the loop finishes — same
+      // reasoning as bulkChangeStatus/bulkAssign (lifecycle/actions.ts) and
+      // uploadBatchDocument (inventory/document-actions.ts).
+      timeout: 60_000, maxWait: 10_000,
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {

@@ -4,7 +4,7 @@ import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { canManageClass } from "@/lib/asset-class";
+import { canAttachDocuments, canManageClass } from "@/lib/asset-class";
 import { Banner } from "@/components/ui/banner";
 import { DocumentsPanel, type DocumentRow } from "@/components/inventory/documents-panel";
 
@@ -51,7 +51,8 @@ export default async function AssetDocumentsPage({
       <DocumentsPanel
         assetId={id}
         docs={rows}
-        canMutate={canManageClass(user.role, asset.cls)}
+        canUpload={canAttachDocuments(user.role, asset)}
+        canSign={canManageClass(user.role, asset.cls)}
       />
     </div>
   );
