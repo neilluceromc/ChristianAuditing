@@ -15,9 +15,10 @@ export interface PaletteResults {
   assets: PaletteHit[];
   people: PaletteHit[];
   requests: PaletteHit[];
+  suppliers: PaletteHit[];
 }
 
-const EMPTY: PaletteResults = { assets: [], people: [], requests: [] };
+const EMPTY: PaletteResults = { assets: [], people: [], requests: [], suppliers: [] };
 
 // In-memory sliding window: 30 searches / 10 s per user. A DB RateEvent per
 // keystroke would be write amplification on a read path; process-local is
@@ -48,8 +49,9 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
   const canAssets = pathAllowedForRole("/inventory/x", user.role);
   const canPeople = pathAllowedForRole("/employees/x", user.role);
   const canRequests = pathAllowedForRole("/purchases/x", user.role);
+  const canSuppliers = pathAllowedForRole("/purchases/suppliers", user.role);
 
-  const [assets, people, requests] = await Promise.all([
+  const [assets, people, requests, suppliers] = await Promise.all([
     canAssets
       ? prisma.asset.findMany({
           where: {
@@ -76,11 +78,27 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
           orderBy: { refNo: "desc" },
         })
       : [],
+    canSuppliers
+      ? prisma.vendor.findMany({
+          where: {
+            archivedAt: null,
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { registeredName: { contains: q, mode: "insensitive" } },
+            ],
+          },
+          take: 5,
+          orderBy: { name: "asc" },
+        })
+      : [],
   ]);
 
   return {
     assets: assets.map((a) => ({ label: a.tag, sub: a.model, href: `/inventory/${a.id}` })),
     people: people.map((e) => ({ label: e.name, sub: e.employeeNo, href: `/employees/${e.id}` })),
     requests: requests.map((r) => ({ label: r.refNo, sub: r.state, href: `/purchases/${r.id}` })),
+    suppliers: suppliers.map((v) => ({
+      label: v.name, sub: v.category ?? v.contactPerson ?? "supplier", href: `/purchases/suppliers/${v.id}`,
+    })),
   };
 }

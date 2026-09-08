@@ -26,7 +26,7 @@ export function CommandPaletteTrigger() {
   );
 }
 
-const EMPTY: PaletteResults = { assets: [], people: [], requests: [] };
+const EMPTY: PaletteResults = { assets: [], people: [], requests: [], suppliers: [] };
 
 export function CommandPalette({ role, sections }: { role: Role; sections: NavSection[] }) {
   const [open, setOpen] = useState(false);
@@ -81,6 +81,7 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
         { heading: "Assets", hits: results.assets },
         { heading: "People", hits: results.people },
         { heading: "Requests", hits: results.requests },
+        { heading: "Suppliers", hits: results.suppliers },
         { heading: "Actions", hits: actions },
       ].filter((g) => g.hits.length > 0),
     [results, actions],
