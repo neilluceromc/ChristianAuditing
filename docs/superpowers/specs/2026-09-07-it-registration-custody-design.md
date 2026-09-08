@@ -55,6 +55,7 @@ which both IT and Purchasing may open (`requireRole("admin","it_staff","purchasi
 | 11 | Signed acknowledgement | **An employee-level `Acknowledgement` row**: signing date, the scanned file, who recorded it, and a snapshot of the items covered. Shown on the employee page with an "issued since last signature" hint. §6 | user (item 18: date + scan) | On-screen signature; a date stamp with no file; reusing `AssetDocument` (asset-scoped, `Restrict` FK). |
 | 12 | Employees | **Unchanged**: the manual form and the spreadsheet import. No M365. | user | Manager/site fields; pre-hire dates. |
 | 13 | Schema change | **One additive migration** `20260907110000_it_registration_custody`: three nullable columns on `Asset`, one flag on `PolicySlot`, one enum, two tables. Migration count 16 → 17. No backfill. §8 | — | — |
+| 14 | Who may attach documents at registration? | **Anyone who manages the class, or may register it while the asset awaits IT's check** — `canAttachDocuments`, §2.3, §2.5. | assistant (final review, ruling R14) | Keeping `canManageClass`, which made the spec's own Purchasing-registers-IT flow fail its document step. |
 
 ---
 
@@ -113,10 +114,16 @@ Additions to `AssetForm` in `mode="new"` and to `createSchema`/`createAsset`:
   returns `{ created: number; ids: string[] }` — the form calls the new
   `uploadBatchDocument(formData)` in `src/server/modules/inventory/document-actions.ts`: `assetIds[]`
   (1–200), `kind` (from `KINDS`), `file`. The action checks every asset exists and that the actor
-  `canManageClass` each one's class, stores the file **once** at `uploads/batches/<Date.now()>-<safeName>`,
-  and in one transaction creates one `AssetDocument` row per asset (same `path`, `checksum`, `fileName`,
-  `kind`) with one `document.uploaded` audit entry per asset. The download route is unchanged: it
-  resolves any relative path under `uploads/` and already refuses traversal.
+  `canAttachDocuments` each one — **ruling R14 (final-review fix wave):** the managing department always,
+  or the registering department while IT has not yet checked the asset (`canManageClass(role, cls) ||
+  (canRegisterClass(role, cls) && itVerifiedAt === null)`, `src/lib/asset-class.ts`) — not `canManageClass`
+  alone, which made this very batch page's own worked example (Purchasing registers an IT-class batch)
+  fail its document step every time: `canManageClass(purchasing_staff, "IT")` is false, so the invoice
+  chosen above always ended "Registered — the invoice did not attach." — stores the file **once** at
+  `uploads/batches/<Date.now()>-<safeName>`, and in one transaction creates one `AssetDocument` row per
+  asset (same `path`, `checksum`, `fileName`, `kind`) with one `document.uploaded` audit entry per asset.
+  The download route is unchanged: it resolves any relative path under `uploads/` and already refuses
+  traversal.
 - **Success panel** replacing the current count toast: *"5 assets registered — BR-LT-0211 … BR-LT-0215"*,
   with *Print labels* (`/inventory/labels?ids=<ids>`), *Open the list*, *Register another batch*.
 
@@ -146,7 +153,13 @@ The validation and storage halves of `uploadDocument` move to `src/server/upload
 `validateUpload(file: File): { ok: true; ext: string } | { ok: false; error: string }` (extension table,
 MIME cross-check, `MAX_BYTES`) and `storeUpload(relDir: string, file: File): Promise<{ relPath: string; checksum: string; safeName: string }>`.
 `uploadDocument`, `uploadBatchDocument` and §6's `recordAcknowledgement` all call them. Behaviour of
-`uploadDocument` is unchanged.
+`uploadDocument` is unchanged, **except its own gate: ruling R14 (final-review fix wave) replaces its
+`canManageClass` check with `canAttachDocuments`, the same predicate §2.3 gives `uploadBatchDocument` —
+the managing department, or the registering department while IT has not yet checked the asset.** The
+documents panel and page route their upload-form visibility through the same predicate (a new `canUpload`
+prop, split apart from the existing `canMutate` — renamed `canSign` — which keeps gating the
+accountability-form "Mark signed" button on `canManageClass` alone; R14 does not touch who may sign). The
+download route's `canSeeClass` visibility check is unchanged.
 
 ### 2.6 Register form fields, as a table
 

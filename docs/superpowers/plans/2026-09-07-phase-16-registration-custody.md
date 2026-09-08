@@ -12,7 +12,7 @@
 
 **Baselines on `main` at `7712524`:** 998 unit / 54 files · 214 e2e / 16 files · `tsc` and `lint` clean · 16 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
-> ### AMENDED DURING EXECUTION — D-1 through D-18
+> ### AMENDED DURING EXECUTION — D-1 through D-20
 >
 > *(Ruling R4 — adding `.superpowers/` to `.gitignore` in Task 1's commit range — was raised at pre-flight and withdrawn before Task 1 started: the directory was already line 16 of `.gitignore`, and the earlier `check-ignore` miss was because a trailing-slash pattern only matches an existing directory. No plan change resulted, so it carries no `D-` number.)*
 >
@@ -51,6 +51,42 @@
 > **D-17. Task 15 case 7 written from the real DOM (Ruling R3):** the plan's sketch of case 7 was a soft placeholder ("write against the real DOM"); the implementer's version still asserts both halves spec §9.2 row 7 requires — the loaner slot holds the TEMPORARY device, AND the standard laptop slot stays empty — not just the happy path. Reviewer-checked per the ruling.
 >
 > **D-18. Task 16 the register success panel freezes its submitted tags, found during the battery:** `RegisterSuccess` displayed the live `tags` state; after a successful batch registration the `[prefix, quantity, highestByPrefix]` effect in `register-form.tsx` could recompute a fresh suggestion once the page's `highestByPrefix` prop reflected the asset just created — one tag number ahead of what had actually been written, even though the asset itself was created correctly. `registered` now freezes the submitted `tags` alongside the returned `ids`, so the headline always names what was created. Found 100%-reproducibly (not a flake) by `department-owned.spec.ts` case 13a; `receiving.spec.ts` and `asset-classes.spec.ts` needed the same `waitForURL("/inventory")` → "wait for the success panel" locator fix, since Task 13 replaced the register page's post-submit redirect with an in-place success panel and none of the three pre-existing specs had been updated for it. Lesson: a UI component that mirrors "what the server just did" from live form state, not from the server's own response, can drift the instant anything else re-renders that state in between.
+>
+> **D-19. Whole-branch review, ruling R14 — registrants may attach documents until IT checks the asset:**
+> `REGISTRABLE_CLASSES.purchasing_staff` includes IT (Phase 14's spec §4), but `uploadDocument` and
+> `uploadBatchDocument` (`src/server/modules/inventory/document-actions.ts`) gated on `canManageClass`
+> alone, so a Purchasing batch registering IT-class devices — spec §2.3's own worked example — could never
+> attach the invoice it just chose, and always ended "Registered — the invoice did not attach." Fixed with
+> a new pure predicate `canAttachDocuments(role, { cls, itVerifiedAt })` in `src/lib/asset-class.ts` —
+> `canManageClass(role, cls) || (canRegisterClass(role, cls) && itVerifiedAt === null)`, the mirror of
+> Phase 14's `canEditAsset` — used by both upload actions in place of `canManageClass`, and by
+> `documents-panel.tsx`/`documents/page.tsx` to decide whether the upload form renders (`canUpload`, a new
+> prop, split apart from the existing `canMutate` — renamed `canSign` — which still gates the accountability-
+> form "Mark signed" button on `canManageClass` alone, since R14 does not touch who may sign). The download
+> route's `canSeeClass` visibility check is unchanged (spec's own instruction). Five unit tests in
+> `asset-class.test.ts`; e2e case 7 in `registration.spec.ts` (Purchasing registers a 2-unit IT batch with
+> an invoice, the success panel shows no attention banner, each unit gets one `invoice` document and stays
+> `itVerifiedAt === null`). Spec §2.3/§2.5 amended with the R14 wording and a new decisions-table row 14.
+> Lesson: a capability added to one map (`REGISTRABLE_CLASSES`, Phase 14) is not automatically threaded
+> through every action that assumes the OLD, narrower map (`MANAGEABLE_CLASSES`) was the only one that
+> mattered — the two diverge exactly where a department registers into a class it does not manage.
+>
+> **D-20. Whole-branch review — axe coverage of Phase 16's new dialogs and drawer states:** spec §9.2's
+> `axe-sweep.spec.ts` row covered the batch success panel and new routes, but not the dialogs and drawer
+> states this phase actually added: the Waive and Add-a-slot dialogs, the Assign dialog in Loan mode, the
+> bulk drawer in assign mode (and again on its skipped list), and the Record-a-signed-form dialog.
+> `expectNoSeriousAxe` (copied from `e2e/it-core.spec.ts:24`, house rule: never import across spec files)
+> added to both `registration.spec.ts` and `custody.spec.ts`, called with each surface open. **The first run
+> failed once**, on `custody.spec.ts` case 8's Waive dialog: a SERIOUS 3.6:1 contrast violation on the
+> "Waive" `Button variant="primary"`. This is the same phantom class `axe-sweep.spec.ts`'s own `scanRoute`
+> already documents (measured three times in that file) — the button samples mid-transition or with the
+> pointer resting on it, and passes at rest — because every call this ruling added follows a click, unlike
+> `it-core.spec.ts`'s callers, which are all fresh `page.goto`s. Fixed by giving both files' copied
+> `expectNoSeriousAxe` the same pointer-settle step `scanRoute` uses (`page.mouse.move(0, 0)` + a 700 ms
+> wait) before analysing, not by weakening the assertion — re-run, all 13 cases across both files passed
+> with zero serious/critical violations. Lesson: a helper copied verbatim from a file whose every caller is
+> a fresh navigation does not carry that file's implicit precondition into a file whose callers are all
+> post-click — the precondition has to be re-derived, not assumed to travel with the copy.
 
 **Dev environment on the staging laptop (PICKUP §2, memory):** work in a git worktree under `.claude/worktrees/`, with its own `.env`: `DATABASE_URL` pointing at the `inventory_dev` database in the same Postgres container, `APP_BASE_URL=http://192.168.203.153:3100`, no `SEED_PASSWORD`. Dev server on port 3100; Playwright with `E2E_PORT=3100`, always foreground, `--workers=1`. Never touch the `inventory` database or port 3000.
 
