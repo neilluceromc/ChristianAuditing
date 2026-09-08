@@ -40,14 +40,24 @@ export function BankAccountsCard({
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const { pending, error, fieldErrors, setFieldErrors, retryAfter, setRetryAfter, run } = useSupplierRunner(CLAIMED);
+  const { pending, error, fieldErrors, retryAfter, setRetryAfter, reset, run } = useSupplierRunner(CLAIMED);
 
+  /**
+   * Reveal keeps its own inline banner (`revealError`) rather than the one
+   * shared by the Add/Remove dialogs — it has no dialog of its own to host
+   * one, and unlike Add/Remove it never calls router.refresh() (ruling R2).
+   * It still shares the runner's `retryAfter` so a reveal that gets rate
+   * limited counts against, and is shown by, the exact same countdown as
+   * Add/Remove — one 60/min bucket, one piece of state — instead of a second
+   * ad-hoc timer. Neither rate_limited nor forbidden is discarded any more.
+   */
   function reveal(id: string) {
     setRevealError(null);
     startReveal(async () => {
       const res = await revealBankAccount({ id });
       if (res.ok) setRevealed((prev) => ({ ...prev, [id]: res.data.accountNumber }));
-      else if (res.kind !== "rate_limited" && res.kind !== "forbidden") setRevealError(res.message);
+      else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
+      else setRevealError(res.message);
     });
   }
 
@@ -56,12 +66,18 @@ export function BankAccountsCard({
       <CardHeader
         title="Bank accounts"
         actions={canManage && (
-          <Button size="sm" onClick={() => { setForm(EMPTY_FORM); setFieldErrors({}); setAdding(true); }}>
+          <Button size="sm" onClick={() => { reset(); setForm(EMPTY_FORM); setAdding(true); }}>
             Add account
           </Button>
         )}
       />
       <CardBody className="flex flex-col gap-3">
+        {/* Gated on both dialogs being closed: while one is open, its own
+            RateLimitNotice below already shows this same shared retryAfter —
+            rendering it here too would double it up behind the dialog veil. */}
+        {!adding && !removing && retryAfter !== null && (
+          <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />
+        )}
         {revealError && <Banner tone="fault" title={revealError} />}
         <BankAccountsTable
           accounts={accounts}
@@ -70,7 +86,7 @@ export function BankAccountsCard({
           canReveal={canReveal}
           canManage={canManage}
           onReveal={reveal}
-          onRemove={setRemoving}
+          onRemove={(id) => { reset(); setRemoving(id); }}
         />
       </CardBody>
 
@@ -91,6 +107,11 @@ export function BankAccountsCard({
           </>
         }
       >
+        {retryAfter !== null && (
+          <div className="mb-3">
+            <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />
+          </div>
+        )}
         {error && <Banner tone="fault" title={error} className="mb-3" />}
         Only the record here is removed; nothing is sent to the bank.
       </Dialog>

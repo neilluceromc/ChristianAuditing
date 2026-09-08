@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { uploadSupplierDocument } from "@/server/modules/suppliers/document-actions";
 import { SUPPLIER_DOCUMENT_KINDS, SUPPLIER_DOCUMENT_LABEL } from "@/lib/documents";
+import { SupplierDocumentsTable } from "./supplier-documents-table";
 
 export interface SupplierDocumentRow {
   id: string;
@@ -69,32 +69,7 @@ export function SupplierDocumentsCard({
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title="Upload rejected">{error}</Banner>}
 
-        {docs.length === 0 ? (
-          <p className="py-2 text-center text-xs text-fg-muted">No documents on file for this supplier.</p>
-        ) : (
-          <Table>
-            <THead>
-              <Tr>
-                <Th>Kind</Th>
-                <Th>File</Th>
-                <Th>Uploaded by</Th>
-                <Th>Date</Th>
-                <Th aria-label="Download" />
-              </Tr>
-            </THead>
-            <TBody>
-              {docs.map((d) => (
-                <Tr key={d.id}>
-                  <Td>{SUPPLIER_DOCUMENT_LABEL[d.kind as SupplierDocKind] ?? d.kind}</Td>
-                  <Td>{d.fileName}</Td>
-                  <Td>{d.uploadedBy}</Td>
-                  <Td mono>{d.at}</Td>
-                  <Td align="right"><a href={d.downloadHref} className="text-accent hover:underline">Download</a></Td>
-                </Tr>
-              ))}
-            </TBody>
-          </Table>
-        )}
+        <SupplierDocumentsTable docs={docs} />
 
         {canUpload && (
           <div className="flex items-center gap-2 border-t border-border-faint pt-3">

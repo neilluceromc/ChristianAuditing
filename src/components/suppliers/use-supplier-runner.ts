@@ -52,5 +52,12 @@ export function useSupplierRunner(claimedFieldKeys: string[] = []) {
     });
   }
 
-  return { pending, error, setError, fieldErrors, setFieldErrors, retryAfter, setRetryAfter, run };
+  /** Clears leftover error/field-error/retry state — call from a dialog's open-handler so a failed submit in one dialog never bleeds into another freshly opened one. */
+  function reset() {
+    setError(null);
+    setFieldErrors({});
+    setRetryAfter(null);
+  }
+
+  return { pending, error, setError, fieldErrors, setFieldErrors, retryAfter, setRetryAfter, reset, run };
 }
