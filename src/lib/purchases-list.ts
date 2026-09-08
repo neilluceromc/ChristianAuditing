@@ -21,8 +21,6 @@ export const PURCHASE_TABS = [
 
 export type PurchaseTabId = (typeof PURCHASE_TABS)[number]["id"];
 
-export const PURCHASE_PAGE_SIZE = 50;
-
 export function parsePurchaseState(raw: string | null | undefined): PurchaseRequestState | null {
   return (PURCHASE_STATES as readonly string[]).includes(raw ?? "")
     ? (raw as PurchaseRequestState)

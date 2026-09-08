@@ -153,6 +153,9 @@ export function buildAssetWhere(
 
 export function buildAssetOrderBy(sort: SortKey[]): Prisma.AssetOrderByWithRelationInput[] {
   const order = sort.length ? sort : INVENTORY_LIST_CONFIG.defaultSort;
-  return order.map(({ key, dir }): Prisma.AssetOrderByWithRelationInput =>
-    key === "category" ? { category: { name: dir } } : { [key]: dir });
+  return [
+    ...order.map(({ key, dir }): Prisma.AssetOrderByWithRelationInput =>
+      key === "category" ? { category: { name: dir } } : { [key]: dir }),
+    { id: "asc" },
+  ];
 }

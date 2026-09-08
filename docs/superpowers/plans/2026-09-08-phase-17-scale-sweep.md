@@ -12,6 +12,136 @@
 
 **Baselines on `main` at `94a396b`:** 1040 unit / 56 files · 227 e2e / 18 files · `tsc` and `lint` clean · 17 migrations, none pending. Verify before Task 1 and correct these numbers if they differ.
 
+> ### AMENDED DURING EXECUTION — D-1 through D-9
+>
+> *(Task 1 — `prisma format` realigned the whole `schema.prisma` file when the new `@@index` blocks were
+> added: a cosmetically noisy diff with no semantic change, which is also why the implementer's own report
+> line-count looked off. No plan change resulted, so it carries no `D-` number.)*
+>
+> **D-1. Task 5 `employeeExportRows` return shape (Ruling P1):** the plan's Interfaces block carried a stray
+> comment — "throws ExportCapExceeded? NO" — alongside the return-type sketch, which read as ambiguous
+> against Task 5's own Step 3 prose. Ruled that the return type is `{ rows: EmployeeExportRow[] } | { over:
+> number }`, with the route checking `"over" in result`; the stray comment is plan noise and the Step 3 text
+> is binding. — Cost if wrong: a compile error. Lesson: a stray inline comment inside an Interfaces block is
+> not itself a requirement — when it conflicts with a step's prose, the prose wins.
+>
+> **D-2. Task 5 gaps candidate select scope (Ruling P2):** the brief's "no relations" wording for the gaps
+> candidate select was read narrowly, as "no `department` join" rather than "no nested select at all" — the
+> select keeps `assets: { select: { id, tag, model, typeId, status } }` (the `HeldAssetLike` shape
+> `computeLoadout` requires) alongside the plain scalars. — Cost if wrong: none. Lesson: "no relations" in a
+> brief can mean "no unnecessary joins," not "nothing nested" — check what the consuming function actually
+> needs before trimming a select.
+>
+> **D-3. Task 6 `TimelineList` gains `data-id` (Ruling P3):** rows render an additive, invisible
+> `data-id={item.id}` attribute so Task 8's e2e can assert row identity across cursor pages — nothing else in
+> the rendered list was stable enough to grep. — Cost if wrong: one attribute. Lesson: when an e2e assertion
+> needs identity and the DOM offers nothing stable, a single additive test-hook attribute is cheaper than
+> reverse-engineering visible text into a de facto identifier.
+>
+> **D-4. Plan unit/e2e counts are estimates (Ruling P4):** every commit message and doc update in this phase
+> states measured counts, never the plan's estimated ones. — Cost if wrong: a stale number. Lesson: numeric
+> estimates written into a plan before the work starts are scaffolding, not a spec; docs and commits report
+> what was actually measured.
+>
+> **D-5. Task 2 clamped-page rendering extended to inventory and audit:** the Global Constraints' "out-of-
+> range pages clamp to the last page on the server" rule was applied to the inventory and audit pages too,
+> beyond whatever narrower set Task 2's own steps named by name. Accepted as an extension, not a deviation.
+> Lesson: a global constraint declared once at the top of the plan binds every task that touches a paged
+> list, even a page a task's step-by-step instructions never called out individually.
+>
+> **D-6. Task 4 `DeliveryTable` takes `tab`, not an `hrefFor` function prop (Ruling P5):** `DeliveryTable` is
+> a client component, so it receives the `tab` value as a prop and builds its own pagination hrefs, rather
+> than the plan's `hrefFor` function-prop shape — a function cannot cross the server→client boundary. Plan
+> defect, accepted; the resulting URLs are identical either way. — Cost if wrong: none. Lesson: a plan's
+> proposed component interface can silently assume a server-component call site — check whether the actual
+> component is client or server before accepting a function-prop shape.
+>
+> **D-7. Task 5 pre-existing `employees-list.test.ts` preserved:** the first implementation pass overwrote
+> the pre-existing `src/lib/employees-list.test.ts`; caught before commit and restored, so the file carries
+> both the prior coverage and the new SQL-paging tests. Lesson: when a task's new tests target a file that
+> already has tests, confirm the new content is additive, not a wholesale replacement, before treating a
+> green run as proof nothing was lost.
+>
+> **D-8. Task 6 fix round 1 — the timeline cursor survives a tie longer than a page (Ruling P6):** Task 8's
+> e2e battery found that `mergeTimeline` truncated a tie group longer than one page — a `createMany` or bulk
+> assign stamping one `createdAt` across many rows on a single employee's timeline was silently dropped by
+> the old page-local `skip` and a fixed per-source `take`. Fixed so the cursor's `skip` accumulates across
+> pages at the same boundary instant and each source fetches `take = limit + 1 + cursor.skip`
+> (`timelineTake`); two new unit tests cover a 120-row single-source tie and a 60+3 two-source tie. — Cost if
+> wrong: a wrong cursor, caught by the new tests. Lesson: a cursor's "skip past what I've already shown at
+> this instant" state has to survive across pages, not just within one page's fetch — scale testing is
+> exactly what surfaces the difference.
+>
+> **D-9. Task 8 fix round 1 — case 7 made size-agnostic, two-source fixture restored:** review caught that
+> case 7 hardcoded page sizes (`[50, 48, 22]`) computed against the pre-fix `mergeTimeline`, which D-8's fix
+> (5930cce) had already changed to `[50, 50, 20]` — the suite would have failed on its very next run.
+> Rewritten to be size-agnostic, with the two-source timeline fixture (audit + approval entries on
+> BR-ZZ-0001) restored now that D-8 makes it safe to exercise at e2e scale again, and the assertion
+> strengthened to full DB id-set equality. Lesson: a test pinned to a specific numeric shape has to be
+> re-derived, not just left in place, once the code it pins changes underneath it — and a workaround fixture
+> used to unblock one task should be revisited once the thing it worked around is fixed.
+>
+> **D-10. e2e file list — `admin.spec.ts` and `axe-sweep.spec.ts` unchanged:** the plan's Task 8 file list
+> and the spec's §9.2/§11 both named `e2e/{admin,axe-sweep}.spec.ts` as files this phase would touch.
+> Neither changed: `admin.spec.ts` never asserted the "Older attempts aren't paged through yet" text the
+> deliveries page used to show, so removing that text needed no test edit; and the paged-route axe checks
+> (`?page=2` on `/approvals`, `/employees`, `/admin/webhooks/deliveries`, plus a timeline page with an
+> active cursor) were written as case 12 of the new `paging.spec.ts` instead, because the rows those checks
+> need to find a page 2 exist only in `paging.spec.ts`'s own fixtures — `axe-sweep.spec.ts` would have had
+> to manufacture them itself for no benefit. — Cost if wrong: none; both files are correctly absent from
+> the spec's Changed list now (§11). Lesson: name test files by what they must prove, not by guess — a
+> spec section written before implementation can commit to a file list that the actual dependency (where
+> the rows already live) later overrides.
+>
+> **D-11. Final-review fix wave — the timeline cursor's `skip` is clamped:** `parseTimelineCursor` accepted
+> whatever `skip` a hand-edited URL supplied, and `mergeTimeline` fetched `take = limit + 1 + skip` per
+> source (flagged as unclamped in PICKUP §5 at Phase 17's close) — a large hand-crafted `skip` could 500
+> the timeline page or, at worst, pull an entity's entire history into one query. Fixed: `TIMELINE_MAX_SKIP
+> = 1_000` (named beside `TIMELINE_PAGE_SIZE`), clamped inside `parseTimelineCursor` on the way in — not
+> inside `timelineTake`, so `timelineCursorQS` round-trips stay exact — sized off the largest same-instant
+> writer to one entity's timeline (a 200-row bulk assign), so a tie longer than the bound degrades to
+> repeated rows on a later page, never a crash; three unit tests (`skip=1e12 → 1000`, `skip=-5 → 0`,
+> `skip=7 → 7`), written first and seen red before the clamp landed. — Cost if wrong: an oversized fetch,
+> now impossible. Lesson: a value that crosses a URL boundary needs its own clamp at the parse boundary,
+> independent of whatever downstream function consumes it — clamping inside `timelineTake` instead would
+> have broken the cursor's own round-trip test.
+>
+> The same fix wave also landed Minors 6, 7 and 15 of the final review (no `!` on a possibly-missing
+> employee row in `employees/queries.ts`; the gaps candidate-pass + `resolveMissing` + keep sequence
+> deduplicated into one `gapKeptIds` helper shared by the list and the export; the Home worklist's loans
+> comment references `CAP.large` instead of a literal `50`) and strengthened Minor 14's `headcountByPolicy`
+> test to sum two Finance-department groups into one policy. Minors 8–13 of the final review are deferred,
+> undecided by this wave: a parallel `count`/`findMany` pair that can refetch a page whose total shifted
+> between the two calls; a possible approvals double-count; the work-page capped-section note's wording
+> once dismissals are in play; a fully-dismissed capped section vanishing from the note entirely;
+> `TIMELINE_PAGE_SIZE` living as a third page-size constant alongside `ENTITY_PAGE_SIZE`/`LOG_PAGE_SIZE`
+> plus `parsePage` duplication; and a missing collation comment on `byWhenDesc`'s id comparator.
+>
+> Measured after the fix wave: **1056 unit / 58 files** (was 1055 / 58 at Task 9's close — the three new
+> `parseTimelineCursor` clamp cases, less the loadout test's unchanged `it` count); `tsc` and `lint` clean;
+> `e2e/paging.spec.ts` and `e2e/it-core.spec.ts` (33 cases, the surfaces this wave touched) reran green,
+> foreground, `E2E_PORT=3100 --workers=1`; `npx playwright test --list` still reports 239 / 19 files.
+>
+> The scoped re-review of the wave (9 addressed, 0 open) raised one new Minor, deferred with 8–13:
+> `gapKeptIds` makes the gaps LIST path call `resolveMissing` twice — once over every candidate inside
+> the helper, once over the 25-row page — where the list previously reused the whole-candidate map. The
+> output is equivalent and the extra read is bounded by the page; the helper could return
+> `{ keptIds, missing }` instead. Cost if wrong: one extra query per gaps page.
+
+> **D-12. Final battery — custody case 7 raced its own toast:** with the fix wave in, the whole e2e
+> battery was re-run on the final tree in four foreground chunks. Chunk D (`admin`, `direct-lifecycle`,
+> `scanner`, `registration`, `custody`, `axe-sweep`, `kitchen-sink`) failed custody case 7 twice at the
+> same line — the loaner slot never appeared on Leo Tan's page — while `custody.spec.ts` alone passed
+> 6/6. Cause: the test waited on the "Slot added" toast with `.first()`, which the FIRST add's toast still
+> satisfied, so `page.goto` could outrun the second slot's insert; with `admin` and `axe-sweep` warming
+> the same server first, the timing tipped every time. Fixed in the test only (`2c1436c`): both waits now
+> target the new slot's Remove button inside the Contractor kit card, which renders only after the action
+> commits and `router.refresh()` returns the slot. Not a product defect — an operator clicking Add slot
+> twice gets both slots. Chunk D then passed 55/55; the full battery on the final tree is **239/239 e2e /
+> 19 files** (54 + 67 + 63 + 55) and **1056 unit / 58**, `tsc` and `lint` clean. — Cost if wrong: a
+> stricter wait. Lesson: assert on the state a step produces, never on a toast an earlier step may still
+> be showing — a `.first()` on a repeated success message is a race by construction.
+
 **Dev environment on the staging laptop (PICKUP §2, memory):** a git worktree under `.claude/worktrees/` with its own `.env` (`DATABASE_URL` → `inventory_dev`, `APP_BASE_URL=http://192.168.203.153:3100`, no `SEED_PASSWORD`), dev server on port 3100, Playwright with `E2E_PORT=3100`, always foreground, `--workers=1`. Never touch the `inventory` database or port 3000. `npm ci` in the worktree first.
 
 ## Global Constraints

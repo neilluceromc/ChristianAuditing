@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy, type ExceptionLike } from "./loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, resolvePolicy, type ExceptionLike } from "./loadout";
 
 const policies = [
   { id: "p-dept", name: "Finance standard", appliesToTitle: null, appliesToDepartmentId: "dept-fin", slots: [] },
@@ -101,6 +101,21 @@ describe("effectiveSlots (Phase 16 §3.3)", () => {
   });
   it("ADD-only with no policy gives a personal loadout", () => {
     expect(computeLoadout(effectiveSlots([], [add]), [asset("a1", "t-tablet")]).filled).toBe(1);
+  });
+});
+
+describe("headcountByPolicy", () => {
+  it("sums counts per resolved policy id; groups that resolve to no policy are not counted", () => {
+    const groups = [
+      { title: "Team Lead", departmentId: "dept-fin", count: 3 },
+      { title: "Accountant", departmentId: "dept-fin", count: 5 },
+      { title: "Analyst", departmentId: "dept-fin", count: 4 }, // second, distinct non-policy title in the same department -- p-dept sums both groups
+      { title: "Driver", departmentId: "dept-ops", count: 2 },
+    ];
+    const heads = headcountByPolicy(groups, policies);
+    expect(heads.get("p-title")).toBe(3);
+    expect(heads.get("p-dept")).toBe(9); // 5 (Accountant) + 4 (Analyst)
+    expect(heads.size).toBe(2);
   });
 });
 

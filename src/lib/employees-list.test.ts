@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEmployeeWhere, EMPLOYEES_LIST_CONFIG } from "./employees-list";
+import { buildEmployeeOrderBy, buildEmployeeWhere, EMPLOYEES_LIST_CONFIG } from "./employees-list";
 import { parseListState } from "./url-state";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), EMPLOYEES_LIST_CONFIG);
@@ -21,5 +21,16 @@ describe("buildEmployeeWhere", () => {
   });
   it("empty state → empty where", () => {
     expect(buildEmployeeWhere(parse(""))).toEqual({});
+  });
+});
+
+describe("buildEmployeeOrderBy", () => {
+  it("applies both sort keys then the id tiebreaker", () => {
+    expect(buildEmployeeOrderBy([{ key: "joinedAt", dir: "desc" }, { key: "name", dir: "asc" }]))
+      .toEqual([{ joinedAt: "desc" }, { name: "asc" }, { id: "asc" }]);
+  });
+  it("falls back to the default sort", () => {
+    expect(buildEmployeeOrderBy([])).toEqual([{ name: "asc" }, { id: "asc" }]);
+    expect(EMPLOYEES_LIST_CONFIG.defaultSort).toEqual([{ key: "name", dir: "asc" }]);
   });
 });

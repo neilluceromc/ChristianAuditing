@@ -1,7 +1,7 @@
 # Phase 17 — The Scale Sweep — Design
 
-**Status:** approved in chat 2026-09-08 ("yep"); the user waived the spec-review and execution-choice
-gates ("no need for approval proceed to subagent development"). Amendments during execution are `D-`
+**Status:** implemented on branch `phase-17-scale-sweep`, 2026-09-08; the user waived the spec-review and
+execution-choice gates ("no need for approval proceed to subagent development"); amendments are `D-`
 entries at the top of the plan.
 
 **Goal:** every list that can grow pages properly at 1000 assets and 600 employees, with no list that
@@ -154,7 +154,7 @@ across the boundary are therefore never skipped or repeated — a direct change 
 and audit entry at the same `now`, so this case is real, and a unit test pins it.
 
 Pages: `src/app/(app)/inventory/[id]/timeline/page.tsx` (audit entries by `createdAt`, approvals by
-`updatedAt` — today's `when` for each source is kept) and `src/app/(app)/employees/[id]/timeline/page.tsx`
+`createdAt` — today's `when` for each source is kept) and `src/app/(app)/employees/[id]/timeline/page.tsx`
 (audit, approvals, reservations). Each renders the page's items through the existing `TimelineList` and,
 when `next` is non-null, an *"Older"* `ButtonLink` to `?${timelineCursorQS(next)}`; a *"Newest"* link back
 to the bare URL appears whenever a cursor is active. No client island: titles stay server-rendered JSX.
@@ -216,7 +216,8 @@ Baselines on `main` at `6d046da`: 1040 unit / 56 files · 227 e2e / 18 files · 
   `parsePage` mirrors `parseListState`'s lower clamp.
 - `timeline.test.ts`: `mergeTimeline` — interleaves three sources newest-first; a tie at the boundary
   (two items with the same `when` split across pages) is neither skipped nor repeated across two calls;
-  `next` is null when every source is exhausted; `parseTimelineCursor`/`timelineCursorQS` round-trip.
+  `next` is null when every source is exhausted; `parseTimelineCursor`/`timelineCursorQS` round-trip;
+  `parseTimelineCursor` clamps `skip` to `TIMELINE_MAX_SKIP` (final-review fix wave).
 - `worklist.test.ts`: `groupWork` sets `capped` for a saturated section and not otherwise.
 - `loadout.test.ts`: `headcountByPolicy` — title policy beats department policy per group; groups with
   no policy are not counted; sums `_count`.
@@ -257,10 +258,13 @@ model allows it; every tag/employeeNo/refNo is generated with a distinctive pref
     answers within Playwright's default navigation timeout (no explicit timing assertion).
 
 Existing specs to touch: `e2e/approvals-audit.spec.ts` if it asserts the old "showing N of M" line
-(the fact sheet says it does not); `e2e/admin.spec.ts` deliveries cases (the old "Older attempts" line);
-`e2e/axe-sweep.spec.ts` gains `?page=2` variants for `/approvals`, `/employees` and
-`/admin/webhooks/deliveries` (they render only when a page 2 exists — the sweep runs after `paging.spec`
-in chunk order, or manufactures its own rows; the plan decides). Expected: 227 → about 238 e2e / 19 files.
+(the fact sheet says it does not); `e2e/admin.spec.ts` deliveries cases, if any assert the old "Older
+attempts" line. As built, neither `e2e/admin.spec.ts` nor `e2e/axe-sweep.spec.ts` changed: `admin.spec.ts`
+never asserted the removed text, so it needed no edit, and the `?page=2` axe variants for `/approvals`,
+`/employees` and `/admin/webhooks/deliveries` were written as case 12 of the new `paging.spec.ts` instead
+of inside `axe-sweep.spec.ts` — that file's own fixtures already carry the paged rows those checks need,
+where `axe-sweep.spec.ts` would have had to manufacture its own. Expected: 227 → 239 e2e / 19 files
+(measured; see plan `D-10`).
 
 ---
 
@@ -288,5 +292,8 @@ Changed: `prisma/schema.prisma` · `src/lib/worklist.ts` (+test) · `src/lib/loa
 `src/app/(app)/admin/equipment-policies/page.tsx` · `src/app/(app)/employees/page.tsx` · `src/app/(app)/employees/export/route.ts` ·
 `src/app/(app)/inventory/[id]/{history,timeline}/page.tsx` · `src/app/(app)/employees/[id]/timeline/page.tsx` ·
 the four `*/activity/page.tsx` · `src/app/(app)/audit/page.tsx` · `src/app/(app)/purchases/page.tsx` ·
-`src/app/(app)/finance/assets/page.tsx` · `src/app/(app)/inventory/page.tsx` · `e2e/{admin,axe-sweep}.spec.ts` ·
+`src/app/(app)/finance/assets/page.tsx` · `src/app/(app)/inventory/page.tsx` ·
 `docs/PICKUP.md` · `docs/HANDOVER.md`.
+
+Not changed, despite §9.2's original expectation: `e2e/admin.spec.ts` and `e2e/axe-sweep.spec.ts` — see
+§9.2 and plan `D-10`.

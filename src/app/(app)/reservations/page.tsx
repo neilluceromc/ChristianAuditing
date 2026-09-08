@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
+import { parsePage } from "@/lib/paging";
 import {
   RESERVATION_TABS, listReservations, parseReservationTab,
 } from "@/server/modules/reservations/queries";
@@ -8,6 +9,7 @@ import { Banner } from "@/components/ui/banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
+import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
@@ -19,8 +21,14 @@ export default async function ReservationsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
-  const tab = parseReservationTab(toSearchParams(await searchParams).get("state"));
-  const { rows, counts } = await listReservations(tab);
+  const sp = toSearchParams(await searchParams);
+  const tab = parseReservationTab(sp.get("state"));
+  const { rows, counts, page, pageCount } = await listReservations(tab, parsePage(sp));
+  const hrefFor = (p: number) => {
+    const qs = new URLSearchParams({ state: tab });
+    if (p > 1) qs.set("page", String(p));
+    return `/reservations?${qs}`;
+  };
 
   return (
     <>
@@ -107,6 +115,7 @@ export default async function ReservationsPage({
             </TBody>
           </Table>
         )}
+        {rows.length > 0 && <Pagination page={page} pageCount={pageCount} hrefFor={hrefFor} />}
       </div>
     </>
   );

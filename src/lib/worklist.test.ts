@@ -37,6 +37,11 @@ describe("groupWork", () => {
     const g = groupWork(queueRows, new Set(), {});
     expect(g[0].rows.map((r) => r.key)).toEqual(["q-sla", "q-exec", "q-leave"]);
   });
+  it("marks a group capped when its section is in the saturated set", () => {
+    const g = groupWork(rows, new Set(), {}, new Set(["triage"]));
+    expect(g.find((x) => x.section.id === "triage")?.capped).toBe(true);
+    expect(g.find((x) => x.section.id === "repairs")?.capped).toBe(false);
+  });
 });
 
 describe("loanRow (Phase 16 §4.3)", () => {

@@ -40,7 +40,7 @@ export interface WorkRow {
   rank?: number;
 }
 
-export interface WorkGroup { section: WorkSection; rows: WorkRow[]; total: number }
+export interface WorkGroup { section: WorkSection; rows: WorkRow[]; total: number; capped: boolean }
 
 export interface LoanLike { id: string; tag: string; model: string; loanDueAt: Date | null; holder: string | null }
 
@@ -62,13 +62,23 @@ export function loanRow(a: LoanLike, now: Date): WorkRow | null {
   return null;
 }
 
-export function groupWork(rows: WorkRow[], dismissed: Set<string>, opts: { limit?: number }): WorkGroup[] {
+export function groupWork(
+  rows: WorkRow[],
+  dismissed: Set<string>,
+  opts: { limit?: number },
+  saturated: ReadonlySet<WorkSectionId> = new Set(),
+): WorkGroup[] {
   const live = rows.filter((r) => !dismissed.has(r.key));
   return WORK_SECTIONS.flatMap((section) => {
     const mine = live
       .filter((r) => r.section === section.id)
       .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || b.severity - a.severity);
     if (mine.length === 0) return [];
-    return [{ section, rows: opts.limit ? mine.slice(0, opts.limit) : mine, total: mine.length }];
+    return [{
+      section,
+      rows: opts.limit ? mine.slice(0, opts.limit) : mine,
+      total: mine.length,
+      capped: saturated.has(section.id),
+    }];
   });
 }

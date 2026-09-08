@@ -6,6 +6,7 @@ import {
   DELIVERY_TABS, deliveryStage, partitionEvents, replayBlockedReason, type DeliveryTab,
   type WebhookEvent,
 } from "@/lib/webhooks";
+import { pageOf, ENTITY_PAGE_SIZE, LOG_PAGE_SIZE } from "@/lib/paging";
 import type { Prisma, Role } from "@prisma/client";
 
 export interface UserRow {
@@ -29,15 +30,20 @@ export interface UserRow {
   target: TargetUser;
 }
 
-export async function listUsers(): Promise<UserRow[]> {
-  const rows = await prisma.user.findMany({
-    orderBy: [{ isPermanentAdmin: "desc" }, { name: "asc" }],
+export async function listUsers(requestedPage: number): Promise<{
+  rows: UserRow[]; total: number; page: number; pageCount: number;
+}> {
+  const total = await prisma.user.count();
+  const pg = pageOf(total, requestedPage, ENTITY_PAGE_SIZE);
+  const users = await prisma.user.findMany({
+    orderBy: [{ isPermanentAdmin: "desc" }, { name: "asc" }, { id: "asc" }],
     select: {
       id: true, name: true, email: true, role: true,
       isPermanentAdmin: true, disabled: true, passwordHash: true,
     },
+    skip: pg.skip, take: pg.take,
   });
-  return rows.map((r) => {
+  const rows = users.map((r): UserRow => {
     const target: TargetUser = {
       id: r.id, role: r.role, isPermanentAdmin: r.isPermanentAdmin, disabled: r.disabled,
     };
@@ -53,6 +59,7 @@ export async function listUsers(): Promise<UserRow[]> {
       target,
     };
   });
+  return { rows, total, page: pg.page, pageCount: pg.pageCount };
 }
 
 export interface FlagRow {
@@ -237,8 +244,6 @@ export interface DeliveryRow {
   replayable: boolean;
 }
 
-const DELIVERY_PAGE = 50;
-
 /**
  * A live `DELIVER_WEBHOOK` job's delivery id, or null for a payload that has
  * none. Defensive about the shape because `Job.payload` is a `Json` column: it
@@ -253,8 +258,8 @@ function liveDeliveryId(payload: Prisma.JsonValue): string | null {
 }
 
 /**
- * Scope decision #12: no pagination, matching `/approvals` — the newest
- * `DELIVERY_PAGE` attempts, with a line saying so when there are more.
+ * Scope decision #12: closed by Phase 17 — this page is paged like every
+ * other list (README 1k), the newest attempts first within the page.
  *
  * `WebhookDelivery.nextAttemptAt` is deliberately NOT read. Only the seed ever
  * writes it (`prisma/seed.ts`) — the worker's retry path (`mark` in
@@ -265,13 +270,17 @@ function liveDeliveryId(payload: Prisma.JsonValue): string | null {
  */
 export async function listDeliveries(
   tab: DeliveryTab,
-): Promise<{ rows: DeliveryRow[]; total: number; deadReplayable: number }> {
+  requestedPage: number,
+): Promise<{ rows: DeliveryRow[]; total: number; deadReplayable: number; page: number; pageCount: number }> {
   const statuses = DELIVERY_TABS.find((t) => t.id === tab)!.statuses;
   const where: Prisma.WebhookDeliveryWhereInput = statuses
     ? { status: { in: [...statuses] } }
     : {};
 
-  const [rows, total, deadReplayable, liveJobs] = await Promise.all([
+  const total = await prisma.webhookDelivery.count({ where });
+  const pg = pageOf(total, requestedPage, LOG_PAGE_SIZE);
+
+  const [rows, deadReplayable, liveJobs] = await Promise.all([
     prisma.webhookDelivery.findMany({
       where,
       // An explicit `select`, not `include: { endpoint: true }`: that pulls
@@ -286,9 +295,8 @@ export async function listDeliveries(
       // transaction share a millisecond (HANDOVER §7), and this seed writes
       // five in one `createMany`. The id tiebreaker is mandatory.
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: DELIVERY_PAGE,
+      skip: pg.skip, take: pg.take,
     }),
-    prisma.webhookDelivery.count({ where }),
     // Not filtered by `tab`: this is the batch control's offer, and it means
     // the same thing on every tab. A DEAD delivery cannot also hold a live
     // job — the worker dead-letters both in the same failure (`retryStatus`
@@ -313,6 +321,8 @@ export async function listDeliveries(
   return {
     total,
     deadReplayable,
+    page: pg.page,
+    pageCount: pg.pageCount,
     rows: rows.map((r) => ({
       id: r.id,
       endpointUrl: r.endpoint.url,

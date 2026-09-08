@@ -69,11 +69,11 @@ enum ApprovalState {
 }
 
 enum ApprovalType {
-  lifecycle_assign         @map("lifecycle.assign")
-  lifecycle_replace        @map("lifecycle.replace")
-  lifecycle_transfer       @map("lifecycle.transfer")
-  lifecycle_return         @map("lifecycle.return")
-  lifecycle_change_status  @map("lifecycle.change-status")
+  lifecycle_assign        @map("lifecycle.assign")
+  lifecycle_replace       @map("lifecycle.replace")
+  lifecycle_transfer      @map("lifecycle.transfer")
+  lifecycle_return        @map("lifecycle.return")
+  lifecycle_change_status @map("lifecycle.change-status")
 }
 
 enum ReservationState {
@@ -129,29 +129,29 @@ enum DeliveryStatus {
 // ── Identity & access ─────────────────────────────────────────────────
 
 model User {
-  id               String           @id @default(cuid())
-  email            String           @unique
-  name             String
-  passwordHash     String?          // null = SSO-only account
-  role             Role
-  isPermanentAdmin Boolean          @default(false)
-  disabled         Boolean          @default(false)
-  entraObjectId    String?          @unique
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @default(now()) @updatedAt
-  preferences      UserPreference[]
-  purchaseRequests PurchaseRequest[] @relation("requestedBy")
-  reviewedRequests PurchaseRequest[] @relation("reviewedBy")
-  notes            NoteEntry[]
-  claimedApprovals Approval[]       @relation("claimedBy")
-  requestedApprovals Approval[]     @relation("approvalRequestedBy")
-  documents        AssetDocument[]
-  rateEvents       RateEvent[]
-  financeConfirmed Asset[] @relation("financeConfirmedBy")
-  financeReturned  Asset[] @relation("financeReturnedBy")
-  itVerifiedAssets Asset[] @relation("itVerifiedBy")
-  slotExceptionsCreated EmployeeSlotException[] @relation("slotExceptionCreatedBy")
-  acknowledgementsRecorded Acknowledgement[] @relation("acknowledgementRecordedBy")
+  id                       String                  @id @default(cuid())
+  email                    String                  @unique
+  name                     String
+  passwordHash             String? // null = SSO-only account
+  role                     Role
+  isPermanentAdmin         Boolean                 @default(false)
+  disabled                 Boolean                 @default(false)
+  entraObjectId            String?                 @unique
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @default(now()) @updatedAt
+  preferences              UserPreference[]
+  purchaseRequests         PurchaseRequest[]       @relation("requestedBy")
+  reviewedRequests         PurchaseRequest[]       @relation("reviewedBy")
+  notes                    NoteEntry[]
+  claimedApprovals         Approval[]              @relation("claimedBy")
+  requestedApprovals       Approval[]              @relation("approvalRequestedBy")
+  documents                AssetDocument[]
+  rateEvents               RateEvent[]
+  financeConfirmed         Asset[]                 @relation("financeConfirmedBy")
+  financeReturned          Asset[]                 @relation("financeReturnedBy")
+  itVerifiedAssets         Asset[]                 @relation("itVerifiedBy")
+  slotExceptionsCreated    EmployeeSlotException[] @relation("slotExceptionCreatedBy")
+  acknowledgementsRecorded Acknowledgement[]       @relation("acknowledgementRecordedBy")
 }
 
 model UserPreference {
@@ -168,7 +168,7 @@ model RateEvent {
   id     String   @id @default(cuid())
   userId String
   user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kind   String   // "mutation" | "import"
+  kind   String // "mutation" | "import"
   at     DateTime @default(now())
 
   @@index([userId, kind, at])
@@ -177,9 +177,9 @@ model RateEvent {
 // ── Reference data ────────────────────────────────────────────────────
 
 model Department {
-  id        String     @id @default(cuid())
-  name      String     @unique
-  locked    Boolean    @default(false)
+  id        String            @id @default(cuid())
+  name      String            @unique
+  locked    Boolean           @default(false)
   employees Employee[]
   policies  EquipmentPolicy[]
 }
@@ -194,13 +194,13 @@ model AssetCategory {
 }
 
 model AssetType {
-  id         String        @id @default(cuid())
-  name       String
-  categoryId String
-  category   AssetCategory @relation(fields: [categoryId], references: [id])
-  locked     Boolean       @default(false)
-  assets     Asset[]
-  policySlots PolicySlot[]
+  id             String                  @id @default(cuid())
+  name           String
+  categoryId     String
+  category       AssetCategory           @relation(fields: [categoryId], references: [id])
+  locked         Boolean                 @default(false)
+  assets         Asset[]
+  policySlots    PolicySlot[]
   slotExceptions EmployeeSlotException[]
 
   @@unique([categoryId, name])
@@ -216,42 +216,45 @@ model Vendor {
 // ── People ────────────────────────────────────────────────────────────
 
 model Employee {
-  id           String           @id @default(cuid())
-  employeeNo   String           @unique // EMP-0042
-  name         String
-  title        String
-  departmentId String
-  department   Department       @relation(fields: [departmentId], references: [id])
-  m365Status   String?          // canonical: pending|active|offboarding|inactive; custom stored as-is; null = never synced
-  employment   EmploymentStatus @default(ACTIVE)
+  id               String                  @id @default(cuid())
+  employeeNo       String                  @unique // EMP-0042
+  name             String
+  title            String
+  departmentId     String
+  department       Department              @relation(fields: [departmentId], references: [id])
+  m365Status       String? // canonical: pending|active|offboarding|inactive; custom stored as-is; null = never synced
+  employment       EmploymentStatus        @default(ACTIVE)
   /// stamped when employment becomes OFFBOARDING; bounds "this offboarding" so a
   /// routine return from years ago can't land on a farewell report. Cleared if
   /// they go back to ACTIVE; kept once OFFBOARDED so the report stays readable.
-  offboardingAt DateTime?
-  joinedAt     DateTime
-  assets       Asset[]
-  reservations Reservation[]
-  approvals    Approval[]
-  slotExceptions EmployeeSlotException[]
+  offboardingAt    DateTime?
+  joinedAt         DateTime
+  assets           Asset[]
+  reservations     Reservation[]
+  approvals        Approval[]
+  slotExceptions   EmployeeSlotException[]
   acknowledgements Acknowledgement[]
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @default(now()) @updatedAt
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @default(now()) @updatedAt
 
   @@index([employment])
+  @@index([departmentId])
+  @@index([name])
+  @@index([joinedAt])
 }
 
 // ── Assets ────────────────────────────────────────────────────────────
 
 model Asset {
-  id                String           @id @default(cuid())
-  tag               String           @unique // BR-LT-0148
-  model             String
-  serial            String?          @unique
-  categoryId        String
-  category          AssetCategory    @relation(fields: [categoryId], references: [id])
-  typeId            String?
-  type              AssetType?       @relation(fields: [typeId], references: [id], onDelete: Restrict)
-  status            AssetStatus      @default(SPARE)
+  id                   String           @id @default(cuid())
+  tag                  String           @unique // BR-LT-0148
+  model                String
+  serial               String?          @unique
+  categoryId           String
+  category             AssetCategory    @relation(fields: [categoryId], references: [id])
+  typeId               String?
+  type                 AssetType?       @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  status               AssetStatus      @default(SPARE)
   /// @default(IT) is scaffolding: it keeps every insert path that predates Phase
   /// 13 working while later tasks teach each one to set this from the category.
   /// The asset_class_invariants trigger -- not the default -- is the guarantee:
@@ -259,36 +262,36 @@ model Asset {
   /// class's set, on every write that touches status, cls or categoryId. It
   /// does NOT make the value immutable: at the database level a single-statement
   /// change of category, cls and status together is legal.
-  cls               AssetClass       @default(IT)
-  assigneeId        String?
-  assignee          Employee?        @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
-  purchasedAt       DateTime?
-  cost              Decimal?         @db.Decimal(12, 2)
-  purchaseRequestId String?
-  purchaseRequest   PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
-  purchaseUnitId    String?
-  purchaseUnit      PurchaseUnit?    @relation(fields: [purchaseUnitId], references: [id], onDelete: Restrict)
-  warrantyUntil     DateTime?
+  cls                  AssetClass       @default(IT)
+  assigneeId           String?
+  assignee             Employee?        @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
+  purchasedAt          DateTime?
+  cost                 Decimal?         @db.Decimal(12, 2)
+  purchaseRequestId    String?
+  purchaseRequest      PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
+  purchaseUnitId       String?
+  purchaseUnit         PurchaseUnit?    @relation(fields: [purchaseUnitId], references: [id], onDelete: Restrict)
+  warrantyUntil        DateTime?
   // repair fields (repairs view = saved filter over status=DEFECTIVE; no new enum)
-  vendorId          String?
-  vendor            Vendor?          @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  rmaRef            String?
-  repairQuote       Decimal?         @db.Decimal(12, 2)
-  defectiveSince    DateTime?
-  notes             String?
+  vendorId             String?
+  vendor               Vendor?          @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  rmaRef               String?
+  repairQuote          Decimal?         @db.Decimal(12, 2)
+  defectiveSince       DateTime?
+  notes                String?
   financeConfirmedAt   DateTime?
   financeConfirmedById String?
-  financeConfirmedBy   User?     @relation("financeConfirmedBy", fields: [financeConfirmedById], references: [id], onDelete: Restrict)
+  financeConfirmedBy   User?            @relation("financeConfirmedBy", fields: [financeConfirmedById], references: [id], onDelete: Restrict)
   financeReturnedAt    DateTime?
   financeReturnedById  String?
-  financeReturnedBy    User?     @relation("financeReturnedBy", fields: [financeReturnedById], references: [id], onDelete: Restrict)
+  financeReturnedBy    User?            @relation("financeReturnedBy", fields: [financeReturnedById], references: [id], onDelete: Restrict)
   financeReturnReason  String?
   /// Phase 14: set when IT checked a Purchasing-registered IT asset, or at
   /// creation when IT registered it. NULL on an IT asset = awaiting IT's check.
   /// Always NULL on a Purchasing asset (isAwaitingItCheck includes the class).
   itVerifiedAt         DateTime?
   itVerifiedById       String?
-  itVerifiedBy         User?     @relation("itVerifiedBy", fields: [itVerifiedById], references: [id], onDelete: Restrict)
+  itVerifiedBy         User?            @relation("itVerifiedBy", fields: [itVerifiedById], references: [id], onDelete: Restrict)
   /// Phase 15: set when a return lands an IT device on SPARE; the device is
   /// "back, not checked" and leaves the spare pool until IT triages it, which
   /// clears this. Any other status write clears it too.
@@ -299,12 +302,12 @@ model Asset {
   brand                String?
   /// supplier invoice or receipt number, as Purchasing registered it
   invoiceRef           String?
-  secrets           AssetSecret[]
-  documents         AssetDocument[]
-  reservations      Reservation[]
-  approvals         Approval[]
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @default(now()) @updatedAt
+  secrets              AssetSecret[]
+  documents            AssetDocument[]
+  reservations         Reservation[]
+  approvals            Approval[]
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @default(now()) @updatedAt
 
   @@index([status])
   @@index([assigneeId])
@@ -326,7 +329,7 @@ model AssetSecret {
   assetId    String
   asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
   label      String
-  ciphertext String   // AES-256-GCM v1: base64(version || iv || tag || data), AAD = "assetId:label", key from SECRET_ENCRYPTION_KEY
+  ciphertext String // AES-256-GCM v1: base64(version || iv || tag || data), AAD = "assetId:label", key from SECRET_ENCRYPTION_KEY
   createdAt  DateTime @default(now())
   updatedAt  DateTime @default(now()) @updatedAt
 
@@ -337,9 +340,9 @@ model AssetDocument {
   id           String   @id @default(cuid())
   assetId      String
   asset        Asset    @relation(fields: [assetId], references: [id], onDelete: Restrict)
-  kind         String   // "receipt" | "accountability-form" | ...
+  kind         String // "receipt" | "accountability-form" | ...
   fileName     String
-  path         String   // relative path under uploads/ volume
+  path         String // relative path under uploads/ volume
   checksum     String
   signed       Boolean  @default(false)
   uploadedById String?
@@ -362,6 +365,7 @@ model Reservation {
 
   @@index([assetId])
   @@index([employeeId])
+  @@index([state, createdAt])
 }
 
 // ── Purchasing ────────────────────────────────────────────────────────
@@ -426,7 +430,7 @@ model Approval {
   refNo            String        @unique // APR-2039
   type             ApprovalType
   state            ApprovalState @default(PENDING)
-  payload          Json          // before→after change description
+  payload          Json // before→after change description
   priority         Priority      @default(NORMAL)
   slaAt            DateTime
   requestedById    String
@@ -436,7 +440,7 @@ model Approval {
   claimedAt        DateTime?
   resolvedAt       DateTime?
   resolutionReason String?
-  workerError      String?       // verbatim error for EXECUTION_FAILED retry UI
+  workerError      String? // verbatim error for EXECUTION_FAILED retry UI
   assetId          String?
   asset            Asset?        @relation(fields: [assetId], references: [id], onDelete: Restrict)
   employeeId       String?
@@ -448,24 +452,26 @@ model Approval {
   @@index([claimedById])
   @@index([employeeId])
   @@index([assetId])
+  @@index([state, updatedAt])
 }
 
 // ── Audit (append-only by DB trigger, Task 4) ─────────────────────────
 
 model AuditEntry {
   id         String   @id @default(cuid())
-  actorId    String?  // null = system
-  actorLabel String   // denormalized display name, survives user deletion
-  entityType String   // "asset" | "employee" | "approval" | ...
+  actorId    String? // null = system
+  actorLabel String // denormalized display name, survives user deletion
+  entityType String // "asset" | "employee" | "approval" | ...
   entityId   String
-  action     String   // "create" | "update" | "SECRET_READ" | ...
-  diff       Json?    // { field: { from, to } } per changed field
+  action     String // "create" | "update" | "SECRET_READ" | ...
+  diff       Json? // { field: { from, to } } per changed field
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])
   @@index([createdAt])
   @@index([entityType, createdAt])
   @@index([actorId])
+  @@index([entityType, entityId, createdAt])
 }
 
 // ── Equipment policies ────────────────────────────────────────────────
@@ -475,21 +481,21 @@ model EquipmentPolicy {
   name                  String       @unique
   appliesToDepartmentId String?
   appliesToDepartment   Department?  @relation(fields: [appliesToDepartmentId], references: [id], onDelete: Restrict)
-  appliesToTitle        String?      // role policy beats department policy
+  appliesToTitle        String? // role policy beats department policy
   slots                 PolicySlot[]
 }
 
 model PolicySlot {
-  id          String          @id @default(cuid())
+  id          String                  @id @default(cuid())
   policyId    String
-  policy      EquipmentPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  name        String          // "laptop", "monitor", ...
+  policy      EquipmentPolicy         @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  name        String // "laptop", "monitor", ...
   assetTypeId String?
-  assetType   AssetType?      @relation(fields: [assetTypeId], references: [id], onDelete: Restrict)
-  required    Boolean         @default(true)
+  assetType   AssetType?              @relation(fields: [assetTypeId], references: [id], onDelete: Restrict)
+  required    Boolean                 @default(true)
   /// Phase 16: filled only by a device on loan (status TEMPORARY); standard
   /// slots never are. computeLoadout applies the rule.
-  loaner      Boolean         @default(false)
+  loaner      Boolean                 @default(false)
   waivers     EmployeeSlotException[]
 }
 
@@ -545,7 +551,7 @@ model WebhookEndpoint {
   id         String            @id @default(cuid())
   url        String
   secret     String
-  events     String[]          // event names this endpoint subscribes to
+  events     String[] // event names this endpoint subscribes to
   active     Boolean           @default(true)
   deliveries WebhookDelivery[]
   createdAt  DateTime          @default(now())
@@ -566,6 +572,7 @@ model WebhookDelivery {
   createdAt     DateTime        @default(now())
 
   @@index([status, nextAttemptAt])
+  @@index([status, createdAt])
 }
 
 model FeatureFlag {

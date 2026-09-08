@@ -35,12 +35,17 @@ describe("buildAssetWhere", () => {
 });
 
 describe("buildAssetOrderBy", () => {
-  it("defaults to tag asc", () => {
-    expect(buildAssetOrderBy([])).toEqual([{ tag: "asc" }]);
+  it("defaults to tag asc, plus the id tiebreaker", () => {
+    expect(buildAssetOrderBy([])).toEqual([{ tag: "asc" }, { id: "asc" }]);
   });
-  it("category sorts through the relation name", () => {
+  it("category sorts through the relation name, plus the id tiebreaker", () => {
     expect(buildAssetOrderBy([{ key: "category", dir: "desc" }, { key: "model", dir: "asc" }]))
-      .toEqual([{ category: { name: "desc" } }, { model: "asc" }]);
+      .toEqual([{ category: { name: "desc" } }, { model: "asc" }, { id: "asc" }]);
+  });
+  it("buildAssetOrderBy ends with the id tiebreaker", () => {
+    const order = buildAssetOrderBy([{ key: "tag", dir: "asc" }]);
+    expect(order[order.length - 1]).toEqual({ id: "asc" });
+    expect(buildAssetOrderBy([])[buildAssetOrderBy([]).length - 1]).toEqual({ id: "asc" });
   });
 });
 

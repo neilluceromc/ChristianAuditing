@@ -1,17 +1,25 @@
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
+import { toSearchParams } from "@/lib/url-state";
+import { parsePage } from "@/lib/paging";
 import { listOffboarding } from "@/server/modules/offboarding/queries";
 import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 
-export default async function OffboardingPage() {
+export default async function OffboardingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireUser();
   const canMutate = user.role === "admin" || user.role === "it_staff";
-  const rows = await listOffboarding();
+  const sp = toSearchParams(await searchParams);
+  const { rows, total, page, pageCount } = await listOffboarding(parsePage(sp));
 
   return (
     <>
@@ -28,7 +36,7 @@ export default async function OffboardingPage() {
       ) : (
         <div className="flex flex-col gap-2">
           <p className="font-mono text-[11px] text-fg-muted">
-            {rows.length} {rows.length === 1 ? "person" : "people"} leaving · every item is collected as its own request
+            {total} {total === 1 ? "person" : "people"} leaving · every item is collected as its own request
           </p>
           <Table>
             <THead>
@@ -81,6 +89,11 @@ export default async function OffboardingPage() {
               ))}
             </TBody>
           </Table>
+          <Pagination
+            page={page}
+            pageCount={pageCount}
+            hrefFor={(p) => (p > 1 ? `/offboarding?page=${p}` : "/offboarding")}
+          />
         </div>
       )}
     </>

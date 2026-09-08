@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { StatusPill } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
@@ -11,6 +12,21 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { replayAllDead, replayDelivery } from "@/server/modules/admin/webhook-actions";
 import type { DeliveryRow } from "@/server/modules/admin/queries";
 import type { ActionResult } from "@/server/action-result";
+import type { DeliveryTab } from "@/lib/webhooks";
+
+/**
+ * Built client-side rather than passed in as a prop: a plain closure cannot
+ * cross the Server → Client Component boundary (only "use server" actions
+ * can), so the page hands this table the serializable `tab` and it builds
+ * the same `?state=&page=` URLs `/admin/webhooks/deliveries/page.tsx` would.
+ */
+function hrefFor(tab: DeliveryTab, p: number): string {
+  const qs = new URLSearchParams();
+  if (tab !== "ALL") qs.set("state", tab);
+  if (p > 1) qs.set("page", String(p));
+  const s = qs.toString();
+  return s ? `/admin/webhooks/deliveries?${s}` : "/admin/webhooks/deliveries";
+}
 
 /**
  * The same ActionResult ladder as every other admin screen, with the two
@@ -73,11 +89,17 @@ export function DeliveryTable({
   rows,
   total,
   deadReplayable,
+  page,
+  pageCount,
+  tab,
   empty,
 }: {
   rows: DeliveryRow[];
   total: number;
   deadReplayable: number;
+  page: number;
+  pageCount: number;
+  tab: DeliveryTab;
   /**
    * Rendered in place of the table when this tab has no rows. It comes in
    * from the page rather than the empty branch living there, because the batch
@@ -205,10 +227,13 @@ export function DeliveryTable({
         </Table>
       )}
 
-      {total > rows.length && (
-        <p className="text-[11px] text-fg-muted">
-          Showing {rows.length} of {total}. Older attempts aren&apos;t paged through yet.
-        </p>
+      {rows.length > 0 && (
+        <div className="flex items-center justify-between pt-1">
+          <span className="font-mono text-[11px] text-fg-muted">
+            page {page} of {pageCount} · {total} attempts
+          </span>
+          <Pagination page={page} pageCount={pageCount} hrefFor={(p) => hrefFor(tab, p)} />
+        </div>
       )}
     </div>
   );

@@ -5,8 +5,7 @@ import { summarizeApproval } from "@/lib/approval-execution";
 import { RETURN_TARGETS, isAssignable } from "@/lib/asset-class";
 import { approvalClassWhere } from "@/lib/approval-access";
 import { slaLabel, tabWhere, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
-
-export const QUEUE_PAGE_SIZE = 50;
+import { pageOf, LOG_PAGE_SIZE } from "@/lib/paging";
 
 /** Serializable queue row — the island gets strings, no Dates/Decimals. */
 export interface ApprovalRow {
@@ -21,15 +20,21 @@ export interface ApprovalRow {
   mine: boolean;
 }
 
-export async function listApprovals(tab: QueueTab, userId: string, role: Role): Promise<ApprovalRow[]> {
+export async function listApprovals(tab: QueueTab, userId: string, role: Role, requestedPage: number): Promise<{
+  rows: ApprovalRow[]; total: number; page: number; pageCount: number;
+}> {
+  const where = { AND: [tabWhere(tab, userId), approvalClassWhere(role)] };
+  const total = await prisma.approval.count({ where });
+  const pg = pageOf(total, requestedPage, LOG_PAGE_SIZE);
   const approvals = await prisma.approval.findMany({
-    where: { AND: [tabWhere(tab, userId), approvalClassWhere(role)] },
+    where,
     include: { asset: true, employee: true, claimedBy: true },
     // Open work orders by what breaks first; closed history reads newest-first.
-    orderBy: tab === "closed" ? { updatedAt: "desc" } : { slaAt: "asc" },
-    take: QUEUE_PAGE_SIZE,
+    // The id tiebreaker keeps two rows with one slaAt in one order across pages.
+    orderBy: tab === "closed" ? [{ updatedAt: "desc" }, { id: "desc" }] : [{ slaAt: "asc" }, { id: "asc" }],
+    skip: pg.skip, take: pg.take,
   });
-  return approvals.map((a) => {
+  const rows = approvals.map((a) => {
     const s = summarizeApproval(a.type, a.payload, {
       assetTag: a.asset?.tag,
       employeeName: a.employee?.name,
@@ -47,6 +52,7 @@ export async function listApprovals(tab: QueueTab, userId: string, role: Role): 
       mine: a.claimedById === userId,
     };
   });
+  return { rows, total, page: pg.page, pageCount: pg.pageCount };
 }
 
 export async function tabCounts(userId: string, role: Role): Promise<Record<QueueTab, number>> {

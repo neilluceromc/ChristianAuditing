@@ -1,5 +1,5 @@
 import type { EmploymentStatus, Prisma } from "@prisma/client";
-import type { ListConfig, ListState } from "./url-state";
+import type { ListConfig, ListState, SortKey } from "./url-state";
 
 export const EMPLOYMENT_STATUSES = ["ACTIVE", "OFFBOARDING", "OFFBOARDED"] as const satisfies readonly EmploymentStatus[];
 
@@ -23,4 +23,10 @@ export function buildEmployeeWhere(state: ListState): Prisma.EmployeeWhereInput 
     (EMPLOYMENT_STATUSES as readonly string[]).includes(v));
   if (employment.length) where.employment = { in: employment };
   return where;
+}
+
+/** Phase 17 (spec §4): both sort keys, then the id tiebreaker every list orders by. */
+export function buildEmployeeOrderBy(sort: SortKey[]): Prisma.EmployeeOrderByWithRelationInput[] {
+  const order = sort.length ? sort : EMPLOYEES_LIST_CONFIG.defaultSort;
+  return [...order.map(({ key, dir }) => ({ [key]: dir })), { id: "asc" }];
 }

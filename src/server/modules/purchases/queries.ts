@@ -1,8 +1,9 @@
 import type { PurchaseRequestState, PurchaseUnitState } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtMoney } from "@/lib/format";
-import { PURCHASE_PAGE_SIZE, dwellLine, purchaseWhere } from "@/lib/purchases-list";
+import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
 import { bounceBack, type ThreadNote } from "@/lib/purchase-thread";
+import { LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
 
 export interface PurchaseListRow {
   id: string;
@@ -62,14 +63,12 @@ export async function listPurchases(
 ): Promise<{ rows: PurchaseListRow[]; total: number; page: number; pageCount: number }> {
   const where = purchaseWhere(state, q);
   const total = await prisma.purchaseRequest.count({ where });
-  const pageCount = Math.max(1, Math.ceil(total / PURCHASE_PAGE_SIZE));
-  // an unbounded ?page= must not become a huge OFFSET
-  const safePage = Math.min(Math.max(1, page), pageCount);
+  const pg = pageOf(total, page, LOG_PAGE_SIZE);
   const rows = await prisma.purchaseRequest.findMany({
     where,
-    orderBy: { updatedAt: "desc" },
-    skip: (safePage - 1) * PURCHASE_PAGE_SIZE,
-    take: PURCHASE_PAGE_SIZE,
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    skip: pg.skip,
+    take: pg.take,
     select: {
       id: true, refNo: true, state: true, updatedAt: true, submittedAt: true,
       reviewedAt: true, completedAt: true, cancelledAt: true,
@@ -92,8 +91,8 @@ export async function listPurchases(
   const now = new Date();
   return {
     total,
-    page: safePage,
-    pageCount,
+    page: pg.page,
+    pageCount: pg.pageCount,
     rows: rows.map((r): PurchaseListRow => {
       const last: ThreadNote[] = r.notes.map((n) => ({
         id: n.id, kind: n.kind, text: n.text, author: n.author.name, at: n.createdAt,
