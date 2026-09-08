@@ -80,6 +80,47 @@
 > strengthened to full DB id-set equality. Lesson: a test pinned to a specific numeric shape has to be
 > re-derived, not just left in place, once the code it pins changes underneath it — and a workaround fixture
 > used to unblock one task should be revisited once the thing it worked around is fixed.
+>
+> **D-10. e2e file list — `admin.spec.ts` and `axe-sweep.spec.ts` unchanged:** the plan's Task 8 file list
+> and the spec's §9.2/§11 both named `e2e/{admin,axe-sweep}.spec.ts` as files this phase would touch.
+> Neither changed: `admin.spec.ts` never asserted the "Older attempts aren't paged through yet" text the
+> deliveries page used to show, so removing that text needed no test edit; and the paged-route axe checks
+> (`?page=2` on `/approvals`, `/employees`, `/admin/webhooks/deliveries`, plus a timeline page with an
+> active cursor) were written as case 12 of the new `paging.spec.ts` instead, because the rows those checks
+> need to find a page 2 exist only in `paging.spec.ts`'s own fixtures — `axe-sweep.spec.ts` would have had
+> to manufacture them itself for no benefit. — Cost if wrong: none; both files are correctly absent from
+> the spec's Changed list now (§11). Lesson: name test files by what they must prove, not by guess — a
+> spec section written before implementation can commit to a file list that the actual dependency (where
+> the rows already live) later overrides.
+>
+> **D-11. Final-review fix wave — the timeline cursor's `skip` is clamped:** `parseTimelineCursor` accepted
+> whatever `skip` a hand-edited URL supplied, and `mergeTimeline` fetched `take = limit + 1 + skip` per
+> source (flagged as unclamped in PICKUP §5 at Phase 17's close) — a large hand-crafted `skip` could 500
+> the timeline page or, at worst, pull an entity's entire history into one query. Fixed: `TIMELINE_MAX_SKIP
+> = 1_000` (named beside `TIMELINE_PAGE_SIZE`), clamped inside `parseTimelineCursor` on the way in — not
+> inside `timelineTake`, so `timelineCursorQS` round-trips stay exact — sized off the largest same-instant
+> writer to one entity's timeline (a 200-row bulk assign), so a tie longer than the bound degrades to
+> repeated rows on a later page, never a crash; three unit tests (`skip=1e12 → 1000`, `skip=-5 → 0`,
+> `skip=7 → 7`), written first and seen red before the clamp landed. — Cost if wrong: an oversized fetch,
+> now impossible. Lesson: a value that crosses a URL boundary needs its own clamp at the parse boundary,
+> independent of whatever downstream function consumes it — clamping inside `timelineTake` instead would
+> have broken the cursor's own round-trip test.
+>
+> The same fix wave also landed Minors 6, 7 and 15 of the final review (no `!` on a possibly-missing
+> employee row in `employees/queries.ts`; the gaps candidate-pass + `resolveMissing` + keep sequence
+> deduplicated into one `gapKeptIds` helper shared by the list and the export; the Home worklist's loans
+> comment references `CAP.large` instead of a literal `50`) and strengthened Minor 14's `headcountByPolicy`
+> test to sum two Finance-department groups into one policy. Minors 8–13 of the final review are deferred,
+> undecided by this wave: a parallel `count`/`findMany` pair that can refetch a page whose total shifted
+> between the two calls; a possible approvals double-count; the work-page capped-section note's wording
+> once dismissals are in play; a fully-dismissed capped section vanishing from the note entirely;
+> `TIMELINE_PAGE_SIZE` living as a third page-size constant alongside `ENTITY_PAGE_SIZE`/`LOG_PAGE_SIZE`
+> plus `parsePage` duplication; and a missing collation comment on `byWhenDesc`'s id comparator.
+>
+> Measured after the fix wave: **1056 unit / 58 files** (was 1055 / 58 at Task 9's close — the three new
+> `parseTimelineCursor` clamp cases, less the loadout test's unchanged `it` count); `tsc` and `lint` clean;
+> `e2e/paging.spec.ts` and `e2e/it-core.spec.ts` (33 cases, the surfaces this wave touched) reran green,
+> foreground, `E2E_PORT=3100 --workers=1`; `npx playwright test --list` still reports 239 / 19 files.
 
 **Dev environment on the staging laptop (PICKUP §2, memory):** a git worktree under `.claude/worktrees/` with its own `.env` (`DATABASE_URL` → `inventory_dev`, `APP_BASE_URL=http://192.168.203.153:3100`, no `SEED_PASSWORD`), dev server on port 3100, Playwright with `E2E_PORT=3100`, always foreground, `--workers=1`. Never touch the `inventory` database or port 3000. `npm ci` in the worktree first.
 
