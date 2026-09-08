@@ -1,6 +1,6 @@
 # Phase 16 — Registration, Policy Exceptions, Loans, Bulk Assign and the Signed Form — Design
 
-**Status:** approved in chat 2026-09-07 ("go"); not yet implemented. Amendments during execution are `D-`
+**Status:** implemented on branch `phase-16-registration-custody`, 2026-09-08; amendments are `D-`
 entries at the top of the plan. Phase 17 (the scale sweep: pagination everywhere, the employees list in
 SQL, cursor paging on the merged timelines) has its own spec and is listed in §10 so nothing here waits
 on it.

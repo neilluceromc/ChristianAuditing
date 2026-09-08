@@ -15,8 +15,8 @@ assistant memory until now — that is why this file exists.
 | Branch | `main`, **level with `origin/main`** after the Phase 15 push (merge `c087f8d`, 2026-09-07) — count with `git rev-list --count origin/main..main` before trusting this. Phase branches (`phase-10-polish` … `phase-14-department-owned-classes`) exist only on the old dev laptop; `phase-15-direct-it-lifecycle` was merged and deleted on the staging laptop. All are fully contained in `main`. **Staging is behind `main`** until `scripts/deploy-staging.ps1` runs again (it applies migration 16). |
 | Stack | Next.js 15 App Router · Prisma 6 · PostgreSQL 16 (Docker) · Auth.js v5 · Tailwind v4 · Playwright · vitest. Node ≥ 22, npm ≥ 11 (dev machine ran Node 24). |
 | Database | 16 migrations, additive only. `prisma migrate reset` is **not** used in this project. |
-| Battery, last run 2026-09-07 | `tsc` clean · `lint` clean · **993 unit / 54 files** · `npm run build` · `docker compose --profile prod build` · **214 e2e / 16 files** by `--list` (the full battery last ran at 213 across five foreground chunks — 31 · 67 · 46 · 36 · 33 — before plan D-9 added one scanner case; `scanner` + `offboarding`, 23 cases, re-ran green). Commands and history: `HANDOVER.md` §0 item 9. |
-| Last two phases | **Phase 14** — department-owned classes: IT sees IT only (VISIBLE_CLASSES), Purchasing registers both classes (REGISTRABLE_CLASSES), an IT asset Purchasing registers waits for IT's check (`Asset.itVerifiedAt`) before Finance sees it, Purchasing approves/assigns/documents/categorises/labels its own class from the asset record, `/employees/new`. Spec `superpowers/specs/2026-09-07-department-owned-classes-design.md`, plan `superpowers/plans/2026-09-07-phase-14-department-owned-classes.md`. **Phase 15** — direct IT lifecycle: for a role that manages an IT asset (`DIRECT_LIFECYCLE_CLASSES = ["IT"]`, `isDirectLifecycle`), status change, assign, return, replace, bulk, deploy-at-creation and offboarding decisions apply on confirm and are recorded as already-EXECUTED approvals plus audit (`lifecycle.*` actions); one shared executor `prepareLifecycle`/`commitLifecycle` serves the worker and the direct actions; a returned IT device waits for triage (`Asset.returnedAt`, migration 16, `isAssignable`); one `Replace` action; IT's Home is a grouped worklist with `/inventory/work`. Purchasing keeps its queue. Spec `superpowers/specs/2026-09-07-direct-it-lifecycle-design.md`, plan `superpowers/plans/2026-09-07-phase-15-direct-it-lifecycle.md`. |
+| Battery, last run 2026-09-08 | `tsc` clean · `lint` clean · **17 migrations** · **1035 unit / 56 files** · **226 e2e / 18 files** across five foreground chunks — **52 · 63 · 69 · 36 · 6 = 226** (chunks 2 and 3 needed a fix first — plan `D-18` — before they passed). Commands and history: `HANDOVER.md` §0 item 9. |
+| Last two phases | **Phase 16** — registration, policy exceptions, loans, bulk assign and the signed form: the batch page (`/inventory/register`) gains the Purchasing fields (warranty, brand, notes, invoice ref/document) and a live duplicate check shared with the single-asset form; loadouts apply per-employee ADD/WAIVE exceptions before slots are computed (`effectiveSlots`), and a `PolicySlot.loaner` flag lets a slot fill only from a `TEMPORARY` device (an unmatched one reads "on loan", never an extra); `Asset.loanDueAt` threads through the shared lifecycle executor and a metadata-only `setLoanDue`; `bulkAssign` hands out several spares in one transaction beside `bulkChangeStatus`; a signed accountability form is recorded on the employee (`Acknowledgement`) with its own safe-download route and an "issued since last signature" hint. Spec `superpowers/specs/2026-09-07-it-registration-custody-design.md`, plan `superpowers/plans/2026-09-07-phase-16-registration-custody.md`. **CODE-COMPLETE on `phase-16-registration-custody`, UNMERGED and UNPUSHED.** **Phase 15** — direct IT lifecycle: for a role that manages an IT asset (`DIRECT_LIFECYCLE_CLASSES = ["IT"]`, `isDirectLifecycle`), status change, assign, return, replace, bulk, deploy-at-creation and offboarding decisions apply on confirm and are recorded as already-EXECUTED approvals plus audit (`lifecycle.*` actions); one shared executor `prepareLifecycle`/`commitLifecycle` serves the worker and the direct actions; a returned IT device waits for triage (`Asset.returnedAt`, migration 16, `isAssignable`); one `Replace` action; IT's Home is a grouped worklist with `/inventory/work`. Purchasing keeps its queue. Spec `superpowers/specs/2026-09-07-direct-it-lifecycle-design.md`, plan `superpowers/plans/2026-09-07-phase-15-direct-it-lifecycle.md`. |
 
 ## 2. Dev environment on the new device
 
@@ -90,22 +90,28 @@ These were made with the user and would be invisible to anyone reading only the 
 
 ## 4. What is next, in order
 
-1. **Deploy the prototype to the staging laptop and let Purchasing and Finance use it.** Chosen by the user
+1. **Phase 17 — the scale sweep — is next.** Split out of Phase 16 on purpose (spec decision 1, so scale
+   work never waits on a feature phase): pagination on Approvals, Offboarding, Reservations, Admin users
+   and webhook deliveries; the Employees list paged in SQL with loadout computed only for the page; a
+   cursor on the asset History and the two merged Timelines; `take`/ordering tiebreakers everywhere
+   skip/take is used; a grouped count instead of the 600-row employee read on the policies page; the
+   worklist's remaining uncapped sources. Its own spec and plan are still to be written.
+2. **Deploy the prototype to the staging laptop and let Purchasing and Finance use it.** Chosen by the user
    on 2026-09-07 as the next step before any more features. The ordered checklist is
    [`staging-run-sheet.md`](staging-run-sheet.md) (also delivered as a PDF). It hinges on one decision only
    the user can make — **which machine owns the reserved address `192.168.202.141`**, or whether to use a
    DNS name instead — because that value is printed onto every label. Physical steps nobody else can do:
    the UniFi DHCP reservation, the phone reachability test, the printed sheet (tape-measure the 100 mm bar,
    scan one QR).
-2. **Two visual checks never done by a human:** the inventory class-switch chips and Finance's IT/Purchasing
+3. **Two visual checks never done by a human:** the inventory class-switch chips and Finance's IT/Purchasing
    tabs by eye, and the Register form signed in as `purchasing@`. Both are asserted by e2e and axe, never
    looked at.
-3. **Phase 15b candidates**, in value order:
+4. **Remaining candidates**, in value order (**Phase 16 delivered the fourth item this list used to
+   carry — a real `Asset.loanDueAt` for TEMPORARY loans, no longer a 30-day proxy — so it's dropped here**):
    - The **depreciation module** (user's choice, own brainstorm).
    - **Purchasing bulk import**.
-   - A real **`loanDueAt`** for TEMPORARY loans (30-day proxy today).
    - The Replace dialog's headerless **"other spares" list** when no same-type spare exists.
-4. **The §9 subsystems from the Admin meeting** — vendor master data, purchasing extensions, consumables.
+5. **The §9 subsystems from the Admin meeting** — vendor master data, purchasing extensions, consumables.
    Consumables is a second domain, not an extension of assets; it needs its own brainstorm and must not be
    modelled as an `Asset`.
 
@@ -127,6 +133,9 @@ These were made with the user and would be invisible to anyone reading only the 
 - Worklist section totals are capped by their queries' `take` (10 for missing/records, 50 for triage/repairs), so "See all N" can understate on a very large fleet.
 - Phase 15 changed Home dismissal keys from `KIND:id` to `section:id`, so dismissals made earlier on deploy day reappear until cleared again — one-day effect.
 - Backups land on the same disk as the data; copy them off periodically.
+- **`checkIdentifiers` (Phase 16) leaks existence across classes.** The live duplicate check queries the whole `Asset` table regardless of `cls`, so IT registering a laptop can learn that a tag or serial is "already registered" even when the matching row is a Purchasing asset IT cannot otherwise see — accepted, since it only ever confirms existence, never any detail of the other class's row.
+- **`bulkChangeStatus` still returns a bare `{ changed, skipped }` count**, unlike the new `bulkAssign` (Phase 16), which names which tags it skipped and why. Spec §10 puts changing `bulkChangeStatus`'s return shape explicitly out of scope for this phase.
+- **Signing-date tolerance (Phase 16, plan `D-13`) is a one-day window, not true local-timezone awareness:** the server refuses only a date later than the UTC date of `now + 1 day`, so a signing date genuinely one day in the future (not just "tomorrow" at 03:00 PHT) would also be accepted. Traded deliberately — a wrong refusal at local midnight was worse than the one-day slack.
 
 ## 6. If you are an assistant reading this
 
