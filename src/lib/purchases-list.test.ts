@@ -71,6 +71,14 @@ describe("purchaseWhere", () => {
     expect(where.state).toBe("SUBMITTED");
     expect(where.OR).toHaveLength(2);
   });
+  it("filters by requesting department, including the untagged bucket", () => {
+    expect(purchaseWhere(null, "", "dep1").departmentId).toBe("dep1");
+    expect(purchaseWhere(null, "", "none").departmentId).toBeNull();
+    expect(purchaseWhere(null, "").departmentId).toBeUndefined();
+  });
+  it("filters by supplier", () => {
+    expect(purchaseWhere("COMPLETED", "", null, "ven1")).toMatchObject({ state: "COMPLETED", vendorId: "ven1" });
+  });
 });
 
 describe("dwellLine — how long it's been there, not derivable from the enum", () => {

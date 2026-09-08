@@ -2,6 +2,7 @@ import type { AssetClass, AssetStatus, Prisma } from "@prisma/client";
 import type { ListConfig, ListState, SortKey } from "./url-state";
 import { isRepairStage } from "./repairs";
 import { STATUSES_BY_CLASS, isStatusOf } from "./asset-class";
+import { parseProvenance, provenanceWhere, type Provenance } from "./provenance";
 
 /**
  * EVERY status of BOTH classes (Phase 13) — the flat list for the places that
@@ -24,7 +25,7 @@ export const ASSET_STATUSES = [
 export const BULK_MAX = 200;
 
 export const INVENTORY_LIST_CONFIG: ListConfig = {
-  facets: ["status", "category", "type", "assignee", "stage"],
+  facets: ["status", "category", "type", "assignee", "stage", "provenance"],
   sortable: [
     "tag", "model", "category", "status", "purchasedAt", "warrantyUntil",
     // the repairs view's Down column
@@ -130,6 +131,15 @@ export function buildAssetWhere(
     // Prisma types AND as object-or-array, so normalise before appending.
     const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
     and.push({ OR: [{ status: "DEFECTIVE" }, { defectiveSince: { not: null } }] });
+    where.AND = and;
+  }
+  // Phase 18 spec §6: provenance is DERIVED (request link, importedAt), so the
+  // facet is an OR of where-shapes, appended to AND exactly as the stage facet
+  // does — never assigned, so neither clause can drop the other.
+  const provenances = (f.provenance ?? []).map(parseProvenance).filter((p): p is Provenance => p !== null);
+  if (provenances.length) {
+    const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+    and.push({ OR: provenances.map(provenanceWhere) });
     where.AND = and;
   }
   // purchaseYear is fully expressible in SQL — a straight range on

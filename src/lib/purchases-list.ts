@@ -30,6 +30,8 @@ export function parsePurchaseState(raw: string | null | undefined): PurchaseRequ
 export function purchaseWhere(
   state: PurchaseRequestState | null,
   q: string,
+  department: string | null = null,
+  supplier: string | null = null,
 ): Prisma.PurchaseRequestWhereInput {
   const where: Prisma.PurchaseRequestWhereInput = {};
   if (state) where.state = state;
@@ -41,6 +43,10 @@ export function purchaseWhere(
       { units: { some: { description: { contains: q, mode: "insensitive" } } } },
     ];
   }
+  // Spec §5.1: "none" is the pre-phase rows that carry no department at all.
+  if (department === "none") where.departmentId = null;
+  else if (department) where.departmentId = department;
+  if (supplier) where.vendorId = supplier;
   return where;
 }
 
