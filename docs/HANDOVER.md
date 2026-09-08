@@ -379,6 +379,14 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    not a weakened assertion, a corrected measurement moment; the full battery should still confirm this at
    the next full run before merge, since a targeted subset is not the same claim as a clean five-part run.
 
+   **Closed 2026-09-08 on `ead422d` (the merge candidate):** the controller ran the remaining files in the
+   foreground, `--workers=1`, `E2E_PORT=3100`: `admin` + `approvals-audit` + `auth-shell` + `home-finance`
+   **52 passed (2.8m)** · `offboarding` + `purchases` + `receiving` + `asset-classes` + `direct-lifecycle`
+   **69 passed (4.4m)** · `scanner` + `labels` **24 passed (1.3m)** · `import-export` + `kitchen-sink`
+   **26 passed (1.5m)**. With the fix wave's 13 · 37 · 6 that is every one of the 18 files — **227 / 227
+   passed on `ead422d`**, zero failed, zero did-not-run. `tsc` clean and **1040 unit / 56 files** re-run on
+   the same head. Nothing is owed before merge.
+
    Splitting is safe **because every spec file reseeds in its own `beforeAll`**. Say plainly what it
    costs: a split run does not prove the suite green in one process, and its compile-warmth profile
    differs — the axis every headroom failure in this project lives on.
