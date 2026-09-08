@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
+import { prisma } from "@/server/db/client";
 import { DRAFT_ROLES } from "@/lib/purchase-flow";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
@@ -8,7 +9,11 @@ import { DraftForm, type UnitDraft } from "@/components/purchases/draft-form";
 export default async function EditPurchasePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireRole(...DRAFT_ROLES);
   const { id } = await params;
-  const [request, loadouts] = await Promise.all([getPurchase(id), policyLoadouts()]);
+  const [request, loadouts, departments] = await Promise.all([
+    getPurchase(id),
+    policyLoadouts(),
+    prisma.department.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+  ]);
   if (!request) notFound();
   // only a draft is editable, and only by its requester (or an admin) — the
   // server action enforces both; this keeps the dead end off the screen
@@ -33,7 +38,11 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
           { label: "Edit" },
         ]}
       />
-      <DraftForm loadouts={loadouts} initial={{ id: request.id, refNo: request.refNo, units }} />
+      <DraftForm
+        loadouts={loadouts}
+        departments={departments}
+        initial={{ id: request.id, refNo: request.refNo, units, departmentId: request.department?.id ?? null }}
+      />
     </>
   );
 }

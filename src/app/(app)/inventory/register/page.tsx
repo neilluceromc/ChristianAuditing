@@ -27,7 +27,7 @@ export default async function RegisterAssetsPage() {
     prisma.vendor.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.purchaseRequest.findMany({
       where: { state: "COMPLETED" },
-      select: { id: true, refNo: true },
+      select: { id: true, refNo: true, vendorId: true },
       orderBy: { refNo: "asc" },
     }),
   ]);

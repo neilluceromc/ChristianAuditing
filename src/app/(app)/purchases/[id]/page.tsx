@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getPurchase } from "@/server/modules/purchases/queries";
+import { supplierOptions } from "@/server/modules/suppliers/queries";
 import { unitEditorMode } from "@/lib/purchase-flow";
 import { bounceBack, stepperModel } from "@/lib/purchase-thread";
+import { canAttachToRequest, canSetRequestSupplier } from "@/lib/supplier-access";
 import { fmtDate } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -13,6 +15,8 @@ import { BounceBackBanner } from "@/components/purchases/bounce-back-banner";
 import { PurchaseStepper } from "@/components/purchases/purchase-stepper";
 import { NoteThread } from "@/components/purchases/note-thread";
 import { RequestActions } from "@/components/purchases/request-actions";
+import { RequestDocumentsCard } from "@/components/purchases/request-documents-card";
+import { SupplierPicker } from "@/components/purchases/supplier-picker";
 import { UnitEditor } from "@/components/purchases/unit-editor";
 
 export default async function PurchasePage({ params }: { params: Promise<{ id: string }> }) {
@@ -25,6 +29,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
   const stepper = stepperModel(request.state, request.notes);
   const editorMode = unitEditorMode(request.state, user.role);
   const canComment = user.role !== "viewer";
+  const canSetSupplier = canSetRequestSupplier(user.role);
+  const supplierPickOptions = canSetSupplier ? await supplierOptions(request.supplier?.id) : [];
 
   return (
     <>
@@ -34,6 +40,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
         badge={
           <span className="inline-flex items-center gap-2">
             <StatusPill value={request.state} />
+            <Pill>{request.department ? `FOR ${request.department.name.toUpperCase()}` : "NO DEPARTMENT"}</Pill>
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
         }
@@ -50,7 +57,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
       />
       <p className="-mt-2 pb-4 font-mono text-[11px] text-fg-muted">
         requested by {request.requester} · {fmtDate(request.createdAt)} · {request.units.length} line
-        {request.units.length === 1 ? "" : "s"} · {request.total}
+        {request.units.length === 1 ? "" : "s"} · {request.total} · for {request.department?.name ?? "no department"}
         {request.reviewedBy ? ` · IT-reviewed by ${request.reviewedBy}` : ""}
       </p>
 
@@ -66,6 +73,18 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
                 Cancelled {fmtDate(request.cancelledAt)} — {request.cancelReason}
               </p>
             )}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader title="Supplier" />
+          <CardBody>
+            <SupplierPicker
+              requestId={request.id}
+              current={request.supplier}
+              options={supplierPickOptions}
+              canSet={canSetSupplier}
+            />
           </CardBody>
         </Card>
 
@@ -126,6 +145,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
             </div>
           </CardBody>
         </Card>
+
+        <RequestDocumentsCard requestId={request.id} docs={request.documents} canUpload={canAttachToRequest(user.role)} />
 
         <NoteThread requestId={request.id} notes={request.notes} canComment={canComment} />
       </div>

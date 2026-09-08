@@ -1,6 +1,6 @@
 import type { PurchaseRequestState, PurchaseUnitState } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
 import { bounceBack, type ThreadNote } from "@/lib/purchase-thread";
 import { LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
@@ -17,6 +17,8 @@ export interface PurchaseListRow {
   total: string;
   /** README 4d second line — "back from finance", "awaiting IT · 2 d" */
   dwell: string;
+  department: string | null;
+  supplier: string | null;
 }
 
 export interface PurchaseUnitView {
@@ -52,6 +54,9 @@ export interface PurchaseDetail {
   notes: ThreadNote[];
   total: string;
   totalValue: number;
+  department: { id: string; name: string } | null;
+  supplier: { id: string; name: string; archived: boolean } | null;
+  documents: Array<{ id: string; kind: string; fileName: string; uploadedBy: string; at: string; downloadHref: string }>;
 }
 
 const money = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
@@ -60,8 +65,10 @@ export async function listPurchases(
   state: PurchaseRequestState | null,
   q: string,
   page: number,
+  department: string | null = null,
+  supplier: string | null = null,
 ): Promise<{ rows: PurchaseListRow[]; total: number; page: number; pageCount: number }> {
-  const where = purchaseWhere(state, q);
+  const where = purchaseWhere(state, q, department, supplier);
   const total = await prisma.purchaseRequest.count({ where });
   const pg = pageOf(total, page, LOG_PAGE_SIZE);
   const rows = await prisma.purchaseRequest.findMany({
@@ -73,6 +80,8 @@ export async function listPurchases(
       id: true, refNo: true, state: true, updatedAt: true, submittedAt: true,
       reviewedAt: true, completedAt: true, cancelledAt: true,
       requestedBy: { select: { name: true } },
+      department: { select: { name: true } },
+      vendor: { select: { name: true } },
       // id is a tiebreaker, not the sort key: units created in the same
       // batch (every seed row, every draft save) share one createdAt
       // millisecond, and createdAt alone is not a stable order across reads.
@@ -112,6 +121,8 @@ export async function listPurchases(
         unitCount: r.units.length,
         totalQty: r.units.reduce((sum, u) => sum + u.qty, 0),
         total: fmtMoney(value),
+        department: r.department?.name ?? null,
+        supplier: r.vendor?.name ?? null,
         dwell: dwellLine(
           {
             state: r.state, updatedAt: r.updatedAt, submittedAt: r.submittedAt,
@@ -146,6 +157,12 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       completedAt: true, cancelledAt: true, cancelReason: true, requestedById: true,
       requestedBy: { select: { name: true } },
       reviewedBy: { select: { name: true } },
+      department: { select: { id: true, name: true } },
+      vendor: { select: { id: true, name: true, archivedAt: true } },
+      documents: {
+        include: { uploadedBy: { select: { name: true } } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      },
       // See the identical comment in listPurchases: units created in the
       // same batch tie on createdAt, so `unit.index` (unit-N anchors, the
       // bounce-back's "Jump to unit 02") needs a stable tiebreaker.
@@ -195,6 +212,12 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
     })),
     total: fmtMoney(totalValue),
     totalValue,
+    department: r.department ? { id: r.department.id, name: r.department.name } : null,
+    supplier: r.vendor ? { id: r.vendor.id, name: r.vendor.name, archived: r.vendor.archivedAt !== null } : null,
+    documents: r.documents.map((d) => ({
+      id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "system",
+      at: fmtDate(d.createdAt), downloadHref: `/purchases/${r.id}/documents/${d.id}/download`,
+    })),
   };
 }
 

@@ -19,6 +19,8 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
           <Th width={78} align="right">Items</Th>
           <Th width={124} align="right">Value</Th>
           <Th width={150}>Requested by</Th>
+          <Th width={120}>Department</Th>
+          <Th width={150}>Supplier</Th>
           <Th width={168}>State</Th>
         </Tr>
       </THead>
@@ -38,6 +40,8 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
             <Td align="right" mono>{row.totalQty}</Td>
             <Td align="right" mono>{row.total}</Td>
             <Td>{row.requester}</Td>
+            <Td>{row.department ?? "No department"}</Td>
+            <Td>{row.supplier ?? <span className="text-fg-faint">—</span>}</Td>
             <Td>
               <span className="flex flex-col gap-0.5 py-1.5">
                 <StatusPill value={row.state} className="self-start" />
