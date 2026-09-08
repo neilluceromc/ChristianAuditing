@@ -152,6 +152,9 @@ model User {
   itVerifiedAssets         Asset[]                 @relation("itVerifiedBy")
   slotExceptionsCreated    EmployeeSlotException[] @relation("slotExceptionCreatedBy")
   acknowledgementsRecorded Acknowledgement[]       @relation("acknowledgementRecordedBy")
+  bankAccountsCreated      VendorBankAccount[]     @relation("bankAccountsCreated")
+  vendorDocuments          VendorDocument[]        @relation("vendorDocuments")
+  requestDocuments         RequestDocument[]       @relation("requestDocuments")
 }
 
 model UserPreference {
@@ -182,6 +185,7 @@ model Department {
   locked    Boolean           @default(false)
   employees Employee[]
   policies  EquipmentPolicy[]
+  requests  PurchaseRequest[]
 }
 
 model AssetCategory {
@@ -206,11 +210,94 @@ model AssetType {
   @@unique([categoryId, name])
 }
 
+enum VendorContractStatus {
+  NONE
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+}
+
+/// Phase 18 (spec §2.1): the supplier master record. `name` stays the unique
+/// key the importer and the asset form already use; every profile column is
+/// nullable so the pre-phase stub rows stay valid.
 model Vendor {
-  id     String  @id @default(cuid())
-  name   String  @unique
-  locked Boolean @default(false)
-  assets Asset[]
+  id             String               @id @default(cuid())
+  name           String               @unique
+  locked         Boolean              @default(false)
+  registeredName String?
+  category       String?
+  contactPerson  String?
+  phone          String?
+  email          String?
+  address        String?
+  registrationNo String?
+  contractStatus VendorContractStatus @default(NONE)
+  contractStart  DateTime?
+  contractEnd    DateTime?
+  contractTerms  String?
+  notes          String?
+  archivedAt     DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @default(now()) @updatedAt
+  assets         Asset[]
+  requests       PurchaseRequest[]
+  documents      VendorDocument[]
+  bankAccounts   VendorBankAccount[]
+
+  @@index([archivedAt])
+  @@index([category])
+  @@index([contractStatus])
+}
+
+/// Spec §2.2. Only the account number is secret (AES-256-GCM via encryptSecret,
+/// AAD `${vendorId}:${label}`); bank, holder and the last four digits are clear
+/// so a masked row can render without a decrypt.
+model VendorBankAccount {
+  id           String   @id @default(cuid())
+  vendorId     String
+  vendor       Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  label        String
+  bankName     String
+  accountName  String
+  accountLast4 String
+  ciphertext   String
+  createdById  String
+  createdBy    User     @relation("bankAccountsCreated", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt    DateTime @default(now())
+
+  @@unique([vendorId, label])
+}
+
+/// Spec §2.3 — the shape of AssetDocument, owned by a supplier.
+model VendorDocument {
+  id           String   @id @default(cuid())
+  vendorId     String
+  vendor       Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  kind         String
+  fileName     String
+  path         String
+  checksum     String
+  uploadedById String?
+  uploadedBy   User?    @relation("vendorDocuments", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime @default(now())
+
+  @@index([vendorId])
+}
+
+/// Spec §2.3 — the shape of AssetDocument, owned by a purchase request.
+model RequestDocument {
+  id           String          @id @default(cuid())
+  requestId    String
+  request      PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  kind         String
+  fileName     String
+  path         String
+  checksum     String
+  uploadedById String?
+  uploadedBy   User?           @relation("requestDocuments", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime        @default(now())
+
+  @@index([requestId])
 }
 
 // ── People ────────────────────────────────────────────────────────────
@@ -269,6 +356,9 @@ model Asset {
   cost                 Decimal?         @db.Decimal(12, 2)
   purchaseRequestId    String?
   purchaseRequest      PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
+  /// Phase 18 (spec §2.5): stamped by the CSV importer on CREATE only. Provenance
+  /// is DERIVED from this and purchaseRequestId (src/lib/provenance.ts) — never stored.
+  importedAt           DateTime?
   purchaseUnitId       String?
   purchaseUnit         PurchaseUnit?    @relation(fields: [purchaseUnitId], references: [id], onDelete: Restrict)
   warrantyUntil        DateTime?
@@ -322,6 +412,7 @@ model Asset {
   @@index([returnedAt])
   @@index([loanDueAt])
   @@index([cls])
+  @@index([importedAt])
 }
 
 model AssetSecret {
@@ -376,6 +467,14 @@ model PurchaseRequest {
   state         PurchaseRequestState @default(DRAFT)
   requestedById String
   requestedBy   User                 @relation("requestedBy", fields: [requestedById], references: [id])
+  /// Phase 18 (spec §5.2): one supplier per request, optional, any state.
+  vendorId      String?
+  vendor        Vendor?              @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  /// Phase 18 (spec §5.1): the requesting department. Nullable at the database
+  /// (pre-phase rows), REQUIRED by createDraft/saveDraft.
+  departmentId  String?
+  department    Department?          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  documents     RequestDocument[]
   submittedAt   DateTime?
   reviewedAt    DateTime?
   reviewedById  String?
@@ -391,6 +490,8 @@ model PurchaseRequest {
 
   @@index([state])
   @@index([requestedById])
+  @@index([vendorId])
+  @@index([departmentId])
 }
 
 model PurchaseUnit {
