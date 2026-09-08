@@ -14,7 +14,7 @@ export function TimelineList({ items }: { items: TimelineItem[] }) {
   return (
     <ol className="ml-2 flex flex-col border-l border-border-faint pl-5">
       {items.map((item) => (
-        <li key={item.id} className="relative pb-5">
+        <li key={item.id} data-id={item.id} className="relative pb-5">
           <span className="absolute -left-[24.5px] top-[5px] rounded-full bg-canvas p-[1px]">
             <StatusDot value={item.status ?? "SPARE"} />
           </span>
