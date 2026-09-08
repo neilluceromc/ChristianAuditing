@@ -76,12 +76,12 @@ test.describe("registration — each class is its own department's", () => {
     // "Register asset" (no leading count) — register-form.tsx's ternary only
     // prepends the number when quantity > 1.
     await page.getByRole("button", { name: "Register asset" }).click();
-    // Fixed from the plan's draft: /\/inventory/ trivially matches the CURRENT
-    // url ("/inventory/register" already contains "/inventory"), so
-    // waitForURL resolved instantly without waiting for the real redirect —
-    // the DB read below then raced the still-in-flight server action and
-    // found nothing. Wait for the actual landing pathname instead.
-    await page.waitForURL((url) => url.pathname === "/inventory");
+    // Phase 16 Task 13: the register page no longer redirects to /inventory
+    // on success — it swaps the form for a RegisterSuccess panel in place
+    // ("1 asset registered — <tag>"). Wait for that panel instead of a
+    // navigation that no longer happens (the plan-draft note above about
+    // /\/inventory/ matching the current URL no longer applies either way).
+    await expect(page.getByText(`1 asset registered — ${registeredTag}`)).toBeVisible();
 
     const a = await db.asset.findUniqueOrThrow({ where: { tag: registeredTag } });
     expect(a.cls).toBe("PURCHASING");
