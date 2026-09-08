@@ -35,7 +35,7 @@ export const ASSET_EXPORT_COLUMNS: XlsxColumn<{
   tag: string; model: string; brand: string | null; serial: string | null; categoryName: string; typeName: string | null;
   status: string; assigneeName: string | null; assigneeNo: string | null; purchasedAt: Date | null;
   cost: number | null; warrantyUntil: Date | null; loanDueAt: Date | null; vendorName: string | null;
-  invoiceRef: string | null; rmaRef: string | null; notes: string | null;
+  invoiceRef: string | null; rmaRef: string | null; notes: string | null; provenance: string;
 }>[] = [
   { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
   { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
@@ -51,6 +51,7 @@ export const ASSET_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Warranty until", width: 14, cell: (r) => ({ value: r.warrantyUntil, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Loan until", width: 14, cell: (r) => ({ value: r.loanDueAt, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Vendor", width: 20, cell: (r) => ({ value: r.vendorName }) },
+  { label: "Provenance", width: 24, cell: (r) => ({ value: r.provenance }) },
   { label: "Invoice / receipt no.", width: 18, cell: (r) => ({ value: r.invoiceRef }) },
   { label: "RMA ref", width: 16, cell: (r) => ({ value: r.rmaRef }) },
   { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },

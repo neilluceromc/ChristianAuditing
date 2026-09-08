@@ -55,7 +55,7 @@ function asset(
   return {
     brand: null, serial: null, typeName: null, status: "", assigneeName: null, assigneeNo: null,
     purchasedAt: null, cost: null, warrantyUntil: null, loanDueAt: null, vendorName: null,
-    invoiceRef: null, rmaRef: null, notes: null,
+    invoiceRef: null, rmaRef: null, notes: null, provenance: "Registered directly",
     ...row,
   };
 }

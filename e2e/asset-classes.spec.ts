@@ -506,7 +506,7 @@ test.describe("the IT import wizard refuses a Purchasing row by name", () => {
       {
         tag: "BR-LT-9901", model: "Wrong department (e2e)", brand: null, serial: null, categoryName: "Vehicle", typeName: null,
         status: "", assigneeName: null, assigneeNo: null, purchasedAt: null, cost: null, warrantyUntil: null,
-        loanDueAt: null, vendorName: null, invoiceRef: null, rmaRef: null, notes: null,
+        loanDueAt: null, vendorName: null, invoiceRef: null, rmaRef: null, notes: null, provenance: "Registered directly",
       },
     ]);
 

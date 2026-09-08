@@ -201,8 +201,10 @@ export async function applyAssetImport(
         if (row.kind === "create") {
           // Spec §4 stamping: this wizard is admin/it_staff only and IT-class
           // only (import-assets.ts), so every row it creates is self-checked.
+          // Phase 18 spec §6: only the importer stamps importedAt, and only on
+          // CREATE — updates never touch it.
           const asset = await tx.asset.create({
-            data: { ...row.data, itVerifiedAt: new Date(), itVerifiedById: actor.id },
+            data: { ...row.data, itVerifiedAt: new Date(), itVerifiedById: actor.id, importedAt: new Date() },
           });
           // A-5: `createAsset` can hardcode tag/model/status as a from-null
           // because `creationPlan` guarantees DEFAULT_STATUS[cls]-only direct

@@ -12,6 +12,7 @@ import { REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairSt
 import { TAG_SHAPE } from "@/lib/tag-key";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
+import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
 
 /** Serializable DTO for the client table island — strings only, preformatted. */
 export interface AssetRow {
@@ -233,7 +234,7 @@ export async function facetOptions(
   // simply never "its own" facet here, because it isn't one of the four
   // being computed. Matches the without(facet) rule above: apply everything
   // else, never the facet's own selection.
-  const [statusG, categoryG, typeG, assigneeG, categories, types, assignees] = await Promise.all([
+  const [statusG, categoryG, typeG, assigneeG, categories, types, assignees, provenanceCounts] = await Promise.all([
     prisma.asset.groupBy({ by: ["status"], where: buildAssetWhere(without("status"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["categoryId"], where: buildAssetWhere(without("category"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["typeId"], where: buildAssetWhere(without("type"), purchaseYear, cls), _count: true }),
@@ -241,6 +242,12 @@ export async function facetOptions(
     prisma.assetCategory.findMany({ where: { cls }, orderBy: { name: "asc" } }),
     prisma.assetType.findMany({ where: { category: { cls } }, orderBy: { name: "asc" }, include: { category: true } }),
     prisma.employee.findMany({ where: { assets: { some: { cls } } }, orderBy: { name: "asc" } }),
+    // a derived facet cannot groupBy — three counts over the same where minus its own key (spec §6)
+    Promise.all(
+      PROVENANCES.map((p) =>
+        prisma.asset.count({ where: { AND: [buildAssetWhere(without("provenance"), purchaseYear, cls), provenanceWhere(p)] } }),
+      ),
+    ),
   ]);
 
   return {
@@ -257,6 +264,7 @@ export async function facetOptions(
     assignee: assignees.map((e) => ({
       value: e.id, label: e.name, count: assigneeG.find((g) => g.assigneeId === e.id)?._count ?? 0,
     })),
+    provenance: PROVENANCES.map((p, i) => ({ value: p, label: PROVENANCE_LABEL[p], count: provenanceCounts[i] })),
   };
 }
 
@@ -319,6 +327,7 @@ export const getAsset = cache((id: string) =>
       type: true,
       assignee: true,
       vendor: true,
+      purchaseRequest: { select: { id: true, refNo: true } },
       approvals: {
         where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
         orderBy: { createdAt: "desc" },

@@ -12,8 +12,10 @@ describe("KNOWN_UNIMPORTED_COLUMNS", () => {
   // notice, not have it slide by silently the way a hand-typed list would.
   it("is exactly the export's columns with no import field, as of today", () => {
     // Task 11: Brand, Loan until and Invoice / receipt no. joined RMA ref as
-    // export-only columns the sheet importer has no field for yet.
-    expect(KNOWN_UNIMPORTED_COLUMNS).toEqual(["Brand", "Loan until", "Invoice / receipt no.", "RMA ref"]);
+    // export-only columns the sheet importer has no field for yet. Phase 18
+    // Task 7: Provenance is derived (purchaseRequestId + importedAt), never a
+    // column the importer can set, so it joins the same list.
+    expect(KNOWN_UNIMPORTED_COLUMNS).toEqual(["Brand", "Loan until", "Provenance", "Invoice / receipt no.", "RMA ref"]);
   });
 
   // Task 11 round two, V-7: the whole point of deriving this is that it

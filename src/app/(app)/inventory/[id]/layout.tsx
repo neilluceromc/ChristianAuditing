@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset, spareOptions } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
 import { CLASS_LABEL, canEditAsset, canManageClass, isAssignable, isAwaitingItCheck, isDirectLifecycle } from "@/lib/asset-class";
+import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
@@ -60,6 +62,13 @@ export default async function AssetRecordLayout({
           <span className="inline-flex items-center gap-2">
             <StatusPill value={asset.status} />
             <Pill>{CLASS_LABEL[asset.cls].toUpperCase()}</Pill>
+            {asset.purchaseRequest ? (
+              <Link href={`/purchases/${asset.purchaseRequest.id}`}>
+                <Pill tone="accent">From {asset.purchaseRequest.refNo}</Pill>
+              </Link>
+            ) : (
+              <Pill>{PROVENANCE_LABEL[provenanceOf(asset)]}</Pill>
+            )}
             {asset.financeConfirmedAt ? (
               <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
             ) : returned ? (
