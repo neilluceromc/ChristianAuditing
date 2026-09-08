@@ -245,6 +245,9 @@ describe("BLOCK_CAUSES", () => {
       "employment-via-import": "option",
       "name-or-title-length": "reupload",
       "wrong-class": "link",
+      "bad-contract-status": "reupload",
+      "bad-email": "reupload",
+      "contract-dates-order": "reupload",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);

@@ -22,7 +22,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { toXlsxBuffer, type XlsxColumn } from "@/server/xlsx/write";
-import { ASSET_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS } from "@/lib/export-columns";
+import { ASSET_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS, SUPPLIER_EXPORT_COLUMNS } from "@/lib/export-columns";
 import { IMPORT_ROW_CAP } from "@/lib/import-vocabulary";
 
 const OUT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -34,6 +34,7 @@ const OUT_DIR = dirname(fileURLToPath(import.meta.url));
  */
 type AssetSheetRow = Parameters<(typeof ASSET_EXPORT_COLUMNS)[number]["cell"]>[0];
 type EmployeeSheetRow = Parameters<(typeof EMPLOYEE_EXPORT_COLUMNS)[number]["cell"]>[0];
+type SupplierSheetRow = Parameters<(typeof SUPPLIER_EXPORT_COLUMNS)[number]["cell"]>[0];
 
 /**
  * UTC midnight, matching what `readSheet` hands back for a date-formatted
@@ -64,6 +65,15 @@ function employee(
     Pick<EmployeeSheetRow, "employeeNo" | "name" | "department" | "title" | "joinedAt">,
 ): EmployeeSheetRow {
   return { employment: "", m365Status: null, itemsHeld: 0, ...row };
+}
+
+/** Every column blank but Name — the minimal supplier row. */
+function supplier(row: Partial<SupplierSheetRow> & Pick<SupplierSheetRow, "name">): SupplierSheetRow {
+  return {
+    registeredName: null, category: null, contactPerson: null, phone: null, email: null, address: null,
+    registrationNo: null, contractStatus: "NONE", contractStart: null, contractEnd: null, notes: null,
+    ...row,
+  };
 }
 
 /**
@@ -188,6 +198,44 @@ async function main() {
   write("employees-offboarding-create.xlsx", await toXlsxBuffer(EMPLOYEE_EXPORT_COLUMNS, [
     employee({ employeeNo: "EMP-9003", name: "Dolores Panganiban", department: "Operations",
                title: "Warehouse Lead", employment: "OFFBOARDING", joinedAt: utcDay("2023-06-01") }),
+  ]));
+
+  // suppliers-clean.xlsx — 2 new rows, all valid, nothing to block on.
+  write("suppliers-clean.xlsx", await toXlsxBuffer(SUPPLIER_EXPORT_COLUMNS, [
+    supplier({ name: "Bayanihan Cabling", category: "IT hardware", contactPerson: "Mira Ong",
+               contractStatus: "ACTIVE", contractStart: utcDay("2026-01-15"), contractEnd: utcDay("2027-01-14") }),
+    supplier({ name: "Pilar Printing", category: "Printing" }),
+  ]));
+
+  // suppliers-mixed.xlsx — one of every verdict. Built from a REDUCED column
+  // list (Name, Phone, Contract status), not the full export: the update row
+  // (TechServe PH, seeded with contactPerson "Rina Valdez") must prove a
+  // sheet that never MENTIONS a column can't blank it out — the full export
+  // would carry a Contact person column, and this fixture exists precisely
+  // to exercise the narrower, more common case of an operator's own partial
+  // sheet instead.
+  const SUPPLIER_MIXED_COLUMNS: XlsxColumn<{ name: string; phone: string | null; contractStatus: string }>[] = [
+    { label: "Name", width: 26, cell: (r) => ({ value: r.name }) },
+    { label: "Phone", width: 18, cell: (r) => ({ value: r.phone }) },
+    { label: "Contract status", width: 16, cell: (r) => ({ value: r.contractStatus }) },
+  ];
+  write("suppliers-mixed.xlsx", await toXlsxBuffer(SUPPLIER_MIXED_COLUMNS, [
+    { name: "Harbor Logistics", phone: null, contractStatus: "" },
+    { name: "techserve ph", phone: "+63 2 8999 0000", contractStatus: "" },
+    { name: "Dup Co", phone: null, contractStatus: "" },
+    { name: "Dup Co", phone: null, contractStatus: "" },
+    { name: "Sometimes Ltd", phone: null, contractStatus: "sometimes" },
+  ]));
+
+  // suppliers-bank.xlsx — P-3: the bank-column refusal is FILE-level, so one
+  // row with one bank-shaped column is enough to prove the whole file is
+  // refused before a single row is ever examined.
+  const SUPPLIER_BANK_COLUMNS: XlsxColumn<{ name: string; bankAccount: string }>[] = [
+    { label: "Name", width: 26, cell: (r) => ({ value: r.name }) },
+    { label: "Bank account", width: 18, cell: (r) => ({ value: r.bankAccount }) },
+  ];
+  write("suppliers-bank.xlsx", await toXlsxBuffer(SUPPLIER_BANK_COLUMNS, [
+    { name: "Some Supplier", bankAccount: "1234567890" },
   ]));
 }
 
