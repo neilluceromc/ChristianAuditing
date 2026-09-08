@@ -106,9 +106,11 @@ test.describe.serial("purchasing extensions", () => {
     ).toBeVisible();
 
     await line1.fill("Ergonomic task chairs");
-    // Well past the 2.5s autosave debounce — draft-form.tsx's guard refuses
-    // to call createDraft at all while departmentId === "".
-    await page.waitForTimeout(4_000);
+    // Sanctioned exception: a negative assertion has no state to wait on.
+    // Outwaits draft-form's AUTOSAVE_MS (2500ms) + margin, then proves the DB
+    // count is unchanged (draft-form.tsx:30,136-150 debounce; the guard at
+    // :132 refuses to call createDraft at all while departmentId === "").
+    await page.waitForTimeout(3_000);
     expect(await db.purchaseRequest.count()).toBe(before);
 
     await page.getByLabel("Requesting department").selectOption({ label: "HR" });
@@ -227,7 +229,9 @@ test.describe.serial("purchasing extensions", () => {
 
     await login(page, FINANCE);
     await page.goto(`/purchases/${pr0198.id}`);
-    await page.getByLabel("Document kind").selectOption("invoice");
+    const kindSelectFinance = page.getByLabel("Document kind");
+    await waitForHydration(kindSelectFinance);
+    await kindSelectFinance.selectOption("invoice");
     await page.getByLabel("Document file").setInputFiles({
       name: "invoice.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%invoice"),
     });
@@ -250,7 +254,9 @@ test.describe.serial("purchasing extensions", () => {
     await login(page, PURCHASING);
     const pr0183 = await reqByRef("PR-0183");
     await page.goto(`/purchases/${pr0183.id}`);
-    await page.getByLabel("Document kind").selectOption("other");
+    const kindSelectPr0183 = page.getByLabel("Document kind");
+    await waitForHydration(kindSelectPr0183);
+    await kindSelectPr0183.selectOption("other");
     await page.getByLabel("Document file").setInputFiles({
       name: "other.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%other"),
     });
