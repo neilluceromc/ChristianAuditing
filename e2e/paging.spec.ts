@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 import { encryptSecret } from "../src/server/crypto";
 import { secretAad } from "../src/server/webhooks/sign";
+import { TIMELINE_PAGE_SIZE } from "../src/lib/timeline";
 
 /**
  * Phase 17 (Task 8) — the scale sweep. Every list added a real page in this
@@ -60,22 +61,9 @@ const empNo = (n: number) => `EMP-${String(n).padStart(4, "0")}`;
  * before approvals/reservations/audit entries that reference them; employees
  * before reservations that reference them.
  *
- * DESIGN NOTE (see task-8-report.md for the full derivation): the brief pairs
- * "120 PENDING approvals on the 120 spares" with "BR-ZZ-0001 carries 120 audit
- * entries" back to back, which reads as the same asset carrying both. Doing
- * that for real makes BR-ZZ-0001's /timeline merge two sources of wildly
- * different size (120 audit rows vs. 1 approval), and a hand simulation of
- * the shipped `mergeTimeline()` cursor (verified against the actual function
- * body) shows the far-older single approval gets fetched, shown, and then
- * used as the NEXT cursor's watermark — after which the audit source's own
- * `take: TIMELINE_PAGE_SIZE + 1` cap has already left entries beyond that
- * watermark unfetched, and they are never reached again. 22 of 120 audit rows
- * are silently dropped. That is a real gap in the two-source cursor, not a
- * fixture mistake, and it is not this task's job to patch `src/lib/timeline.ts`.
- * The approvals below therefore land on BR-ZZ-0002..BR-ZZ-0121 (still 120
- * spares, still exercising every approvals-list assertion) and BR-ZZ-0001
- * keeps a clean, single-source (audit-only) timeline, which the real
- * algorithm pages correctly and completely.
+ * BR-ZZ-0001 carries both one of the 120 approvals and all 120 audit entries,
+ * so its /timeline intentionally exercises mergeTimeline()'s two-source
+ * cursor (src/lib/timeline.ts), not just the single-source audit case.
  */
 async function seedScaleFixtures() {
   const now = new Date();
@@ -105,9 +93,11 @@ async function seedScaleFixtures() {
   });
   await db.asset.createMany({ data: assetsData });
 
-  // ---- 120 PENDING lifecycle_change_status approvals on BR-ZZ-0002..0121 ----
+  // ---- 120 PENDING lifecycle_change_status approvals on BR-ZZ-0001..0120,
+  // one each -- BR-ZZ-0001 therefore carries both an approval and its 120
+  // audit entries, so its /timeline exercises the real two-source merge. ----
   const approvalTargets = await db.asset.findMany({
-    where: { tag: { in: Array.from({ length: 120 }, (_, i) => zzTag(i + 2)) } },
+    where: { tag: { in: Array.from({ length: 120 }, (_, i) => zzTag(i + 1)) } },
     orderBy: { tag: "asc" },
   });
   await db.approval.createMany({
@@ -352,7 +342,7 @@ test.describe.serial("paging", () => {
     }
   });
 
-  test("7. Timeline cursor: BR-ZZ-0001's 120 audit entries page completely, with no repeats, and the boundary tie survives", async ({ page }) => {
+  test("7. Timeline cursor: BR-ZZ-0001's audit entries and approval page completely across two sources, with no repeats, and the boundary tie survives", async ({ page }) => {
     test.setTimeout(60_000);
     const id = await idOf(zzTag(1));
     await login(page, "it@thebackroomop.com");
@@ -360,40 +350,69 @@ test.describe.serial("paging", () => {
     const dataIdsOnCurrentPage = async (): Promise<string[]> =>
       page.locator("[data-id]").evaluateAll((els) => els.map((el) => el.getAttribute("data-id") ?? "").filter(Boolean));
 
+    // The DB's own id set for this asset -- both timeline sources -- is the
+    // ground truth every cursor page must reconstruct exactly, once each.
+    const [dbAuditEntries, dbApprovals] = await Promise.all([
+      db.auditEntry.findMany({ where: { entityType: "asset", entityId: id }, select: { id: true } }),
+      db.approval.findMany({ where: { assetId: id }, select: { id: true } }),
+    ]);
+    const expectedIds = new Set([
+      ...dbAuditEntries.map((e) => `audit-${e.id}`),
+      ...dbApprovals.map((a) => `approval-${a.id}`),
+    ]);
+    const dbTotal = dbAuditEntries.length + dbApprovals.length;
+    expect(expectedIds.size).toBe(dbTotal); // sanity: the two id prefixes never collide
+
     await page.goto(`/inventory/${id}/timeline`);
-    const olderLink = page.getByRole("link", { name: "Older" });
 
-    const page1Ids = await dataIdsOnCurrentPage();
-    expect(page1Ids.length).toBe(50); // TIMELINE_PAGE_SIZE — guaranteed full on a 120-row single source
-    await expect(olderLink).toBeVisible();
+    // Walk "Older" to exhaustion, collecting every page's ids and sizes. This
+    // is deliberately size-agnostic: the exact per-page split depends on the
+    // two-source cursor's interaction with the fixture's boundary tie (see
+    // src/lib/timeline.ts's mergeTimeline), and hardcoding a specific triple
+    // would go stale the moment the fixture, TIMELINE_PAGE_SIZE, or the tie's
+    // position changes. The guarantees this case actually makes -- every
+    // page but the last is a full page, the pages sum to the DB total, no
+    // repeats, the tie group survives intact, and Newest returns to page 1 --
+    // don't depend on any specific split.
+    const pageSizes: number[] = [];
+    const allIds: string[] = [];
+    let firstPageIds: string[] = [];
+    for (let guard = 0; guard < 10; guard++) {
+      const ids = await dataIdsOnCurrentPage();
+      if (guard === 0) firstPageIds = ids;
+      pageSizes.push(ids.length);
+      allIds.push(...ids);
+      const olderLink = page.getByRole("link", { name: "Older" });
+      if ((await olderLink.count()) === 0) break;
+      const urlBeforeClick = page.url();
+      await olderLink.click();
+      await page.waitForURL((u) => u.toString() !== urlBeforeClick && /before=/.test(u.search));
+    }
 
-    const page1Url = page.url();
-    await olderLink.click();
-    await page.waitForURL((u) => u.toString() !== page1Url && /before=/.test(u.search));
-    const page2Ids = await dataIdsOnCurrentPage();
-    await expect(page.getByRole("link", { name: "Older" })).toBeVisible();
-
-    const page2Url = page.url();
-    await page.getByRole("link", { name: "Older" }).click();
-    await page.waitForURL((u) => u.toString() !== page2Url && /before=/.test(u.search));
-    const page3Ids = await dataIdsOnCurrentPage();
-    // Last page: no further Older link.
+    // Every page but the last is exactly TIMELINE_PAGE_SIZE; the last is the
+    // (non-empty) remainder; no Older link survives the last page.
+    for (let i = 0; i < pageSizes.length - 1; i++) {
+      expect(pageSizes[i]).toBe(TIMELINE_PAGE_SIZE);
+    }
+    expect(pageSizes[pageSizes.length - 1]).toBeGreaterThan(0);
+    expect(pageSizes[pageSizes.length - 1]).toBeLessThanOrEqual(TIMELINE_PAGE_SIZE);
     await expect(page.getByRole("link", { name: "Older" })).toHaveCount(0);
 
-    // Real per-page sizes for this exact fixture (verified against the shipped
-    // mergeTimeline() cursor logic directly, not assumed): the take+1 cap and
-    // the tie-skip mechanism mean pages after the first are not always a full
-    // 50 even on a single source — completeness and no-repeats are the actual
-    // guarantee, which is what the rest of this case proves.
-    expect([page1Ids.length, page2Ids.length, page3Ids.length]).toEqual([50, 48, 22]);
-
-    const allIds = [...page1Ids, ...page2Ids, ...page3Ids];
+    // The pages sum to the DB total across both sources.
+    expect(pageSizes.reduce((a, b) => a + b, 0)).toBe(dbTotal);
+    expect(allIds.length).toBe(dbTotal);
     expect(new Set(allIds).size).toBe(allIds.length); // no repeats anywhere
-    expect(allIds.length).toBe(120);
-    expect(allIds.every((i) => i.startsWith("audit-"))).toBe(true);
+
+    // The collected id set equals the DB's id set exactly: same size, every
+    // element present (not just "the right count" -- the right rows).
+    const collectedIds = new Set(allIds);
+    expect(collectedIds.size).toBe(expectedIds.size);
+    for (const expectedId of expectedIds) {
+      expect(collectedIds.has(expectedId)).toBe(true);
+    }
 
     // The tie group of six (page.test entries sharing one createdAt) must all
-    // appear, each exactly once, somewhere across the three pages.
+    // appear, each exactly once, somewhere across the pages.
     const tieEntries = await db.auditEntry.findMany({
       where: { entityId: id, action: "page.test" },
       orderBy: { createdAt: "desc" },
@@ -415,7 +434,7 @@ test.describe.serial("paging", () => {
     await page.getByRole("link", { name: "Newest" }).click();
     await page.waitForURL((u) => !u.search.includes("before"));
     const backToPage1 = await dataIdsOnCurrentPage();
-    expect(backToPage1.sort()).toEqual(page1Ids.sort());
+    expect(backToPage1.sort()).toEqual(firstPageIds.sort());
   });
 
   test("8. History: BR-ZZ-0001 shows page 1 of 3 · 120 entries", async ({ page }) => {
