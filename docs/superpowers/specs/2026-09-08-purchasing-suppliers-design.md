@@ -215,7 +215,8 @@ rule); `contractStatus` not one of the four values (case-insensitive match on th
 accepted); an unparseable date; `contractEnd` before `contractStart` within the row; an email that is not
 an email. Archived suppliers match and update like any other (the sheet does not un-archive). Row cap:
 the same `IMPORT_ROW_CAP` the other importers use. Apply runs in chunks inside transactions exactly as
-`applyEmployeeImport` does, one audit entry per created or updated supplier (`supplier.imported`).
+`applyEmployeeImport` does, one audit entry per created or updated supplier (`import-create` /
+`import-update` on entityType `vendor` — the app's existing importer action names, plan P-1).
 
 ### 4.5 Command palette
 
@@ -303,8 +304,9 @@ export function parseProvenance(raw: string | null | undefined): Provenance | nu
 - **Badge:** the asset detail header shows one pill: "From PR-0188" (link to the request), "Registered
   directly", or "Historical import · no purchase request".
 - **Export:** `export-columns.ts` gains `provenance` (label text) after `purchaseRequest`.
-- **Importer:** `planAssetRows`' CREATE branch writes `importedAt: now` (the apply step's clock); UPDATE
-  rows never touch it. `import-assets.test.ts` gains the two cases.
+- **Importer:** the apply step (`asset-actions.ts`) writes `importedAt: now` on every row it CREATES; UPDATE
+  rows never touch it. The pure planner is unchanged, so the proof is e2e (`purchasing-ext.spec.ts` case
+  6), not a planner unit test (plan P-5).
 - **Register / receive paths:** untouched — they leave `importedAt` null and set or omit
   `purchaseRequestId`, which is exactly what the derivation needs.
 - **Finance view** (`/finance/assets`): a Provenance column, no filter.
