@@ -10,7 +10,7 @@ import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
-import { loanRow, groupWork, type WorkGroup, type WorkRow } from "@/lib/worklist";
+import { loanRow, groupWork, type WorkGroup, type WorkRow, type WorkSectionId } from "@/lib/worklist";
 
 const DAY_MS = 86_400_000;
 const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY_MS));
@@ -18,6 +18,9 @@ const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() 
 /** ACTIVE employees who started recently are the ones whose kit is still landing. */
 const HIRE_WINDOW_DAYS = 30;
 const WARRANTY_WINDOW_DAYS = 90;
+
+/** Phase 17: per-source read caps, named once so `take` and the saturation check can't drift apart. */
+const CAP = { small: 10, large: 50 };
 
 /**
  * The worklist (Phase 15, spec §5): grouped sections in a fixed order, each
@@ -30,25 +33,25 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
     prisma.approval.findMany({
       where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] },
       orderBy: { slaAt: "asc" },
-      take: 10,
+      take: CAP.small,
       include: { asset: true, employee: true },
     }),
     prisma.approval.findMany({
       where: { AND: [{ state: "EXECUTION_FAILED" as const }, scope] },
       orderBy: { updatedAt: "asc" },
-      take: 10,
+      take: CAP.small,
       include: { asset: true, employee: true },
     }),
     prisma.employee.findMany({
       where: { employment: "OFFBOARDING" },
       orderBy: { updatedAt: "asc" },
-      take: 10,
+      take: CAP.small,
       select: { id: true, name: true, employeeNo: true, updatedAt: true, _count: { select: { assets: { where: { cls: "IT" } } } } },
     }),
     prisma.employee.findMany({
       where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
       orderBy: { joinedAt: "asc" },
-      take: 10,
+      take: CAP.small,
       select: {
         id: true, name: true, employeeNo: true, title: true, departmentId: true, joinedAt: true,
         assets: { where: { cls: "IT" }, select: { id: true, tag: true, model: true, typeId: true, status: true } },
@@ -57,21 +60,21 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
     prisma.asset.findMany({
       where: { status: "MISSING", cls: "IT" },
       orderBy: { updatedAt: "asc" },
-      take: 10,
+      take: CAP.small,
       select: { id: true, tag: true, model: true, updatedAt: true },
     }),
     // custody that doesn't add up: DEPLOYED with nobody holding it
     prisma.asset.findMany({
       where: { status: "DEPLOYED", assigneeId: null, cls: "IT" },
       orderBy: { updatedAt: "asc" },
-      take: 10,
+      take: CAP.small,
       select: { id: true, tag: true, model: true, updatedAt: true },
     }),
     // Phase 14 (spec §5.5): IT assets Purchasing registered, waiting for IT.
     prisma.asset.findMany({
       where: { cls: "IT", itVerifiedAt: null },
       orderBy: { createdAt: "asc" },
-      take: 10,
+      take: CAP.small,
       select: { id: true, tag: true, model: true, createdAt: true },
     }),
     prisma.userPreference.findUnique({
@@ -82,7 +85,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
     prisma.asset.findMany({
       where: { cls: "IT", returnedAt: { not: null } },
       orderBy: { returnedAt: "asc" },
-      take: 50,
+      take: CAP.large,
       select: { id: true, tag: true, model: true, returnedAt: true },
     }),
     // Repairs to chase — the same fields the Repairs saved view derives its
@@ -90,7 +93,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
     prisma.asset.findMany({
       where: { cls: "IT", status: "DEFECTIVE" },
       orderBy: { defectiveSince: "asc" },
-      take: 50,
+      take: CAP.large,
       select: {
         id: true, tag: true, model: true, status: true, vendorId: true, rmaRef: true,
         repairQuote: true, cost: true, defectiveSince: true, vendor: { select: { name: true } },
@@ -100,7 +103,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
     prisma.asset.findMany({
       where: { cls: "IT", status: "TEMPORARY" },
       orderBy: [{ loanDueAt: { sort: "asc", nulls: "first" } }, { id: "asc" }],
-      take: 50,
+      take: CAP.large,
       select: { id: true, tag: true, model: true, loanDueAt: true, assignee: { select: { name: true } } },
     }),
   ]);
@@ -262,7 +265,16 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
     if (r) rows.push(r);
   }
 
-  return groupWork(rows, activeDismissals(pref?.value, todayStamp(now)), opts);
+  const saturated = new Set<WorkSectionId>();
+  if (triage.length === CAP.large) saturated.add("triage");
+  if (repairs.length === CAP.large) saturated.add("repairs");
+  if (loans.length === CAP.large) saturated.add("loans");
+  if (missing.length === CAP.small || orphaned.length === CAP.small) saturated.add("missing");
+  if (awaiting.length === CAP.small) saturated.add("check");
+  if (hires.length === CAP.small) saturated.add("hires");
+  if (breached.length === CAP.small || failed.length === CAP.small || leavers.length === CAP.small) saturated.add("queue");
+
+  return groupWork(rows, activeDismissals(pref?.value, todayStamp(now)), opts, saturated);
 }
 
 export interface ClaimRow {

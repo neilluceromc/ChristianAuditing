@@ -70,6 +70,25 @@ export function effectiveSlots(slots: SlotLike[], exceptions: ExceptionLike[]): 
 }
 
 /**
+ * Phase 17: how many heads each policy covers, from a grouped
+ * (title, departmentId) count rather than one row per employee — the same
+ * resolvePolicy brain, so the number can't drift from the per-employee read
+ * it replaces. A group that resolves to no policy is not counted.
+ */
+export function headcountByPolicy<P extends PolicyLike>(
+  groups: Array<{ title: string; departmentId: string; count: number }>,
+  policies: P[],
+): Map<string, number> {
+  const heads = new Map<string, number>();
+  for (const g of groups) {
+    const policy = resolvePolicy({ title: g.title, departmentId: g.departmentId }, policies);
+    if (!policy) continue;
+    heads.set(policy.id, (heads.get(policy.id) ?? 0) + g.count);
+  }
+  return heads;
+}
+
+/**
  * Bucket exception rows by the employee they belong to, preserving each
  * employee's row order. Every consumer that fetches exceptions for a set of
  * employees (the employees list, Home's hires/fleet, offboarding) needs this

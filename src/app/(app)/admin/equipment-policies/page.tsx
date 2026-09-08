@@ -1,6 +1,6 @@
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
-import { resolvePolicy } from "@/lib/loadout";
+import { headcountByPolicy } from "@/lib/loadout";
 import { Banner } from "@/components/ui/banner";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
@@ -12,7 +12,7 @@ export default async function EquipmentPoliciesPage() {
   const user = await requireUser();
   const canMutate = user.role === "admin" || user.role === "it_staff";
 
-  const [policies, types, employees, departments] = await Promise.all([
+  const [policies, types, employeeGroups, departments] = await Promise.all([
     prisma.equipmentPolicy.findMany({
       include: {
         appliesToDepartment: true,
@@ -22,16 +22,20 @@ export default async function EquipmentPoliciesPage() {
     }),
     // Leaver kits are IT's; a policy never names a car.
     prisma.assetType.findMany({ where: { category: { cls: "IT" } }, include: { category: true }, orderBy: [{ name: "asc" }] }),
-    prisma.employee.findMany({
+    // Phase 17: grouped, not one row per employee — a headcount, not a table.
+    prisma.employee.groupBy({
+      by: ["title", "departmentId"],
       where: { employment: { not: "OFFBOARDED" } },
-      select: { title: true, departmentId: true },
+      _count: { _all: true },
     }),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
   ]);
 
-  // Whose completeness each policy actually decides — resolvePolicy is the same
-  // brain the loadout view and Home's HIRE rows use, so the number can't drift.
-  const resolved = employees.map((e) => resolvePolicy(e, policies)?.id ?? null);
+  // Whose completeness each policy actually decides — headcountByPolicy shares
+  // resolvePolicy with the loadout view and Home's HIRE rows, so the number
+  // can't drift from either.
+  const groups = employeeGroups.map((g) => ({ title: g.title, departmentId: g.departmentId, count: g._count._all }));
+  const heads = headcountByPolicy(groups, policies);
 
   const cards: PolicyCard[] = policies.map((p) => ({
     id: p.id,
@@ -41,7 +45,7 @@ export default async function EquipmentPoliciesPage() {
       : p.appliesToDepartment
         ? `department: ${p.appliesToDepartment.name}`
         : "applies to nobody",
-    employees: resolved.filter((id) => id === p.id).length,
+    employees: heads.get(p.id) ?? 0,
     slots: p.slots.map((s) => ({
       id: s.id,
       name: s.name,
