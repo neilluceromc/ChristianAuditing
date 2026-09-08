@@ -120,6 +120,22 @@ test.describe.serial("suppliers", () => {
     await page.goto("/purchases/suppliers?category=IT%20hardware");
     await expect(page.getByRole("link", { name: "Bayside Networks" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Quezon Furniture Works" })).toHaveCount(0);
+
+    // Review round 1, Important #1: the URL filter above proves the list
+    // narrows, but not that the facet's own count reflects the new row. Read
+    // the Category facet directly — FacetDropdown (facet-dropdown.tsx:100-113)
+    // renders each option as a <label> holding the option text and a
+    // font-mono count span side by side. "IT hardware" is shared by the
+    // seed's TechServe PH (prisma/seed.ts:83) and this new Bayside row, so
+    // the option's count must read 2.
+    await page.goto("/purchases/suppliers");
+    const categoryFacetBtn = page.getByRole("button", { name: "Category", exact: true });
+    await waitForHydration(categoryFacetBtn);
+    await categoryFacetBtn.click();
+    const categoryDialog = page.getByRole("dialog", { name: "Filter by Category" });
+    const itHardwareOption = categoryDialog.locator("label", { hasText: "IT hardware" });
+    await expect(itHardwareOption).toBeVisible({ timeout: 10_000 });
+    await expect(itHardwareOption.getByText("2", { exact: true })).toBeVisible();
   });
 
   test("2. Purchasing trips the contract-date rule, then fixes it and changes the category", async ({ page }) => {
@@ -138,12 +154,22 @@ test.describe.serial("suppliers", () => {
     // Fix the date and change the category in the same save.
     await contractEnd.fill("2026-12-31");
     await page.getByLabel("Category", { exact: true }).fill("Networking");
-    await page.getByRole("button", { name: "Save changes" }).click();
+    const saveBtn = page.getByRole("button", { name: "Save changes" });
+    await saveBtn.click();
     // The validation error is this save's own first thing to disappear —
     // waited on directly rather than the "Saved" toast, since a save that
-    // still fails would leave it on screen.
+    // still fails would leave it on screen. NOTE: `useSupplierRunner.run`
+    // (use-supplier-runner.ts:34-35) clears `fieldErrors` synchronously at
+    // click time, before the server action is even called, so this check
+    // alone proves nothing about the mutation actually persisting — only
+    // that the click was handled. The button's own `disabled`/`aria-busy`
+    // state (button.tsx:35-36) is driven by `useTransition`'s `pending` and
+    // can only go false again once the transition's async callback (the
+    // whole server round trip) has resolved, so waiting for it re-enabled
+    // is the real synchronization point that lets the next line navigate
+    // without racing the write — real STATE, not the redundant toast text.
     await expect(page.getByText("End date is before the start")).toHaveCount(0, { timeout: 10_000 });
-    await expect(page.getByText("Saved")).toBeVisible({ timeout: 10_000 });
+    await expect(saveBtn).toBeEnabled({ timeout: 10_000 });
 
     await page.goto(`/purchases/suppliers/${vendor.id}`);
     await expect(page.getByText("Networking")).toBeVisible({ timeout: 10_000 });
@@ -287,6 +313,16 @@ test.describe.serial("suppliers", () => {
     await spreadsheet.setInputFiles("e2e/fixtures/suppliers-mixed.xlsx");
     await page.getByRole("button", { name: /^Validate/ }).click();
     await expect(page.getByText("1 new · 1 updates · 3 blocked")).toBeVisible({ timeout: 10_000 });
+
+    // Review round 1, Important #2: the aggregate "3 blocked" count above
+    // would also pass if a row were blocked for the wrong reason.
+    // BlockedCauses (import-wizard.tsx:487) groups by cause and renders each
+    // group's blockSpec(...).label verbatim (blocked-causes.tsx:96) — the two
+    // "Dup Co" rows collide under blockSpec("duplicate-in-file").label, and
+    // "Sometimes Ltd"'s unrecognised status is blockSpec("bad-contract-status").label
+    // (both read from src/lib/import-vocabulary.ts, not the raw cause keys).
+    await expect(page.getByText("Duplicate within this file")).toBeVisible();
+    await expect(page.getByText("Contract status not recognised")).toBeVisible();
 
     await page.getByRole("button", { name: "Import 2 rows" }).click();
     await expect(
