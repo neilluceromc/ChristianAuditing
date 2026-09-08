@@ -84,7 +84,7 @@ export function RegisterForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  const [registered, setRegistered] = useState<{ ids: string[] } | null>(null);
+  const [registered, setRegistered] = useState<{ ids: string[]; tags: string[] } | null>(null);
   const [docError, setDocError] = useState(false);
 
   // Task 13's live check: it runs the SAME `checkIdentifiers` call whichever
@@ -259,7 +259,14 @@ export function RegisterForm({
             setDocError(true);
           }
         }
-        setRegistered({ ids: res.data.ids });
+        // Freeze the tags this submission actually sent, not the live `tags`
+        // state: a later successful registration revalidates `/inventory`,
+        // and if that also refreshes this page's server-supplied
+        // `highestByPrefix` prop, the [prefix, quantity, highestByPrefix]
+        // effect above recomputes a NEW suggested run for the next batch —
+        // silently replacing what the success panel would otherwise display,
+        // even though the assets already created keep their real tags.
+        setRegistered({ ids: res.data.ids, tags });
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
         const fe = res.fieldErrors ?? {};
@@ -301,7 +308,7 @@ export function RegisterForm({
 
   if (registered) {
     return (
-      <RegisterSuccess tags={tags} ids={registered.ids} cls={cls} onAgain={reset}>
+      <RegisterSuccess tags={registered.tags} ids={registered.ids} cls={cls} onAgain={reset}>
         {docError && (
           <Banner tone="attention" title="Registered — the invoice did not attach. Add it from any unit's Documents tab." />
         )}
