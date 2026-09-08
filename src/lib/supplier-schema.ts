@@ -11,13 +11,23 @@ export const CONTRACT_STATUS_LABEL: Record<VendorContractStatus, string> = {
 const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
 const text = (max: number) => z.string().trim().max(max).optional().default("");
 
+/**
+ * Fix round 1 (Task 5, Minor): the exact rule `supplierSchema.email` used
+ * inline, exported so the importer (`import-suppliers.ts`) can call the
+ * SAME rule instead of independently reasoning its own regex — the two
+ * could disagree on edge cases (consecutive dots, an IP-literal domain),
+ * meaning a value the edit form accepts could be blocked on import, or
+ * vice versa.
+ */
+export const emailSchema = z.string().trim().email("That is not an email address");
+
 export const supplierSchema = z.object({
   name: z.string().trim().min(1, "Name the supplier").max(120),
   registeredName: text(160),
   category: text(60),
   contactPerson: text(120),
   phone: text(40),
-  email: z.union([z.literal(""), z.string().trim().email("That is not an email address")]).optional().default(""),
+  email: z.union([z.literal(""), emailSchema]).optional().default(""),
   address: text(400),
   registrationNo: text(60),
   contractStatus: z.enum(VENDOR_CONTRACT_STATUSES),

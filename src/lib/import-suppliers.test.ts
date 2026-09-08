@@ -40,6 +40,23 @@ describe("findBankColumns", () => {
   it("does not match a word that merely contains 'bank' (word boundary)", () => {
     expect(findBankColumns(["Name", "Bankside Road"])).toEqual([]);
   });
+
+  // Fix round 1, Important #1: the `#` alternative was dead — a trailing `\b`
+  // cannot fire right after a non-word character at (or near) the end of a
+  // string, so "Account #" (an extremely common real header) sailed straight
+  // past the file-level bank refusal.
+  it("catches 'Account #' and 'Account#', the realistic header the '#' branch exists for", () => {
+    expect(findBankColumns(["Name", "Account #", "Phone"])).toEqual(["Account #"]);
+    expect(findBankColumns(["Name", "Account#", "Phone"])).toEqual(["Account#"]);
+  });
+
+  it("does not match 'Accountant', which merely starts with 'account'", () => {
+    expect(findBankColumns(["Name", "Accountant"])).toEqual([]);
+  });
+
+  it("still catches 'Bank account', 'IBAN', and 'Account no'", () => {
+    expect(findBankColumns(["Bank account", "IBAN", "Account no"])).toEqual(["Bank account", "IBAN", "Account no"]);
+  });
 });
 
 describe("matchHeaders(SUPPLIER_IMPORT_HEADERS)", () => {
@@ -129,10 +146,15 @@ describe("planSupplierRows", () => {
     expect(plan.counts).toEqual({ create: 0, update: 0, blocked: 2 });
   });
 
-  it("blocks a case-colliding vendor name as duplicate-vendor-name", () => {
+  // Fix round 1, Important #2: this cause used to be `duplicate-vendor-name`,
+  // reused verbatim from the asset importer's own vendor-reference cause —
+  // whose copy and "drop the vendor" fix are both false in this context
+  // (the supplier's own `name` is required, not optional and droppable).
+  // Supplier-import now gets its own cause with truthful copy.
+  it("blocks a case-colliding supplier name as duplicate-supplier-name", () => {
     const row = [cells({ name: "Twin Co" })];
     const plan = planSupplierRows(headers, row, REFS);
-    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "duplicate-vendor-name", detail: "Twin Co" });
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "duplicate-supplier-name", detail: "Twin Co" });
   });
 
   describe("contract status", () => {

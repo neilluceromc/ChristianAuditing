@@ -108,6 +108,15 @@ export const BLOCK_CAUSES = [
   "bad-contract-status",
   "bad-email",
   "contract-dates-order",
+  // Fix round 1 (Task 5, Important #2): NOT a reuse of `duplicate-vendor-name`
+  // — that cause was written for the asset importer's optional, droppable
+  // Vendor reference field ("no page in this app can rename or create one").
+  // Here the colliding field is the supplier row's own required `name`, and
+  // `/purchases/suppliers` genuinely lets someone rename the colliding
+  // record, so this gets its own cause with its own truthful copy and a
+  // `link` fix instead of the asset-vendor `option` one. Appended, per this
+  // array's own rule above — never inserted.
+  "duplicate-supplier-name",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -462,6 +471,20 @@ const SPECS: Record<BlockCause, BlockSpec> = {
     label: "Contract ends before it starts",
     explain: "These rows have a contract end date earlier than the start date. One of the two is wrong.",
     fix: { kind: "reupload", label: "Fix the file" },
+  },
+  // Fix round 1 (Task 5, Important #2): the supplier importer's own name
+  // collision cause. NOT a reuse of `duplicate-vendor-name` — every sentence
+  // of that cause's copy is false here: this row's `name` is the required
+  // identity field being imported, not an optional droppable reference, and
+  // `/purchases/suppliers/[id]/edit` DOES let someone rename the colliding
+  // record (there is no "asset's edit form" in this wizard at all).
+  "duplicate-supplier-name": {
+    label: "Two suppliers already share this name",
+    explain:
+      "Two supplier records already exist whose names differ only by letter case, so this import can't " +
+      "tell which one this row means. Rename one of them — to something differing by more than letter " +
+      "case, or the rename lands on this same block — then re-upload.",
+    fix: { kind: "link", label: "Open suppliers", href: "/purchases/suppliers" },
   },
 };
 

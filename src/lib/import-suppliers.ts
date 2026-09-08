@@ -1,5 +1,5 @@
 import type { VendorContractStatus } from "@prisma/client";
-import { VENDOR_CONTRACT_STATUSES } from "./supplier-schema";
+import { emailSchema, VENDOR_CONTRACT_STATUSES } from "./supplier-schema";
 import { cellText, parseDateCell, refKey, type HeaderMatch } from "./import-assets";
 import { isBlank } from "./tag-key";
 import type { AuditDiff } from "./audit-diff";
@@ -38,14 +38,22 @@ export type SupplierField = (typeof SUPPLIER_IMPORT_HEADERS)[number]["key"];
  * the supplier's own page, never imported, so a sheet carrying one is wrong
  * in its entirety rather than row by row. Word-boundary matched so a column
  * merely containing the letters ("Bankside Road") is not mistaken for one.
+ *
+ * Fix round 1 (Important #1): the `#` alternative used to live INSIDE the
+ * `\b...\b`-wrapped group (`account\s*(no|number|#)\b`), so the trailing
+ * `\b` was asked to fire immediately after `#` — a non-word character — with
+ * nothing word-like following it. A boundary needs one word-char side and
+ * one non-word side; "end of string" also counts as non-word, so
+ * `\b` right after `#` can never match. That silently defeated the single
+ * most common real header this alternative exists for ("Account #"). The
+ * `#` case is now its OWN alternative with no trailing `\b`, ORed in at the
+ * top level instead of nested inside the shared group.
  */
-export const BANK_HEADER = /\b(bank|iban|account\s*(no|number|#))\b/i;
+export const BANK_HEADER = /\b(bank|iban)\b|\baccount\s*(no|number)\b|\baccount\s*#/i;
 
 export function findBankColumns(header: unknown[]): string[] {
   return header.map(cellText).filter((h) => BANK_HEADER.test(h));
 }
-
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** `name`'s ceiling matches `supplierSchema`'s own `.max(120)` — the create
  * schema this importer's validation stands in for. */
@@ -185,11 +193,15 @@ export function planSupplierRows(
       return;
     }
 
-    // Rule 5 (R-1): two stored vendors whose names differ only by case —
-    // undecidable, so this blocks rather than guessing.
+    // Rule 5 (R-1): two stored suppliers whose names differ only by case —
+    // undecidable, so this blocks rather than guessing. Fix round 1
+    // (Important #2): its own cause, `duplicate-supplier-name` — NOT the
+    // asset importer's `duplicate-vendor-name`, whose copy/fix (optional,
+    // droppable, no rename surface) are all false for this row's own
+    // required `name` field.
     const existing = refs.byName.get(key);
     if (existing === null) {
-      block("duplicate-vendor-name", nameRaw);
+      block("duplicate-supplier-name", nameRaw);
       return;
     }
 
@@ -230,9 +242,11 @@ export function planSupplierRows(
       return;
     }
 
-    // Rule 9: Email, non-blank, must look like an address.
+    // Rule 9: Email, non-blank, must look like an address — the SAME rule
+    // `supplierSchema.email` enforces (`emailSchema`, `supplier-schema.ts`),
+    // not a second independently-reasoned regex that could disagree with it.
     const emailRaw = textAt(headers, raw, "email");
-    if (emailRaw !== "" && !EMAIL.test(emailRaw)) {
+    if (emailRaw !== "" && !emailSchema.safeParse(emailRaw).success) {
       block("bad-email", emailRaw);
       return;
     }
