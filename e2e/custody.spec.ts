@@ -105,16 +105,23 @@ test.describe.serial("custody", () => {
     // A standard (non-loaner) slot of the SAME type first, to prove the
     // converse half of this case's title: a plain slot must NOT claim a
     // TEMPORARY device either.
+    // Wait for the slot CHIP, not the toast: the chip renders only once the
+    // action has committed and router.refresh() has carried the new slot back,
+    // so the next step sees settled state. The toast is the wrong signal here
+    // — the first add's toast is still showing when the second add is clicked,
+    // so a `.first()` toast wait passes at once and the page.goto below can
+    // outrun the second insert (seen: the employee page rendered one slot,
+    // Phase 17 final battery, custody after admin + axe-sweep in one server).
     await card.getByLabel("New slot name for Contractor kit").fill("laptop");
     await card.getByLabel("Asset type for the new slot in Contractor kit").selectOption({ label: typeLabel });
     await card.getByRole("button", { name: "Add slot" }).click();
-    await expect(page.getByText("Slot added — existing assignments are untouched").first()).toBeVisible({ timeout: 10_000 });
+    await expect(card.getByRole("button", { name: "Remove the laptop slot from Contractor kit", exact: true })).toBeVisible({ timeout: 10_000 });
 
     await card.getByLabel("New slot name for Contractor kit").fill("loaner laptop");
     await card.getByLabel("Asset type for the new slot in Contractor kit").selectOption({ label: typeLabel });
     await card.getByLabel("loaner slot — filled by a device on loan (TEMPORARY)").check();
     await card.getByRole("button", { name: "Add slot" }).click();
-    await expect(page.getByText("Slot added — existing assignments are untouched").first()).toBeVisible({ timeout: 10_000 });
+    await expect(card.getByRole("button", { name: "Remove the loaner laptop slot from Contractor kit", exact: true })).toBeVisible({ timeout: 10_000 });
 
     await page.goto(`/employees/${emp.id}`);
     const loanerTile = page.getByRole("button", { name: /^loaner laptop slot,/ });
