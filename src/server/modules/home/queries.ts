@@ -99,7 +99,7 @@ export async function worklist(userId: string, role: Role, opts: { limit?: numbe
         repairQuote: true, cost: true, defectiveSince: true, vendor: { select: { name: true } },
       },
     }),
-    // Loans: ordered by due date (nulls first), limited to 50
+    // Loans: ordered by due date (nulls first), limited to CAP.large
     prisma.asset.findMany({
       where: { cls: "IT", status: "TEMPORARY" },
       orderBy: [{ loanDueAt: { sort: "asc", nulls: "first" } }, { id: "asc" }],

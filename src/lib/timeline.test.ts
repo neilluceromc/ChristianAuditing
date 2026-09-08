@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeTimeline, parseTimelineCursor, timelineCursorQS, timelineTake, type TimelineCursor, type TimelinePoint } from "./timeline";
+import { mergeTimeline, parseTimelineCursor, timelineCursorQS, timelineTake, TIMELINE_MAX_SKIP, type TimelineCursor, type TimelinePoint } from "./timeline";
 
 const at = (id: string, iso: string): TimelinePoint => ({ id, when: new Date(iso) });
 const byIdDesc = (a: TimelinePoint, b: TimelinePoint) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
@@ -87,5 +87,11 @@ describe("cursor round-trip", () => {
     expect(parseTimelineCursor(new URLSearchParams(timelineCursorQS(c)))).toEqual(c);
     expect(parseTimelineCursor(new URLSearchParams(""))).toBeNull();
     expect(parseTimelineCursor(new URLSearchParams("before=garbage&skip=1"))).toBeNull();
+  });
+  it("clamps skip to TIMELINE_MAX_SKIP on the way in, so a hand-edited URL can't inflate the fetch", () => {
+    const before = "2026-09-07T10:00:00.000Z";
+    expect(parseTimelineCursor(new URLSearchParams(`before=${before}&skip=${1e12}`))?.skip).toBe(TIMELINE_MAX_SKIP);
+    expect(parseTimelineCursor(new URLSearchParams(`before=${before}&skip=-5`))?.skip).toBe(0);
+    expect(parseTimelineCursor(new URLSearchParams(`before=${before}&skip=7`))?.skip).toBe(7);
   });
 });

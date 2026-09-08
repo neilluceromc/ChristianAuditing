@@ -109,11 +109,12 @@ describe("headcountByPolicy", () => {
     const groups = [
       { title: "Team Lead", departmentId: "dept-fin", count: 3 },
       { title: "Accountant", departmentId: "dept-fin", count: 5 },
+      { title: "Analyst", departmentId: "dept-fin", count: 4 }, // second, distinct non-policy title in the same department -- p-dept sums both groups
       { title: "Driver", departmentId: "dept-ops", count: 2 },
     ];
     const heads = headcountByPolicy(groups, policies);
     expect(heads.get("p-title")).toBe(3);
-    expect(heads.get("p-dept")).toBe(5);
+    expect(heads.get("p-dept")).toBe(9); // 5 (Accountant) + 4 (Analyst)
     expect(heads.size).toBe(2);
   });
 });

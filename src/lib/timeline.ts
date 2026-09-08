@@ -13,6 +13,14 @@
  * source made entirely of the tied instant still has all of it in view.
  */
 export const TIMELINE_PAGE_SIZE = 50;
+/**
+ * The largest same-instant writer to one entity's timeline is a bulk assign
+ * (200 approval rows, one `createdAt`), so 1,000 is ample headroom. A tie
+ * longer than the bound degrades to repeated rows on later pages, never a
+ * crash or an unbounded fetch -- `parseTimelineCursor` clamps here, on the
+ * way in, so a hand-edited `?skip=` can't inflate `timelineTake`'s fetch.
+ */
+export const TIMELINE_MAX_SKIP = 1_000;
 export interface TimelinePoint { id: string; when: Date }
 export interface TimelineCursor { before: Date; skip: number }
 
@@ -49,7 +57,8 @@ export function parseTimelineCursor(params: URLSearchParams): TimelineCursor | n
   if (!raw) return null;
   const before = new Date(raw);
   if (Number.isNaN(before.getTime())) return null;
-  const skip = Math.max(0, Number.parseInt(params.get("skip") ?? "0", 10) || 0);
+  const parsed = Number.parseInt(params.get("skip") ?? "0", 10) || 0;
+  const skip = Math.min(TIMELINE_MAX_SKIP, Math.max(0, parsed));
   return { before, skip };
 }
 
