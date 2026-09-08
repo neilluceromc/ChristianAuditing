@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
+import { pageOf, ENTITY_PAGE_SIZE } from "@/lib/paging";
 
 /**
  * Tabs write `?state=`. EXPIRED (the clock ran out) and RELEASED (a person let
@@ -35,22 +36,31 @@ export interface ReservationRow {
   closedBy: "clock" | "person" | null;
 }
 
-export async function listReservations(tab: ReservationTab): Promise<{
+export async function listReservations(tab: ReservationTab, requestedPage: number): Promise<{
   rows: ReservationRow[];
   counts: Record<ReservationTab, number>;
+  total: number;
+  page: number;
+  pageCount: number;
 }> {
   const states = RESERVATION_TABS.find((t) => t.id === tab)!.states;
-  const [reservations, grouped] = await Promise.all([
-    prisma.reservation.findMany({
-      where: { state: { in: [...states] } },
-      include: { asset: true, employee: true },
-      // rows seeded in one transaction share a createdAt millisecond — the id
-      // tiebreaker is what stops two reads returning a different order
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    }),
-    prisma.reservation.groupBy({ by: ["state"], _count: true }),
-  ]);
+  const grouped = await prisma.reservation.groupBy({ by: ["state"], _count: true });
   const countOf = (s: string) => grouped.find((g) => g.state === s)?._count ?? 0;
+  const counts: Record<ReservationTab, number> = {
+    ACTIVE: countOf("ACTIVE"),
+    FULFILLED: countOf("FULFILLED"),
+    CLOSED: countOf("RELEASED") + countOf("EXPIRED"),
+  };
+  const total = counts[tab];
+  const pg = pageOf(total, requestedPage, ENTITY_PAGE_SIZE);
+  const reservations = await prisma.reservation.findMany({
+    where: { state: { in: [...states] } },
+    include: { asset: true, employee: true },
+    // rows seeded in one transaction share a createdAt millisecond — the id
+    // tiebreaker is what stops two reads returning a different order
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: pg.skip, take: pg.take,
+  });
 
   return {
     rows: reservations.map((r): ReservationRow => ({
@@ -74,10 +84,9 @@ export async function listReservations(tab: ReservationTab): Promise<{
       resolved: r.state === "EXPIRED" ? fmtDate(r.expiresAt) : fmtDate(r.resolvedAt),
       closedBy: r.state === "EXPIRED" ? "clock" : r.state === "RELEASED" ? "person" : null,
     })),
-    counts: {
-      ACTIVE: countOf("ACTIVE"),
-      FULFILLED: countOf("FULFILLED"),
-      CLOSED: countOf("RELEASED") + countOf("EXPIRED"),
-    },
+    counts,
+    total,
+    page: pg.page,
+    pageCount: pg.pageCount,
   };
 }

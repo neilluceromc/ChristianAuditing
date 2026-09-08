@@ -7,6 +7,7 @@ import {
   decisionOf, reportTotals, returnTargetStatus,
   type Decision, type DecisionCandidate, type ReportTotals,
 } from "@/lib/offboarding";
+import { pageOf, ENTITY_PAGE_SIZE } from "@/lib/paging";
 
 /** One row of the /offboarding queue. */
 export interface OffboardingRow {
@@ -86,9 +87,14 @@ async function heldIds(employeeId: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-export async function listOffboarding(): Promise<OffboardingRow[]> {
+export async function listOffboarding(requestedPage: number): Promise<{
+  rows: OffboardingRow[]; total: number; page: number; pageCount: number;
+}> {
+  const where = { employment: "OFFBOARDING" as const };
+  const total = await prisma.employee.count({ where });
+  const pg = pageOf(total, requestedPage, ENTITY_PAGE_SIZE);
   const employees = await prisma.employee.findMany({
-    where: { employment: "OFFBOARDING" },
+    where,
     include: {
       department: true,
       assets: { select: { id: true } },
@@ -99,9 +105,10 @@ export async function listOffboarding(): Promise<OffboardingRow[]> {
     },
     // name is not unique — two people sharing one must not swap rows between reads
     orderBy: [{ name: "asc" }, { employeeNo: "asc" }],
+    skip: pg.skip, take: pg.take,
   });
 
-  return employees.map((e) => {
+  const rows = employees.map((e) => {
     const byAsset = candidatesFor(e, e.approvals);
     const heldIdSet = new Set(e.assets.map((a) => a.id));
     // every asset in e.assets is held by them right now, hence held: true —
@@ -131,6 +138,8 @@ export async function listOffboarding(): Promise<OffboardingRow[]> {
       joined: fmtDate(e.joinedAt),
     };
   });
+
+  return { rows, total, page: pg.page, pageCount: pg.pageCount };
 }
 
 export interface WizardItem {

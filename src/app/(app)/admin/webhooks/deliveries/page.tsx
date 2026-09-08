@@ -1,5 +1,6 @@
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
+import { parsePage } from "@/lib/paging";
 import { DELIVERY_TABS, parseDeliveryTab } from "@/lib/webhooks";
 import { listDeliveries } from "@/server/modules/admin/queries";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,8 +14,10 @@ export default async function DeliveriesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireRole("admin");
-  const tab = parseDeliveryTab(toSearchParams(await searchParams).get("state"));
-  const { rows, total, deadReplayable } = await listDeliveries(tab);
+  const sp = toSearchParams(await searchParams);
+  const tab = parseDeliveryTab(sp.get("state"));
+  const requestedPage = parsePage(sp);
+  const { rows, total, deadReplayable, page, pageCount } = await listDeliveries(tab, requestedPage);
 
   return (
     <>
@@ -44,6 +47,9 @@ export default async function DeliveriesPage({
           rows={rows}
           total={total}
           deadReplayable={deadReplayable}
+          page={page}
+          pageCount={pageCount}
+          tab={tab}
           empty={
             <EmptyState
               title={tab === "ALL" ? "Nothing has been sent yet" : "Nothing in this tab"}
