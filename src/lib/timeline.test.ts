@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mergeTimeline, parseTimelineCursor, timelineCursorQS, type TimelinePoint } from "./timeline";
+import { mergeTimeline, parseTimelineCursor, timelineCursorQS, timelineTake, type TimelineCursor, type TimelinePoint } from "./timeline";
 
 const at = (id: string, iso: string): TimelinePoint => ({ id, when: new Date(iso) });
+const byIdDesc = (a: TimelinePoint, b: TimelinePoint) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
 describe("mergeTimeline", () => {
   it("interleaves sources newest-first and reports no next when exhausted", () => {
@@ -33,6 +34,50 @@ describe("mergeTimeline", () => {
     const page3 = mergeTimeline([audit.filter((r) => r.when <= page2.next!.before), approvals.filter((r) => r.when <= page2.next!.before)], 2, page2.next);
     expect(page3.items.map((i) => i.id)).toEqual(["x1"]);
     expect(page3.next).toBeNull();
+  });
+  it("a single-source tie longer than a page (120 rows, one instant) is exhausted without drops or repeats", () => {
+    const T = "2026-09-07T10:00:00.000Z";
+    // mirrors a `createMany` bulk write: 120 rows, one `createdAt`, DB-ordered id desc.
+    const all = Array.from({ length: 120 }, (_, i) => at(`r${String(i).padStart(3, "0")}`, T)).sort(byIdDesc);
+    let cursor: TimelineCursor | null = null;
+    const seenIds: string[] = [];
+    for (let page = 0; page < 10; page++) {
+      const take = timelineTake(50, cursor);
+      const source = all.slice(0, take); // every row satisfies `when <= cursor.before` here; `take` is the only cap
+      const result: { items: TimelinePoint[]; next: TimelineCursor | null } = mergeTimeline([source], 50, cursor);
+      seenIds.push(...result.items.map((i) => i.id));
+      cursor = result.next;
+      if (!result.next) break;
+    }
+    expect(cursor).toBeNull();
+    expect(seenIds).toHaveLength(120);
+    expect(new Set(seenIds).size).toBe(120);
+    expect(new Set(seenIds)).toEqual(new Set(all.map((r) => r.id)));
+  });
+  it("two sources -- a 60-row tie at T plus 3 older rows elsewhere -- page to exhaustion, and take grows with skip", () => {
+    const T = "2026-09-07T10:00:00.000Z";
+    const a = Array.from({ length: 60 }, (_, i) => at(`a${String(i).padStart(2, "0")}`, T)).sort(byIdDesc);
+    const b = [at("b1", "2026-09-05T00:00:00Z"), at("b2", "2026-09-04T00:00:00Z"), at("b3", "2026-09-03T00:00:00Z")];
+    let cursor: TimelineCursor | null = null;
+    const takes: number[] = [];
+    const seenIds: string[] = [];
+    for (let page = 0; page < 10; page++) {
+      const take = timelineTake(50, cursor);
+      takes.push(take);
+      const before = cursor ? cursor.before : null;
+      const sourceA: TimelinePoint[] = (before ? a.filter((r) => r.when <= before) : a).slice(0, take);
+      const sourceB: TimelinePoint[] = (before ? b.filter((r) => r.when <= before) : b).slice(0, take);
+      const result: { items: TimelinePoint[]; next: TimelineCursor | null } = mergeTimeline([sourceA, sourceB], 50, cursor);
+      seenIds.push(...result.items.map((i) => i.id));
+      cursor = result.next;
+      if (!result.next) break;
+    }
+    expect(takes[0]).toBe(51);
+    expect(takes[1]).toBe(101);
+    expect(cursor).toBeNull();
+    expect(seenIds).toHaveLength(63);
+    expect(new Set(seenIds).size).toBe(63);
+    expect(new Set(seenIds)).toEqual(new Set([...a, ...b].map((r) => r.id)));
   });
 });
 

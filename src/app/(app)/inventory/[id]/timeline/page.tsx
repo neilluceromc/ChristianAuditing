@@ -5,7 +5,7 @@ import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { mergeTimeline, parseTimelineCursor, timelineCursorQS, TIMELINE_PAGE_SIZE, type TimelinePoint } from "@/lib/timeline";
+import { mergeTimeline, parseTimelineCursor, timelineCursorQS, timelineTake, TIMELINE_PAGE_SIZE, type TimelinePoint } from "@/lib/timeline";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ButtonLink } from "@/components/ui/button-link";
 import { TimelineList, type TimelineItem } from "@/components/patterns/timeline-list";
@@ -24,7 +24,7 @@ export default async function AssetTimelinePage({
   if (!asset) notFound();
 
   const cursor = parseTimelineCursor(sp);
-  const take = TIMELINE_PAGE_SIZE + 1;
+  const take = timelineTake(TIMELINE_PAGE_SIZE, cursor);
 
   const [entries, approvals] = await Promise.all([
     prisma.auditEntry.findMany({

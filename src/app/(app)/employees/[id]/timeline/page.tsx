@@ -4,7 +4,7 @@ import { requireUser } from "@/server/auth/guards";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { mergeTimeline, parseTimelineCursor, timelineCursorQS, TIMELINE_PAGE_SIZE, type TimelinePoint } from "@/lib/timeline";
+import { mergeTimeline, parseTimelineCursor, timelineCursorQS, timelineTake, TIMELINE_PAGE_SIZE, type TimelinePoint } from "@/lib/timeline";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -24,7 +24,7 @@ export default async function EmployeeTimelinePage({
   if (!employee) notFound();
 
   const cursor = parseTimelineCursor(sp);
-  const take = TIMELINE_PAGE_SIZE + 1;
+  const take = timelineTake(TIMELINE_PAGE_SIZE, cursor);
 
   const [entries, approvals, reservations] = await Promise.all([
     prisma.auditEntry.findMany({
