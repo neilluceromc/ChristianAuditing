@@ -57,6 +57,21 @@ describe("findBankColumns", () => {
   it("still catches 'Bank account', 'IBAN', and 'Account no'", () => {
     expect(findBankColumns(["Bank account", "IBAN", "Account no"])).toEqual(["Bank account", "IBAN", "Account no"]);
   });
+
+  // Final-review fix wave, M-4: `\b` treats `_` as a word character, so a
+  // snake_case export header like "bank_account" never reached a boundary
+  // between "bank" and "account" and sailed past the file-level refusal.
+  it("catches 'bank_account', a snake_case header normalisation now handles", () => {
+    expect(findBankColumns(["Name", "bank_account", "Phone"])).toEqual(["bank_account"]);
+  });
+
+  it("catches 'Acct no', the abbreviated header the new 'acct' alternative exists for", () => {
+    expect(findBankColumns(["Name", "Acct no", "Phone"])).toEqual(["Acct no"]);
+  });
+
+  it("still does not match 'Accountant' after adding the 'acct' alternative", () => {
+    expect(findBankColumns(["Name", "Accountant"])).toEqual([]);
+  });
 });
 
 describe("matchHeaders(SUPPLIER_IMPORT_HEADERS)", () => {

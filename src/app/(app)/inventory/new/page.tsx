@@ -36,7 +36,11 @@ export default async function NewAssetPage({
       orderBy: { name: "asc" },
     }),
     prisma.employee.findMany({ where: { employment: "ACTIVE" }, orderBy: { name: "asc" } }),
-    prisma.vendor.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.vendor.findMany({
+      where: { archivedAt: null },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
   const suggestions = await tagSuggestions(categories.map((c) => c.id));
 

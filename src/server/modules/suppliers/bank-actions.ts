@@ -95,8 +95,9 @@ export async function removeBankAccount(input: unknown): Promise<ActionResult<nu
  * try/catch. A decrypt failure returns `conflict(...)` and writes NO audit
  * entry. Only a successful decrypt writes `supplier.bank.revealed` — one
  * audit row per actual reveal, never one for a failed attempt. No
- * revalidate: the 30s auto-hide this mirrors (secret-actions.ts) is client
- * state, not a server-rendered value.
+ * revalidate: the revealed value is client state that lives until the page
+ * is left (spec §4.2) — there is no timer, and nothing server-rendered
+ * changes.
  */
 export async function revealBankAccount(input: unknown): Promise<ActionResult<{ accountNumber: string; label: string }>> {
   const user = await actionUser();

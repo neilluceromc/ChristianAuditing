@@ -10,7 +10,7 @@ import { useSupplierRunner } from "./use-supplier-runner";
 
 export function ArchiveControls({ id, archived }: { id: string; archived: boolean }) {
   const [open, setOpen] = useState(false);
-  const { pending, error, retryAfter, setRetryAfter, run } = useSupplierRunner();
+  const { pending, error, retryAfter, setRetryAfter, reset, run } = useSupplierRunner();
 
   if (archived) {
     return (
@@ -26,7 +26,7 @@ export function ArchiveControls({ id, archived }: { id: string; archived: boolea
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>Archive supplier</Button>
+      <Button onClick={() => { reset(); setOpen(true); }}>Archive supplier</Button>
       <Dialog
         open={open}
         onClose={() => setOpen(false)}

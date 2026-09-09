@@ -243,12 +243,20 @@ async function main() {
       notes: { create: [{ authorId: purchasing.id, kind: "SUBMIT", text: "Replacement cycle for Sales.", createdAt: day(-6) }] },
     },
   });
-  await prisma.purchaseRequest.create({
+  const pr0188 = await prisma.purchaseRequest.create({
     data: {
       refNo: "PR-0188", state: "COMPLETED", requestedById: purchasing.id, departmentId: depts["IT"].id, vendorId: vendors[0].id,
       submittedAt: day(-40), reviewedAt: day(-35), reviewedById: itStaff.id, completedAt: day(-30),
       units: { create: [{ description: "Dell Latitude 5420", qty: 2, unitPrice: 55_000, state: "APPROVED" }] },
     },
+    include: { units: true },
+  });
+  // Final-review fix wave (M-5): register one seeded asset against PR-0188's
+  // own unit so the "From PR-0188" badge (spec §6) has seed data, not only
+  // e2e-created rows. BR-LT-0148 is one of PR-0188's two Dell Latitude 5420s.
+  await prisma.asset.update({
+    where: { tag: "BR-LT-0148" },
+    data: { purchaseRequestId: pr0188.id, purchaseUnitId: pr0188.units[0].id },
   });
   // Phase 18: deliberately untagged — the e2e "none" filter case needs one pre-phase row
   await prisma.purchaseRequest.create({

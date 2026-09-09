@@ -27,7 +27,12 @@ export async function uploadSupplierDocument(formData: FormData): Promise<Action
   const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
   if (!vendor) return conflict("That supplier no longer exists.");
 
-  const stored = await storeUpload(`suppliers/${vendorId}`, checked.file);
+  let stored: Awaited<ReturnType<typeof storeUpload>>;
+  try {
+    stored = await storeUpload(`suppliers/${vendorId}`, checked.file);
+  } catch {
+    return conflict("Could not store the file");
+  }
 
   const doc = await prisma.$transaction(async (tx) => {
     const created = await tx.vendorDocument.create({

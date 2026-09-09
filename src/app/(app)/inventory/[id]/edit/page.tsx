@@ -18,7 +18,13 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
   const [categories, types, vendors] = await Promise.all([
     prisma.assetCategory.findMany({ where: { cls: asset.cls }, orderBy: { name: "asc" } }),
     prisma.assetType.findMany({ where: { category: { cls: asset.cls } }, orderBy: { name: "asc" } }),
-    prisma.vendor.findMany({ orderBy: { name: "asc" } }),
+    // Spec §2.1: archived suppliers leave pickers, but never at the cost of
+    // blanking a real value — same rule the request picker uses
+    // (`supplierOptions`, suppliers/queries.ts).
+    prisma.vendor.findMany({
+      where: { OR: [{ archivedAt: null }, { id: asset.vendorId ?? "" }] },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   async function action(payload: Record<string, unknown>) {

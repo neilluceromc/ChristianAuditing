@@ -49,10 +49,22 @@ export type SupplierField = (typeof SUPPLIER_IMPORT_HEADERS)[number]["key"];
  * `#` case is now its OWN alternative with no trailing `\b`, ORed in at the
  * top level instead of nested inside the shared group.
  */
-export const BANK_HEADER = /\b(bank|iban)\b|\baccount\s*(no|number)\b|\baccount\s*#/i;
+export const BANK_HEADER = /\b(bank|iban|acct)\b|\baccount\s*(no|number)\b|\baccount\s*#/i;
 
+/**
+ * Final-review fix wave (M-4): `\b` treats `_` as a word character, so a
+ * snake_case export header like "Bank_Account_No" never hit a boundary
+ * between "Bank" and "Account" and sailed past every alternative above.
+ * Normalise `_`, `.`, `/` and `-` runs to a space before testing (the
+ * ORIGINAL header text is still what gets returned/reported) so
+ * "Bank_Account_No" reads as "Bank Account No". `acct` is now its own
+ * alternative so "Acct No" / "Acct #" are caught without a `#`-shaped
+ * boundary problem of their own; "Accountant" matches none of the
+ * alternatives (no `\bacct\b`, and "Account" is not followed by `no`/`number`),
+ * so it is still not caught.
+ */
 export function findBankColumns(header: unknown[]): string[] {
-  return header.map(cellText).filter((h) => BANK_HEADER.test(h));
+  return header.map(cellText).filter((h) => BANK_HEADER.test(h.replace(/[_./-]+/g, " ")));
 }
 
 /** `name`'s ceiling matches `supplierSchema`'s own `.max(120)` — the create

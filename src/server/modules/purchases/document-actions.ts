@@ -27,7 +27,12 @@ export async function uploadRequestDocument(formData: FormData): Promise<ActionR
   const request = await prisma.purchaseRequest.findUnique({ where: { id: requestId } });
   if (!request) return conflict("That request no longer exists.");
 
-  const stored = await storeUpload(`requests/${requestId}`, checked.file);
+  let stored: Awaited<ReturnType<typeof storeUpload>>;
+  try {
+    stored = await storeUpload(`requests/${requestId}`, checked.file);
+  } catch {
+    return conflict("Could not store the file");
+  }
 
   const doc = await prisma.$transaction(async (tx) => {
     const created = await tx.requestDocument.create({

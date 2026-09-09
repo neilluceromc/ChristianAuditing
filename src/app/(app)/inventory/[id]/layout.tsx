@@ -67,7 +67,14 @@ export default async function AssetRecordLayout({
                 <Pill tone="accent">From {asset.purchaseRequest.refNo}</Pill>
               </Link>
             ) : (
-              <Pill>{PROVENANCE_LABEL[provenanceOf(asset)]}</Pill>
+              // Spec §6 badge: the HISTORICAL pill reads "Historical import · no
+              // purchase request"; the label map itself stays "Historical
+              // import" (used elsewhere — facet, export, finance) and this
+              // badge appends the suffix only here.
+              <Pill>
+                {PROVENANCE_LABEL[provenanceOf(asset)]}
+                {provenanceOf(asset) === "HISTORICAL" && " · no purchase request"}
+              </Pill>
             )}
             {asset.financeConfirmedAt ? (
               <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>

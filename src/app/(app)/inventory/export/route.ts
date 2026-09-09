@@ -49,6 +49,7 @@ export async function GET(req: Request) {
   const assets = await prisma.asset.findMany({
     where,
     orderBy: ids ? { tag: "asc" } : buildAssetOrderBy(state.sort),
+    // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
     include: { category: true, type: true, assignee: true, vendor: true },
   });
 

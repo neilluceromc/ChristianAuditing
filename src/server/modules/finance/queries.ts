@@ -53,6 +53,7 @@ export async function financeAssets(
     orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
     skip: pg.skip,
     take: pg.take,
+    // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
     include: { category: true, assignee: true },
   });
 

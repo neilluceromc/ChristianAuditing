@@ -4,6 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { readSheet } from "read-excel-file/node";
 import { SEED_PASSWORD } from "../prisma/fixtures";
+import { PROVENANCE_LABEL } from "@/lib/provenance";
 
 /**
  * Phase 18, Task 9 — purchasing extensions (spec §8.2, 8 cases). Covers the
@@ -317,11 +318,18 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
     await expect(page.getByRole("link", { name: "From PR-0188" })).toBeVisible();
 
-    // The export sheet's header carries the derived column.
+    // The export sheet's header carries the derived column, and by this point
+    // the run has produced all three provenances (BR-LT-9001 historical,
+    // directTag direct, fromPrTag from-a-request, plus the seeded PR-0188
+    // asset) — spec §8.2 case 6: "the export CSV has the provenance column
+    // with the three labels".
     const res = await page.request.get("/inventory/export");
     expect(res.status()).toBe(200);
     const grid = (await readSheet(Buffer.from(await res.body()))) as unknown[][];
     expect(grid[0]).toContain("Provenance");
+    const provenanceCol = (grid[0] as string[]).indexOf("Provenance");
+    const seen = new Set(grid.slice(1).map((row) => row[provenanceCol]));
+    for (const label of Object.values(PROVENANCE_LABEL)) expect(seen).toContain(label);
   });
 
   test("7. the register page prefills the vendor from a chosen request, but never overwrites one already picked", async ({ page }) => {

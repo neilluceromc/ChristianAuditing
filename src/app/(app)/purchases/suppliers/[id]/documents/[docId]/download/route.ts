@@ -2,14 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
-import { contentDisposition } from "@/server/uploads";
-
-const TYPES: Record<string, string> = {
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-};
+import { contentDisposition, UPLOAD_TYPES } from "@/server/uploads";
 
 /**
  * Spec §3: unlike the asset document route this mirrors, there is no class
@@ -35,7 +28,7 @@ export async function GET(
 
   return new Response(new Uint8Array(bytes), {
     headers: {
-      "content-type": TYPES[path.extname(doc.fileName).toLowerCase()] ?? "application/octet-stream",
+      "content-type": UPLOAD_TYPES[path.extname(doc.fileName).toLowerCase()] ?? "application/octet-stream",
       "content-disposition": contentDisposition(doc.fileName),
     },
   });

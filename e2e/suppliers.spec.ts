@@ -117,6 +117,10 @@ test.describe.serial("suppliers", () => {
     await expect(page.getByText("Paolo Santos")).toBeVisible();
     await page.goto("/purchases/suppliers?q=paolo");
     await expect(page.getByRole("link", { name: "Bayside Networks" })).toBeVisible();
+    // Spec §8.2 case 1: "list finds it by name and by contact" — the q=paolo
+    // search above proves the contact half; this proves the name half.
+    await page.goto("/purchases/suppliers?q=bayside");
+    await expect(page.getByRole("link", { name: "Bayside Networks" })).toBeVisible();
     await page.goto("/purchases/suppliers?category=IT%20hardware");
     await expect(page.getByRole("link", { name: "Bayside Networks" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Quezon Furniture Works" })).toHaveCount(0);

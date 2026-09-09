@@ -493,7 +493,10 @@ export function RegisterForm({
                   const r = requests.find((x) => x.id === e.target.value);
                   setRequestId(e.target.value);
                   // Phase 18 spec §5.4: fill an EMPTY vendor from the request's supplier; never overwrite a chosen one.
-                  if (r?.vendorId && !vendorId) setVendorId(r.vendorId);
+                  // I-1: only when that supplier is among the offered options — an archived
+                  // supplier no longer appears in `vendors`, and this control must never set
+                  // a value the select cannot show.
+                  if (r?.vendorId && !vendorId && vendors.some((v) => v.id === r.vendorId)) setVendorId(r.vendorId);
                 }}
               >
                 <option value="">—</option>
