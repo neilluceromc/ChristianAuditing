@@ -28,7 +28,8 @@ async function main() {
       "RateEvent", "UserPreference", "Approval", "Reservation", "AssetSecret",
       "AssetDocument", "PurchaseUnit", "PurchaseRequest", "Asset", "PolicySlot",
       "EquipmentPolicy", "Employee", "AssetType", "AssetCategory", "Vendor",
-      "Department", "FeatureFlag", "User" CASCADE`);
+      "Department", "FeatureFlag", "User",
+      "StocktakeLine", "Stocktake", "StockMovement", "StockLot", "StockItem", "StockCategory" CASCADE`);
 
   const hash = await bcrypt.hash(SEED_PASSWORD, 10);
 

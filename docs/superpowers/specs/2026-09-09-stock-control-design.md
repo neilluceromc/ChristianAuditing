@@ -82,7 +82,9 @@ on ISSUE), `employeeId String?` → Employee (Restrict; optional on ISSUE), `rea
 ADJUSTMENT; the issue's purpose on ISSUE), `stocktakeId String?` → Stocktake (Restrict; set when an
 ADJUSTMENT comes from posting), `actorId` → User (Restrict), `occurredAt DateTime` (the business date,
 defaults to now; a receipt may be dated back to the delivery day, never into the future), `createdAt`.
-Indexes: `(itemId, occurredAt, id)`, `kind`, `stocktakeId`, `departmentId`, `(itemId, createdAt)`.
+Indexes: `(itemId, occurredAt, id)`, `kind`, `stocktakeId`, `departmentId`. (An `(itemId, createdAt)`
+index was listed here originally and dropped at Task 1's review — ruling R6: nothing orders or filters by
+`createdAt`; the `(itemId, occurredAt, id)` index serves history and balance.)
 
 ### 2.5 `Stocktake` and `StocktakeLine`
 
