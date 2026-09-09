@@ -448,16 +448,19 @@
 > re-reading the code the comment points at, not just trusting the comment's own claim about which layer
 > is responsible.
 >
-> **D-29. New hazard surfaced by D-23's own fix, not fixed in this wave (I-3's scope named only
-> `countStocktakeLine` and `postStocktake`):** `cancelStocktake` still reads `state` before its transaction
-> and then runs an unconditional `tx.stocktake.update({ data: { state: "CANCELLED" } })` inside it, with no
-> row lock and no re-checked `where`. Before D-23, this raced `postStocktake` freely; after D-23,
+> **D-29. New hazard surfaced by D-23's own fix — closed by the controller in the same wave (ruling R14):**
+> `cancelStocktake` read `state` before its transaction and then ran an unconditional
+> `tx.stocktake.update({ data: { state: "CANCELLED" } })` inside it, with no row lock and no re-checked
+> `where`. FIXED: the write is now `updateMany({ where: { id, state: "OPEN" } })`; a zero count throws the
+> module's `ActionFailure` ("This stocktake is no longer open.") so the audit write rolls back with it — a
+> cancel that waited behind a post now refuses instead of clobbering. The paragraph below describes the
+> hazard as the wave found it. Before D-23, this raced `postStocktake` freely; after D-23,
 > `postStocktake` holds a `FOR UPDATE` lock on the same `Stocktake` row for the length of its transaction,
 > so a concurrent `cancelStocktake` targeting the same row now BLOCKS on the plain `UPDATE` until
 > `postStocktake` commits — and then fires anyway, unconditionally overwriting a just-POSTED stocktake
 > (adjustments already written and audited) back to CANCELLED. The interleaving is no longer racy — it is
-> now a deterministic wait-then-clobber — but it is not closed, since fixing `cancelStocktake` was outside
-> I-3's named scope. — Cost if wrong: a stocktake that successfully posted real `ADJUSTMENT` movements
+> now a deterministic wait-then-clobber — and the wave itself left it open, since fixing `cancelStocktake`
+> was outside I-3's named scope; R14 closed it before the re-review. — Cost if wrong: a stocktake that successfully posted real `ADJUSTMENT` movements
 > reads as CANCELLED on screen a moment later, with no record of ever having posted. Lesson: locking one
 > writer against a shared row can change a SECOND, unrelated writer's timing (wait instead of racing)
 > without making that second writer any safer — a fix scoped to two named functions should still name the
