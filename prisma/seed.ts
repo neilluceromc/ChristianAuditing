@@ -490,6 +490,84 @@ async function main() {
     `SELECT setval('purchase_request_ref_seq', 201), setval('approval_ref_seq', 2041)`,
   );
 
+  // ── Phase 19: stock control ───────────────────────────────────────────
+  const stockCats = Object.fromEntries(
+    (await Promise.all([
+      prisma.stockCategory.create({ data: { name: "Office supplies", prefix: "OS", nextNumber: 6 } }),
+      prisma.stockCategory.create({ data: { name: "Cleaning materials", prefix: "CM", nextNumber: 4 } }),
+      prisma.stockCategory.create({ data: { name: "Pantry", prefix: "PN", nextNumber: 5 } }),
+    ])).map((c) => [c.prefix, c]),
+  );
+  const stockRows: Array<[string, string, string, string, number | null, number, number]> = [
+    // code, category, name, unit, packSize, reorderLevel, openingQty
+    ["OS-0001", "OS", "Bond paper A4", "ream", 5, 10, 40],
+    ["OS-0002", "OS", "Ballpen black", "piece", 12, 24, 120],
+    ["OS-0003", "OS", "Sticky notes 3x3", "pad", 12, 12, 36],
+    ["OS-0004", "OS", "Stapler wire no. 35", "box", null, 5, 18],
+    ["OS-0005", "OS", "Folder long brown", "piece", 50, 50, 200],
+    ["CM-0001", "CM", "Dishwashing liquid 1L", "bottle", 12, 6, 24],
+    ["CM-0002", "CM", "Trash bag XL", "roll", null, 10, 30],
+    ["CM-0003", "CM", "Hand soap refill 500ml", "bottle", 12, 6, 12],
+    ["PN-0001", "PN", "3-in-1 coffee sachet", "sachet", 30, 60, 90],
+    ["PN-0002", "PN", "Creamer sachet", "sachet", 50, 50, 150],
+    ["PN-0003", "PN", "Sugar sachet", "sachet", 100, 100, 300],
+    ["PN-0004", "PN", "Bottled water 500ml", "bottle", 24, 24, 96],
+  ];
+  const stockItems: Record<string, { id: string }> = {};
+  for (const [code, cat, name, unit, packSize, reorderLevel, opening] of stockRows) {
+    const item = await prisma.stockItem.create({
+      data: { code, name, unit, packSize, reorderLevel, categoryId: stockCats[cat].id },
+    });
+    stockItems[code] = item;
+    await prisma.stockMovement.create({
+      data: { itemId: item.id, kind: "OPENING", quantity: opening, actorId: purchasing.id, occurredAt: day(-30), reason: "Opening stock" },
+    });
+  }
+  const receipt = async (code: string, qty: number, daysAgo: number, unitCost: number, reference: string) => {
+    const lot = await prisma.stockLot.create({
+      data: { itemId: stockItems[code].id, supplierId: vendors[2].id, lotDate: day(-daysAgo), unitCost, quantity: qty, reference, receivedById: purchasing.id },
+    });
+    await prisma.stockMovement.create({ data: { itemId: stockItems[code].id, kind: "RECEIPT", quantity: qty, lotId: lot.id, actorId: purchasing.id, occurredAt: day(-daysAgo) } });
+  };
+  await receipt("OS-0001", 20, 21, 245, "DR-1101");
+  await receipt("OS-0002", 60, 21, 8.5, "DR-1101");
+  await receipt("CM-0001", 12, 18, 95, "DR-1102");
+  await receipt("PN-0001", 60, 14, 9.25, "DR-1103");
+  await receipt("PN-0002", 100, 14, 3.1, "DR-1103");
+  await receipt("PN-0004", 48, 7, 12, "DR-1104");
+  const issue = async (code: string, qty: number, daysAgo: number, dept: string, empNo: string | null, reason: string) => {
+    await prisma.stockMovement.create({
+      data: {
+        itemId: stockItems[code].id, kind: "ISSUE", quantity: -qty, actorId: purchasing.id, occurredAt: day(-daysAgo),
+        departmentId: depts[dept].id, employeeId: empNo ? emp(empNo).id : null, reason,
+      },
+    });
+  };
+  await issue("OS-0001", 12, 15, "Finance", null, "Monthly paper");
+  await issue("OS-0002", 24, 12, "Sales", "EMP-0042", "New hires");
+  await issue("PN-0001", 110, 6, "Operations", null, "Pantry restock");   // leaves PN-0001 at 40 < 60 → LOW
+  await issue("PN-0004", 50, 3, "HR", null, "Town hall");
+  await issue("CM-0002", 8, 9, "Operations", null, "Weekly cleaning");
+  // One POSTED stocktake on Cleaning materials, ten days ago, with two adjustments.
+  const st = await prisma.stocktake.create({
+    data: {
+      refNo: "ST-0001", categoryId: stockCats.CM.id, state: "POSTED", openedAt: day(-10), openedById: purchasing.id,
+      postedAt: day(-10), postedById: purchasing.id, note: "Monthly pantry-side count",
+      lines: { create: [
+        { itemId: stockItems["CM-0001"].id, bookQty: 36, countedQty: 34, countedAt: day(-10), countedById: purchasing.id },
+        { itemId: stockItems["CM-0002"].id, bookQty: 22, countedQty: 22, countedAt: day(-10), countedById: purchasing.id },
+        { itemId: stockItems["CM-0003"].id, bookQty: 12, countedQty: 13, countedAt: day(-10), countedById: purchasing.id },
+      ] },
+    },
+  });
+  await prisma.stockMovement.createMany({
+    data: [
+      { itemId: stockItems["CM-0001"].id, kind: "ADJUSTMENT", quantity: -2, reason: "Stocktake ST-0001", stocktakeId: st.id, actorId: purchasing.id, occurredAt: day(-10) },
+      { itemId: stockItems["CM-0003"].id, kind: "ADJUSTMENT", quantity: 1, reason: "Stocktake ST-0001", stocktakeId: st.id, actorId: purchasing.id, occurredAt: day(-10) },
+    ],
+  });
+  await prisma.$executeRaw`SELECT setval('stocktake_ref_seq', 1)`;
+
   console.log("Seed complete.");
 }
 
