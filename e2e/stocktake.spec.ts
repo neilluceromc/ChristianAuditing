@@ -102,12 +102,14 @@ const pantry = (code: string) => db.stockItem.findUniqueOrThrow({ where: { code 
 const PANTRY_CODES = ["PN-0001", "PN-0002", "PN-0003", "PN-0004"] as const;
 
 // Our own count-screen inputs for case 3/4 — not seed facts. PN1_COUNT is
-// deliberately chosen to equal the seed's PN-0001 book balance minus the 2
-// issued later in case 3, so the row demonstrates a real MOVED flag (the
-// ledger moved) that resolves to zero variance once reconciled against the
-// CURRENT balance — exactly the double-count case planStocktakePost's own
-// comment (src/lib/stocktake.ts) describes avoiding.
-const PN1_COUNT = 38;
+// deliberately chosen to differ from PN-0001's post-issue CURRENT balance
+// (book 40, minus the 2 issued later in case 3, leaves 38), so the row
+// demonstrates both a real MOVED flag (the ledger moved) AND a genuine
+// variance (35 − 38 = −3) reconciled against the CURRENT balance, never the
+// stale book snapshot — proving planStocktakePost actually writes an
+// ADJUSTMENT rather than the double-count case its own comment
+// (src/lib/stocktake.ts) describes avoiding.
+const PN1_COUNT = 35;
 const PN2_COUNT = 250;
 
 let stocktakeId = "";
@@ -321,26 +323,21 @@ test.describe.serial("stocktake", () => {
       expect(movements.some((mv) => mv.itemId === l.itemId)).toBe(false);
     }
 
-    // PN-0001 counted exactly book-2 (case 3), i.e. exactly its own current
-    // balance at review time — the reconciliation-against-CURRENT design
-    // (src/lib/stocktake.ts) correctly finds nothing left to adjust there, so
-    // it's absent from `differing`; its history gains no stocktake-linked
-    // row. Either way its balance lands on what was counted.
+    // PN-0001 was counted at 35 against a post-issue current balance of 38
+    // (case 3), so the reconciliation-against-CURRENT design
+    // (src/lib/stocktake.ts) writes a real ADJUSTMENT of 35 − 38 = −3 there;
+    // it's present in `differing`, and its item history gains a
+    // stocktake-linked row. Its balance lands on what was counted either way.
     const pn1 = await pantry("PN-0001");
     const pn1Line = plan.find((l) => l.item.code === "PN-0001")!;
-    const pn1Differs = differing.some((l) => l.itemId === pn1.id);
 
     await page.goto(`/stock/items/${pn1.id}`);
     const adjustmentRow = page.getByRole("row", { name: /Adjustment/ });
-    if (pn1Differs) {
-      await expect(adjustmentRow).toBeVisible();
-      await expect(adjustmentRow.getByRole("link", { name: stAfter.refNo })).toHaveAttribute(
-        "href",
-        `/stock/stocktakes/${stocktakeId}`,
-      );
-    } else {
-      await expect(adjustmentRow).toHaveCount(0);
-    }
+    await expect(adjustmentRow).toBeVisible();
+    await expect(adjustmentRow.getByRole("link", { name: stAfter.refNo })).toHaveAttribute(
+      "href",
+      `/stock/stocktakes/${stocktakeId}`,
+    );
     expect(await balanceOf(pn1.id)).toBe(PN1_COUNT);
     expect(pn1Line.countedQty).toBe(PN1_COUNT);
   });
