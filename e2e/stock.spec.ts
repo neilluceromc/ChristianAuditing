@@ -40,7 +40,7 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-// Copied from e2e/suppliers.spec.ts:38-44 — house rule: never import helpers
+// Copied from e2e/suppliers.spec.ts:44-50 — house rule: never import helpers
 // across spec files, since each file reseeds independently.
 async function login(page: Page, email: string) {
   await page.goto("/logout");
@@ -50,7 +50,7 @@ async function login(page: Page, email: string) {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
-// Copied from e2e/suppliers.spec.ts:52-59 — the mouse-move-then-settle step
+// Copied from e2e/suppliers.spec.ts:56-61 — the mouse-move-then-settle step
 // guards against a phantom SERIOUS contrast violation measured there on a
 // freshly-mounted Button variant="primary" mid-transition.
 async function expectNoSeriousAxe(page: Page) {
@@ -221,7 +221,7 @@ test.describe.serial("stock", () => {
     await expect(quantityField).toHaveValue("", { timeout: 10_000 });
 
     await page.goto(`/stock/items/${item.id}`);
-    await expect(page.getByText("30 pieces")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("30 pieces", { exact: true })).toBeVisible({ timeout: 10_000 });
     const historyRow = page.getByRole("row", { name: /Issue/ });
     await expect(historyRow).toBeVisible();
     await expect(historyRow).toContainText(`${MINUS}20`);
@@ -267,7 +267,7 @@ test.describe.serial("stock", () => {
     await dialog.getByRole("button", { name: "Post adjustment" }).click();
 
     await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 10_000 });
-    await expect(page.getByText("35 pieces")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("35 pieces", { exact: true })).toBeVisible({ timeout: 10_000 });
     const historyRow = page.getByRole("row", { name: /Adjustment/ });
     await expect(historyRow).toBeVisible();
     await expect(historyRow).toContainText("+5");
@@ -351,6 +351,14 @@ test.describe.serial("stock", () => {
     const balanceBefore = await balanceOf(os0001Before.id);
 
     await page.goto("/stock/import");
+    // The spec's own business-rule sentence (§6, STOCK_UNIT_COST_NOTICE)
+    // lives in this page's static banner, not the preview panel, and is
+    // visible from page load — no Validate needed. The generic "Not
+    // imported: Unit cost" preview line (checked here in an earlier round)
+    // only proves the column is a recognised non-typo, not that this
+    // specific sentence exists (Task 7 review, Important #1).
+    await expect(page.getByText("Unit cost is recorded on receipts, not opening stock")).toBeVisible();
+
     const spreadsheet = page.getByLabel(/Spreadsheet/);
     await waitForHydration(spreadsheet);
     await spreadsheet.setInputFiles("e2e/fixtures/stock-mixed.xlsx");
@@ -360,9 +368,6 @@ test.describe.serial("stock", () => {
     await expect(page.getByText("Item code doesn't fit its category")).toBeVisible();
     await expect(page.getByText("Stock category doesn't exist")).toBeVisible();
     await expect(page.getByText("Opening stock on an existing item")).toBeVisible();
-    // The Unit cost notice — the fixture carries that column, and it's
-    // accepted-but-ignored, so it must show up as "known", not a typo.
-    await expect(page.getByText(/Not imported:/)).toContainText("Unit cost");
 
     await page.getByRole("button", { name: "Import 3 rows" }).click();
     await expect(
