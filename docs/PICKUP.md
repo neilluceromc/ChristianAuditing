@@ -12,12 +12,12 @@ assistant memory until now — that is why this file exists.
 | | |
 |---|---|
 | Repository | `github.com/neilluceromc/ChristianAuditing` — **public**, by choice. Never commit `.env` or any real secret; scan before every push. |
-| Branch | `main`, **level with `origin/main`** after the Phase 18 push (merge `d4b95bb`, 2026-09-09) — count with `git rev-list --count origin/main..main` before trusting this. Phase branches (`phase-10-polish` … `phase-14-department-owned-classes`) exist only on the old dev laptop; `phase-15-direct-it-lifecycle`, `phase-16-registration-custody`, `phase-17-scale-sweep` and `phase-18-purchasing-suppliers` were merged and deleted on the staging laptop. All are fully contained in `main`. **Staging runs the Phase 18 merge** (`4cf5697`) since the 2026-09-09 forced redeploy (migration 19 applied; 16–18 came with the two 2026-09-08 redeploys) — `-Force` is needed whenever the merge happened on this laptop, because the plain run sees nothing new and skips. |
+| Branch | `main`, **level with `origin/main`** after the Phase 18 push (merge `d4b95bb`, 2026-09-09) — count with `git rev-list --count origin/main..main` before trusting this; Phase 19 does not touch `main`. **`phase-19-stock-control` is a new LOCAL branch, CODE-COMPLETE (9 tasks, `D-1`…`D-20`, branch tip `2f26ac1`), UNMERGED and UNPUSHED, with its worktree still present** at `.claude/worktrees/phase-19-stock-control`. Phase branches (`phase-10-polish` … `phase-14-department-owned-classes`) exist only on the old dev laptop; `phase-15-direct-it-lifecycle`, `phase-16-registration-custody`, `phase-17-scale-sweep` and `phase-18-purchasing-suppliers` were merged and deleted on the staging laptop. All of those are fully contained in `main`; `phase-19-stock-control` is not. **Staging runs the Phase 18 merge** (`4cf5697`) since the 2026-09-09 forced redeploy (migration 19 applied; 16–18 came with the two 2026-09-08 redeploys) — Phase 19 has not been merged, pushed, or deployed anywhere. |
 | Stack | Next.js 15 App Router · Prisma 6 · PostgreSQL 16 (Docker) · Auth.js v5 · Tailwind v4 · Playwright · vitest. Node ≥ 22, npm ≥ 11 (dev machine ran Node 24). |
-| Database | 19 migrations, additive only, on `main` and on staging (since the 2026-09-09 redeploy). `prisma migrate reset` is **not** used in this project. |
-| Battery, last run 2026-09-09 (Phase 18 final tree `3298abf`, the tree merged as `d4b95bb`) | `tsc` clean · `lint` clean · **19 migrations** · **1113 unit / 64 files** · **258 e2e / 21 files** by `--list`. Five foreground chunks, `E2E_PORT=3100 --workers=1 --global-timeout=540000`: **54 passed (3.3m) · 67 passed (3.9m) · 63 passed (4.0m) · 38 passed (2.5m) · 36 passed (5.6m) = 258 / 258**, zero failed, zero did-not-run (Task 10's 74-test last chunk was split in two to fit the ten-minute foreground cap). Commands and history: `HANDOVER.md` §0 item 9. |
-| Battery, earlier full run 2026-09-08 (Phase 18 branch tip `38a3b02`, before the fix wave) | `tsc` clean · `lint` clean · **19 migrations** · **1110 unit / 64 files** · **258 e2e / 21 files** by `--list`. Four foreground chunks, `E2E_PORT=3100 --workers=1`: **54 passed (3.4m) · 67 passed (3.9m) · 63 passed (4.0m) · 74 passed (8.0m, `--global-timeout=900000`) = 258 / 258**, zero failed, zero did-not-run on the recorded runs. Chunk A's one non-reproduced failure (an `it-core.spec.ts` case that also passed standalone and on immediate re-run) is the documented cold-compile/headroom class, not a regression. Commands and history: `HANDOVER.md` §0 item 9; what shipped: `HANDOVER.md` (k). |
-| Last two phases | **Phase 18** — Purchasing: suppliers and request extensions: `Vendor` grows a full profile, contract status/dates, encrypted bank accounts (`encryptSecret`, only the last four digits ever clear) and documents behind a new Suppliers area (`/purchases/suppliers` — list, profile, new/edit, import, palette); every purchase request now carries a required department and an optional supplier (a picker, a Supplier card, list filters/columns, audit `supplier-set`) plus role-gated attachments; an asset's provenance — from a purchase request, registered directly, or a historical import — is derived (never stored) and surfaces as an inventory facet, a detail badge, and an export/finance column. One additive migration, **19**. Spec `superpowers/specs/2026-09-08-purchasing-suppliers-design.md`, plan `superpowers/plans/2026-09-08-phase-18-purchasing-suppliers.md` (19 amendments, `D-1`…`D-19` — the final-review fix wave added `D-18`/`D-19`). **MERGED TO `main` via `--no-ff` `d4b95bb` AND PUSHED (2026-09-09), fix wave included; branch and worktree removed; staging redeployed the same day (migration 19 applied).** **Phase 17** — the scale sweep: one pure `pageOf(total, requested, size)` rule (`src/lib/paging.ts`, `ENTITY_PAGE_SIZE` 25 / `LOG_PAGE_SIZE` 50) pages every list that can grow — approvals, offboarding, reservations, admin users, webhook deliveries, plus the inventory and audit pages' clamped-page rendering — each ordered by its key(s) then `id` and clamped server-side to the last page; the Employees list splits into a SQL-paged plain path and a narrow `HeldAssetLike`-select gaps path, never reading a full employee row outside the current page; the asset History and the two merged Timelines page with a `?before=&skip=` cursor (`mergeTimeline`, whose `skip` now accumulates across pages so a tie group longer than one page is never truncated); `groupWork` caps Worklist sections and renders "See all 50+" honestly instead of an undercount; `headcountByPolicy` replaces the policies page's 600-row employee read with one grouped query; one additive migration adds seven indexes (17 → 18). Spec `superpowers/specs/2026-09-08-scale-sweep-design.md`, plan `superpowers/plans/2026-09-08-phase-17-scale-sweep.md` (12 amendments, `D-1`…`D-12` — the final-review fix wave added `D-10`/`D-11`, the final battery `D-12`). **MERGED TO `main` via `--no-ff` `aef53fa` AND PUSHED (2026-09-08); branch and worktree removed; staging redeployed.** |
+| Database | **20 migrations**, additive only, on `phase-19-stock-control`'s dev database (branch tip `2f26ac1`, migration `stock_control`). `main` and staging remain at **19** until Phase 19 merges and redeploys. `prisma migrate reset` is **not** used in this project. |
+| Battery, last run 2026-09-09 (Phase 19 branch tip `2f26ac1`, `phase-19-stock-control`, unmerged) | `tsc` clean · `lint` clean · **20 migrations** · **1212 unit / 72 files** · **275 e2e / 23 files** by `--list`. Five foreground chunks, `E2E_PORT=3100 --workers=1 --global-timeout=540000`: **54 passed (3.3m) · 67 passed (3.9m) · 63 passed (4.0m) · 38 passed (2.6m) · 53 passed (7.3m) = 275 / 275**, zero failed, zero did-not-run on the first pass of every chunk — no re-run was needed. Commands and history: `HANDOVER.md` §0 item 9; what shipped: `HANDOVER.md` (l). |
+| Battery, earlier full run 2026-09-09 (Phase 18 final tree `3298abf`, the tree merged as `d4b95bb`) | `tsc` clean · `lint` clean · **19 migrations** · **1113 unit / 64 files** · **258 e2e / 21 files** by `--list`. Five foreground chunks, `E2E_PORT=3100 --workers=1 --global-timeout=540000`: **54 passed (3.3m) · 67 passed (3.9m) · 63 passed (4.0m) · 38 passed (2.5m) · 36 passed (5.6m) = 258 / 258**, zero failed, zero did-not-run (Task 10's 74-test last chunk was split in two to fit the ten-minute foreground cap). Commands and history: `HANDOVER.md` §0 item 9. |
+| Last two phases | **Phase 19** — Stock control, part D1 (the ledger core): six new models beside the asset register (`StockCategory`, `StockItem`, `StockLot`, `StockMovement`, `Stocktake`, `StocktakeLine`) with balances always derived (`SUM(quantity)`, never stored) and `StockMovement` append-only (trigger plus sign-by-kind check constraints); categories carry an automatic code series (`OS-0001`); Receive (lots, a pack-to-units helper), Issue (an on-hand guard with an exact over-issue refusal) and Adjust (delta or set-to) all run under row locks; Stocktakes open one per scope, blind-count with no book quantity shown, review variance and drift, and post real `ADJUSTMENT` rows against the current balance; a spreadsheet importer creates/updates items and records opening stock; a balances export. New Stock area under `/stock` in the Purchasing workspace. One additive migration, **20**. Spec `superpowers/specs/2026-09-09-stock-control-design.md`, plan `superpowers/plans/2026-09-09-phase-19-stock-control.md` (20 amendments, `D-1`…`D-20`). **CODE-COMPLETE on `phase-19-stock-control`, UNMERGED and UNPUSHED; merge/push/redeploy are the user's decisions, not pre-authorised.** **Phase 18** — Purchasing: suppliers and request extensions: `Vendor` grows a full profile, contract status/dates, encrypted bank accounts (`encryptSecret`, only the last four digits ever clear) and documents behind a new Suppliers area (`/purchases/suppliers` — list, profile, new/edit, import, palette); every purchase request now carries a required department and an optional supplier (a picker, a Supplier card, list filters/columns, audit `supplier-set`) plus role-gated attachments; an asset's provenance — from a purchase request, registered directly, or a historical import — is derived (never stored) and surfaces as an inventory facet, a detail badge, and an export/finance column. One additive migration, **19**. Spec `superpowers/specs/2026-09-08-purchasing-suppliers-design.md`, plan `superpowers/plans/2026-09-08-phase-18-purchasing-suppliers.md` (19 amendments, `D-1`…`D-19` — the final-review fix wave added `D-18`/`D-19`). **MERGED TO `main` via `--no-ff` `d4b95bb` AND PUSHED (2026-09-09), fix wave included; branch and worktree removed; staging redeployed the same day (migration 19 applied).** |
 
 ## 2. Dev environment on the new device
 
@@ -91,7 +91,22 @@ These were made with the user and would be invisible to anyone reading only the 
 
 ## 4. What is next, in order
 
-1. **Phase 18 — Purchasing: suppliers and request extensions — is DONE, including the
+1. **Phase 19 — Stock control, part D1 (the ledger core) — is CODE-COMPLETE on
+   `phase-19-stock-control`** (9 tasks, `D-1`…`D-20`; branch tip `2f26ac1`) — **UNMERGED and UNPUSHED, its
+   worktree still present.** Items and categories with an automatic code series, an append-only movement
+   ledger (opening/receipt/issue/adjustment) with balances always derived (never stored), a blind-count
+   stocktake with a variance review that posts real adjustments, a spreadsheet importer for items and
+   opening stock, and a balances export, all under a new Stock area at `/stock` in the Purchasing
+   workspace. One additive migration, **20** (`stock_control`). Spec
+   `superpowers/specs/2026-09-09-stock-control-design.md`, plan
+   `superpowers/plans/2026-09-09-phase-19-stock-control.md` (20 amendments, `D-1`…`D-20`). Battery:
+   `tsc`/`lint` clean, **1212 unit / 72 files**, **275 e2e / 23 files** by `--list` — five foreground
+   chunks, `E2E_PORT=3100 --workers=1 --global-timeout=540000`: **54 (3.3m) · 67 (3.9m) · 63 (4.0m) · 38
+   (2.6m) · 53 (7.3m) = 275**, zero failed, zero did-not-run on the first pass of every chunk. See the
+   table in §1 above and `HANDOVER.md` (l) for what shipped. **What remains: the merge/push and staging
+   redeploy are the user's decisions (not pre-authorised); D2 (FIFO costing, expiry, reports) is next
+   (item 6 below); Purchasing's opening stock goes in through `/stock/import`.**
+2. **Phase 18 — Purchasing: suppliers and request extensions — is DONE, including the
    final-review fix wave** — merged to `main` via `--no-ff` `d4b95bb` and pushed (2026-09-09), **branch and
    worktree removed; staging redeployed the same day with `-Force`, migration 19 applied**: a supplier master record (profile, contract, encrypted bank accounts, documents, search)
    under a new Suppliers area at `/purchases/suppliers`; a required department and an optional supplier on
@@ -104,30 +119,29 @@ These were made with the user and would be invisible to anyone reading only the 
    edit-save's toast-and-refresh vs. redirect behaviour was kept with spec §4.3 reworded to match).
    Battery: `tsc`/`lint` clean, **1113 unit / 64 files**, **258 e2e / 21 files** by `--list` (unchanged
    after the wave — see the table in §1 above and `HANDOVER.md` (k) for the fix wave's own 47/47 e2e run
-   and what it changed). **What
-   remains: Purchasing's cleaned supplier list goes in through `/purchases/suppliers/import`; item D
-   (consumables and stock control, item 5 below) is next** — no further scale or feature work is queued
-   ahead of it.
-2. **Deploy the prototype to the staging laptop and let Purchasing and Finance use it.** Chosen by the user
+   and what it changed).
+3. **Deploy the prototype to the staging laptop and let Purchasing and Finance use it.** Chosen by the user
    on 2026-09-07 as the next step before any more features. The ordered checklist is
    [`staging-run-sheet.md`](staging-run-sheet.md) (also delivered as a PDF). It hinges on one decision only
    the user can make — **which machine owns the reserved address `192.168.203.153`**, or whether to use a
    DNS name instead — because that value is printed onto every label. Physical steps nobody else can do:
    the UniFi DHCP reservation, the phone reachability test, the printed sheet (tape-measure the 100 mm bar,
    scan one QR).
-3. **Two visual checks never done by a human:** the inventory class-switch chips and Finance's IT/Purchasing
+4. **Two visual checks never done by a human:** the inventory class-switch chips and Finance's IT/Purchasing
    tabs by eye, and the Register form signed in as `purchasing@`. Both are asserted by e2e and axe, never
    looked at.
-4. **Remaining candidates**, in value order (**Phase 16 delivered the fourth item this list used to
+5. **Remaining candidates**, in value order (**Phase 16 delivered the fourth item this list used to
    carry — a real `Asset.loanDueAt` for TEMPORARY loans, no longer a 30-day proxy — so it's dropped here**):
    - The **depreciation module** (user's choice, own brainstorm).
    - **Purchasing bulk import**.
    - The Replace dialog's headerless **"other spares" list** when no same-type spare exists.
-5. **The §9 subsystems from the Admin meeting — B and C shipped in Phase 18 (item 1 above); only D
-   remains.** Vendor master data (B) and purchasing workflow extensions (C) are code-complete on
-   `phase-18-purchasing-suppliers`. **D · consumables and stock control** is still NOT yet planned — it is
-   a second domain, not an extension of assets; it needs its own brainstorm and must not be modelled as an
-   `Asset` (`HANDOVER.md` §9).
+6. **The §9 subsystems from the Admin meeting — B and C shipped in Phase 18; D's first half (D1) shipped
+   in Phase 19 (item 1 above); only D2 remains.** Vendor master data (B) and purchasing workflow
+   extensions (C) are code-complete on `phase-18-purchasing-suppliers`, merged. **D1 · stock control**
+   (items, the ledger, derived balances, stocktake, import) is code-complete on
+   `phase-19-stock-control`, unmerged. **D2 · FIFO costing, expiry warnings, report views and exports by
+   department and month** is still NOT yet planned — it needs its own spec and consumes the lots D1
+   records (`HANDOVER.md` §9).
 
 ## 5. Known gaps to keep in view
 

@@ -28,6 +28,274 @@
 - **P-4** The item combobox options for Receive/Issue are server-loaded once per page (`stockItemOptions()`, active items, `code · name`) and filtered client-side by `EntityCombobox` — the same shape as `spareOptions`.
 - **P-5** `Pill` has only `neutral`/`accent` tones; movement kinds render as `Pill` text (Opening / Receipt / Issue / Adjustment) with `accent` for Receipt and Adjustment, `neutral` otherwise; `LOW` and `MOVED` are `accent`.
 
+> ### AMENDED DURING EXECUTION — D-1 through D-20
+>
+> **D-1. R1 — the code series never stops, because the four digits are padding, not a cap (pre-flight
+> ruling, Task 2):** spec §2.1 read "4 digits" for a stock code (`OS-0001`), and the plan's own
+> `STOCK_CODE_SHAPE` constant had to choose between `\d{4}` (exactly four, the series wraps or breaks
+> past 9999) and `\d{4,}` (four or more, the series just grows a digit). Ruled before Task 2 wrote a
+> line: `STOCK_CODE_SHAPE = /^[A-Z]{2,3}-\d{4,}$/` — every code parses at four-or-more digits, so
+> `nextNumber` can pass 9999 without inventing a fifth format. — Cost if wrong: a hard cap that starts
+> refusing new items in a category the day it fills. Lesson: "N digits" in a spec written before a
+> counter exists is the *starting* width, not a ceiling — a code series has no natural stopping point,
+> and the regex has to say so explicitly rather than leave it to be discovered at item 10000.
+>
+> **D-2. R6 — Task 1's seed TRUNCATE list omitted the six stock tables (Critical, caught by the Task 1
+> review):** CASCADE only follows foreign keys down from an already-truncated table, so leaving
+> `StockCategory`/`StockItem`/`StockLot`/`StockMovement`/`Stocktake`/`StocktakeLine` off `seed.ts`'s
+> explicit TRUNCATE list meant a *second* `db:seed` run collided on `StockCategory.name`'s unique
+> constraint — and since every e2e spec file reseeds in its own `beforeAll`, this would have broken every
+> stock/stocktake test on the second file, not just the seed script. Fixed (controller-applied, one
+> implementer at a time, after Task 3 committed so the tree stayed clean): all six tables added to the
+> TRUNCATE list, proven with two consecutive `db:seed` runs both printing "Seed complete." The same
+> ruling dropped the spec §2.4 `(itemId, createdAt)` index from the design — nothing in the shipped code
+> orders or filters by `createdAt`, and `(itemId, occurredAt, id)` already serves both history and
+> balance, so the index would have been dead weight added only because the spec had proposed it. — Cost
+> if wrong: (a) every stock e2e file breaks on its second run in the same session; (b) one migration
+> adding an index nothing queries. Lesson: a seed script's TRUNCATE list is a manually-maintained
+> inventory of every table a domain owns — adding six models to `schema.prisma` and not adding them to
+> that list is invisible until the *second* reseed, which is exactly the moment a full e2e battery
+> depends on.
+>
+> **D-3. R2 — one refusal pattern per module, not one per plan-offered option (pre-flight ruling, Task
+> 3):** the plan had described two ways to signal a refusal discovered *inside* a Prisma `$transaction` —
+> an `ActionFailure` class the callback throws, or a `failure` sentinel the callback returns and the
+> caller inspects (`receiving.ts`'s existing shape). Ruled before Task 3 wrote code: the stock module
+> owns one pattern throughout, a local `class ActionFailure extends Error` that the transaction wrapper
+> catches and turns into the module's `ActionResult`; `item-actions.ts` and `stocktake-actions.ts` each
+> declare their own copy. — Cost if wrong: none technical — both patterns work — but a module mixing the
+> two forces every reader to check which one a given function uses. Lesson: when a plan offers two
+> working alternatives for the same mechanical problem, pick one per module before the first task starts,
+> not once per task — consistency inside a module outweighs either option's marginal merit.
+>
+> **D-4. R3 — a `Map` cannot cross the server→client boundary; the issue page converts it first
+> (pre-flight ruling, Task 3/Task 5 seam):** `stockItemBalances(ids)` in `queries.ts` returns
+> `Promise<Map<string, number>>`, the natural shape for a grouped-by-item balance query — but
+> `issue-form.tsx` is a client component, and a `Map` serialized across that boundary arrives empty.
+> Ruled before Task 3 shipped the query: the *page* (`stock/issue/page.tsx`, a server component) converts
+> the Map to a plain `Record<string, number>` before passing it down as a prop; `issue-form.tsx`'s own
+> comment records the rule so a future balances consumer doesn't reintroduce the Map at the wrong layer.
+> — Cost if wrong: a runtime prop that silently reads as empty, not a compile error — `Map` and
+> `Record<string, number>` both type-check as "an object" until something calls `.get()` on what is
+> actually a plain object. Lesson: a function's return type chosen for the query layer's convenience is
+> not automatically safe for every consumer; the moment one consumer is a client component, the
+> conversion boundary has to be named in the plan, not discovered when a page renders nothing for every
+> balance.
+>
+> **D-5. Task 3 review — `postStocktake` returned a conflict from inside its own `$transaction`, which
+> Prisma commits anyway:** the first review of Task 3 found that the callback's error path used
+> `return conflict(...)` after the adjustment rows were already written, rather than `throw`. Prisma's
+> `$transaction` callback commits on any normal return — a return is not the same signal as a throw — so
+> a stocktake caught mid-transaction by a race (e.g. already posted) would have written its adjustments
+> and *then* reported failure, leaving the ledger in the state the refusal claimed never happened. Fixed
+> in the Task 3 fix round (commit `3bd0840`): every mid-transaction refusal in the stock module now
+> throws the module's own `ActionFailure` (D-3), which the wrapper catches outside the transaction — never
+> a `return` from inside the callback. — Cost if wrong: an append-only, audited ledger silently gaining
+> rows a refusal message said it hadn't. Lesson: "wrap refusals in one pattern per module" (R2) is
+> necessary but not sufficient — the pattern also has to be *followed* at every call site inside a
+> transaction callback, since a `return` there reads as a normal, working line to anyone skimming the
+> diff, not as a bug.
+>
+> **D-6. R7 — the export's low-stock path had the same missing `orderBy` the Task 3 review caught in the
+> page's own low filter:** Task 3's fix round (`3bd0840`) ordered the candidate pass behind the items-list
+> low filter with `buildStockOrderBy`, and its implementer flagged that `stockExportRows`' low branch
+> built its candidate pass the same unordered way — an export whose row order silently depends on
+> whatever order Postgres returns rows in. Folded into the Task 4 fix round as a same-module-family rider
+> (commit `2fe84f6`) rather than a separate dispatch: the export path now threads the same
+> `buildStockOrderBy(state.sort)` through its low-branch candidate query in `queries.ts`. — Cost if wrong:
+> a downloaded balances export whose row order does not match the on-screen list it claims to mirror, and
+> which can silently reorder between two exports of the same filter. Lesson: when a review finds an
+> unordered query in one branch of a function, check every *sibling* branch that builds its candidate set
+> the same way before closing the finding — the export and the page's low filter share the
+> "collect candidates, then filter to LOW" shape, so they share the omission too.
+>
+> **D-7. Task 4 review — the categories page shared one error surface between the create row and
+> whichever row was mid-rename:** `category-table.tsx` used a single `useStockRunner` instance for both
+> the "add a category" row and the inline rename controls, so a failed create could render its
+> `fieldErrors` under whichever row happened to be open for renaming, not under the create row that
+> actually produced them. Fixed in the Task 4 fix round (commit `2fe84f6`, same commit as D-6's rider):
+> two separate `useStockRunner` instances, one for the create row and one for whichever row is currently
+> being renamed, each with its own `pending`/`error`/`fieldErrors`; opening a rename on a different row
+> resets the row runner, since renames are per-row actions. — Cost if wrong: a validation error attributed
+> to the wrong row on screen, confusing rather than merely cosmetic. Lesson: a list component with two
+> independent inline-edit surfaces (an always-present create row, a per-row toggle) needs two independent
+> error/pending states from the start — sharing one because "it's the same table" conflates two different
+> user actions that can be mid-flight at once.
+>
+> **D-8. R8 — the pack-helper wording is pluralised via `unitsLabel`, not the raw unit string (Task 5
+> review, controller-applied):** the brief's own template and its own worked example disagreed — the
+> template read `${packs} packs × ${packSize} = ${units} ${unit}` (implying a bare "60 piece"), but the
+> brief's example line showed "60 pieces". Ruled for the pluralised form, `unitsLabel(units, unit)` —
+> because the e2e contract (Task 7's `stock.spec.ts` case 2) and the receipt toast already depended on
+> the pluralised noun, so matching the singular template would have broken a contract two tasks had
+> already committed to. Fixed controller-applied between Task 5 and Task 6 (commit `c3f380b`,
+> `unitsLabel` reused in `receive-form.tsx`'s pack-helper line), `tsc`/`eslint` clean, committed while
+> Task 6's tree was clean. — Cost if wrong: one string ("60 piece" instead of "60 pieces") that a toast
+> and an e2e assertion both have to agree on. Lesson: when a brief's template and its own worked example
+> disagree, the example — closer to what a human will actually read on screen — is more likely to be the
+> intended contract than the abstract template, especially once a downstream task has already locked in
+> an assertion against it.
+>
+> **D-9. Task 5 review — three minors accepted as deferred, not fixed, because none change behaviour a
+> user or the ledger depends on:** `SupplierOption.archived` is declared on `receive-form.tsx`'s prop type
+> and populated by the caller but never read inside the component (the archived-supplier filtering
+> already happens server-side before the options reach the form); `stocktake-review.tsx`'s
+> `showControls = state === "OPEN" && canPost` re-checks `state === "OPEN"` even though the page's own
+> `canPost = manage && st.state === "OPEN"` already encodes it, so the component-level check can never be
+> false when `canPost` is true; and `stocktake-count.tsx`'s `canCount` prop is always `true` at every call
+> site today (only an OPEN stocktake's count screen renders it), so the prop threads a condition that
+> never varies yet. None affects a spec-visible behaviour — they cost only reading effort — and none was
+> fixed in the Task 5 fix round, which spent its one Important on R8 instead. — Cost if wrong: a future
+> change to who can see an archived supplier's name, or to when a stocktake's controls or a count row can
+> be disabled, has to discover these three sites are unused/redundant on its own. Lesson: an unused prop
+> or a re-checked condition that happens to always agree with its caller is real but low-priority debt —
+> worth naming once so the next person who touches that file doesn't assume it's load-bearing, not worth
+> a fix-round slot ahead of a finding that changes what ships.
+>
+> **D-10. R9 — an archived stock category is not refused by the spreadsheet importer (Task 6, accepted for
+> D1, deferred):** `import-stock.ts`'s row-level category resolution reads only name and prefix to build
+> its lookup map — `StockRefs` (the planner's snapshot of existing categories/items) carries no `archived`
+> flag at all, so a row naming an archived category's name or prefix resolves and creates items under it
+> exactly as if the category were active. Accepted rather than fixed in Task 6, because closing it means
+> widening `StockRefs` and adding a new block cause the spec never named, and the created items can
+> themselves be archived after the fact if that turns out to matter in practice. Recorded as a deferred
+> minor, not silently left out. — Cost if wrong: an operator re-importing a historical sheet unknowingly
+> resurrects activity under a category Purchasing had deliberately retired. Lesson: an importer's
+> row-level validation is only as complete as the reference snapshot it is handed — a snapshot built to
+> answer "does this name/prefix exist" does not by itself answer "should new rows be allowed to target
+> it," and the two questions need asking separately when the importer is written after the archiving.
+>
+> **D-11. Task 6 review — a blank Category cell blocked with the wrong cause and an empty detail, plus
+> header-alias/code-key/update-shape minors:** the first review found `import-stock.ts` let a blank
+> Category cell fall through to `resolveCategory`, which blocked it as `unknown-stock-category` with no
+> detail string — reading as "names a category nobody recognises" when the truer statement is "names no
+> category at all," the same missing-required-vs-unknown-value distinction `import-employees.ts`'s NI-5
+> class already draws, and no test exercised the blank-cell path at all. Minors folded into the same fix
+> round: the header aliases recognised only a narrow set of column names, missing spec §6's "stock
+> code"/"reorder"/"quantity"/"available" synonyms and no `unitCost` header entry at all; the code-key
+> lookup inlined `.toUpperCase()` instead of reusing the shared key-normalising helper every other lookup
+> in the file uses; and the update path wrote every present column from the row as a patch rather than
+> only the columns that actually differ (the `supplierChanges`-style changed-subset diff the rest of the
+> app's update paths use), so a re-imported row with unchanged values still produced a write and an audit
+> row. Fixed together in the Task 6 fix round (commit `1e5a4db`): blank Category/Name/Unit cells now block
+> as `missing-required` naming the blank field(s); the header-alias table gained the spec's synonyms plus
+> a `unitCost` entry; the code key reuses the shared helper; updates diff to a changed-subset patch. —
+> Cost if wrong: a confusing block message on the single most common import mistake (a cell left blank), a
+> header vocabulary narrower than the spec's own examples, and a spurious audit row on every re-import of
+> an unchanged sheet. Lesson: "blank" and "unrecognised" are different failure classes for any
+> lookup-by-name field, and a planner that only tests the unrecognised-value path can look complete while
+> never having exercised the blank-cell path at all.
+>
+> **D-12. R4 — the blind-count assertion is scoped to the count table, never the whole page (pre-flight
+> ruling, applied in Task 8's `stocktake.spec.ts` case 1):** "no book quantity anywhere on the count
+> screen" is a negative, page-wide-sounding claim, but a book value can coincide with an unrelated number
+> elsewhere on the page (a toast, a stat tile, a different item's code) with nothing wrong. Ruled before
+> Task 8 wrote the assertion: scope the check to the count `<table>` itself, and additionally assert no
+> "Book" column header exists in that table — never a bare "page does not contain the string N" check. —
+> Cost if wrong: a flaky or falsely-passing assertion the moment any unrelated number on the page happens
+> to match a book quantity. Lesson: a "this value is never shown" assertion needs a *where*, not just a
+> *what* — the safest scope is the smallest DOM region the spec's own claim is actually about.
+>
+> **D-13. R10 — Task 7's review found `stock.spec.ts` case 8 asserting the wrong text, plus two minors,
+> folded into Task 8 as a rider:** the review found case 8 checked the importer's generic "Not imported:
+> Unit cost" line rather than the spec's own banner notice, "Unit cost is recorded on receipts, not
+> opening stock" — a real behaviour change had already made this ambiguous, since Task 6's fix round
+> (D-11) added a recognised `unitCost` header, so the wizard stopped listing it as an unknown column at
+> all and the assertion had to move from "unknown column" to "recognised-but-notice" territory. Two more
+> minors — stale line-number comments and two text checks ("30 pieces"/"35 pieces") missing `exact:true`
+> — were folded in alongside it. Ruled to land all three as a rider on Task 8's dispatch (same file
+> family Task 8 was already touching, one implementer at a time), `stock.spec.ts` re-run once after the
+> edits, Task 8's reviewer covering the rider. Landed in commit `b7336ef`. — Cost if wrong: one extra e2e
+> run to prove the rider didn't regress the file it touched. Lesson: when a fix round changes what a
+> *different*, already-passing spec file must now assert, folding the correction into the next task
+> already touching that file family is cheaper than a standalone dispatch, provided the review scope
+> explicitly names the rider so it isn't missed.
+>
+> **D-14. R11 — the plan's own stocktake-count arithmetic left case 3 with a zero variance, so it never
+> proved the post-writes-an-adjustment path (Task 8 implementer, caught before review):** with the
+> brief's numbers — PN-0001 starts the stocktake at book quantity 40, is issued 2 during the count (a
+> mid-count movement, case 3's own scenario) — a blind count of 38 exactly matches the current balance
+> (40 − 2), so `postStocktake` would find zero variance for PN-0001 and write no adjustment row at all,
+> silently defeating case 4's assertion that the item's history shows a "Stocktake ST-000N" link. Ruled:
+> case 3 counts PN-0001 at 35 instead of 38, producing a genuine −3 variance against the current balance
+> of 37, so post writes an ADJUSTMENT and case 4 asserts the history link unconditionally rather than
+> behind an `if` that would have silently passed when the link never appeared. The summary-line numbers
+> (counted/withDiff/notCounted) follow from the corrected count. Fixed in the Task 8 fix round (commit
+> `2f26ac1`). — Cost if wrong: a passing e2e suite whose central "post writes real adjustments" claim was
+> never actually exercised, because the chosen numbers happened to cancel out. Lesson: a plan that
+> hand-picks example quantities for an e2e scenario has done arithmetic, and arithmetic in a plan is
+> exactly as fallible as arithmetic in code — a scenario meant to prove "X happens" has to be checked that
+> X's precondition (here, a nonzero variance) actually holds for the chosen numbers.
+>
+> **D-15. R5 — measured counts govern, never the plan's estimates (same rule as every prior phase's own
+> D-block):** every commit message and every doc update in this phase states the unit/e2e counts actually
+> measured after `vitest run`/`playwright test --list`, not the plan's placeholder figures — Task 9's own
+> battery (below, "Measured at close") is the final instance of that rule. — Cost if wrong: a stale number
+> nobody re-reads until it visibly disagrees with a re-run. Lesson: an estimate written into a plan before
+> the work starts is scaffolding for the plan's author, not a number worth repeating once the real count
+> is one command away.
+>
+> **D-16. P-1 held — import audit actions reuse the app's existing vocabulary:** the stock importer's
+> created/updated rows are audited as `import-create`/`import-update` on entityType `stock-item`, the same
+> action names and entity-type shape `activity.ts` already resolves for the asset and employee importers,
+> not a stock-specific pair. — Cost if wrong: an audit action string `activity.ts` cannot resolve to a
+> sentence. Lesson: a new importer's audit semantics default to the app's existing importer vocabulary
+> unless the entity genuinely needs its own verb.
+>
+> **D-17. P-2 held — two column specs, and fixtures are `.xlsx` the app could have produced:**
+> `STOCK_EXPORT_COLUMNS` (the balances export a user downloads) and `STOCK_IMPORT_TEMPLATE_COLUMNS` (what
+> `e2e/fixtures/make.ts` writes the import fixtures with) stayed two separate specs in
+> `export-columns.ts` rather than one shared list, because the export's Balance/Low columns are never
+> valid import input and the import template's opening-quantity columns are never export output.
+> `stock-clean.xlsx`/`stock-mixed.xlsx` are generated through `make.ts`, the house rule that a fixture
+> must be a file the app itself could produce. — Cost if wrong: a shared column list that has to grow
+> optional fields neither direction actually uses. Lesson: export and import column specs look like the
+> same list until one direction needs a computed/derived column (Balance) the other can never accept as
+> input — that asymmetry is reason enough to keep them separate from the start.
+>
+> **D-18. P-3 held — the count screen saves one line per action, no batch endpoint:**
+> `countStocktakeLine` fires on blur or Enter for a single count-table row, matching the spec's
+> blind-count-then-review shape (a count is a series of independent writes, not a form submitted once)
+> rather than accumulating an in-memory batch a "Save all" button would flush. — Cost if wrong: none
+> observed; a batch endpoint would have added a discard-on-navigate-away edge case the per-line save
+> avoids entirely. Lesson: a screen whose real-world analogue is "walk the shelf, key in what's there one
+> line at a time" is better served by a write-per-line contract than by simulating a form submitted over
+> something that was never one interaction.
+>
+> **D-19. P-4 held — Receive/Issue's item combobox is server-loaded once, filtered client-side:**
+> `stockItemOptions()` loads every active item (`code · name`) once per page render and `EntityCombobox`
+> filters it in the browser, the same shape `spareOptions` already uses for the asset-assignment picker —
+> not a per-keystroke server search. — Cost if wrong: a combobox that feels laggy only once the
+> active-item count grows into the thousands, a scale this phase's single-office scope does not reach.
+> Lesson: reusing an existing combobox's load-once-filter-client shape for a same-order-of-magnitude list
+> is cheaper to build and reason about than inventing a second search pattern, and the cost only shows up
+> at a scale worth deferring to when it actually arrives.
+>
+> **D-20. P-5 held — movement kinds render as `Pill` text, not a third tone:** `Pill` ships only
+> `neutral`/`accent`, so Opening/Receipt/Issue/Adjustment distinguish themselves by their text label, with
+> `accent` reserved for Receipt and Adjustment (the two kinds that add value un-derived from a request)
+> and `neutral` for Opening and Issue; `LOW` and `MOVED` are `accent` too, matching the existing
+> "accent marks something worth a second look" convention. — Cost if wrong: a fourth colour token added to
+> a shared UI primitive for one feature's benefit. Lesson: a shared design-system primitive with two
+> tones is a constraint worth keeping, not a gap to fill — distinguishing four states through two tones
+> plus text is more consistent with the rest of the app than growing the primitive's vocabulary for a
+> single new domain.
+>
+> Measured at close, on the final tree (branch tip `2f26ac1`, Task 9): `tsc` clean · `lint` clean ·
+> **20 migrations** · **1212 unit / 72 files** · **275 e2e / 23 files** across five foreground chunks,
+> `E2E_PORT=3100 --workers=1 --global-timeout=540000` — **54 (3.3m) · 67 (3.9m) · 63 (4.0m) · 38 (2.6m) ·
+> 53 (7.3m) = 275**, zero failed, zero did-not-run on the first pass of every chunk — no re-run was
+> needed. Chunk A: `it-core` + `import-export` + `purchases`. Chunk B: `asset-classes` +
+> `department-owned` + `auth-shell` + `labels`. Chunk C: `offboarding` + `receiving` + `paging` +
+> `home-finance` + `approvals-audit`. Chunk D: `admin` + `direct-lifecycle` + `scanner` + `registration`.
+> Chunk E: `custody` + `axe-sweep` + `kitchen-sink` + `suppliers` + `purchasing-ext` + `stock` +
+> `stocktake` (53 tests, 7.3m — the largest single chunk, carrying the full axe sweep plus both of this
+> phase's new files). `npx prisma migrate status` reported 20 migrations, schema up to date, before the
+> battery ran. `npx playwright test --list | tail -1` confirmed **`Total: 275 tests in 23 files`**
+> beforehand. Only `e2e/fixtures/make.ts` among pre-existing e2e files changed (P-2's fixture columns);
+> no pre-existing e2e *spec* file changed — `git diff --stat dba6a94..HEAD -- e2e` shows exactly
+> `make.ts`, the two new spec files, and the two new `.xlsx` fixtures.
+
 ## File structure
 
 **Create**
