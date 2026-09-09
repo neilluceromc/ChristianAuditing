@@ -28,7 +28,7 @@
 - **P-4** The item combobox options for Receive/Issue are server-loaded once per page (`stockItemOptions()`, active items, `code · name`) and filtered client-side by `EntityCombobox` — the same shape as `spareOptions`.
 - **P-5** `Pill` has only `neutral`/`accent` tones; movement kinds render as `Pill` text (Opening / Receipt / Issue / Adjustment) with `accent` for Receipt and Adjustment, `neutral` otherwise; `LOW` and `MOVED` are `accent`.
 
-> ### AMENDED DURING EXECUTION — D-1 through D-20
+> ### AMENDED DURING EXECUTION — D-1 through D-30
 >
 > **D-1. R1 — the code series never stops, because the four digits are padding, not a cap (pre-flight
 > ruling, Task 2):** spec §2.1 read "4 digits" for a stock code (`OS-0001`), and the plan's own
@@ -295,6 +295,206 @@
 > beforehand. Only `e2e/fixtures/make.ts` among pre-existing e2e files changed (P-2's fixture columns);
 > no pre-existing e2e *spec* file changed — `git diff --stat dba6a94..HEAD -- e2e` shows exactly
 > `make.ts`, the two new spec files, and the two new `.xlsx` fixtures.
+>
+> **The final whole-branch review (`reviews/final-review.md`, tip `c6fd465`, "ready with fixes") found
+> four Important and eleven Minor findings. D-21 through D-27 below are the single fix wave that closed
+> the four Important and the three Minor items (M-1/M-2/M-3) the review recommended fixing before merge;
+> D-28 corrects one deferred item's own tracking note; D-29 records a new hazard this wave's own fix
+> surfaced; D-30 lists the eight Minor items and the pre-existing deferred-minor triage that stay
+> deferred, per the review's own recommendation.**
+>
+> **D-21. I-1 — `issueStock` used `return` from inside its `$transaction` callback for all three
+> in-transaction refusals, and its own doc comment asserted the opposite of what a `return` actually
+> does:** the comment read "every in-transaction refusal here … is `return`ed from the callback … so a
+> write above it still rolls back" — a `return` from an interactive transaction's callback COMMITS; only
+> a `throw` rolls back (the exact D-5 hazard, in the one module D-3/D-5's own claim of "one pattern
+> throughout" turned out not to reach). No write preceded the three refusals today, so the ledger was
+> never at risk, but `movement-actions.ts` was the one stock file with no `ActionFailure` class at all.
+> Fixed: a local `ActionFailure` class identical in shape to `item-actions.ts`/`stocktake-actions.ts`'s;
+> `issueStock`'s over-issue conflict and its two validation refusals (`departmentId`, `employeeId`) now
+> `throw new ActionFailure(...)`, caught by a `try/catch` around the transaction that returns
+> `e.result`; the misleading comment rewritten to state the real rule. — Cost if wrong: the next writer
+> who adds a lot/audit write above the over-issue refusal, trusting the comment, ships a half-committed
+> issue that reports failure while the ledger already moved. Lesson: a module-wide pattern decided once
+> (D-3) is only as real as its weakest file — a review has to check the claim against every file the
+> module contains, not just the ones the day's task touched, and a comment describing transactional
+> semantics is exactly the kind of prose rule 16 (HANDOVER.md) already warns can go stale unnoticed.
+>
+> **D-22. I-2 — `openStocktake`'s one-open-per-scope rule could still be raced into two OPEN stocktakes
+> on the same scope, because the blocking check ran only once, before the transaction:** two concurrent
+> opens on "Pantry" (or "Pantry" and "all") both see no blocker under READ COMMITTED and both insert — no
+> unique index can express the rule, since an open "all" must also block every category. Fixed: the
+> pre-transaction check stays as a fast path, but the transaction itself now opens with
+> `` await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('stocktake-open'))` `` — a
+> transaction-scoped Postgres advisory lock, released automatically at commit/rollback — before
+> re-running the identical blocking query under `tx` and throwing `ActionFailure(conflict(...))` with
+> the same sentence if it now finds one. **Caught only by actually running the e2e battery, not by
+> `tsc`/`lint`/`vitest`:** the ruling as first written said to acquire the lock with `tx.$queryRaw`, which
+> compiles and type-checks cleanly but fails at runtime — `pg_advisory_xact_lock` returns Postgres `void`,
+> and Prisma's `$queryRaw` cannot deserialize a column with no type, throwing `PrismaClientKnownRequestError`
+> (P2010) on every call. `stocktake.spec.ts` case 1 caught it immediately (a 500 on the very first open).
+> Switched to `tx.$executeRaw`, which runs the statement without trying to read a row back — the review's
+> own suggested fix text used `$executeRaw` for exactly this reason. — Cost if wrong: two Purchasing users
+> open the same scope concurrently and get two blind counts on one shelf, the operational failure the rule
+> exists to prevent; separately, a plausible-looking raw-SQL call that only fails at request time is invisible
+> to every static check this project runs. Lesson: a lock acquired purely for its side effect (no rows
+> needed back) is an `$executeRaw` call, never a `$queryRaw` one — and a fix wave's own e2e run is not
+> optional ceremony even when `tsc`/`lint`/`vitest` are all green, because this exact class of bug passes
+> all three.
+>
+> **D-23. I-3 — `postStocktake` read counted quantities before its own transaction, and
+> `countStocktakeLine` neither locked nor transacted, so a count saved during the post's window could land
+> on a POSTED stocktake with no adjustment and no refusal to either user:** the item-row locks protected
+> the balance arithmetic but not the count/state seam itself. Fixed in both actions with a lock on the
+> `Stocktake` row taken FIRST: `countStocktakeLine` now runs `` SELECT "id" FROM "Stocktake" WHERE "id" = ${id} FOR UPDATE ``
+> inside a `$transaction`, re-reads `state` under that lock, throws `ActionFailure(conflict("This stocktake
+> is no longer open."))` if it isn't OPEN, and only then updates the line. `postStocktake` takes the
+> identical lock first, re-reads state AND lines (with their `countedQty`) inside the transaction under
+> that lock, throws the same refusal if not OPEN, and only after that confirmation locks the item rows and
+> proceeds exactly as before. The two now serialise on one row: a count that lands while a post is running
+> either commits before the post's lock is taken (and is reflected in its re-read) or blocks until the
+> post's transaction finishes and then fails its own re-checked OPEN gate — never both applying against
+> different snapshots of the same line. — Cost if wrong: a counted quantity silently vanishes from the
+> ledger's story, with neither the counter nor the poster told anything went wrong. Lesson: a row lock
+> taken for one seam (the item balance) does not protect a DIFFERENT seam (the count/state race) on a
+> different row — each racing pair of writers needs its own lock, taken and re-checked in the same order
+> everywhere it matters, not just wherever the first race was found.
+>
+> **D-24. I-4 — the POSTED/CANCELLED stocktake review rendered today's live Now/Variance/MOVED against
+> the CURRENT ledger, misstating what the stocktake actually posted, and never linked an adjusted item to
+> it (spec §7.5: "POSTED: the review is read-only with a link to each adjustment's item"):** every
+> movement after a stocktake posted pushed its own review further from what was actually written — the
+> seed's own POSTED `ST-0001` would show its own −2 adjustment as "no difference" the moment nothing else
+> moved that item, and as a fabricated variance the moment something did. Fixed: `getStocktake`
+> (`queries.ts`) now computes the live current-balance groupBy ONLY for an OPEN stocktake (spec §5.1 said
+> "for OPEN ones" all along); for POSTED/CANCELLED it instead loads the stocktake's own `ADJUSTMENT`
+> movements via its `movements` relation into an item-id → quantity `Map` (a CANCELLED stocktake's map is
+> always empty — `cancelStocktake` writes no movements). A new pure `postedReviewRows(lines, adjustments)`
+> in `src/lib/stocktake.ts` (tested RED→GREEN, two cases) sits beside `varianceRows` and produces
+> `{itemId, bookQty, countedQty, adjustment}` rows from that map, never from a live balance. The page
+> (`stock/stocktakes/[id]/page.tsx`) picks `varianceRows` or `postedReviewRows` once, by `st.state`.
+> `StocktakeReview`'s `ReviewRow`/`ReviewSummary` became discriminated unions (`kind: "open" | "posted"`)
+> so the two shapes' fields (`currentQty`/`variance`/`drift` vs. `adjustment`) can never be read in the
+> wrong mode; the POSTED/CANCELLED table shows Code (linked to `/stock/items/<id>` on every row with a
+> non-null adjustment, plain text otherwise), Name, Book, Counted ("not counted" when null), Adjustment
+> (signed, "—" when none), no Now/Variance/MOVED column at all; its summary reads "N items counted · M
+> adjusted · K not counted". D-9b (deferred-minor triage) folded in while this same component was open:
+> `showControls` simplified from `state === "OPEN" && canPost` to plain `canPost`, since the page already
+> computes `canPost = manage && st.state === "OPEN"`. — Cost if wrong: a stocktake's own permanent record
+> silently drifts with every later movement on the items it touched, and a reader has no way to reach an
+> adjusted item from the review that adjusted it. Lesson: a "review" screen for a CLOSED record has to be
+> built from what was actually written (the record's own child rows), never from a live recomputation
+> that happens to share a table shape with the live view of the same screen — the two only look
+> interchangeable the moment the record is created, and diverge from then on.
+>
+> **D-25. M-1 — the balances export's plain (non-low) branch hardcoded `orderBy: [{ code: "asc" }]`,
+> ignoring the toolbar's requested sort:** D-6 threaded `buildStockOrderBy(state.sort)` through the
+> export's LOW-filter branch only, leaving this sibling branch — the far more common path — silently
+> code-sorted regardless of what the on-screen list was sorted by. Fixed: one-line change to
+> `orderBy: buildStockOrderBy(state.sort)` in `stockExportRows` (`queries.ts`). — Cost if wrong: a
+> name-sorted list on screen downloads code-sorted, with no indication the two disagree. Lesson: D-6's own
+> lesson ("check every sibling branch that builds its candidate set the same way") applies to a fix's own
+> aftermath too — the export has exactly two branches (low/plain) and D-6 checked only the one under
+> review that day; the plain branch needed the identical grep-for-siblings step the *next* review actually
+> did.
+>
+> **D-26. M-2 — three comments asserted "Unit cost" is NOT matched by `STOCK_IMPORT_HEADERS`, false since
+> D-11 added a `unitCost` entry there (`import-stock.ts`'s own comment already said so correctly):**
+> `src/lib/export-columns.ts`, `src/lib/import-columns.ts` and `e2e/fixtures/make.ts` each still described
+> the pre-D-11 world. Consequently `STOCK_KNOWN_UNIMPORTED_COLUMNS = ["Unit cost"]` was unreachable dead
+> data — a matched header never lands in `matchHeaders`'s `unknown` array, so `splitColumns` never had
+> anything to excuse. Fixed: all three comments rewritten to state the header is recognised but consumed
+> by nothing (spec §6: a unit cost lives on a receipt/lot, never on the item); the constant emptied to
+> `[]`, same shape and same reason as `SUPPLIER_KNOWN_UNIMPORTED_COLUMNS` — kept only because
+> `ImportWizard`'s `knownUnimportedColumns` prop is required (checked before deleting, per the fix's own
+> instruction). — Cost if wrong: none technical (the constant was already inert), only a false trail for
+> the next reader trying to understand why a recognised column exists in an "unimported" list. Lesson: a
+> behaviour change in one file (D-11, `import-stock.ts`) can strand a comment describing the OLD behaviour
+> in a sibling file that never itself changed — a fix should grep for every comment describing the
+> changed behaviour, not just re-read the file it edited.
+>
+> **D-27. M-3 — the fourteen stock/stocktake audit actions this module writes all fell to
+> `auditSentence`'s `default` branch and rendered as a raw verb** ("A. Reyes stock.issued OS-0002 ·
+> Ballpen black") — the exact non-sentence rule 16's own Phase 12 fix (the same file's `register`/
+> `finance.confirm`/etc. cases) already corrected once for assets. Fixed: one `case` per action in
+> `src/lib/activity.ts` — `stock.item.created/updated/archived/restored`, `stock.category.created/
+> updated/archived/restored` (both families read the changed-fields list the same way plain `update`
+> does), `stock.received` (names the received quantity), `stock.issued` (recovers the issued quantity as
+> the before/after balance's difference, since the diff records balances not the delta, and names the
+> department), `stock.adjusted` (names the signed delta — real minus, matching `stocktake-review.tsx`'s
+> own `fmtVariance` convention — and the reason), `stocktake.opened` (names the scope and line count),
+> `stocktake.posted` (names adjusted vs. not-counted counts), `stocktake.cancelled`. Ten new unit tests in
+> `activity.test.ts`, RED (10/14 assertions failing against the raw-verb default) → GREEN. **Verified the
+> actual action list against the code rather than trusting the review's own count:** the review's prose
+> called this "twelve" actions while its own parenthetical list names fourteen, and the task brief passed
+> down named a fifteenth, `stocktake.counted`, that appears nowhere in the review's list; `` grep -rn
+> 'action: "(stock|stocktake)\.' src `` confirms exactly fourteen distinct action strings are ever written
+> by `writeAudit` in this module and `stocktake.counted` is not one of them — `countStocktakeLine`'s own
+> comment says plainly "no audit per line". No case was added for it: a case for an action nothing ever
+> emits is untestable dead code, and the review's own file list (which the fix instructions point to as
+> authoritative) omits it too. — Cost if wrong: the audit feed — the ledger's second surface — stays
+> unreadable for every stock/stocktake action, the same defect A-5/rule-16's family already named once for
+> assets. Lesson: when two summaries of "the same list" disagree (a review's prose count vs. its own
+> parenthetical, or a task brief vs. the review it claims to summarise), the code that actually writes the
+> rows — not either summary — is the tiebreaker.
+>
+> **D-28. Correction to D-10's own tracking note (deferred-minor triage, not a code change):** D-10
+> recorded "an archived stock category is not refused by the spreadsheet importer" as a planner-only gap.
+> The final review's triage corrected this: `resolve.ts`'s comment calls the check "an apply-time
+> concern", but `applyStockImport` performs no such check either — only `createStockItem`'s direct-UI path
+> (`item-actions.ts`) refuses an archived category. Both halves are open, not just the planner D-10 named.
+> Still deferred for D1; no code changed by this correction. — Lesson: a deferred finding's own tracking
+> comment can itself misattribute WHERE the gap lives — triaging a "stay deferred" item still means
+> re-reading the code the comment points at, not just trusting the comment's own claim about which layer
+> is responsible.
+>
+> **D-29. New hazard surfaced by D-23's own fix, not fixed in this wave (I-3's scope named only
+> `countStocktakeLine` and `postStocktake`):** `cancelStocktake` still reads `state` before its transaction
+> and then runs an unconditional `tx.stocktake.update({ data: { state: "CANCELLED" } })` inside it, with no
+> row lock and no re-checked `where`. Before D-23, this raced `postStocktake` freely; after D-23,
+> `postStocktake` holds a `FOR UPDATE` lock on the same `Stocktake` row for the length of its transaction,
+> so a concurrent `cancelStocktake` targeting the same row now BLOCKS on the plain `UPDATE` until
+> `postStocktake` commits — and then fires anyway, unconditionally overwriting a just-POSTED stocktake
+> (adjustments already written and audited) back to CANCELLED. The interleaving is no longer racy — it is
+> now a deterministic wait-then-clobber — but it is not closed, since fixing `cancelStocktake` was outside
+> I-3's named scope. — Cost if wrong: a stocktake that successfully posted real `ADJUSTMENT` movements
+> reads as CANCELLED on screen a moment later, with no record of ever having posted. Lesson: locking one
+> writer against a shared row can change a SECOND, unrelated writer's timing (wait instead of racing)
+> without making that second writer any safer — a fix scoped to two named functions should still name the
+> third function touching the same row as an open follow-up, not leave it to be rediscovered.
+>
+> **D-30. Minor items and the pre-existing deferred-minor triage stay deferred, per the final review's own
+> recommendation ("none of the deferred minors needs fixing before merge"):** M-4 (`workspaces.ts`'s
+> `/stock/items/[id]/(edit|adjust)` and `/stock/stocktakes/[id]/(count|review)` path patterns guard routes
+> that don't exist as separate pages — spec-conformant dead policy); M-5 (`stocktake-count.tsx`'s per-line
+> save spends one unit of the shared 60/min mutation cap, untested against a 60+-line transcribed count);
+> M-6 (Receive/Issue pages each run a near-duplicate `stockItemOptions()` + a second `stockItem.findMany`
+> that one combined select could serve); M-7 (`movement-actions.ts` reports a nonexistent supplier id as
+> "archived"; `updateStockItem` writes a new `categoryId` without checking it exists or is unarchived);
+> M-8 (`adjust-dialog.tsx`'s "Adjustment posted" toast on a no-op set-to-current write; the archived
+> refusal's trailing period; the import breadcrumb saying "Stock" instead of "Stock items"; `STATE_TONE`
+> and `revalidateItem` each declared twice); M-9 (seed's CM-0002 dated after its own POSTED stocktake's
+> book snapshot — cosmetic); M-10 (`stock.spec.ts` case 8's comment describing a preview line D-11 already
+> removed — comment only, assertion is correct); M-11 (an import row naming the same category once by name
+> and once by prefix can create two same-named items — allowed by spec §5.2). The pre-existing
+> deferred-minor triage — D-9a (`SupplierOption.archived` unread), D-9c (`canCount` always `true`), the
+> Task 2 `dateStr`/`todayStr` duplication, the Task 4 file-length notes — all stay deferred exactly as the
+> review found them; D-9b was NOT left deferred (see D-24, folded into the same component touch) and D-10
+> was corrected, not fixed (see D-28).
+>
+> Measured at close of the final-review fix wave, branch tip `4c4eb94`: `tsc` clean · `lint` clean ·
+> **20 migrations** (unchanged — no schema touched) · **1224 unit / 72 files** (was 1212/72 at Task 9's
+> close — 12 new tests: 2 for `postedReviewRows` in `stocktake.test.ts`, 10 for the fourteen new
+> `auditSentence` cases in `activity.test.ts`, both RED before the fix and GREEN after) ·
+> `E2E_PORT=3100 npx playwright test e2e/stock.spec.ts e2e/stocktake.spec.ts --workers=1
+> --global-timeout=540000` — **17 / 17 passed (1.6m)**, zero failed, zero did-not-run, port 3100 free
+> before and confirmed free after (only `stocktake.spec.ts` case 1 needed a second run: I-2's advisory
+> lock first shipped as `tx.$queryRaw`, which fails at runtime on `pg_advisory_xact_lock`'s `void` return
+> — see D-22 — fixed to `$executeRaw` and re-run clean) · `npx playwright test --list` → **`Total: 275
+> tests in 23 files`**, unchanged from Task 9's close (no e2e file added or removed; only
+> `e2e/fixtures/make.ts`'s comment changed, per M-2) · `npm run db:seed` → `Seed complete.`, run last.
+> `git diff --stat dba6a94..HEAD -- e2e` still shows only `make.ts` plus the two Task 8 spec files and
+> fixtures — no pre-existing e2e spec file changed by this wave either.
 
 ## File structure
 

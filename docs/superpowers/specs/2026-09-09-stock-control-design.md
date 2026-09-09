@@ -160,7 +160,7 @@ Finance gains one read link "Stock" `/stock`; IT's nav is unchanged (palette rea
 - `listStockItems(state)` → `{ rows, total, page, pageCount, facets, lowCount }`. Count and page with `pageOf(total, page, ENTITY_PAGE_SIZE)` over `buildStockItemWhere`; then ONE `groupBy` sum over the page's ids; rows carry `balance`, `low`, `lastMovementAt`. When `state.filters.low` includes `"1"`: fetch the candidate ids for the where (narrow select), compute balances for all candidates in one groupBy, keep the low ones, page THAT id list (the employees-gaps pattern from Phase 17), then fetch the page rows. `facets.category` = groupBy over the where minus its own key; `lowCount` = the low count over the where minus `low`.
 - `getStockItem(id, page)` → item, category, `balance`, `low`, movements page (`LOG_PAGE_SIZE`, `orderBy [{ occurredAt: "desc" }, { id: "desc" }]`, with lot ref/supplier, department, employee, actor names, stocktake refNo).
 - `stockUnits()` → distinct units (≤ 50). `stockItemOptions(q?)` for the comboboxes (active items, code + name). `activeCategories()`.
-- `listStocktakes(state)`; `getStocktake(id)` → header, lines with `bookQty`, `countedQty`, and for OPEN ones the current balances (one groupBy) so the review computes variance and drift.
+- `listStocktakes(state)`; `getStocktake(id)` → header, lines with `bookQty`, `countedQty`, and for OPEN ones the current balances (one groupBy) so the review computes variance and drift; for POSTED/CANCELLED ones the stocktake's own posted `ADJUSTMENT` movements instead (item id → signed quantity), so a closed review renders the frozen record it actually wrote, never a live recomputation (final-review I-4, §7.5).
 - `stockExportRows(state)` → every row of the filtered list with balance (cap `EXPORT_CAP`).
 
 ### 5.2 `item-actions.ts`
@@ -250,11 +250,21 @@ List: Ref, Scope (category or All), State pill, Opened, Posted, Lines counted / 
 note → creates and redirects to the count screen. Detail (OPEN): the **count screen** lists every line
 with Code, Name, Unit and a Counted input (`aria-label="Counted <code>"`), saving on blur/Enter (one action
 per line, debounced); the book quantity is HIDDEN here (blind count). A "Review variance" button (managers)
-switches to the **review**: Code, Name, Book at open, Now (current), Counted, Variance (counted − now, mono,
-coloured), a `MOVED` pill when drift ≠ 0, and "not counted" for empty lines; a summary line "N items
-counted · M with a difference · K not counted · J moved since opening"; **Post** (confirm dialog naming the
-adjustments count) and **Cancel**. POSTED: the review is read-only with a link to each adjustment's item.
-Only managers count, review, post or cancel; others see the review read-only.
+switches to the **review**, whose shape depends on the stocktake's own state (final-review I-4 — the two
+never share data):
+- **OPEN** — a *live* view against today's ledger: Code, Name, Book at open, Now (current balance),
+  Counted, Variance (counted − now, mono, coloured), a `MOVED` pill when drift ≠ 0, and "not counted" for
+  empty lines; a summary line "N items counted · M with a difference · K not counted · J moved since
+  opening"; **Post** (confirm dialog naming the adjustments count) and **Cancel**.
+- **POSTED or CANCELLED** — a *frozen record* of what was actually posted, never a live recomputation:
+  Code (linked to `/stock/items/<id>` on every row the stocktake actually adjusted), Name, Book at open,
+  Counted ("not counted" for empty lines), and Adjustment — the signed quantity of the `ADJUSTMENT`
+  movement this stocktake itself wrote for that item (`—` where none was written, whether the line was
+  never counted or matched its balance exactly). No Now, no Variance, no `MOVED` column — a later movement
+  on an already-posted item must never be able to change what this screen shows. Summary line: "N items
+  counted · M adjusted · K not counted". Read-only; no Post/Cancel controls.
+
+Only managers count, review, post or cancel; others always see the review, read-only.
 
 ### 7.6 `/stock/categories`
 Table Name, Prefix, Next code (`OS-0013`), Items, Archived; inline create (name + prefix) and rename;
