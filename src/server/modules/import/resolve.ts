@@ -365,10 +365,16 @@ interface StockItemRow {
  * "Twin" (a name) colliding with "TW" (a different category's own prefix,
  * refKey'd) is caught exactly like two categories sharing a name already is.
  *
- * `itemsByCode` is a plain map, not `refKey`'d: `StockItem.code` is written
- * by `formatStockCode` and is always upper-case already, so there is no
- * case-insensitive collision scenario for it to represent (unlike a Vendor
- * or AssetCategory name, which the admin UI never normalises).
+ * `itemsByCode` is keyed by `tagKey` (Minor #2, review fix round 1) — the
+ * same shared helper `planStockRows` (`import-stock.ts`) runs a sheet's own
+ * Code cell through before consulting this map, not a hand-rolled
+ * `.toUpperCase()` twin on either side. `StockItem.code` is written by
+ * `formatStockCode` and is always upper-case already, so `tagKey` is a no-op
+ * on these keys today — but both sides going through the ONE rule is what
+ * keeps a lookup from ever missing by case or stray whitespace, the exact
+ * hazard `tagKey` was extracted to remove (unlike a Vendor or AssetCategory
+ * name, which the admin UI never normalises, so no collision scenario is
+ * being introduced here — this is defence, not a behaviour change).
  */
 export function buildStockRefs(categories: StockCategoryRow[], items: StockItemRow[]): StockRefs {
   const counts = new Map<string, number>();
@@ -387,7 +393,7 @@ export function buildStockRefs(categories: StockCategoryRow[], items: StockItemR
   }
   return {
     categoriesByKey,
-    itemsByCode: new Map(items.map((i) => [i.code, i.id])),
+    itemsByCode: new Map(items.map((i) => [tagKey(i.code), i.id])),
   };
 }
 

@@ -6,11 +6,10 @@ import { checkRate } from "@/server/rate-limit";
 import { RATE_LIMITS } from "@/lib/rate-limit";
 import { prisma } from "@/server/db/client";
 import { writeAudit } from "@/server/audit";
-import { diffOf } from "@/lib/audit-diff";
 import { classifyRowError, RowWriteError, type RowErrorSubject } from "@/lib/row-error";
 import { readGrid } from "@/server/import/read-sheet";
 import { matchHeaders } from "@/lib/import-assets";
-import { STOCK_IMPORT_HEADERS, planStockRows, type StockPlan } from "@/lib/import-stock";
+import { STOCK_IMPORT_HEADERS, planStockRows, stockChanges, type StockPlan } from "@/lib/import-stock";
 import { formatStockCode, parseStockCode } from "@/lib/stock-code";
 import { signedQuantity } from "@/lib/stock-movement-rules";
 import { groupByCause, type CauseGroup } from "@/lib/import-vocabulary";
@@ -171,7 +170,11 @@ export async function applyStockImport(
         const before = await tx.stockItem.findUnique({ where: { id: row.itemId } });
         if (!before) throw new RowWriteError("that item no longer exists");
 
-        const diff = diffOf(before as unknown as Record<string, unknown>, row.data);
+        // Minor #3 (review fix round 1): the changed-SUBSET write
+        // `supplierChanges` already established (`import-suppliers.ts`) —
+        // an unchanged row must count, and behave, as `unchanged`, not
+        // rewrite every present column back onto itself as an `updated` one.
+        const { diff, changed } = stockChanges(before as unknown as Record<string, unknown>, row.data);
         if (Object.keys(diff).length === 0) {
           return { kind: "unchanged" as const, itemId: row.itemId };
         }
@@ -182,7 +185,7 @@ export async function applyStockImport(
         // rather than being silently overwritten.
         const written = await tx.stockItem.updateMany({
           where: { id: row.itemId, updatedAt: before.updatedAt },
-          data: row.data,
+          data: changed,
         });
         if (written.count === 0) {
           throw new RowWriteError("changed since this import was checked — re-check and retry");
