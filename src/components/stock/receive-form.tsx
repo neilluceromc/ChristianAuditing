@@ -119,7 +119,7 @@ export function ReceiveForm({
 
   const packsHelper =
     selectedMeta?.packSize && form.packs.trim() !== "" && Number.isInteger(Number(form.packs)) && Number(form.packs) > 0
-      ? `${form.packs} packs × ${selectedMeta.packSize} = ${packToUnits(Number(form.packs), selectedMeta.packSize)} ${selectedMeta.unit}`
+      ? `${form.packs} packs × ${selectedMeta.packSize} = ${unitsLabel(packToUnits(Number(form.packs), selectedMeta.packSize), selectedMeta.unit)}`
       : undefined;
 
   return (
