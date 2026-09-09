@@ -258,12 +258,22 @@ export async function cancelStocktake(input: unknown): Promise<ActionResult<null
   if (!st) return conflict("That stocktake no longer exists.");
   if (st.state !== "OPEN") return conflict("This stocktake is no longer open.");
 
-  await prisma.$transaction(async (tx) => {
-    await tx.stocktake.update({ where: { id }, data: { state: "CANCELLED" } });
-    await writeAudit(tx, {
-      actorId: user.id, actorLabel: user.name, entityType: "stocktake", entityId: id, action: "stocktake.cancelled",
+  // Ruling R14 (plan D-29): the state guard lives INSIDE the write. postStocktake
+  // holds the Stocktake row FOR UPDATE for its whole transaction, so a cancel that
+  // arrives mid-post waits here and then finds the row POSTED — the conditional
+  // updateMany touches nothing and the refusal rolls the audit write back with it.
+  try {
+    await prisma.$transaction(async (tx) => {
+      const written = await tx.stocktake.updateMany({ where: { id, state: "OPEN" }, data: { state: "CANCELLED" } });
+      if (written.count === 0) throw new ActionFailure(conflict("This stocktake is no longer open."));
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name, entityType: "stocktake", entityId: id, action: "stocktake.cancelled",
+      });
     });
-  });
+  } catch (e) {
+    if (e instanceof ActionFailure) return e.result;
+    throw e;
+  }
   revalidateStocktake(id);
   return ok(null);
 }
