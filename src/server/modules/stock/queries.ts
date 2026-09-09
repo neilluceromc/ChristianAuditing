@@ -293,7 +293,7 @@ export async function stockExportRows(state: ListState): Promise<{ rows: StockEx
   const where = buildStockItemWhere(state);
 
   if (state.filters.low?.includes("1")) {
-    const candidates = await candidateBalancesWithMovement(where);
+    const candidates = await candidateBalancesWithMovement(where, buildStockOrderBy(state.sort));
     const kept = candidates.filter((c) => isLow(c.balance, c.reorderLevel));
     if (kept.length > EXPORT_CAP) return { over: kept.length };
     const ids = kept.map((c) => c.id);

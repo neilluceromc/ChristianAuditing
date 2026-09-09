@@ -23,24 +23,42 @@ export interface CategoryRow {
   archived: boolean;
 }
 
-/** One shared runner (task-4 brief): the create row and at most one open row-edit share it, so `reset()` on entering edit clears anything the create row left behind. */
+/**
+ * Two runner instances, not one: the create row and the row currently being
+ * renamed each get their own `fieldErrors`/`pending`/banner surface, so a
+ * failed create can never render under an unrelated row mid-rename (and vice
+ * versa) — see task-4-review.md's Important finding. Starting either action
+ * resets the other's runner, and opening a rename on a different row resets
+ * both, matching `reset when the edited row changes`. Archive/restore share
+ * the row runner since they are per-row actions like rename and never
+ * populate `name`/`prefix` field errors.
+ */
 export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
   const [newName, setNewName] = useState("");
   const [newPrefix, setNewPrefix] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrefix, setEditPrefix] = useState("");
-  const { pending, error, fieldErrors, retryAfter, setRetryAfter, reset, run } = useStockRunner(["name", "prefix"]);
+  const {
+    pending: creating, error: createError, fieldErrors: createFieldErrors,
+    retryAfter: createRetryAfter, setRetryAfter: setCreateRetryAfter, reset: resetCreate, run: runCreate,
+  } = useStockRunner(["name", "prefix"]);
+  const {
+    pending: rowPending, error: rowError, fieldErrors: rowFieldErrors,
+    retryAfter: rowRetryAfter, setRetryAfter: setRowRetryAfter, reset: resetRow, run: runRow,
+  } = useStockRunner(["name", "prefix"]);
 
   function startEdit(row: CategoryRow) {
-    reset();
+    resetCreate();
+    resetRow();
     setEditingId(row.id);
     setEditName(row.name);
     setEditPrefix(row.prefix);
   }
 
   function createCategory() {
-    run(
+    resetRow();
+    runCreate(
       () => createStockCategory({ name: newName, prefix: newPrefix }),
       "Category created",
       { onOk: () => { setNewName(""); setNewPrefix(""); } },
@@ -48,7 +66,8 @@ export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
   }
 
   function saveEdit(id: string) {
-    run(
+    resetCreate();
+    runRow(
       () => updateStockCategory({ id, name: editName, prefix: editPrefix }),
       "Saved",
       { onOk: () => setEditingId(null) },
@@ -57,8 +76,10 @@ export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
-      {error && <Banner tone="fault" title={error} />}
+      {createRetryAfter !== null && <RateLimitNotice retryAfterSec={createRetryAfter} onExpire={() => setCreateRetryAfter(null)} />}
+      {rowRetryAfter !== null && <RateLimitNotice retryAfterSec={rowRetryAfter} onExpire={() => setRowRetryAfter(null)} />}
+      {createError && <Banner tone="fault" title={createError} />}
+      {rowError && <Banner tone="fault" title={rowError} />}
       <Table>
         <THead>
           <Tr>
@@ -78,7 +99,7 @@ export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
               />
-              {editingId === null && <FormError>{fieldErrors.name}</FormError>}
+              <FormError>{createFieldErrors.name}</FormError>
             </Td>
             <Td>
               <Input
@@ -88,11 +109,11 @@ export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
                 onChange={(e) => setNewPrefix(e.target.value.toUpperCase())}
                 className="w-20 font-mono uppercase"
               />
-              {editingId === null && <FormError>{fieldErrors.prefix}</FormError>}
+              <FormError>{createFieldErrors.prefix}</FormError>
             </Td>
             <Td colSpan={2} className="text-fg-muted">—</Td>
             <Td align="right">
-              <Button size="sm" variant="primary" loading={pending} onClick={createCategory}>
+              <Button size="sm" variant="primary" loading={creating} onClick={createCategory}>
                 Create category
               </Button>
             </Td>
@@ -105,7 +126,7 @@ export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
                   {editing ? (
                     <>
                       <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                      <FormError>{fieldErrors.name}</FormError>
+                      <FormError>{rowFieldErrors.name}</FormError>
                     </>
                   ) : (
                     <span className="inline-flex items-center gap-2">
@@ -122,7 +143,7 @@ export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
                         onChange={(e) => setEditPrefix(e.target.value.toUpperCase())}
                         className="w-20 font-mono uppercase"
                       />
-                      <FormError>{fieldErrors.prefix}</FormError>
+                      <FormError>{rowFieldErrors.prefix}</FormError>
                     </>
                   ) : (
                     row.prefix
@@ -134,7 +155,7 @@ export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
                   <div className="inline-flex gap-2">
                     {editing ? (
                       <>
-                        <Button size="sm" variant="primary" loading={pending} onClick={() => saveEdit(row.id)}>
+                        <Button size="sm" variant="primary" loading={rowPending} onClick={() => saveEdit(row.id)}>
                           Save
                         </Button>
                         <Button size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
@@ -145,16 +166,16 @@ export function CategoryTable({ rows }: { rows: CategoryRow[] }) {
                         {row.archived ? (
                           <Button
                             size="sm"
-                            loading={pending}
-                            onClick={() => run(() => restoreStockCategory({ id: row.id }), "Category restored")}
+                            loading={rowPending}
+                            onClick={() => runRow(() => restoreStockCategory({ id: row.id }), "Category restored")}
                           >
                             Restore category
                           </Button>
                         ) : (
                           <Button
                             size="sm"
-                            loading={pending}
-                            onClick={() => run(() => archiveStockCategory({ id: row.id }), "Category archived")}
+                            loading={rowPending}
+                            onClick={() => runRow(() => archiveStockCategory({ id: row.id }), "Category archived")}
                           >
                             Archive category
                           </Button>
