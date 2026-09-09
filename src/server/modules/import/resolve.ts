@@ -3,6 +3,7 @@ import { refKey, tagKey } from "@/lib/import-assets";
 import type { AssetRecordRef, AssetRefs, EmployeeRef } from "@/lib/import-assets";
 import type { EmployeeRecordRef, EmployeeRefs } from "@/lib/import-employees";
 import type { SupplierRefs } from "@/lib/import-suppliers";
+import type { StockRefs } from "@/lib/import-stock";
 import type { AssetClass, EmploymentStatus } from "@prisma/client";
 
 /** Every field `AssetRecordRef` needs, straight off the Prisma select. */
@@ -340,4 +341,72 @@ export function buildSupplierRefs(vendors: Array<{ id: string; name: string }>):
 export async function resolveSupplierRefs(): Promise<SupplierRefs> {
   const vendors = await prisma.vendor.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } });
   return buildSupplierRefs(vendors);
+}
+
+interface StockCategoryRow {
+  id: string;
+  name: string;
+  prefix: string;
+}
+interface StockItemRow {
+  id: string;
+  code: string;
+}
+
+/**
+ * The pure half of stock-ref resolution (Phase 19 Task 6), the same
+ * extraction discipline every earlier importer's own `build*Refs` follows.
+ *
+ * `categoriesByKey` is NOT a plain `buildCollisionMap` call: each category
+ * contributes TWO keys (its name and its prefix), both of which must resolve
+ * to the SAME category — and a genuine collision can happen on either column,
+ * or between one category's name and a different category's prefix. Both
+ * keys are counted in one shared namespace before either is assigned, so
+ * "Twin" (a name) colliding with "TW" (a different category's own prefix,
+ * refKey'd) is caught exactly like two categories sharing a name already is.
+ *
+ * `itemsByCode` is a plain map, not `refKey`'d: `StockItem.code` is written
+ * by `formatStockCode` and is always upper-case already, so there is no
+ * case-insensitive collision scenario for it to represent (unlike a Vendor
+ * or AssetCategory name, which the admin UI never normalises).
+ */
+export function buildStockRefs(categories: StockCategoryRow[], items: StockItemRow[]): StockRefs {
+  const counts = new Map<string, number>();
+  for (const c of categories) {
+    for (const raw of [c.name, c.prefix]) {
+      const key = refKey(raw);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  const categoriesByKey = new Map<string, { id: string; prefix: string } | null>();
+  for (const c of categories) {
+    for (const raw of [c.name, c.prefix]) {
+      const key = refKey(raw);
+      categoriesByKey.set(key, (counts.get(key) ?? 0) > 1 ? null : { id: c.id, prefix: c.prefix });
+    }
+  }
+  return {
+    categoriesByKey,
+    itemsByCode: new Map(items.map((i) => [i.code, i.id])),
+  };
+}
+
+/**
+ * Both tables fetched whole — the same convention `resolveSupplierRefs` and
+ * `resolveEmployeeRefs` use for their own reference tables: a category list
+ * and an item catalogue are both small relative to, say, an asset fleet, so
+ * there is no analogue of the tag/serial file-scoped lookup that matters at
+ * thousands of rows. Archived categories and items are included: a sheet
+ * naming one still needs to resolve (to an UPDATE, or to the same
+ * `unknown-stock-category` a truly-unknown name gets is the wrong signal —
+ * the category exists, it just isn't accepting new items, which is an
+ * apply-time concern this resolver's own `StockRefs` shape has no field to
+ * carry).
+ */
+export async function resolveStockRefs(): Promise<StockRefs> {
+  const [categories, items] = await Promise.all([
+    prisma.stockCategory.findMany({ select: { id: true, name: true, prefix: true }, orderBy: { name: "asc" } }),
+    prisma.stockItem.findMany({ select: { id: true, code: true }, orderBy: { code: "asc" } }),
+  ]);
+  return buildStockRefs(categories, items);
 }

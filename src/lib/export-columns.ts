@@ -132,6 +132,35 @@ export const SUPPLIER_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
 ];
 
+/**
+ * Phase 19 Task 6 (plan P-2): the stock IMPORT template — what `make.ts`
+ * writes the import fixtures with, and what an operator downloads to fill
+ * in. Deliberately a SEPARATE spec from `STOCK_EXPORT_COLUMNS` below (the
+ * balances export): that sheet carries `balance`/`low`/`lastMovementAt`,
+ * none of which is a writable field, while this one carries `code` (blank to
+ * assign) and `openingQty`, neither of which the balances export has any use
+ * for. "Unit cost" is deliberately NOT matched by `STOCK_IMPORT_HEADERS`
+ * (`import-stock.ts`) — its value is accepted in the sheet but ignored on
+ * write (spec §6: unit cost is recorded on receipts, not opening stock), and
+ * leaving it unmapped is what lets `import-columns.ts`'s
+ * `STOCK_KNOWN_UNIMPORTED_COLUMNS` file it under "known, not a typo" rather
+ * than mapping and then silently discarding it.
+ */
+export const STOCK_IMPORT_TEMPLATE_COLUMNS: XlsxColumn<{
+  code: string | null; name: string; category: string; unit: string; packSize: number | null;
+  reorderLevel: number; openingQty: number; unitCost: number | null; notes: string | null;
+}>[] = [
+  { label: "Code", width: 12, cell: (r) => ({ value: r.code }) },
+  { label: "Name", width: 30, cell: (r) => ({ value: r.name }) },
+  { label: "Category", width: 20, cell: (r) => ({ value: r.category }) },
+  { label: "Unit", width: 10, cell: (r) => ({ value: r.unit }) },
+  { label: "Pack size", width: 10, cell: (r) => ({ value: r.packSize, type: Number }) },
+  { label: "Reorder level", width: 12, cell: (r) => ({ value: r.reorderLevel, type: Number }) },
+  { label: "Opening quantity", width: 14, cell: (r) => ({ value: r.openingQty, type: Number }) },
+  { label: "Unit cost", width: 12, cell: (r) => ({ value: r.unitCost, type: Number, format: "#,##0.00" }) },
+  { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
+];
+
 /** Phase 19 (spec §5.4): the stock balances export — same columns the `/stock` list shows. */
 export const STOCK_EXPORT_COLUMNS: XlsxColumn<{
   code: string; name: string; category: string; unit: string; packSize: number | null; reorderLevel: number;

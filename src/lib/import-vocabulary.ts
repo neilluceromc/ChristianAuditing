@@ -117,6 +117,11 @@ export const BLOCK_CAUSES = [
   // `link` fix instead of the asset-vendor `option` one. Appended, per this
   // array's own rule above — never inserted.
   "duplicate-supplier-name",
+  // Phase 19 Task 6: the stock importer's own causes. Appended, never inserted.
+  "unknown-stock-category",
+  "bad-stock-code",
+  "bad-unit",
+  "opening-on-existing",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -485,6 +490,37 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "tell which one this row means. Rename one of them — to something differing by more than letter " +
       "case, or the rename lands on this same block — then re-upload.",
     fix: { kind: "link", label: "Open suppliers", href: "/purchases/suppliers" },
+  },
+
+  // Phase 19 Task 6: the stock importer's own causes, from here down.
+  "unknown-stock-category": {
+    label: "Stock category doesn't exist",
+    explain:
+      "These rows name a stock category this system has never seen, by name or by prefix. Categories are " +
+      "created deliberately, not as a side effect of an upload, so create it first and re-upload.",
+    fix: { kind: "link", label: "Create category", href: "/stock/categories" },
+  },
+  "bad-stock-code": {
+    label: "Item code doesn't fit its category",
+    explain:
+      "The Code column on these rows isn't shaped like PREFIX-0000 with the category's own prefix — the " +
+      "same shape every code in this system already follows. Leave the cell blank to have one assigned " +
+      "automatically, or correct it to match the row's category, and re-upload.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "bad-unit": {
+    label: "Unit missing or too long",
+    explain:
+      "The Unit column on these rows is either empty or longer than this system allows (20 characters). " +
+      "Every item needs a short base unit — piece, box, bottle — to be created or updated.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "opening-on-existing": {
+    label: "Opening stock on an existing item",
+    explain:
+      "This item already has a ledger — record a receipt or an adjustment on its page instead. An " +
+      "opening quantity only makes sense the first time an item is created.",
+    fix: { kind: "link", label: "Open stock", href: "/stock" },
   },
 };
 
