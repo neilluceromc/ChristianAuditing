@@ -16,6 +16,19 @@ import {
 
 const idSchema = z.object({ id: z.string().min(1) });
 
+/**
+ * R2, same local class as `item-actions.ts`'s `createStockItem`: a refusal
+ * discovered inside `$transaction` must THROW so Prisma rolls back whatever
+ * the callback already wrote (the per-line ADJUSTMENT creates + audits in
+ * `postStocktake`), not `return` — a plain `return` from an interactive
+ * transaction's callback commits everything written so far.
+ */
+class ActionFailure extends Error {
+  constructor(public readonly result: ActionResult<never>) {
+    super(result.ok ? undefined : result.message);
+  }
+}
+
 function revalidateStocktake(id?: string) {
   revalidatePath("/stock/stocktakes");
   if (id) revalidatePath(`/stock/stocktakes/${id}`);
@@ -108,9 +121,12 @@ export async function countStocktakeLine(input: unknown): Promise<ActionResult<n
 }
 
 /**
- * The "failure" variable pattern (R2), same as movement-actions.ts: the
- * updateMany's zero-count race (someone else posted it meanwhile) is
- * returned from inside the transaction and handed back after it resolves.
+ * R2, the same `ActionFailure` pattern as `item-actions.ts`'s
+ * `createStockItem`: the updateMany's zero-count race (someone else posted
+ * it meanwhile) is discovered AFTER the per-line ADJUSTMENT creates + audits
+ * already ran, so the refusal THROWS — a plain `return` from an interactive
+ * transaction's callback would commit those writes instead of rolling them
+ * back with the refusal.
  */
 export async function postStocktake(input: unknown): Promise<ActionResult<{ adjusted: number; skipped: number }>> {
   const user = await actionUser();
@@ -128,45 +144,47 @@ export async function postStocktake(input: unknown): Promise<ActionResult<{ adju
   if (!st) return conflict("That stocktake no longer exists.");
   if (st.state !== "OPEN") return conflict("This stocktake is no longer open.");
 
-  let counts: { adjusted: number; skipped: number } | null = null;
-  const failure = await prisma.$transaction(async (tx) => {
-    const ids = st.lines.map((l) => l.itemId);
-    if (ids.length) {
-      await tx.$queryRaw`SELECT "id" FROM "StockItem" WHERE "id" IN (${Prisma.join(ids)}) FOR UPDATE`;
-    }
-    const sums = ids.length
-      ? await tx.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true } })
-      : [];
-    const current = new Map(sums.map((s) => [s.itemId, s._sum.quantity ?? 0]));
-    const plan = planStocktakePost(st.lines, current);
+  try {
+    const counts = await prisma.$transaction(async (tx) => {
+      const ids = st.lines.map((l) => l.itemId);
+      if (ids.length) {
+        await tx.$queryRaw`SELECT "id" FROM "StockItem" WHERE "id" IN (${Prisma.join(ids)}) FOR UPDATE`;
+      }
+      const sums = ids.length
+        ? await tx.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true } })
+        : [];
+      const current = new Map(sums.map((s) => [s.itemId, s._sum.quantity ?? 0]));
+      const plan = planStocktakePost(st.lines, current);
 
-    for (const adj of plan.adjustments) {
-      const before = current.get(adj.itemId) ?? 0;
-      await tx.stockMovement.create({
-        data: { itemId: adj.itemId, kind: "ADJUSTMENT", quantity: adj.quantity, reason: `Stocktake ${st.refNo}`, stocktakeId: st.id, actorId: user.id },
+      for (const adj of plan.adjustments) {
+        const before = current.get(adj.itemId) ?? 0;
+        await tx.stockMovement.create({
+          data: { itemId: adj.itemId, kind: "ADJUSTMENT", quantity: adj.quantity, reason: `Stocktake ${st.refNo}`, stocktakeId: st.id, actorId: user.id },
+        });
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: adj.itemId, action: "stock.adjusted",
+          diff: { balance: { from: before, to: before + adj.quantity }, reason: { from: null, to: `Stocktake ${st.refNo}` } },
+        });
+      }
+
+      const updated = await tx.stocktake.updateMany({
+        where: { id: st.id, state: "OPEN" }, data: { state: "POSTED", postedAt: new Date(), postedById: user.id },
       });
+      if (updated.count === 0) throw new ActionFailure(conflict("This stocktake was already posted"));
+
       await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: adj.itemId, action: "stock.adjusted",
-        diff: { balance: { from: before, to: before + adj.quantity }, reason: { from: null, to: `Stocktake ${st.refNo}` } },
+        actorId: user.id, actorLabel: user.name, entityType: "stocktake", entityId: st.id, action: "stocktake.posted",
+        diff: { adjusted: { from: null, to: plan.adjustments.length }, skipped: { from: null, to: plan.skipped.length } },
       });
-    }
-
-    const updated = await tx.stocktake.updateMany({
-      where: { id: st.id, state: "OPEN" }, data: { state: "POSTED", postedAt: new Date(), postedById: user.id },
+      return { adjusted: plan.adjustments.length, skipped: plan.skipped.length };
     });
-    if (updated.count === 0) return conflict("This stocktake was already posted");
-
-    await writeAudit(tx, {
-      actorId: user.id, actorLabel: user.name, entityType: "stocktake", entityId: st.id, action: "stocktake.posted",
-      diff: { adjusted: { from: null, to: plan.adjustments.length }, skipped: { from: null, to: plan.skipped.length } },
-    });
-    counts = { adjusted: plan.adjustments.length, skipped: plan.skipped.length };
-    return null;
-  });
-  if (failure) return failure;
-  revalidateStocktake(id);
-  revalidatePath("/stock");
-  return ok(counts!);
+    revalidateStocktake(id);
+    revalidatePath("/stock");
+    return ok(counts);
+  } catch (e) {
+    if (e instanceof ActionFailure) return e.result;
+    throw e;
+  }
 }
 
 export async function cancelStocktake(input: unknown): Promise<ActionResult<null>> {

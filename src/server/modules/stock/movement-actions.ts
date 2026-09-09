@@ -7,7 +7,7 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { canManageStock } from "@/lib/stock-access";
 import { adjustSchema, issueSchema, receiptSchema, todayStr } from "@/lib/stock-schema";
-import { canIssue } from "@/lib/stock-movement-rules";
+import { canIssue, signedQuantity } from "@/lib/stock-movement-rules";
 import { unitsLabel } from "@/lib/stock-balance";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
@@ -56,7 +56,7 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ movem
       },
     });
     const mv = await tx.stockMovement.create({
-      data: { itemId: item.id, kind: "RECEIPT", quantity: d.quantity, lotId: lot.id, actorId: user.id, occurredAt },
+      data: { itemId: item.id, kind: "RECEIPT", quantity: signedQuantity("RECEIPT", d.quantity), lotId: lot.id, actorId: user.id, occurredAt },
     });
     const sum = await tx.stockMovement.aggregate({ where: { itemId: item.id }, _sum: { quantity: true } });
     await writeAudit(tx, {
@@ -109,7 +109,7 @@ export async function issueStock(input: unknown): Promise<ActionResult<{ balance
     }
     await tx.stockMovement.create({
       data: {
-        itemId: item.id, kind: "ISSUE", quantity: -d.quantity, departmentId: dept.id,
+        itemId: item.id, kind: "ISSUE", quantity: signedQuantity("ISSUE", d.quantity), departmentId: dept.id,
         employeeId: employeeId || null, reason: d.reason || null, actorId: user.id,
       },
     });

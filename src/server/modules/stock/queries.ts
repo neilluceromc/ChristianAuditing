@@ -2,7 +2,7 @@ import type { Prisma, StockMovementKind, StocktakeState } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { ListState } from "@/lib/url-state";
 import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
-import { buildStockItemWhere } from "@/lib/stock-list";
+import { buildStockItemWhere, buildStockOrderBy } from "@/lib/stock-list";
 import { isLow } from "@/lib/stock-balance";
 import { EXPORT_CAP } from "@/lib/export-columns";
 import type { FacetOption } from "@/server/modules/inventory/queries";
@@ -27,9 +27,18 @@ async function candidateBalances(where: Prisma.StockItemWhereInput): Promise<Can
   return candidates.map((c) => ({ id: c.id, reorderLevel: c.reorderLevel, balance: balanceById.get(c.id) ?? 0 }));
 }
 
-/** Same shape, plus `_max: { occurredAt }` in the SAME groupBy — the low-filter branch's one query. */
-async function candidateBalancesWithMovement(where: Prisma.StockItemWhereInput): Promise<CandidateBalanceWithMovement[]> {
-  const candidates = await prisma.stockItem.findMany({ where, select: { id: true, reorderLevel: true } });
+/**
+ * Same shape, plus `_max: { occurredAt }` in the SAME groupBy — the low-filter
+ * branch's one query. `orderBy` (the employees-gaps pattern — `gapKeptIds` in
+ * `src/server/modules/employees/queries.ts`) threads the requested sort
+ * through the candidate select itself, so the kept-id order downstream
+ * follows it instead of whatever order Postgres happens to return.
+ */
+async function candidateBalancesWithMovement(
+  where: Prisma.StockItemWhereInput,
+  orderBy: Prisma.StockItemOrderByWithRelationInput[] = [],
+): Promise<CandidateBalanceWithMovement[]> {
+  const candidates = await prisma.stockItem.findMany({ where, orderBy, select: { id: true, reorderLevel: true } });
   if (!candidates.length) return [];
   const sums = await prisma.stockMovement.groupBy({
     by: ["itemId"], where: { itemId: { in: candidates.map((c) => c.id) } },
@@ -58,15 +67,22 @@ export async function listStockItems(state: ListState): Promise<{
 }> {
   const where = buildStockItemWhere(state);
   const without = (facet: string): ListState => ({ ...state, filters: { ...state.filters, [facet]: [] } });
+  const orderBy = buildStockOrderBy(state.sort);
 
   type ItemWithCategory = Prisma.StockItemGetPayload<{ include: { category: { select: { name: true } } } }>;
   let pg: ReturnType<typeof pageOf>;
   let itemRows: ItemWithCategory[];
   let balanceById: Map<string, number>;
   let lastMovementById: Map<string, Date | null>;
+  // Set only on the low-filter branch: `low` is never part of the SQL where
+  // (buildStockItemWhere ignores it), so `without("low")`'s candidate set
+  // below is identical to the one already fetched here for paging — reuse it
+  // instead of a second groupBy over the same rows.
+  let lowFilterCandidates: CandidateBalance[] | null = null;
 
   if (state.filters.low?.includes("1")) {
-    const candidates = await candidateBalancesWithMovement(where);
+    const candidates = await candidateBalancesWithMovement(where, orderBy);
+    lowFilterCandidates = candidates;
     const kept = candidates.filter((c) => isLow(c.balance, c.reorderLevel));
     pg = pageOf(kept.length, state.page, ENTITY_PAGE_SIZE);
     const pageIds = kept.slice(pg.skip, pg.skip + pg.take).map((c) => c.id);
@@ -80,10 +96,6 @@ export async function listStockItems(state: ListState): Promise<{
   } else {
     const total = await prisma.stockItem.count({ where });
     pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
-    const orderBy: Prisma.StockItemOrderByWithRelationInput[] = [
-      ...state.sort.map((s): Prisma.StockItemOrderByWithRelationInput => ({ [s.key]: s.dir })),
-      { id: "asc" },
-    ];
     itemRows = await prisma.stockItem.findMany({
       where, orderBy, skip: pg.skip, take: pg.take, include: { category: { select: { name: true } } },
     });
@@ -99,7 +111,7 @@ export async function listStockItems(state: ListState): Promise<{
 
   const [categoryG, lowCandidates] = await Promise.all([
     prisma.stockItem.groupBy({ by: ["categoryId"], where: buildStockItemWhere(without("category")), _count: true }),
-    candidateBalances(buildStockItemWhere(without("low"))),
+    lowFilterCandidates ? Promise.resolve(lowFilterCandidates) : candidateBalances(buildStockItemWhere(without("low"))),
   ]);
   const catIds = categoryG.map((g) => g.categoryId);
   const categories = catIds.length
