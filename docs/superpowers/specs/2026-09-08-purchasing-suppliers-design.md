@@ -191,8 +191,9 @@ must be an email when present, `address` ≤400, `registrationNo` ≤60, `contra
 and `contractEnd` `dateStr` with `contractEnd >= contractStart` when both present ("End date is before the
 start"), `contractTerms` and `notes` ≤2000. The category input autocompletes from
 `supplierCategories()` (distinct non-null values, ≤50). A duplicate name (Prisma P2002 on `name`) is the
-field error "A supplier with this name already exists". Success: redirect to the profile with a
-"Supplier created" / "Saved" toast. Audit: `supplier.created`, `supplier.updated` (diff of changed
+field error "A supplier with this name already exists". Success: new → redirect to the profile with a
+toast; edit → toast and refresh (D-19 — this line originally read both ways; the implemented behaviour
+is now the binding one). Audit: `supplier.created`, `supplier.updated` (diff of changed
 fields), `supplier.archived`, `supplier.restored`, entityType `vendor`.
 
 `archiveSupplier` / `restoreSupplier` from the profile header. Archiving never touches requests or
