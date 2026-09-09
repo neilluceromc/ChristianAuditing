@@ -101,6 +101,17 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       ],
     },
     {
+      heading: "Stock",
+      items: [
+        { label: "Items", href: "/stock" },
+        { label: "Receive stock", href: "/stock/receive", roles: ["admin", "purchasing_staff"] },
+        { label: "Issue stock", href: "/stock/issue", roles: ["admin", "purchasing_staff"] },
+        { label: "Stocktakes", href: "/stock/stocktakes" },
+        { label: "Stock categories", href: "/stock/categories", roles: ["admin", "purchasing_staff"] },
+        { label: "Import items", href: "/stock/import", roles: ["admin", "purchasing_staff"] },
+      ],
+    },
+    {
       heading: "By status",
       items: [
         { label: "My drafts", href: "/purchases?state=DRAFT" },
@@ -145,6 +156,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         { label: "Cancelled", href: "/purchases?state=CANCELLED" },
         { label: "All purchases", href: "/purchases" },
         { label: "Suppliers", href: "/purchases/suppliers" },
+        { label: "Stock", href: "/stock" },
       ],
     },
   ],
@@ -262,6 +274,12 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // it_staff out of /purchases/new, and viewer sees it read-only.
   // Phase 18 spec §3: the supplier write surfaces belong to Purchasing (and the
   // sysadmin role). MUST precede the general /purchases rule — first-match-wins.
+  // Phase 19 spec §3: stock write surfaces are Purchasing's (and the sysadmin role's).
+  // MUST precede the /stock read rule — first-match-wins.
+  { test: /^\/stock\/(items\/new|receive|issue|import|categories|stocktakes\/new)(\/|$)/, workspaces: ["purchasing", "admin"], roles: ["admin", "purchasing_staff"] },
+  { test: /^\/stock\/items\/[^/]+\/(edit|adjust)(\/|$)/, workspaces: ["purchasing", "admin"], roles: ["admin", "purchasing_staff"] },
+  { test: /^\/stock\/stocktakes\/[^/]+\/(count|review)(\/|$)/, workspaces: ["purchasing", "admin"], roles: ["admin", "purchasing_staff"] },
+  { test: /^\/stock(\/|$)/, workspaces: ["it", "purchasing", "finance", "admin"] },
   { test: /^\/purchases\/suppliers\/(new|import)(\/|$)/, workspaces: ["purchasing", "admin"], roles: ["admin", "purchasing_staff"] },
   { test: /^\/purchases\/suppliers\/[^/]+\/edit(\/|$)/, workspaces: ["purchasing", "admin"], roles: ["admin", "purchasing_staff"] },
   { test: /^\/purchases(\/|$)/, workspaces: ["purchasing", "finance", "it"] },
