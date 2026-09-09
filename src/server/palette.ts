@@ -16,9 +16,10 @@ export interface PaletteResults {
   people: PaletteHit[];
   requests: PaletteHit[];
   suppliers: PaletteHit[];
+  stock: PaletteHit[];
 }
 
-const EMPTY: PaletteResults = { assets: [], people: [], requests: [], suppliers: [] };
+const EMPTY: PaletteResults = { assets: [], people: [], requests: [], suppliers: [], stock: [] };
 
 // In-memory sliding window: 30 searches / 10 s per user. A DB RateEvent per
 // keystroke would be write amplification on a read path; process-local is
@@ -50,8 +51,9 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
   const canPeople = pathAllowedForRole("/employees/x", user.role);
   const canRequests = pathAllowedForRole("/purchases/x", user.role);
   const canSuppliers = pathAllowedForRole("/purchases/suppliers", user.role);
+  const canStock = pathAllowedForRole("/stock", user.role);
 
-  const [assets, people, requests, suppliers] = await Promise.all([
+  const [assets, people, requests, suppliers, stock] = await Promise.all([
     canAssets
       ? prisma.asset.findMany({
           where: {
@@ -91,6 +93,16 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
           orderBy: { name: "asc" },
         })
       : [],
+    canStock
+      ? prisma.stockItem.findMany({
+          where: {
+            archivedAt: null,
+            OR: [{ code: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }],
+          },
+          take: 5,
+          orderBy: { code: "asc" },
+        })
+      : [],
   ]);
 
   return {
@@ -100,5 +112,6 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
     suppliers: suppliers.map((v) => ({
       label: v.name, sub: v.category ?? v.contactPerson ?? "supplier", href: `/purchases/suppliers/${v.id}`,
     })),
+    stock: stock.map((s) => ({ label: s.code, sub: s.name, href: `/stock/items/${s.id}` })),
   };
 }

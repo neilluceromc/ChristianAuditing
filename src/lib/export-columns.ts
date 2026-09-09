@@ -132,6 +132,22 @@ export const SUPPLIER_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
 ];
 
+/** Phase 19 (spec §5.4): the stock balances export — same columns the `/stock` list shows. */
+export const STOCK_EXPORT_COLUMNS: XlsxColumn<{
+  code: string; name: string; category: string; unit: string; packSize: number | null; reorderLevel: number;
+  balance: number; low: string; lastMovementAt: Date | null;
+}>[] = [
+  { label: "Code", width: 12, cell: (r) => ({ value: r.code }) },
+  { label: "Name", width: 30, cell: (r) => ({ value: r.name }) },
+  { label: "Category", width: 20, cell: (r) => ({ value: r.category }) },
+  { label: "Unit", width: 10, cell: (r) => ({ value: r.unit }) },
+  { label: "Pack size", width: 10, cell: (r) => ({ value: r.packSize, type: Number }) },
+  { label: "Reorder level", width: 12, cell: (r) => ({ value: r.reorderLevel, type: Number }) },
+  { label: "Balance", width: 10, cell: (r) => ({ value: r.balance, type: Number }) },
+  { label: "Low", width: 6, cell: (r) => ({ value: r.low }) },
+  { label: "Last movement", width: 14, cell: (r) => ({ value: r.lastMovementAt, type: Date, format: "yyyy-mm-dd" }) },
+];
+
 export const FAREWELL_EXPORT_COLUMNS: XlsxColumn<{
   tag: string; model: string; outcome: string; reason: string | null;
   cost: number | null; refNo: string; state: string;

@@ -6,7 +6,10 @@ import { PREFIX_SHAPE } from "./stock-code";
 const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
 
 // UTC, matching how the app writes dates — never the local calendar day.
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// Exported so movement-actions.ts (Task 3) imports this instead of writing
+// another copy — this file already carries the one this app trusts, wired
+// into receiptSchema's own "not after today" check below.
+export const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export const categorySchema = z.object({
   name: z.string().trim().min(1, "Name the category").max(60),
