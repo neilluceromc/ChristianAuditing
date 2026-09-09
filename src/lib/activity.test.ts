@@ -139,7 +139,7 @@ describe("offboarding.completed", () => {
   });
 });
 
-describe("stock module audit sentences (M-3) — the twelve actions no longer fall to the raw-verb default", () => {
+describe("stock module audit sentences (M-3) — the fourteen actions no longer fall to the raw-verb default", () => {
   const item = { actorLabel: "A. Reyes", entityLabel: "OS-0002 · Ballpen black" };
   const category = { actorLabel: "A. Reyes", entityLabel: "Pantry" };
   const stocktake = { actorLabel: "A. Reyes", entityLabel: "ST-0007" };

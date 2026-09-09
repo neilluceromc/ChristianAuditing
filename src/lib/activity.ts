@@ -117,7 +117,7 @@ export function auditSentence(entry: ActivityEntryLike): string {
       const fields = diff ? Object.keys(diff).join(", ") : "fields";
       return `${entry.actorLabel} updated ${fields} on ${entry.entityLabel} by import`;
     }
-    // Phase 19 (M-3): the twelve stock/stocktake actions this module writes
+    // Phase 19 (M-3): the fourteen stock/stocktake actions this module writes
     // (`item-actions.ts`, `movement-actions.ts`, `stocktake-actions.ts`) all
     // fell to the `default` branch and rendered as a raw verb — exactly the
     // non-sentence rule 16's own Phase 12 fix (above) already corrected once

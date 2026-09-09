@@ -307,6 +307,15 @@ test.describe.serial("stocktake", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByText("POSTED", { exact: true })).toBeVisible({ timeout: 10_000 });
 
+    // Ruling R12 (plan D-24): a POSTED review is a frozen record — an Adjustment
+    // column in place of Variance, no live Now column, no MOVED pill, and each
+    // adjusted item's code links to its page.
+    const review = page.getByRole("table");
+    await expect(review.getByRole("columnheader", { name: "Adjustment" })).toBeVisible();
+    await expect(review.getByRole("columnheader", { name: "Now" })).toHaveCount(0);
+    await expect(review.getByText("MOVED", { exact: true })).toHaveCount(0);
+    await expect(review.getByRole("link", { name: "PN-0001", exact: true })).toHaveAttribute("href", /\/stock\/items\//);
+
     const stAfter = await db.stocktake.findUniqueOrThrow({ where: { id: stocktakeId } });
     expect(stAfter.state).toBe("POSTED");
 
