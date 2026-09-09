@@ -3,7 +3,7 @@ import type { StocktakeState } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
 import { getStocktake } from "@/server/modules/stock/queries";
 import { canManageStock } from "@/lib/stock-access";
-import { varianceRows } from "@/lib/stocktake";
+import { postedReviewRows, varianceRows } from "@/lib/stocktake";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -33,22 +33,40 @@ export default async function StocktakeDetailPage({
   // count screen exists solely for a manager mid-count on an OPEN stocktake.
   const showReview = st.state !== "OPEN" || !manage || sp.get("view") === "review";
 
+  // I-4: an OPEN review is a live view against today's ledger (`varianceRows`);
+  // a POSTED/CANCELLED review is a frozen record of what was actually posted
+  // (`postedReviewRows`) — the two never mix, picked once here by `st.state`.
   let review: { rows: ReviewRow[]; summary: ReviewSummary } | null = null;
   if (showReview) {
     const lineInputs = st.lines.map((l) => ({ itemId: l.itemId, bookQty: l.bookQty, countedQty: l.countedQty }));
-    const current = new Map(st.lines.map((l) => [l.itemId, l.currentQty]));
     const infoById = new Map(st.lines.map((l) => [l.itemId, { code: l.code, name: l.name }]));
-    const rows: ReviewRow[] = varianceRows(lineInputs, current).map((v) => {
-      const info = infoById.get(v.itemId)!;
-      return { ...v, code: info.code, name: info.name };
-    });
-    const summary: ReviewSummary = {
-      counted: rows.filter((r) => r.countedQty !== null).length,
-      withDiff: rows.filter((r) => r.variance !== null && r.variance !== 0).length,
-      notCounted: rows.filter((r) => r.countedQty === null).length,
-      moved: rows.filter((r) => r.drift !== 0).length,
-    };
-    review = { rows, summary };
+    if (st.state === "OPEN") {
+      const current = new Map(st.lines.map((l) => [l.itemId, l.currentQty]));
+      const rows: ReviewRow[] = varianceRows(lineInputs, current).map((v) => {
+        const info = infoById.get(v.itemId)!;
+        return { kind: "open", ...v, code: info.code, name: info.name };
+      });
+      const summary: ReviewSummary = {
+        kind: "open",
+        counted: rows.filter((r) => r.countedQty !== null).length,
+        withDiff: rows.filter((r) => r.kind === "open" && r.variance !== null && r.variance !== 0).length,
+        notCounted: rows.filter((r) => r.countedQty === null).length,
+        moved: rows.filter((r) => r.kind === "open" && r.drift !== 0).length,
+      };
+      review = { rows, summary };
+    } else {
+      const rows: ReviewRow[] = postedReviewRows(lineInputs, st.adjustments).map((v) => {
+        const info = infoById.get(v.itemId)!;
+        return { kind: "posted", ...v, code: info.code, name: info.name };
+      });
+      const summary: ReviewSummary = {
+        kind: "posted",
+        counted: rows.filter((r) => r.countedQty !== null).length,
+        adjusted: rows.filter((r) => r.kind === "posted" && r.adjustment !== null).length,
+        notCounted: rows.filter((r) => r.countedQty === null).length,
+      };
+      review = { rows, summary };
+    }
   }
 
   return (

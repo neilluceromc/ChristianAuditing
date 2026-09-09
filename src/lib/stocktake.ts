@@ -59,3 +59,29 @@ export function varianceRows(lines: StocktakeLineInput[], current: Map<string, n
     };
   });
 }
+
+export interface PostedReviewRow {
+  itemId: string;
+  bookQty: number;
+  countedQty: number | null;
+  adjustment: number | null;
+}
+
+/**
+ * Spec §7.5, I-4: a POSTED (or CANCELLED) stocktake's review is a frozen
+ * RECORD of what was posted, not today's live ledger — unlike `varianceRows`,
+ * this never looks at a current balance. `adjustments` is keyed by item id
+ * to the signed quantity of the ADJUSTMENT movement this stocktake itself
+ * wrote (`getStocktake` reads it from `stocktake.movements`); a line with no
+ * entry either was never counted or was counted exactly on balance
+ * (`planStocktakePost` writes no movement for a zero delta) — both render as
+ * `adjustment: null`, and the caller tells them apart via `countedQty`.
+ */
+export function postedReviewRows(lines: StocktakeLineInput[], adjustments: Map<string, number>): PostedReviewRow[] {
+  return lines.map((l) => ({
+    itemId: l.itemId,
+    bookQty: l.bookQty,
+    countedQty: l.countedQty,
+    adjustment: adjustments.get(l.itemId) ?? null,
+  }));
+}

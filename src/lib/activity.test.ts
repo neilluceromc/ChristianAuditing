@@ -139,6 +139,64 @@ describe("offboarding.completed", () => {
   });
 });
 
+describe("stock module audit sentences (M-3) — the twelve actions no longer fall to the raw-verb default", () => {
+  const item = { actorLabel: "A. Reyes", entityLabel: "OS-0002 · Ballpen black" };
+  const category = { actorLabel: "A. Reyes", entityLabel: "Pantry" };
+  const stocktake = { actorLabel: "A. Reyes", entityLabel: "ST-0007" };
+
+  it("stock.item.created reads as a plain create, the code · name label carries the rest", () => {
+    expect(auditSentence({ ...item, action: "stock.item.created", diff: { code: { from: null, to: "OS-0002" }, name: { from: null, to: "Ballpen black" } } }))
+      .toBe("A. Reyes created OS-0002 · Ballpen black");
+  });
+  it("stock.item.updated names the changed fields", () => {
+    expect(auditSentence({ ...item, action: "stock.item.updated", diff: { reorderLevel: { from: 10, to: 20 } } }))
+      .toBe("A. Reyes updated reorderLevel on OS-0002 · Ballpen black");
+  });
+  it("stock.item.archived / restored", () => {
+    expect(auditSentence({ ...item, action: "stock.item.archived", diff: { archived: { from: false, to: true } } }))
+      .toBe("A. Reyes archived OS-0002 · Ballpen black");
+    expect(auditSentence({ ...item, action: "stock.item.restored", diff: { archived: { from: true, to: false } } }))
+      .toBe("A. Reyes restored OS-0002 · Ballpen black");
+  });
+  it("stock.category.created/updated/archived/restored name the category explicitly", () => {
+    expect(auditSentence({ ...category, action: "stock.category.created", diff: { name: { from: null, to: "Pantry" }, prefix: { from: null, to: "PN" } } }))
+      .toBe("A. Reyes created the category Pantry");
+    expect(auditSentence({ ...category, action: "stock.category.updated", diff: { name: { from: "Pantry", to: "Kitchen" } } }))
+      .toBe("A. Reyes updated name on the category Pantry");
+    expect(auditSentence({ ...category, action: "stock.category.archived", diff: { archived: { from: false, to: true } } }))
+      .toBe("A. Reyes archived the category Pantry");
+    expect(auditSentence({ ...category, action: "stock.category.restored", diff: { archived: { from: true, to: false } } }))
+      .toBe("A. Reyes restored the category Pantry");
+  });
+  it("stock.received names the quantity", () => {
+    expect(auditSentence({ ...item, action: "stock.received", diff: { quantity: { from: null, to: 60 }, lot: { from: null, to: "PO-4021" } } }))
+      .toBe("A. Reyes received 60 of OS-0002 · Ballpen black");
+  });
+  it("stock.issued recovers the issued quantity from the before/after balance and names the department", () => {
+    expect(auditSentence({ ...item, action: "stock.issued", diff: { quantity: { from: 40, to: 35 }, department: { from: null, to: "HR" } } }))
+      .toBe("A. Reyes issued 5 of OS-0002 · Ballpen black to HR");
+  });
+  it("stock.adjusted names the signed delta (real minus for a decrease) and the reason", () => {
+    expect(auditSentence({ ...item, action: "stock.adjusted", diff: { balance: { from: 40, to: 38 }, reason: { from: null, to: "Damaged in storage" } } }))
+      .toBe("A. Reyes adjusted OS-0002 · Ballpen black by −2 · Damaged in storage");
+    expect(auditSentence({ ...item, action: "stock.adjusted", diff: { balance: { from: 40, to: 44 }, reason: { from: null, to: "Recount" } } }))
+      .toBe("A. Reyes adjusted OS-0002 · Ballpen black by +4 · Recount");
+  });
+  it("stocktake.opened names the scope and the line count", () => {
+    expect(auditSentence({ ...stocktake, action: "stocktake.opened", diff: { scope: { from: null, to: "Pantry" }, lines: { from: null, to: 4 } } }))
+      .toBe("A. Reyes opened ST-0007 for Pantry · 4 items");
+    expect(auditSentence({ ...stocktake, action: "stocktake.opened", diff: { scope: { from: null, to: "All categories" }, lines: { from: null, to: 1 } } }))
+      .toBe("A. Reyes opened ST-0007 for All categories · 1 item");
+  });
+  it("stocktake.posted names how many were adjusted vs. left uncounted", () => {
+    expect(auditSentence({ ...stocktake, action: "stocktake.posted", diff: { adjusted: { from: null, to: 2 }, skipped: { from: null, to: 1 } } }))
+      .toBe("A. Reyes posted ST-0007 · 2 adjusted, 1 not counted");
+  });
+  it("stocktake.cancelled reads as a sentence, not the raw verb", () => {
+    expect(auditSentence({ ...stocktake, action: "stocktake.cancelled", diff: null })).toBe("A. Reyes cancelled the stocktake ST-0007");
+  });
+});
+
 describe("actionDot — import actions get a deliberate, explicit colour", () => {
   it("import-create settles the same way a manual create does", () => {
     expect(actionDot("import-create")).toBe("DEPLOYED");

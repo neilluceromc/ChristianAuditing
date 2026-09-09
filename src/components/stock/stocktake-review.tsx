@@ -12,23 +12,41 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { cancelStocktake, postStocktake } from "@/server/modules/stock/stocktake-actions";
 import { useStockRunner } from "./use-stock-runner";
 
-export interface ReviewRow {
-  itemId: string;
-  code: string;
-  name: string;
-  bookQty: number;
-  currentQty: number;
-  countedQty: number | null;
-  variance: number | null;
-  drift: number;
-}
+/**
+ * I-4: an OPEN review is a live view (today's Now/Variance/MOVED against the
+ * current ledger); a POSTED or CANCELLED review is a frozen RECORD of what
+ * was posted (Book/Counted/Adjustment only — never a live recomputation).
+ * The two shapes are different enough (no `currentQty`/`drift` in one, no
+ * `adjustment` in the other) that a discriminated union is clearer than one
+ * interface with fields that are meaningless half the time; `kind` always
+ * agrees with the `state` prop below, since the page builds both from the
+ * same `st.state` check (`varianceRows` vs `postedReviewRows`).
+ */
+export type ReviewRow =
+  | {
+      kind: "open";
+      itemId: string;
+      code: string;
+      name: string;
+      bookQty: number;
+      currentQty: number;
+      countedQty: number | null;
+      variance: number | null;
+      drift: number;
+    }
+  | {
+      kind: "posted";
+      itemId: string;
+      code: string;
+      name: string;
+      bookQty: number;
+      countedQty: number | null;
+      adjustment: number | null;
+    };
 
-export interface ReviewSummary {
-  counted: number;
-  withDiff: number;
-  notCounted: number;
-  moved: number;
-}
+export type ReviewSummary =
+  | { kind: "open"; counted: number; withDiff: number; notCounted: number; moved: number }
+  | { kind: "posted"; counted: number; adjusted: number; notCounted: number };
 
 /** Real minus (U+2212) for a negative — never a hyphen-minus (movement-history.tsx's own convention). */
 function fmtVariance(v: number | null): string {
@@ -37,13 +55,15 @@ function fmtVariance(v: number | null): string {
 }
 
 /**
- * Spec §5.3, Task 5 Step 4 — the variance review. `rows`/`summary` are
- * computed server-side in the page (`varianceRows` from lib/stocktake.ts);
- * this component only formats and, for an OPEN stocktake a manager is
- * viewing, offers post/cancel. The preview counts in the post confirm
- * dialog (`summary.withDiff`/`summary.notCounted`) mirror exactly what
- * `planStocktakePost` computes server-side, since both come from the same
- * countedQty-vs-current comparison.
+ * Spec §5.3/§7.5, Task 5 Step 4, I-4. `rows`/`summary` are computed
+ * server-side in the page — `varianceRows` (OPEN, a live view against
+ * today's ledger) or `postedReviewRows` (POSTED/CANCELLED, a frozen record
+ * of what was actually posted) from `lib/stocktake.ts`; this component only
+ * formats, picking columns by `state`, and, for an OPEN stocktake a manager
+ * is viewing, offers post/cancel. The preview counts in the post confirm
+ * dialog (`summary.withDiff`/`summary.notCounted`, OPEN only) mirror exactly
+ * what `planStocktakePost` computes server-side, since both come from the
+ * same countedQty-vs-current comparison.
  */
 export function StocktakeReview({
   stocktakeId,
@@ -77,7 +97,11 @@ export function StocktakeReview({
     run(() => cancelStocktake({ id: stocktakeId }), "Stocktake cancelled", { onOk: () => setCancelOpen(false) });
   }
 
-  const showControls = state === "OPEN" && canPost;
+  // D-9b, folded in while I-4 touched this component: `canPost` is already
+  // `manage && state === "OPEN"` (computed once by the page), so re-checking
+  // `state === "OPEN"` here was redundant.
+  const showControls = canPost;
+  const isOpen = state === "OPEN";
 
   return (
     <div className="flex flex-col gap-3">
@@ -89,29 +113,47 @@ export function StocktakeReview({
             <Th>Code</Th>
             <Th>Name</Th>
             <Th align="right">Book</Th>
-            <Th align="right">Now</Th>
+            {isOpen && <Th align="right">Now</Th>}
             <Th align="right">Counted</Th>
-            <Th align="right">Variance</Th>
-            <Th aria-label="Flags" />
+            <Th align="right">{isOpen ? "Variance" : "Adjustment"}</Th>
+            {isOpen && <Th aria-label="Flags" />}
           </Tr>
         </THead>
         <TBody>
           {rows.map((r) => (
             <Tr key={r.itemId}>
-              <Td mono>{r.code}</Td>
+              <Td mono>
+                {r.kind === "posted" && r.adjustment !== null ? (
+                  <Link href={`/stock/items/${r.itemId}`} className="text-accent hover:underline">{r.code}</Link>
+                ) : (
+                  r.code
+                )}
+              </Td>
               <Td>{r.name}</Td>
               <Td align="right" mono>{r.bookQty}</Td>
-              <Td align="right" mono>{r.currentQty}</Td>
+              {r.kind === "open" && <Td align="right" mono>{r.currentQty}</Td>}
               <Td align="right" mono>{r.countedQty ?? "not counted"}</Td>
-              <Td align="right" mono>{fmtVariance(r.variance)}</Td>
-              <Td align="right">{r.drift !== 0 && <Pill tone="accent">MOVED</Pill>}</Td>
+              {r.kind === "open" ? (
+                <Td align="right" mono>{fmtVariance(r.variance)}</Td>
+              ) : (
+                <Td align="right" mono>{r.adjustment !== null ? fmtVariance(r.adjustment) : "—"}</Td>
+              )}
+              {r.kind === "open" && <Td align="right">{r.drift !== 0 && <Pill tone="accent">MOVED</Pill>}</Td>}
             </Tr>
           ))}
         </TBody>
       </Table>
       <p className="font-mono text-[11px] text-fg-muted">
-        {summary.counted} items counted · {summary.withDiff} with a difference · {summary.notCounted} not counted ·{" "}
-        {summary.moved} moved since opening
+        {summary.kind === "open" ? (
+          <>
+            {summary.counted} items counted · {summary.withDiff} with a difference · {summary.notCounted} not counted{" "}
+            · {summary.moved} moved since opening
+          </>
+        ) : (
+          <>
+            {summary.counted} items counted · {summary.adjusted} adjusted · {summary.notCounted} not counted
+          </>
+        )}
       </p>
 
       {showControls ? (
@@ -137,7 +179,9 @@ export function StocktakeReview({
           </>
         }
       >
-        Post {summary.withDiff} adjustments? {summary.notCounted} uncounted items are left as they are.
+        {summary.kind === "open" && (
+          <>Post {summary.withDiff} adjustments? {summary.notCounted} uncounted items are left as they are.</>
+        )}
       </Dialog>
 
       <Dialog

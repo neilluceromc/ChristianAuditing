@@ -117,6 +117,73 @@ export function auditSentence(entry: ActivityEntryLike): string {
       const fields = diff ? Object.keys(diff).join(", ") : "fields";
       return `${entry.actorLabel} updated ${fields} on ${entry.entityLabel} by import`;
     }
+    // Phase 19 (M-3): the twelve stock/stocktake actions this module writes
+    // (`item-actions.ts`, `movement-actions.ts`, `stocktake-actions.ts`) all
+    // fell to the `default` branch and rendered as a raw verb — exactly the
+    // non-sentence rule 16's own Phase 12 fix (above) already corrected once
+    // for assets. `entityLabels` already resolves `stock-item`/`stocktake`/
+    // `stock-category` to a human label (`code · name` / refNo / name), so
+    // every case below only supplies the verb and, where the diff carries
+    // one, the quantity/department/reason that makes the row worth reading
+    // without opening the diff.
+    case "stock.item.created":
+      return `${entry.actorLabel} created ${entry.entityLabel}`;
+    case "stock.item.updated": {
+      const fields = diff ? Object.keys(diff).join(", ") : "fields";
+      return `${entry.actorLabel} updated ${fields} on ${entry.entityLabel}`;
+    }
+    case "stock.item.archived":
+      return `${entry.actorLabel} archived ${entry.entityLabel}`;
+    case "stock.item.restored":
+      return `${entry.actorLabel} restored ${entry.entityLabel}`;
+    case "stock.category.created":
+      return `${entry.actorLabel} created the category ${entry.entityLabel}`;
+    case "stock.category.updated": {
+      const fields = diff ? Object.keys(diff).join(", ") : "fields";
+      return `${entry.actorLabel} updated ${fields} on the category ${entry.entityLabel}`;
+    }
+    case "stock.category.archived":
+      return `${entry.actorLabel} archived the category ${entry.entityLabel}`;
+    case "stock.category.restored":
+      return `${entry.actorLabel} restored the category ${entry.entityLabel}`;
+    case "stock.received": {
+      const qty = diff?.quantity?.to;
+      return `${entry.actorLabel} received ${typeof qty === "number" ? qty : "stock"} of ${entry.entityLabel}`;
+    }
+    case "stock.issued": {
+      // `movement-actions.ts` records the balance before/after, not the
+      // issued quantity itself, so the sentence recovers it as their
+      // difference — the same number the over-issue refusal would have
+      // named had this issue been refused instead.
+      const from = diff?.quantity?.from;
+      const to = diff?.quantity?.to;
+      const qty = typeof from === "number" && typeof to === "number" ? from - to : null;
+      const dept = diff?.department?.to;
+      return `${entry.actorLabel} issued ${qty ?? "stock"} of ${entry.entityLabel}${typeof dept === "string" ? ` to ${dept}` : ""}`;
+    }
+    case "stock.adjusted": {
+      const from = diff?.balance?.from;
+      const to = diff?.balance?.to;
+      const delta = typeof from === "number" && typeof to === "number" ? to - from : null;
+      // Real minus (U+2212), never a hyphen-minus — the same convention
+      // `stocktake-review.tsx`'s `fmtVariance` uses for a negative.
+      const deltaStr = delta === null ? "an amount" : delta >= 0 ? `+${delta}` : `−${Math.abs(delta)}`;
+      const reason = diff?.reason?.to;
+      return `${entry.actorLabel} adjusted ${entry.entityLabel} by ${deltaStr}${typeof reason === "string" ? ` · ${reason}` : ""}`;
+    }
+    case "stocktake.opened": {
+      const scope = diff?.scope?.to;
+      const lines = diff?.lines?.to;
+      const lineSuffix = typeof lines === "number" ? ` · ${lines} item${lines === 1 ? "" : "s"}` : "";
+      return `${entry.actorLabel} opened ${entry.entityLabel} for ${typeof scope === "string" ? scope : "all categories"}${lineSuffix}`;
+    }
+    case "stocktake.posted": {
+      const adjusted = diff?.adjusted?.to;
+      const skipped = diff?.skipped?.to;
+      return `${entry.actorLabel} posted ${entry.entityLabel} · ${typeof adjusted === "number" ? adjusted : 0} adjusted, ${typeof skipped === "number" ? skipped : 0} not counted`;
+    }
+    case "stocktake.cancelled":
+      return `${entry.actorLabel} cancelled the stocktake ${entry.entityLabel}`;
     default:
       return `${entry.actorLabel} ${entry.action} ${entry.entityLabel}`;
   }

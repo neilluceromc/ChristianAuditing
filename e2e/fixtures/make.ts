@@ -81,8 +81,10 @@ function supplier(row: Partial<SupplierSheetRow> & Pick<SupplierSheetRow, "name"
 
 /** Every column blank but Name/Category/Unit — the minimal stock row. Code
  * defaults to null (assigned a code at apply time); Unit cost is always
- * null here — `STOCK_IMPORT_HEADERS` never maps it, so a real value would
- * only prove the fixture carries a column the importer already ignores. */
+ * null here — M-2 correction: `STOCK_IMPORT_HEADERS` DOES map it (matched,
+ * since D-11), but nothing downstream reads the matched value, so a real
+ * figure here would only prove the fixture carries a column the importer
+ * already ignores on write. */
 function stock(row: Partial<StockSheetRow> & Pick<StockSheetRow, "name" | "category" | "unit">): StockSheetRow {
   return {
     code: null, packSize: null, reorderLevel: 0, openingQty: 0, unitCost: null, notes: null,

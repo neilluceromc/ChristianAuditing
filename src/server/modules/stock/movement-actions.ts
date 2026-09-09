@@ -20,6 +20,22 @@ function revalidateItem(itemId: string) {
 }
 
 /**
+ * R2/I-1, the same local class `item-actions.ts` and `stocktake-actions.ts`
+ * each declare: a refusal discovered inside `$transaction` must THROW so
+ * Prisma rolls back whatever the callback already wrote, never `return` — a
+ * plain `return` from an interactive transaction's callback COMMITS. Nothing
+ * is written above `issueStock`'s three in-transaction refusals today, but
+ * the pattern is declared here (not just followed ad hoc) so the next writer
+ * who adds a write above one of them inherits the rollback for free instead
+ * of having to notice the hazard themselves.
+ */
+class ActionFailure extends Error {
+  constructor(public readonly result: ActionResult<never>) {
+    super(result.ok ? undefined : result.message);
+  }
+}
+
+/**
  * Spec §5.3. Item existence/archived and the packs×packSize cross-check are
  * refused BEFORE the transaction (nothing to roll back yet); the lot and
  * movement are written together so a receipt is never half-recorded.
@@ -70,10 +86,13 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ movem
 }
 
 /**
- * The "failure" variable pattern (R2 — the same shape `saveDraft`/`receiving.ts`
- * use): every in-transaction refusal here — over-issue, unknown department,
- * unknown employee — is `return`ed from the callback and handed back after
- * the transaction resolves, so a write above it still rolls back.
+ * R2/I-1: the same `ActionFailure` pattern as `item-actions.ts`'s
+ * `createStockItem` and `stocktake-actions.ts`'s `postStocktake` — every
+ * in-transaction refusal here (over-issue, unknown department, unknown
+ * employee) THROWS `ActionFailure`, caught by the `try/catch` below and
+ * turned back into the module's `ActionResult`. A `return` from inside an
+ * interactive transaction's callback COMMITS rather than rolling back, so it
+ * is never used for a refusal found after the item row lock is taken.
  */
 export async function issueStock(input: unknown): Promise<ActionResult<{ balance: number }>> {
   const user = await actionUser();
@@ -90,39 +109,41 @@ export async function issueStock(input: unknown): Promise<ActionResult<{ balance
   if (!item) return conflict("That item no longer exists.");
   if (item.archivedAt) return conflict(`${item.code} is archived — restore it first.`);
 
-  let balanceAfter = 0;
-  const failure = await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT "id" FROM "StockItem" WHERE "id" = ${item.id} FOR UPDATE`;
-    const sum = await tx.stockMovement.aggregate({ where: { itemId: item.id }, _sum: { quantity: true } });
-    const balance = sum._sum.quantity ?? 0;
-    const check = canIssue(balance, d.quantity);
-    if (!check.ok) {
-      return conflict(`Only ${unitsLabel(check.left, item.unit)} left of ${item.code} — issue at most that many`);
-    }
-    const dept = await tx.department.findUnique({ where: { id: d.departmentId }, select: { id: true, name: true } });
-    if (!dept) return validationError({ departmentId: "Unknown department" });
-    let employeeId: string | null = null;
-    if (d.employeeId) {
-      const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { id: true } });
-      if (!employee) return validationError({ employeeId: "Unknown employee" });
-      employeeId = employee.id;
-    }
-    await tx.stockMovement.create({
-      data: {
-        itemId: item.id, kind: "ISSUE", quantity: signedQuantity("ISSUE", d.quantity), departmentId: dept.id,
-        employeeId: employeeId || null, reason: d.reason || null, actorId: user.id,
-      },
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "StockItem" WHERE "id" = ${item.id} FOR UPDATE`;
+      const sum = await tx.stockMovement.aggregate({ where: { itemId: item.id }, _sum: { quantity: true } });
+      const balance = sum._sum.quantity ?? 0;
+      const check = canIssue(balance, d.quantity);
+      if (!check.ok) {
+        throw new ActionFailure(conflict(`Only ${unitsLabel(check.left, item.unit)} left of ${item.code} — issue at most that many`));
+      }
+      const dept = await tx.department.findUnique({ where: { id: d.departmentId }, select: { id: true, name: true } });
+      if (!dept) throw new ActionFailure(validationError({ departmentId: "Unknown department" }));
+      let employeeId: string | null = null;
+      if (d.employeeId) {
+        const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { id: true } });
+        if (!employee) throw new ActionFailure(validationError({ employeeId: "Unknown employee" }));
+        employeeId = employee.id;
+      }
+      await tx.stockMovement.create({
+        data: {
+          itemId: item.id, kind: "ISSUE", quantity: signedQuantity("ISSUE", d.quantity), departmentId: dept.id,
+          employeeId: employeeId || null, reason: d.reason || null, actorId: user.id,
+        },
+      });
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: item.id, action: "stock.issued",
+        diff: { quantity: { from: balance, to: balance - d.quantity }, department: { from: null, to: dept.name } },
+      });
+      return { balance: balance - d.quantity };
     });
-    await writeAudit(tx, {
-      actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: item.id, action: "stock.issued",
-      diff: { quantity: { from: balance, to: balance - d.quantity }, department: { from: null, to: dept.name } },
-    });
-    balanceAfter = balance - d.quantity;
-    return null;
-  });
-  if (failure) return failure;
-  revalidateItem(item.id);
-  return ok({ balance: balanceAfter });
+    revalidateItem(item.id);
+    return ok(result);
+  } catch (e) {
+    if (e instanceof ActionFailure) return e.result;
+    throw e;
+  }
 }
 
 /**

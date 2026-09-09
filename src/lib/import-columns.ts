@@ -102,17 +102,19 @@ export const splitEmployeeUnknownColumns = makeSplitter(EMPLOYEE_KNOWN_UNIMPORTE
 export const SUPPLIER_KNOWN_UNIMPORTED_COLUMNS: readonly string[] = [];
 
 /**
- * Phase 19 Task 6 (spec §6). NOT derived by `deriveKnownUnimported` — that
- * helper compares against `STOCK_EXPORT_COLUMNS` (the balances export),
- * which doesn't even carry a "Unit cost" column; the sheet this notice is
- * about is `STOCK_IMPORT_TEMPLATE_COLUMNS`, the import template itself.
- * "Unit cost" is deliberately absent from `STOCK_IMPORT_HEADERS`
- * (`import-stock.ts`) — it is never matched to a field, so it always lands
- * in `matchHeaders`'s own `unknown` array, and this list is what tells
- * `splitColumns` to file it under "known, not a typo" rather than warn the
- * operator to go check their header spelling.
+ * M-2 correction: this used to claim "Unit cost" was absent from
+ * `STOCK_IMPORT_HEADERS` and so needed excusing from the unknown-column typo
+ * check. False since D-11 added a `unitCost` entry there (`import-stock.ts`
+ * says so correctly) — the header IS recognised, it is just consumed by
+ * nothing (no field on `StockCreateData`/`StockUpdatePatch` ever reads it,
+ * per spec §6: a unit cost is recorded on a receipt, not on the item). A
+ * matched header never lands in `matchHeaders`'s `unknown` array in the
+ * first place, so `splitColumns` never sees "Unit cost" to excuse — this
+ * list has nothing left to hold. Kept as `[]`, same as
+ * `SUPPLIER_KNOWN_UNIMPORTED_COLUMNS` above, purely because `ImportWizard`'s
+ * `knownUnimportedColumns` prop is required.
  */
-export const STOCK_KNOWN_UNIMPORTED_COLUMNS: readonly string[] = ["Unit cost"];
+export const STOCK_KNOWN_UNIMPORTED_COLUMNS: readonly string[] = [];
 
 /**
  * Spec §6: a receipt (not an import row) is where a unit cost is recorded,

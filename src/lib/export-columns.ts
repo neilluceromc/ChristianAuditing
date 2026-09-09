@@ -139,12 +139,13 @@ export const SUPPLIER_EXPORT_COLUMNS: XlsxColumn<{
  * balances export): that sheet carries `balance`/`low`/`lastMovementAt`,
  * none of which is a writable field, while this one carries `code` (blank to
  * assign) and `openingQty`, neither of which the balances export has any use
- * for. "Unit cost" is deliberately NOT matched by `STOCK_IMPORT_HEADERS`
- * (`import-stock.ts`) — its value is accepted in the sheet but ignored on
- * write (spec §6: unit cost is recorded on receipts, not opening stock), and
- * leaving it unmapped is what lets `import-columns.ts`'s
- * `STOCK_KNOWN_UNIMPORTED_COLUMNS` file it under "known, not a typo" rather
- * than mapping and then silently discarding it.
+ * for. M-2 correction: "Unit cost" IS matched by `STOCK_IMPORT_HEADERS`
+ * (`import-stock.ts`, since D-11) — recognised, never reported as an
+ * unrecognised column — but its value is accepted and then consumed by
+ * nothing on write (spec §6: unit cost is recorded on receipts, not opening
+ * stock). Because it's matched, it never reaches `matchHeaders`'s `unknown`
+ * array in the first place, so `import-columns.ts`'s
+ * `STOCK_KNOWN_UNIMPORTED_COLUMNS` has nothing to excuse — it stays `[]`.
  */
 export const STOCK_IMPORT_TEMPLATE_COLUMNS: XlsxColumn<{
   code: string | null; name: string; category: string; unit: string; packSize: number | null;

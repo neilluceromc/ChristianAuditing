@@ -251,9 +251,19 @@ export interface StocktakeDetail {
   id: string; refNo: string; scope: string; categoryId: string | null; state: StocktakeState;
   openedAt: Date; openedBy: string; postedAt: Date | null; postedBy: string | null; note: string | null;
   lines: Array<{ id: string; itemId: string; code: string; name: string; unit: string; bookQty: number; countedQty: number | null; currentQty: number }>;
+  /** I-4: the stocktake's OWN posted ADJUSTMENT movements, item id -> signed quantity. Always empty for OPEN (nothing posted yet) and for CANCELLED (nothing was ever written). A Map is fine here — this is server-only; the page converts it before any client boundary (R3/D-4). */
+  adjustments: Map<string, number>;
 }
 
-/** `currentQty` comes from one groupBy over the line item ids — the review needs it, the count screen ignores it. */
+/**
+ * `currentQty` is a live balance — spec §5.1 says it matters "for OPEN ones"
+ * only, since a POSTED/CANCELLED review is a frozen record, not today's
+ * ledger (I-4); the groupBy that computes it is skipped entirely once the
+ * stocktake has left OPEN, and `currentQty` is 0 (never read by the page in
+ * that branch). `adjustments` instead reads the stocktake's own `movements`
+ * relation — what it actually posted — for the non-OPEN review's
+ * "Adjustment" column.
+ */
 export async function getStocktake(id: string): Promise<StocktakeDetail | null> {
   const st = await prisma.stocktake.findUnique({
     where: { id },
@@ -266,11 +276,20 @@ export async function getStocktake(id: string): Promise<StocktakeDetail | null> 
   });
   if (!st) return null;
 
-  const ids = st.lines.map((l) => l.itemId);
-  const sums = ids.length
-    ? await prisma.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true } })
-    : [];
-  const currentById = new Map(sums.map((s) => [s.itemId, s._sum.quantity ?? 0]));
+  let currentById = new Map<string, number>();
+  let adjustments = new Map<string, number>();
+  if (st.state === "OPEN") {
+    const ids = st.lines.map((l) => l.itemId);
+    const sums = ids.length
+      ? await prisma.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true } })
+      : [];
+    currentById = new Map(sums.map((s) => [s.itemId, s._sum.quantity ?? 0]));
+  } else {
+    const posted = await prisma.stockMovement.findMany({
+      where: { stocktakeId: st.id, kind: "ADJUSTMENT" }, select: { itemId: true, quantity: true },
+    });
+    adjustments = new Map(posted.map((m) => [m.itemId, m.quantity]));
+  }
 
   return {
     id: st.id, refNo: st.refNo, scope: st.category?.name ?? "All", categoryId: st.categoryId, state: st.state,
@@ -280,6 +299,7 @@ export async function getStocktake(id: string): Promise<StocktakeDetail | null> 
       id: l.id, itemId: l.itemId, code: l.item.code, name: l.item.name, unit: l.item.unit,
       bookQty: l.bookQty, countedQty: l.countedQty, currentQty: currentById.get(l.itemId) ?? 0,
     })),
+    adjustments,
   };
 }
 
@@ -319,7 +339,7 @@ export async function stockExportRows(state: ListState): Promise<{ rows: StockEx
 
   const total = await prisma.stockItem.count({ where });
   if (total > EXPORT_CAP) return { over: total };
-  const items = await prisma.stockItem.findMany({ where, orderBy: [{ code: "asc" }], include: { category: { select: { name: true } } } });
+  const items = await prisma.stockItem.findMany({ where, orderBy: buildStockOrderBy(state.sort), include: { category: { select: { name: true } } } });
   const ids = items.map((r) => r.id);
   const sums = ids.length
     ? await prisma.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true }, _max: { occurredAt: true } })

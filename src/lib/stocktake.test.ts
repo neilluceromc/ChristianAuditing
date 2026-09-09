@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planStocktakePost, varianceRows, type StocktakeLineInput } from "./stocktake";
+import { planStocktakePost, postedReviewRows, varianceRows, type StocktakeLineInput } from "./stocktake";
 
 const lines: StocktakeLineInput[] = [
   { itemId: "A", bookQty: 36, countedQty: 34 },
@@ -30,5 +30,26 @@ describe("varianceRows", () => {
       { itemId: "C", bookQty: 12, currentQty: 12, countedQty: null, variance: null, drift: 0 },
       { itemId: "D", bookQty: 5, currentQty: 5, countedQty: 9, variance: 4, drift: 0 },
     ]);
+  });
+});
+
+describe("postedReviewRows — I-4: a frozen record, never a live recomputation", () => {
+  it("reads the adjustment from the stocktake's own movements, ignoring bookQty/current entirely", () => {
+    const adjustments = new Map<string, number>([["A", -2], ["B", 2]]);
+    expect(postedReviewRows(lines, adjustments)).toEqual([
+      { itemId: "A", bookQty: 36, countedQty: 34, adjustment: -2 },
+      { itemId: "B", bookQty: 22, countedQty: 22, adjustment: 2 },
+      { itemId: "C", bookQty: 12, countedQty: null, adjustment: null },
+      { itemId: "D", bookQty: 5, countedQty: 9, adjustment: null },
+    ]);
+  });
+
+  it("a line with no recorded adjustment renders null whether it was never counted (C) or matched exactly (D)", () => {
+    // Same fixture, empty adjustments map — every line falls back to null;
+    // the caller (the component) tells the two cases apart via countedQty.
+    const rows = postedReviewRows(lines, new Map());
+    expect(rows.every((r) => r.adjustment === null)).toBe(true);
+    expect(rows.find((r) => r.itemId === "C")!.countedQty).toBeNull();
+    expect(rows.find((r) => r.itemId === "D")!.countedQty).not.toBeNull();
   });
 });
