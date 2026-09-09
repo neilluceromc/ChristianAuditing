@@ -55,7 +55,7 @@ export function RegisterForm({
   categories: Array<{ id: string; name: string; cls: AssetClass }>;
   types: Array<{ id: string; name: string; categoryId: string }>;
   vendors: Array<{ id: string; name: string }>;
-  requests: Array<{ id: string; refNo: string }>;
+  requests: Array<{ id: string; refNo: string; vendorId: string | null }>;
   prefixCountsByCategory: Record<string, Array<{ prefix: string; n: number }>>;
   highestByPrefix: Record<string, number | null>;
   action: (payload: Record<string, unknown>) => Promise<ActionResult<{ created: number; ids: string[] }>>;
@@ -489,7 +489,15 @@ export function RegisterForm({
               <Select
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 value={requestId}
-                onChange={(e) => setRequestId(e.target.value)}
+                onChange={(e) => {
+                  const r = requests.find((x) => x.id === e.target.value);
+                  setRequestId(e.target.value);
+                  // Phase 18 spec §5.4: fill an EMPTY vendor from the request's supplier; never overwrite a chosen one.
+                  // I-1: only when that supplier is among the offered options — an archived
+                  // supplier no longer appears in `vendors`, and this control must never set
+                  // a value the select cannot show.
+                  if (r?.vendorId && !vendorId && vendors.some((v) => v.id === r.vendorId)) setVendorId(r.vendorId);
+                }}
               >
                 <option value="">—</option>
                 {requests.map((r) => <option key={r.id} value={r.id}>{r.refNo}</option>)}

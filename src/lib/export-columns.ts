@@ -35,7 +35,7 @@ export const ASSET_EXPORT_COLUMNS: XlsxColumn<{
   tag: string; model: string; brand: string | null; serial: string | null; categoryName: string; typeName: string | null;
   status: string; assigneeName: string | null; assigneeNo: string | null; purchasedAt: Date | null;
   cost: number | null; warrantyUntil: Date | null; loanDueAt: Date | null; vendorName: string | null;
-  invoiceRef: string | null; rmaRef: string | null; notes: string | null;
+  invoiceRef: string | null; rmaRef: string | null; notes: string | null; provenance: string;
 }>[] = [
   { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
   { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
@@ -51,6 +51,7 @@ export const ASSET_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Warranty until", width: 14, cell: (r) => ({ value: r.warrantyUntil, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Loan until", width: 14, cell: (r) => ({ value: r.loanDueAt, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Vendor", width: 20, cell: (r) => ({ value: r.vendorName }) },
+  { label: "Provenance", width: 24, cell: (r) => ({ value: r.provenance }) },
   { label: "Invoice / receipt no.", width: 18, cell: (r) => ({ value: r.invoiceRef }) },
   { label: "RMA ref", width: 16, cell: (r) => ({ value: r.rmaRef }) },
   { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
@@ -111,6 +112,26 @@ export const EMPLOYEE_EXPORT_COLUMNS: XlsxColumn<{
  * (`refNo` and `state`), just as two cells instead of one. `Reason` is the
  * plan's "Note" column under its actual name, matching the page's header.
  */
+/** Phase 18 (plan P-4): the supplier sheet shape — the import template, and what make.ts writes fixtures with. */
+export const SUPPLIER_EXPORT_COLUMNS: XlsxColumn<{
+  name: string; registeredName: string | null; category: string | null; contactPerson: string | null; phone: string | null;
+  email: string | null; address: string | null; registrationNo: string | null; contractStatus: string;
+  contractStart: Date | null; contractEnd: Date | null; notes: string | null;
+}>[] = [
+  { label: "Name", width: 26, cell: (r) => ({ value: r.name }) },
+  { label: "Registered name", width: 30, cell: (r) => ({ value: r.registeredName }) },
+  { label: "Category", width: 18, cell: (r) => ({ value: r.category }) },
+  { label: "Contact person", width: 22, cell: (r) => ({ value: r.contactPerson }) },
+  { label: "Phone", width: 18, cell: (r) => ({ value: r.phone }) },
+  { label: "Email", width: 26, cell: (r) => ({ value: r.email }) },
+  { label: "Address", width: 36, cell: (r) => ({ value: r.address }) },
+  { label: "Registration no", width: 18, cell: (r) => ({ value: r.registrationNo }) },
+  { label: "Contract status", width: 16, cell: (r) => ({ value: r.contractStatus }) },
+  { label: "Contract start", width: 14, cell: (r) => ({ value: r.contractStart, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Contract end", width: 14, cell: (r) => ({ value: r.contractEnd, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
+];
+
 export const FAREWELL_EXPORT_COLUMNS: XlsxColumn<{
   tag: string; model: string; outcome: string; reason: string | null;
   cost: number | null; refNo: string; state: string;

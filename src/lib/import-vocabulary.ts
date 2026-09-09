@@ -1,5 +1,6 @@
 import { EMPLOYMENT_STATUSES } from "./employees-list";
 import { STATUSES_BY_CLASS } from "./asset-class";
+import { VENDOR_CONTRACT_STATUSES } from "./supplier-schema";
 
 /**
  * Scope decision 5. An import writes one AuditEntry per row, so this cap bounds
@@ -103,6 +104,19 @@ export const BLOCK_CAUSES = [
   // its own cause, with its own fix (the Register screen, not a spreadsheet
   // edit). Appended, per this array's own rule above — never inserted.
   "wrong-class",
+  // Phase 18 Task 5: the supplier importer's own causes. Appended, never inserted.
+  "bad-contract-status",
+  "bad-email",
+  "contract-dates-order",
+  // Fix round 1 (Task 5, Important #2): NOT a reuse of `duplicate-vendor-name`
+  // — that cause was written for the asset importer's optional, droppable
+  // Vendor reference field ("no page in this app can rename or create one").
+  // Here the colliding field is the supplier row's own required `name`, and
+  // `/purchases/suppliers` genuinely lets someone rename the colliding
+  // record, so this gets its own cause with its own truthful copy and a
+  // `link` fix instead of the asset-vendor `option` one. Appended, per this
+  // array's own rule above — never inserted.
+  "duplicate-supplier-name",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -438,6 +452,39 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "for them; an existing one is theirs to edit. Hand them the rows below; the rest of your file " +
       "still imports.",
     fix: { kind: "link", label: "Open the Register screen", href: "/inventory/register" },
+  },
+
+  // Phase 18 Task 5: the supplier importer's own causes, from here down.
+  "bad-contract-status": {
+    label: "Contract status not recognised",
+    explain:
+      `These rows carry a contract status that is not one of this system's four: ${VENDOR_CONTRACT_STATUSES.join(", ")}. ` +
+      "Leave the cell blank for a supplier with no contract.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "bad-email": {
+    label: "Email is not an address",
+    explain: "These rows carry something in the Email column that is not an email address. Correct it or clear the cell.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  "contract-dates-order": {
+    label: "Contract ends before it starts",
+    explain: "These rows have a contract end date earlier than the start date. One of the two is wrong.",
+    fix: { kind: "reupload", label: "Fix the file" },
+  },
+  // Fix round 1 (Task 5, Important #2): the supplier importer's own name
+  // collision cause. NOT a reuse of `duplicate-vendor-name` — every sentence
+  // of that cause's copy is false here: this row's `name` is the required
+  // identity field being imported, not an optional droppable reference, and
+  // `/purchases/suppliers/[id]/edit` DOES let someone rename the colliding
+  // record (there is no "asset's edit form" in this wizard at all).
+  "duplicate-supplier-name": {
+    label: "Two suppliers already share this name",
+    explain:
+      "Two supplier records already exist whose names differ only by letter case, so this import can't " +
+      "tell which one this row means. Rename one of them — to something differing by more than letter " +
+      "case, or the rename lands on this same block — then re-upload.",
+    fix: { kind: "link", label: "Open suppliers", href: "/purchases/suppliers" },
   },
 };
 

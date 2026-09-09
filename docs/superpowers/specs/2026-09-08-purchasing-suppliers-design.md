@@ -3,7 +3,12 @@
 **Status:** design approved in conversation 2026-09-08 (approach and section 1 explicitly; sections 2–6 by
 the instruction "continue until we finished developing this phase"). Implements HANDOVER §9 items **B**
 (vendor / supplier master data) and **C** (purchasing workflow extensions). Item **D** (consumables and
-stock control) is a separate phase with its own spec.
+stock control) is a separate phase with its own spec. **Implemented on `phase-18-purchasing-suppliers`
+(code-complete 2026-09-08) — see the plan's `D-1`…`D-17` amendment block for every deviation.** Contra
+§8.2's "no existing e2e file changes": two pre-existing e2e files changed, both compile-forced by an
+earlier task's own column addition, not new assertions — `e2e/asset-classes.spec.ts` (a `provenance`
+value in its hand-built fixture literal, Task 7) and `e2e/purchases.spec.ts` (two `selectOption` lines so
+its existing draft-creation steps pick a department, Task 9) — see plan `D-15`.
 
 **Plan:** `docs/superpowers/plans/2026-09-08-phase-18-purchasing-suppliers.md` (written next).
 
@@ -186,8 +191,9 @@ must be an email when present, `address` ≤400, `registrationNo` ≤60, `contra
 and `contractEnd` `dateStr` with `contractEnd >= contractStart` when both present ("End date is before the
 start"), `contractTerms` and `notes` ≤2000. The category input autocompletes from
 `supplierCategories()` (distinct non-null values, ≤50). A duplicate name (Prisma P2002 on `name`) is the
-field error "A supplier with this name already exists". Success: redirect to the profile with a
-"Supplier created" / "Saved" toast. Audit: `supplier.created`, `supplier.updated` (diff of changed
+field error "A supplier with this name already exists". Success: new → redirect to the profile with a
+toast; edit → toast and refresh (D-19 — this line originally read both ways; the implemented behaviour
+is now the binding one). Audit: `supplier.created`, `supplier.updated` (diff of changed
 fields), `supplier.archived`, `supplier.restored`, entityType `vendor`.
 
 `archiveSupplier` / `restoreSupplier` from the profile header. Archiving never touches requests or

@@ -1,4 +1,4 @@
-import { PrismaClient, type AssetStatus, type AssetClass } from "@prisma/client";
+import { PrismaClient, Prisma, type AssetStatus, type AssetClass } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { encryptSecret } from "../src/server/crypto";
 import { secretAad } from "../src/server/webhooks/sign";
@@ -79,9 +79,19 @@ async function main() {
   }
   await prisma.assetCategory.create({ data: { name: "Uncategorised", locked: true } });
 
-  const vendors = await Promise.all(
-    ["TechServe PH", "Octagon Repairs"].map((name) => prisma.vendor.create({ data: { name } })),
-  );
+  const vendorRows: Array<Prisma.VendorCreateInput> = [
+    { name: "TechServe PH", registeredName: "TechServe Philippines, Inc.", category: "IT hardware", contactPerson: "Rina Valdez",
+      phone: "+63 2 8123 4567", email: "sales@techserve.ph", address: "Ortigas Center, Pasig", registrationNo: "CS201512345",
+      contractStatus: "ACTIVE", contractStart: day(-300), contractEnd: day(425), contractTerms: "Net 30; on-site warranty service" },
+    { name: "Octagon Repairs", category: "Repair services", contactPerson: "Bong Reyes", phone: "+63 917 555 0102",
+      email: "service@octagon-repairs.ph", contractStatus: "NONE" },
+    { name: "Metro Office Supply", category: "Office supplies", contactPerson: "Liza Mendoza", email: "orders@metrooffice.ph",
+      contractStatus: "EXPIRED", contractStart: day(-800), contractEnd: day(-70) },
+    { name: "Quezon Furniture Works", category: "Furniture", contactPerson: "Dante Cruz", phone: "+63 2 8555 0199",
+      contractStatus: "ACTIVE", contractStart: day(-100), contractEnd: day(265) },
+    { name: "Old Line Trading", category: "General", contactPerson: "—", contractStatus: "NONE", archivedAt: day(-30) },
+  ];
+  const vendors = await Promise.all(vendorRows.map((data) => prisma.vendor.create({ data })));
 
   const employeeRows: Array<[string, string, string, string, string | null, number, "ACTIVE" | "OFFBOARDING" | "OFFBOARDED"]> = [
     ["EMP-0042", "Marites Bautista", "Accountant", "Finance", "active", -900, "ACTIVE"],
@@ -123,7 +133,7 @@ async function main() {
     // Phase 14: IT-registered rows are born checked; a car never carries a stamp.
     itVerifiedAt: cats[cat].cls === "IT" ? day(-720) : null,
     status: status as AssetStatus,
-    purchasedAt: day(-720), cost: 55_000, warrantyUntil: day(180), ...extra,
+    purchasedAt: day(-720), cost: 55_000, warrantyUntil: day(180), importedAt: null, ...extra,
   });
 
   await prisma.asset.createMany({
@@ -190,18 +200,25 @@ async function main() {
       mk("BR-BL-0001", "Makati office, 12F", "Building", "OPERATIONAL", { cost: 45_000_000, purchasedAt: day(-3000), warrantyUntil: null }),
     ],
   });
+
+  // Phase 18 spec §2.6: anything bought more than two years ago reads as a historical import.
+  await prisma.asset.updateMany({
+    where: { purchasedAt: { lt: day(-730) }, purchaseRequestId: null },
+    data: { importedAt: new Date() },
+  });
+
   const asset = (tag: string) => prisma.asset.findUniqueOrThrow({ where: { tag } });
 
   // Purchase requests — one per state; the SUBMITTED one is a bounce-back with a note thread.
   await prisma.purchaseRequest.create({
     data: {
-      refNo: "PR-0201", state: "DRAFT", requestedById: purchasing.id,
+      refNo: "PR-0201", state: "DRAFT", requestedById: purchasing.id, departmentId: depts["IT"].id,
       units: { create: [{ description: "Laptop for new analyst", specs: "16GB RAM min", qty: 1, unitPrice: 62_000 }] },
     },
   });
   await prisma.purchaseRequest.create({
     data: {
-      refNo: "PR-0198", state: "SUBMITTED", requestedById: purchasing.id,
+      refNo: "PR-0198", state: "SUBMITTED", requestedById: purchasing.id, departmentId: depts["HR"].id,
       submittedAt: day(-4), reviewedAt: day(-2), reviewedById: itStaff.id,
       units: {
         create: [
@@ -220,19 +237,28 @@ async function main() {
   });
   await prisma.purchaseRequest.create({
     data: {
-      refNo: "PR-0195", state: "IT_REVIEWED", requestedById: purchasing.id,
+      refNo: "PR-0195", state: "IT_REVIEWED", requestedById: purchasing.id, departmentId: depts["Sales"].id,
       submittedAt: day(-6), reviewedAt: day(-3), reviewedById: itStaff.id,
       units: { create: [{ description: "Wireless headsets", qty: 6, unitPrice: 7_500, state: "APPROVED" }] },
       notes: { create: [{ authorId: purchasing.id, kind: "SUBMIT", text: "Replacement cycle for Sales.", createdAt: day(-6) }] },
     },
   });
-  await prisma.purchaseRequest.create({
+  const pr0188 = await prisma.purchaseRequest.create({
     data: {
-      refNo: "PR-0188", state: "COMPLETED", requestedById: purchasing.id,
+      refNo: "PR-0188", state: "COMPLETED", requestedById: purchasing.id, departmentId: depts["IT"].id, vendorId: vendors[0].id,
       submittedAt: day(-40), reviewedAt: day(-35), reviewedById: itStaff.id, completedAt: day(-30),
       units: { create: [{ description: "Dell Latitude 5420", qty: 2, unitPrice: 55_000, state: "APPROVED" }] },
     },
+    include: { units: true },
   });
+  // Final-review fix wave (M-5): register one seeded asset against PR-0188's
+  // own unit so the "From PR-0188" badge (spec §6) has seed data, not only
+  // e2e-created rows. BR-LT-0148 is one of PR-0188's two Dell Latitude 5420s.
+  await prisma.asset.update({
+    where: { tag: "BR-LT-0148" },
+    data: { purchaseRequestId: pr0188.id, purchaseUnitId: pr0188.units[0].id },
+  });
+  // Phase 18: deliberately untagged — the e2e "none" filter case needs one pre-phase row
   await prisma.purchaseRequest.create({
     data: {
       refNo: "PR-0183", state: "CANCELLED", requestedById: purchasing.id,

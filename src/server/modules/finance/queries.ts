@@ -4,6 +4,7 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 import { isStatusOf } from "@/lib/asset-class";
 import { ageBucket } from "@/lib/home";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
 
 export interface FinanceAssetRow {
   id: string;
@@ -16,6 +17,7 @@ export interface FinanceAssetRow {
   age: string;
   warranty: string;
   assignee: string | null;
+  provenance: string;
 }
 
 export function parseAssetStatus(raw: string | null | undefined, cls: AssetClass): AssetStatus | null {
@@ -51,6 +53,7 @@ export async function financeAssets(
     orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
     skip: pg.skip,
     take: pg.take,
+    // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
     include: { category: true, assignee: true },
   });
 
@@ -71,6 +74,7 @@ export async function financeAssets(
       age: ageBucket(a.purchasedAt, now) ?? "—",
       warranty: fmtDate(a.warrantyUntil),
       assignee: a.assignee?.name ?? null,
+      provenance: PROVENANCE_LABEL[provenanceOf(a)],
     })),
   };
 }

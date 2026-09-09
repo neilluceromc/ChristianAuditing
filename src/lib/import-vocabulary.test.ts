@@ -17,9 +17,13 @@ import {
 // a rename there is genuinely possible (E-6). `/inventory/register` was added
 // in Phase 13 Task 10 — it exists, and is where a Purchasing-class row is
 // pointed instead of a file fix.
+// Fix round 1 (Task 5, Important #2): "/purchases/suppliers" added — it
+// exists, and unlike the asset importer's Vendor, a supplier's name IS
+// something the suppliers page can rename, so `duplicate-supplier-name`'s
+// link fix points somewhere real and actionable.
 const REAL_ROUTES = [
   "/admin/asset-categories", "/admin/asset-types", "/admin/departments", "/inventory",
-  "/inventory/register",
+  "/inventory/register", "/purchases/suppliers",
 ];
 
 describe("BLOCK_CAUSES", () => {
@@ -208,6 +212,21 @@ describe("BLOCK_CAUSES", () => {
     expect(spec.explain).not.toMatch(/create it first/i);
   });
 
+  // Fix round 1 (Task 5, Important #2): the supplier importer's OWN
+  // collision cause, replacing a reuse of duplicate-vendor-name whose copy
+  // and fix were both false here (a supplier's name is required, not
+  // optional and droppable, and no "asset's edit form" exists in this
+  // wizard). Unlike a Vendor reference on an asset row, a supplier's own
+  // name CAN be renamed — on the suppliers page — so this gets a link, not
+  // an option.
+  it("sends duplicate-supplier-name to the suppliers page with copy that is true for a supplier row", () => {
+    const spec = blockSpec("duplicate-supplier-name");
+    expect(spec.label).toBe("Two suppliers already share this name");
+    expect(spec.fix).toEqual({ kind: "link", label: "Open suppliers", href: "/purchases/suppliers" });
+    expect(spec.explain).not.toMatch(/optional/i);
+    expect(spec.explain).not.toMatch(/asset/i);
+  });
+
   // NI-2 (round 2): reverting `bad-status` to a `/inventory` link left the
   // suite green under round 1, because no test pinned any cause's fix KIND
   // — only its internal consistency (a `link` fix must point somewhere
@@ -245,6 +264,10 @@ describe("BLOCK_CAUSES", () => {
       "employment-via-import": "option",
       "name-or-title-length": "reupload",
       "wrong-class": "link",
+      "bad-contract-status": "reupload",
+      "bad-email": "reupload",
+      "contract-dates-order": "reupload",
+      "duplicate-supplier-name": "link",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);

@@ -10,6 +10,7 @@ import {
 import { parseCls, visibleClassWhere } from "@/lib/asset-class";
 import { parseListState, withFilter } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
+import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
 
 export async function GET(req: Request) {
   const user = await requireUser();
@@ -48,6 +49,7 @@ export async function GET(req: Request) {
   const assets = await prisma.asset.findMany({
     where,
     orderBy: ids ? { tag: "asc" } : buildAssetOrderBy(state.sort),
+    // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
     include: { category: true, type: true, assignee: true, vendor: true },
   });
 
@@ -71,6 +73,7 @@ export async function GET(req: Request) {
       warrantyUntil: a.warrantyUntil,
       loanDueAt: a.loanDueAt,
       vendorName: a.vendor?.name ?? null,
+      provenance: PROVENANCE_LABEL[provenanceOf(a)],
       invoiceRef: a.invoiceRef,
       rmaRef: a.rmaRef,
       notes: a.notes,

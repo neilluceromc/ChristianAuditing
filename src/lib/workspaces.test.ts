@@ -209,6 +209,15 @@ describe("pathAllowedForRole", () => {
   it.each(cases)("%s for %s → %s", (path, role, allowed) => {
     expect(pathAllowedForRole(path, role as never)).toBe(allowed);
   });
+  it("supplier write routes are Purchasing-only and precede the general purchases rule", () => {
+    expect(pathAllowedForRole("/purchases/suppliers/new", "purchasing_staff")).toBe(true);
+    expect(pathAllowedForRole("/purchases/suppliers/new", "finance_staff")).toBe(false);
+    expect(pathAllowedForRole("/purchases/suppliers/import", "it_staff")).toBe(false);
+    expect(pathAllowedForRole("/purchases/suppliers/abc/edit", "admin")).toBe(true);
+    expect(pathAllowedForRole("/purchases/suppliers/abc/edit", "viewer")).toBe(false);
+    // reads follow whatever the general purchases rule allows today
+    expect(pathAllowedForRole("/purchases/suppliers", "finance_staff")).toBe(pathAllowedForRole("/purchases", "finance_staff"));
+  });
   it("admin can reach every workspace's paths", () => {
     for (const p of ["/inventory", "/purchases", "/finance/assets", "/admin/users", "/audit"]) {
       expect(pathAllowedForRole(p, "admin")).toBe(true);

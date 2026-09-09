@@ -93,6 +93,14 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       ],
     },
     {
+      heading: "Suppliers",
+      items: [
+        { label: "All suppliers", href: "/purchases/suppliers" },
+        { label: "New supplier", href: "/purchases/suppliers/new", roles: ["admin", "purchasing_staff"] },
+        { label: "Import suppliers", href: "/purchases/suppliers/import", roles: ["admin", "purchasing_staff"] },
+      ],
+    },
+    {
       heading: "By status",
       items: [
         { label: "My drafts", href: "/purchases?state=DRAFT" },
@@ -136,6 +144,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         { label: "Approved", href: "/purchases?state=COMPLETED" },
         { label: "Cancelled", href: "/purchases?state=CANCELLED" },
         { label: "All purchases", href: "/purchases" },
+        { label: "Suppliers", href: "/purchases/suppliers" },
       ],
     },
   ],
@@ -251,6 +260,10 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // finance approves the money. IT therefore needs the path its own
   // it-review/it-reject actions live on; page-level requireRole keeps
   // it_staff out of /purchases/new, and viewer sees it read-only.
+  // Phase 18 spec §3: the supplier write surfaces belong to Purchasing (and the
+  // sysadmin role). MUST precede the general /purchases rule — first-match-wins.
+  { test: /^\/purchases\/suppliers\/(new|import)(\/|$)/, workspaces: ["purchasing", "admin"], roles: ["admin", "purchasing_staff"] },
+  { test: /^\/purchases\/suppliers\/[^/]+\/edit(\/|$)/, workspaces: ["purchasing", "admin"], roles: ["admin", "purchasing_staff"] },
   { test: /^\/purchases(\/|$)/, workspaces: ["purchasing", "finance", "it"] },
   { test: /^\/finance(\/|$)/, workspaces: ["finance"] },
 ];

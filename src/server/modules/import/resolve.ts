@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/client";
 import { refKey, tagKey } from "@/lib/import-assets";
 import type { AssetRecordRef, AssetRefs, EmployeeRef } from "@/lib/import-assets";
 import type { EmployeeRecordRef, EmployeeRefs } from "@/lib/import-employees";
+import type { SupplierRefs } from "@/lib/import-suppliers";
 import type { AssetClass, EmploymentStatus } from "@prisma/client";
 
 /** Every field `AssetRecordRef` needs, straight off the Prisma select. */
@@ -311,4 +312,32 @@ export async function resolveEmployeeRefs(): Promise<EmployeeRefs> {
     }),
   ]);
   return buildEmployeeRefs(departments, employees);
+}
+
+/**
+ * The pure half of supplier-ref resolution (Phase 18 Task 5), the same
+ * extraction discipline `buildAssetRefs`/`buildEmployeeRefs` already
+ * established: unit-testable with a hand-built array, no database needed.
+ *
+ * A single map, reusing `buildCollisionMap` (R-1) — `Vendor.name` is
+ * `@unique`, but Postgres's unique index is case-sensitive and nothing in
+ * `suppliers/actions.ts`'s `createSupplier` checks case, so "TechServe PH"
+ * and "techserve ph" could coexist exactly as two categories or departments
+ * can. `null` means the key matched more than one vendor — undecidable,
+ * so `planSupplierRows` blocks rather than guessing which one a row means.
+ */
+export function buildSupplierRefs(vendors: Array<{ id: string; name: string }>): SupplierRefs {
+  return { byName: buildCollisionMap(vendors, (v) => refKey(v.name)) };
+}
+
+/**
+ * Every vendor, fetched whole — the same convention `resolveAssetRefs` and
+ * `resolveEmployeeRefs` use for their own reference tables, and for the same
+ * reason: a supplier list is small relative to the asset fleet, so there is
+ * no analogue of the tag/serial file-scoped lookup that matters at thousands
+ * of rows.
+ */
+export async function resolveSupplierRefs(): Promise<SupplierRefs> {
+  const vendors = await prisma.vendor.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } });
+  return buildSupplierRefs(vendors);
 }

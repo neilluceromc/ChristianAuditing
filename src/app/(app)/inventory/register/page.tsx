@@ -24,10 +24,14 @@ export default async function RegisterAssetsPage() {
       select: { id: true, name: true, categoryId: true },
       orderBy: { name: "asc" },
     }),
-    prisma.vendor.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.vendor.findMany({
+      where: { archivedAt: null },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
     prisma.purchaseRequest.findMany({
       where: { state: "COMPLETED" },
-      select: { id: true, refNo: true },
+      select: { id: true, refNo: true, vendorId: true },
       orderBy: { refNo: "asc" },
     }),
   ]);

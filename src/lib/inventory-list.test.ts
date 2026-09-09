@@ -32,6 +32,17 @@ describe("buildAssetWhere", () => {
   it("all-invalid status facet filters nothing rather than everything", () => {
     expect(buildAssetWhere(parse("status=HACKED")).status).toBeUndefined();
   });
+  it("provenance facet ORs the derived shapes inside AND, displacing nothing", () => {
+    const w = buildAssetWhere({ q: "", page: 1, sort: [], filters: { provenance: ["DIRECT", "HISTORICAL"], status: ["SPARE"] } });
+    expect(w.status).toEqual({ in: ["SPARE"] });
+    expect(w.AND).toEqual([{ OR: [
+      { purchaseRequestId: null, importedAt: null },
+      { purchaseRequestId: null, importedAt: { not: null } },
+    ] }]);
+  });
+  it("ignores an unknown provenance value", () => {
+    expect(buildAssetWhere({ q: "", page: 1, sort: [], filters: { provenance: ["nope"] } }).AND).toBeUndefined();
+  });
 });
 
 describe("buildAssetOrderBy", () => {

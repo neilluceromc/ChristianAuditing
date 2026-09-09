@@ -98,6 +98,7 @@ export default async function FinanceAssetsPage({
                   <Th width={96}>Category</Th>
                   <Th width={124} align="right">Cost</Th>
                   <Th width={104}>Purchased</Th>
+                  <Th width={150}>Provenance</Th>
                   <Th width={64}>Age</Th>
                   <Th width={104}>Warranty</Th>
                   <Th width={150}>Held by</Th>
@@ -117,6 +118,7 @@ export default async function FinanceAssetsPage({
                     <Td mono>{a.category}</Td>
                     <Td align="right" mono>{a.cost}</Td>
                     <Td mono>{a.purchased}</Td>
+                    <Td>{a.provenance}</Td>
                     <Td mono>{a.age}</Td>
                     <Td mono>{a.warranty}</Td>
                     <Td>{a.assignee ?? "—"}</Td>

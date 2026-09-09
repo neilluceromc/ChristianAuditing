@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { Button, IconButton } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/ui/pill";
 import { Select } from "@/components/ui/select";
@@ -50,32 +51,39 @@ function toPayload(units: UnitDraft[]) {
  */
 export function DraftForm({
   loadouts,
+  departments,
   initial,
 }: {
   loadouts: PolicyLoadout[];
-  initial?: { id: string; refNo: string; units: UnitDraft[] };
+  departments: Array<{ id: string; name: string }>;
+  initial?: { id: string; refNo: string; units: UnitDraft[]; departmentId: string | null };
 }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, startTransition] = useTransition();
   const [units, setUnits] = useState<UnitDraft[]>(initial?.units.length ? initial.units : [emptyRow()]);
+  const [departmentId, setDepartmentId] = useState(initial?.departmentId ?? "");
   const [draft, setDraft] = useState<{ id: string; refNo: string } | null>(
     initial ? { id: initial.id, refNo: initial.refNo } : null,
   );
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
   const [loadoutId, setLoadoutId] = useState("");
-  const lastSaved = useRef<string>(JSON.stringify(toPayload(initial?.units ?? [])));
+  const lastSaved = useRef<string>(
+    JSON.stringify({ payload: toPayload(initial?.units ?? []), departmentId: initial?.departmentId ?? "" }),
+  );
   // Guards the FIRST createDraft: while it's in flight, `draft` is still
   // null, so anything else that would otherwise fire its own createDraft
   // (a later autosave tick, or the Submit button) joins this promise instead.
   const createInFlight = useRef<ReturnType<typeof createDraft> | null>(null);
 
   const handleFailure = useCallback((res: Extract<ActionResult<unknown>, { ok: false }>) => {
-    if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
-    else setError(res.fieldErrors ? Object.values(res.fieldErrors)[0] ?? res.message : res.message);
+    if (res.kind === "rate_limited") { setRetryAfter(res.retryAfterSec ?? 60); return; }
+    setFieldErrors(res.fieldErrors ?? {});
+    setError(res.fieldErrors ? Object.values(res.fieldErrors)[0] ?? res.message : res.message);
   }, []);
 
   /**
@@ -95,14 +103,14 @@ export function DraftForm({
    * saveDraft rather than assuming the create covered it.
    */
   const persist = useCallback(
-    async (payload: ReturnType<typeof toPayload>) => {
-      if (draft) return saveDraft({ id: draft.id, units: payload });
+    async (payload: ReturnType<typeof toPayload>, dept: string) => {
+      if (draft) return saveDraft({ id: draft.id, units: payload, departmentId: dept });
       if (createInFlight.current) {
         const first = await createInFlight.current;
         if (!first.ok) return first;
-        return saveDraft({ id: first.data.id, units: payload });
+        return saveDraft({ id: first.data.id, units: payload, departmentId: dept });
       }
-      const p = createDraft({ units: payload });
+      const p = createDraft({ units: payload, departmentId: dept });
       createInFlight.current = p;
       try {
         return await p;
@@ -113,18 +121,23 @@ export function DraftForm({
     [draft],
   );
 
-  /** Autosave: debounce, skip when unchanged, never fire on an empty request. */
+  /**
+   * Autosave: debounce, skip when unchanged, never fire on an empty request —
+   * and never fire without a department (the draft has nothing valid to be
+   * created with yet; the field's own hint tells the user what unblocks it).
+   */
   useEffect(() => {
     const payload = toPayload(units);
     if (payload.length === 0) return;
-    const serialized = JSON.stringify(payload);
+    if (departmentId === "") return;
+    const serialized = JSON.stringify({ payload, departmentId });
     if (serialized === lastSaved.current) return;
 
     const timer = setTimeout(() => {
       setSaving(true);
       setError(null);
       startTransition(async () => {
-        const res = await persist(payload);
+        const res = await persist(payload, departmentId);
         setSaving(false);
         if (res.ok) {
           lastSaved.current = serialized;
@@ -136,7 +149,7 @@ export function DraftForm({
       });
     }, AUTOSAVE_MS);
     return () => clearTimeout(timer);
-  }, [units, persist, handleFailure]);
+  }, [units, departmentId, persist, handleFailure]);
 
   const set = (i: number, key: keyof UnitDraft) => (value: string) =>
     setUnits((rows) => rows.map((r, idx) => (idx === i ? { ...r, [key]: value } : r)));
@@ -161,6 +174,10 @@ export function DraftForm({
       setError("Add at least one line before submitting.");
       return;
     }
+    if (departmentId === "") {
+      setError("Pick the requesting department first.");
+      return;
+    }
     if (payload.some((u) => u.unitPrice === null)) {
       setError("Every line needs a price — IT review sharpens specs, it doesn't invent budgets.");
       return;
@@ -170,12 +187,12 @@ export function DraftForm({
       // save first: submit acts on what the database holds, not on the
       // inputs. persist() is the same chokepoint autosave uses, so a create
       // still in flight from a recent autosave tick is joined, not duplicated.
-      const saved = await persist(payload);
+      const saved = await persist(payload, departmentId);
       if (!saved.ok) {
         handleFailure(saved);
         return;
       }
-      lastSaved.current = JSON.stringify(payload);
+      lastSaved.current = JSON.stringify({ payload, departmentId });
       setDraft({ id: saved.data.id, refNo: saved.data.refNo });
       const res = await submitRequest({ id: saved.data.id });
       if (!res.ok) {
@@ -191,6 +208,32 @@ export function DraftForm({
     <div className="flex max-w-[900px] flex-col gap-4">
       {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
       {error && <Banner tone="fault" title={error} />}
+
+      <Card>
+        <CardBody>
+          <FormField
+            label="Requesting department"
+            required
+            error={fieldErrors.departmentId}
+            hint={departmentId === "" ? "Pick the department first — the draft saves once it is chosen." : undefined}
+            className="max-w-[280px]"
+          >
+            {(p) => (
+              <Select
+                id={p.id}
+                aria-label="Requesting department"
+                aria-describedby={p["aria-describedby"]}
+                invalid={p.invalid}
+                value={departmentId}
+                onChange={(e) => setDepartmentId(e.target.value)}
+              >
+                <option value="">Choose a department…</option>
+                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </Select>
+            )}
+          </FormField>
+        </CardBody>
+      </Card>
 
       <Card>
         <CardHeader

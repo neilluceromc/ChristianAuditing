@@ -96,3 +96,7 @@ export const EMPLOYEE_KNOWN_UNIMPORTED_COLUMNS: readonly string[] = deriveKnownU
 );
 
 export const splitEmployeeUnknownColumns = makeSplitter(EMPLOYEE_KNOWN_UNIMPORTED_COLUMNS);
+
+/** Phase 18 Task 5: every supplier sheet column imports, so nothing here is
+ * known-unimported; kept as data for `ImportWizard`'s prop. */
+export const SUPPLIER_KNOWN_UNIMPORTED_COLUMNS: readonly string[] = [];

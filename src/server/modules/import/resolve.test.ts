@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { refKey } from "@/lib/import-assets";
-import { buildAssetRefs, buildEmployeeRefs } from "./resolve";
+import { buildAssetRefs, buildEmployeeRefs, buildSupplierRefs } from "./resolve";
 
 /** A minimal AssetRecordRef-shaped row, overridable per test. */
 const record = (over: Partial<{
@@ -245,5 +245,29 @@ describe("buildEmployeeRefs", () => {
       [{ id: "e-1", employeeNo: "EMP-0090", employment: "OFFBOARDING" }],
     );
     expect(refs.byEmployeeNo.get(refKey("EMP-0090"))?.employment).toBe("OFFBOARDING");
+  });
+});
+
+describe("buildSupplierRefs", () => {
+  it("resolves a name to its vendor id when there is exactly one match", () => {
+    const refs = buildSupplierRefs([{ id: "v-1", name: "TechServe PH" }]);
+    expect(refs.byName.get(refKey("TechServe PH"))).toBe("v-1");
+  });
+
+  // R-1: the same case-collision guard categories/types/vendors/departments
+  // already have — Vendor.name is @unique but Postgres's index is
+  // case-sensitive, so two names differing only by case can coexist.
+  it("resolves two names differing only by case to null, not silently to one of the two ids", () => {
+    const refs = buildSupplierRefs([
+      { id: "v-1", name: "Twin Co" },
+      { id: "v-2", name: "twin co" },
+    ]);
+    expect(refs.byName.get(refKey("Twin Co"))).toBeNull();
+    expect(refs.byName.get(refKey("twin co"))).toBeNull();
+  });
+
+  it("leaves a name with no stored vendor unresolved (undefined), for planSupplierRows to treat as a create", () => {
+    const refs = buildSupplierRefs([{ id: "v-1", name: "TechServe PH" }]);
+    expect(refs.byName.get(refKey("Harbor Logistics"))).toBeUndefined();
   });
 });

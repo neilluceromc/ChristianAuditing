@@ -126,12 +126,12 @@ export function InventoryToolbar({
         the empty state. The stage chips are the status control in repair mode.
       */}
       {(stageActive
-        ? (["category", "type", "assignee"] as const)
-        : (["status", "category", "type", "assignee"] as const)
+        ? (["category", "type", "assignee", "provenance"] as const)
+        : (["status", "category", "type", "assignee", "provenance"] as const)
       ).map((facet) => (
         <FacetDropdown
           key={facet}
-          label={facet === "assignee" ? "Assigned" : facet[0].toUpperCase() + facet.slice(1)}
+          label={facet === "assignee" ? "Assigned" : facet === "provenance" ? "Provenance" : facet[0].toUpperCase() + facet.slice(1)}
           options={facets[facet] ?? []}
           selected={state.filters[facet] ?? []}
           onApply={(values) => applyFacet(facet, values)}

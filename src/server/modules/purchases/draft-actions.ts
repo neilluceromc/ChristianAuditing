@@ -33,6 +33,7 @@ const unitSchema = z.object({
 
 const draftSchema = z.object({
   id: z.string().min(1).optional(),
+  departmentId: z.string().min(1, "Pick the requesting department"),
   units: z.array(unitSchema).min(1, "A request needs at least one unit").max(50),
 });
 
@@ -75,12 +76,15 @@ export async function createDraft(input: unknown): Promise<ActionResult<DraftSav
 async function createDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>> {
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { units } = parsed.data;
+  const { units, departmentId } = parsed.data;
 
   const user = await actionRole(...DRAFT_ROLES);
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, name: true } });
+  if (!dept) return validationError({ departmentId: "Unknown department" });
 
   const created = await prisma.$transaction(async (tx) => {
     const [{ nextval }] = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('purchase_request_ref_seq')`;
@@ -89,6 +93,7 @@ async function createDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>
         refNo: `PR-${String(nextval).padStart(4, "0")}`,
         state: "DRAFT",
         requestedById: user.id,
+        departmentId: dept.id,
         units: {
           create: units.map((u) => ({
             description: u.description,
@@ -106,7 +111,11 @@ async function createDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>
       entityType: "purchase-request",
       entityId: request.id,
       action: "create",
-      diff: { state: { from: null, to: "DRAFT" }, ...diffOf({}, summarize(units)) },
+      diff: {
+        state: { from: null, to: "DRAFT" },
+        department: { from: null, to: dept.name },
+        ...diffOf({}, summarize(units)),
+      },
     });
     return request;
   });
@@ -131,7 +140,7 @@ export async function saveDraft(input: unknown): Promise<ActionResult<DraftSaved
 async function saveDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>> {
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { id, units } = parsed.data;
+  const { id, units, departmentId } = parsed.data;
   if (!id) return validationError({ _form: "Missing draft id." });
 
   const user = await actionRole(...DRAFT_ROLES);
@@ -139,12 +148,16 @@ async function saveDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>> 
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
+  const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, name: true } });
+  if (!dept) return validationError({ departmentId: "Unknown department" });
+
   let saved: DraftSaved | null = null;
   const failure = await prisma.$transaction(async (tx) => {
     const req = await tx.purchaseRequest.findUnique({
       where: { id },
       select: {
-        id: true, refNo: true, state: true, requestedById: true,
+        id: true, refNo: true, state: true, requestedById: true, departmentId: true,
+        department: { select: { name: true } },
         units: { select: { id: true, qty: true, unitPrice: true } },
       },
     });
@@ -184,12 +197,17 @@ async function saveDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>> 
     }
 
     const now = new Date();
-    await tx.purchaseRequest.updateMany({ where: { id, state: "DRAFT" }, data: { updatedAt: now } });
+    const departmentChanged = req.departmentId !== dept.id;
+    await tx.purchaseRequest.updateMany({
+      where: { id, state: "DRAFT" },
+      data: { updatedAt: now, ...(departmentChanged ? { departmentId: dept.id } : {}) },
+    });
 
     const before = summarize(
       req.units.map((u) => ({ qty: u.qty, unitPrice: u.unitPrice === null ? null : Number(u.unitPrice) })),
     );
     const diff = diffOf(before, summarize(units));
+    if (departmentChanged) diff.department = { from: req.department?.name ?? null, to: dept.name };
     // autosave fires per edit; an unchanged save must not spam the audit log
     if (Object.keys(diff).length > 0 || drop.length > 0 || fresh.length > 0) {
       await writeAudit(tx, {

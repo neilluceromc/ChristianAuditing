@@ -147,6 +147,8 @@ test.describe("purchases — drafting, autosave, submit", () => {
     await page.getByLabel("Line 1 description").fill("Wireless mice");
     await page.getByLabel("Line 1 quantity").fill("3");
     await page.getByLabel("Line 1 unit price").fill("18500.50");
+    // Phase 18 Task 6: the draft cannot autosave until a department is chosen.
+    await page.getByLabel("Requesting department").selectOption({ label: "IT" });
 
     await expect(page.getByText(/DRAFT · SAVED \d{2}:\d{2}/)).toBeVisible({ timeout: 10_000 });
 
@@ -179,6 +181,10 @@ test.describe("purchases — unpriced line refused", () => {
     await page.goto("/purchases/new");
 
     await page.getByLabel("Line 1 description").fill("Docking stations");
+    // Phase 18 Task 6: a department must be chosen before the price check
+    // ever runs — pick one so this test still exercises the unpriced-line
+    // refusal it names, not the (also real) missing-department refusal.
+    await page.getByLabel("Requesting department").selectOption({ label: "IT" });
     // price deliberately left blank
     await page.getByRole("button", { name: "Submit for IT review" }).click();
 
