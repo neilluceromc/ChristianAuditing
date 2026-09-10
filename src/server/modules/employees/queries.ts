@@ -182,9 +182,16 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
   // and `employeeExportRows` both resolve the exact cut set themselves.
   // Tracked in HANDOVER §8.
   const without = (facet: string): ListState => ({ ...state, filters: { ...state.filters, [facet]: [] } });
+  // Phase 20 (spec §5): "Facet counts for `employment` keep counting all
+  // three values" — the employment groupBy must see OFFBOARDED regardless of
+  // the leavers-hidden-by-default rule, so its own where forces the toggle on
+  // (leavers=1) on top of clearing the employment facet itself. Department
+  // counts keep the default (they should agree with what the list shows).
+  const employmentState = without("employment");
+  const employmentWhere = buildEmployeeWhere({ ...employmentState, filters: { ...employmentState.filters, leavers: ["1"] } });
   const [deptGroups, empGroups, departments] = await Promise.all([
     prisma.employee.groupBy({ by: ["departmentId"], where: buildEmployeeWhere(without("department")), _count: true }),
-    prisma.employee.groupBy({ by: ["employment"], where: buildEmployeeWhere(without("employment")), _count: true }),
+    prisma.employee.groupBy({ by: ["employment"], where: employmentWhere, _count: true }),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
   ]);
   return {

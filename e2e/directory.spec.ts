@@ -129,6 +129,23 @@ test.describe.serial("directory", () => {
     await page.goto("/employees");
     await expect(page.getByRole("row", { name: /EMP-0093/ })).toHaveCount(0);
 
+    // I-2 (final review): "Facet counts for employment keep counting all
+    // three values" (spec §5) — the employment groupBy forces the leavers
+    // toggle on internally, so the dropdown's own OFFBOARDED count must read
+    // the real number of leavers (the seed has exactly one, EMP-0093) even
+    // while the list itself still hides them by default. Checked BEFORE the
+    // "Show leavers" click below, on the exact default state the review's
+    // scenario named — this is the one moment a stale groupBy would have
+    // read 0 instead.
+    await page.getByRole("button", { name: "Employment" }).click();
+    const employmentDialog = page.getByRole("dialog", { name: "Filter by Employment" });
+    await expect(employmentDialog).toBeVisible();
+    const offboardedOption = employmentDialog.locator("label", { hasText: "OFFBOARDED" });
+    await expect(offboardedOption).toBeVisible();
+    await expect(offboardedOption.locator("span").last()).toHaveText("1");
+    await page.keyboard.press("Escape");
+    await expect(employmentDialog).toBeHidden();
+
     await page.getByRole("link", { name: "Show leavers" }).click();
     await expect(page).toHaveURL(/leavers=1/);
     await expect(page.getByRole("row", { name: /EMP-0093/ })).toBeVisible({ timeout: 15_000 });
