@@ -71,17 +71,19 @@ export async function planEmployeeImport(form: FormData): Promise<ActionResult<E
     );
   }
 
-  // This importer's own row rule only ever reads TWO of the seven shared
+  // This importer's own row rule only ever reads THREE of the eight shared
   // options — see `EmployeeImportOptions`'s own comment (`import-
   // employees.ts`) for why the narrower slice, rather than the full
-  // `Record<ImportOption, boolean>`, is what `planEmployeeRows` takes.
-  // `allowSameName` (Phase 20 spec §5) has no form control wired up to it
-  // yet — that UI is a later task's — so this reads `"0"` (false) from
-  // `optionsFromForm` until one exists, exactly like every other option
-  // before its own fix button shipped.
+  // `Record<ImportOption, boolean>`, is what `planEmployeeRows` takes. Both
+  // `allowSameName` (Phase 20 spec §5) and `keepCurrentDepartment` (I-5)
+  // reach the browser the same generic way every option already does —
+  // `import-wizard.tsx`'s "option"-kind `BlockFix` button folds over
+  // `IMPORT_OPTIONS` and posts whichever key its cause names — so nothing
+  // here or in the wizard needed a dedicated control.
   const options: EmployeeImportOptions = {
     keepCurrentEmployment: optionsFromForm(form).keepCurrentEmployment,
     allowSameName: optionsFromForm(form).allowSameName,
+    keepCurrentDepartment: optionsFromForm(form).keepCurrentDepartment,
   };
 
   const refs = await resolveEmployeeRefs();

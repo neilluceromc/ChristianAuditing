@@ -93,6 +93,8 @@ const OPTS: ImportOptions = {
   keepCurrentEmployment: false,
   // Phase 20: same story — the same-name guard's own option, employee-only.
   allowSameName: false,
+  // I-5: same story — the department-via-import guard's own option, employee-only.
+  keepCurrentDepartment: false,
 };
 
 /**

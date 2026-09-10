@@ -25,13 +25,15 @@ function cells(over: Partial<Record<keyof typeof COL, unknown>>): unknown[] {
 const REFS: EmployeeRefs = {
   departments: new Map([["finance", "dept-1"], ["it", "dept-2"]]),
   byEmployeeNo: new Map([
-    ["emp-0042", { id: "e-1", employment: "ACTIVE" }],
-    ["emp-0099", { id: "e-2", employment: "OFFBOARDED" }],
+    ["emp-0042", { id: "e-1", employment: "ACTIVE", departmentId: "dept-1" }],
+    ["emp-0099", { id: "e-2", employment: "OFFBOARDED", departmentId: "dept-2" }],
   ]),
   byNameDept: new Map(),
 };
 
-const OPTS: EmployeeImportOptions = { keepCurrentEmployment: false, allowSameName: false };
+const OPTS: EmployeeImportOptions = {
+  keepCurrentEmployment: false, allowSameName: false, keepCurrentDepartment: false,
+};
 
 describe("matchHeaders(EMPLOYEE_IMPORT_HEADERS)", () => {
   it("matches case- and space-insensitively", () => {
@@ -279,6 +281,37 @@ describe("planEmployeeRows", () => {
       const patch = plan.rows[0] as unknown as { data: Record<string, unknown> };
       expect(patch.data).not.toHaveProperty("employment");
       expect(patch.data).not.toHaveProperty("offboardingAt");
+    });
+  });
+
+  // I-5 (final review, ruling R15 option a): the department analogue of
+  // scope decision 15's employment guard — spec §0 decision 3 / §3 says a
+  // department change always goes through Transfer, so an UPDATE row whose
+  // Department cell disagrees with the record blocks; the option applies
+  // the row's other columns anyway and leaves `departmentId` out of the
+  // patch (Transfer is the only path that may move it).
+  describe("department on update (I-5)", () => {
+    it("blocks when the sheet's Department disagrees with the record's current department", () => {
+      const row = [cells({ employeeNo: "EMP-0042", name: "Marites Bautista", department: "IT", title: "Accountant", joined: "2020-01-01" })];
+      const plan = planEmployeeRows(headers, row, REFS, OPTS);
+      expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "department-via-import" });
+    });
+
+    it("does not block when the sheet's Department already agrees with the record", () => {
+      const row = [cells({ employeeNo: "EMP-0042", name: "Marites Bautista", department: "Finance", title: "Accountant", joined: "2020-01-01" })];
+      const plan = planEmployeeRows(headers, row, REFS, OPTS);
+      expect(plan.rows[0]).toMatchObject({ kind: "update" });
+      const patch = (plan.rows[0] as { data: { departmentId?: string } }).data;
+      expect(patch.departmentId).toBe("dept-1");
+    });
+
+    it("keepCurrentDepartment applies the row's other columns instead of blocking, and omits departmentId", () => {
+      const row = [cells({ employeeNo: "EMP-0042", name: "Marites B. Cruz", department: "IT", title: "Accountant", joined: "2020-01-01" })];
+      const plan = planEmployeeRows(headers, row, REFS, { ...OPTS, keepCurrentDepartment: true });
+      expect(plan.rows[0]).toMatchObject({ kind: "update", employeeId: "e-1" });
+      const patch = (plan.rows[0] as { data: { name: string; departmentId?: string } }).data;
+      expect(patch.name).toBe("Marites B. Cruz");
+      expect(patch).not.toHaveProperty("departmentId");
     });
   });
 

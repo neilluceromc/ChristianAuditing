@@ -291,7 +291,10 @@ export function buildEmployeeRefs(
   const byEmployeeNo = new Map<string, EmployeeRecordRef | null>();
   for (const e of employees) {
     const key = refKey(e.employeeNo);
-    byEmployeeNo.set(key, (counts.get(key) ?? 0) > 1 ? null : { id: e.id, employment: e.employment });
+    byEmployeeNo.set(
+      key,
+      (counts.get(key) ?? 0) > 1 ? null : { id: e.id, employment: e.employment, departmentId: e.departmentId },
+    );
   }
   // Phase 20 (spec §5): the same-name directory guard's own lookup — every
   // EXISTING employee's own name+department key maps to their employeeNo, so
