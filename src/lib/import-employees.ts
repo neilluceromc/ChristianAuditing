@@ -1,6 +1,7 @@
 import type { EmploymentStatus } from "@prisma/client";
 import { EMPLOYMENT_STATUSES } from "./employees-list";
 import { cellText, parseDateCell, refKey, type HeaderMatch } from "./import-assets";
+import { nameDeptKey } from "./same-name";
 import { isBlank } from "./tag-key";
 import type { BlockCause, BlockedRow } from "./import-vocabulary";
 
@@ -71,6 +72,14 @@ export interface EmployeeRefs {
    * whichever record was read last (review I-1).
    */
   byEmployeeNo: Map<string, EmployeeRecordRef | null>;
+  /**
+   * Phase 20 (spec §5): the same-name directory guard's own lookup, keyed by
+   * `nameDeptKey(name, departmentName)` → the existing employee's
+   * `employeeNo` — so a CREATE row (no `employeeNo` match) whose name and
+   * department already belong to someone can name who it might collide with,
+   * rather than silently creating a probable duplicate.
+   */
+  byNameDept: Map<string, string>;
 }
 
 /**
@@ -130,6 +139,8 @@ export interface EmployeePlan {
  * asset importer's five options, and its own tests stay simple. */
 export interface EmployeeImportOptions {
   keepCurrentEmployment: boolean;
+  /** Phase 20 (spec §5): lets a CREATE row through the same-name directory guard. */
+  allowSameName: boolean;
 }
 
 /**
@@ -349,7 +360,20 @@ export function planEmployeeRows(
       rows.push({ kind: "update", row: sheetRow, employeeId: matched.id, data: patch });
       counts.update += 1;
     } else {
-      // Rule 9 (scope decision 15, create-only): blank Employment → ACTIVE.
+      // Rule 9 (Phase 20 spec §5): a CREATE row (no employeeNo match) whose
+      // name and department already belong to a stored employee may be a
+      // duplicate rather than a new hire — block naming the existing
+      // employeeNo, unless the operator confirmed these are different
+      // people (allowSameName). Runs only on CREATE: an UPDATE already
+      // resolved to one specific employee by employeeNo, so there is no
+      // "which one did you mean" question left to ask.
+      const sameNameEmployeeNo = refs.byNameDept.get(nameDeptKey(nameRaw, departmentRaw));
+      if (sameNameEmployeeNo && !options.allowSameName) {
+        block("same-name-in-department", sameNameEmployeeNo);
+        return;
+      }
+
+      // Rule 10 (scope decision 15, create-only): blank Employment → ACTIVE.
       const employment: EmploymentStatus = parsedEmployment ?? "ACTIVE";
       const data: EmployeeCreateData = {
         employeeNo: employeeNoRaw,

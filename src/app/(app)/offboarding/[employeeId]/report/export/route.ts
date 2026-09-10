@@ -24,6 +24,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ employe
     cost: i.cost,
     refNo: i.decision.refNo,
     state: i.decision.state,
+    // Phase 20 (spec §4.1): decidedBy/decidedAt now ride on Decision itself
+    // (decisionOf defaults both to null), so the sheet's two new columns
+    // read straight off it — no re-derivation here.
+    decidedBy: i.decision.decidedBy,
+    decidedAt: i.decision.decidedAt,
   }));
 
   // No cap check, deliberately: the shared EXPORT_CAP (10,000) guards the

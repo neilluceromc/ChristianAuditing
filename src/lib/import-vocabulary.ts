@@ -122,6 +122,11 @@ export const BLOCK_CAUSES = [
   "bad-stock-code",
   "bad-unit",
   "opening-on-existing",
+  // Phase 20 (spec §5): the employee importer's own same-name directory
+  // guard — a CREATE row (no employeeNo match) whose name and department
+  // match an existing employee. Appended, per this array's own rule above —
+  // never inserted.
+  "same-name-in-department",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -171,6 +176,11 @@ export const IMPORT_OPTIONS = [
   // row's OTHER columns anyway rather than losing the whole row over one
   // field that a different flow owns.
   "keepCurrentEmployment",
+  // Phase 20 (spec §5): the same-name directory guard's own option — lets
+  // the operator confirm a CREATE row really is a different, new person
+  // sharing a name (and department) with someone already on file, rather
+  // than the likelier duplicate.
+  "allowSameName",
 ] as const;
 
 export type ImportOption = (typeof IMPORT_OPTIONS)[number];
@@ -521,6 +531,17 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "This item already has a ledger — record a receipt or an adjustment on its page instead. An " +
       "opening quantity only makes sense the first time an item is created.",
     fix: { kind: "link", label: "Open stock", href: "/stock" },
+  },
+
+  // Phase 20 (spec §5): the same-name directory guard, applied to a CREATE
+  // row — an UPDATE already matched by employeeNo never reaches this check.
+  "same-name-in-department": {
+    label: "Same name already in that department",
+    explain:
+      "An existing person with this name is already in this department, and this row has no employee " +
+      "number match — it may be a duplicate rather than a new hire. Add an Employee no column naming who " +
+      "this row means, or confirm these really are different people.",
+    fix: { kind: "option", label: "Add same-name rows as new people", option: "allowSameName" },
   },
 };
 

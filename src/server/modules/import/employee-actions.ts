@@ -71,11 +71,18 @@ export async function planEmployeeImport(form: FormData): Promise<ActionResult<E
     );
   }
 
-  // This importer's own row rule only ever reads ONE of the six shared
+  // This importer's own row rule only ever reads TWO of the seven shared
   // options — see `EmployeeImportOptions`'s own comment (`import-
   // employees.ts`) for why the narrower slice, rather than the full
   // `Record<ImportOption, boolean>`, is what `planEmployeeRows` takes.
-  const options: EmployeeImportOptions = { keepCurrentEmployment: optionsFromForm(form).keepCurrentEmployment };
+  // `allowSameName` (Phase 20 spec §5) has no form control wired up to it
+  // yet — that UI is a later task's — so this reads `"0"` (false) from
+  // `optionsFromForm` until one exists, exactly like every other option
+  // before its own fix button shipped.
+  const options: EmployeeImportOptions = {
+    keepCurrentEmployment: optionsFromForm(form).keepCurrentEmployment,
+    allowSameName: optionsFromForm(form).allowSameName,
+  };
 
   const refs = await resolveEmployeeRefs();
   const plan = planEmployeeRows(headers, read.rows, refs, options);

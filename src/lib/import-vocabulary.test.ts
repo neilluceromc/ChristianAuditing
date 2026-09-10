@@ -276,6 +276,7 @@ describe("BLOCK_CAUSES", () => {
       "bad-stock-code": "reupload",
       "bad-unit": "reupload",
       "opening-on-existing": "link",
+      "same-name-in-department": "option",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);
@@ -369,6 +370,13 @@ describe("BLOCK_CAUSES", () => {
     const spec = blockSpec("opening-on-existing");
     expect(spec.fix).toEqual({ kind: "link", label: "Open stock", href: "/stock" });
     expect(spec.explain).toMatch(/receipt or an adjustment/i);
+  });
+
+  // Phase 20 (spec §5): the same-name directory guard's own cause.
+  it("offers same-name-in-department as a re-plan naming the existing employee, not a link", () => {
+    const spec = blockSpec("same-name-in-department");
+    expect(spec.fix).toMatchObject({ kind: "option", option: "allowSameName" });
+    expect(spec.explain).toMatch(/employee number/i);
   });
 });
 

@@ -129,6 +129,16 @@ export interface DecisionCandidate {
   toStatus: string | null;
   reason: string | null;
   createdAt: Date;
+  /**
+   * Phase 20 (spec §4.1): the approval's claimer and resolved time. OPTIONAL
+   * here — a PENDING approval has neither, and every existing caller/fixture
+   * that builds a `DecisionCandidate` with no notion of attribution yet stays
+   * valid. `decisionOf` defaults an absent value to `null` on the winning
+   * `Decision`, whose own fields are required — every caller of `decisionOf`
+   * gets a real (if `null`) answer, never `undefined`.
+   */
+  decidedBy?: string | null;
+  decidedAt?: Date | null;
 }
 
 export interface Decision {
@@ -138,6 +148,9 @@ export interface Decision {
   reason: string | null;
   /** payload.to.status, exactly as stored — the payload's real target, not a re-derivation. */
   toStatus: string | null;
+  /** Phase 20 (spec §4.1): the winning candidate's claimer/resolved time, or both null (still PENDING, or the candidate carried none). */
+  decidedBy: string | null;
+  decidedAt: Date | null;
 }
 
 /**
@@ -196,5 +209,7 @@ export function decisionOf(
     state: winner.state,
     reason: winner.reason,
     toStatus: winner.toStatus,
+    decidedBy: winner.decidedBy ?? null,
+    decidedAt: winner.decidedAt ?? null,
   };
 }

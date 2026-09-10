@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ListState } from "./url-state";
 import {
-  REPAIRS_SAVED_VIEW, REPAIR_STAGES, REPAIR_STAGE_LABEL, REPAIR_WRITE_OFF_SHARE,
-  beyondRepair, downDays, isRepairStage, isRepairView, quoteWarning, repairStage, withRepairStage,
+  REPAIRS_SAVED_VIEW, REPAIR_STAGES, REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, REPAIR_WRITE_OFF_SHARE,
+  beyondRepair, downDays, isRepairStage, isRepairView, quoteWarning, repairStage, repairStageFixture, withRepairStage,
   type RepairLike,
 } from "./repairs";
 
@@ -148,5 +148,24 @@ describe("repairs is a saved view, so the URL decides", () => {
   it("resets to page 1 — a stage swap is a new result set", () => {
     const paged: ListState = { q: "", page: 4, sort: [], filters: { status: ["DEFECTIVE"] } };
     expect(withRepairStage(paged, "to-assess").page).toBe(1);
+  });
+});
+
+// Phase 20 (spec §6.6, plan P-1): the SQL parity fixture — vitest has no
+// database, so this proves repairStage against 12 rows covering every
+// branch; the raw CASE's agreement with repairStage is proven end-to-end in
+// it-gaps.spec.ts.
+describe("repairStageFixture — the twelve rows the SQL CASE must agree with", () => {
+  it("has twelve rows", () => {
+    expect(repairStageFixture).toHaveLength(12);
+  });
+
+  it.each(repairStageFixture.map((row) => [row.label, row] as const))("%s", (_label, row) => {
+    expect(repairStage(row.asset)).toBe(row.expected);
+  });
+
+  it("REPAIR_STAGE_CASE_SQL names every stage this app knows, and only those", () => {
+    for (const stage of REPAIR_STAGES) expect(REPAIR_STAGE_CASE_SQL).toContain(stage);
+    expect(REPAIR_STAGE_CASE_SQL).toMatch(/^CASE[\s\S]*END$/);
   });
 });

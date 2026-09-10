@@ -292,6 +292,15 @@ export function buildEmployeeRefs(
   return {
     departments: buildCollisionMap(departments, (d) => refKey(d.name)),
     byEmployeeNo,
+    // Phase 20 (spec §5): `EmployeeRefs.byNameDept` — this task widened the
+    // TYPE so `planEmployeeRows`' same-name row rule has something to call,
+    // but populating it needs `name` and `departmentId` on `employees` (not
+    // fetched here) plus a department-name lookup, which is real query
+    // wiring for the task that actually turns the guard on end-to-end. An
+    // empty map here means "nothing matches" — the same fail-open shape
+    // `planEmployeeRows` uses when a lookup genuinely has no entry — so
+    // every row still creates normally until that wiring lands.
+    byNameDept: new Map(),
   };
 }
 

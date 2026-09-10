@@ -101,16 +101,16 @@ export const EMPLOYEE_EXPORT_COLUMNS: XlsxColumn<{
  * `src/server/modules/offboarding/queries.ts` — the same rows the printable
  * report prints, via that module's `decidedItems`, never re-derived here.
  *
- * The plan for this task named "Decided by" and "Decided" (a timestamp)
- * columns. Neither exists on `Decision` (`src/lib/offboarding.ts`): it
- * carries `refNo`, `outcome`, `state`, `reason` and `toStatus` only — no approver actor,
- * no decision timestamp, and adding either would mean widening the shared
- * `Decision`/`DecisionCandidate` types and the query that fills them, which
- * is out of this task's scope and not something to do by inventing a field
- * quietly. `Request` and `Status` below are the real analogue: they are
- * exactly the two facts the printed page's own "Request" column shows
- * (`refNo` and `state`), just as two cells instead of one. `Reason` is the
- * plan's "Note" column under its actual name, matching the page's header.
+ * `Request` and `Status` are the two facts the printed page's own "Request"
+ * column shows (`refNo` and `state`), just as two cells instead of one.
+ * `Reason` is the plan's "Note" column under its actual name, matching the
+ * page's header.
+ *
+ * Phase 20 (spec §4.1): `Decision` now carries `decidedBy`/`decidedAt` (the
+ * approval's claimer and resolved time), so the "Decided by" / "Decided on"
+ * columns this sheet's own comment used to say could not exist here now can
+ * — added after "Status", the same order the printable report and the
+ * wizard rows carry them in.
  */
 /** Phase 18 (plan P-4): the supplier sheet shape — the import template, and what make.ts writes fixtures with. */
 export const SUPPLIER_EXPORT_COLUMNS: XlsxColumn<{
@@ -181,6 +181,7 @@ export const STOCK_EXPORT_COLUMNS: XlsxColumn<{
 export const FAREWELL_EXPORT_COLUMNS: XlsxColumn<{
   tag: string; model: string; outcome: string; reason: string | null;
   cost: number | null; refNo: string; state: string;
+  decidedBy: string | null; decidedAt: Date | null;
 }>[] = [
   { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
   { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
@@ -189,4 +190,48 @@ export const FAREWELL_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Value", width: 13, cell: (r) => ({ value: r.cost, type: Number, format: "#,##0.00" }) },
   { label: "Request", width: 16, cell: (r) => ({ value: r.refNo }) },
   { label: "Status", width: 16, cell: (r) => ({ value: r.state }) },
+  { label: "Decided by", width: 20, cell: (r) => ({ value: r.decidedBy }) },
+  { label: "Decided on", width: 14, cell: (r) => ({ value: r.decidedAt, type: Date, format: "yyyy-mm-dd" }) },
+];
+
+/**
+ * Phase 20 (spec §5, plan P-3): the `/employees/[id]/holdings` export — one
+ * sheet, two blocks. `section` is the discriminator every cell checks:
+ * `"asset"` and `"reservation"` rows carry their own real values, while
+ * `"blank"` (the spacer row between blocks) and `"header"` (the
+ * "Reservations" row that opens the second block) render every column empty
+ * except the header row's own first cell. This keeps one `XlsxColumn` spec
+ * for what is, on the page, two differently-shaped tables — the route
+ * (Task 5/P-3) builds the reservation rows with `type`/`status`/`loanDue`
+ * already blank, so this spec only needs to special-case the spacer and
+ * header rows, never the two "real" row kinds against each other.
+ */
+export type HoldingsExportSection = "asset" | "reservation" | "blank" | "header";
+
+export interface HoldingsExportRow {
+  section: HoldingsExportSection;
+  tag: string;
+  model: string;
+  type: string;
+  status: string;
+  /** "Held since" for an asset row, "Reserved on" for a reservation row — one column, two meanings by section. */
+  since: Date | null;
+  loanDue: Date | null;
+}
+
+const isHoldingsFillerRow = (r: HoldingsExportRow) => r.section === "blank" || r.section === "header";
+
+export const HOLDINGS_EXPORT_COLUMNS: XlsxColumn<HoldingsExportRow>[] = [
+  { label: "Tag", width: 16, cell: (r) => ({ value: r.section === "header" ? "Reservations" : isHoldingsFillerRow(r) ? "" : r.tag }) },
+  { label: "Model", width: 28, cell: (r) => ({ value: isHoldingsFillerRow(r) ? "" : r.model }) },
+  { label: "Type", width: 18, cell: (r) => ({ value: isHoldingsFillerRow(r) ? "" : r.type }) },
+  { label: "Status", width: 14, cell: (r) => ({ value: isHoldingsFillerRow(r) ? "" : r.status }) },
+  {
+    label: "Held since", width: 14,
+    cell: (r) => (isHoldingsFillerRow(r) ? { value: "" } : { value: r.since, type: Date, format: "yyyy-mm-dd" }),
+  },
+  {
+    label: "Loan due", width: 14,
+    cell: (r) => (isHoldingsFillerRow(r) ? { value: "" } : { value: r.loanDue, type: Date, format: "yyyy-mm-dd" }),
+  },
 ];

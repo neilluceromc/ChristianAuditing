@@ -3,6 +3,7 @@ import { matchHeaders } from "./import-assets";
 import {
   EMPLOYEE_IMPORT_HEADERS, planEmployeeRows, type EmployeeImportOptions, type EmployeeRefs,
 } from "./import-employees";
+import { nameDeptKey } from "./same-name";
 
 // The real 8-column export header (`EMPLOYEE_EXPORT_COLUMNS`, export-columns.ts)
 // — not a subset. Task 7 shipped once with a fixture missing several real
@@ -27,9 +28,10 @@ const REFS: EmployeeRefs = {
     ["emp-0042", { id: "e-1", employment: "ACTIVE" }],
     ["emp-0099", { id: "e-2", employment: "OFFBOARDED" }],
   ]),
+  byNameDept: new Map(),
 };
 
-const OPTS: EmployeeImportOptions = { keepCurrentEmployment: false };
+const OPTS: EmployeeImportOptions = { keepCurrentEmployment: false, allowSameName: false };
 
 describe("matchHeaders(EMPLOYEE_IMPORT_HEADERS)", () => {
   it("matches case- and space-insensitively", () => {
@@ -264,7 +266,7 @@ describe("planEmployeeRows", () => {
 
     it("keepCurrentEmployment applies the row's other columns instead of blocking", () => {
       const row = [cells({ employeeNo: "EMP-0042", name: "Marites B. Cruz", department: "Finance", title: "Accountant", joined: "2020-01-01", employment: "OFFBOARDING" })];
-      const plan = planEmployeeRows(headers, row, REFS, { keepCurrentEmployment: true });
+      const plan = planEmployeeRows(headers, row, REFS, { ...OPTS, keepCurrentEmployment: true });
       expect(plan.rows[0]).toMatchObject({ kind: "update", employeeId: "e-1" });
       const patch = (plan.rows[0] as { data: { name: string } }).data;
       expect(patch.name).toBe("Marites B. Cruz");
@@ -376,6 +378,41 @@ describe("planEmployeeRows", () => {
       const plan = planEmployeeRows(headers, row, REFS, OPTS);
       const data = (plan.rows[0] as { data: { employment: string } }).data;
       expect(data.employment).toBe("OFFBOARDED");
+    });
+  });
+
+  // Phase 20 (spec §5): the same-name directory guard, on the importer's CREATE path.
+  describe("same-name-in-department (Phase 20 spec §5)", () => {
+    const refs: EmployeeRefs = { ...REFS, byNameDept: new Map([[nameDeptKey("Nina Robles", "IT"), "EMP-0050"]]) };
+
+    it("blocks a CREATE row whose name+department already exists, naming the existing employeeNo", () => {
+      const row = [cells({ employeeNo: "EMP-0100", name: "Nina Robles", department: "IT", title: "Analyst", joined: "2026-01-05" })];
+      const plan = planEmployeeRows(headers, row, refs, OPTS);
+      expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "same-name-in-department", detail: "EMP-0050" });
+    });
+
+    it("matches case- and whitespace-insensitively, the same as every other name-keyed lookup", () => {
+      const row = [cells({ employeeNo: "EMP-0100", name: "  nina   robles ", department: "it", title: "Analyst", joined: "2026-01-05" })];
+      const plan = planEmployeeRows(headers, row, refs, OPTS);
+      expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "same-name-in-department" });
+    });
+
+    it("allowSameName lets the row create anyway", () => {
+      const row = [cells({ employeeNo: "EMP-0100", name: "Nina Robles", department: "IT", title: "Analyst", joined: "2026-01-05" })];
+      const plan = planEmployeeRows(headers, row, refs, { ...OPTS, allowSameName: true });
+      expect(plan.rows[0]).toMatchObject({ kind: "create" });
+    });
+
+    it("does not fire on an UPDATE row — an employeeNo match already resolved to one specific person", () => {
+      const row = [cells({ employeeNo: "EMP-0042", name: "Marites Bautista", department: "Finance", title: "Accountant", joined: "2020-01-01" })];
+      const plan = planEmployeeRows(headers, row, refs, OPTS);
+      expect(plan.rows[0]).toMatchObject({ kind: "update" });
+    });
+
+    it("a name+department pair not in byNameDept creates normally", () => {
+      const row = [cells({ employeeNo: "EMP-0101", name: "Someone New", department: "IT", title: "Analyst", joined: "2026-01-05" })];
+      const plan = planEmployeeRows(headers, row, refs, OPTS);
+      expect(plan.rows[0]).toMatchObject({ kind: "create" });
     });
   });
 });
