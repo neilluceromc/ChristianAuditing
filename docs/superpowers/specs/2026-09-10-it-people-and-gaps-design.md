@@ -1,7 +1,7 @@
 # Phase 20 — IT side: department transfers, offboarding attribution and facets, directory quality, and six known gaps
 
 **Status:** implemented on branch `phase-20-it-people-and-gaps` (9 tasks, `D-1`…`D-30` — the final-review
-fix wave included), code-complete 2026-09-10 at final tree `4d54382`, unmerged and unpushed; battery
+fix wave included), code-complete 2026-09-10 at final tree `4d54382`, merged to `main` via `--no-ff` `e48b457` and pushed the same day; battery
 `tsc`/`lint` clean, **21 migrations**, **1295 unit / 75 files**, **296 e2e / 27 files** by `--list` across
 six foreground chunks with explicit file paths — **A 54 (3.4m) · B 67 (3.8m) · C 63 (4.0m) · D 38 (2.6m) ·
 E 53 (7.3m) · F 21 (2.0m) = 296**, zero failed, zero did-not-run. See `docs/HANDOVER.md` (m) and plan
