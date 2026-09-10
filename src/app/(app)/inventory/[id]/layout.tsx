@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
-import { getVisibleAsset, spareOptions } from "@/server/modules/inventory/queries";
+import { getVisibleAsset, lastLifecycleChange, spareOptions } from "@/server/modules/inventory/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate } from "@/lib/format";
 import { CLASS_LABEL, canEditAsset, canManageClass, isAssignable, isAwaitingItCheck, isDirectLifecycle } from "@/lib/asset-class";
@@ -52,6 +52,12 @@ export default async function AssetRecordLayout({
   const canTriage = direct && !pending && asset.returnedAt !== null;
   const employees = canAssign ? await activeEmployeeOptions() : [];
   const spares = canReplace ? await spareOptions(asset.typeId) : [];
+  // Phase 20 (spec §6.5, gap 5): while an approval is queued, the record
+  // still reads the pre-approval status everywhere (see the Banner below) —
+  // showing "Last change" from before that queued change would read as
+  // stale/misleading next to it, so the line is withheld until nothing is
+  // pending.
+  const last = pending ? null : await lastLifecycleChange(asset.id);
 
   return (
     <>
@@ -138,6 +144,11 @@ export default async function AssetRecordLayout({
             </>
           )}
         </p>
+        {last && (
+          <p className="font-mono text-[11px] text-fg-muted">
+            Last change: {last.sentence} · {fmtDate(last.at)} · by {last.actor}
+          </p>
+        )}
         {asset.status === "TEMPORARY" && canMutate && direct && (
           <LoanDueControl assetId={asset.id} tag={asset.tag} loanDueAt={asset.loanDueAt?.toISOString().slice(0, 10) ?? null} />
         )}

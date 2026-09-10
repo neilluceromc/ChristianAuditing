@@ -122,13 +122,32 @@ export function BulkDrawer({
         to: effectiveTo,
         reason,
       };
-      const res = direct
-        ? handleResult(await bulkChangeStatus(payload), ({ changed, skipped }) =>
-            `${changed} asset${changed === 1 ? "" : "s"} now ${effectiveTo}` +
-            (skipped ? ` · ${skipped} skipped (held, already there, or already requested)` : ""))
-        : handleResult(await bulkRequestStatusChange(payload), ({ created, skipped }) =>
-            `${created} approval${created === 1 ? "" : "s"} created` +
-            (skipped ? ` · ${skipped} skipped (already there or already requested)` : ""));
+      if (direct) {
+        // Phase 20 (spec §6.1, gap 1): bulkChangeStatus's `skipped` is now
+        // the same {tag, reason}[] shape bulkAssign already returns — mirror
+        // that path exactly: toast the count, keep the drawer open on the
+        // skipped list (never auto-close) when anything was skipped.
+        const res = await bulkChangeStatus(payload);
+        if (res.ok) {
+          const { changed, skipped } = res.data;
+          toast(
+            `Changed ${changed} asset${changed === 1 ? "" : "s"}` +
+            (skipped.length > 0 ? ` · ${skipped.length} skipped` : ""),
+            "settled",
+          );
+          setReason(""); // a fresh batch never inherits the last batch's reason
+          onDone();
+          router.refresh();
+          if (skipped.length > 0) setSkippedList(skipped);
+          else handleClose();
+        } else {
+          applyFailure(res);
+        }
+        return;
+      }
+      const res = handleResult(await bulkRequestStatusChange(payload), ({ created, skipped }) =>
+        `${created} approval${created === 1 ? "" : "s"} created` +
+        (skipped ? ` · ${skipped} skipped (already there or already requested)` : ""));
       if (res === "ok") {
         setReason(""); // a fresh batch never inherits the last batch's reason
         onDone();
@@ -173,7 +192,7 @@ export function BulkDrawer({
             someone else or held by an open request are skipped and listed.</>
           ) : direct ? (
             <>Changes the status of <b>{scope}</b> now. Held devices and off-the-books stock are
-            skipped — return or handle those one at a time.</>
+            skipped and listed — return or handle those one at a time.</>
           ) : (
             <>Acting on <span className="font-medium text-fg-secondary">{scope}</span>. Each asset gets its
             own <span className="font-mono">lifecycle.change-status</span> approval — nothing changes until

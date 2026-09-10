@@ -75,7 +75,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     visible: canSeeClass(user.role, a.cls),
   });
 
-  const slots: SlotTile[] = loadout.slots.map(({ slot, asset }) => {
+  const slots: SlotTile[] = loadout.slots.map(({ slot, asset, coveredByLoan }) => {
     // An ADD-exception slot's id isn't a real PolicySlot id, so `typeName`
     // (keyed on policy slot ids) never has it — fall back to the exception
     // row's own assetType.name, which the query above included for exactly
@@ -91,6 +91,10 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       loaner: slot.loaner,
       exceptionId: slot.exceptionId ?? null,
       exceptionReason: exception?.reason ?? null,
+      // Phase 20 (spec §6.3, gap 3): a standard slot left empty because its
+      // type has a remaining TEMPORARY device on loan — the tile reads "on
+      // loan" instead of "policy gap".
+      coveredByLoan,
     };
   });
 
