@@ -142,8 +142,8 @@ These were made with the user and would be invisible to anyone reading only the 
 6. **The §9 subsystems from the Admin meeting — B and C shipped in Phase 18; D's first half (D1) shipped
    in Phase 19 (item 1 above); only D2 remains.** Vendor master data (B) and purchasing workflow
    extensions (C) are code-complete on `phase-18-purchasing-suppliers`, merged. **D1 · stock control**
-   (items, the ledger, derived balances, stocktake, import) is code-complete on
-   `phase-19-stock-control`, unmerged. **D2 · FIFO costing, expiry warnings, report views and exports by
+   (items, the ledger, derived balances, stocktake, import) is merged to `main` (`d311e26`, 2026-09-10;
+   staging still to be redeployed). **D2 · FIFO costing, expiry warnings, report views and exports by
    department and month** is still NOT yet planned — it needs its own spec and consumes the lots D1
    records (`HANDOVER.md` §9).
 
