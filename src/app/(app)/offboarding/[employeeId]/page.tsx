@@ -453,6 +453,8 @@ export default async function OffboardingWizardPage({
                     <Th>Reason</Th>
                     <Th width={112} align="right">Value</Th>
                     <Th width={132}>Request</Th>
+                    <Th width={112}>Decided by</Th>
+                    <Th width={104}>Decided on</Th>
                   </Tr>
                 </THead>
                 <TBody>
@@ -478,6 +480,8 @@ export default async function OffboardingWizardPage({
                         {" · "}
                         {i.decision.state}
                       </Td>
+                      <Td mono className="text-[10.5px]">{i.decision.decidedBy ?? "—"}</Td>
+                      <Td mono className="text-[10.5px]">{fmtDate(i.decision.decidedAt)}</Td>
                     </Tr>
                   ))}
                 </TBody>
