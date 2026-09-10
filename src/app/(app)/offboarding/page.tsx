@@ -94,8 +94,14 @@ export default async function OffboardingPage({
                   <Tr key={r.id}>
                     <Td className="pr-0"><StatusDot value="OFFBOARDING" ns="employment" /></Td>
                     <Td>
-                      <Link href={`/offboarding/${r.id}`} className="text-accent hover:underline">{r.name}</Link>
-                      <span className="pl-1.5 font-mono text-[10.5px] text-fg-muted">{r.employeeNo} · {r.title}</span>
+                      <Link href={`/offboarding/${r.id}`} className="flex items-center gap-2.5 hover:underline">
+                        <span className="flex flex-col leading-tight">
+                          <span className="text-[12.5px] font-medium text-fg">{r.name}</span>
+                          <span className="font-mono text-[10px] text-fg-faint">
+                            {r.employeeNo} · {r.title}
+                          </span>
+                        </span>
+                      </Link>
                     </Td>
                     <Td>{r.department}</Td>
                     <Td mono>{fmtDate(r.started)}</Td>

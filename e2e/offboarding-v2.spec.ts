@@ -195,27 +195,7 @@ test.describe.serial("offboarding v2 — attribution, facets and sort", () => {
     await expect(rows.nth(0)).toContainText("Dennis Ong");
     await expect(rows.nth(1)).toContainText("Aida Reyes");
 
-    // A genuine pre-existing gap, found here rather than in Task 5's own
-    // e2e/offboarding.spec.ts axe scan of this same page because the seed
-    // has only ONE OFFBOARDING employee (Dennis) — this rule needs two rows
-    // to fire (confirmed with a throwaway repro: identical computed colours
-    // on every row, zero violations with one row, the same violation on row
-    // 1 with two or more, regardless of sort order or which employee ends
-    // up first). offboarding/page.tsx's Name cell wraps only the name in the
-    // <Link>; the "EMP-#### · Title" meta sits in a sibling <span> OUTSIDE
-    // it, so axe's link-in-text-block rule measures the link's accent-blue
-    // against the <td>'s own declared text colour (text-fg-secondary,
-    // #475467) at 1.25:1 — the same category of bug the employees list once
-    // had and fixed by wrapping the WHOLE name cell in one <Link>
-    // (src/app/(app)/employees/page.tsx; see the comment on it-core.spec.ts's
-    // "axe passes on the list, not just the detail page"). Flagged for a
-    // real fix rather than silently masked; this scan excludes only that one
-    // already-filed rule so every other accessibility property of this page
-    // is still verified.
-    await page.mouse.move(0, 0);
-    await page.waitForTimeout(700);
-    const listAxe = await new AxeBuilder({ page }).disableRules(["link-in-text-block"]).analyze();
-    expect(listAxe.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
+    await expectNoSeriousAxe(page);
 
     const dennis = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
     await page.goto(`/offboarding/${dennis.id}/report`);
