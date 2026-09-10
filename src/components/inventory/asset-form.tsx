@@ -130,10 +130,20 @@ export function AssetForm({
   ) {
     if (timer.current) clearTimeout(timer.current);
     if (!value) return;
+    // Phase 20 (spec §6.2): checkIdentifiers is now class-scoped. Guessing a
+    // class before a category is chosen would risk flagging a same-tag/
+    // serial collision that only exists in the OTHER class, so the live
+    // check is skipped entirely until the category names one — the server's
+    // own unique constraint (and the neutral post-submit conflict copy) is
+    // still the authority regardless.
+    const categoryCls = categories.find((c) => c.id === form.categoryId)?.cls;
+    if (!categoryCls) return;
     timer.current = setTimeout(() => {
       // Never blocks submit — this only ever paints an early hint; the
       // server's unique constraint remains the authority at submit time.
-      void checkIdentifiers(kind === "tag" ? { tags: [value] } : { serials: [value] }).then((res) => {
+      void checkIdentifiers(
+        kind === "tag" ? { tags: [value], cls: categoryCls } : { serials: [value], cls: categoryCls },
+      ).then((res) => {
         if (!mountedRef.current || !res.ok) return;
         // The field this response is about may no longer hold the value we
         // checked — ignore it rather than label whatever is there now.

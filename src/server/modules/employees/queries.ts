@@ -4,7 +4,8 @@ import { buildEmployeeOrderBy, buildEmployeeWhere } from "@/lib/employees-list";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate } from "@/lib/format";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
-import { EXPORT_CAP } from "@/lib/export-columns";
+import { EXPORT_CAP, type HoldingsExportRow } from "@/lib/export-columns";
+import { sameNameKey } from "@/lib/same-name";
 import type { ListState } from "@/lib/url-state";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 
@@ -204,4 +205,135 @@ export async function activeEmployeeOptions(): Promise<ComboOption[]> {
     select: { id: true, name: true, employeeNo: true },
   });
   return rows.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }));
+}
+
+/**
+ * Phase 20 (spec §3, plan P-2): the Transfers card and the employee-page
+ * "Transferred from X on Y" line's own read — every transfer this person has
+ * ever had, newest first. Unpaged by design (spec §7): a person moves
+ * departments a handful of times in a career, never enough to need it.
+ */
+export async function getTransfers(employeeId: string): Promise<Array<{
+  id: string;
+  from: string;
+  to: string;
+  fromTitle: string;
+  toTitle: string;
+  effectiveAt: Date;
+  reason: string | null;
+  actor: string;
+}>> {
+  const rows = await prisma.employeeTransfer.findMany({
+    where: { employeeId },
+    include: { fromDepartment: true, toDepartment: true, actor: true },
+    orderBy: [{ effectiveAt: "desc" }, { id: "desc" }],
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    from: r.fromDepartment.name,
+    to: r.toDepartment.name,
+    fromTitle: r.fromTitle,
+    toTitle: r.toTitle,
+    effectiveAt: r.effectiveAt,
+    reason: r.reason,
+    actor: r.actor.name,
+  }));
+}
+
+/**
+ * Phase 20 (spec §5): the same-name directory guard's own lookup — the first
+ * OTHER employee in the SAME department whose name matches via `sameNameKey`
+ * (trimmed/lower-cased/whitespace-collapsed, the same `refKey` every other
+ * NAME-keyed lookup in this app goes through). Bounded by department size —
+ * a department is a handful to a few dozen people, never the whole roster —
+ * so filtering in memory after one `findMany` is cheap and keeps the match
+ * rule in one place instead of hand-translating it into SQL. `excludeId`
+ * (optional) is the record being edited, so a self-match at the same name it
+ * already had never reads back as a collision with itself.
+ */
+export async function findSameName(
+  name: string,
+  departmentId: string,
+  excludeId?: string,
+): Promise<{ id: string; employeeNo: string; department: string } | null> {
+  const key = sameNameKey(name);
+  const rows = await prisma.employee.findMany({
+    where: { departmentId, id: { not: excludeId } },
+    select: { id: true, name: true, employeeNo: true, department: { select: { name: true } } },
+  });
+  const match = rows.find((r) => sameNameKey(r.name) === key);
+  return match ? { id: match.id, employeeNo: match.employeeNo, department: match.department.name } : null;
+}
+
+/**
+ * Phase 20 (spec §5, plan P-3): the `/employees/[id]/holdings` export's row
+ * source — one sheet, two blocks. `HoldingsRow` IS `HoldingsExportRow`
+ * (`export-columns.ts`): this function builds the FULL sheet, spacer and
+ * header rows included, so the route only has to cap and write it — the
+ * same division of labour `employeeExportRows` already has with its own
+ * route (row-shaping lives beside the query, not the route).
+ *
+ * "Held since" is the newest `lifecycle.assign` audit entry for that asset,
+ * read with ONE `findMany` over every held id (grouped in memory rather than
+ * one query per row — the N+1 this app avoids everywhere else), falling back
+ * to `asset.updatedAt` for a held asset with no such entry on record (a
+ * legacy/seeded holding predating this audit action).
+ */
+export type HoldingsRow = HoldingsExportRow;
+
+export async function holdingsRows(employeeId: string): Promise<HoldingsRow[]> {
+  const [heldAssets, reservations] = await Promise.all([
+    prisma.asset.findMany({
+      where: { assigneeId: employeeId },
+      select: {
+        id: true, tag: true, model: true, status: true, updatedAt: true, loanDueAt: true,
+        type: { select: { name: true } },
+      },
+      orderBy: [{ tag: "asc" }],
+    }),
+    prisma.reservation.findMany({
+      where: { employeeId, state: "ACTIVE" },
+      select: { createdAt: true, asset: { select: { tag: true, model: true } } },
+      orderBy: [{ createdAt: "asc" }],
+    }),
+  ]);
+
+  const heldIds = heldAssets.map((a) => a.id);
+  const assignEntries = heldIds.length
+    ? await prisma.auditEntry.findMany({
+        where: { entityType: "asset", entityId: { in: heldIds }, action: "lifecycle.assign" },
+        select: { entityId: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+      })
+    : [];
+  // Newest first (orderBy above), so the first entry seen per asset id is its
+  // newest lifecycle.assign — grouped in memory, one query for every held id.
+  const sinceByAsset = new Map<string, Date>();
+  for (const entry of assignEntries) {
+    if (!sinceByAsset.has(entry.entityId)) sinceByAsset.set(entry.entityId, entry.createdAt);
+  }
+
+  const assetRows: HoldingsRow[] = heldAssets.map((a) => ({
+    section: "asset",
+    tag: a.tag,
+    model: a.model,
+    type: a.type?.name ?? "",
+    status: a.status,
+    since: sinceByAsset.get(a.id) ?? a.updatedAt,
+    loanDue: a.loanDueAt,
+  }));
+
+  const blankRow: HoldingsRow = { section: "blank", tag: "", model: "", type: "", status: "", since: null, loanDue: null };
+  const headerRow: HoldingsRow = { section: "header", tag: "", model: "", type: "", status: "", since: null, loanDue: null };
+  const reservationRows: HoldingsRow[] = reservations.map((r) => ({
+    section: "reservation",
+    tag: r.asset.tag,
+    model: r.asset.model,
+    type: "",
+    status: "",
+    since: r.createdAt,
+    loanDue: null,
+  }));
+
+  return [...assetRows, blankRow, headerRow, ...reservationRows];
 }

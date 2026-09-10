@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
-import { toSearchParams } from "@/lib/url-state";
-import { parsePage } from "@/lib/paging";
+import { parseListState, toSearchParams } from "@/lib/url-state";
+import { OFFBOARDING_LIST_CONFIG } from "@/lib/offboarding-list";
 import { listOffboarding } from "@/server/modules/offboarding/queries";
 import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -19,7 +19,11 @@ export default async function OffboardingPage({
   const user = await requireUser();
   const canMutate = user.role === "admin" || user.role === "it_staff";
   const sp = toSearchParams(await searchParams);
-  const { rows, total, page, pageCount } = await listOffboarding(parsePage(sp));
+  // R2: the toolbar and sortable headers are Task 5's — this call site only
+  // needs to switch from a bare page number to the full ListState so
+  // listOffboarding's new facets/sort contract has something to read.
+  const state = parseListState(sp, OFFBOARDING_LIST_CONFIG);
+  const { rows, total, page, pageCount } = await listOffboarding(state);
 
   return (
     <>

@@ -388,7 +388,18 @@ const bulkSchema = z
   })
   .refine((v) => (v.ids?.length ?? 0) > 0 || v.filters !== undefined, { message: "Nothing is selected", path: ["ids"] });
 
-export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ changed: number; skipped: number }>> {
+/**
+ * Phase 20 (spec §6.1, gap 1): the skipped list now NAMES each tag and why,
+ * the same shape `bulkAssign` already returns — before this it was a bare
+ * count, and an operator staring at "3 skipped" had to go find which three
+ * and guess. The one-class refusal (mixed IT/Purchasing in one selection)
+ * stays a hard, whole-selection conflict, unchanged: the list-scoped `cls`
+ * filter `resolveBulkWhere` applies means a mixed selection can only reach
+ * here via a hand-built `ids` list, and there is still no legal target
+ * status for a mixed batch to skip its way around — so it refuses before any
+ * per-asset reason is even collected.
+ */
+export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ changed: number; skipped: Array<{ tag: string; reason: string }> }>> {
   const user = await actionUser();
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -400,7 +411,8 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
   const where = await resolveBulkWhere(ids, filters);
 
   const now = new Date();
-  let changed = 0, skipped = 0;
+  let changed = 0;
+  const skipped: Array<{ tag: string; reason: string }> = [];
   const failure = await prisma.$transaction(async (tx) => {
     const assets = await tx.asset.findMany({ where, take: BULK_MAX + 1, select: assetSelect });
     if (assets.length === 0) return conflict("Nothing matched the selection.");
@@ -415,15 +427,23 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
       select: { assetId: true },
     });
     const blocked = new Set(open.map((o) => o.assetId));
-    const targets = assets.filter((a) => a.status !== to && !blocked.has(a.id) && statusFamily(a.status) !== "closed");
-    skipped = assets.length - targets.length;
+    const targets: typeof assets = [];
+    for (const asset of assets) {
+      if (asset.status === to) { skipped.push({ tag: asset.tag, reason: `already ${to}` }); continue; }
+      if (blocked.has(asset.id)) { skipped.push({ tag: asset.tag, reason: "held by an open request" }); continue; }
+      if (statusFamily(asset.status) === "closed") {
+        skipped.push({ tag: asset.tag, reason: `closed status ${asset.status} — cannot change` });
+        continue;
+      }
+      targets.push(asset);
+    }
     for (const asset of targets) {
       const r = await recordDirect(tx, {
         actor: user, asset, now, type: "lifecycle_change_status", action: "lifecycle.change-status",
         change: { kind: "change-status", status: to },
         payload: { from: { status: asset.status }, to: { status: to }, reason: reason ?? "" },
       });
-      if (!r.ok) { skipped += 1; continue; } // a held asset refused by the holder guard is skipped, not fatal
+      if (!r.ok) { skipped.push({ tag: asset.tag, reason: r.error }); continue; } // a held asset refused by the holder guard is skipped, not fatal
       changed += 1;
     }
     return null;

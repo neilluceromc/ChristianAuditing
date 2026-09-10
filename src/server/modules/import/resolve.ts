@@ -4,6 +4,7 @@ import type { AssetRecordRef, AssetRefs, EmployeeRef } from "@/lib/import-assets
 import type { EmployeeRecordRef, EmployeeRefs } from "@/lib/import-employees";
 import type { SupplierRefs } from "@/lib/import-suppliers";
 import type { StockRefs } from "@/lib/import-stock";
+import { nameDeptKey } from "@/lib/same-name";
 import type { AssetClass, EmploymentStatus } from "@prisma/client";
 
 /** Every field `AssetRecordRef` needs, straight off the Prisma select. */
@@ -239,6 +240,9 @@ interface EmployeeIdentityRow {
   id: string;
   employeeNo: string;
   employment: EmploymentStatus;
+  // Phase 20 (spec §5): needed to key `byNameDept` — see `buildEmployeeRefs`.
+  name: string;
+  departmentId: string;
 }
 
 /**
@@ -289,18 +293,25 @@ export function buildEmployeeRefs(
     const key = refKey(e.employeeNo);
     byEmployeeNo.set(key, (counts.get(key) ?? 0) > 1 ? null : { id: e.id, employment: e.employment });
   }
+  // Phase 20 (spec §5): the same-name directory guard's own lookup — every
+  // EXISTING employee's own name+department key maps to their employeeNo, so
+  // a CREATE row (no employeeNo match) landing on the same key can name who
+  // it might collide with. No collision-`null` handling the way
+  // `byEmployeeNo`/`departments` get (R-1): this map only powers a warning
+  // naming ONE possible match for the operator to confirm or reject, not an
+  // identity resolution the way those two are — `planEmployeeRows`'s own row
+  // rule treats a hit as "here is a candidate", never a final answer.
+  const deptNameById = new Map(departments.map((d) => [d.id, d.name]));
+  const byNameDept = new Map<string, string>();
+  for (const e of employees) {
+    const deptName = deptNameById.get(e.departmentId);
+    if (deptName) byNameDept.set(nameDeptKey(e.name, deptName), e.employeeNo);
+  }
+
   return {
     departments: buildCollisionMap(departments, (d) => refKey(d.name)),
     byEmployeeNo,
-    // Phase 20 (spec §5): `EmployeeRefs.byNameDept` — this task widened the
-    // TYPE so `planEmployeeRows`' same-name row rule has something to call,
-    // but populating it needs `name` and `departmentId` on `employees` (not
-    // fetched here) plus a department-name lookup, which is real query
-    // wiring for the task that actually turns the guard on end-to-end. An
-    // empty map here means "nothing matches" — the same fail-open shape
-    // `planEmployeeRows` uses when a lookup genuinely has no entry — so
-    // every row still creates normally until that wiring lands.
-    byNameDept: new Map(),
+    byNameDept,
   };
 }
 
@@ -317,7 +328,8 @@ export async function resolveEmployeeRefs(): Promise<EmployeeRefs> {
   const [departments, employees] = await Promise.all([
     prisma.department.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.employee.findMany({
-      select: { id: true, employeeNo: true, employment: true },
+      // name/departmentId (Phase 20, spec §5): what buildEmployeeRefs needs to key byNameDept.
+      select: { id: true, employeeNo: true, employment: true, name: true, departmentId: true },
       orderBy: { employeeNo: "asc" },
     }),
   ]);
