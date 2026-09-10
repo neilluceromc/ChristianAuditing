@@ -313,7 +313,10 @@ test.describe.serial("paging", () => {
   });
 
   test("6. Employees: sorted page 2 exists, the toolbar count matches the DB, employeeNos are disjoint, and gaps=1 still pages", async ({ page }) => {
-    const dbEmployeeCount = await db.employee.count();
+    // Phase 20 (spec §5): leavers are hidden from /employees by default (no
+    // ?leavers=1 here), so the toolbar count excludes OFFBOARDED like the
+    // page's own query does — not a raw db.employee.count().
+    const dbEmployeeCount = await db.employee.count({ where: { employment: { not: "OFFBOARDED" } } });
 
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees?sort=joinedAt&page=2");
