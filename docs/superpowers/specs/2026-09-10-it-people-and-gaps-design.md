@@ -1,7 +1,11 @@
 # Phase 20 — IT side: department transfers, offboarding attribution and facets, directory quality, and six known gaps
 
-**Status:** design approved in conversation 2026-09-10 (areas, employee items, the transfer flow, the
-approach and all seven sections). The Purchasing/stock work is parked in `docs/HANDOVER-PENDING.md`.
+**Status:** implemented on branch `phase-20-it-people-and-gaps` (9 tasks, `D-1`…`D-22`), code-complete
+2026-09-10, unmerged and unpushed; battery `tsc`/`lint` clean, **21 migrations**, **1291 unit / 75 files**,
+**296 e2e / 27 files** by `--list` across six foreground chunks — **54 (3.3m) · 67 (3.9m) · 68 (4.4m) ·
+38 (2.6m) · 53 (7.3m) · 21 (2.0m)**, zero failed, zero did-not-run on the recorded runs; see
+`docs/HANDOVER.md` (m) and plan `D-1`…`D-22` for what shipped and the four test-only fixes found closing
+the battery. The Purchasing/stock work is parked in `docs/HANDOVER-PENDING.md`.
 
 **Plan:** `docs/superpowers/plans/2026-09-10-phase-20-it-people-and-gaps.md` (written next).
 
