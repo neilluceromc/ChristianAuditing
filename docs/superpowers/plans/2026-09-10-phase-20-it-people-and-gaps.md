@@ -28,7 +28,7 @@
 - **P-4** `checkIdentifiers` gains `cls` in its zod input; the forms pass the class they render for. The neutral post-submit copy is the existing P2002 conflict text; nothing new is written for that path.
 - **P-5** Offboarding sorting by `undecided` and the `progress` facet are applied in memory over the OFFBOARDING candidate set (bounded by the number of leavers), then paged; name/started sorts go to SQL.
 
-## Amendments made during execution (`D-1`…`D-22`, from the SDD ledger, 2026-09-10)
+## Amendments made during execution (`D-1`…`D-30`, from the SDD ledger, 2026-09-10)
 
 Pre-flight (before Task 1):
 
@@ -84,7 +84,16 @@ To complete at Task 9 / final review:
     Vehicle (Purchasing class) batch as Purchasing — the very cross-class leak gap 2 closed, so it stopped
     colliding. Fixed by stamping onto a Vehicle asset instead (`f6ec5e1`); chunk re-ran **38/38**.
   - Chunks B, E and F passed clean on the first try — **67/67**, **53/53**, **21/21**.
-- **D-23+** — reserved for the final whole-branch review and its fix wave.
+Final whole-branch review (read-only, on 94b8466..2641af5; Approve with fixes — 0 Critical, 5 Important, 11 Minor) and its ONE fix wave (rulings R14/R15):
+
+- **D-23** (I-1, test-only) — `e2e/paging.spec.ts` case 6 compared the toolbar count with ALL employees; the list hides leavers (spec §5), so the DB count now uses the same `employment: { not: "OFFBOARDED" }` predicate its case 10 already used. Already fixed by Task 9's battery as `63df64a` (chunk C's first-pass failure) before the review reported it.
+- **D-24** (I-2) — the employment facet's `OFFBOARDED (n)` count was always 0 by default because the groupBy ran under the leavers-hidden `where`; that one groupBy now runs with the toggle forced on (spec §5: the employment facet keeps counting all three values); `directory.spec.ts` case 3 asserts the count. Commit `f001cfb`.
+- **D-25** (I-3) — `it-gaps.spec.ts` case 6 compared JS with JS (`listAssets` filters the repair stage in JS; the raw CASE is reached only by the export and the bulk actions). The case now runs `REPAIR_STAGE_CASE_SQL` through `$queryRaw` and asserts, per asset, SQL stage = `repairStage()` — the proof spec §6.6 / P-1 promised. Commit `87dd879`.
+- **D-26** (I-4) — two overlapping transfers could both record `from = A` on an append-only table. `transferEmployee`'s employee write is now conditional on the department that was read (`updateMany where { id, departmentId }`, zero rows → the transaction throws and the action returns `conflict("Someone else just transferred this person — reload and try again.")`). Commit `4b97cbd`.
+- **D-27** (I-5, ruling R15) — an employee-import UPDATE row could still move a department with no `EmployeeTransfer` row, against spec §0 decision 3 ("one path for one fact"). Resolved like `employment-via-import`: a new block cause `department-via-import` ("Department change needs a Transfer") with the option `keepCurrentDepartment` ("Keep current departments, apply the rest"); vocabulary totality and planner tests extended (unit total 1291 → 1295). Commit `3910991`.
+- **D-28** (M-3, rode along) — the transfer reads select `actor.name` only instead of the whole `User` row. Commit `4d54382`.
+- **D-29** (parked Minors, rulings) — M-1 department facet counts under a derived `progress` filter are a plain groupBy (spec §4.2 says so; display-only); M-2 `sortByUndecided` ignores a second sort key (stable name/employeeNo tiebreak; edge); M-4 `lastLifecycleChange` re-reads the tag (cosmetic); M-5 "today" is the UTC date on both sides (pre-existing convention); M-6 two CREATE rows sharing name + department in one sheet both create (spec §5 scopes the guard to existing employees); M-7 the CASE's `"rmaRef" IS NOT NULL` vs JS truthiness diverge only for an empty-string `rmaRef`, which no writer stores; M-8 the Transfer button renders for an OFFBOARDED person and the server refuses with the spec's copy; M-9 `offboardingFacets` re-fetches the leaver set (bounded by leavers); M-10 the `bulkAssign`/`bulkChangeStatus` success blocks stay duplicated (D-12); M-11 "Held since" reads only `lifecycle.assign` (spec §5 names exactly that).
+- **D-30** — Measured at close, final tree `4d54382` (after the fix wave; product code untouched since): `tsc` clean · `lint` clean · **1295 unit / 75 files** · **21 migrations** (up to date) · **296 e2e / 27 files** by `--list`; six foreground chunks with explicit file paths, `E2E_PORT=3100 --workers=1 --global-timeout=540000` — **A 54 (3.4m) · B 67 (3.8m) · C 63 (4.0m) · D 38 (2.6m) · E 53 (7.3m) · F 21 (2.0m) = 296**, zero failed, zero did-not-run. Chunk A's first pass was 53 + 1 failed (`it-core.spec.ts:302`, a `toBeVisible` 5 s timeout) and passed 54/54 on the immediate as-is re-run — the cold-compile/headroom class HANDOVER §7 documents, not a regression; no test or product code was touched. Task 9's earlier close (D-22) ran chunk C with the bare pattern `offboarding`, which also matched `offboarding-v2.spec.ts` (hence its 68 and a 301 sum); the explicit-path list above is the canonical one and the sum is 296.
 
 ## File structure
 

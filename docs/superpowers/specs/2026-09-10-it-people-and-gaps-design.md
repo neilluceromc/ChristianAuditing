@@ -1,11 +1,13 @@
 # Phase 20 — IT side: department transfers, offboarding attribution and facets, directory quality, and six known gaps
 
-**Status:** implemented on branch `phase-20-it-people-and-gaps` (9 tasks, `D-1`…`D-22`), code-complete
-2026-09-10, unmerged and unpushed; battery `tsc`/`lint` clean, **21 migrations**, **1291 unit / 75 files**,
-**296 e2e / 27 files** by `--list` across six foreground chunks — **54 (3.3m) · 67 (3.9m) · 68 (4.4m) ·
-38 (2.6m) · 53 (7.3m) · 21 (2.0m)**, zero failed, zero did-not-run on the recorded runs; see
-`docs/HANDOVER.md` (m) and plan `D-1`…`D-22` for what shipped and the four test-only fixes found closing
-the battery. The Purchasing/stock work is parked in `docs/HANDOVER-PENDING.md`.
+**Status:** implemented on branch `phase-20-it-people-and-gaps` (9 tasks, `D-1`…`D-30` — the final-review
+fix wave included), code-complete 2026-09-10 at final tree `4d54382`, unmerged and unpushed; battery
+`tsc`/`lint` clean, **21 migrations**, **1295 unit / 75 files**, **296 e2e / 27 files** by `--list` across
+six foreground chunks with explicit file paths — **A 54 (3.4m) · B 67 (3.8m) · C 63 (4.0m) · D 38 (2.6m) ·
+E 53 (7.3m) · F 21 (2.0m) = 296**, zero failed, zero did-not-run. See `docs/HANDOVER.md` (m) and plan
+`D-1`…`D-30` for what shipped, the final review's findings, the fix wave, and the earlier Task 9 close
+(four test-only fixes; chunk C's bare `offboarding` pattern there also matched `offboarding-v2.spec.ts`,
+hence its 301-run/296-unique sum). The Purchasing/stock work is parked in `docs/HANDOVER-PENDING.md`.
 
 **Plan:** `docs/superpowers/plans/2026-09-10-phase-20-it-people-and-gaps.md` (written next).
 
