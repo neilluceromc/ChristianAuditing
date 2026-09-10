@@ -306,7 +306,9 @@ export function LoadoutView({
         <div role="group" aria-label="Equipment slots" className="grid grid-cols-2 gap-[11px] lg:grid-cols-4" onKeyDown={onGridKeyDown}>
           {slots.map((tile, i) => {
             const a = tile.asset;
-            const name = `${tile.name} slot, ${a ? a.model : "empty"}, ${tile.required ? "required" : "optional"}`;
+            // Phase 20 (spec §6.3): a loan-covered empty slot says so in its
+            // accessible name too — the LOAN pill alone was sighted-only.
+            const name = `${tile.name} slot, ${a ? a.model : tile.coveredByLoan ? "on loan" : "empty"}, ${tile.required ? "required" : "optional"}`;
             const showReplace = !!a && direct && mayAct && !a.pendingRef;
             // Waiving is a policy-slot affordance (an ADD-exception slot is
             // already only for this person — "Remove exception" is its

@@ -130,8 +130,10 @@ export function BulkDrawer({
         const res = await bulkChangeStatus(payload);
         if (res.ok) {
           const { changed, skipped } = res.data;
+          // Count first, then the destination status — the file's toast
+          // house style, and the operator sees what the assets became.
           toast(
-            `Changed ${changed} asset${changed === 1 ? "" : "s"}` +
+            `${changed} asset${changed === 1 ? "" : "s"} now ${effectiveTo}` +
             (skipped.length > 0 ? ` · ${skipped.length} skipped` : ""),
             "settled",
           );
@@ -157,7 +159,7 @@ export function BulkDrawer({
     });
   }
 
-  /** Shared result handling for both the direct and approval-request calls — they share every ActionResult failure shape and differ only in the success payload's field names. */
+  /** Result handling for the approval-request call: toast on success, `applyFailure` otherwise. The direct status branch above handles its own result because its skipped list keeps the drawer open. */
   function handleResult<T>(res: ActionResult<T>, successMessage: (data: T) => string): "ok" | "failed" {
     if (res.ok) {
       toast(successMessage(res.data), "settled");
