@@ -223,6 +223,30 @@ describe("pathAllowedForRole", () => {
       expect(pathAllowedForRole(p, "admin")).toBe(true);
     }
   });
+  // Phase 19 spec §3: stock write surfaces are Purchasing's (and the sysadmin
+  // role's); reads are open to every workspace. These write-surface rules
+  // MUST precede the general /stock read rule (first-match-wins) — if they
+  // didn't, finance_staff and viewer would fall through to the general rule
+  // (which has no `roles` key) and pass.
+  it("stock reads are open to every workspace", () => {
+    for (const role of ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"] as const) {
+      expect(pathAllowedForRole("/stock", role)).toBe(true);
+      expect(pathAllowedForRole("/stock/items/abc", role)).toBe(true);
+    }
+  });
+  it("stock write routes are Purchasing-only and precede the general stock rule", () => {
+    expect(pathAllowedForRole("/stock/items/new", "purchasing_staff")).toBe(true);
+    expect(pathAllowedForRole("/stock/items/new", "admin")).toBe(true);
+    expect(pathAllowedForRole("/stock/items/new", "finance_staff")).toBe(false);
+    expect(pathAllowedForRole("/stock/items/new", "viewer")).toBe(false);
+    expect(pathAllowedForRole("/stock/items/abc/edit", "purchasing_staff")).toBe(true);
+    expect(pathAllowedForRole("/stock/items/abc/adjust", "finance_staff")).toBe(false);
+    expect(pathAllowedForRole("/stock/stocktakes/abc/review", "it_staff")).toBe(false);
+    expect(pathAllowedForRole("/stock/stocktakes/abc/review", "purchasing_staff")).toBe(true);
+    expect(pathAllowedForRole("/stock/stocktakes/abc/count", "finance_staff")).toBe(false);
+    expect(pathAllowedForRole("/stock/receive", "it_staff")).toBe(false);
+    expect(pathAllowedForRole("/stock/issue", "it_staff")).toBe(false);
+  });
 });
 
 describe("navIsActive", () => {
@@ -295,6 +319,35 @@ describe("WORKSPACE_NAV shape", () => {
     for (const item of records?.items ?? []) {
       expect(item.roles).toEqual(["admin", "it_staff"]);
     }
+  });
+  // Phase 19: the Purchasing workspace gains a Stock section after Suppliers;
+  // the read-only items (Items, Stocktakes) carry no `roles` restriction,
+  // matching the general /stock PATH_RULE, while the write-surface items
+  // match the Purchasing-only PATH_RULEs above.
+  it("Phase 19: the Purchasing Stock section follows Suppliers and gates its write items", () => {
+    const headings = WORKSPACE_NAV.purchasing.map((s) => s.heading);
+    const suppliersIdx = headings.indexOf("Suppliers");
+    const stockIdx = headings.indexOf("Stock");
+    expect(stockIdx).toBeGreaterThan(-1);
+    expect(stockIdx).toBe(suppliersIdx + 1);
+    const stock = WORKSPACE_NAV.purchasing[stockIdx];
+    expect(stock.items.map((i) => i.href)).toEqual([
+      "/stock",
+      "/stock/receive",
+      "/stock/issue",
+      "/stock/stocktakes",
+      "/stock/categories",
+      "/stock/import",
+    ]);
+    expect(stock.items.find((i) => i.href === "/stock")?.roles).toBeUndefined();
+    expect(stock.items.find((i) => i.href === "/stock/stocktakes")?.roles).toBeUndefined();
+    for (const href of ["/stock/receive", "/stock/issue", "/stock/categories", "/stock/import"]) {
+      expect(stock.items.find((i) => i.href === href)?.roles).toEqual(["admin", "purchasing_staff"]);
+    }
+  });
+  it("Phase 19: the Finance By status section appends a Stock link", () => {
+    const byStatus = WORKSPACE_NAV.finance.find((s) => s.heading === "By status");
+    expect(byStatus?.items.at(-1)).toEqual({ label: "Stock", href: "/stock" });
   });
 });
 

@@ -22,7 +22,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { toXlsxBuffer, type XlsxColumn } from "@/server/xlsx/write";
-import { ASSET_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS, SUPPLIER_EXPORT_COLUMNS } from "@/lib/export-columns";
+import {
+  ASSET_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS, SUPPLIER_EXPORT_COLUMNS, STOCK_IMPORT_TEMPLATE_COLUMNS,
+} from "@/lib/export-columns";
 import { IMPORT_ROW_CAP } from "@/lib/import-vocabulary";
 
 const OUT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +37,7 @@ const OUT_DIR = dirname(fileURLToPath(import.meta.url));
 type AssetSheetRow = Parameters<(typeof ASSET_EXPORT_COLUMNS)[number]["cell"]>[0];
 type EmployeeSheetRow = Parameters<(typeof EMPLOYEE_EXPORT_COLUMNS)[number]["cell"]>[0];
 type SupplierSheetRow = Parameters<(typeof SUPPLIER_EXPORT_COLUMNS)[number]["cell"]>[0];
+type StockSheetRow = Parameters<(typeof STOCK_IMPORT_TEMPLATE_COLUMNS)[number]["cell"]>[0];
 
 /**
  * UTC midnight, matching what `readSheet` hands back for a date-formatted
@@ -72,6 +75,19 @@ function supplier(row: Partial<SupplierSheetRow> & Pick<SupplierSheetRow, "name"
   return {
     registeredName: null, category: null, contactPerson: null, phone: null, email: null, address: null,
     registrationNo: null, contractStatus: "NONE", contractStart: null, contractEnd: null, notes: null,
+    ...row,
+  };
+}
+
+/** Every column blank but Name/Category/Unit — the minimal stock row. Code
+ * defaults to null (assigned a code at apply time); Unit cost is always
+ * null here — M-2 correction: `STOCK_IMPORT_HEADERS` DOES map it (matched,
+ * since D-11), but nothing downstream reads the matched value, so a real
+ * figure here would only prove the fixture carries a column the importer
+ * already ignores on write. */
+function stock(row: Partial<StockSheetRow> & Pick<StockSheetRow, "name" | "category" | "unit">): StockSheetRow {
+  return {
+    code: null, packSize: null, reorderLevel: 0, openingQty: 0, unitCost: null, notes: null,
     ...row,
   };
 }
@@ -236,6 +252,47 @@ async function main() {
   ];
   write("suppliers-bank.xlsx", await toXlsxBuffer(SUPPLIER_BANK_COLUMNS, [
     { name: "Some Supplier", bankAccount: "1234567890" },
+  ]));
+
+  // stock-clean.xlsx — Phase 19 Task 6. Three new items, one per seeded
+  // category (OS/CM/PN — `prisma/seed.ts`'s own `stockCats`), all valid and
+  // all with an opening quantity: a CREATE is the one row shape where
+  // `openingQty > 0` is legal at all, so the clean fixture is where that
+  // path gets exercised. No codes — every one is assigned at apply time.
+  write("stock-clean.xlsx", await toXlsxBuffer(STOCK_IMPORT_TEMPLATE_COLUMNS, [
+    stock({ name: "Whiteboard marker", category: "Office supplies", unit: "piece", packSize: 12, reorderLevel: 24, openingQty: 48 }),
+    stock({ name: "Air freshener spray", category: "Cleaning materials", unit: "bottle", reorderLevel: 6, openingQty: 18 }),
+    stock({ name: "Paper cup 8oz", category: "Pantry", unit: "sleeve", packSize: 50, reorderLevel: 20, openingQty: 60 }),
+  ]));
+
+  // stock-mixed.xlsx — one of every verdict (spec §6, Task 6's own manual
+  // check): 2 creates, 1 update, 3 blocked.
+  //
+  // Row 1 (update): OS-0001 restates its seeded Name/Category/Unit/Pack size
+  // — a present-but-UNCHANGED cell must not be mistaken for a write, the
+  // same lesson `assets-mixed.xlsx`'s own update row teaches — with only
+  // Reorder level actually moved, 10 → 12.
+  // Row 2 (create, explicit code): OS-0009 — ahead of OS's own series
+  // counter (seeded at 6), so applying it must raise the counter past 9,
+  // not leave a later manual create free to mint OS-0007..0009 later and
+  // collide. Carries an opening quantity too, so a code-carrying CREATE
+  // exercises the OPENING-movement path exactly like a code-less one does.
+  // Row 3 (create, blank code): a brand-new Cleaning materials item with no
+  // Code cell — assigned CM's next series number at apply time.
+  // Row 4 (blocked, bad-stock-code): PN-0009 under category "Office
+  // supplies" — a well-formed code whose prefix doesn't match its row's
+  // stated category.
+  // Row 5 (blocked, unknown-stock-category): "Garden" has never been created.
+  // Row 6 (blocked, opening-on-existing): OS-0002 already has a ledger, so
+  // an Opening quantity cell on this row is refused rather than silently
+  // added as a second opening entry.
+  write("stock-mixed.xlsx", await toXlsxBuffer(STOCK_IMPORT_TEMPLATE_COLUMNS, [
+    stock({ code: "OS-0001", name: "Bond paper A4", category: "Office supplies", unit: "ream", packSize: 5, reorderLevel: 12 }),
+    stock({ code: "OS-0009", name: "Highlighter set", category: "Office supplies", unit: "set", reorderLevel: 10, openingQty: 25 }),
+    stock({ name: "Microfiber cloth", category: "Cleaning materials", unit: "piece", reorderLevel: 12, openingQty: 24 }),
+    stock({ code: "PN-0009", name: "Mislabelled code", category: "Office supplies", unit: "piece" }),
+    stock({ name: "Potting soil 5kg", category: "Garden", unit: "bag" }),
+    stock({ code: "OS-0002", name: "Ballpen black", category: "Office supplies", unit: "piece", openingQty: 5 }),
   ]));
 }
 

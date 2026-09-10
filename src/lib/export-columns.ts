@@ -132,6 +132,52 @@ export const SUPPLIER_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
 ];
 
+/**
+ * Phase 19 Task 6 (plan P-2): the stock IMPORT template — what `make.ts`
+ * writes the import fixtures with, and what an operator downloads to fill
+ * in. Deliberately a SEPARATE spec from `STOCK_EXPORT_COLUMNS` below (the
+ * balances export): that sheet carries `balance`/`low`/`lastMovementAt`,
+ * none of which is a writable field, while this one carries `code` (blank to
+ * assign) and `openingQty`, neither of which the balances export has any use
+ * for. M-2 correction: "Unit cost" IS matched by `STOCK_IMPORT_HEADERS`
+ * (`import-stock.ts`, since D-11) — recognised, never reported as an
+ * unrecognised column — but its value is accepted and then consumed by
+ * nothing on write (spec §6: unit cost is recorded on receipts, not opening
+ * stock). Because it's matched, it never reaches `matchHeaders`'s `unknown`
+ * array in the first place, so `import-columns.ts`'s
+ * `STOCK_KNOWN_UNIMPORTED_COLUMNS` has nothing to excuse — it stays `[]`.
+ */
+export const STOCK_IMPORT_TEMPLATE_COLUMNS: XlsxColumn<{
+  code: string | null; name: string; category: string; unit: string; packSize: number | null;
+  reorderLevel: number; openingQty: number; unitCost: number | null; notes: string | null;
+}>[] = [
+  { label: "Code", width: 12, cell: (r) => ({ value: r.code }) },
+  { label: "Name", width: 30, cell: (r) => ({ value: r.name }) },
+  { label: "Category", width: 20, cell: (r) => ({ value: r.category }) },
+  { label: "Unit", width: 10, cell: (r) => ({ value: r.unit }) },
+  { label: "Pack size", width: 10, cell: (r) => ({ value: r.packSize, type: Number }) },
+  { label: "Reorder level", width: 12, cell: (r) => ({ value: r.reorderLevel, type: Number }) },
+  { label: "Opening quantity", width: 14, cell: (r) => ({ value: r.openingQty, type: Number }) },
+  { label: "Unit cost", width: 12, cell: (r) => ({ value: r.unitCost, type: Number, format: "#,##0.00" }) },
+  { label: "Notes", width: 40, cell: (r) => ({ value: r.notes }) },
+];
+
+/** Phase 19 (spec §5.4): the stock balances export — same columns the `/stock` list shows. */
+export const STOCK_EXPORT_COLUMNS: XlsxColumn<{
+  code: string; name: string; category: string; unit: string; packSize: number | null; reorderLevel: number;
+  balance: number; low: string; lastMovementAt: Date | null;
+}>[] = [
+  { label: "Code", width: 12, cell: (r) => ({ value: r.code }) },
+  { label: "Name", width: 30, cell: (r) => ({ value: r.name }) },
+  { label: "Category", width: 20, cell: (r) => ({ value: r.category }) },
+  { label: "Unit", width: 10, cell: (r) => ({ value: r.unit }) },
+  { label: "Pack size", width: 10, cell: (r) => ({ value: r.packSize, type: Number }) },
+  { label: "Reorder level", width: 12, cell: (r) => ({ value: r.reorderLevel, type: Number }) },
+  { label: "Balance", width: 10, cell: (r) => ({ value: r.balance, type: Number }) },
+  { label: "Low", width: 6, cell: (r) => ({ value: r.low }) },
+  { label: "Last movement", width: 14, cell: (r) => ({ value: r.lastMovementAt, type: Date, format: "yyyy-mm-dd" }) },
+];
+
 export const FAREWELL_EXPORT_COLUMNS: XlsxColumn<{
   tag: string; model: string; outcome: string; reason: string | null;
   cost: number | null; refNo: string; state: string;

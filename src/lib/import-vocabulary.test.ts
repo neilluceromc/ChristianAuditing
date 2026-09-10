@@ -21,9 +21,13 @@ import {
 // exists, and unlike the asset importer's Vendor, a supplier's name IS
 // something the suppliers page can rename, so `duplicate-supplier-name`'s
 // link fix points somewhere real and actionable.
+// Phase 19 Task 6: "/stock/categories" and "/stock" added — both exist, and
+// unlike the asset importer's Vendor, a stock category (or item) IS something
+// those pages can create/manage, so the new causes' link fixes point somewhere
+// real and actionable.
 const REAL_ROUTES = [
   "/admin/asset-categories", "/admin/asset-types", "/admin/departments", "/inventory",
-  "/inventory/register", "/purchases/suppliers",
+  "/inventory/register", "/purchases/suppliers", "/stock/categories", "/stock",
 ];
 
 describe("BLOCK_CAUSES", () => {
@@ -268,6 +272,10 @@ describe("BLOCK_CAUSES", () => {
       "bad-email": "reupload",
       "contract-dates-order": "reupload",
       "duplicate-supplier-name": "link",
+      "unknown-stock-category": "link",
+      "bad-stock-code": "reupload",
+      "bad-unit": "reupload",
+      "opening-on-existing": "link",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);
@@ -335,6 +343,32 @@ describe("BLOCK_CAUSES", () => {
   // asset" would be false on an employee row.
   it("keeps duplicate-in-file entity-neutral, since the employee importer reuses it", () => {
     expect(blockSpec("duplicate-in-file").explain).not.toMatch(/asset/i);
+  });
+
+  // Phase 19 Task 6: the stock importer's own causes, from here down.
+  it("sends unknown-stock-category to the categories page, distinct from unknown-category", () => {
+    const spec = blockSpec("unknown-stock-category");
+    expect(spec.fix).toMatchObject({ kind: "link", href: "/stock/categories" });
+    expect(spec.label.toLowerCase()).not.toBe(blockSpec("unknown-category").label.toLowerCase());
+  });
+
+  it("gives bad-stock-code a reupload fix explaining the PREFIX-0000 shape", () => {
+    const spec = blockSpec("bad-stock-code");
+    expect(spec.fix?.kind).toBe("reupload");
+    expect(spec.explain).toMatch(/PREFIX-0000/);
+    expect(spec.explain).toMatch(/blank/i);
+  });
+
+  it("gives bad-unit its own cause, distinct from bad-status/bad-employment wording", () => {
+    const spec = blockSpec("bad-unit");
+    expect(spec.fix?.kind).toBe("reupload");
+    expect(spec.explain).not.toMatch(/model|serial/i);
+  });
+
+  it("sends opening-on-existing to stock, with copy pointing at a receipt or adjustment instead", () => {
+    const spec = blockSpec("opening-on-existing");
+    expect(spec.fix).toEqual({ kind: "link", label: "Open stock", href: "/stock" });
+    expect(spec.explain).toMatch(/receipt or an adjustment/i);
   });
 });
 

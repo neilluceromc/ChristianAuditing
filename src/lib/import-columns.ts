@@ -100,3 +100,28 @@ export const splitEmployeeUnknownColumns = makeSplitter(EMPLOYEE_KNOWN_UNIMPORTE
 /** Phase 18 Task 5: every supplier sheet column imports, so nothing here is
  * known-unimported; kept as data for `ImportWizard`'s prop. */
 export const SUPPLIER_KNOWN_UNIMPORTED_COLUMNS: readonly string[] = [];
+
+/**
+ * M-2 correction: this used to claim "Unit cost" was absent from
+ * `STOCK_IMPORT_HEADERS` and so needed excusing from the unknown-column typo
+ * check. False since D-11 added a `unitCost` entry there (`import-stock.ts`
+ * says so correctly) — the header IS recognised, it is just consumed by
+ * nothing (no field on `StockCreateData`/`StockUpdatePatch` ever reads it,
+ * per spec §6: a unit cost is recorded on a receipt, not on the item). A
+ * matched header never lands in `matchHeaders`'s `unknown` array in the
+ * first place, so `splitColumns` never sees "Unit cost" to excuse — this
+ * list has nothing left to hold. Kept as `[]`, same as
+ * `SUPPLIER_KNOWN_UNIMPORTED_COLUMNS` above, purely because `ImportWizard`'s
+ * `knownUnimportedColumns` prop is required.
+ */
+export const STOCK_KNOWN_UNIMPORTED_COLUMNS: readonly string[] = [];
+
+/**
+ * Spec §6: a receipt (not an import row) is where a unit cost is recorded,
+ * because it feeds `StockLot.unitCost` — a per-LOT figure that can differ
+ * receipt to receipt, not a single fact an item ever carries. The import
+ * page's own banner (`/stock/import/page.tsx`) carries this text so an
+ * operator who filled in the column understands why nothing happened with
+ * it, rather than guessing from the generic "not imported" line alone.
+ */
+export const STOCK_UNIT_COST_NOTICE = "Unit cost is recorded on receipts, not opening stock";
