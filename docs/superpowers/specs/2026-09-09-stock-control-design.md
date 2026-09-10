@@ -1,8 +1,8 @@
 # Phase 19 — Stock control, part D1: the ledger core
 
-**Status:** implemented on branch `phase-19-stock-control` (9 tasks, `D-1`…`D-20`) — CODE-COMPLETE,
-UNMERGED and UNPUSHED; see the plan's D-block for every ruling and deviation, and `docs/HANDOVER.md` (l)
-for what shipped and the measured battery. Implements the first half of HANDOVER §9 item **D**
+**Status:** implemented on branch `phase-19-stock-control` (9 tasks, `D-1`…`D-30`), merged to `main` via
+`--no-ff` `d311e26` and pushed on 2026-09-10; see the plan's D-block for every ruling and deviation, and
+`docs/HANDOVER.md` (l) for what shipped and the measured battery. Implements the first half of HANDOVER §9 item **D**
 (consumables and stock control). Part **D2** — FIFO costing, expiry warnings, report views and exports by
 department and month — is a separate phase with its own spec and consumes the lots this phase records.
 
