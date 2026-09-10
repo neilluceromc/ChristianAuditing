@@ -124,6 +124,11 @@ test.describe.serial("registration", () => {
 
     await login(page, IT);
     await page.goto("/inventory/new");
+    // Phase 20 (spec §6.2): checkIdentifiers is class-scoped now, and the
+    // live check is skipped entirely until a category names the class — a
+    // category-less guess could flag a collision that only exists in the
+    // OTHER class. BR-LT-0201 is a Laptop, so choose that class first.
+    await page.getByLabel("Category").selectOption({ label: "Laptop" });
     await page.getByLabel("Serial").fill(serial);
     await page.getByLabel("Model").click(); // blur
     await expect(page.getByText("Already registered")).toBeVisible({ timeout: 10_000 });
