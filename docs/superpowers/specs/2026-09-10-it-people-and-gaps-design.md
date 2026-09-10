@@ -161,8 +161,9 @@ options with derived counts), sortable headers. `listOffboarding(state: ListStat
    (`"cls" = $1 AND (status = 'DEFECTIVE' OR "defectiveSince" IS NOT NULL)`) and returns `(id, stage)` rows;
    the caller keeps the ids whose stage is requested and, when other filters are active, intersects them
    with the Prisma-side candidate ids from `buildAssetWhere`. The Prisma where is never hand-translated to
-   SQL. A unit test proves the SQL CASE agrees with `repairStage` on a fixture of 12 rows covering every rule
-   and the centavo edge.
+   SQL. A unit test asserts `repairStage` on a 12-row fixture covering every rule and the centavo edge; the
+   SQL CASE's agreement with it is proven end-to-end (`it-gaps.spec.ts` compares the raw cut against
+   `repairStage` over every seeded asset) — vitest has no database (plan P-1).
 
 ---
 
