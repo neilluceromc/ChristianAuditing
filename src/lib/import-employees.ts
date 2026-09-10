@@ -1,6 +1,7 @@
 import type { EmploymentStatus } from "@prisma/client";
 import { EMPLOYMENT_STATUSES } from "./employees-list";
 import { cellText, parseDateCell, refKey, type HeaderMatch } from "./import-assets";
+import { nameDeptKey } from "./same-name";
 import { isBlank } from "./tag-key";
 import type { BlockCause, BlockedRow } from "./import-vocabulary";
 
@@ -37,6 +38,8 @@ export type EmployeeField = (typeof EMPLOYEE_IMPORT_HEADERS)[number]["key"];
 export interface EmployeeRecordRef {
   id: string;
   employment: EmploymentStatus;
+  /** I-5: needed for the department-via-import guard below. */
+  departmentId: string;
 }
 
 /**
@@ -71,6 +74,14 @@ export interface EmployeeRefs {
    * whichever record was read last (review I-1).
    */
   byEmployeeNo: Map<string, EmployeeRecordRef | null>;
+  /**
+   * Phase 20 (spec §5): the same-name directory guard's own lookup, keyed by
+   * `nameDeptKey(name, departmentName)` → the existing employee's
+   * `employeeNo` — so a CREATE row (no `employeeNo` match) whose name and
+   * department already belong to someone can name who it might collide with,
+   * rather than silently creating a probable duplicate.
+   */
+  byNameDept: Map<string, string>;
 }
 
 /**
@@ -106,11 +117,20 @@ export interface EmployeeCreateData {
  * CONTRACT still matters one layer down, in `employeeDiff`
  * (`src/lib/employee-diff.ts`), which is what actually decides what gets
  * written to the database from this patch.
+ *
+ * `departmentId` is the one exception to "every field here is REQUIRED":
+ * I-5 (final review, ruling R15 option a) — an UPDATE row whose Department
+ * cell disagrees with the record blocks by default (the same shape as
+ * `employment-via-import`), and `keepCurrentDepartment` lets the operator
+ * apply the row's other columns while leaving the department untouched. The
+ * key is OMITTED (not written as the current value) in that case, the same
+ * "absent leaves it alone" contract `AssetUpdatePatch`'s optional keys use —
+ * `employeeDiff` only compares keys `patch` actually carries.
  */
 export interface EmployeeUpdatePatch {
   name: string;
   title: string;
-  departmentId: string;
+  departmentId?: string;
   joinedAt: Date;
 }
 
@@ -130,6 +150,10 @@ export interface EmployeePlan {
  * asset importer's five options, and its own tests stay simple. */
 export interface EmployeeImportOptions {
   keepCurrentEmployment: boolean;
+  /** Phase 20 (spec §5): lets a CREATE row through the same-name directory guard. */
+  allowSameName: boolean;
+  /** I-5: lets an UPDATE row through `department-via-import` and apply the rest of the row. */
+  keepCurrentDepartment: boolean;
 }
 
 /**
@@ -314,6 +338,23 @@ export function planEmployeeRows(
       }
     }
 
+    // Rule 6b (I-5, final review, ruling R15 option a): the department
+    // analogue of Rule 6 above — spec §0 decision 3 / §3 says a department
+    // change always goes through Transfer ("one path for one fact, so every
+    // change carries a date and a record"), so an UPDATE row whose
+    // Department cell disagrees with the record's current department blocks
+    // by default, unless the operator ticked `keepCurrentDepartment`, in
+    // which case the row's other columns still apply and `departmentId` is
+    // left out of the patch below (see `EmployeeUpdatePatch`'s own comment).
+    let departmentConflict = false;
+    if (matched) {
+      departmentConflict = departmentId !== matched.departmentId;
+      if (departmentConflict && !options.keepCurrentDepartment) {
+        block("department-via-import", departmentRaw);
+        return;
+      }
+    }
+
     // Rule 7 (E-1): ceilings from `employeeSchema`
     // (`employees/actions.ts:199`) — there is no createEmployee schema to
     // copy from, since this importer's validation IS the creation contract.
@@ -340,16 +381,34 @@ export function planEmployeeRows(
     const joinedAt = joinedAtResult.value!;
 
     if (matched) {
+      // I-5: `departmentId` is omitted (not written as the unchanged
+      // current value) exactly when Rule 6b let a real conflict through via
+      // `keepCurrentDepartment` — leaving the key out of the patch entirely
+      // is what keeps the record's department untouched (see
+      // `EmployeeUpdatePatch`'s own comment on the absent/present contract).
       const patch: EmployeeUpdatePatch = {
         name: nameRaw,
         title: titleRaw,
-        departmentId,
         joinedAt,
       };
+      if (!departmentConflict) patch.departmentId = departmentId;
       rows.push({ kind: "update", row: sheetRow, employeeId: matched.id, data: patch });
       counts.update += 1;
     } else {
-      // Rule 9 (scope decision 15, create-only): blank Employment → ACTIVE.
+      // Rule 9 (Phase 20 spec §5): a CREATE row (no employeeNo match) whose
+      // name and department already belong to a stored employee may be a
+      // duplicate rather than a new hire — block naming the existing
+      // employeeNo, unless the operator confirmed these are different
+      // people (allowSameName). Runs only on CREATE: an UPDATE already
+      // resolved to one specific employee by employeeNo, so there is no
+      // "which one did you mean" question left to ask.
+      const sameNameEmployeeNo = refs.byNameDept.get(nameDeptKey(nameRaw, departmentRaw));
+      if (sameNameEmployeeNo && !options.allowSameName) {
+        block("same-name-in-department", sameNameEmployeeNo);
+        return;
+      }
+
+      // Rule 10 (scope decision 15, create-only): blank Employment → ACTIVE.
       const employment: EmploymentStatus = parsedEmployment ?? "ACTIVE";
       const data: EmployeeCreateData = {
         employeeNo: employeeNoRaw,

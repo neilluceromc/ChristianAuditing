@@ -106,7 +106,7 @@ export function groupExceptionsByEmployee<E extends { employeeId: string }>(rows
 }
 
 export interface Loadout<A extends HeldAssetLike> {
-  slots: Array<{ slot: SlotLike; asset: A | null }>;
+  slots: Array<{ slot: SlotLike; asset: A | null; coveredByLoan: boolean }>;
   /** held assets no slot claimed — shown in the holding area / table view */
   unslotted: A[];
   /** Phase 16: TEMPORARY devices no loaner slot claimed — never "extras" */
@@ -114,23 +114,54 @@ export interface Loadout<A extends HeldAssetLike> {
   filled: number;
   totalSlots: number;
   missingRequired: number;
+  /** Phase 20 (spec §6.3, gap 3): standard slots covered by a device on loan — see `coveredByLoan` below. */
+  coveredByLoan: number;
 }
 
-/** Greedy fill in slot order. A standard slot takes the first remaining non-loan asset of its type; a loaner slot the first remaining TEMPORARY one. */
+/**
+ * Greedy fill in slot order. A standard slot takes the first remaining
+ * non-loan asset of its type; a loaner slot the first remaining TEMPORARY
+ * one.
+ *
+ * Phase 20 (spec §6.3, gap 3): after that fill, a REQUIRED-or-not standard
+ * slot left empty whose type still has a remaining TEMPORARY device is
+ * "covered by loan" rather than plainly missing — someone standing in for
+ * their own broken kit with a loaner is not a policy gap. The device is NOT
+ * consumed (it stays in `onLoan`, exactly as before), so this second pass
+ * tracks coverage in its own pool rather than splicing `remaining` — one
+ * physical unit covers at most ONE slot, the same "greedy, in order" rule
+ * the fill above already follows. A loaner slot's own greedy match above
+ * always wins first: it is the only kind of slot whose fill condition can
+ * take a TEMPORARY asset at all, so by the time this pass runs, any device a
+ * loaner slot claimed is already gone from `remaining` and cannot also
+ * "cover" a standard slot of the same type.
+ */
 export function computeLoadout<A extends HeldAssetLike>(slots: SlotLike[], held: A[]): Loadout<A> {
   const remaining = [...held];
   const filledSlots = slots.map((slot) => {
     const i = slot.assetTypeId
       ? remaining.findIndex((a) => a.typeId === slot.assetTypeId && (a.status === "TEMPORARY") === slot.loaner)
       : -1;
-    return { slot, asset: i >= 0 ? remaining.splice(i, 1)[0] : null };
+    return { slot, asset: i >= 0 ? remaining.splice(i, 1)[0] : null, coveredByLoan: false };
   });
+
+  const loanPool = remaining.filter((a) => a.status === "TEMPORARY");
+  for (const entry of filledSlots) {
+    if (entry.asset || entry.slot.loaner || !entry.slot.assetTypeId) continue;
+    const i = loanPool.findIndex((a) => a.typeId === entry.slot.assetTypeId);
+    if (i >= 0) {
+      entry.coveredByLoan = true;
+      loanPool.splice(i, 1);
+    }
+  }
+
   return {
     slots: filledSlots,
     unslotted: remaining.filter((a) => a.status !== "TEMPORARY"),
     onLoan: remaining.filter((a) => a.status === "TEMPORARY"),
     filled: filledSlots.filter((s) => s.asset).length,
     totalSlots: slots.length,
-    missingRequired: filledSlots.filter((s) => !s.asset && s.slot.required).length,
+    missingRequired: filledSlots.filter((s) => !s.asset && s.slot.required && !s.coveredByLoan).length,
+    coveredByLoan: filledSlots.filter((s) => s.coveredByLoan).length,
   };
 }

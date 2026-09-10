@@ -131,6 +131,7 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
   it("reports the outcome, ref, state, reason and stored target of a live decision", () => {
     expect(decisionOf([cand({ toStatus: "MISSING", state: "CLAIMED", reason: "never handed back" })], { held: true })).toEqual({
       refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back", toStatus: "MISSING",
+      decidedBy: null, decidedAt: null,
     });
   });
 
@@ -182,7 +183,10 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     expect(decisionOf([
       cand({ id: "old", refNo: "APR-2100", state: "REJECTED", createdAt: at(0) }),
       cand({ id: "new", refNo: "APR-2101", state: "PENDING", toStatus: "BUYOUT", createdAt: at(5_000) }),
-    ], { held: true })).toEqual({ refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null, toStatus: "BUYOUT" });
+    ], { held: true })).toEqual({
+      refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null, toStatus: "BUYOUT",
+      decidedBy: null, decidedAt: null,
+    });
   });
 
   it("the newest decision wins even when the older one is also live", () => {
@@ -218,6 +222,34 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
     ];
     expect(decisionOf(rows, { held: true })?.refNo).toBe("APR-2101");
     expect(decisionOf([...rows].reverse(), { held: true })?.refNo).toBe("APR-2101");
+  });
+
+  // Phase 20 (spec §4.1): attribution rides on the winning candidate, copied
+  // straight across — decisionOf does not re-derive who decided or when.
+  describe("attribution (decidedBy / decidedAt)", () => {
+    it("carries the claimer and resolved time of an EXECUTED winner", () => {
+      const resolvedAt = at(9_000);
+      expect(decisionOf(
+        [cand({ state: "EXECUTED", decidedBy: "A. Reyes", decidedAt: resolvedAt })],
+        { held: false },
+      )).toMatchObject({ decidedBy: "A. Reyes", decidedAt: resolvedAt });
+    });
+
+    it("is both null for a PENDING winner with no claimer yet", () => {
+      expect(decisionOf([cand({ state: "PENDING" })], { held: false }))
+        .toMatchObject({ decidedBy: null, decidedAt: null });
+    });
+
+    // A DecisionCandidate that never mentions decidedBy/decidedAt at all
+    // (every candidate built before Phase 20) must still resolve to a real
+    // Decision with both fields null, never undefined.
+    it("defaults to null, not undefined, when the candidate carries neither field", () => {
+      const decision = decisionOf([cand({ state: "CLAIMED" })], { held: false });
+      expect(decision?.decidedBy).toBeNull();
+      expect(decision?.decidedAt).toBeNull();
+      expect(decision).toHaveProperty("decidedBy");
+      expect(decision).toHaveProperty("decidedAt");
+    });
   });
 });
 

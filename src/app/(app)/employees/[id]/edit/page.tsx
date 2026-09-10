@@ -7,10 +7,9 @@ import { EmployeeForm } from "@/components/employees/employee-form";
 export default async function EditEmployeePage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole("admin", "it_staff");
   const { id } = await params;
-  const [employee, departments] = await Promise.all([
-    prisma.employee.findUnique({ where: { id } }),
-    prisma.department.findMany({ orderBy: { name: "asc" } }),
-  ]);
+  // Phase 20: no department list — the edit form no longer changes departments
+  // (that is Transfer's job), so the query and the prop went with the select.
+  const employee = await prisma.employee.findUnique({ where: { id } });
   if (!employee) notFound();
 
   return (
@@ -26,7 +25,6 @@ export default async function EditEmployeePage({ params }: { params: Promise<{ i
       <EmployeeForm
         mode="edit"
         employeeId={id}
-        departments={departments.map((d) => ({ id: d.id, name: d.name }))}
         initial={{
           name: employee.name,
           title: employee.title,

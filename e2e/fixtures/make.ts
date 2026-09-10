@@ -216,6 +216,21 @@ async function main() {
                title: "Warehouse Lead", employment: "OFFBOARDING", joinedAt: utcDay("2023-06-01") }),
   ]));
 
+  // employees-same-name.xlsx — Phase 20 (spec §5), the same-name directory
+  // guard applied to an import: a CREATE row (fresh employeeNo, no match to
+  // update) whose Name+Department already belong to a stored employee —
+  // "Carlo Dizon" is EMP-0099, seeded in Operations — blocks under
+  // same-name-in-department unless `allowSameName` is applied. The second
+  // row is an ordinary new hire with nothing to block on, so the fixture
+  // proves the option applies to the blocked row without moving the clean
+  // one.
+  write("employees-same-name.xlsx", await toXlsxBuffer(EMPLOYEE_EXPORT_COLUMNS, [
+    employee({ employeeNo: "EMP-0150", name: "Carlo Dizon", department: "Operations",
+               title: "Team Lead", joinedAt: utcDay("2026-01-05") }),
+    employee({ employeeNo: "EMP-9102", name: "Bettina Reyes", department: "Finance",
+               title: "Payroll Clerk", joinedAt: utcDay("2026-02-15") }),
+  ]));
+
   // suppliers-clean.xlsx — 2 new rows, all valid, nothing to block on.
   write("suppliers-clean.xlsx", await toXlsxBuffer(SUPPLIER_EXPORT_COLUMNS, [
     supplier({ name: "Bayanihan Cabling", category: "IT hardware", contactPerson: "Mira Ong",

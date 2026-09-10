@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { refKey } from "@/lib/import-assets";
+import { nameDeptKey } from "@/lib/same-name";
 import { buildAssetRefs, buildEmployeeRefs, buildSupplierRefs } from "./resolve";
 
 /** A minimal AssetRecordRef-shaped row, overridable per test. */
@@ -191,6 +192,22 @@ describe("buildAssetRefs", () => {
   });
 });
 
+/** A minimal EmployeeIdentityRow-shaped row, overridable per test (Phase 20: name/departmentId key byNameDept). */
+const empRow = (over: Partial<{
+  id: string;
+  employeeNo: string;
+  employment: "ACTIVE" | "OFFBOARDING" | "OFFBOARDED";
+  name: string;
+  departmentId: string;
+}> = {}) => ({
+  id: "e-1",
+  employeeNo: "EMP-0042",
+  employment: "ACTIVE" as const,
+  name: "J. Sarmiento",
+  departmentId: "dept-1",
+  ...over,
+});
+
 describe("buildEmployeeRefs", () => {
   it("resolves a department name to its id when there is exactly one match", () => {
     const refs = buildEmployeeRefs([{ id: "dept-1", name: "Finance" }], []);
@@ -211,7 +228,7 @@ describe("buildEmployeeRefs", () => {
   it("keys byEmployeeNo via refKey, so a differently-cased sheet value still matches", () => {
     const refs = buildEmployeeRefs(
       [],
-      [{ id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" }],
+      [empRow({ id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" })],
     );
     expect(refs.byEmployeeNo.get(refKey("emp-0042"))).toMatchObject({ id: "e-1", employment: "ACTIVE" });
   });
@@ -227,24 +244,52 @@ describe("buildEmployeeRefs", () => {
     const refs = buildEmployeeRefs(
       [],
       [
-        { id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" },
-        { id: "e-2", employeeNo: "emp-0042", employment: "OFFBOARDED" },
+        empRow({ id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" }),
+        empRow({ id: "e-2", employeeNo: "emp-0042", employment: "OFFBOARDED" }),
       ],
     );
     expect(refs.byEmployeeNo.get(refKey("EMP-0042"))).toBeNull();
   });
 
   it("still resolves an employeeNo that only one record claims", () => {
-    const refs = buildEmployeeRefs([], [{ id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" }]);
+    const refs = buildEmployeeRefs([], [empRow({ id: "e-1", employeeNo: "EMP-0042", employment: "ACTIVE" })]);
     expect(refs.byEmployeeNo.get(refKey("emp-0042"))).toMatchObject({ id: "e-1" });
   });
 
   it("carries employment on the employeeNo ref, for the update-time employment-conflict check", () => {
     const refs = buildEmployeeRefs(
       [],
-      [{ id: "e-1", employeeNo: "EMP-0090", employment: "OFFBOARDING" }],
+      [empRow({ id: "e-1", employeeNo: "EMP-0090", employment: "OFFBOARDING" })],
     );
     expect(refs.byEmployeeNo.get(refKey("EMP-0090"))?.employment).toBe("OFFBOARDING");
+  });
+
+  // Phase 20 (spec §5): the same-name directory guard's own lookup —
+  // populated for real now (Task 2's stub left it an empty map, a
+  // compile-safe placeholder documented as "real query wiring for the task
+  // that actually turns the guard on").
+  it("keys byNameDept by name+department, mapping to the existing employee's employeeNo", () => {
+    const refs = buildEmployeeRefs(
+      [{ id: "dept-1", name: "Finance" }],
+      [empRow({ id: "e-1", employeeNo: "EMP-0042", name: "Maria Santos", departmentId: "dept-1" })],
+    );
+    expect(refs.byNameDept.get(nameDeptKey("Maria Santos", "Finance"))).toBe("EMP-0042");
+  });
+
+  it("normalises through nameDeptKey, so whitespace/case differences still match", () => {
+    const refs = buildEmployeeRefs(
+      [{ id: "dept-1", name: "finance" }],
+      [empRow({ id: "e-1", employeeNo: "EMP-0042", name: "Maria  Santos", departmentId: "dept-1" })],
+    );
+    expect(refs.byNameDept.get(nameDeptKey("maria santos", "Finance"))).toBe("EMP-0042");
+  });
+
+  it("does not key byNameDept for a different department", () => {
+    const refs = buildEmployeeRefs(
+      [{ id: "dept-1", name: "Finance" }, { id: "dept-2", name: "HR" }],
+      [empRow({ id: "e-1", employeeNo: "EMP-0042", name: "Maria Santos", departmentId: "dept-1" })],
+    );
+    expect(refs.byNameDept.get(nameDeptKey("Maria Santos", "HR"))).toBeUndefined();
   });
 });
 

@@ -1,5 +1,5 @@
 import { cache } from "react";
-import type { AssetClass, Prisma, Role } from "@prisma/client";
+import { Prisma, type AssetClass, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
@@ -8,11 +8,14 @@ import {
 import { ASSET_CLASSES, ASSIGNABLE_FROM, canSeeClass, statusesFor } from "@/lib/asset-class";
 import type { ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
-import { REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage } from "@/lib/repairs";
+import {
+  REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
+} from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
+import { auditSentence } from "@/lib/activity";
 
 /** Serializable DTO for the client table island — strings only, preformatted. */
 export interface AssetRow {
@@ -108,6 +111,17 @@ function toRow(a: {
  * Prisma filter can express) — so acting on that candidate set directly would
  * mean "the screen shows 1 row" and "the action touches 7" can both be true at
  * once. This resolves the candidate set down to the same ids listAssets shows.
+ *
+ * Phase 20 (spec §6.6, plan P-1): the cut itself is now computed by the
+ * database instead of read-then-filter in JS — `REPAIR_STAGE_CASE_SQL`
+ * mirrors `repairStage` rule for rule (their agreement is proven end-to-end
+ * in `it-gaps.spec.ts`, since vitest has no database). The raw query is
+ * scoped ONLY by class and the repair candidate predicate — the same
+ * candidate set `buildAssetWhere`'s own stage-facet branch narrows to — so
+ * when q/status/category/etc. are ALSO active this intersects the raw cut
+ * with the Prisma-side candidate ids from `buildAssetWhere`. The Prisma
+ * where is never hand-translated to SQL; it is only ever used to compute an
+ * id set to intersect against.
  */
 export async function repairStageIds(
   state: ListState,
@@ -116,20 +130,27 @@ export async function repairStageIds(
 ): Promise<string[] | null> {
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
   if (stages.length === 0) return null;
+
+  const rows = await prisma.$queryRaw<Array<{ id: string; stage: string }>>(Prisma.sql`
+    SELECT "id", ${Prisma.raw(REPAIR_STAGE_CASE_SQL)} AS stage
+    FROM "Asset"
+    WHERE "cls" = ${cls}::"AssetClass" AND ("status" = 'DEFECTIVE' OR "defectiveSince" IS NOT NULL)
+  `);
+  const kept = rows.filter((r) => (stages as readonly string[]).includes(r.stage)).map((r) => r.id);
+
+  // Every filter besides `stage` itself (q, status, category, type,
+  // assignee, provenance) and purchaseYear still has to narrow the result —
+  // the raw query above knows nothing about any of them.
+  const hasOtherFilters =
+    Boolean(state.q) ||
+    purchaseYear !== null ||
+    Object.entries(state.filters).some(([key, values]) => key !== "stage" && (values?.length ?? 0) > 0);
+  if (!hasOtherFilters) return kept;
+
   const where = buildAssetWhere(state, purchaseYear, cls);
-  const candidates = await prisma.asset.findMany({
-    where,
-    select: {
-      id: true, status: true, vendorId: true, rmaRef: true, cost: true,
-      repairQuote: true, defectiveSince: true,
-    },
-  });
-  return candidates
-    .filter((a) => {
-      const stage = stageOf(a);
-      return stage !== null && stages.includes(stage);
-    })
-    .map((a) => a.id);
+  const candidates = await prisma.asset.findMany({ where, select: { id: true } });
+  const candidateIds = new Set(candidates.map((c) => c.id));
+  return kept.filter((id) => candidateIds.has(id));
 }
 
 export async function listAssets(
@@ -353,14 +374,58 @@ export async function invisibleAssetIds(role: Role): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-/** Phase 15: the Replace picker — same-type spares first, then any assignable IT spare. */
+/**
+ * Phase 15/20 (spec §6.4, gap 4): the Replace picker — same-type spares
+ * first, then any assignable IT spare. `note` names WHICH group each row is
+ * in (`EntityCombobox` already renders `option.note`) — when no same-type
+ * spare exists every row still reads "Other spare" rather than the
+ * headerless list Phase 15 shipped with, because `note` here is not "this
+ * one matched" but "which group this row belongs to", true for every row
+ * whether or not `preferTypeId` ever matches anything.
+ */
 export async function spareOptions(preferTypeId: string | null): Promise<ComboOption[]> {
   const rows = await prisma.asset.findMany({
     where: { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null, reservations: { none: { state: "ACTIVE" } } },
     select: { id: true, tag: true, model: true, typeId: true },
     orderBy: { tag: "asc" },
   });
-  const rank = (t: string | null) => (preferTypeId && t === preferTypeId ? 0 : 1);
+  const isSameType = (t: string | null) => preferTypeId !== null && t === preferTypeId;
+  const rank = (t: string | null) => (isSameType(t) ? 0 : 1);
   return rows.sort((a, b) => rank(a.typeId) - rank(b.typeId) || a.tag.localeCompare(b.tag))
-    .map((a) => ({ value: a.id, label: a.tag, sub: a.model }));
+    .map((a) => ({ value: a.id, label: a.tag, sub: a.model, note: isSameType(a.typeId) ? "Same type" : "Other spare" }));
+}
+
+/**
+ * Phase 20 (spec §6.5, gap 5): the asset record header's "Last change" line
+ * — the newest `AuditEntry` for this asset whose action is a direct IT
+ * lifecycle change or a registration, rendered through the SAME
+ * `auditSentence` builder every other activity feed in this app already
+ * uses (never a bespoke sentence here). Matched by PREFIX (`lifecycle.*`) or
+ * the literal `"register"`, exactly spec §6.6's own wording — not a hand
+ * enumeration of today's five lifecycle actions, so a future
+ * `lifecycle.*` action is picked up automatically rather than silently
+ * falling out of this line the day it ships. `null` when there is no such
+ * entry (a fresh registration with no lifecycle event yet, or an asset whose
+ * only history predates this feature) — the header shows nothing, per spec.
+ */
+export async function lastLifecycleChange(
+  assetId: string,
+): Promise<{ sentence: string; at: Date; actor: string } | null> {
+  const entry = await prisma.auditEntry.findFirst({
+    where: {
+      entityType: "asset",
+      entityId: assetId,
+      OR: [{ action: { startsWith: "lifecycle." } }, { action: "register" }],
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!entry) return null;
+  const asset = await prisma.asset.findUnique({ where: { id: assetId }, select: { tag: true } });
+  return {
+    sentence: auditSentence({
+      actorLabel: entry.actorLabel, action: entry.action, diff: entry.diff, entityLabel: asset?.tag ?? assetId,
+    }),
+    at: entry.createdAt,
+    actor: entry.actorLabel,
+  };
 }

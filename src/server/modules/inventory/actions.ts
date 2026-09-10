@@ -13,10 +13,10 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import {
-  ASSET_STATUSES, BULK_MAX, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
+  ASSET_STATUSES, BULK_MAX, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
 import {
-  CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
+  ASSET_CLASSES, CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
@@ -778,9 +778,15 @@ export async function verifyAssetDetails(input: unknown): Promise<ActionResult<{
 const identifiersSchema = z.object({
   tags: z.array(z.string().trim().max(20)).max(200).optional(),
   serials: z.array(z.string().trim().max(120)).max(200).optional(),
+  // Phase 20 (spec §6.2, plan P-4): now REQUIRED — the register and single
+  // forms pass the class they are registering into, so a tag or serial
+  // belonging to the OTHER class never leaks before submit. A genuine
+  // cross-class collision still surfaces, but only at save time, as the
+  // existing neutral P2002 conflict copy.
+  cls: z.enum(ASSET_CLASSES),
 });
 
-/** Spec §2.4: which of these tags/serials already exist, on any asset of any class. Echoes identifiers only. */
+/** Spec §2.4/§6.2: which of these tags/serials already exist, scoped to ONE class. Echoes identifiers only. */
 export async function checkIdentifiers(input: unknown): Promise<ActionResult<{ tags: string[]; serials: string[] }>> {
   const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
@@ -788,9 +794,10 @@ export async function checkIdentifiers(input: unknown): Promise<ActionResult<{ t
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const tags = [...new Set((parsed.data.tags ?? []).map(tagKey).filter(Boolean))];
   const serials = [...new Set((parsed.data.serials ?? []).filter(Boolean))];
+  const where = identifierWhere(parsed.data.cls, tags, serials);
   const [byTag, bySerial] = await Promise.all([
-    tags.length ? prisma.asset.findMany({ where: { tag: { in: tags } }, select: { tag: true } }) : [],
-    serials.length ? prisma.asset.findMany({ where: { serial: { in: serials } }, select: { serial: true } }) : [],
+    tags.length ? prisma.asset.findMany({ where: where.tags, select: { tag: true } }) : [],
+    serials.length ? prisma.asset.findMany({ where: where.serials, select: { serial: true } }) : [],
   ]);
   return ok({ tags: byTag.map((a) => a.tag), serials: bySerial.map((a) => a.serial as string) });
 }

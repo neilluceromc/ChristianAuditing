@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASSET_STATUSES, buildAssetOrderBy, buildAssetWhere, INVENTORY_LIST_CONFIG,
+  ASSET_STATUSES, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
   parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
 } from "./inventory-list";
 import { parseListState } from "./url-state";
@@ -215,5 +215,23 @@ describe("withPurchaseYearQS", () => {
 
   it("passes the qs through unchanged when there is nothing to add", () => {
     expect(withPurchaseYearQS("?status=SPARE", null)).toBe("?status=SPARE");
+  });
+});
+
+// Phase 20 (spec §6.2, plan P-4): checkIdentifiers scopes its lookup to one
+// class, so a tag/serial belonging to the other class never leaks before submit.
+describe("identifierWhere", () => {
+  it("scopes both the tag and serial lookup to one class", () => {
+    expect(identifierWhere("IT", ["BR-LT-0001"], ["SN-1"])).toEqual({
+      tags: { cls: "IT", tag: { in: ["BR-LT-0001"] } },
+      serials: { cls: "IT", serial: { in: ["SN-1"] } },
+    });
+  });
+
+  it("scopes to Purchasing just as well, with empty lists narrowing to nothing", () => {
+    expect(identifierWhere("PURCHASING", [], [])).toEqual({
+      tags: { cls: "PURCHASING", tag: { in: [] } },
+      serials: { cls: "PURCHASING", serial: { in: [] } },
+    });
   });
 });

@@ -276,6 +276,8 @@ describe("BLOCK_CAUSES", () => {
       "bad-stock-code": "reupload",
       "bad-unit": "reupload",
       "opening-on-existing": "link",
+      "same-name-in-department": "option",
+      "department-via-import": "option",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);
@@ -369,6 +371,27 @@ describe("BLOCK_CAUSES", () => {
     const spec = blockSpec("opening-on-existing");
     expect(spec.fix).toEqual({ kind: "link", label: "Open stock", href: "/stock" });
     expect(spec.explain).toMatch(/receipt or an adjustment/i);
+  });
+
+  // Phase 20 (spec §5): the same-name directory guard's own cause.
+  it("offers same-name-in-department as a re-plan naming the existing employee, not a link", () => {
+    const spec = blockSpec("same-name-in-department");
+    expect(spec.fix).toMatchObject({ kind: "option", option: "allowSameName" });
+    expect(spec.explain).toMatch(/employee number/i);
+  });
+
+  // I-5 (final review, ruling R15 option a): the department analogue of
+  // employment-via-import — same shape (an option to keep applying the
+  // row's other columns), a different reason named in its own words. Must
+  // NOT reuse employment-via-import's wording, which names "Employment" and
+  // "the offboarding flow", neither true here.
+  it("offers department-via-import a way to keep applying the row's other columns", () => {
+    const spec = blockSpec("department-via-import");
+    const fix = spec.fix!;
+    expect(fix.kind).toBe("option");
+    expect(fix.option).toBe("keepCurrentDepartment");
+    expect(spec.explain).toMatch(/transfer/i);
+    expect(spec.explain).not.toMatch(/employment|offboarding/i);
   });
 });
 

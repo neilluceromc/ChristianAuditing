@@ -28,6 +28,73 @@
 - **P-4** `checkIdentifiers` gains `cls` in its zod input; the forms pass the class they render for. The neutral post-submit copy is the existing P2002 conflict text; nothing new is written for that path.
 - **P-5** Offboarding sorting by `undecided` and the `progress` facet are applied in memory over the OFFBOARDING candidate set (bounded by the number of leavers), then paged; name/started sorts go to SQL.
 
+## Amendments made during execution (`D-1`…`D-30`, from the SDD ledger, 2026-09-10)
+
+Pre-flight (before Task 1):
+
+- **D-1** (ruling R1) — `DecisionCandidate.decidedBy/decidedAt` are OPTIONAL (default null in `decisionOf`), `Decision`'s stay required, and Task 2 itself updated the two mapping lines in `report/export/route.ts`, so `tsc` stayed green between Tasks 2 and 5.
+- **D-2** (R2) — Task 3 updated the offboarding page's call site minimally (`parseListState(sp, OFFBOARDING_LIST_CONFIG)`); the toolbar and sortable headers stayed in Task 5.
+- **D-3** (R3) — the two `checkIdentifiers({ …, cls })` call-site edits moved from Task 6 to Task 3 (`register-form` already derived `cls`; `asset-form` derives it from its chosen category and skips the live check while none is chosen).
+- **D-4** (R4) — measured counts govern every number in the plan and the docs.
+
+Task rulings:
+
+- **D-5** (R5, Task 3 → 4) — the missing `auditSentence` case for `employee.transferred` (plus its unit test) rode with Task 4.
+- **D-6** (Task 3, accepted) — the "wrong class" bulk skip reason is unreachable behind the whole-selection class refusal (kept as a guard); `lastLifecycleChange` uses the spec's prefix rule (`lifecycle.*` or `register`) because the brief named a nonexistent `lifecycle.transfer` and missed `lifecycle.triage`.
+- **D-7** (Task 4 review, Important) — the edit page no longer queries departments or passes a dead prop; `EmployeeForm`'s edit branch takes no `departments`.
+- **D-8** (Task 4 review, Minor, accepted) — a same-name submit rejected server-side shows both the live banner and the field refusal; the two agree, so both stay.
+- **D-9** (Task 5 review, two Importants, fix round 1 `5e19abe`) — the wizard's step-4 "What happened to the kit" table carries "Decided by"/"Decided on" like the Review-step table; `/offboarding` keeps the toolbar and count line when a facet filters to zero rows, with a "No one matches these filters" empty state and a "Clear filters" link; the sortable column header reads "Undecided".
+- **D-10** (Task 5, accepted) — the Progress facet relabels the server values `open`/`complete` client-side as "Has undecided items"/"All decided"; the URL values and counts are untouched.
+- **D-11** (Task 6, accepted) — `employees/[id]/page.tsx` plumbs `coveredByLoan` into the slot tile (one extra file beyond the brief).
+- **D-12** (Task 6 review, R7, controller fix `b3fb44b`) — the bulk status toast reads `N asset(s) now STATUS · k skipped` (count first, destination named — the file's house style, over the brief's `Changed N`); `handleResult`'s comment now describes its single remaining caller; a loan-covered empty slot tile's accessible name says "on loan". The duplicated success block between `bulkAssign` and `bulkChangeStatus` is parked for the final review (the brief mandated mirroring exactly).
+- **D-13** (R6, Task 7 brief defect) — the seed puts EMP-0042 in Finance, not Sales; transfers case 1 moves Finance → HR and asserts `Transferred from Finance on <today>`.
+- **D-14** (R8, Task 7) — the Transfer dialog's picker already excludes the current department, so "Already in this department" is proven through the stale-dialog race (open the dialog, move the employee via Prisma, submit the now-current department) and the picker is asserted never to list the current department.
+- **D-15** (Task 7 adaptations) — the import fix control for `same-name-in-department` is a Button (every `kind: "option"` fix renders that way), not a checkbox; the "Equipment slots" group renders empty before a policy applies, so case 2 asserts zero tiles then the specific `laptop slot, on loan, required` tile; no pre-existing spec changed an employee's department through the edit form (verified by grep), so none needed editing.
+- **D-16** (R9, Task 8) — the "Last change" actor is the audit entry's `actorLabel`, i.e. the seeded IT user's name "J. Sarmiento", not "IT Staff".
+- **D-17** (R10, Task 8) — the seed has no executed offboarding decision; a direct decision writes its approval row EXECUTED with `claimedById`/`resolvedAt` = the actor and time (`approvals/create.ts`), so offboarding-v2 case 1 decides one of Dennis Ong's items as IT and asserts "Decided by J. Sarmiento" with today's date; cases 2–3 reuse that state.
+- **D-18** (R11, Task 8) — the "Contractor kit" policy fixture is created via Prisma (`appliesToTitle: "Contractor"`, one required laptop slot), as `asset-classes.spec.ts` builds its fixtures.
+
+To complete at Task 9 / final review:
+
+- **D-19** (Task 8 adaptations, accepted) — `/inventory/register` submits through `registerAssets`, whose duplicate-tag catch returns the generic conflict "One of those tags was just taken. Reload and try again." (the field-scoped "That tag is already registered" belongs to `createAsset` on `/inventory/new`), so it-gaps case 2 asserts that banner; BR-LT-0148 carries the seeded CLAIMED approval and so offers no Replace control — case 4 uses BR-LT-0201; the repair-stage chips carry no numeric badges, so case 6 compares each stage's DB-computed count with the toolbar's "N assets" total under `?stage=`; the loadout "missing" count renders only on the employees list row, so case 3 asserts it there; bulk-drawer case 1 hydrates on the first checkbox before checking (a lost `toggleRow` click otherwise); toasts carry the "Success: " tone prefix.
+- **D-20** (R12, Task 8 concern 5, fix round 1) — axe `link-in-text-block` on `/offboarding` with two or more rows: the Name cell wrapped only the name in the Link with the "EMP-#### · Title" meta in a sibling span. Fixed in this phase by mirroring the employees list (one Link wrapping name + meta); offboarding-v2 case 5 scans the full rule set again. The structure dates from `3359430` (2026-08-18, Phase 7) and never fired because the seed has one leaver; Task 8's second leaver exposed it. Fix commit `519d804`.
+- **D-21** (R13, Task 8 fix round 2) — `e2e/offboarding.spec.ts`'s "printable farewell report" case searched `/employees?q=Dennis` after completing his offboarding; Phase 20 hides OFFBOARDED people from the directory by default (spec §5), so the case now searches with `leavers=1` (the smallest edit; the product behaviour is the spec's). This is the one pre-existing e2e file Phase 20 changed. Fix commit `2641af5`.
+- Task 8's review: spec ✅ 11/11, quality Approved, one Minor (dates asserted via `fmtDate(new Date())` at assertion time rather than the stored `decidedAt`; negligible, pre-existing pattern) accepted.
+- **D-22** — Measured at close (Task 9, 2026-09-10, branch tip `f6ec5e1`): `tsc` clean · `lint` clean ·
+  **21 migrations** · **1291 unit / 75 files** · **296 e2e / 27 files** by `--list`, across six foreground
+  chunks, `E2E_PORT=3100 --workers=1 --global-timeout=540000` — **A 54 (3.3m) · B 67 (3.9m) · C 68 (4.4m) ·
+  D 38 (2.6m) · E 53 (7.3m) · F 21 (2.0m)** (chunks C and F both run `offboarding-v2.spec.ts`'s 5 cases by
+  the brief's own chunk lists, so the six sum to 301 against 296 unique), zero failed, zero did-not-run on
+  the runs recorded below; `npm run db:seed` run last, port 3100 clear before/after every chunk. Four
+  test-only fixes, found re-running a chunk whose first pass failed on a case this phase's own behaviour
+  changed underneath it — each its own commit, none a regression, D-21's "one pre-existing e2e file" count
+  now stands at four:
+  - Chunk A first pass **53/54**: `it-core.spec.ts` "list shows loadout gaps" expected 2 missing; gap 3's
+    `coveredByLoan` now excuses Marites Bautista's loan-covered phone slot, true count 1. Reproduced on an
+    immediate re-run; fixed (`fe4295c`); chunk re-ran **54/54**.
+  - Chunk C first pass **61/68, 6 did not run** (`paging.spec.ts` is `test.describe.serial`): case 6's
+    `db.employee.count()` counted the base-seed OFFBOARDED employee (EMP-0093) that spec §5's
+    leavers-hidden default now excludes from the `/employees` toolbar. Reproduced; fixed by scoping the
+    count to `employment: { not: "OFFBOARDED" }` (`63df64a`); chunk re-ran **68/68**.
+  - Chunk D first pass **33/38, 4 did not run** (`registration.spec.ts` is also `test.describe.serial`):
+    case 3's live-serial check ran with no category chosen; gap 2's class-scoped `checkIdentifiers` now
+    skips the check entirely until a category names the class. Reproduced; fixed by choosing Laptop first
+    (`0b463b1`). The full-chunk re-run then surfaced a second, previously-masked failure in the same
+    serial block: case 5 stamped its collision serial onto a Laptop (IT class) while registering a
+    Vehicle (Purchasing class) batch as Purchasing — the very cross-class leak gap 2 closed, so it stopped
+    colliding. Fixed by stamping onto a Vehicle asset instead (`f6ec5e1`); chunk re-ran **38/38**.
+  - Chunks B, E and F passed clean on the first try — **67/67**, **53/53**, **21/21**.
+Final whole-branch review (read-only, on 94b8466..2641af5; Approve with fixes — 0 Critical, 5 Important, 11 Minor) and its ONE fix wave (rulings R14/R15):
+
+- **D-23** (I-1, test-only) — `e2e/paging.spec.ts` case 6 compared the toolbar count with ALL employees; the list hides leavers (spec §5), so the DB count now uses the same `employment: { not: "OFFBOARDED" }` predicate its case 10 already used. Already fixed by Task 9's battery as `63df64a` (chunk C's first-pass failure) before the review reported it.
+- **D-24** (I-2) — the employment facet's `OFFBOARDED (n)` count was always 0 by default because the groupBy ran under the leavers-hidden `where`; that one groupBy now runs with the toggle forced on (spec §5: the employment facet keeps counting all three values); `directory.spec.ts` case 3 asserts the count. Commit `f001cfb`.
+- **D-25** (I-3) — `it-gaps.spec.ts` case 6 compared JS with JS (`listAssets` filters the repair stage in JS; the raw CASE is reached only by the export and the bulk actions). The case now runs `REPAIR_STAGE_CASE_SQL` through `$queryRaw` and asserts, per asset, SQL stage = `repairStage()` — the proof spec §6.6 / P-1 promised. Commit `87dd879`.
+- **D-26** (I-4) — two overlapping transfers could both record `from = A` on an append-only table. `transferEmployee`'s employee write is now conditional on the department that was read (`updateMany where { id, departmentId }`, zero rows → the transaction throws and the action returns `conflict("Someone else just transferred this person — reload and try again.")`). Commit `4b97cbd`.
+- **D-27** (I-5, ruling R15) — an employee-import UPDATE row could still move a department with no `EmployeeTransfer` row, against spec §0 decision 3 ("one path for one fact"). Resolved like `employment-via-import`: a new block cause `department-via-import` ("Department change needs a Transfer") with the option `keepCurrentDepartment` ("Keep current departments, apply the rest"); vocabulary totality and planner tests extended (unit total 1291 → 1295). Commit `3910991`.
+- **D-28** (M-3, rode along) — the transfer reads select `actor.name` only instead of the whole `User` row. Commit `4d54382`.
+- **D-29** (parked Minors, rulings) — M-1 department facet counts under a derived `progress` filter are a plain groupBy (spec §4.2 says so; display-only); M-2 `sortByUndecided` ignores a second sort key (stable name/employeeNo tiebreak; edge); M-4 `lastLifecycleChange` re-reads the tag (cosmetic); M-5 "today" is the UTC date on both sides (pre-existing convention); M-6 two CREATE rows sharing name + department in one sheet both create (spec §5 scopes the guard to existing employees); M-7 the CASE's `"rmaRef" IS NOT NULL` vs JS truthiness diverge only for an empty-string `rmaRef`, which no writer stores; M-8 the Transfer button renders for an OFFBOARDED person and the server refuses with the spec's copy; M-9 `offboardingFacets` re-fetches the leaver set (bounded by leavers); M-10 the `bulkAssign`/`bulkChangeStatus` success blocks stay duplicated (D-12); M-11 "Held since" reads only `lifecycle.assign` (spec §5 names exactly that).
+- **D-30** — Measured at close, final tree `4d54382` (after the fix wave; product code untouched since): `tsc` clean · `lint` clean · **1295 unit / 75 files** · **21 migrations** (up to date) · **296 e2e / 27 files** by `--list`; six foreground chunks with explicit file paths, `E2E_PORT=3100 --workers=1 --global-timeout=540000` — **A 54 (3.4m) · B 67 (3.8m) · C 63 (4.0m) · D 38 (2.6m) · E 53 (7.3m) · F 21 (2.0m) = 296**, zero failed, zero did-not-run. Chunk A's first pass was 53 + 1 failed (`it-core.spec.ts:302`, a `toBeVisible` 5 s timeout) and passed 54/54 on the immediate as-is re-run — the cold-compile/headroom class HANDOVER §7 documents, not a regression; no test or product code was touched. Task 9's earlier close (D-22) ran chunk C with the bare pattern `offboarding`, which also matched `offboarding-v2.spec.ts` (hence its 68 and a 301 sum); the explicit-path list above is the canonical one and the sum is 296.
+
 ## File structure
 
 **Create**

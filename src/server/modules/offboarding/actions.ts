@@ -329,8 +329,15 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
           where: { type: "lifecycle_return", assetId: { not: null } },
           // the full ApprovalLike shape — groupCandidates needs id/refNo/createdAt
           // too, and createdAt is not a formality: without it every candidate
-          // sorts on undefined and the comparator falls through to the id term
-          select: { id: true, refNo: true, state: true, payload: true, createdAt: true, assetId: true },
+          // sorts on undefined and the comparator falls through to the id term.
+          // claimedBy/resolvedAt (Phase 20, spec §4.1): decisionOf carries them
+          // onto the winning Decision even though this action never reads them
+          // itself — every ApprovalLike-shaped select in this module stays one
+          // shape, not two that can silently drift.
+          select: {
+            id: true, refNo: true, state: true, payload: true, createdAt: true, assetId: true,
+            claimedBy: { select: { name: true } }, resolvedAt: true,
+          },
         },
       },
     });

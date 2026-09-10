@@ -160,6 +160,7 @@ model User {
   stocktakesOpened         Stocktake[]             @relation("stocktakesOpened")
   stocktakesPosted         Stocktake[]             @relation("stocktakesPosted")
   stocktakeLinesCounted    StocktakeLine[]         @relation("stocktakeLinesCounted")
+  employeeTransfers        EmployeeTransfer[]      @relation("employeeTransfers")
 }
 
 model UserPreference {
@@ -185,13 +186,15 @@ model RateEvent {
 // ── Reference data ────────────────────────────────────────────────────
 
 model Department {
-  id          String            @id @default(cuid())
-  name        String            @unique
-  locked      Boolean           @default(false)
-  employees   Employee[]
-  policies    EquipmentPolicy[]
-  requests    PurchaseRequest[]
-  stockIssues StockMovement[]
+  id            String             @id @default(cuid())
+  name          String             @unique
+  locked        Boolean            @default(false)
+  employees     Employee[]
+  policies      EquipmentPolicy[]
+  requests      PurchaseRequest[]
+  stockIssues   StockMovement[]
+  transfersFrom EmployeeTransfer[] @relation("transfersFrom")
+  transfersTo   EmployeeTransfer[] @relation("transfersTo")
 }
 
 model AssetCategory {
@@ -329,6 +332,7 @@ model Employee {
   slotExceptions   EmployeeSlotException[]
   acknowledgements Acknowledgement[]
   stockIssues      StockMovement[]
+  transfers        EmployeeTransfer[]
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @default(now()) @updatedAt
 
@@ -336,6 +340,29 @@ model Employee {
   @@index([departmentId])
   @@index([name])
   @@index([joinedAt])
+}
+
+/// Phase 20 (spec §2). A dated record of a department (and optionally title) change.
+/// The employee row is updated in the same transaction; a wrong transfer is
+/// corrected by another transfer — nothing is edited or deleted.
+model EmployeeTransfer {
+  id               String     @id @default(cuid())
+  employeeId       String
+  employee         Employee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  fromDepartmentId String
+  fromDepartment   Department @relation("transfersFrom", fields: [fromDepartmentId], references: [id], onDelete: Restrict)
+  toDepartmentId   String
+  toDepartment     Department @relation("transfersTo", fields: [toDepartmentId], references: [id], onDelete: Restrict)
+  fromTitle        String
+  toTitle          String
+  effectiveAt      DateTime
+  reason           String?
+  actorId          String
+  actor            User       @relation("employeeTransfers", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt        DateTime   @default(now())
+
+  @@index([employeeId, effectiveAt, id])
+  @@index([toDepartmentId])
 }
 
 // ── Assets ────────────────────────────────────────────────────────────

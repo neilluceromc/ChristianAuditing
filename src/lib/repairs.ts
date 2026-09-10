@@ -114,3 +114,104 @@ export function isRepairView(state: ListState): boolean {
   const status = state.filters.status ?? [];
   return status.length === 1 && status[0] === "DEFECTIVE";
 }
+
+/**
+ * Phase 20 (spec §6.6, plan P-1): `repairStageIds`' `$queryRaw` computes a
+ * stage entirely in SQL, over the repair candidate set — this string is
+ * exactly that CASE expression, mirroring `repairStage` above rule for rule.
+ * vitest has no database, so this file's own unit test proves this text
+ * against `repairStageFixture` below by re-deriving each row's expected
+ * stage from `repairStage` (the one JS rule both this comment and the test
+ * describe), and the SQL's actual agreement with that rule is proven
+ * end-to-end in `it-gaps.spec.ts` (comparing the raw cut against
+ * `repairStage` over every seeded asset) — nothing in this codebase
+ * executes this string as a query; it exists so the two tests share one
+ * written source of truth instead of a hand-copied twin that can drift.
+ */
+export const REPAIR_STAGE_CASE_SQL = `
+CASE
+  WHEN status <> 'DEFECTIVE' AND "defectiveSince" IS NOT NULL THEN 'returned-ok'
+  WHEN status = 'DEFECTIVE' AND "repairQuote" IS NOT NULL AND cost > 0
+    AND ROUND("repairQuote" * 100) >= ROUND(cost * 0.6 * 100) THEN 'beyond-repair'
+  WHEN status = 'DEFECTIVE' AND ("vendorId" IS NOT NULL OR "rmaRef" IS NOT NULL) THEN 'at-vendor'
+  ELSE 'to-assess'
+END
+`.trim();
+
+/** One fixture row: a `RepairLike` asset plus the stage `repairStage` must return for it. */
+export interface RepairStageFixtureRow {
+  label: string;
+  asset: RepairLike;
+  expected: RepairStage | null;
+}
+
+/**
+ * Twelve rows covering every branch of `repairStage` (and, via
+ * `REPAIR_STAGE_CASE_SQL`'s comment above, every branch of its SQL mirror):
+ * plain / vendor / RMA / high quote / exactly-60% quote / the centavo edge /
+ * one centavo under the edge / a low quote / a quote with no cost to compare
+ * against / a quote-less row with both a vendor and an RMA / a returned item
+ * / an item that was never defective at all.
+ */
+export const repairStageFixture: RepairStageFixtureRow[] = [
+  {
+    label: "DEFECTIVE, no vendor, no RMA, no quote — nothing to go on yet",
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z") },
+    expected: "to-assess",
+  },
+  {
+    label: "DEFECTIVE with a vendor",
+    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z") },
+    expected: "at-vendor",
+  },
+  {
+    label: "DEFECTIVE with an RMA ref, no vendor",
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: "RMA-8802", repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z") },
+    expected: "at-vendor",
+  },
+  {
+    label: "DEFECTIVE, a vendor AND a high quote — the quote outranks being at a vendor",
+    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: null, repairQuote: 34_000, cost: 55_000, defectiveSince: null },
+    expected: "beyond-repair",
+  },
+  {
+    label: "DEFECTIVE, quote exactly 60% on round pesos",
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 33_000, cost: 55_000, defectiveSince: null },
+    expected: "beyond-repair",
+  },
+  {
+    label: "DEFECTIVE, the centavo edge — 6000.57 on 10000.95 is exactly 60%",
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 6_000.57, cost: 10_000.95, defectiveSince: null },
+    expected: "beyond-repair",
+  },
+  {
+    label: "DEFECTIVE, one centavo under the edge — 6000.56 on 10000.95",
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 6_000.56, cost: 10_000.95, defectiveSince: null },
+    expected: "to-assess",
+  },
+  {
+    label: "DEFECTIVE, quote clearly under 60% — repair it",
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 18_400, cost: 55_000, defectiveSince: null },
+    expected: "to-assess",
+  },
+  {
+    label: "DEFECTIVE, quote present but cost is 0 — nothing to compare against",
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 5_000, cost: 0, defectiveSince: null },
+    expected: "to-assess",
+  },
+  {
+    label: "DEFECTIVE, no quote, but both a vendor AND an RMA — still at-vendor, not double-counted",
+    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: "RMA-9001", repairQuote: null, cost: 55_000, defectiveSince: null },
+    expected: "at-vendor",
+  },
+  {
+    label: "not DEFECTIVE, but it was — returned OK",
+    asset: { status: "SPARE", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z") },
+    expected: "returned-ok",
+  },
+  {
+    label: "never DEFECTIVE — no stage at all",
+    asset: { status: "DEPLOYED", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: null },
+    expected: null,
+  },
+];

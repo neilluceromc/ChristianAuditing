@@ -124,6 +124,11 @@ test.describe.serial("registration", () => {
 
     await login(page, IT);
     await page.goto("/inventory/new");
+    // Phase 20 (spec §6.2): checkIdentifiers is class-scoped now, and the
+    // live check is skipped entirely until a category names the class — a
+    // category-less guess could flag a collision that only exists in the
+    // OTHER class. BR-LT-0201 is a Laptop, so choose that class first.
+    await page.getByLabel("Category").selectOption({ label: "Laptop" });
     await page.getByLabel("Serial").fill(serial);
     await page.getByLabel("Model").click(); // blur
     await expect(page.getByText("Already registered")).toBeVisible({ timeout: 10_000 });
@@ -168,8 +173,12 @@ test.describe.serial("registration", () => {
 
   test("5. duplicate serials are refused by name, and a seeded serial as a serial", async ({ page }) => {
     // Same adaptation as case 3 — stamp a real serial onto an untouched
-    // seeded asset first (a different one than case 3 used).
-    const target = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0166" } });
+    // seeded asset first (a different one than case 3 used). Phase 20 (spec
+    // §6.2) scopes checkIdentifiers by class, so the stamped asset must be a
+    // Vehicle (Purchasing class) like the batch being registered below —
+    // BR-LT-0166 (IT class) would no longer collide, which is the very leak
+    // this phase closed.
+    const target = await db.asset.findUniqueOrThrow({ where: { tag: "BR-VH-0002" } }); // STORED, unassigned
     const seededSerial = "SN-E2E-0166";
     await db.asset.update({ where: { id: target.id }, data: { serial: seededSerial } });
 

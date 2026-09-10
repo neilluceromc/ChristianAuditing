@@ -211,7 +211,9 @@ test.describe.serial("the 4-step wizard", () => {
 
   test("the printable farewell report names every outcome and the value recovered", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto("/employees?q=Dennis");
+    // Phase 20 spec §5: leavers hidden by default — Dennis is OFFBOARDED now,
+    // so the directory needs the "Show leavers" toggle to surface him.
+    await page.goto("/employees?q=Dennis&leavers=1");
     await page.getByRole("link", { name: /Dennis Ong/ }).click();
     // A next/link push is client-side routing, not a full navigation — reading
     // page.url() straight after click() can race it, so wait for the URL to

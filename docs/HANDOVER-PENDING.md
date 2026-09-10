@@ -24,6 +24,8 @@ migrations); **Phase 19 (stock control D1, migration 20) is merged but NOT yet d
   skips. Verify afterwards: `docker compose ps` (web healthy), `docker compose exec -T web npx prisma
   migrate status` (20 found, up to date), HTTP 200 on `http://127.0.0.1:3000/login` and the LAN URL.
   Never seed staging — the seed truncates every table.
+  Phase 20's migration 21 (`employee_transfers`, additive; code-complete on `phase-20-it-people-and-gaps`,
+  unmerged) will ride the same `-Force` redeploy once it is merged to `main`.
 
 ## 2. Needs the user or Administrator rights on the laptop
 

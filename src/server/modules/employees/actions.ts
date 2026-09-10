@@ -14,6 +14,7 @@ import {
 import { diffOf } from "@/lib/audit-diff";
 import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass, isAssignable, isDirectLifecycle } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
+import { findSameName } from "@/server/modules/employees/queries";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -212,11 +213,18 @@ export async function requestAssignReserved(input: unknown): Promise<ActionResul
   return ok({ created });
 }
 
+/**
+ * Phase 20 (spec §3): NO `departmentId` here any more — a department change
+ * always goes through Transfer, which is what makes it dated and recorded
+ * (`transferEmployee`, `transfer-actions.ts`). `createEmployeeSchema` below
+ * extends this WITH `departmentId` back in (a new person has no transfer
+ * history to start from); `updateEmployee`'s own data omits it entirely, so
+ * the edit form cannot move a department as a side effect of any other edit.
+ */
 const employeeSchema = z.object({
   id: z.string().min(1),
   name: z.string().trim().min(2, "Name the person").max(120),
   title: z.string().trim().min(2, "Give a title").max(120),
-  departmentId: z.string().min(1, "Pick a department"),
   employment: z.enum(["ACTIVE", "OFFBOARDING", "OFFBOARDED"]),
   /** null = never synced ("no sync yet"); custom strings stored as-is → Neutral family */
   m365Status: z.string().trim().max(60).nullable(),
@@ -233,14 +241,10 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
 
   const employee = await prisma.employee.findUnique({ where: { id: d.id } });
   if (!employee) return conflict("That employee no longer exists.");
-  if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) {
-    return validationError({ departmentId: "Unknown department" });
-  }
 
   const data = {
     name: d.name,
     title: d.title,
-    departmentId: d.departmentId,
     employment: d.employment,
     m365Status: d.m365Status === "" ? null : d.m365Status,
     // The offboarding wizard reads "this offboarding" as everything decided
@@ -274,11 +278,16 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
 
 const createEmployeeSchema = employeeSchema.omit({ id: true }).extend({
+  departmentId: z.string().min(1, "Pick a department"),
   // No format rule: Employee.employeeNo has none anywhere and the importer
   // (import-employees.ts, E-2) refuses to invent one. Uniqueness is
   // case-insensitive, matching the importer's refKey.
   employeeNo: z.string().trim().min(1, "Give an employee number").max(60),
   joinedAt: dateStr,
+  // Phase 20 (spec §5): ticked when the operator confirmed a same-name match
+  // in the SAME department really is a different person — lets the create
+  // through the guard below on a second submit.
+  confirmSameName: z.boolean().default(false),
 });
 
 /** Phase 14 (spec §11): the first manual create path — before this, employees arrived only by import or seed. */
@@ -295,6 +304,19 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
   if (Number.isNaN(joinedAt.getTime())) return validationError({ joinedAt: "Use the date picker" });
   if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) {
     return validationError({ departmentId: "Unknown department" });
+  }
+  // Phase 20 (spec §5): same-name-same-department is a warning that needs a
+  // deliberate confirm — checked BEFORE the employeeNo uniqueness check
+  // (that one is a hard collision; this one is a "are you sure").
+  if (!d.confirmSameName) {
+    const match = await findSameName(d.name, d.departmentId);
+    if (match) {
+      return validationError({
+        name:
+          `Another ${d.name} exists in ${match.department} (${match.employeeNo}) — tick 'This is a different ` +
+          "person' to add them anyway",
+      });
+    }
   }
   const taken = await prisma.employee.findFirst({
     where: { employeeNo: { equals: d.employeeNo, mode: "insensitive" } },
@@ -333,4 +355,33 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
   }
   revalidatePath("/employees");
   return ok({ id });
+}
+
+const checkSameNameSchema = z.object({
+  name: z.string(),
+  departmentId: z.string(),
+  excludeId: z.string().optional(),
+});
+
+/**
+ * Phase 20 (spec §5): read-only — the create/edit form's own live check, run
+ * on blur of the name and department fields, never a write. `excludeId` lets
+ * an edit form run the same check without a person matching their own
+ * existing record. Blank name/department (nothing typed yet) reads as "no
+ * match" without touching the database — the same fail-open shape every
+ * other lookup in this app uses for "not enough to search on yet".
+ */
+export async function checkSameName(
+  input: unknown,
+): Promise<ActionResult<{ match: { employeeNo: string; department: string } | null }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = checkSameNameSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { name, departmentId, excludeId } = parsed.data;
+  if (!name.trim() || !departmentId) return ok({ match: null });
+  const match = await findSameName(name, departmentId, excludeId);
+  return ok({ match: match ? { employeeNo: match.employeeNo, department: match.department } : null });
 }

@@ -134,7 +134,10 @@ export function RegisterForm({
     }
     const tagsToCheck = snapshot.tags;
     const serialsToCheck = snapshot.serials.filter((s) => s.trim().length > 0);
-    void checkIdentifiers({ tags: tagsToCheck, serials: serialsToCheck }).then((res) => {
+    // Phase 20 (spec §6.2): checkIdentifiers is now class-scoped — this form
+    // already derives `cls` from the chosen category (below), so the live
+    // check never flags a tag/serial that only collides in the OTHER class.
+    void checkIdentifiers({ tags: tagsToCheck, serials: serialsToCheck, cls }).then((res) => {
       if (!mountedRef.current || !res.ok) return;
       const same = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
       const stale =

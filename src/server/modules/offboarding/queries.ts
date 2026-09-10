@@ -7,7 +7,12 @@ import {
   decisionOf, reportTotals, returnTargetStatus,
   type Decision, type DecisionCandidate, type ReportTotals,
 } from "@/lib/offboarding";
+import {
+  buildOffboardingOrderBy, buildOffboardingWhere, progressOf, sortByUndecided, type Progress,
+} from "@/lib/offboarding-list";
 import { pageOf, ENTITY_PAGE_SIZE } from "@/lib/paging";
+import type { ListState } from "@/lib/url-state";
+import type { FacetOption } from "@/server/modules/inventory/queries";
 
 /** One row of the /offboarding queue. */
 export interface OffboardingRow {
@@ -16,6 +21,8 @@ export interface OffboardingRow {
   employeeNo: string;
   title: string;
   department: string;
+  /** Phase 20 (spec §4.2): the Department facet's own filter value. */
+  departmentId: string;
   m365: string | null;
   /** still physically held by them */
   itemsOut: number;
@@ -24,6 +31,8 @@ export interface OffboardingRow {
   /** items of this offboarding: still-out plus already-returned */
   total: number;
   undecided: number;
+  /** Phase 20 (spec §4.2): `employee.offboardingAt` — the "started" sort key. */
+  started: Date | null;
   joined: string;
 }
 
@@ -34,6 +43,10 @@ export interface ApprovalLike {
   payload: unknown;
   createdAt: Date;
   assetId: string | null;
+  /** Phase 20 (spec §4.1): the approval's claimer — who decided this item. */
+  claimedBy: { name: string } | null;
+  /** Phase 20 (spec §4.1): when the approval was resolved — when it was decided. */
+  resolvedAt: Date | null;
 }
 
 /** The decision's own reason lives in the payload; resolutionReason is the approver's. */
@@ -75,6 +88,10 @@ function groupCandidates(approvals: ApprovalLike[]): Map<string, DecisionCandida
       toStatus: returnTargetStatus(a.payload),
       reason: payloadReason(a.payload),
       createdAt: a.createdAt,
+      // Phase 20 (spec §4.1): the approval's claimer/resolved time, straight
+      // off the row — decisionOf carries these onto the winning Decision.
+      decidedBy: a.claimedBy?.name ?? null,
+      decidedAt: a.resolvedAt,
     });
     byAsset.set(a.assetId, list);
   }
@@ -87,59 +104,139 @@ async function heldIds(employeeId: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-export async function listOffboarding(requestedPage: number): Promise<{
-  rows: OffboardingRow[]; total: number; page: number; pageCount: number;
-}> {
-  const where = { employment: "OFFBOARDING" as const };
-  const total = await prisma.employee.count({ where });
-  const pg = pageOf(total, requestedPage, ENTITY_PAGE_SIZE);
-  const employees = await prisma.employee.findMany({
-    where,
-    include: {
-      department: true,
-      assets: { select: { id: true } },
-      approvals: {
-        where: { type: "lifecycle_return", assetId: { not: null } },
-        select: { id: true, refNo: true, state: true, payload: true, createdAt: true, assetId: true },
-      },
+/** Narrow include shared by every branch that needs to compute a row — the SQL-paged path and the in-memory candidate pass alike. */
+const OFFBOARDING_INCLUDE = {
+  department: true,
+  assets: { select: { id: true } },
+  approvals: {
+    where: { type: "lifecycle_return" as const, assetId: { not: null } },
+    select: {
+      id: true, refNo: true, state: true, payload: true, createdAt: true, assetId: true,
+      claimedBy: { select: { name: true } }, resolvedAt: true,
     },
-    // name is not unique — two people sharing one must not swap rows between reads
-    orderBy: [{ name: "asc" }, { employeeNo: "asc" }],
-    skip: pg.skip, take: pg.take,
-  });
+  },
+} satisfies Prisma.EmployeeInclude;
 
-  const rows = employees.map((e) => {
-    const byAsset = candidatesFor(e, e.approvals);
-    const heldIdSet = new Set(e.assets.map((a) => a.id));
-    // every asset in e.assets is held by them right now, hence held: true —
-    // which is what makes an EXECUTED return from an EARLIER holding not count
-    const decidedHeld = e.assets.filter(
-      (a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }) !== null,
-    ).length;
-    // Items whose return already executed have LEFT e.assets. Counting only the
-    // held ones made this numerator run backwards as work progressed ("1 of 3"
-    // becoming "0 of 2" when the worker ran) and disagree with the wizard's own
-    // fraction. Both now count the same union.
-    const decidedGone = [...byAsset].filter(
-      ([assetId, candidates]) =>
-        !heldIdSet.has(assetId) && decisionOf(candidates, { held: false }) !== null,
-    ).length;
-    return {
-      id: e.id,
-      name: e.name,
-      employeeNo: e.employeeNo,
-      title: e.title,
-      department: e.department.name,
-      m365: e.m365Status,
-      itemsOut: heldIdSet.size,
-      decided: decidedHeld + decidedGone,
-      total: heldIdSet.size + decidedGone,
-      undecided: heldIdSet.size - decidedHeld,
-      joined: fmtDate(e.joinedAt),
-    };
-  });
+type OffboardingCandidate = Prisma.EmployeeGetPayload<{ include: typeof OFFBOARDING_INCLUDE }>;
 
-  return { rows, total, page: pg.page, pageCount: pg.pageCount };
+function toOffboardingRow(e: OffboardingCandidate): OffboardingRow {
+  const byAsset = candidatesFor(e, e.approvals);
+  const heldIdSet = new Set(e.assets.map((a) => a.id));
+  // every asset in e.assets is held by them right now, hence held: true —
+  // which is what makes an EXECUTED return from an EARLIER holding not count
+  const decidedHeld = e.assets.filter(
+    (a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }) !== null,
+  ).length;
+  // Items whose return already executed have LEFT e.assets. Counting only the
+  // held ones made this numerator run backwards as work progressed ("1 of 3"
+  // becoming "0 of 2" when the worker ran) and disagree with the wizard's own
+  // fraction. Both now count the same union.
+  const decidedGone = [...byAsset].filter(
+    ([assetId, candidates]) =>
+      !heldIdSet.has(assetId) && decisionOf(candidates, { held: false }) !== null,
+  ).length;
+  return {
+    id: e.id,
+    name: e.name,
+    employeeNo: e.employeeNo,
+    title: e.title,
+    department: e.department.name,
+    departmentId: e.departmentId,
+    m365: e.m365Status,
+    itemsOut: heldIdSet.size,
+    decided: decidedHeld + decidedGone,
+    total: heldIdSet.size + decidedGone,
+    undecided: heldIdSet.size - decidedHeld,
+    started: e.offboardingAt,
+    joined: fmtDate(e.joinedAt),
+  };
+}
+
+/** `where` with one facet cleared, matching the without(facet) shape every other list's facetOptions helper uses. */
+function withoutFilter(state: ListState, facet: string): ListState {
+  return { ...state, filters: { ...state.filters, [facet]: [] } };
+}
+
+/**
+ * Phase 20 (spec §4.2): Department counts by real SQL groupBy; Progress
+ * counts are derived, so they can only be had by computing rows over the
+ * candidate set (plan P-5) — both computed over `where` minus their OWN key,
+ * the same convention `employeeFacetOptions`/`facetOptions` already use.
+ */
+async function offboardingFacets(state: ListState): Promise<{ department: FacetOption[]; progress: FacetOption[] }> {
+  const [deptGroups, departments, progressCandidates] = await Promise.all([
+    prisma.employee.groupBy({
+      by: ["departmentId"], where: buildOffboardingWhere(withoutFilter(state, "department")), _count: true,
+    }),
+    prisma.department.findMany({ orderBy: { name: "asc" } }),
+    prisma.employee.findMany({
+      where: buildOffboardingWhere(withoutFilter(state, "progress")),
+      include: OFFBOARDING_INCLUDE,
+    }),
+  ]);
+
+  const progressCounts: Record<Progress, number> = { open: 0, complete: 0 };
+  for (const e of progressCandidates) progressCounts[progressOf(toOffboardingRow(e).undecided)] += 1;
+
+  return {
+    department: departments.map((d) => ({
+      value: d.id, label: d.name, count: deptGroups.find((g) => g.departmentId === d.id)?._count ?? 0,
+    })),
+    progress: [
+      { value: "open", label: "Open", count: progressCounts.open },
+      { value: "complete", label: "Complete", count: progressCounts.complete },
+    ],
+  };
+}
+
+/**
+ * Spec §4.2 / plan P-5: `progress` and the `undecided` sort are both DERIVED
+ * — neither can be expressed in SQL over `Employee` alone — so whenever
+ * either is active this fetches every OFFBOARDING candidate (bounded by how
+ * many people are mid-offboarding at once, never the whole roster), computes
+ * rows, filters/sorts in memory, then pages the KEPT set with `pageOf` —
+ * the same "narrow candidate pass, then page the cut" shape
+ * `employees/queries.ts`'s own gaps-only branch uses. Every other sort pages
+ * straight off SQL.
+ */
+export async function listOffboarding(state: ListState): Promise<{
+  rows: OffboardingRow[]; total: number; page: number; pageCount: number;
+  facets: { department: FacetOption[]; progress: FacetOption[] };
+}> {
+  const where = buildOffboardingWhere(state);
+  const orderBy = buildOffboardingOrderBy(state.sort);
+  const progressFilter = (state.filters.progress ?? []).filter(
+    (p): p is Progress => p === "open" || p === "complete",
+  );
+
+  let rows: OffboardingRow[];
+  let pg: ReturnType<typeof pageOf>;
+
+  if (progressFilter.length > 0 || orderBy === null) {
+    const stableOrder: Prisma.EmployeeOrderByWithRelationInput[] =
+      orderBy ?? [{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }];
+    const candidates = await prisma.employee.findMany({ where, orderBy: stableOrder, include: OFFBOARDING_INCLUDE });
+    let computed = candidates.map(toOffboardingRow);
+    if (progressFilter.length > 0) {
+      computed = computed.filter((r) => progressFilter.includes(progressOf(r.undecided)));
+    }
+    if (orderBy === null) {
+      const undecidedSort = state.sort.find((s) => s.key === "undecided");
+      computed = sortByUndecided(computed, undecidedSort?.dir ?? "asc");
+    }
+    pg = pageOf(computed.length, state.page, ENTITY_PAGE_SIZE);
+    rows = computed.slice(pg.skip, pg.skip + pg.take);
+  } else {
+    const total = await prisma.employee.count({ where });
+    pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
+    const employees = await prisma.employee.findMany({
+      where, orderBy, include: OFFBOARDING_INCLUDE, skip: pg.skip, take: pg.take,
+    });
+    rows = employees.map(toOffboardingRow);
+  }
+
+  const facets = await offboardingFacets(state);
+  return { rows, total: pg.total, page: pg.page, pageCount: pg.pageCount, facets };
 }
 
 export interface WizardItem {
@@ -232,6 +329,10 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
       where: { employeeId, type: "lifecycle_return", assetId: { not: null } },
       select: {
         id: true, refNo: true, state: true, payload: true, createdAt: true, assetId: true,
+        // Phase 20 (spec §4.1): the wizard rows and the farewell report/export
+        // (both read straight off Decision.decidedBy/decidedAt) need the
+        // claimer and resolved time on every ApprovalLike this module builds.
+        claimedBy: { select: { name: true } }, resolvedAt: true,
         asset: {
           select: {
             id: true, tag: true, cls: true, model: true, status: true, cost: true,

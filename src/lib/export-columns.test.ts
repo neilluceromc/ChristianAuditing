@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS, EXPORT_CAP,
-  FAREWELL_EXPORT_COLUMNS, IDS_CAP, capRefusalText, idsRefusalText,
+  FAREWELL_EXPORT_COLUMNS, HOLDINGS_EXPORT_COLUMNS, IDS_CAP, capRefusalText, idsRefusalText,
+  type HoldingsExportRow,
 } from "./export-columns";
 
 describe("export column specs", () => {
@@ -93,13 +94,8 @@ describe("audit and employee column specs", () => {
   });
 });
 
-// The plan for this sheet named "Decided by" and "Decided" columns. Neither
-// exists: `Decision` (src/lib/offboarding.ts) carries only `refNo`, `outcome`,
-// `state` and `reason` — no approver actor, no timestamp. Rather than invent
-// them (the same mistake this plan already made twice, on the asset and
-// employee specs), the sheet carries the two real fields the printed report
-// shows in its "Request" column instead — see this task's commit for the
-// full account.
+// Phase 20 (spec §4.1): `Decision` now carries `decidedBy`/`decidedAt`, so
+// this sheet gains the two columns naming who decided and when.
 describe("farewell column spec", () => {
   it("gives every column a label and no duplicates", () => {
     const labels = FAREWELL_EXPORT_COLUMNS.map((c) => c.label);
@@ -116,11 +112,62 @@ describe("farewell column spec", () => {
       "Value",
       "Request",
       "Status",
+      "Decided by",
+      "Decided on",
     ]);
   });
 
-  it("does not claim a 'Decided by' or 'Decided' column the underlying Decision has no data for", () => {
-    const labels = FAREWELL_EXPORT_COLUMNS.map((c) => c.label);
-    expect(labels.some((l) => /decided/i.test(l))).toBe(false);
+  it("renders the decider's name and resolved date after Status", () => {
+    const row = {
+      tag: "BR-LT-0001", model: "Latitude", outcome: "Returned", reason: null, cost: 55_000,
+      refNo: "APR-2100", state: "EXECUTED", decidedBy: "A. Reyes", decidedAt: new Date("2026-08-01T00:00:00Z"),
+    };
+    const values = FAREWELL_EXPORT_COLUMNS.map((c) => c.cell(row).value);
+    expect(values[7]).toBe("A. Reyes");
+    expect(values[8]).toEqual(row.decidedAt);
+  });
+
+  it("renders both as empty for a still-PENDING (undecided) item", () => {
+    const row = {
+      tag: "BR-LT-0001", model: "Latitude", outcome: "Returned", reason: null, cost: null,
+      refNo: "APR-2100", state: "PENDING", decidedBy: null, decidedAt: null,
+    };
+    const values = FAREWELL_EXPORT_COLUMNS.map((c) => c.cell(row).value);
+    expect(values[7]).toBeNull();
+    expect(values[8]).toBeNull();
+  });
+});
+
+describe("holdings export column spec (Phase 20 spec §5, plan P-3)", () => {
+  const row = (section: HoldingsExportRow["section"], over: Partial<HoldingsExportRow> = {}): HoldingsExportRow => ({
+    section, tag: "BR-LT-0001", model: "Latitude", type: "Laptop", status: "DEPLOYED",
+    since: new Date("2026-01-01T00:00:00Z"), loanDue: null, ...over,
+  });
+  const values = (r: HoldingsExportRow) => HOLDINGS_EXPORT_COLUMNS.map((c) => c.cell(r).value);
+
+  it("gives every column a label and no duplicates", () => {
+    const labels = HOLDINGS_EXPORT_COLUMNS.map((c) => c.label);
+    expect(labels.every((l) => l.length > 0)).toBe(true);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("renders an asset row's real values", () => {
+    const r = row("asset");
+    expect(values(r)).toEqual(["BR-LT-0001", "Latitude", "Laptop", "DEPLOYED", r.since, null]);
+  });
+
+  it("renders a blank row as empty across every column", () => {
+    expect(values(row("blank"))).toEqual(["", "", "", "", "", ""]);
+  });
+
+  it("renders the header row with 'Reservations' in the first column only, blank elsewhere", () => {
+    const cells = values(row("header"));
+    expect(cells[0]).toBe("Reservations");
+    expect(cells.slice(1)).toEqual(["", "", "", "", ""]);
+  });
+
+  it("renders a reservation row's tag, model and reserved-on date, with no type/status/loan due", () => {
+    const r = row("reservation", { type: "", status: "", loanDue: null, since: new Date("2026-02-01T00:00:00Z") });
+    expect(values(r)).toEqual(["BR-LT-0001", "Latitude", "", "", r.since, null]);
   });
 });

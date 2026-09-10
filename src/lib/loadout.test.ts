@@ -57,12 +57,18 @@ describe("computeLoadout", () => {
 });
 
 describe("computeLoadout — loaner rule (Phase 16 §3.3)", () => {
-  it("a TEMPORARY device never fills a standard slot; it is on loan", () => {
+  it("a TEMPORARY device never fills a standard slot; it is on loan, and now covers that slot (Phase 20 §6.3)", () => {
     const l = computeLoadout(slots, [asset("a1", "t-laptop", "TEMPORARY")]);
     expect(l.slots[0].asset).toBeNull();
     expect(l.onLoan.map((a) => a.id)).toEqual(["a1"]);
     expect(l.unslotted).toEqual([]);
-    expect(l.missingRequired).toBe(3);
+    // Phase 20 (spec §6.3): s1 (the laptop slot) is now covered by the
+    // device on loan rather than plainly missing — only s2 (monitor) and s4
+    // (headset) remain missing. Before this phase, with no coverage concept,
+    // this asserted missingRequired === 3 (s1, s2, s4 all counted missing).
+    expect(l.slots[0].coveredByLoan).toBe(true);
+    expect(l.coveredByLoan).toBe(1);
+    expect(l.missingRequired).toBe(2);
   });
   it("a loaner slot takes only a TEMPORARY device of its type", () => {
     const l = computeLoadout([...slots, loanerSlot], [asset("a1", "t-laptop", "DEPLOYED"), asset("a2", "t-laptop", "TEMPORARY")]);
@@ -77,6 +83,40 @@ describe("computeLoadout — loaner rule (Phase 16 §3.3)", () => {
   });
   it("a required loaner slot left empty counts as missing", () => {
     expect(computeLoadout([{ ...loanerSlot, required: true }], []).missingRequired).toBe(1);
+  });
+});
+
+describe("computeLoadout — loan-covered slot (Phase 20 spec §6.3, gap 3)", () => {
+  const laptopSlot = { id: "sa", name: "laptop", assetTypeId: "t-laptop", required: true, loaner: false };
+
+  it("one laptop on loan covers a required standard laptop slot: nothing missing, the device stays on loan", () => {
+    const l = computeLoadout([laptopSlot], [asset("a1", "t-laptop", "TEMPORARY")]);
+    expect(l.missingRequired).toBe(0);
+    expect(l.coveredByLoan).toBe(1);
+    expect(l.slots[0]).toMatchObject({ asset: null, coveredByLoan: true });
+    expect(l.onLoan.map((a) => a.id)).toEqual(["a1"]);
+  });
+
+  it("two standard slots of the same type and one loan: one covered, one still missing", () => {
+    const secondSlot = { ...laptopSlot, id: "sb" };
+    const l = computeLoadout([laptopSlot, secondSlot], [asset("a1", "t-laptop", "TEMPORARY")]);
+    expect(l.coveredByLoan).toBe(1);
+    expect(l.missingRequired).toBe(1);
+    expect(l.slots.filter((s) => s.coveredByLoan)).toHaveLength(1);
+  });
+
+  it("a loaner slot still consumes the TEMPORARY device first, leaving no coverage for the standard slot after it", () => {
+    const l = computeLoadout([loanerSlot, laptopSlot], [asset("a1", "t-laptop", "TEMPORARY")]);
+    expect(l.slots.find((s) => s.slot.id === "s5")?.asset?.id).toBe("a1");
+    expect(l.coveredByLoan).toBe(0);
+    expect(l.slots.find((s) => s.slot.id === "sa")).toMatchObject({ asset: null, coveredByLoan: false });
+    expect(l.missingRequired).toBe(1);
+  });
+
+  it("ordinary cases are unchanged: a slot filled outright is never marked covered by loan", () => {
+    const l = computeLoadout([laptopSlot], [asset("a1", "t-laptop", "DEPLOYED")]);
+    expect(l.coveredByLoan).toBe(0);
+    expect(l.slots[0]).toMatchObject({ asset: { id: "a1" }, coveredByLoan: false });
   });
 });
 

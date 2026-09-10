@@ -122,6 +122,34 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
   });
 });
 
+describe("employee.transferred (R5) — a sentence, not the raw verb", () => {
+  it("names the department move when the title is unchanged", () => {
+    expect(auditSentence({
+      actorLabel: "J. Sarmiento",
+      action: "employee.transferred",
+      diff: {
+        department: { from: "HR", to: "Operations" },
+        title: { from: "Analyst", to: "Analyst" },
+        effectiveAt: { from: null, to: new Date("2026-06-12") },
+      },
+      entityLabel: "Dennis Ong",
+    })).toBe("J. Sarmiento moved Dennis Ong from HR to Operations");
+  });
+
+  it("appends the title change when the diff has one", () => {
+    expect(auditSentence({
+      actorLabel: "J. Sarmiento",
+      action: "employee.transferred",
+      diff: {
+        department: { from: "HR", to: "Operations" },
+        title: { from: "Analyst", to: "Senior Analyst" },
+        effectiveAt: { from: null, to: new Date("2026-06-12") },
+      },
+      entityLabel: "Dennis Ong",
+    })).toBe("J. Sarmiento moved Dennis Ong from HR to Operations · retitled Senior Analyst");
+  });
+});
+
 describe("offboarding.completed", () => {
   it("reads as a sentence and counts what was settled, not as a raw action name", () => {
     expect(auditSentence({

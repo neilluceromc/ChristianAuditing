@@ -122,6 +122,17 @@ export const BLOCK_CAUSES = [
   "bad-stock-code",
   "bad-unit",
   "opening-on-existing",
+  // Phase 20 (spec §5): the employee importer's own same-name directory
+  // guard — a CREATE row (no employeeNo match) whose name and department
+  // match an existing employee. Appended, per this array's own rule above —
+  // never inserted.
+  "same-name-in-department",
+  // I-5 (final review, ruling R15 option a): the department analogue of
+  // `employment-via-import` — spec §0 decision 3 / §3 says a department
+  // change always goes through Transfer, so an UPDATE row whose Department
+  // cell disagrees with the record must not move it silently. Appended, per
+  // this array's own rule above — never inserted.
+  "department-via-import",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -171,6 +182,16 @@ export const IMPORT_OPTIONS = [
   // row's OTHER columns anyway rather than losing the whole row over one
   // field that a different flow owns.
   "keepCurrentEmployment",
+  // Phase 20 (spec §5): the same-name directory guard's own option — lets
+  // the operator confirm a CREATE row really is a different, new person
+  // sharing a name (and department) with someone already on file, rather
+  // than the likelier duplicate.
+  "allowSameName",
+  // I-5: `department-via-import`'s own option — the employee analogue of
+  // `keepCurrentEmployment`. Applies the row's other columns and leaves
+  // `departmentId` out of the UPDATE patch, so the person's department is
+  // untouched until a real Transfer records the move.
+  "keepCurrentDepartment",
 ] as const;
 
 export type ImportOption = (typeof IMPORT_OPTIONS)[number];
@@ -521,6 +542,34 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "This item already has a ledger — record a receipt or an adjustment on its page instead. An " +
       "opening quantity only makes sense the first time an item is created.",
     fix: { kind: "link", label: "Open stock", href: "/stock" },
+  },
+
+  // Phase 20 (spec §5): the same-name directory guard, applied to a CREATE
+  // row — an UPDATE already matched by employeeNo never reaches this check.
+  "same-name-in-department": {
+    label: "Same name already in that department",
+    explain:
+      "An existing person with this name is already in this department, and this row has no employee " +
+      "number match — it may be a duplicate rather than a new hire. Add an Employee no column naming who " +
+      "this row means, or confirm these really are different people.",
+    fix: { kind: "option", label: "Add same-name rows as new people", option: "allowSameName" },
+  },
+
+  // I-5 (final review, ruling R15 option a): the department analogue of
+  // `employment-via-import`, and NOT a reuse of it — that cause's explain
+  // names "Employment" and "the offboarding flow", neither of which applies
+  // here. A department change is recorded with Transfer on the employee
+  // page so every change carries an effective date and an actor
+  // (`EmployeeTransfer`); an import UPDATE that silently moved
+  // `departmentId` would leave the next real Transfer's own `from` reading
+  // the imported department, with no record of how the person got there.
+  "department-via-import": {
+    label: "Department change needs a Transfer",
+    explain:
+      "This row is an update whose Department cell disagrees with the record's current department. " +
+      "Department changes are recorded with Transfer on the employee page so every change carries a " +
+      "date — use the option to keep current departments and apply the rest, or use Transfer instead.",
+    fix: { kind: "option", label: "Keep current departments, apply the rest", option: "keepCurrentDepartment" },
   },
 };
 

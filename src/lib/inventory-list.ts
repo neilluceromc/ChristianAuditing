@@ -169,3 +169,21 @@ export function buildAssetOrderBy(sort: SortKey[]): Prisma.AssetOrderByWithRelat
     { id: "asc" },
   ];
 }
+
+/**
+ * Phase 20 (spec §6.2, plan P-4): `checkIdentifiers`' own where-builder,
+ * scoped to one class — a tag or serial belonging to the OTHER class must
+ * not leak before submit (that is what "no class information leaks before
+ * submit" means); a genuine cross-class collision still surfaces, but only
+ * at save time, as the existing neutral P2002 conflict copy. Pure so the
+ * scoping rule has a unit test independent of the database the action
+ * itself needs.
+ */
+export function identifierWhere(
+  cls: AssetClass, tags: string[], serials: string[],
+): { tags: Prisma.AssetWhereInput; serials: Prisma.AssetWhereInput } {
+  return {
+    tags: { cls, tag: { in: tags } },
+    serials: { cls, serial: { in: serials } },
+  };
+}

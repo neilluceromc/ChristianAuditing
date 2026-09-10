@@ -6,6 +6,7 @@ import { computeLoadout, effectiveSlots, resolvePolicy } from "@/lib/loadout";
 import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
 import { fmtDate, fmtMoney, fmtRelativeDays } from "@/lib/format";
 import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
+import { isRecentTransfer } from "@/lib/transfer-schema";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -16,6 +17,9 @@ import { Stat } from "@/components/ui/stat";
 import { StatusDot } from "@/components/ui/status";
 import { LoadoutView, type HoldingItem, type SlotTile, type SpareOption } from "@/components/employees/loadout-view";
 import { AcknowledgementCard } from "@/components/employees/acknowledgement-card";
+import { TransferDialog } from "@/components/employees/transfer-dialog";
+import { TransfersCard } from "@/components/employees/transfers-card";
+import { getTransfers } from "@/server/modules/employees/queries";
 
 export default async function EmployeePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -23,7 +27,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
   const employee = await prisma.employee.findUnique({ where: { id }, include: { department: true } });
   if (!employee) notFound();
 
-  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes, acks] = await Promise.all([
+  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes, acks, transfers, departments] = await Promise.all([
     prisma.asset.findMany({ where: { assigneeId: id }, orderBy: { tag: "asc" } }),
     prisma.reservation.findMany({ where: { employeeId: id, state: "ACTIVE" }, include: { asset: true } }),
     prisma.approval.findMany({
@@ -55,6 +59,8 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       orderBy: [{ signedAt: "desc" }, { id: "desc" }],
       take: 20,
     }),
+    getTransfers(id),
+    prisma.department.findMany({ orderBy: { name: "asc" } }),
   ]);
 
   const policy = resolvePolicy(employee, policies);
@@ -69,7 +75,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     visible: canSeeClass(user.role, a.cls),
   });
 
-  const slots: SlotTile[] = loadout.slots.map(({ slot, asset }) => {
+  const slots: SlotTile[] = loadout.slots.map(({ slot, asset, coveredByLoan }) => {
     // An ADD-exception slot's id isn't a real PolicySlot id, so `typeName`
     // (keyed on policy slot ids) never has it — fall back to the exception
     // row's own assetType.name, which the query above included for exactly
@@ -85,6 +91,10 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       loaner: slot.loaner,
       exceptionId: slot.exceptionId ?? null,
       exceptionReason: exception?.reason ?? null,
+      // Phase 20 (spec §6.3, gap 3): a standard slot left empty because its
+      // type has a remaining TEMPORARY device on loan — the tile reads "on
+      // loan" instead of "policy gap".
+      coveredByLoan,
     };
   });
 
@@ -125,6 +135,11 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     held.map((a) => ({ assetId: a.id, tag: a.tag })),
     latest ? (latest.items as unknown as AckItem[]) : null,
   );
+  // Phase 20 (spec §3): `getTransfers` is already newest-first, so the
+  // header line only ever looks at the first row.
+  const newestTransfer = transfers[0] ?? null;
+  const recentTransfer = newestTransfer && isRecentTransfer(newestTransfer.effectiveAt) ? newestTransfer : null;
+  const otherDepartments = departments.filter((d) => d.id !== employee.departmentId).map((d) => ({ id: d.id, name: d.name }));
 
   return (
     <>
@@ -141,7 +156,16 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
         actions={
           <>
             <ButtonLink href={`/employees/${id}/timeline`}>Timeline</ButtonLink>
+            <ButtonLink href={`/employees/${id}/holdings`}>Export holdings</ButtonLink>
             <ButtonLink href={`/employees/${id}/form`}>Accountability form</ButtonLink>
+            {canMutate && (
+              <TransferDialog
+                employeeId={id}
+                employeeName={employee.name}
+                currentTitle={employee.title}
+                departments={otherDepartments}
+              />
+            )}
             {canMutate && <ButtonLink variant="primary" href={`/employees/${id}/edit`}>Edit</ButtonLink>}
           </>
         }
@@ -156,6 +180,11 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
                 <div>
                   <p className="text-[15px] font-semibold text-fg">{employee.name}</p>
                   <p className="text-xs text-fg-secondary">{employee.title} · {employee.department.name}</p>
+                  {recentTransfer && (
+                    <p className="text-[10.5px] text-fg-muted">
+                      Transferred from {recentTransfer.from} on {fmtDate(recentTransfer.effectiveAt)}
+                    </p>
+                  )}
                   <p className="pt-0.5 font-mono text-[10.5px] text-fg-muted">
                     {employee.employeeNo} · joined {fmtDate(employee.joinedAt)}
                   </p>
@@ -192,7 +221,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           />
         </div>
 
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
           <LoadoutView
             employeeId={id}
             slots={slots}
@@ -206,6 +235,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             canMutate={canMutate}
             direct={direct}
           />
+          <TransfersCard transfers={transfers} />
         </div>
       </div>
       {/* keep an escape hatch for link-followers */}

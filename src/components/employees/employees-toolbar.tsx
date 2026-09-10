@@ -23,6 +23,10 @@ export function EmployeesToolbar({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  // Phase 20 (spec §5): leavers hidden by default — an explicit employment
+  // facet always wins over the toggle (buildEmployeeWhere's own rule), but
+  // the toggle only ever needs to know whether IT itself asked to see them.
+  const showingLeavers = (state.filters.leavers ?? []).includes("1");
 
   const href = (s: ListState, gaps: boolean) => {
     const qs = serializeListState(s, EMPLOYEES_LIST_CONFIG);
@@ -59,6 +63,18 @@ export function EmployeesToolbar({
         selected={state.filters.employment ?? []}
         onApply={(values) => router.push(href(withFilter(state, "employment", values), gapsOnly))}
       />
+      <Link
+        href={href(withFilter(state, "leavers", showingLeavers ? [] : ["1"]), gapsOnly)}
+        aria-current={showingLeavers ? "true" : undefined}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-(--radius-btn) border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors duration-(--dur-1)",
+          showingLeavers
+            ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
+            : "border-border-strong bg-surface text-fg-secondary hover:bg-surface-subtle",
+        )}
+      >
+        {showingLeavers ? "Hide leavers" : "Show leavers"}
+      </Link>
       <Link
         href={href({ ...state, page: 1 }, !gapsOnly)}
         aria-current={gapsOnly ? "true" : undefined}

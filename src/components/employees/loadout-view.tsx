@@ -43,6 +43,8 @@ export interface SlotTile {
   exceptionId: string | null;
   /** Phase 16: the reason recorded for the exception this tile came from, if any — surfaced as the EXCEPTION pill's tooltip. */
   exceptionReason: string | null;
+  /** Phase 20 (spec §6.3, gap 3): empty, but a remaining TEMPORARY device of this slot's type covers it — reads "on loan", not "policy gap". */
+  coveredByLoan: boolean;
 }
 
 export interface SpareOption {
@@ -304,7 +306,9 @@ export function LoadoutView({
         <div role="group" aria-label="Equipment slots" className="grid grid-cols-2 gap-[11px] lg:grid-cols-4" onKeyDown={onGridKeyDown}>
           {slots.map((tile, i) => {
             const a = tile.asset;
-            const name = `${tile.name} slot, ${a ? a.model : "empty"}, ${tile.required ? "required" : "optional"}`;
+            // Phase 20 (spec §6.3): a loan-covered empty slot says so in its
+            // accessible name too — the LOAN pill alone was sighted-only.
+            const name = `${tile.name} slot, ${a ? a.model : tile.coveredByLoan ? "on loan" : "empty"}, ${tile.required ? "required" : "optional"}`;
             const showReplace = !!a && direct && mayAct && !a.pendingRef;
             // Waiving is a policy-slot affordance (an ADD-exception slot is
             // already only for this person — "Remove exception" is its
@@ -374,13 +378,18 @@ export function LoadoutView({
                       <span className="font-mono text-[10px] text-fg-muted">
                         {tile.typeName} · {tile.required ? "required" : "optional"}
                       </span>
-                      {(tile.loaner || tile.exceptionId) && (
+                      {(tile.loaner || tile.exceptionId || tile.coveredByLoan) && (
                         <span className="flex flex-wrap items-center gap-1">
-                          {tile.loaner && <Pill>LOAN</Pill>}
+                          {(tile.loaner || tile.coveredByLoan) && <Pill>LOAN</Pill>}
                           {tile.exceptionId && <Pill title={tile.exceptionReason ?? undefined}>EXCEPTION</Pill>}
                         </span>
                       )}
-                      {tile.required && (
+                      {/* Phase 20 (spec §6.3, gap 3): someone standing in on
+                          their own broken kit's loaner is not a policy gap —
+                          "on loan" replaces the attention-toned text. */}
+                      {tile.coveredByLoan ? (
+                        <span className="font-mono text-[10px] text-fg-muted">on loan</span>
+                      ) : tile.required && (
                         <span className="font-mono text-[10px] font-medium" style={{ color: "var(--st-attention-text)" }}>
                           policy gap
                         </span>

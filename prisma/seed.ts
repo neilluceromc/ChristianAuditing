@@ -27,7 +27,7 @@ async function main() {
     TRUNCATE "AuditEntry", "NoteEntry", "Job", "WebhookDelivery", "WebhookEndpoint",
       "RateEvent", "UserPreference", "Approval", "Reservation", "AssetSecret",
       "AssetDocument", "PurchaseUnit", "PurchaseRequest", "Asset", "PolicySlot",
-      "EquipmentPolicy", "Employee", "AssetType", "AssetCategory", "Vendor",
+      "EquipmentPolicy", "EmployeeTransfer", "Employee", "AssetType", "AssetCategory", "Vendor",
       "Department", "FeatureFlag", "User",
       "StocktakeLine", "Stocktake", "StockMovement", "StockLot", "StockItem", "StockCategory" CASCADE`);
 
@@ -122,6 +122,14 @@ async function main() {
     ),
   );
   const emp = (no: string) => employees.find((e) => e.employeeNo === no)!;
+
+  // Phase 20: one transfer on record so the timeline and the Transfers card have data.
+  await prisma.employeeTransfer.create({
+    data: {
+      employeeId: emp("EMP-0099").id, fromDepartmentId: depts["HR"].id, toDepartmentId: depts["Operations"].id,
+      fromTitle: "Team Lead", toTitle: "Team Lead", effectiveAt: day(-90), reason: "Team consolidation", actorId: itStaff.id,
+    },
+  });
 
   // Assets: every status represented; DEFECTIVE rows carry repair fields.
   // purchasedAt is deliberately spread across the five age buckets (including a

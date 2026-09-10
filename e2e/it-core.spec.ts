@@ -343,9 +343,12 @@ test.describe("employees & loadout", () => {
     const marites = page.getByRole("row", { name: /Marites Bautista/ });
     // Phase 16: a standard (non-loaner) slot no longer counts a TEMPORARY
     // device as filling it (computeLoadout) — her phone is on loan
-    // (BR-PH-0287, TEMPORARY), so the phone slot now reads missing
-    // alongside headset, which was always missing. 1 missing -> 2.
-    await expect(marites).toContainText("2 missing");
+    // (BR-PH-0287, TEMPORARY), so the empty phone slot sat alongside headset,
+    // which was always missing: 1 missing -> 2.
+    // Phase 20 (spec §6.3, gap 3): that empty standard slot is now "covered
+    // by loan" instead of plainly missing — BR-PH-0287 covers it, so only
+    // headset counts. 2 missing -> back to 1.
+    await expect(marites).toContainText("1 missing");
     await page.getByRole("link", { name: "Policy gaps only" }).click();
     await expect(page).toHaveURL(/gaps=1/);
     await expect(page.getByRole("row", { name: /Marites Bautista/ })).toBeVisible();
