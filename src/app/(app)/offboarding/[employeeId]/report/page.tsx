@@ -64,7 +64,9 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
               <th className="py-1.5 pr-3">Outcome</th>
               <th className="py-1.5 pr-3">Reason</th>
               <th className="py-1.5 pr-3 text-right">Value</th>
-              <th className="py-1.5">Request</th>
+              <th className="py-1.5 pr-3">Request</th>
+              <th className="py-1.5 pr-3">Decided by</th>
+              <th className="py-1.5">Decided on</th>
             </tr>
           </thead>
           <tbody>
@@ -79,7 +81,7 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
                 </td>
                 <td className="py-1.5 pr-3">{i.decision.reason ?? "—"}</td>
                 <td className="py-1.5 pr-3 text-right font-mono">{i.costLabel}</td>
-                <td className="py-1.5 font-mono text-[10px]">
+                <td className="py-1.5 pr-3 font-mono text-[10px]">
                   {i.decision.refNo} ·{" "}
                   {/* EXECUTED and PENDING/EXECUTION_FAILED share this column's
                       one muted weight otherwise, and a state this small must not
@@ -89,10 +91,12 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
                     {i.decision.state}
                   </span>
                 </td>
+                <td className="py-1.5 pr-3 font-mono text-[10px]">{i.decision.decidedBy ?? "—"}</td>
+                <td className="py-1.5 font-mono text-[10px]">{fmtDate(i.decision.decidedAt)}</td>
               </tr>
             ))}
             {decided.length === 0 && (
-              <tr><td colSpan={7} className="py-3 text-center text-[#667085]">No equipment decisions were recorded.</td></tr>
+              <tr><td colSpan={9} className="py-3 text-center text-[#667085]">No equipment decisions were recorded.</td></tr>
             )}
           </tbody>
         </table>

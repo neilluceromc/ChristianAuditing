@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { getWizard } from "@/server/modules/offboarding/queries";
 import { canContinue, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
-import { fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
@@ -197,6 +197,8 @@ export default async function OffboardingWizardPage({
                     <Th width={96}>Status</Th>
                     <Th width={112} align="right">Cost</Th>
                     <Th width={124}>Decision</Th>
+                    <Th width={112}>Decided by</Th>
+                    <Th width={104}>Decided on</Th>
                   </Tr>
                 </THead>
                 <TBody>
@@ -213,6 +215,8 @@ export default async function OffboardingWizardPage({
                       <Td mono className="text-[10.5px]">
                         {i.decision ? OUTCOME_LABEL[i.decision.outcome] : "—"}
                       </Td>
+                      <Td mono className="text-[10.5px]">{i.decision?.decidedBy ?? "—"}</Td>
+                      <Td mono className="text-[10.5px]">{fmtDate(i.decision?.decidedAt)}</Td>
                     </Tr>
                   ))}
                 </TBody>
