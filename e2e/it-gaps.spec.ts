@@ -1,9 +1,9 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { REPAIR_STAGES, repairStage, type RepairLike } from "@/lib/repairs";
+import { REPAIR_STAGES, REPAIR_STAGE_CASE_SQL, repairStage, type RepairLike } from "@/lib/repairs";
 import { fmtDate } from "@/lib/format";
 
 /**
@@ -246,12 +246,33 @@ test.describe("it gaps", () => {
     expect(asset.assigneeId).toBeNull();
   });
 
-  test("6. repair-stage parity: every IT asset's DB-computed stage matches the count behind each stage chip", async ({ page }) => {
+  test("6. repair-stage parity: the SQL CASE (repairStageIds) matches repairStage() over every seeded IT asset, and the chip total matches too", async ({ page }) => {
     const assets = await db.asset.findMany({
       where: { cls: "IT" },
-      select: { tag: true, status: true, vendorId: true, rmaRef: true, repairQuote: true, cost: true, defectiveSince: true },
+      select: { id: true, tag: true, status: true, vendorId: true, rmaRef: true, repairQuote: true, cost: true, defectiveSince: true },
     });
+
+    // Phase 20 (spec §6.6, plan P-1): the real parity proof — run the exact
+    // CASE expression `repairStageIds` executes as `$queryRaw`, over the same
+    // candidate predicate ("cls"='IT' AND (status='DEFECTIVE' OR
+    // defectiveSince IS NOT NULL)), and assert per asset that the SQL stage
+    // equals repairStage() in JS. Correcting an earlier draft's comment:
+    // `listAssets` (src/server/modules/inventory/queries.ts) does NOT page
+    // this SQL cut — it fetches the repair candidate set and filters in JS
+    // via toRow -> stageOf -> repairStage; only `repairStageIds` (reached by
+    // the export route and the two bulk actions) ever executes
+    // REPAIR_STAGE_CASE_SQL. This block is the one place in the whole
+    // battery that reads the raw SQL for every stage, including
+    // beyond-repair's arithmetic and centavo rule (BR-LT-0090 in the seed).
+    const sqlRows = await db.$queryRaw<Array<{ id: string; stage: string }>>(Prisma.sql`
+      SELECT "id", ${Prisma.raw(REPAIR_STAGE_CASE_SQL)} AS stage
+      FROM "Asset"
+      WHERE "cls" = 'IT'::"AssetClass" AND ("status" = 'DEFECTIVE' OR "defectiveSince" IS NOT NULL)
+    `);
+    const sqlStageById = new Map(sqlRows.map((r) => [r.id, r.stage]));
+
     const byStage = new Map<string, number>();
+    let candidateCount = 0;
     for (const a of assets) {
       const like: RepairLike = {
         status: a.status,
@@ -263,17 +284,27 @@ test.describe("it gaps", () => {
       };
       const stage = repairStage(like);
       if (stage) byStage.set(stage, (byStage.get(stage) ?? 0) + 1);
+
+      const isCandidate = a.status === "DEFECTIVE" || a.defectiveSince !== null;
+      expect(sqlStageById.has(a.id), `asset ${a.tag} candidate membership`).toBe(isCandidate);
+      if (isCandidate) {
+        candidateCount += 1;
+        expect(sqlStageById.get(a.id), `asset ${a.tag} SQL stage vs repairStage()`).toBe(stage);
+      }
     }
+    // No row in the raw cut outside what repairStage's own candidate rule expects.
+    expect(sqlStageById.size).toBe(candidateCount);
 
     await login(page, IT);
     for (const stage of REPAIR_STAGES) {
-      // repairStageIds (src/server/modules/inventory/queries.ts) computes
-      // this stage's exact cut in SQL and `listAssets` pages it — the
-      // toolbar's own "N assets" total (aria-live="polite") IS that cut's
-      // count. RepairChips itself (src/components/inventory/repair-chips.tsx)
-      // renders no numeric badge on the chips — verified against source —
-      // so the total-assets label is the real, visible parity point, not a
-      // per-chip count.
+      // A second, screen-facing agreement point: the toolbar's own "N
+      // assets" total (aria-live="polite") is `listAssets`' JS-filtered
+      // count for this stage. RepairChips itself
+      // (src/components/inventory/repair-chips.tsx) renders no numeric
+      // badge on the chips — verified against source — so the total-assets
+      // label is the real, visible parity point, not a per-chip count. The
+      // SQL agreement is already proven above; this only re-confirms the
+      // screen matches the same JS rule.
       await page.goto(`/inventory?stage=${stage}`);
       const total = page.getByText(/^\d+ assets?$/);
       await expect(total).toBeVisible({ timeout: 15_000 });
