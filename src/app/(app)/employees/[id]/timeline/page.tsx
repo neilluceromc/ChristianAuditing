@@ -50,7 +50,7 @@ export default async function EmployeeTimelinePage({
     // backdated one).
     prisma.employeeTransfer.findMany({
       where: { employeeId: id, ...(cursor ? { effectiveAt: { lte: cursor.before } } : {}) },
-      include: { fromDepartment: true, toDepartment: true, actor: true },
+      include: { fromDepartment: true, toDepartment: true, actor: { select: { name: true } } },
       orderBy: [{ effectiveAt: "desc" }, { id: "desc" }],
       take,
     }),

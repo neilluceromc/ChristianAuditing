@@ -232,7 +232,7 @@ export async function getTransfers(employeeId: string): Promise<Array<{
 }>> {
   const rows = await prisma.employeeTransfer.findMany({
     where: { employeeId },
-    include: { fromDepartment: true, toDepartment: true, actor: true },
+    include: { fromDepartment: true, toDepartment: true, actor: { select: { name: true } } },
     orderBy: [{ effectiveAt: "desc" }, { id: "desc" }],
   });
   return rows.map((r) => ({
