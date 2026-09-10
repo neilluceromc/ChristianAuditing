@@ -56,6 +56,24 @@ export function auditSentence(entry: ActivityEntryLike): string {
     }
     case "finance.resubmit":
       return `${entry.actorLabel} marked ${entry.entityLabel} corrected for Finance`;
+    // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
+    // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {
+    // from: null, to } }` (transfer-actions.ts) — without this case the raw
+    // activity feed and the audit page rendered the bare verb
+    // ("J. Sarmiento employee.transferred Dennis Ong") via the default
+    // fallback below. The Transfers card / timeline line stay their own
+    // bespoke sentence built straight off `EmployeeTransfer` fields (spec
+    // §3) — this case is only for the generic `AuditEntry` feeds.
+    case "employee.transferred": {
+      const dept = diff?.department as { from: unknown; to: unknown } | undefined;
+      const titleChange = diff?.title as { from: unknown; to: unknown } | undefined;
+      const from = String(dept?.from ?? "?");
+      const to = String(dept?.to ?? "?");
+      const retitled = titleChange && titleChange.from !== titleChange.to
+        ? ` · retitled ${String(titleChange.to)}`
+        : "";
+      return `${entry.actorLabel} moved ${entry.entityLabel} from ${from} to ${to}${retitled}`;
+    }
     case "offboarding.completed": {
       const items = diff?.decisions?.to;
       const n = Array.isArray(items) ? items.length : 0;

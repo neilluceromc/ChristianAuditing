@@ -26,7 +26,7 @@ export default async function EmployeeTimelinePage({
   const cursor = parseTimelineCursor(sp);
   const take = timelineTake(TIMELINE_PAGE_SIZE, cursor);
 
-  const [entries, approvals, reservations] = await Promise.all([
+  const [entries, approvals, reservations, transfers] = await Promise.all([
     prisma.auditEntry.findMany({
       where: { entityType: "employee", entityId: id, ...(cursor ? { createdAt: { lte: cursor.before } } : {}) },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -42,6 +42,16 @@ export default async function EmployeeTimelinePage({
       where: { employeeId: id, ...(cursor ? { createdAt: { lte: cursor.before } } : {}) },
       include: { asset: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take,
+    }),
+    // Phase 20 (spec §3): transfers join as a fourth source, `when =
+    // effectiveAt` — the dated, deliberate moment IT recorded, not the row's
+    // createdAt (the two agree for a same-day transfer but not for a
+    // backdated one).
+    prisma.employeeTransfer.findMany({
+      where: { employeeId: id, ...(cursor ? { effectiveAt: { lte: cursor.before } } : {}) },
+      include: { fromDepartment: true, toDepartment: true, actor: true },
+      orderBy: [{ effectiveAt: "desc" }, { id: "desc" }],
       take,
     }),
   ]);
@@ -78,8 +88,20 @@ export default async function EmployeeTimelinePage({
     } satisfies TimelineItem,
   }));
 
+  const transferPts = transfers.map((t) => ({
+    id: `transfer-${t.id}`,
+    when: t.effectiveAt,
+    item: {
+      id: `transfer-${t.id}`, at: fmtDate(t.effectiveAt),
+      title: (<>
+        Transferred to <b>{t.toDepartment.name}</b> (from {t.fromDepartment.name})
+        {t.reason ? ` · ${t.reason}` : ""} — by {t.actor.name}
+      </>),
+    } satisfies TimelineItem,
+  }));
+
   const { items, next } = mergeTimeline<TimelinePoint & { item: TimelineItem }>(
-    [auditPts, approvalPts, reservationPts],
+    [auditPts, approvalPts, reservationPts, transferPts],
     TIMELINE_PAGE_SIZE,
     cursor,
   );
