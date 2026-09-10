@@ -17,13 +17,15 @@ import { SameNameCheck } from "./same-name-check";
 const CUSTOM = "__custom";
 const today = () => new Date().toISOString().slice(0, 10);
 type Initial = { name: string; title: string; departmentId: string; employment: string; m365Status: string | null };
-type Props = { departments: Array<{ id: string; name: string }> } & (
-  | { mode: "edit"; employeeId: string; initial: Initial }
-  | { mode: "new" }
-);
+// Phase 20: the edit branch never renders the Department select (a department
+// change goes through Transfer), so it takes no departments — the page does not
+// query them for nothing.
+type Props =
+  | { mode: "edit"; employeeId: string; initial: Initial; departments?: Array<{ id: string; name: string }> }
+  | { mode: "new"; departments: Array<{ id: string; name: string }> };
 
 export function EmployeeForm(props: Props) {
-  const { departments } = props;
+  const departments = props.departments ?? [];
   const initial: Initial = props.mode === "edit"
     ? props.initial
     : { name: "", title: "", departmentId: departments[0]?.id ?? "", employment: "ACTIVE", m365Status: null };
