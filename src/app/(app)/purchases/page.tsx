@@ -72,6 +72,7 @@ export default async function PurchasesPage({
       />
       <div className="flex flex-col gap-3">
         <Tabs
+          label="Request states"
           items={PURCHASE_TABS.map((t) => {
             const next = carry(new URLSearchParams());
             if (t.id !== "ALL") next.set("state", t.id);

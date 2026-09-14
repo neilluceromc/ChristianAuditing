@@ -22,7 +22,7 @@ export default async function WorklistPage() {
         breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Worklist" }]}
       />
       <div className="max-w-[980px]">
-        <Worklist groups={groups} canAct={user.role !== "viewer"} />
+        <Worklist groups={groups} canAct={user.role !== "viewer"} headingLevel="h2" />
       </div>
     </>
   );

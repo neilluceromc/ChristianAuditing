@@ -270,6 +270,7 @@ function Demos() {
 
       <Section title="Tabs">
         <Tabs
+          label="Example tabs"
           items={[
             { label: "Overview", href: "#", active: true },
             { label: "History", href: "#", active: false },

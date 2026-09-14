@@ -36,14 +36,11 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
 
   return (
     <>
-      <PageHeader
-        title={`Edit ${asset.tag}`}
-        breadcrumb={[
-          { label: "Inventory", href: "/inventory" },
-          { label: asset.tag, href: `/inventory/${asset.id}` },
-          { label: "Edit" },
-        ]}
-      />
+      {/* No breadcrumb prop here: this route lives under AssetRecordLayout
+          (asset-classes.spec.ts test 17), whose own PageHeader already
+          renders a "Breadcrumb" nav for the record — a second one with the
+          same accessible name is what axe's landmark-unique flagged. */}
+      <PageHeader title={`Edit ${asset.tag}`} />
       <AssetForm
         mode="edit"
         categories={categories.map((c) => ({ id: c.id, name: c.name, cls: c.cls }))}

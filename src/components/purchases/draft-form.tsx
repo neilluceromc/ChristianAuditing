@@ -260,7 +260,9 @@ export function DraftForm({
                 <th scope="col" className="pb-2 text-left font-mono text-[10px] uppercase tracking-[0.06em] text-fg-muted">Specs</th>
                 <th scope="col" className="w-[76px] pb-2 text-left font-mono text-[10px] uppercase tracking-[0.06em] text-fg-muted">Qty</th>
                 <th scope="col" className="w-[128px] pb-2 text-left font-mono text-[10px] uppercase tracking-[0.06em] text-fg-muted">Unit price ₱</th>
-                <th scope="col" className="w-[40px] pb-2" />
+                <th scope="col" className="w-[40px] pb-2">
+                  <span className="sr-only">Remove row</span>
+                </th>
               </tr>
             </thead>
             <tbody>

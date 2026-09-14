@@ -92,7 +92,7 @@ export default async function FinanceAssetsPage({
             <Table>
               <THead>
                 <Tr>
-                  <Th width={26} />
+                  <Th width={26} aria-label="Status colour" />
                   <Th width={112}>Tag</Th>
                   <Th>Model</Th>
                   <Th width={96}>Category</Th>
