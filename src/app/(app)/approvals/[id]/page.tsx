@@ -5,7 +5,7 @@ import { getApproval, systemChecks } from "@/server/modules/approvals/queries";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { slaLabel } from "@/lib/approvals-list";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtDateTime } from "@/lib/format";
 import { canActOnApproval } from "@/lib/approval-access";
 import { canSeeClass } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
@@ -21,7 +21,7 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const approval = await getApproval(id);
   if (!approval) notFound();
-  const checks = await systemChecks(approval);
+  const checks = approval.appliedDirectly ? null : await systemChecks(approval);
   const canAct = canActOnApproval(user.role, approval.asset?.cls ?? null);
   const mine = approval.claimedById === user.id;
   const sla = slaLabel(approval.slaAt);
@@ -43,27 +43,56 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
           </span>
         }
       />
-      <p className="-mt-2 pb-4 font-mono text-[11px] text-fg-muted">
-        {APPROVAL_TYPE_LABEL[approval.type]} · requested by {approval.requestedBy.name} · {fmtDate(approval.createdAt)} · SLA{" "}
-        <span className={sla.overdue ? "font-semibold text-[color:var(--st-fault-text)]" : undefined}>{sla.text}</span>
-      </p>
+      {approval.appliedDirectly ? (
+        <p className="-mt-2 pb-4 font-mono text-[11px] text-fg-muted">
+          {APPROVAL_TYPE_LABEL[approval.type]} · applied directly by{" "}
+          {approval.claimedBy?.name ?? approval.requestedBy.name} · {fmtDateTime(approval.resolvedAt)}
+        </p>
+      ) : (
+        <p className="-mt-2 pb-4 font-mono text-[11px] text-fg-muted">
+          {APPROVAL_TYPE_LABEL[approval.type]} · requested by {approval.requestedBy.name} · {fmtDate(approval.createdAt)} · SLA{" "}
+          <span className={sla.overdue ? "font-semibold text-[color:var(--st-fault-text)]" : undefined}>{sla.text}</span>
+        </p>
+      )}
 
       <div className="grid max-w-[900px] grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="What the system checked" />
-          <CardBody className="flex flex-col gap-2.5">
-            {checks.map((c) => (
-              <div key={c.label} className="flex items-baseline gap-2 text-xs">
-                <StatusDot value={c.pass ? "DEPLOYED" : "DEFECTIVE"} />
-                <span className="font-medium text-fg">{c.label}</span>
-                <span className="ml-auto font-mono text-[10.5px] text-fg-muted">{c.detail}</span>
-              </div>
-            ))}
-            <p className="pt-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-fg-muted">
-              checked just now — execution re-checks in its own transaction
-            </p>
-          </CardBody>
-        </Card>
+        {approval.appliedDirectly ? (
+          <Card>
+            <CardHeader title="How it was applied" />
+            <CardBody className="flex flex-col gap-2.5">
+              <p className="text-xs text-fg">
+                Applied directly by{" "}
+                <strong className="font-semibold text-fg">
+                  {approval.claimedBy?.name ?? approval.requestedBy.name}
+                </strong>{" "}
+                on {fmtDateTime(approval.resolvedAt)}. No request was queued — the change took effect the
+                moment {approval.claimedBy?.name ?? approval.requestedBy.name} confirmed it, and it is
+                recorded in the audit trail under their name.
+              </p>
+              {approval.assetId && (
+                <Link href={`/inventory/${approval.assetId}/history`} className="text-xs text-accent hover:underline">
+                  See the asset&apos;s history →
+                </Link>
+              )}
+            </CardBody>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader title="What the system checked" />
+            <CardBody className="flex flex-col gap-2.5">
+              {checks!.map((c) => (
+                <div key={c.label} className="flex items-baseline gap-2 text-xs">
+                  <StatusDot value={c.pass ? "DEPLOYED" : "DEFECTIVE"} />
+                  <span className="font-medium text-fg">{c.label}</span>
+                  <span className="ml-auto font-mono text-[10.5px] text-fg-muted">{c.detail}</span>
+                </div>
+              ))}
+              <p className="pt-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-fg-muted">
+                checked just now — execution re-checks in its own transaction
+              </p>
+            </CardBody>
+          </Card>
+        )}
 
         <Card>
           <CardHeader title="Before → after" />

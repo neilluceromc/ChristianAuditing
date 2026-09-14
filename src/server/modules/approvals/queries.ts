@@ -4,7 +4,9 @@ import { prisma } from "@/server/db/client";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { RETURN_TARGETS, isAssignable } from "@/lib/asset-class";
 import { approvalClassWhere } from "@/lib/approval-access";
-import { slaLabel, tabWhere, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
+import {
+  slaLabel, tabWhere, viaWhere, CLOSED_VIA, QUEUE_TABS, type QueueTab, type ClosedVia,
+} from "@/lib/approvals-list";
 import { pageOf, LOG_PAGE_SIZE } from "@/lib/paging";
 
 /** Serializable queue row — the island gets strings, no Dates/Decimals. */
@@ -18,12 +20,17 @@ export interface ApprovalRow {
   sla: { text: string; overdue: boolean };
   owner: string | null;
   mine: boolean;
+  direct: boolean;
 }
 
-export async function listApprovals(tab: QueueTab, userId: string, role: Role, requestedPage: number): Promise<{
+export async function listApprovals(
+  tab: QueueTab, via: ClosedVia, userId: string, role: Role, requestedPage: number,
+): Promise<{
   rows: ApprovalRow[]; total: number; page: number; pageCount: number;
 }> {
-  const where = { AND: [tabWhere(tab, userId), approvalClassWhere(role)] };
+  const where = {
+    AND: [tabWhere(tab, userId), tab === "closed" ? viaWhere(via) : {}, approvalClassWhere(role)],
+  };
   const total = await prisma.approval.count({ where });
   const pg = pageOf(total, requestedPage, LOG_PAGE_SIZE);
   const approvals = await prisma.approval.findMany({
@@ -50,6 +57,7 @@ export async function listApprovals(tab: QueueTab, userId: string, role: Role, r
       sla: slaLabel(a.slaAt),
       owner: a.claimedBy?.name ?? null,
       mine: a.claimedById === userId,
+      direct: a.appliedDirectly,
     };
   });
   return { rows, total, page: pg.page, pageCount: pg.pageCount };
@@ -62,6 +70,18 @@ export async function tabCounts(userId: string, role: Role): Promise<Record<Queu
     ),
   );
   return Object.fromEntries(QUEUE_TABS.map((t, i) => [t.id, counts[i]])) as Record<QueueTab, number>;
+}
+
+/** Closed tab's `?via=` chip counts (Phase 21) — same closed rule and class scope as `listApprovals`. */
+export async function closedViaCounts(userId: string, role: Role): Promise<Record<ClosedVia, number>> {
+  const counts = await Promise.all(
+    CLOSED_VIA.map((v) =>
+      prisma.approval.count({
+        where: { AND: [tabWhere("closed", userId), viaWhere(v), approvalClassWhere(role)] },
+      }),
+    ),
+  );
+  return Object.fromEntries(CLOSED_VIA.map((v, i) => [v, counts[i]])) as Record<ClosedVia, number>;
 }
 
 export const getApproval = cache((id: string) =>
