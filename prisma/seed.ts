@@ -318,11 +318,17 @@ async function main() {
   // createApproval (the one writer) sets it the same way. requestedById is
   // the IT user too — a direct change is requested and applied by the same
   // person.
+  // One instant per row, read once: `day()` calls Date.now() each time, and
+  // two calls a millisecond apart would break the very equality the comment
+  // above promises (Task 1 review).
+  const applied36 = day(-1);
+  const applied37 = day(-3);
+  const applied38 = day(-2);
   await prisma.approval.createMany({
     data: [
-      { refNo: "APR-2036", type: "lifecycle_assign", state: "EXECUTED", priority: "NORMAL", slaAt: day(1), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: day(-1), resolvedAt: day(-1), assetId: a0501.id, employeeId: emp("EMP-0051").id, appliedDirectly: true, payload: { to: { assigneeId: emp("EMP-0051").id, status: "DEPLOYED" }, reason: "assigned" } },
-      { refNo: "APR-2037", type: "lifecycle_return", state: "EXECUTED", priority: "NORMAL", slaAt: day(-1), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: day(-3), resolvedAt: day(-3), assetId: a0502.id, employeeId: emp("EMP-0063").id, appliedDirectly: true, payload: { from: { assigneeId: emp("EMP-0063").id }, to: { assigneeId: null, status: "SPARE" }, reason: "" } },
-      { refNo: "APR-2038", type: "lifecycle_change_status", state: "EXECUTED", priority: "NORMAL", slaAt: day(0), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: day(-2), resolvedAt: day(-2), assetId: a0402.id, appliedDirectly: true, payload: { from: { status: "SPARE" }, to: { status: "DEFECTIVE" }, reason: "Two keys unresponsive" } },
+      { refNo: "APR-2036", type: "lifecycle_assign", state: "EXECUTED", priority: "NORMAL", slaAt: day(1), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: applied36, resolvedAt: applied36, assetId: a0501.id, employeeId: emp("EMP-0051").id, appliedDirectly: true, payload: { to: { assigneeId: emp("EMP-0051").id, status: "DEPLOYED" }, reason: "assigned" } },
+      { refNo: "APR-2037", type: "lifecycle_return", state: "EXECUTED", priority: "NORMAL", slaAt: day(-1), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: applied37, resolvedAt: applied37, assetId: a0502.id, employeeId: emp("EMP-0063").id, appliedDirectly: true, payload: { from: { assigneeId: emp("EMP-0063").id }, to: { assigneeId: null, status: "SPARE" }, reason: "" } },
+      { refNo: "APR-2038", type: "lifecycle_change_status", state: "EXECUTED", priority: "NORMAL", slaAt: day(0), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: applied38, resolvedAt: applied38, assetId: a0402.id, appliedDirectly: true, payload: { from: { status: "SPARE" }, to: { status: "DEFECTIVE" }, reason: "Two keys unresponsive" } },
     ],
   });
 
