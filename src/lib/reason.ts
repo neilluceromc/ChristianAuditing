@@ -7,9 +7,15 @@ import { z } from "zod";
  * non-empty to `.trim().length`. Every reason field runs its input through
  * this before the length check, so an invisible-only reason is refused like
  * an empty one.
+ *
+ * Tab, LF and CR are exempt: nearly every reason field is a textarea, and
+ * `\p{Cc}` would otherwise delete the line breaks a person typed — two
+ * sentences glued together with nothing between them, unrecoverably, since
+ * the reason lives only in the approval payload and the audit row (final
+ * review, Phase 21). `.trim()` still turns a whitespace-only reason into "".
  */
 export function cleanReason(raw: string | null | undefined): string {
-  return (raw ?? "").replace(/[\p{Cf}\p{Cc}]/gu, "").trim();
+  return (raw ?? "").replace(/(?![\t\n\r])[\p{Cf}\p{Cc}]/gu, "").trim();
 }
 
 export const REASON_MAX = 500;

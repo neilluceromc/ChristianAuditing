@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
-import { pagedSnapshot } from "./paged";
+import { PAGED_MAX_WAIT_MS, PAGED_TIMEOUT_MS, pagedSnapshot } from "./paged";
 import { pageOf } from "@/lib/paging";
 
 /**
@@ -10,11 +10,11 @@ import { pageOf } from "@/lib/paging";
  * options object back out so the test can inspect it.
  */
 function fakeClient(fakeTx: unknown) {
-  const seen: { isolationLevel?: string } = {};
+  const seen: { isolationLevel?: string; maxWait?: number; timeout?: number } = {};
   const client = {
     $transaction: (
       fn: (tx: unknown) => Promise<unknown>,
-      opts?: { isolationLevel?: string },
+      opts?: { isolationLevel?: string; maxWait?: number; timeout?: number },
     ) => {
       Object.assign(seen, opts);
       return fn(fakeTx);
@@ -49,6 +49,9 @@ describe("pagedSnapshot", () => {
 
     expect(order).toEqual(["count", "rows"]);
     expect(seen.isolationLevel).toBe("RepeatableRead");
+    // Explicit budgets, not Prisma's 2 s / 5 s defaults (final review, Phase 21).
+    expect(seen.maxWait).toBe(PAGED_MAX_WAIT_MS);
+    expect(seen.timeout).toBe(PAGED_TIMEOUT_MS);
 
     const expectedPage = pageOf(30, 9, 25);
     expect(result).toEqual({ ...expectedPage, rows: ["a", "b", "c"] });

@@ -2,6 +2,11 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { pageOf, type Page } from "@/lib/paging";
 
+/** How long a paged read may wait for a pooled connection before failing (a burst queues, it does not 500). */
+export const PAGED_MAX_WAIT_MS = 10_000;
+/** How long the whole count → page window may take (a slow list on a cold database stays slow, it does not fail). */
+export const PAGED_TIMEOUT_MS = 20_000;
+
 /**
  * One list's count and its page, read inside ONE `RepeatableRead` interactive
  * transaction (spec §5). Under PostgreSQL both statements share one snapshot,
@@ -27,6 +32,14 @@ export async function pagedSnapshot<T>(
       const pageRows = await rows(tx, pg);
       return { rows: pageRows, ...pg };
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    // Explicit budgets, not Prisma's 2 s / 5 s defaults: eighteen lists now
+    // pin one pooled connection for the whole count → page window, so a
+    // burst should queue rather than throw P2024, and a slow list on a cold
+    // database should stay slow rather than fail (final review, Phase 21).
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      maxWait: PAGED_MAX_WAIT_MS,
+      timeout: PAGED_TIMEOUT_MS,
+    },
   );
 }

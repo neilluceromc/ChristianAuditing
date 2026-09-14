@@ -47,3 +47,14 @@ describe("reasonOptional (spec §6)", () => {
     expect(reasonOptional({ max: 200 }).parse("​")).toBe("");
   });
 });
+
+describe("cleanReason keeps the whitespace a textarea produces (final review, Phase 21)", () => {
+  it("keeps tab, LF and CR so a multi-line reason is not glued together", () => {
+    expect(cleanReason("Screen cracked.\nRMA raised with Dell.")).toBe("Screen cracked.\nRMA raised with Dell.");
+    expect(cleanReason("a\tb\r\nc")).toBe("a\tb\r\nc");
+  });
+  it("still refuses a reason made only of zero-width characters and line breaks", () => {
+    expect(cleanReason("​\n​")).toBe("");
+    expect(reasonRequired().safeParse("​\n​").success).toBe(false);
+  });
+});
