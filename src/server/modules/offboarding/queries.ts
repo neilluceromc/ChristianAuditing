@@ -1,5 +1,6 @@
 import type { ApprovalType, AssetClass, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { pagedSnapshot } from "@/server/paged";
 import { OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate, fmtMoney } from "@/lib/format";
@@ -227,11 +228,15 @@ export async function listOffboarding(state: ListState): Promise<{
     pg = pageOf(computed.length, state.page, ENTITY_PAGE_SIZE);
     rows = computed.slice(pg.skip, pg.skip + pg.take);
   } else {
-    const total = await prisma.employee.count({ where });
-    pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
-    const employees = await prisma.employee.findMany({
-      where, orderBy, include: OFFBOARDING_INCLUDE, skip: pg.skip, take: pg.take,
-    });
+    const { rows: employees, ...snapshotPg } = await pagedSnapshot(
+      ENTITY_PAGE_SIZE,
+      state.page,
+      (tx) => tx.employee.count({ where }),
+      (tx, pg) => tx.employee.findMany({
+        where, orderBy, include: OFFBOARDING_INCLUDE, skip: pg.skip, take: pg.take,
+      }),
+    );
+    pg = snapshotPg;
     rows = employees.map(toOffboardingRow);
   }
 

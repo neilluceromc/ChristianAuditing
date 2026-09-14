@@ -1,10 +1,10 @@
 import { requireUser } from "@/server/auth/guards";
-import { prisma } from "@/server/db/client";
+import { pagedSnapshot } from "@/server/paged";
 import { entityLabels } from "@/server/modules/audit/queries";
 import { auditSentence } from "@/lib/activity";
 import { fmtDateTime } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { LOG_PAGE_SIZE, pageOf, parsePage } from "@/lib/paging";
+import { LOG_PAGE_SIZE, parsePage } from "@/lib/paging";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
@@ -20,14 +20,18 @@ export default async function PurchasingActivityPage({
   await requireUser();
   const sp = toSearchParams(await searchParams);
 
-  const total = await prisma.auditEntry.count({ where: WHERE });
-  const pg = pageOf(total, parsePage(sp), LOG_PAGE_SIZE);
-  const entries = await prisma.auditEntry.findMany({
-    where: WHERE,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    skip: pg.skip,
-    take: pg.take,
-  });
+  const { rows: entries, ...pg } = await pagedSnapshot(
+    LOG_PAGE_SIZE,
+    parsePage(sp),
+    (tx) => tx.auditEntry.count({ where: WHERE }),
+    (tx, pg) =>
+      tx.auditEntry.findMany({
+        where: WHERE,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: pg.skip,
+        take: pg.take,
+      }),
+  );
   const labels = await entityLabels(entries);
 
   const items: ActivityItem[] = entries.map((e) => ({
