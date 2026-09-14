@@ -18,7 +18,7 @@ import {
 import {
   ASSET_CLASSES, CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
-import { reasonRequired } from "@/lib/reason";
+import { reasonOptional, reasonRequired } from "@/lib/reason";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
@@ -190,7 +190,9 @@ const createSchema = z.object({
   invoiceRef: z.string().trim().max(60).optional(),
   requestedStatus: z.enum(CREATABLE_STATUSES),
   assigneeId: z.string().optional(),
-  assignReason: z.string().trim().max(500).optional(),
+  // Phase 21 (spec §6): cleaned like every other reason — a zero-width string
+  // must fall through to the "assigned at registration" default below.
+  assignReason: reasonOptional(),
 });
 
 /**
