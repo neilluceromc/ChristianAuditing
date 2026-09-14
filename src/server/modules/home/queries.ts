@@ -1,7 +1,7 @@
-import type { Role } from "@prisma/client";
+import type { ApprovalType, Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
-import { slaLabel } from "@/lib/approvals-list";
+import { DIRECT_KIND_LABEL, DIRECT_WINDOW_DAYS, slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { approvalClassWhere } from "@/lib/approval-access";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
@@ -27,11 +27,22 @@ const CAP = { small: 10, large: 50 };
  * row with the one action that clears it. Every row is a real record —
  * nothing here is a count for its own sake.
  */
-export async function worklist(userId: string, role: Role, opts: { limit?: number }, now: Date = new Date()): Promise<WorkGroup[]> {
+export async function worklist(
+  userId: string,
+  role: Role,
+  opts: { limit?: number; excludeOwnClaims?: boolean },
+  now: Date = new Date(),
+): Promise<WorkGroup[]> {
   const scope = approvalClassWhere(role);
+  // Phase 21 spec §4.2: one approval appears once on Home — a claim you hold
+  // already shows (with its SLA and overdue mark) in "Claimed by you", so
+  // Home's worklist excludes it here rather than listing it twice.
+  const breachedWhere: Prisma.ApprovalWhereInput = opts.excludeOwnClaims
+    ? { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, { NOT: { claimedById: userId } }, scope] }
+    : { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] };
   const [breached, failed, leavers, hires, missing, orphaned, awaiting, pref, triage, repairs, loans] = await Promise.all([
     prisma.approval.findMany({
-      where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] },
+      where: breachedWhere,
       orderBy: { slaAt: "asc" },
       take: CAP.small,
       include: { asset: true, employee: true },
@@ -298,6 +309,49 @@ export async function claimedByYou(userId: string, role: Role, now: Date = new D
     line1: summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls }).line1,
     sla: slaLabel(a.slaAt, now),
   }));
+}
+
+export interface DirectChanges {
+  since: Date;
+  total: number;
+  /** zero-count kinds omitted; count desc, then label */
+  byKind: Array<{ type: ApprovalType; label: string; count: number }>;
+  /** zero-count actors can't occur (grouped from real rows); count desc, then name */
+  byActor: Array<{ name: string; count: number }>;
+}
+
+/**
+ * Admin Home's "Applied directly · last 7 days" (Phase 21 spec §4.1): rows
+ * that were never queued — created already EXECUTED via Phase 15's direct
+ * change path (`appliedDirectly`, Task 1) — resolved within the window.
+ */
+export async function directChanges(now: Date = new Date(), days: number = DIRECT_WINDOW_DAYS): Promise<DirectChanges> {
+  const since = new Date(now.getTime() - days * DAY_MS);
+  const where: Prisma.ApprovalWhereInput = { appliedDirectly: true, resolvedAt: { gte: since } };
+
+  const [byType, byClaimer] = await Promise.all([
+    prisma.approval.groupBy({ by: ["type"], where, _count: { _all: true } }),
+    prisma.approval.groupBy({ by: ["claimedById"], where, _count: { _all: true } }),
+  ]);
+
+  const claimerIds = byClaimer.map((g) => g.claimedById).filter((id): id is string => id !== null);
+  const users = claimerIds.length
+    ? await prisma.user.findMany({ where: { id: { in: claimerIds } }, select: { id: true, name: true } })
+    : [];
+  const nameById = new Map(users.map((u) => [u.id, u.name]));
+
+  const byKind = byType
+    .map((g) => ({ type: g.type, label: DIRECT_KIND_LABEL[g.type], count: g._count._all }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  const byActor = byClaimer
+    .map((g) => ({
+      name: g.claimedById === null ? "Unknown" : (nameById.get(g.claimedById) ?? "Unknown"),
+      count: g._count._all,
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  return { since, total: byKind.reduce((sum, k) => sum + k.count, 0), byKind, byActor };
 }
 
 export interface FleetSlice {
