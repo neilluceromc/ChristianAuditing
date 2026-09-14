@@ -37,8 +37,18 @@ export async function worklist(
   // Phase 21 spec §4.2: one approval appears once on Home — a claim you hold
   // already shows (with its SLA and overdue mark) in "Claimed by you", so
   // Home's worklist excludes it here rather than listing it twice.
+  // A PENDING row has claimedById = null, and SQL's `<>` never matches NULL —
+  // so `NOT: { claimedById }` would drop every unclaimed breach along with the
+  // viewer's own claims (home-finance case "APR-2040 leads" caught it). Spell
+  // the null case out.
   const breachedWhere: Prisma.ApprovalWhereInput = opts.excludeOwnClaims
-    ? { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, { NOT: { claimedById: userId } }, scope] }
+    ? {
+        AND: [
+          { state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } },
+          { OR: [{ claimedById: null }, { claimedById: { not: userId } }] },
+          scope,
+        ],
+      }
     : { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] };
   const [breached, failed, leavers, hires, missing, orphaned, awaiting, pref, triage, repairs, loans] = await Promise.all([
     prisma.approval.findMany({
