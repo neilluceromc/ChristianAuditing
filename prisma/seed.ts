@@ -279,6 +279,14 @@ async function main() {
   // Approvals — all six states; one PENDING past SLA; EXECUTION_FAILED with verbatim error.
   const a0148 = await asset("BR-LT-0148");
   const a0181 = await asset("BR-LT-0181");
+  // Phase 21: three direct rows below use IT assets no e2e spec queries
+  // approvals for (checked by hand: BR-HS-0501 doesn't appear in e2e/*.spec.ts
+  // at all; BR-HS-0502 appears but only in asset/reservation queries and one
+  // approval.count scoped to OPEN_STATES, which EXECUTED never matches;
+  // BR-KB-0402 appears only in a comment).
+  const a0501 = await asset("BR-HS-0501");
+  const a0502 = await asset("BR-HS-0502");
+  const a0402 = await asset("BR-KB-0402");
   await prisma.approval.createMany({
     data: [
       // payload mirrors what requestAssign actually writes (assigneeId = row id, not employeeNo)
@@ -300,6 +308,21 @@ async function main() {
       { refNo: "APR-2031", type: "lifecycle_transfer", state: "EXECUTED", priority: "NORMAL", slaAt: day(-2), requestedById: itStaff.id, claimedById: admin.id, resolvedAt: day(-2), payload: { from: "EMP-0042", to: "EMP-0051" } },
       { refNo: "APR-2028", type: "lifecycle_replace", state: "REJECTED", priority: "HIGH", slaAt: day(-5), requestedById: itStaff.id, claimedById: admin.id, resolvedAt: day(-5), resolutionReason: "Replacement not justified; repair quote pending", payload: {} },
       { refNo: "APR-2025", type: "lifecycle_assign", state: "EXECUTION_FAILED", priority: "NORMAL", slaAt: day(-3), requestedById: itStaff.id, claimedById: admin.id, workerError: "Execution guard: target employee EMP-0093 is OFFBOARDED — assignment refused", payload: {} },
+    ],
+  });
+
+  // Phase 21: three direct rows (Phase 15 direct changes, never queued) so
+  // the Closed tab's "via" filter and Home's "Applied directly" section have
+  // data on a fresh database. claimedAt === resolvedAt is what migration 22's
+  // backfill keys on, and appliedDirectly is set explicitly here too since
+  // createApproval (the one writer) sets it the same way. requestedById is
+  // the IT user too — a direct change is requested and applied by the same
+  // person.
+  await prisma.approval.createMany({
+    data: [
+      { refNo: "APR-2036", type: "lifecycle_assign", state: "EXECUTED", priority: "NORMAL", slaAt: day(1), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: day(-1), resolvedAt: day(-1), assetId: a0501.id, employeeId: emp("EMP-0051").id, appliedDirectly: true, payload: { to: { assigneeId: emp("EMP-0051").id, status: "DEPLOYED" }, reason: "assigned" } },
+      { refNo: "APR-2037", type: "lifecycle_return", state: "EXECUTED", priority: "NORMAL", slaAt: day(-1), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: day(-3), resolvedAt: day(-3), assetId: a0502.id, employeeId: emp("EMP-0063").id, appliedDirectly: true, payload: { from: { assigneeId: emp("EMP-0063").id }, to: { assigneeId: null, status: "SPARE" }, reason: "" } },
+      { refNo: "APR-2038", type: "lifecycle_change_status", state: "EXECUTED", priority: "NORMAL", slaAt: day(0), requestedById: itStaff.id, claimedById: itStaff.id, claimedAt: day(-2), resolvedAt: day(-2), assetId: a0402.id, appliedDirectly: true, payload: { from: { status: "SPARE" }, to: { status: "DEFECTIVE" }, reason: "Two keys unresponsive" } },
     ],
   });
 

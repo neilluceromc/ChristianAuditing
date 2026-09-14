@@ -38,6 +38,7 @@ export async function createApproval(
       employeeId: input.employeeId,
       priority: input.priority ?? "NORMAL",
       slaAt: newSlaAt(),
+      appliedDirectly: input.executed !== undefined,
       ...(input.executed
         ? { state: "EXECUTED" as const, claimedById: input.executed.by, claimedAt: input.executed.at, resolvedAt: input.executed.at }
         : {}),

@@ -59,7 +59,9 @@ test.describe("approvals — tabs & URL contract", () => {
     await expect(tabsNav.getByRole("link", { name: "Mine" })).toContainText("0");
     await expect(tabsNav.getByRole("link", { name: "Unclaimed" })).toContainText("2");
     await expect(tabsNav.getByRole("link", { name: "Failed" })).toContainText("1");
-    await expect(tabsNav.getByRole("link", { name: "Closed" })).toContainText("2");
+    // 2 (APR-2031 EXECUTED / APR-2028 REJECTED) + Phase 21's three seeded
+    // direct rows (APR-2036/2037/2038, appliedDirectly EXECUTED) = 5.
+    await expect(tabsNav.getByRole("link", { name: "Closed" })).toContainText("5");
 
     await tabsNav.getByRole("link", { name: "Unclaimed" }).click();
     await expect(page).toHaveURL(/tab=unclaimed/);
