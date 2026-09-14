@@ -8,6 +8,21 @@ const dateFmt = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Manila",
 });
 
+// en-CA renders YYYY-MM-DD — the `<input type="date">` value shape.
+const isoDateFmt = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Manila",
+});
+
+/**
+ * The Asia/Manila calendar date of `now` as `YYYY-MM-DD` — what a date picker
+ * should default to and what "today" means to a rule that refuses future
+ * dates. `toISOString().slice(0, 10)` gives the UTC date instead, which is
+ * yesterday for a Manila user between 00:00 and 08:00 local.
+ */
+export function localDateISO(now: Date = new Date()): string {
+  return isoDateFmt.format(now);
+}
+
 const moneyFmt = new Intl.NumberFormat("en-PH", {
   style: "currency", currency: "PHP", maximumFractionDigits: 0,
 });

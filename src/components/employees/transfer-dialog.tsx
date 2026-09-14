@@ -9,10 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { localDateISO } from "@/lib/format";
 import { transferEmployee } from "@/server/modules/employees/transfer-actions";
 import { useEmployeeRunner } from "./use-employee-runner";
 
-const today = () => new Date().toISOString().slice(0, 10);
+// The Asia/Manila calendar date, like every date the app prints — not the UTC
+// date, which is yesterday for a Manila user before 08:00 (Phase 20 M-5).
+const today = () => localDateISO(new Date());
 
 /**
  * Phase 20 (spec §3): the Transfer button + dialog on the employee page
