@@ -9,8 +9,9 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
 import { resolvePolicy } from "@/lib/loadout";
+import { reasonRequired } from "@/lib/reason";
 
-const reason = z.string().trim().min(3, "Give a reason (at least 3 characters)").max(500);
+const reason = reasonRequired();
 
 function revalidate(employeeId: string) {
   revalidatePath(`/employees/${employeeId}`);

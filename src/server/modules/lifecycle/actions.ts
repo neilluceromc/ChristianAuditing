@@ -13,6 +13,7 @@ import { repairStageIds } from "@/server/modules/inventory/queries";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
+import { cleanReason, reasonOptional } from "@/lib/reason";
 import type { AuditDiff } from "@/lib/audit-diff";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { ASSET_STATUSES, BULK_MAX, INVENTORY_LIST_CONFIG, buildAssetWhere, parsePurchaseYear } from "@/lib/inventory-list";
@@ -90,7 +91,7 @@ function revalidateAsset(assetId: string, employeeIds: Array<string | null | und
   for (const e of employeeIds) if (e) revalidatePath(`/employees/${e}`);
 }
 
-const reasonOpt = z.string().trim().max(500).optional();
+const reasonOpt = reasonOptional();
 const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
 
 // ── changeStatus ────────────────────────────────────────────────────────────
@@ -217,7 +218,7 @@ export async function returnAsset(input: unknown): Promise<ActionResult<{ tag: s
   const parsed = returnSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
-  if (reasonRequiredFor(d.outcome) && (d.reason ?? "").length < 3) {
+  if (reasonRequiredFor(d.outcome) && cleanReason(d.reason).length < 3) {
     return validationError({ reason: "Missing needs a reason (at least 3 characters) — it opens an investigation." });
   }
   const now = new Date();
@@ -259,7 +260,7 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
   if (d.oldAssetId === d.newAssetId) return validationError({ newAssetId: "Pick a different device." });
-  if (reasonRequiredFor(d.outcome) && (d.reason ?? "").length < 3) {
+  if (reasonRequiredFor(d.outcome) && cleanReason(d.reason).length < 3) {
     return validationError({ reason: "Missing needs a reason (at least 3 characters) — it opens an investigation." });
   }
   const now = new Date();

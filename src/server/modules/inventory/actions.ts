@@ -18,6 +18,7 @@ import {
 import {
   ASSET_CLASSES, CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
+import { reasonRequired } from "@/lib/reason";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
@@ -46,7 +47,7 @@ const bulkSchema = z
     /** serialized list query (e.g. "status=SPARE&q=dell") when acting on all matching */
     filters: z.string().max(2000).optional(),
     to: z.enum(ASSET_STATUSES),
-    reason: z.string().trim().min(3, "Give a reason (at least 3 characters)").max(500),
+    reason: reasonRequired(),
   })
   .refine((v) => (v.ids?.length ?? 0) > 0 || v.filters !== undefined, {
     message: "Nothing is selected",
@@ -454,7 +455,7 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
 const statusChangeSchema = z.object({
   assetId: z.string().min(1),
   to: z.enum(ASSET_STATUSES),
-  reason: z.string().trim().min(3, "Give a reason (at least 3 characters)").max(500),
+  reason: reasonRequired(),
 });
 
 /** Lifecycle change = approval, never a direct write. */
@@ -587,7 +588,7 @@ export async function confirmAssetDetails(input: unknown): Promise<ActionResult<
 
 const returnSchema = z.object({
   id: z.string().min(1),
-  reason: z.string().trim().min(5, "Say what is wrong — at least 5 characters.").max(500),
+  reason: reasonRequired({ min: 5, message: "Say what is wrong — at least 5 characters." }),
 });
 
 /**

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { reasonOptional } from "./reason";
 
 // The same shape `employees/actions.ts`'s own `dateStr` uses: a malformed
 // string is a field error at the picker, never an Invalid Date reaching
@@ -20,7 +21,7 @@ export const transferSchema = z.object({
   toDepartmentId: z.string().min(1, "Pick a department"),
   toTitle: z.string().trim().min(2, "Give a title").max(120),
   effectiveAt: dateStr,
-  reason: z.string().trim().max(300).optional().default(""),
+  reason: reasonOptional({ max: 300 }).default(""),
 }).superRefine((d, ctx) => {
   if (d.effectiveAt > todayStr()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["effectiveAt"], message: "That date is in the future" });

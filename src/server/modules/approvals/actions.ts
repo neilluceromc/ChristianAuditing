@@ -12,11 +12,12 @@ import {
 } from "@/server/action-result";
 import { approvalTransition, escalatePriority, type QueueAction } from "@/lib/approval-flow";
 import { canActOnApproval, isApprover } from "@/lib/approval-access";
+import { reasonRequired } from "@/lib/reason";
 
 const idSchema = z.object({ id: z.string().min(1) });
 const rejectSchema = z.object({
   id: z.string().min(1),
-  reason: z.string().trim().min(3, "Give a reason (at least 3 characters)").max(500),
+  reason: reasonRequired(),
 });
 
 interface Acted {
