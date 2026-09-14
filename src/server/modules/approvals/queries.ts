@@ -7,7 +7,8 @@ import { approvalClassWhere } from "@/lib/approval-access";
 import {
   slaLabel, tabWhere, viaWhere, CLOSED_VIA, QUEUE_TABS, type QueueTab, type ClosedVia,
 } from "@/lib/approvals-list";
-import { pageOf, LOG_PAGE_SIZE } from "@/lib/paging";
+import { LOG_PAGE_SIZE } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 
 /** Serializable queue row — the island gets strings, no Dates/Decimals. */
 export interface ApprovalRow {
@@ -31,16 +32,20 @@ export async function listApprovals(
   const where = {
     AND: [tabWhere(tab, userId), tab === "closed" ? viaWhere(via) : {}, approvalClassWhere(role)],
   };
-  const total = await prisma.approval.count({ where });
-  const pg = pageOf(total, requestedPage, LOG_PAGE_SIZE);
-  const approvals = await prisma.approval.findMany({
-    where,
-    include: { asset: true, employee: true, claimedBy: true },
-    // Open work orders by what breaks first; closed history reads newest-first.
-    // The id tiebreaker keeps two rows with one slaAt in one order across pages.
-    orderBy: tab === "closed" ? [{ updatedAt: "desc" }, { id: "desc" }] : [{ slaAt: "asc" }, { id: "asc" }],
-    skip: pg.skip, take: pg.take,
-  });
+  const { rows: approvals, total, page, pageCount } = await pagedSnapshot(
+    LOG_PAGE_SIZE,
+    requestedPage,
+    (tx) => tx.approval.count({ where }),
+    (tx, pg) =>
+      tx.approval.findMany({
+        where,
+        include: { asset: true, employee: true, claimedBy: true },
+        // Open work orders by what breaks first; closed history reads newest-first.
+        // The id tiebreaker keeps two rows with one slaAt in one order across pages.
+        orderBy: tab === "closed" ? [{ updatedAt: "desc" }, { id: "desc" }] : [{ slaAt: "asc" }, { id: "asc" }],
+        skip: pg.skip, take: pg.take,
+      }),
+  );
   const rows = approvals.map((a) => {
     const s = summarizeApproval(a.type, a.payload, {
       assetTag: a.asset?.tag,
@@ -60,7 +65,7 @@ export async function listApprovals(
       direct: a.appliedDirectly,
     };
   });
-  return { rows, total, page: pg.page, pageCount: pg.pageCount };
+  return { rows, total, page, pageCount };
 }
 
 export async function tabCounts(userId: string, role: Role): Promise<Record<QueueTab, number>> {

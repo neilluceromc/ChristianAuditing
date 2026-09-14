@@ -13,6 +13,7 @@ import {
 } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
 import { auditSentence } from "@/lib/activity";
@@ -187,19 +188,23 @@ export async function listAssets(
     };
   }
 
-  const total = await prisma.asset.count({ where });
-  const pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
-  const assets = await prisma.asset.findMany({
-    where,
-    orderBy,
-    skip: pg.skip,
-    take: pg.take,
-    include: LIST_INCLUDE,
-  });
+  const { rows: assets, total, page, pageCount } = await pagedSnapshot(
+    ENTITY_PAGE_SIZE,
+    state.page,
+    (tx) => tx.asset.count({ where }),
+    (tx, pg) =>
+      tx.asset.findMany({
+        where,
+        orderBy,
+        skip: pg.skip,
+        take: pg.take,
+        include: LIST_INCLUDE,
+      }),
+  );
   return {
     total,
-    page: pg.page,
-    pageCount: pg.pageCount,
+    page,
+    pageCount,
     rows: assets.map(toRow),
   };
 }

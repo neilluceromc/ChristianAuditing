@@ -3,7 +3,8 @@ import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
 import { bounceBack, type ThreadNote } from "@/lib/purchase-thread";
-import { LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { LOG_PAGE_SIZE } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 
 export interface PurchaseListRow {
   id: string;
@@ -69,39 +70,43 @@ export async function listPurchases(
   supplier: string | null = null,
 ): Promise<{ rows: PurchaseListRow[]; total: number; page: number; pageCount: number }> {
   const where = purchaseWhere(state, q, department, supplier);
-  const total = await prisma.purchaseRequest.count({ where });
-  const pg = pageOf(total, page, LOG_PAGE_SIZE);
-  const rows = await prisma.purchaseRequest.findMany({
-    where,
-    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    skip: pg.skip,
-    take: pg.take,
-    select: {
-      id: true, refNo: true, state: true, updatedAt: true, submittedAt: true,
-      reviewedAt: true, completedAt: true, cancelledAt: true,
-      requestedBy: { select: { name: true } },
-      department: { select: { name: true } },
-      vendor: { select: { name: true } },
-      // id is a tiebreaker, not the sort key: units created in the same
-      // batch (every seed row, every draft save) share one createdAt
-      // millisecond, and createdAt alone is not a stable order across reads.
-      units: { select: { qty: true, unitPrice: true, description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
-      // the newest state-carrying note decides "did this come back?" —
-      // bounceBack() reads the last non-COMMENT note, so one row is enough
-      notes: {
-        where: { kind: { not: "COMMENT" } },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { id: true, kind: true, text: true, createdAt: true, author: { select: { name: true } } },
-      },
-    },
-  });
+  const { rows, total, page: pg, pageCount } = await pagedSnapshot(
+    LOG_PAGE_SIZE,
+    page,
+    (tx) => tx.purchaseRequest.count({ where }),
+    (tx, pg) =>
+      tx.purchaseRequest.findMany({
+        where,
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        skip: pg.skip,
+        take: pg.take,
+        select: {
+          id: true, refNo: true, state: true, updatedAt: true, submittedAt: true,
+          reviewedAt: true, completedAt: true, cancelledAt: true,
+          requestedBy: { select: { name: true } },
+          department: { select: { name: true } },
+          vendor: { select: { name: true } },
+          // id is a tiebreaker, not the sort key: units created in the same
+          // batch (every seed row, every draft save) share one createdAt
+          // millisecond, and createdAt alone is not a stable order across reads.
+          units: { select: { qty: true, unitPrice: true, description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+          // the newest state-carrying note decides "did this come back?" —
+          // bounceBack() reads the last non-COMMENT note, so one row is enough
+          notes: {
+            where: { kind: { not: "COMMENT" } },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: { id: true, kind: true, text: true, createdAt: true, author: { select: { name: true } } },
+          },
+        },
+      }),
+  );
 
   const now = new Date();
   return {
     total,
-    page: pg.page,
-    pageCount: pg.pageCount,
+    page: pg,
+    pageCount,
     rows: rows.map((r): PurchaseListRow => {
       const last: ThreadNote[] = r.notes.map((n) => ({
         id: n.id, kind: n.kind, text: n.text, author: n.author.name, at: n.createdAt,

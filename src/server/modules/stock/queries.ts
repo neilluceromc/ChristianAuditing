@@ -2,6 +2,7 @@ import type { Prisma, StockMovementKind, StocktakeState } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { ListState } from "@/lib/url-state";
 import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 import { buildStockItemWhere, buildStockOrderBy } from "@/lib/stock-list";
 import { isLow } from "@/lib/stock-balance";
 import { EXPORT_CAP } from "@/lib/export-columns";
@@ -94,11 +95,17 @@ export async function listStockItems(state: ListState): Promise<{
     balanceById = new Map(candidates.map((c) => [c.id, c.balance]));
     lastMovementById = new Map(candidates.map((c) => [c.id, c.lastMovementAt]));
   } else {
-    const total = await prisma.stockItem.count({ where });
-    pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
-    itemRows = await prisma.stockItem.findMany({
-      where, orderBy, skip: pg.skip, take: pg.take, include: { category: { select: { name: true } } },
-    });
+    const { rows: snapshotRows, ...snapshotPg } = await pagedSnapshot(
+      ENTITY_PAGE_SIZE,
+      state.page,
+      (tx) => tx.stockItem.count({ where }),
+      (tx, pg) =>
+        tx.stockItem.findMany({
+          where, orderBy, skip: pg.skip, take: pg.take, include: { category: { select: { name: true } } },
+        }),
+    );
+    pg = snapshotPg;
+    itemRows = snapshotRows;
     const ids = itemRows.map((r) => r.id);
     const sums = ids.length
       ? await prisma.stockMovement.groupBy({
@@ -231,14 +238,18 @@ export async function listStocktakes(page: number): Promise<{
   rows: Array<{ id: string; refNo: string; scope: string; state: StocktakeState; openedAt: Date; postedAt: Date | null; counted: number; total: number }>;
   page: number; pageCount: number; total: number;
 }> {
-  const total = await prisma.stocktake.count();
-  const pg = pageOf(total, page, ENTITY_PAGE_SIZE);
-  const rows = await prisma.stocktake.findMany({
-    orderBy: [{ openedAt: "desc" }, { id: "desc" }], skip: pg.skip, take: pg.take,
-    include: { category: { select: { name: true } }, lines: { select: { countedQty: true } } },
-  });
+  const { rows, total, page: pg, pageCount } = await pagedSnapshot(
+    ENTITY_PAGE_SIZE,
+    page,
+    (tx) => tx.stocktake.count(),
+    (tx, pg) =>
+      tx.stocktake.findMany({
+        orderBy: [{ openedAt: "desc" }, { id: "desc" }], skip: pg.skip, take: pg.take,
+        include: { category: { select: { name: true } }, lines: { select: { countedQty: true } } },
+      }),
+  );
   return {
-    total, page: pg.page, pageCount: pg.pageCount,
+    total, page: pg, pageCount,
     rows: rows.map((s) => ({
       id: s.id, refNo: s.refNo, scope: s.category?.name ?? "All", state: s.state,
       openedAt: s.openedAt, postedAt: s.postedAt,

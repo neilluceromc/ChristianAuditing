@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
-import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
+import { pagedSnapshot } from "@/server/paged";
 import { historyRows } from "@/lib/history";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { LOG_PAGE_SIZE, pageOf, parsePage } from "@/lib/paging";
+import { LOG_PAGE_SIZE, parsePage } from "@/lib/paging";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
@@ -23,14 +23,18 @@ export default async function AssetHistoryPage({
   const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   const where = { entityType: "asset", entityId: id };
-  const total = await prisma.auditEntry.count({ where });
-  const pg = pageOf(total, parsePage(sp), LOG_PAGE_SIZE);
-  const entries = await prisma.auditEntry.findMany({
-    where,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    skip: pg.skip,
-    take: pg.take,
-  });
+  const { rows: entries, ...pg } = await pagedSnapshot(
+    LOG_PAGE_SIZE,
+    parsePage(sp),
+    (tx) => tx.auditEntry.count({ where }),
+    (tx, pg) =>
+      tx.auditEntry.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: pg.skip,
+        take: pg.take,
+      }),
+  );
   const rows = historyRows(entries);
 
   if (rows.length === 0) {
