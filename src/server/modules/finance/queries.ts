@@ -1,9 +1,9 @@
 import { Prisma, type AssetClass, type AssetStatus } from "@prisma/client";
-import { prisma } from "@/server/db/client";
+import { pagedSnapshot } from "@/server/paged";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { isStatusOf } from "@/lib/asset-class";
 import { ageBucket } from "@/lib/home";
-import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { ENTITY_PAGE_SIZE } from "@/lib/paging";
 import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
 
 export interface FinanceAssetRow {
@@ -43,26 +43,37 @@ export async function financeAssets(
     ...(cls === "IT" ? { itVerifiedAt: { not: null } } : {}),
     ...(status ? { status } : {}),
   };
-  const [total, sum] = await Promise.all([
-    prisma.asset.count({ where }),
-    prisma.asset.aggregate({ where, _sum: { cost: true } }),
-  ]);
-  const pg = pageOf(total, page, ENTITY_PAGE_SIZE);
-  const assets = await prisma.asset.findMany({
-    where,
-    orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
-    skip: pg.skip,
-    take: pg.take,
-    // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
-    include: { category: true, assignee: true },
-  });
+  // The aggregate must read the same snapshot as the count, so it runs
+  // inside pagedSnapshot's transaction alongside the page's own findMany —
+  // captured via closure since the helper's `rows` callback returns T[].
+  let costSum = 0;
+  const { rows: assets, ...pg } = await pagedSnapshot(
+    ENTITY_PAGE_SIZE,
+    page,
+    (tx) => tx.asset.count({ where }),
+    async (tx, pg) => {
+      const [rows, sum] = await Promise.all([
+        tx.asset.findMany({
+          where,
+          orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
+          skip: pg.skip,
+          take: pg.take,
+          // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
+          include: { category: true, assignee: true },
+        }),
+        tx.asset.aggregate({ where, _sum: { cost: true } }),
+      ]);
+      costSum = sum._sum.cost === null ? 0 : Number(sum._sum.cost);
+      return rows;
+    },
+  );
 
   return {
-    total,
+    total: pg.total,
     page: pg.page,
     pageCount: pg.pageCount,
     // Decimal never leaves this module
-    totalCost: fmtMoney(sum._sum.cost === null ? 0 : Number(sum._sum.cost)),
+    totalCost: fmtMoney(costSum),
     rows: assets.map((a): FinanceAssetRow => ({
       id: a.id,
       tag: a.tag,

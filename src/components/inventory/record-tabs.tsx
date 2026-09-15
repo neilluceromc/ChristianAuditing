@@ -26,5 +26,5 @@ export function RecordTabs({ assetId, showSecrets }: { assetId: string; showSecr
       : []),
     { label: "Reservations" as React.ReactNode, href: `${base}/reservations` },
   ].map((t) => ({ ...t, active: t.href === base ? pathname === base : pathname.startsWith(t.href) }));
-  return <Tabs items={items} />;
+  return <Tabs items={items} label="Record sections" />;
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PREFIX_SHAPE } from "./stock-code";
+import { reasonOptional, reasonRequired } from "./reason";
 
 // The same date shape supplier-schema.ts uses: a malformed string is a field
 // error at the picker, never an Invalid Date reaching Prisma.
@@ -48,7 +49,7 @@ export const issueSchema = z.object({
   quantity: z.number().int().min(1, "At least one"),
   departmentId: z.string().min(1, "Pick the department"),
   employeeId: z.string().optional().default(""),
-  reason: z.string().trim().max(200).optional().default(""),
+  reason: reasonOptional({ max: 200 }).default(""),
 });
 export type IssueInput = z.infer<typeof issueSchema>;
 
@@ -56,7 +57,7 @@ export const adjustSchema = z.object({
   itemId: z.string().min(1),
   mode: z.enum(["delta", "set"]),
   quantity: z.number().int(),
-  reason: z.string().trim().min(3, "Say why").max(200),
+  reason: reasonRequired({ min: 3, max: 200, message: "Say why" }),
 }).superRefine((d, ctx) => {
   if (d.mode === "delta" && d.quantity === 0) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["quantity"], message: "A change of zero changes nothing" });

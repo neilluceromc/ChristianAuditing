@@ -94,7 +94,7 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
     const row = rows[focused];
     const announceRow = (i: number) => {
       const r = rows[i];
-      setAnnounce(`${r.refNo} — ${r.line1}, ${r.state}${r.owner ? `, owned by ${r.owner}` : ""}. Row ${i + 1} of ${rows.length}.`);
+      setAnnounce(`${r.refNo} — ${r.line1}, ${r.state}${r.owner ? `, owned by ${r.owner}` : ""}${r.direct ? ", applied directly" : ""}. Row ${i + 1} of ${rows.length}.`);
     };
     if (key === "j" || e.key === "ArrowDown") { e.preventDefault(); setFocused((i) => { const n = Math.min(i + 1, rows.length - 1); announceRow(n); return n; }); }
     else if (key === "k" || e.key === "ArrowUp") { e.preventDefault(); setFocused((i) => { const n = Math.max(i - 1, 0); announceRow(n); return n; }); }
@@ -166,7 +166,12 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
                   {row.sla.text}
                 </Td>
                 <Td className="text-xs">{row.owner ?? <span className="text-fg-muted">—</span>}</Td>
-                <Td mono className="text-[10.5px]">{row.state}</Td>
+                <Td mono className="text-[10.5px]">
+                  <span className="inline-flex items-center gap-1.5">
+                    {row.state}
+                    {row.direct && <Pill>DIRECT</Pill>}
+                  </span>
+                </Td>
               </Tr>
             ))}
           </TBody>

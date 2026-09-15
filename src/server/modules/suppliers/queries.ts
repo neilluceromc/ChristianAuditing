@@ -2,6 +2,7 @@ import type { AssetStatus, PurchaseRequestState, VendorContractStatus } from "@p
 import { prisma } from "@/server/db/client";
 import type { ListState } from "@/lib/url-state";
 import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 import { buildSupplierWhere } from "@/lib/supplier-list";
 import { VENDOR_CONTRACT_STATUSES, CONTRACT_STATUS_LABEL } from "@/lib/supplier-schema";
 import { provenanceOf, type Provenance } from "@/lib/provenance";
@@ -18,17 +19,22 @@ export interface SupplierRow {
 export async function listSuppliers(state: ListState) {
   const where = buildSupplierWhere(state);
   const without = (facet: string): ListState => ({ ...state, filters: { ...state.filters, [facet]: [] } });
-  const total = await prisma.vendor.count({ where });
-  const pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
-  const [rows, categoryG, contractG] = await Promise.all([
-    prisma.vendor.findMany({
-      where, orderBy: [{ name: "asc" }, { id: "asc" }], skip: pg.skip, take: pg.take,
-      select: {
-        id: true, name: true, registeredName: true, category: true, contactPerson: true, phone: true, email: true,
-        contractStatus: true, contractEnd: true, archivedAt: true,
-        _count: { select: { requests: true, assets: true } },
-      },
-    }),
+  const { rows, total, page, pageCount } = await pagedSnapshot(
+    ENTITY_PAGE_SIZE,
+    state.page,
+    (tx) => tx.vendor.count({ where }),
+    (tx, pg) =>
+      tx.vendor.findMany({
+        where, orderBy: [{ name: "asc" }, { id: "asc" }], skip: pg.skip, take: pg.take,
+        select: {
+          id: true, name: true, registeredName: true, category: true, contactPerson: true, phone: true, email: true,
+          contractStatus: true, contractEnd: true, archivedAt: true,
+          _count: { select: { requests: true, assets: true } },
+        },
+      }),
+  );
+  // Facet groupBys beside the list (spec §5) stay separate queries, outside the snapshot.
+  const [categoryG, contractG] = await Promise.all([
     prisma.vendor.groupBy({ by: ["category"], where: buildSupplierWhere(without("category")), _count: true }),
     prisma.vendor.groupBy({ by: ["contractStatus"], where: buildSupplierWhere(without("contract")), _count: true }),
   ]);
@@ -41,7 +47,7 @@ export async function listSuppliers(state: ListState) {
     })),
   };
   return {
-    total, page: pg.page, pageCount: pg.pageCount, facets,
+    total, page, pageCount, facets,
     rows: rows.map((v): SupplierRow => ({
       id: v.id, name: v.name, registeredName: v.registeredName, category: v.category, contactPerson: v.contactPerson,
       phone: v.phone, email: v.email, contractStatus: v.contractStatus, contractEnd: v.contractEnd,

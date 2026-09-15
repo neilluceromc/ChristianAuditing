@@ -2,8 +2,8 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
-import { parseTab, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
-import { listApprovals, tabCounts } from "@/server/modules/approvals/queries";
+import { parseTab, parseVia, QUEUE_TABS, type QueueTab, type ClosedVia } from "@/lib/approvals-list";
+import { listApprovals, tabCounts, closedViaCounts } from "@/server/modules/approvals/queries";
 import { isApprover } from "@/lib/approval-access";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
@@ -11,11 +11,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { cn } from "@/lib/cn";
 import { QueueTable } from "@/components/approvals/queue-table";
+import { ClosedViaChips } from "@/components/approvals/closed-via-chips";
 
-const hrefFor = (t: QueueTab, p: number) => {
+const hrefFor = (t: QueueTab, p: number, v: ClosedVia = "all") => {
   const qs = new URLSearchParams();
   if (t !== "open") qs.set("tab", t);
   if (p > 1) qs.set("page", String(p));
+  if (t === "closed" && v !== "all") qs.set("via", v);
   const s = qs.toString();
   return s ? `/approvals?${s}` : "/approvals";
 };
@@ -29,10 +31,12 @@ export default async function ApprovalsPage({
   const canAct = isApprover(user.role);
   const sp = toSearchParams(await searchParams);
   const tab = parseTab(sp.get("tab"));
+  const via = tab === "closed" ? parseVia(sp.get("via")) : "all";
   const requestedPage = parsePage(sp);
-  const [{ rows, total, page, pageCount }, counts] = await Promise.all([
-    listApprovals(tab, user.id, user.role, requestedPage),
+  const [{ rows, total, page, pageCount }, counts, viaCounts] = await Promise.all([
+    listApprovals(tab, via, user.id, user.role, requestedPage),
     tabCounts(user.id, user.role),
+    tab === "closed" ? closedViaCounts(user.id, user.role) : Promise.resolve(null),
   ]);
 
   return (
@@ -59,12 +63,29 @@ export default async function ApprovalsPage({
             </Link>
           ))}
         </nav>
+        {tab === "closed" && viaCounts && (
+          <ClosedViaChips via={via} counts={viaCounts} hrefFor={hrefFor} />
+        )}
         {rows.length > 0 ? (
           <QueueTable rows={rows} canAct={canAct} />
         ) : (
           <EmptyState
-            title={tab === "open" ? "The queue is clear" : `Nothing in ${QUEUE_TABS.find((t) => t.id === tab)?.label}`}
-            description={tab === "open" ? "New lifecycle requests land here the moment they're made." : undefined}
+            title={
+              tab === "open"
+                ? "The queue is clear"
+                : tab === "closed" && via === "direct"
+                  ? "Nothing has been applied directly"
+                  : tab === "closed" && via === "queue"
+                    ? "Nothing has come through the queue yet"
+                    : `Nothing in ${QUEUE_TABS.find((t) => t.id === tab)?.label}`
+            }
+            description={
+              tab === "open"
+                ? "New lifecycle requests land here the moment they're made."
+                : tab === "closed" && via === "direct"
+                  ? "Direct IT changes will appear here as they happen."
+                  : undefined
+            }
           />
         )}
         {rows.length > 0 && (
@@ -72,7 +93,7 @@ export default async function ApprovalsPage({
             <span className="font-mono text-[10px] text-fg-muted">
               page {page} of {pageCount} · {total} in this tab{tab !== "closed" ? " — ordered by SLA, what breaks first" : ""}
             </span>
-            <Pagination page={page} pageCount={pageCount} hrefFor={(p) => hrefFor(tab, p)} />
+            <Pagination page={page} pageCount={pageCount} hrefFor={(p) => hrefFor(tab, p, via)} />
           </div>
         )}
         {canAct && rows.length > 0 && (

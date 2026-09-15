@@ -44,6 +44,42 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 const db = new PrismaClient();
 const moderates = new Map<string, number>();
 
+// Rules that fail regardless of impact, once their root cause is fixed and
+// the tail is verified to be zero — see
+// docs/superpowers/specs/2026-09-14-approvals-oversight-design.md §7.
+const PROMOTED_RULES = new Set<string>([
+  "empty-table-header",
+  "page-has-heading-one",
+  "heading-order",
+  "landmark-unique",
+]);
+
+/**
+ * Shared by every scan site (scanRoute and the admin-branch "/" scan). A
+ * violation fails the test when its impact is serious/critical OR its rule
+ * id is in PROMOTED_RULES; everything else is counted into `moderates` (and,
+ * with AXE_DETAIL=1, printed one line per node as
+ * `${label} · ${rule} · ${impact} · ${target}`) so the tail stays visible
+ * without failing the suite on it.
+ */
+function record(results: Awaited<ReturnType<AxeBuilder["analyze"]>>, label: string) {
+  const bad: string[] = [];
+  for (const v of results.violations) {
+    const failing = v.impact === "serious" || v.impact === "critical" || PROMOTED_RULES.has(v.id);
+    if (failing) {
+      bad.push(`${v.id} (${v.impact}) x${v.nodes.length}`);
+      continue;
+    }
+    moderates.set(v.id, (moderates.get(v.id) ?? 0) + v.nodes.length);
+    if (process.env.AXE_DETAIL === "1") {
+      for (const node of v.nodes) {
+        console.log(`${label} · ${v.id} · ${v.impact} · ${node.target.join(" ")}`);
+      }
+    }
+  }
+  expect(bad, `axe on ${label}`).toEqual([]);
+}
+
 test.beforeAll(() => {
   execSync("npm run db:seed", { timeout: 120_000 });
 });
@@ -82,12 +118,7 @@ async function scanRoute(page: Page, path: string) {
   await page.waitForTimeout(700);
 
   const results = await new AxeBuilder({ page }).analyze();
-  for (const v of results.violations) {
-    if (v.impact === "serious" || v.impact === "critical") continue;
-    moderates.set(v.id, (moderates.get(v.id) ?? 0) + v.nodes.length);
-  }
-  const bad = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
-  expect(bad.map((v) => `${v.id} (${v.impact}) x${v.nodes.length}`), `axe on ${path}`).toEqual([]);
+  record(results, path);
 }
 
 // ── Admin-only: workspace "admin" in PATH_RULES, or requireRole("admin") ──
@@ -155,12 +186,7 @@ test.describe("axe sweep", () => {
     await page.mouse.move(0, 0);
     await page.waitForTimeout(700);
     const results = await new AxeBuilder({ page }).analyze();
-    for (const v of results.violations) {
-      if (v.impact === "serious" || v.impact === "critical") continue;
-      moderates.set(v.id, (moderates.get(v.id) ?? 0) + v.nodes.length);
-    }
-    const bad = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
-    expect(bad.map((v) => `${v.id} (${v.impact}) x${v.nodes.length}`), "axe on / (admin branch)").toEqual([]);
+    record(results, "/ (admin branch)");
   });
 
   test("it_staff-reachable routes, static and dynamic", async ({ page }) => {

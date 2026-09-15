@@ -32,7 +32,7 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
           <div className="flex items-center gap-3">
             <span aria-hidden className="grid size-6 place-items-center bg-[#101828] font-mono text-[11px] font-bold text-white">BR</span>
             <div>
-              <p className="text-[15px] font-semibold">Backroom IT — Offboarding farewell report</p>
+              <h1 className="text-[15px] font-semibold">Backroom IT — Offboarding farewell report</h1>
               <p className="font-mono text-[10px] text-[#667085]">
                 generated {fmtDate(new Date())} · from live records · {employee.employment}
               </p>

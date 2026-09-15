@@ -6,7 +6,8 @@ import {
   DELIVERY_TABS, deliveryStage, partitionEvents, replayBlockedReason, type DeliveryTab,
   type WebhookEvent,
 } from "@/lib/webhooks";
-import { pageOf, ENTITY_PAGE_SIZE, LOG_PAGE_SIZE } from "@/lib/paging";
+import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 import type { Prisma, Role } from "@prisma/client";
 
 export interface UserRow {
@@ -33,16 +34,20 @@ export interface UserRow {
 export async function listUsers(requestedPage: number): Promise<{
   rows: UserRow[]; total: number; page: number; pageCount: number;
 }> {
-  const total = await prisma.user.count();
-  const pg = pageOf(total, requestedPage, ENTITY_PAGE_SIZE);
-  const users = await prisma.user.findMany({
-    orderBy: [{ isPermanentAdmin: "desc" }, { name: "asc" }, { id: "asc" }],
-    select: {
-      id: true, name: true, email: true, role: true,
-      isPermanentAdmin: true, disabled: true, passwordHash: true,
-    },
-    skip: pg.skip, take: pg.take,
-  });
+  const { rows: users, total, page, pageCount } = await pagedSnapshot(
+    ENTITY_PAGE_SIZE,
+    requestedPage,
+    (tx) => tx.user.count(),
+    (tx, pg) =>
+      tx.user.findMany({
+        orderBy: [{ isPermanentAdmin: "desc" }, { name: "asc" }, { id: "asc" }],
+        select: {
+          id: true, name: true, email: true, role: true,
+          isPermanentAdmin: true, disabled: true, passwordHash: true,
+        },
+        skip: pg.skip, take: pg.take,
+      }),
+  );
   const rows = users.map((r): UserRow => {
     const target: TargetUser = {
       id: r.id, role: r.role, isPermanentAdmin: r.isPermanentAdmin, disabled: r.disabled,
@@ -59,7 +64,7 @@ export async function listUsers(requestedPage: number): Promise<{
       target,
     };
   });
-  return { rows, total, page: pg.page, pageCount: pg.pageCount };
+  return { rows, total, page, pageCount };
 }
 
 export interface FlagRow {
@@ -277,26 +282,32 @@ export async function listDeliveries(
     ? { status: { in: [...statuses] } }
     : {};
 
-  const total = await prisma.webhookDelivery.count({ where });
-  const pg = pageOf(total, requestedPage, LOG_PAGE_SIZE);
+  const { rows, total, page, pageCount } = await pagedSnapshot(
+    LOG_PAGE_SIZE,
+    requestedPage,
+    (tx) => tx.webhookDelivery.count({ where }),
+    (tx, pg) =>
+      tx.webhookDelivery.findMany({
+        where,
+        // An explicit `select`, not `include: { endpoint: true }`: that pulls
+        // every endpoint scalar including the encrypted `secret`, for the same
+        // reason `listEndpoints` above spells its columns out. The ciphertext
+        // has no business crossing this boundary even to be discarded here.
+        select: {
+          id: true, event: true, status: true, attempts: true, lastError: true, createdAt: true,
+          endpoint: { select: { url: true, active: true } },
+        },
+        // createdAt alone is not a stable order — rows written in one
+        // transaction share a millisecond (HANDOVER §7), and this seed writes
+        // five in one `createMany`. The id tiebreaker is mandatory.
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: pg.skip, take: pg.take,
+      }),
+  );
 
-  const [rows, deadReplayable, liveJobs] = await Promise.all([
-    prisma.webhookDelivery.findMany({
-      where,
-      // An explicit `select`, not `include: { endpoint: true }`: that pulls
-      // every endpoint scalar including the encrypted `secret`, for the same
-      // reason `listEndpoints` above spells its columns out. The ciphertext
-      // has no business crossing this boundary even to be discarded here.
-      select: {
-        id: true, event: true, status: true, attempts: true, lastError: true, createdAt: true,
-        endpoint: { select: { url: true, active: true } },
-      },
-      // createdAt alone is not a stable order — rows written in one
-      // transaction share a millisecond (HANDOVER §7), and this seed writes
-      // five in one `createMany`. The id tiebreaker is mandatory.
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      skip: pg.skip, take: pg.take,
-    }),
+  // Facet-shaped queries beside the list (spec §5) — a batch-control count and
+  // the live-job set used to derive `replayable` — stay outside the snapshot.
+  const [deadReplayable, liveJobs] = await Promise.all([
     // Not filtered by `tab`: this is the batch control's offer, and it means
     // the same thing on every tab. A DEAD delivery cannot also hold a live
     // job — the worker dead-letters both in the same failure (`retryStatus`
@@ -321,8 +332,8 @@ export async function listDeliveries(
   return {
     total,
     deadReplayable,
-    page: pg.page,
-    pageCount: pg.pageCount,
+    page,
+    pageCount,
     rows: rows.map((r) => ({
       id: r.id,
       endpointUrl: r.endpoint.url,

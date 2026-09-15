@@ -13,6 +13,7 @@ import {
   CANONICAL_NOTE, PURCHASE_ACTION_ROLES, PURCHASE_NOTE_KIND, REASON_REQUIRED,
   purchaseTransition, unitEditorMode, type PurchaseAction,
 } from "@/lib/purchase-flow";
+import { cleanReason, reasonOptional } from "@/lib/reason";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -26,7 +27,7 @@ interface Acted {
 
 const transitionSchema = z.object({
   id: z.string().min(1),
-  reason: z.string().trim().max(500).optional(),
+  reason: reasonOptional(),
 });
 
 function revalidate(id: string) {
@@ -67,7 +68,7 @@ async function runTransition(action: PurchaseAction, input: unknown): Promise<Ac
   const parsed = transitionSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { id } = parsed.data;
-  const reason = (parsed.data.reason ?? "").trim();
+  const reason = cleanReason(parsed.data.reason);
 
   const user = await actionRole(...(PURCHASE_ACTION_ROLES[action] as Role[]));
   if (!user) return forbidden();

@@ -9,9 +9,19 @@ export interface TabItem {
   active: boolean;
 }
 
-export function Tabs({ items, className }: { items: TabItem[]; className?: string }) {
+export function Tabs({
+  items,
+  label,
+  className,
+}: {
+  items: TabItem[];
+  /** Required: names this `<nav>` landmark — axe's landmark-unique fails an
+   *  unlabelled `<nav>` sharing a page with another one of the same name. */
+  label: string;
+  className?: string;
+}) {
   return (
-    <nav className={cn("flex gap-1 border-b border-border", className)}>
+    <nav aria-label={label} className={cn("flex gap-1 border-b border-border", className)}>
       {items.map((item, i) => (
         <Link
           key={i}

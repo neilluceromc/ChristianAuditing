@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { fmtDate, fmtDateTime, fmtMoney, fmtRelativeDays } from "./format";
+import { fmtDate, fmtDateTime, fmtMoney, fmtRelativeDays, localDateISO } from "./format";
 
 describe("format", () => {
+  it("localDateISO is the Asia/Manila calendar date, not the UTC one", () => {
+    // 17:00Z on the 14th is 01:00 Manila on the 15th — the window in which
+    // toISOString().slice(0, 10) still says the 14th.
+    expect(localDateISO(new Date("2026-09-14T17:00:00Z"))).toBe("2026-09-15");
+    expect(localDateISO(new Date("2026-09-14T15:59:00Z"))).toBe("2026-09-14");
+    expect(localDateISO(new Date("2026-01-01T00:00:00Z"))).toBe("2026-01-01");
+  });
   it("fmtDate renders dd MMM yyyy in Asia/Manila and — for empty", () => {
     expect(fmtDate(new Date("2026-08-16T00:00:00Z"))).toBe("16 Aug 2026");
     expect(fmtDate(null)).toBe("—");

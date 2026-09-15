@@ -4,8 +4,11 @@ import { prisma } from "@/server/db/client";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { RETURN_TARGETS, isAssignable } from "@/lib/asset-class";
 import { approvalClassWhere } from "@/lib/approval-access";
-import { slaLabel, tabWhere, QUEUE_TABS, type QueueTab } from "@/lib/approvals-list";
-import { pageOf, LOG_PAGE_SIZE } from "@/lib/paging";
+import {
+  slaLabel, tabWhere, viaWhere, CLOSED_VIA, QUEUE_TABS, type QueueTab, type ClosedVia,
+} from "@/lib/approvals-list";
+import { LOG_PAGE_SIZE } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 
 /** Serializable queue row — the island gets strings, no Dates/Decimals. */
 export interface ApprovalRow {
@@ -18,22 +21,31 @@ export interface ApprovalRow {
   sla: { text: string; overdue: boolean };
   owner: string | null;
   mine: boolean;
+  direct: boolean;
 }
 
-export async function listApprovals(tab: QueueTab, userId: string, role: Role, requestedPage: number): Promise<{
+export async function listApprovals(
+  tab: QueueTab, via: ClosedVia, userId: string, role: Role, requestedPage: number,
+): Promise<{
   rows: ApprovalRow[]; total: number; page: number; pageCount: number;
 }> {
-  const where = { AND: [tabWhere(tab, userId), approvalClassWhere(role)] };
-  const total = await prisma.approval.count({ where });
-  const pg = pageOf(total, requestedPage, LOG_PAGE_SIZE);
-  const approvals = await prisma.approval.findMany({
-    where,
-    include: { asset: true, employee: true, claimedBy: true },
-    // Open work orders by what breaks first; closed history reads newest-first.
-    // The id tiebreaker keeps two rows with one slaAt in one order across pages.
-    orderBy: tab === "closed" ? [{ updatedAt: "desc" }, { id: "desc" }] : [{ slaAt: "asc" }, { id: "asc" }],
-    skip: pg.skip, take: pg.take,
-  });
+  const where = {
+    AND: [tabWhere(tab, userId), tab === "closed" ? viaWhere(via) : {}, approvalClassWhere(role)],
+  };
+  const { rows: approvals, total, page, pageCount } = await pagedSnapshot(
+    LOG_PAGE_SIZE,
+    requestedPage,
+    (tx) => tx.approval.count({ where }),
+    (tx, pg) =>
+      tx.approval.findMany({
+        where,
+        include: { asset: true, employee: true, claimedBy: true },
+        // Open work orders by what breaks first; closed history reads newest-first.
+        // The id tiebreaker keeps two rows with one slaAt in one order across pages.
+        orderBy: tab === "closed" ? [{ updatedAt: "desc" }, { id: "desc" }] : [{ slaAt: "asc" }, { id: "asc" }],
+        skip: pg.skip, take: pg.take,
+      }),
+  );
   const rows = approvals.map((a) => {
     const s = summarizeApproval(a.type, a.payload, {
       assetTag: a.asset?.tag,
@@ -50,9 +62,10 @@ export async function listApprovals(tab: QueueTab, userId: string, role: Role, r
       sla: slaLabel(a.slaAt),
       owner: a.claimedBy?.name ?? null,
       mine: a.claimedById === userId,
+      direct: a.appliedDirectly,
     };
   });
-  return { rows, total, page: pg.page, pageCount: pg.pageCount };
+  return { rows, total, page, pageCount };
 }
 
 export async function tabCounts(userId: string, role: Role): Promise<Record<QueueTab, number>> {
@@ -62,6 +75,18 @@ export async function tabCounts(userId: string, role: Role): Promise<Record<Queu
     ),
   );
   return Object.fromEntries(QUEUE_TABS.map((t, i) => [t.id, counts[i]])) as Record<QueueTab, number>;
+}
+
+/** Closed tab's `?via=` chip counts (Phase 21) — same closed rule and class scope as `listApprovals`. */
+export async function closedViaCounts(userId: string, role: Role): Promise<Record<ClosedVia, number>> {
+  const counts = await Promise.all(
+    CLOSED_VIA.map((v) =>
+      prisma.approval.count({
+        where: { AND: [tabWhere("closed", userId), viaWhere(v), approvalClassWhere(role)] },
+      }),
+    ),
+  );
+  return Object.fromEntries(CLOSED_VIA.map((v, i) => [v, counts[i]])) as Record<ClosedVia, number>;
 }
 
 export const getApproval = cache((id: string) =>

@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, localDateISO } from "@/lib/format";
 
 /**
  * Phase 20, Task 7 — the Transfer feature (spec §3), 5 cases.
@@ -201,7 +201,10 @@ test.describe.serial("transfers", () => {
     await waitForHydration(dialog);
     await dialog.getByLabel(/^New department\b/).selectOption({ label: "HR" });
 
-    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    // Tomorrow on the app's own Asia/Manila calendar (Phase 21 D-15): the UTC
+    // date is still "today" in Manila before 08:00, and the schema would
+    // rightly accept it.
+    const tomorrow = localDateISO(new Date(Date.now() + 86_400_000));
     await dialog.getByLabel(/^Effective date\b/).fill(tomorrow);
     await dialog.getByRole("button", { name: "Record transfer" }).click();
 

@@ -97,8 +97,11 @@ The user chose to work on the IT workspace next. Candidates already on record (P
 - `checkIdentifiers` leaks tag/serial existence across classes (accepted for Phase 16; a class-scoped check
   or a neutral message would close it).
 - The Replace dialog's headerless "other spares" list.
-- Direct IT changes leave no PENDING row, so the record's pending banner and `Open requests` stat only
-  ever show Purchasing or legacy approvals.
+- **Answered in Phase 21 —** Direct IT changes leave no PENDING row, so the record's pending banner and
+  `Open requests` stat only ever show Purchasing or legacy approvals for IT devices. Not built as a
+  pending row: `Approval.appliedDirectly` (migration 22) makes every direct change queryable, the Closed
+  tab's route chips and `via` filter separate it from queue approvals, its detail page carries a "How it
+  was applied" card, and an admin Home section totals the last 7 days by kind.
 - The loaner rule reads a standard slot as "missing" while a person's only device of that type is on loan.
 - The repair-stage saved view still groups DEFECTIVE assets in memory rather than in SQL (Phase 17 left it).
 - Webhook delivery rows have no retention policy.

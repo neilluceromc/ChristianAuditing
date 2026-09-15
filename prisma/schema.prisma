@@ -583,12 +583,15 @@ model Approval {
   employee         Employee?     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @default(now()) @updatedAt
+  /// Phase 21: created already EXECUTED by a direct IT change (Phase 15) — a decision recorded, never a request queued.
+  appliedDirectly  Boolean       @default(false)
 
   @@index([state, slaAt])
   @@index([claimedById])
   @@index([employeeId])
   @@index([assetId])
   @@index([state, updatedAt])
+  @@index([appliedDirectly, resolvedAt])
 }
 
 // ── Audit (append-only by DB trigger, Task 4) ─────────────────────────

@@ -4,6 +4,7 @@ import { buildEmployeeOrderBy, buildEmployeeWhere } from "@/lib/employees-list";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate } from "@/lib/format";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 import { EXPORT_CAP, type HoldingsExportRow } from "@/lib/export-columns";
 import { sameNameKey } from "@/lib/same-name";
 import type { ListState } from "@/lib/url-state";
@@ -68,9 +69,12 @@ async function pageEmployees(state: ListState, gapsOnly: boolean) {
   const where = buildEmployeeWhere(state);
   const orderBy = buildEmployeeOrderBy(state.sort);
   if (!gapsOnly) {
-    const total = await prisma.employee.count({ where });
-    const pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
-    const employees = await prisma.employee.findMany({ where, orderBy, skip: pg.skip, take: pg.take, include: rowInclude });
+    const { rows: employees, ...pg } = await pagedSnapshot(
+      ENTITY_PAGE_SIZE,
+      state.page,
+      (tx) => tx.employee.count({ where }),
+      (tx, pg) => tx.employee.findMany({ where, orderBy, skip: pg.skip, take: pg.take, include: rowInclude }),
+    );
     const missing = await resolveMissing(employees);
     return { pg, employees, missing };
   }

@@ -42,6 +42,10 @@ export function Th({
 }) {
   const content = (
     <span className="inline-flex items-center gap-1">
+      {/* A column whose header renders no visible text still owes screen
+          readers a name — aria-label alone puts the name on the <th>, but
+          axe's empty-table-header rule wants discernible TEXT content too. */}
+      {!children && ariaLabel && <span className="sr-only">{ariaLabel}</span>}
       {children}
       {sort && (
         <span aria-hidden className="text-accent">{sort === "asc" ? "↑" : "↓"}</span>

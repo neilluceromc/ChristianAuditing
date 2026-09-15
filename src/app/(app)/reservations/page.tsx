@@ -44,6 +44,7 @@ export default async function ReservationsPage({
         </Banner>
 
         <Tabs
+          label="Reservation states"
           items={RESERVATION_TABS.map((t) => ({
             label: (
               <span className="inline-flex items-center gap-1.5">

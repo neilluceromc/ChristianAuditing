@@ -4,10 +4,11 @@ import { resolveWorkspace, WORKSPACE_NAV, type WorkspaceId } from "@/lib/workspa
 import { filterSectionsForRole } from "@/components/shell/sidebar";
 import { safeSection } from "@/lib/section";
 import {
-  ageHistogram, claimedByYou, financeHome, fleet, purchasingHome, warrantyRunway, worklist,
+  ageHistogram, claimedByYou, directChanges, financeHome, fleet, purchasingHome, warrantyRunway, worklist,
 } from "@/server/modules/home/queries";
 import { adminHome } from "@/server/modules/admin/queries";
 import { AdminHomeBody } from "@/components/home/admin-home";
+import { DirectChangesBody } from "@/components/home/direct-changes";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
 import { Stat } from "@/components/ui/stat";
@@ -24,24 +25,24 @@ import type { TodoRow } from "@/server/modules/home/queries";
 
 /**
  * Focus's only job is hiding SECONDARY sections (fleet/age/warranty/Jump-to
- * on IT, Jump-to on purchasing and finance — see the `!focus` blocks below).
- * The Admin Home has no secondary section: its three lists (users, flags,
- * webhooks) are the whole page. Showing the toggle there would render a
- * control that flips a cookie and re-renders the page identically. That is a
- * NEAR relative of HANDOVER §6a rule 10 rather than an instance of it — rule
- * 10 is about an action guaranteed to FAIL (a Disable button whose rule
- * always refuses); this one succeeds and simply does nothing visible. Same
- * remedy, different failure: don't render a control whose effect the page
- * cannot deliver. A `Record` rather than an inline
- * `ws !== "admin"` so a future secondary section on Admin's Home is a
- * one-word change here, and adding a fifth workspace forces a decision at
- * this table instead of being silently `true` by omission.
+ * on IT, Jump-to on purchasing and finance, "Applied directly · last 7 days"
+ * on admin — see the `!focus` blocks below). Admin's Home used to have no
+ * secondary section: its three lists (users, flags, webhooks) were the whole
+ * page, so showing the toggle there would have rendered a control that flips
+ * a cookie and re-renders the page identically. That was a NEAR relative of
+ * HANDOVER §6a rule 10 rather than an instance of it — rule 10 is about an
+ * action guaranteed to FAIL (a Disable button whose rule always refuses);
+ * this one would have succeeded and simply done nothing visible. Phase 21
+ * gave Admin's Home a secondary section, so `admin` below flips to `true` —
+ * the one-word change this comment used to reserve. A `Record` rather than
+ * an inline `ws !== "admin"` so adding a fifth workspace forces a decision
+ * at this table instead of being silently `true` by omission.
  */
 const SHOWS_FOCUS_TOGGLE: Record<WorkspaceId, boolean> = {
   it: true,
   purchasing: true,
   finance: true,
-  admin: false,
+  admin: true,
 };
 
 function TodoList({ rows, empty }: { rows: TodoRow[]; empty: string }) {
@@ -80,7 +81,10 @@ export default async function Home() {
 
   // ── Admin: who can get in, what is switched on, are integrations healthy ─
   if (ws === "admin") {
-    const admin = await safeSection("Admin overview", () => adminHome());
+    const [admin, direct] = await Promise.all([
+      safeSection("Admin overview", () => adminHome()),
+      user.role === "admin" ? safeSection("Applied directly", () => directChanges()) : Promise.resolve(null),
+    ]);
     return (
       <>
         {header}
@@ -95,6 +99,12 @@ export default async function Home() {
           <SectionCard title="System" result={admin}>
             {(data) => <AdminHomeBody data={data} />}
           </SectionCard>
+
+          {direct && !focus && (
+            <SectionCard title="Applied directly · last 7 days" result={direct}>
+              {(d) => <DirectChangesBody data={d} />}
+            </SectionCard>
+          )}
         </div>
       </>
     );
@@ -170,14 +180,15 @@ export default async function Home() {
   }
 
   // ── IT (and admin, and viewer read-only): no KPI row, work first ───────
-  const [shift, claims, fleetData, age, warranty] = await Promise.all([
+  const [shift, claims, fleetData, age, warranty, direct] = await Promise.all([
     isViewer
       ? Promise.resolve({ ok: true as const, data: [] })
-      : safeSection("Worklist", () => worklist(user.id, user.role, { limit: 2 })),
+      : safeSection("Worklist", () => worklist(user.id, user.role, { limit: 2, excludeOwnClaims: true })),
     safeSection("Claimed by you", () => claimedByYou(user.id, user.role)),
     safeSection("Fleet", () => fleet()),
     safeSection("Age", () => ageHistogram()),
     safeSection("Warranty runway", () => warrantyRunway()),
+    user.role === "admin" ? safeSection("Applied directly", () => directChanges()) : Promise.resolve(null),
   ]);
 
   return (
@@ -217,6 +228,12 @@ export default async function Home() {
 
         {!focus && (
           <>
+            {direct && (
+              <SectionCard title="Applied directly · last 7 days" result={direct}>
+                {(d) => <DirectChangesBody data={d} />}
+              </SectionCard>
+            )}
+
             <SectionCard title="Fleet" result={fleetData}>
               {(d) => <FleetBar fleet={d} />}
             </SectionCard>

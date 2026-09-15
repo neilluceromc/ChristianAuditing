@@ -1,6 +1,6 @@
-import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
-import { pageOf, ENTITY_PAGE_SIZE } from "@/lib/paging";
+import { ENTITY_PAGE_SIZE } from "@/lib/paging";
+import { pagedSnapshot } from "@/server/paged";
 
 /**
  * Tabs write `?state=`. EXPIRED (the clock ran out) and RELEASED (a person let
@@ -44,23 +44,34 @@ export async function listReservations(tab: ReservationTab, requestedPage: numbe
   pageCount: number;
 }> {
   const states = RESERVATION_TABS.find((t) => t.id === tab)!.states;
-  const grouped = await prisma.reservation.groupBy({ by: ["state"], _count: true });
-  const countOf = (s: string) => grouped.find((g) => g.state === s)?._count ?? 0;
-  const counts: Record<ReservationTab, number> = {
-    ACTIVE: countOf("ACTIVE"),
-    FULFILLED: countOf("FULFILLED"),
-    CLOSED: countOf("RELEASED") + countOf("EXPIRED"),
-  };
-  const total = counts[tab];
-  const pg = pageOf(total, requestedPage, ENTITY_PAGE_SIZE);
-  const reservations = await prisma.reservation.findMany({
-    where: { state: { in: [...states] } },
-    include: { asset: true, employee: true },
-    // rows seeded in one transaction share a createdAt millisecond — the id
-    // tiebreaker is what stops two reads returning a different order
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    skip: pg.skip, take: pg.take,
-  });
+  // The tab groupBy runs as pagedSnapshot's `count` function — it returns
+  // `counts[tab]`, and `counts` itself is captured via this closure variable
+  // so the caller can still return it alongside the page (P-3/spec §5: the
+  // groupBy and the page read one RepeatableRead snapshot together).
+  let counts!: Record<ReservationTab, number>;
+  const { rows: reservations, total, page, pageCount } = await pagedSnapshot(
+    ENTITY_PAGE_SIZE,
+    requestedPage,
+    async (tx) => {
+      const grouped = await tx.reservation.groupBy({ by: ["state"], _count: true });
+      const countOf = (s: string) => grouped.find((g) => g.state === s)?._count ?? 0;
+      counts = {
+        ACTIVE: countOf("ACTIVE"),
+        FULFILLED: countOf("FULFILLED"),
+        CLOSED: countOf("RELEASED") + countOf("EXPIRED"),
+      };
+      return counts[tab];
+    },
+    (tx, pg) =>
+      tx.reservation.findMany({
+        where: { state: { in: [...states] } },
+        include: { asset: true, employee: true },
+        // rows seeded in one transaction share a createdAt millisecond — the id
+        // tiebreaker is what stops two reads returning a different order
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: pg.skip, take: pg.take,
+      }),
+  );
 
   return {
     rows: reservations.map((r): ReservationRow => ({
@@ -86,7 +97,7 @@ export async function listReservations(tab: ReservationTab, requestedPage: numbe
     })),
     counts,
     total,
-    page: pg.page,
-    pageCount: pg.pageCount,
+    page,
+    pageCount,
   };
 }

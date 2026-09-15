@@ -14,6 +14,7 @@ import {
 import { diffOf } from "@/lib/audit-diff";
 import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass, isAssignable, isDirectLifecycle } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
+import { reasonRequired, reasonOptional } from "@/lib/reason";
 import { findSameName } from "@/server/modules/employees/queries";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
@@ -22,7 +23,7 @@ const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign 
 const assignSchema = z.object({
   employeeId: z.string().min(1),
   assetId: z.string().min(1),
-  reason: z.string().trim().max(500).optional(),
+  reason: reasonOptional(),
 });
 
 /** `+` on a slot: lifecycle.assign approval. The asset stays SPARE until execution. */
@@ -97,7 +98,7 @@ export async function requestAssign(input: unknown): Promise<ActionResult<{ refN
 const returnSchema = z.object({
   employeeId: z.string().min(1),
   assetId: z.string().min(1),
-  reason: z.string().trim().min(3, "Give a reason (at least 3 characters)").max(500),
+  reason: reasonRequired(),
 });
 
 /** `−` on a filled tile: lifecycle.return approval. */

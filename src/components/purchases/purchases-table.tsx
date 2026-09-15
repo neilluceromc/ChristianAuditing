@@ -13,7 +13,7 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
     <Table>
       <THead>
         <Tr>
-          <Th width={26} />
+          <Th width={26} aria-label="Status colour" />
           <Th width={104}>Ref</Th>
           <Th>Request</Th>
           <Th width={78} align="right">Items</Th>

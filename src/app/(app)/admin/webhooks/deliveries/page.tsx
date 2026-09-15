@@ -32,6 +32,7 @@ export default async function DeliveriesPage({
             come off DELIVERY_TABS rather than a map beside this markup, so
             there is only one list to keep true. */}
         <Tabs
+          label="Delivery states"
           items={DELIVERY_TABS.map((t) => ({
             label: t.label,
             href:

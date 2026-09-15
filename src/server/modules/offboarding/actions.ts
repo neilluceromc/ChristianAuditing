@@ -10,6 +10,7 @@ import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
 import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, reasonRequired } from "@/lib/offboarding";
 import { CLASS_PHRASE, isDirectLifecycle } from "@/lib/asset-class";
+import { cleanReason, reasonOptional } from "@/lib/reason";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { candidatesFor } from "@/server/modules/offboarding/queries";
 import { emitWebhook } from "@/server/webhooks/emit";
@@ -69,7 +70,7 @@ const decideSchema = z.object({
   employeeId: z.string().min(1),
   assetId: z.string().min(1),
   outcome: z.enum(OUTCOMES),
-  reason: z.string().trim().max(500).optional(),
+  reason: reasonOptional(),
 });
 
 /**
@@ -87,7 +88,7 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
   const parsed = decideSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
-  const reason = (d.reason ?? "").trim();
+  const reason = cleanReason(d.reason);
   const now = new Date();
 
   let refNo = "";

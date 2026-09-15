@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { localDateISO } from "./format";
 import { TRANSFER_RECENT_DAYS, isRecentTransfer, transferSchema } from "./transfer-schema";
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// The schema's "today" is the Asia/Manila calendar date (Phase 20 M-5 fix), so
+// the fixture must be too — the UTC date is yesterday before 08:00 Manila.
+const todayStr = () => localDateISO(new Date());
 
 const base = {
   employeeId: "e1",
@@ -30,7 +33,7 @@ describe("transferSchema", () => {
   });
 
   it("refuses a future effective date by name", () => {
-    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const tomorrow = localDateISO(new Date(Date.now() + 86_400_000));
     const result = transferSchema.safeParse({ ...base, effectiveAt: tomorrow });
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.issues[0].message).toBe("That date is in the future");
@@ -63,6 +66,14 @@ describe("isRecentTransfer", () => {
 
   it("is inclusive at exactly 90 days — the seeded EMP-0099 fixture", () => {
     expect(isRecentTransfer(day(-90))).toBe(true);
+  });
+
+  it("treats a transfer recorded today before 08:00 Manila (UTC midnight up to 8 h ahead of now) as recent", () => {
+    expect(isRecentTransfer(day(1 / 3))).toBe(true);
+  });
+
+  it("is false for a date two days ahead — beyond the one-day grace", () => {
+    expect(isRecentTransfer(day(2))).toBe(false);
   });
 
   it("names the window as 90 days", () => {
