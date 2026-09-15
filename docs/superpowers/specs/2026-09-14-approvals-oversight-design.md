@@ -1,10 +1,11 @@
 # Phase 21 — Approvals oversight: direct IT changes made visible, plus five correctness and quality items
 
-**Status:** implemented on branch `phase-21-approvals-oversight` (8 tasks, `D-1`…`D-10`), code-complete
-2026-09-14 at final tree `562587f`, unmerged and unpushed; battery `tsc` clean · `lint` clean ·
-**22 migrations** · **1312 unit / 77 files** · **305 e2e / 29 files** by `--list`, across six foreground
-chunks with explicit file paths — **A 54 (3.4m) · B 67 (3.9m) · C 63 (4.0m) · D 38 (2.6m) · E 53 (7.4m) ·
-F 30 (3.3m) = 305**, zero failed, zero did-not-run. See the plan's `D`-block for what each amendment
+**Status:** implemented on branch `phase-21-approvals-oversight` (8 tasks, `D-1`…`D-16` — the final-review
+fix wave added `D-11`…`D-13`, the final battery `D-15` and `D-16`), code-complete 2026-09-15 at final tree
+`2ae8738`, final-review fix wave included, unmerged and unpushed; battery `tsc` clean · `lint` clean ·
+**22 migrations** · **1317 unit / 77 files** · **305 e2e / 29 files** by `--list`, across six foreground
+chunks with explicit file paths — **A 54 (3.4m) · B 67 (3.9m) · C 63 (4.1m) · D 38 (2.6m) · E 53 (7.4m) ·
+F 30 (3.2m) = 305**, zero failed, zero did-not-run. See the plan's `D`-block for what each amendment
 changed and `docs/HANDOVER.md` (n) for what shipped. The user asked to run the whole method through to the
 finishing menu without further check-ins; merging, pushing and redeploying stay the user's decisions.
 
