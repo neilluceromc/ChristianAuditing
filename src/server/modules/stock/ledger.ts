@@ -120,9 +120,12 @@ export async function recordOutflow(
   const result = allocate(lots, quantity, today, policy);
   if (!result.ok) {
     const available = quantity - result.short;
+    // The "write off the expired lot first" advice is only true when this
+    // allocation SKIPPED expired lots (an issue): under "first" the expired
+    // units were already taken, so the plain D1 sentence applies (final review).
     const message = onlyLotId
       ? `Only ${available} left on this lot`
-      : result.expiredRemaining > 0
+      : policy === "skip" && result.expiredRemaining > 0
         ? `Only ${unexpiredLabel(available, item.unit)} of ${item.code} — write off the expired lot first`
         : `Only ${unitsLabel(available, item.unit)} left of ${item.code} — issue at most that many`;
     throw new ActionFailure(conflict(message));

@@ -287,8 +287,15 @@ export interface ExpiryLotRow {
 
 /** Lots with an expiry set and units still remaining, across every item (optionally narrowed by category) — one lot findMany plus one allocations groupBy, never a query per lot. */
 async function computeExpiryLots(state: ListState): Promise<ExpiryLotRow[]> {
-  const where: Prisma.StockLotWhereInput = { expiresAt: { not: null } };
-  if (state.filters.category?.length) where.item = { categoryId: { in: state.filters.category } };
+  // Archived items are out, exactly as the Home tile and the on-hand report
+  // treat them — otherwise the tile could read 0 while this report still
+  // listed the archived item's lot with a live Write off (final review).
+  const where: Prisma.StockLotWhereInput = {
+    expiresAt: { not: null },
+    item: state.filters.category?.length
+      ? { archivedAt: null, categoryId: { in: state.filters.category } }
+      : { archivedAt: null },
+  };
 
   const lots = await prisma.stockLot.findMany({
     where,

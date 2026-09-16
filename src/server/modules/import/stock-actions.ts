@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { RATE_LIMITS } from "@/lib/rate-limit";
@@ -14,6 +13,7 @@ import { formatStockCode, parseStockCode } from "@/lib/stock-code";
 import { groupByCause, type CauseGroup } from "@/lib/import-vocabulary";
 import { resolveStockRefs } from "./resolve";
 import { recordInflowLot } from "../stock/ledger";
+import { revalidateStockReads } from "../stock/revalidate";
 import { conflict, forbidden, ok, rateLimited, type ActionResult } from "@/server/action-result";
 
 export interface StockPlanResult {
@@ -217,13 +217,10 @@ export async function applyStockImport(
     }
   }
 
-  revalidatePath("/stock");
-  // A dynamic-segment form revalidates every matching `/stock/items/[id]`
-  // page in one call — the same shape the supplier importer's own
-  // `applySupplierImport` uses, and the right one here since a single apply
-  // can touch many different item ids.
-  revalidatePath("/stock/items/[id]", "page");
-  revalidatePath("/audit");
+  // Every stock read — list, all item pages (the dynamic-segment form, since
+  // one apply touches many items), audit and the three reports (an import's
+  // opening lots change on-hand value; Phase 22 final review).
+  revalidateStockReads();
   return ok({
     created,
     updated,

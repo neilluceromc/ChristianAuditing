@@ -15,6 +15,7 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { ActionFailure, recordInflowLot, recordOutflow } from "./ledger";
+import { revalidateStockReads } from "./revalidate";
 
 const idSchema = z.object({ id: z.string().min(1) });
 
@@ -255,11 +256,9 @@ export async function postStocktake(input: unknown): Promise<ActionResult<{ adju
       return { adjusted: plan.adjustments.length, skipped: plan.skipped.length };
     });
     revalidateStocktake(id);
-    revalidatePath("/stock");
-    // Phase 22 (spec §7): posted adjustments move lots, so the reports change too.
-    revalidatePath("/stock/reports/on-hand");
-    revalidatePath("/stock/reports/consumption");
-    revalidatePath("/stock/reports/expiry");
+    // Phase 22 (spec §7): posted adjustments move lots on many items, so every
+    // stock read (list, item pages, audit, the three reports) refreshes.
+    revalidateStockReads();
     return ok(counts);
   } catch (e) {
     if (e instanceof ActionFailure) return e.result;

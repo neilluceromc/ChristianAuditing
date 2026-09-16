@@ -192,6 +192,9 @@ describe("expiryLabel", () => {
   });
   it("expires today", () => {
     expect(expiryLabel(d("2026-09-16"), TODAY)).toBe("expires today");
+    // one day either side reads singular (final review, Minor 4)
+    expect(expiryLabel(d("2026-09-17"), TODAY)).toBe("expires in 1 day");
+    expect(expiryLabel(d("2026-09-15"), TODAY)).toBe("expired 1 day ago");
   });
   it("expires in N days", () => {
     expect(expiryLabel(d("2026-09-19"), TODAY)).toBe("expires in 3 days");

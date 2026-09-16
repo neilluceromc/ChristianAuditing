@@ -139,7 +139,9 @@ export function expiryLabel(expiresAt: Date, today: string): string {
   const todayMs = Date.parse(`${today}T00:00:00.000Z`);
   const days = Math.round((expiresAt.getTime() - todayMs) / DAY_MS);
   if (days === 0) return "expires today";
-  return days > 0 ? `expires in ${days} days` : `expired ${-days} days ago`;
+  const n = Math.abs(days);
+  const word = n === 1 ? "day" : "days";
+  return days > 0 ? `expires in ${n} ${word}` : `expired ${n} ${word} ago`;
 }
 
 export const EXPIRY_WINDOWS = [7, 30, 90] as const;

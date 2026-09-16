@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -16,15 +15,12 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { ActionFailure, openLots, recordInflowLot, recordOutflow } from "./ledger";
+import { revalidateStockReads } from "./revalidate";
 
 function revalidateItem(itemId: string) {
-  revalidatePath("/stock");
-  revalidatePath(`/stock/items/${itemId}`);
-  revalidatePath("/audit");
-  // Phase 22 (spec §7): every movement changes what the three reports show.
-  revalidatePath("/stock/reports/on-hand");
-  revalidatePath("/stock/reports/consumption");
-  revalidatePath("/stock/reports/expiry");
+  // Phase 22 (spec §7): the list, the item, the audit and the three reports —
+  // one shared list so no writer can forget a page (final review).
+  revalidateStockReads(itemId);
 }
 
 /** Spec §5.4/R3: names the lot in an audit diff — its reference when it has one, else its lot date. */
