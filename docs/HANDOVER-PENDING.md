@@ -24,8 +24,9 @@ migrations); **Phase 19 (stock control D1, migration 20) is merged but NOT yet d
   skips. Verify afterwards: `docker compose ps` (web healthy), `docker compose exec -T web npx prisma
   migrate status` (20 found, up to date), HTTP 200 on `http://127.0.0.1:3000/login` and the LAN URL.
   Never seed staging — the seed truncates every table.
-  Phase 20's migration 21 (`employee_transfers`, additive; code-complete on `phase-20-it-people-and-gaps`,
-  unmerged) will ride the same `-Force` redeploy once it is merged to `main`.
+  Phase 20's migration 21 (`employee_transfers`) rode the 2026-09-10 `-Force` redeploy and Phase 21's
+  migration 22 the 2026-09-15 one; Phase 22's migration 23 (`stock_lots_and_allocations`, with an asserted
+  backfill) rides the next.
 
 ## 2. Needs the user or Administrator rights on the laptop
 
@@ -57,12 +58,12 @@ as `purchasing@`. Both pass e2e and axe; nobody has looked at them.
 ## 5. Development candidates parked here
 
 ### 5.1 D2 — stock control, second half (own brainstorm and spec) — **SHIPPED in Phase 22**
-(`phase-22-stock-control-d2`, code-complete 2026-09-16 at final tree `dfb1a0f`, unmerged and unpushed)
+(`phase-22-stock-control-d2`, code-complete 2026-09-16 at final tree `a4b57b5` after the final-review fix wave; merged to `main` via `--no-ff` `26aaf82` and pushed 2026-09-16)
 
 Consumed what Phase 19 records. Scope agreed in the D1 brainstorm (spec
 `superpowers/specs/2026-09-09-stock-control-design.md` §1 "Out"); implemented per spec
 `superpowers/specs/2026-09-16-stock-control-d2-design.md`, plan
-`superpowers/plans/2026-09-16-phase-22-stock-control-d2.md` (10 tasks, `D-1`…`D-15`):
+`superpowers/plans/2026-09-16-phase-22-stock-control-d2.md` (10 tasks, `D-1`…`D-20`):
 
 - **FIFO lot consumption** — **shipped:** an issue consumes the oldest `StockLot`s first; cost of issue and
   on-hand value from lot `unitCost`; an allocation table (movement → lot, quantity) so a lot's remaining
