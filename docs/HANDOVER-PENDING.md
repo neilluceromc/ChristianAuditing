@@ -26,7 +26,7 @@ migrations); **Phase 19 (stock control D1, migration 20) is merged but NOT yet d
   Never seed staging — the seed truncates every table.
   Phase 20's migration 21 (`employee_transfers`) rode the 2026-09-10 `-Force` redeploy and Phase 21's
   migration 22 the 2026-09-15 one; Phase 22's migration 23 (`stock_lots_and_allocations`, with an asserted
-  backfill) rides the next.
+  backfill) the 2026-09-17 one.
 
 ## 2. Needs the user or Administrator rights on the laptop
 

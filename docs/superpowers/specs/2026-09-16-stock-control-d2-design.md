@@ -2,7 +2,7 @@
 
 **Status:** implemented on `phase-22-stock-control-d2`, MERGED TO `main` via `--no-ff` `26aaf82` and pushed 2026-09-16 (10 tasks, `D-1`…`D-20` — the final-review
 fix wave added `D-16`…`D-19`, the final battery `D-20`), code-complete 2026-09-16 at final tree `a4b57b5`,
-final-review fix wave included; branch and worktree removed; staging not yet redeployed (migration 23 applies at the next `-Force` run). Design approved in conversation 2026-09-16 (no
+final-review fix wave included; branch and worktree removed; staging redeployed 2026-09-17 with migration 23 applied. Design approved in conversation 2026-09-16 (no
 requisitions; uncosted stock is real but valueless; expiry optional on any lot with earliest-expiry-first
 consumption; three reports; allocation rows written at issue time with D1 history backfilled in the
 migration); the user said "proceed to dev": the method ran through to the finishing menu without further
