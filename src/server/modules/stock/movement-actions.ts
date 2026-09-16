@@ -21,6 +21,10 @@ function revalidateItem(itemId: string) {
   revalidatePath("/stock");
   revalidatePath(`/stock/items/${itemId}`);
   revalidatePath("/audit");
+  // Phase 22 (spec §7): every movement changes what the three reports show.
+  revalidatePath("/stock/reports/on-hand");
+  revalidatePath("/stock/reports/consumption");
+  revalidatePath("/stock/reports/expiry");
 }
 
 /** Spec §5.4/R3: names the lot in an audit diff — its reference when it has one, else its lot date. */

@@ -218,18 +218,23 @@ export async function postStocktake(input: unknown): Promise<ActionResult<{ adju
       // ADJUSTMENT lot, a negative one draws down the item's lots
       // expired-first, so a stocktake's corrections carry allocations like
       // every other outflow/inflow.
+      // One instant and one calendar day for the whole posting (Task 4 review):
+      // a posting that straddles local midnight must not treat a lot as
+      // expired for one line and not for the next.
+      const postedAt = new Date();
+      const today = localDateISO(postedAt);
       for (const adj of plan.adjustments) {
         const before = current.get(adj.itemId) ?? 0;
         const item = itemsById.get(adj.itemId)!;
         if (adj.quantity > 0) {
           await recordInflowLot(tx, {
             item, origin: "ADJUSTMENT", quantity: adj.quantity, unitCost: null,
-            fields: { reason, stocktakeId: st.id, actorId: user.id },
+            fields: { reason, stocktakeId: st.id, actorId: user.id, occurredAt: postedAt },
           });
         } else {
           await recordOutflow(tx, {
-            item, kind: "ADJUSTMENT", quantity: -adj.quantity, policy: "first", today: localDateISO(new Date()),
-            fields: { reason, stocktakeId: st.id, actorId: user.id },
+            item, kind: "ADJUSTMENT", quantity: -adj.quantity, policy: "first", today,
+            fields: { reason, stocktakeId: st.id, actorId: user.id, occurredAt: postedAt },
           });
         }
         await writeAudit(tx, {
@@ -239,7 +244,7 @@ export async function postStocktake(input: unknown): Promise<ActionResult<{ adju
       }
 
       const updated = await tx.stocktake.updateMany({
-        where: { id: st.id, state: "OPEN" }, data: { state: "POSTED", postedAt: new Date(), postedById: user.id },
+        where: { id: st.id, state: "OPEN" }, data: { state: "POSTED", postedAt, postedById: user.id },
       });
       if (updated.count === 0) throw new ActionFailure(conflict("This stocktake was already posted"));
 
@@ -251,6 +256,10 @@ export async function postStocktake(input: unknown): Promise<ActionResult<{ adju
     });
     revalidateStocktake(id);
     revalidatePath("/stock");
+    // Phase 22 (spec §7): posted adjustments move lots, so the reports change too.
+    revalidatePath("/stock/reports/on-hand");
+    revalidatePath("/stock/reports/consumption");
+    revalidatePath("/stock/reports/expiry");
     return ok(counts);
   } catch (e) {
     if (e instanceof ActionFailure) return e.result;
