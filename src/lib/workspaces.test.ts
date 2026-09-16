@@ -336,11 +336,15 @@ describe("WORKSPACE_NAV shape", () => {
       "/stock/receive",
       "/stock/issue",
       "/stock/stocktakes",
+      "/stock/reports",
       "/stock/categories",
       "/stock/import",
     ]);
     expect(stock.items.find((i) => i.href === "/stock")?.roles).toBeUndefined();
     expect(stock.items.find((i) => i.href === "/stock/stocktakes")?.roles).toBeUndefined();
+    // Phase 22 (spec §6.5): Reports is read-only, like Items and Stocktakes —
+    // reachable by anyone in the Stock PATH_RULE, not just admin/purchasing_staff.
+    expect(stock.items.find((i) => i.href === "/stock/reports")?.roles).toBeUndefined();
     for (const href of ["/stock/receive", "/stock/issue", "/stock/categories", "/stock/import"]) {
       expect(stock.items.find((i) => i.href === href)?.roles).toEqual(["admin", "purchasing_staff"]);
     }

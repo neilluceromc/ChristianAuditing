@@ -25,10 +25,9 @@ export interface StockItemMeta {
 export interface SupplierOption {
   id: string;
   name: string;
-  archived: boolean;
 }
 
-const CLAIMED = ["itemId", "quantity", "packs", "supplierId", "lotDate", "reference", "unitCost", "occurredAt"];
+const CLAIMED = ["itemId", "quantity", "packs", "supplierId", "lotDate", "reference", "unitCost", "occurredAt", "expiresAt"];
 
 interface FormState {
   itemId: string | null;
@@ -36,6 +35,7 @@ interface FormState {
   packs: string;
   supplierId: string;
   lotDate: string;
+  expiresAt: string;
   reference: string;
   unitCost: string;
   occurredAt: string;
@@ -44,7 +44,7 @@ interface FormState {
 function emptyForm(): FormState {
   const today = todayStr();
   return {
-    itemId: null, quantity: "", packs: "", supplierId: "", lotDate: today, reference: "", unitCost: "", occurredAt: today,
+    itemId: null, quantity: "", packs: "", supplierId: "", lotDate: today, expiresAt: "", reference: "", unitCost: "", occurredAt: today,
   };
 }
 
@@ -96,6 +96,7 @@ export function ReceiveForm({
       packs: form.packs.trim() === "" ? null : Number(form.packs),
       supplierId: form.supplierId,
       lotDate: form.lotDate,
+      expiresAt: form.expiresAt,
       reference: form.reference,
       unitCost: form.unitCost.trim() === "" ? null : Number(form.unitCost),
       occurredAt: form.occurredAt,
@@ -181,6 +182,15 @@ export function ReceiveForm({
               <Input
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 type="date" value={form.lotDate} onChange={(e) => set("lotDate", e.target.value)}
+              />
+            )}
+          </FormField>
+          <FormField label="Expires" error={fieldErrors.expiresAt}>
+            {(p) => (
+              <Input
+                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                type="date" aria-label="Expires" min={form.lotDate || undefined}
+                value={form.expiresAt} onChange={(e) => set("expiresAt", e.target.value)}
               />
             )}
           </FormField>

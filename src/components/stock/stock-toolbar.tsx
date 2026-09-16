@@ -15,13 +15,16 @@ export function StockToolbar({
   state,
   facets,
   lowCount,
+  expiringCount,
 }: {
   state: ListState;
   facets: { category: FacetOption[] };
   lowCount: number;
+  expiringCount: number;
 }) {
   const router = useRouter();
   const low = state.filters.low?.includes("1") ?? false;
+  const expiring = state.filters.expiring?.includes("1") ?? false;
   const archived = state.filters.archived?.includes("1") ?? false;
 
   function go(next: ListState) {
@@ -60,6 +63,15 @@ export function StockToolbar({
           className="font-mono text-[11px] text-fg-muted hover:text-accent"
         >
           {low ? "Show all" : "Show low stock only"}
+        </Link>
+        {!expiring && expiringCount > 0 && (
+          <span className="font-mono text-[10px] text-fg-faint">{expiringCount} expiring</span>
+        )}
+        <Link
+          href={"/stock" + serializeListState(withFilter(state, "expiring", expiring ? [] : ["1"]), STOCK_LIST_CONFIG)}
+          className="font-mono text-[11px] text-fg-muted hover:text-accent"
+        >
+          {expiring ? "Show all" : "Show expiring only"}
         </Link>
         <Link
           href={"/stock" + serializeListState(withFilter(state, "archived", archived ? [] : ["1"]), STOCK_LIST_CONFIG)}

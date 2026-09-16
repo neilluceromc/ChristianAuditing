@@ -49,9 +49,9 @@ export default async function StockPage({
       />
       <div className="flex flex-col gap-3">
         <p className="font-mono text-[11px] text-fg-muted">
-          {data.total} items · {data.lowCount} below reorder level
+          {data.total} items · {data.lowCount} below reorder level · {data.expiringCount} with expiring lots
         </p>
-        <StockToolbar state={state} facets={data.facets} lowCount={data.lowCount} />
+        <StockToolbar state={state} facets={data.facets} lowCount={data.lowCount} expiringCount={data.expiringCount} />
         {data.rows.length > 0 ? (
           <>
             <StockItemsTable rows={data.rows} />

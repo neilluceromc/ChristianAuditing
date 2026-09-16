@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { Pill } from "@/components/ui/pill";
 import { Pagination } from "@/components/ui/pagination";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtMoneyExact } from "@/lib/format";
 import { MOVEMENT_KIND_LABEL } from "@/lib/stock-movement-rules";
 import type { MovementRow } from "@/server/modules/stock/queries";
 
@@ -36,6 +36,20 @@ function fmtQuantity(q: number): string {
   return q >= 0 ? `+${q}` : `−${Math.abs(q)}`;
 }
 
+/**
+ * Spec §6.4: outflows (ISSUE, negative ADJUSTMENT) show the movement's total
+ * cost, "—" when every unit it drew from was uncosted, or the cost plus a
+ * count when it mixed costed and uncosted lots; an inflow's `cost` is
+ * already its lot's own unit cost (queries.ts), shown as-is when priced.
+ */
+function costCell(m: MovementRow): string {
+  if (m.quantity < 0) {
+    if (m.cost === null) return "—";
+    return m.uncostedUnits > 0 ? `${fmtMoneyExact(m.cost)} + ${m.uncostedUnits} uncosted` : fmtMoneyExact(m.cost);
+  }
+  return m.cost === null ? "—" : fmtMoneyExact(m.cost);
+}
+
 export function MovementHistory({
   rows,
   page,
@@ -57,6 +71,7 @@ export function MovementHistory({
             <Th>Date</Th>
             <Th>Kind</Th>
             <Th align="right">Quantity</Th>
+            <Th align="right">Cost</Th>
             <Th>Detail</Th>
             <Th>By</Th>
           </Tr>
@@ -69,6 +84,7 @@ export function MovementHistory({
                 <Pill tone={ACCENT_KINDS.has(m.kind) ? "accent" : "neutral"}>{MOVEMENT_KIND_LABEL[m.kind]}</Pill>
               </Td>
               <Td align="right" mono>{fmtQuantity(m.quantity)}</Td>
+              <Td align="right" mono>{costCell(m)}</Td>
               <Td>{detailFor(m)}</Td>
               <Td>{m.actor}</Td>
             </Tr>

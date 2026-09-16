@@ -20,15 +20,20 @@ export interface CountLine {
  * NEVER rendered here (that's the review's job); each row saves itself on
  * blur or Enter (P-3: one line per action, no batch endpoint), independent
  * of every other row's pending/saved state.
+ *
+ * Leftover 5 (spec §8): the page only ever renders this component when
+ * `manage && st.state === "OPEN"` (its sibling `StocktakeReview` branch
+ * covers every other case) — so the `canCount` prop this used to take was
+ * always true at the one call site that used it. Removed here and at the
+ * page's own call site, same shape as D-9b's `showControls` fix in
+ * stocktake-review.tsx.
  */
 export function StocktakeCount({
   stocktakeId,
   lines,
-  canCount,
 }: {
   stocktakeId: string;
   lines: CountLine[];
-  canCount: boolean;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(lines.map((l) => [l.id, l.countedQty === null ? "" : String(l.countedQty)])),
@@ -88,7 +93,6 @@ export function StocktakeCount({
                     type="number"
                     min={0}
                     step={1}
-                    disabled={!canCount}
                     className="w-24 text-right"
                     value={values[l.id] ?? ""}
                     onChange={(e) => setValue(l.id, e.target.value)}

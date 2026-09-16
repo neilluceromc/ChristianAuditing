@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
-import { getStockItem } from "@/server/modules/stock/queries";
+import { getStockItem, itemLots } from "@/server/modules/stock/queries";
 import { canManageStock } from "@/lib/stock-access";
 import { unitsLabel } from "@/lib/stock-balance";
+import { fmtMoneyExact } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
 import { PageHeader } from "@/components/ui/page-header";
@@ -13,6 +14,7 @@ import { Stat } from "@/components/ui/stat";
 import { Banner } from "@/components/ui/banner";
 import { AdjustDialog } from "@/components/stock/adjust-dialog";
 import { ItemArchiveControls } from "@/components/stock/item-archive-controls";
+import { LotsCard } from "@/components/stock/lots-card";
 import { MovementHistory } from "@/components/stock/movement-history";
 
 export default async function StockItemPage({
@@ -28,8 +30,10 @@ export default async function StockItemPage({
   const page = parsePage(sp);
   const item = await getStockItem(id, page);
   if (!item) notFound();
+  const lots = await itemLots(id);
 
   const manage = canManageStock(user.role);
+  const expiredUnits = item.balance - item.available;
 
   return (
     <>
@@ -40,6 +44,8 @@ export default async function StockItemPage({
           <span className="inline-flex gap-2">
             <Pill>{item.category.name}</Pill>
             {item.low && <Pill tone="accent">LOW</Pill>}
+            {item.expiring === "expiring" && <Pill tone="accent">EXPIRING</Pill>}
+            {item.expiring === "expired" && <Pill tone="accent">EXPIRED</Pill>}
             {item.archived && <Pill>ARCHIVED</Pill>}
           </span>
         }
@@ -61,6 +67,15 @@ export default async function StockItemPage({
           <CardHeader title="Balance" />
           <CardBody className="flex flex-col gap-3">
             <Stat label="On hand" value={unitsLabel(item.balance, item.unit)} />
+            {expiredUnits > 0 && (
+              <p className="text-xs text-fg-secondary">
+                Available {item.available} ({expiredUnits} expired)
+              </p>
+            )}
+            <p className="text-xs text-fg-secondary">Value on hand {fmtMoneyExact(item.onHandValue)}</p>
+            {item.uncostedUnits > 0 && (
+              <p className="text-xs text-fg-secondary">{item.uncostedUnits} uncosted units</p>
+            )}
             <p className="text-xs text-fg-secondary">
               Reorder level: {item.reorderLevel > 0 ? item.reorderLevel : "none"}
             </p>
@@ -76,6 +91,8 @@ export default async function StockItemPage({
             )}
           </CardBody>
         </Card>
+
+        <LotsCard itemCode={item.code} unit={item.unit} lots={lots} manage={manage} />
 
         <Card>
           <CardHeader title="History" />

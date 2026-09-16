@@ -37,6 +37,8 @@ export function StockItemsTable({ rows }: { rows: StockItemRow[] }) {
               <span className="inline-flex items-center justify-end gap-2">
                 <span className="font-mono text-xs text-fg">{unitsLabel(r.balance, r.unit)}</span>
                 {r.low && <Pill tone="accent">LOW</Pill>}
+                {r.expiring === "expiring" && <Pill tone="accent">EXPIRING</Pill>}
+                {r.expiring === "expired" && <Pill tone="accent">EXPIRED</Pill>}
               </span>
             </Td>
             <Td align="right" mono>{r.reorderLevel}</Td>
