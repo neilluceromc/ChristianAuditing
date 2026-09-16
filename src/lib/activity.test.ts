@@ -223,6 +223,39 @@ describe("stock module audit sentences (M-3) — the fourteen actions no longer 
   it("stocktake.cancelled reads as a sentence, not the raw verb", () => {
     expect(auditSentence({ ...stocktake, action: "stocktake.cancelled", diff: null })).toBe("A. Reyes cancelled the stocktake ST-0007");
   });
+
+  // Phase 22 Task 2 (spec §4.1/§5.4): writeOffLot/setLotCost/
+  // uploadLotDocument's own three sentences. `entityLabel` here is a lot's
+  // item, resolved server-side (spec §5.4: "stock-lot entities labelled by
+  // item code and reference") — these tests supply it directly, the same
+  // way `item`/`category`/`stocktake` above stand in for the real resolver.
+  const lot = { actorLabel: "A. Reyes", entityLabel: "PN-0003" };
+
+  it("stock.written-off names the quantity (already carrying its unit noun) and the reason", () => {
+    expect(auditSentence({ ...lot, action: "stock.written-off", diff: { lot: { from: null, to: "DR-1103" }, quantity: { from: null, to: "12 sachets" }, reason: { from: null, to: "Expired" } } }))
+      .toBe("A. Reyes wrote off 12 sachets of PN-0003 — Expired");
+  });
+
+  it("stock.written-off degrades without a reason", () => {
+    expect(auditSentence({ ...lot, action: "stock.written-off", diff: { quantity: { from: null, to: "5 pieces" } } }))
+      .toBe("A. Reyes wrote off 5 pieces of PN-0003");
+  });
+
+  it("stock.lot-cost-set names the money to two decimals", () => {
+    expect(auditSentence({ ...lot, entityLabel: "OS-0003", action: "stock.lot-cost-set", diff: { unitCost: { from: null, to: 9 } } }))
+      .toBe("A. Reyes priced a lot of OS-0003 at ₱9.00");
+    expect(auditSentence({ ...lot, entityLabel: "PN-0003", action: "stock.lot-cost-set", diff: { unitCost: { from: null, to: 0.9 } } }))
+      .toBe("A. Reyes priced a lot of PN-0003 at ₱0.90");
+  });
+
+  it("stock.document-added names the kind as a readable noun phrase", () => {
+    expect(auditSentence({ ...lot, entityLabel: "OS-0001", action: "stock.document-added", diff: { kind: { from: null, to: "delivery-receipt" } } }))
+      .toBe("A. Reyes attached a delivery receipt to OS-0001");
+    expect(auditSentence({ ...lot, action: "stock.document-added", diff: { kind: { from: null, to: "invoice" } } }))
+      .toBe("A. Reyes attached an invoice to PN-0003");
+    expect(auditSentence({ ...lot, action: "stock.document-added", diff: { kind: { from: null, to: "other" } } }))
+      .toBe("A. Reyes attached a document to PN-0003");
+  });
 });
 
 describe("actionDot — import actions get a deliberate, explicit colour", () => {

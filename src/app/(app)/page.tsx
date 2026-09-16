@@ -120,13 +120,15 @@ export default async function Home() {
           <SectionCard title="Your requests" result={home}>
             {(d) => (
               <div className="flex flex-col gap-4">
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
                   <Stat label="Drafts" value={d.draftCount} />
                   <Stat label="Awaiting IT" value={d.awaitingIT} />
                   <Stat label="Awaiting finance" value={d.awaitingFinance} />
                   <Stat label="Spend this month" value={d.spendThisMonth} />
                   <Stat label="Approvals waiting" value={<Link href="/approvals" className="hover:underline">{d.approvalsWaiting}</Link>} hint="lifecycle changes on your assets" />
                   <Stat label="Awaiting IT check" value={d.awaitingItCheck} hint="IT assets you registered" />
+                  <Stat label="Below reorder level" value={<Link href="/stock?low=1" className="hover:underline">{d.lowStock}</Link>} />
+                  <Stat label="Expiring within 30 days" value={<Link href="/stock/reports/expiry" className="hover:underline">{d.expiringLots}</Link>} />
                 </div>
                 <TodoList rows={d.todo} empty="Nothing of yours is waiting — every request has moved on." />
               </div>

@@ -1,6 +1,7 @@
 import type { ApprovalType, Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
+import { stockHomeSignals } from "@/server/modules/stock/queries";
 import { DIRECT_KIND_LABEL, DIRECT_WINDOW_DAYS, slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { approvalClassWhere } from "@/lib/approval-access";
@@ -515,6 +516,9 @@ export interface PurchasingHome {
   spendThisMonth: string;
   approvalsWaiting: number;
   awaitingItCheck: number;
+  /** Phase 22 (spec §0 decision 7 / §6.5): the two Stock tiles — items at or below reorder level, and open lots expiring within `DEFAULT_EXPIRY_WINDOW`. */
+  lowStock: number;
+  expiringLots: number;
 }
 
 const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
@@ -526,7 +530,7 @@ const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
  */
 export async function purchasingHome(userId: string, role: Role, now: Date = new Date()): Promise<PurchasingHome> {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [mine, counts, completed, approvalsWaiting, awaitingItCheck] = await Promise.all([
+  const [mine, counts, completed, approvalsWaiting, awaitingItCheck, stockSignals] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
       orderBy: { updatedAt: "asc" },
@@ -549,6 +553,7 @@ export async function purchasingHome(userId: string, role: Role, now: Date = new
     }),
     prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, approvalClassWhere(role)] } }),
     prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null } }),
+    stockHomeSignals(localDateISO(now)),
   ]);
 
   const count = (state: string) => counts.find((c) => c.state === state)?._count._all ?? 0;
@@ -574,6 +579,8 @@ export async function purchasingHome(userId: string, role: Role, now: Date = new
     spendThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
     approvalsWaiting,
     awaitingItCheck,
+    lowStock: stockSignals.low,
+    expiringLots: stockSignals.expiringLots,
   };
 }
 

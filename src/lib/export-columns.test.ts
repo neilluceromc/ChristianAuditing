@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS, EXPORT_CAP,
-  FAREWELL_EXPORT_COLUMNS, HOLDINGS_EXPORT_COLUMNS, IDS_CAP, capRefusalText, idsRefusalText,
-  type HoldingsExportRow,
+  ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, CONSUMPTION_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS,
+  EXPIRY_EXPORT_COLUMNS, EXPORT_CAP, FAREWELL_EXPORT_COLUMNS, HOLDINGS_EXPORT_COLUMNS, IDS_CAP,
+  ON_HAND_EXPORT_COLUMNS, capRefusalText, idsRefusalText,
+  type ConsumptionExportRow, type ExpiryExportRow, type HoldingsExportRow, type OnHandExportRow,
 } from "./export-columns";
 
 describe("export column specs", () => {
@@ -169,5 +170,108 @@ describe("holdings export column spec (Phase 20 spec §5, plan P-3)", () => {
   it("renders a reservation row's tag, model and reserved-on date, with no type/status/loan due", () => {
     const r = row("reservation", { type: "", status: "", loanDue: null, since: new Date("2026-02-01T00:00:00Z") });
     expect(values(r)).toEqual(["BR-LT-0001", "Latitude", "", "", r.since, null]);
+  });
+});
+
+describe("ON_HAND_EXPORT_COLUMNS (Phase 22 spec §4.4)", () => {
+  it("carries the eleven columns in this exact order", () => {
+    expect(ON_HAND_EXPORT_COLUMNS.map((c) => c.label)).toEqual([
+      "Code", "Name", "Category", "Unit", "Balance", "Open lots", "Costed units", "Uncosted units",
+      "Value on hand", "Oldest lot", "Nearest expiry",
+    ]);
+  });
+
+  it("renders a row's real values, money and date cells shaped like every other sheet's", () => {
+    const row: OnHandExportRow = {
+      code: "OS-0003", name: "Sticky pad", category: "Office supplies", unit: "pad", balance: 24,
+      openLots: 1, costedUnits: 0, uncostedUnits: 24, valueOnHand: 0,
+      oldestLot: new Date("2026-09-07T00:00:00Z"), nearestExpiry: null,
+    };
+    const cells = ON_HAND_EXPORT_COLUMNS.map((c) => c.cell(row));
+    expect(cells.map((c) => c.value)).toEqual([
+      "OS-0003", "Sticky pad", "Office supplies", "pad", 24, 1, 0, 24, 0, row.oldestLot, null,
+    ]);
+    const valueCell = cells[8];
+    expect(valueCell.type).toBe(Number);
+    expect(valueCell.format).toBe("#,##0.00");
+    const oldestLotCell = cells[9];
+    expect(oldestLotCell.type).toBe(Date);
+    expect(oldestLotCell.format).toBe("yyyy-mm-dd");
+  });
+
+  it("renders null for an item with no open lots at all", () => {
+    const row: OnHandExportRow = {
+      code: "OS-0009", name: "New item", category: "Office supplies", unit: "piece", balance: 0,
+      openLots: 0, costedUnits: 0, uncostedUnits: 0, valueOnHand: null, oldestLot: null, nearestExpiry: null,
+    };
+    const values = ON_HAND_EXPORT_COLUMNS.map((c) => c.cell(row).value);
+    expect(values.slice(-3)).toEqual([null, null, null]);
+  });
+});
+
+describe("CONSUMPTION_EXPORT_COLUMNS (Phase 22 spec §4.4)", () => {
+  it("carries the eight columns in this exact order", () => {
+    expect(CONSUMPTION_EXPORT_COLUMNS.map((c) => c.label)).toEqual([
+      "Department", "Month", "Category", "Code", "Item", "Units", "Cost", "Uncosted units",
+    ]);
+  });
+
+  it("renders a row's real values, month as the plain monthKey string, not a Date", () => {
+    const row: ConsumptionExportRow = {
+      department: "HR", month: "2026-08", category: "Pantry", code: "PN-0001", item: "Sugar sachet",
+      units: 60, cost: 54, uncostedUnits: 0,
+    };
+    const cells = CONSUMPTION_EXPORT_COLUMNS.map((c) => c.cell(row));
+    expect(cells.map((c) => c.value)).toEqual(["HR", "2026-08", "Pantry", "PN-0001", "Sugar sachet", 60, 54, 0]);
+    expect(typeof cells[1].value).toBe("string");
+    const costCell = cells[6];
+    expect(costCell.type).toBe(Number);
+    expect(costCell.format).toBe("#,##0.00");
+  });
+
+  it("renders a null cost for a fully-uncosted row", () => {
+    const row: ConsumptionExportRow = {
+      department: "HR", month: "2026-08", category: "Pantry", code: "PN-0002", item: "Something",
+      units: 6, cost: null, uncostedUnits: 6,
+    };
+    expect(CONSUMPTION_EXPORT_COLUMNS.find((c) => c.label === "Cost")!.cell(row).value).toBeNull();
+  });
+});
+
+describe("EXPIRY_EXPORT_COLUMNS (Phase 22 spec §4.4)", () => {
+  it("carries the eleven columns in this exact order", () => {
+    expect(EXPIRY_EXPORT_COLUMNS.map((c) => c.label)).toEqual([
+      "Status", "Code", "Item", "Lot date", "Reference", "Supplier", "Expires", "Days", "Remaining",
+      "Unit cost", "Value at risk",
+    ]);
+  });
+
+  it("renders a row's real values, Days as expiryLabel's own display string", () => {
+    const row: ExpiryExportRow = {
+      status: "Expired", code: "PN-0003", item: "Sugar sachet", lotDate: new Date("2026-08-27T00:00:00Z"),
+      reference: "DR-1103", supplier: "Acme Trading", expires: new Date("2026-09-11T00:00:00Z"),
+      days: "expired 5 days ago", remaining: 100, unitCost: 0.9, valueAtRisk: 90,
+    };
+    const cells = EXPIRY_EXPORT_COLUMNS.map((c) => c.cell(row));
+    expect(cells.map((c) => c.value)).toEqual([
+      "Expired", "PN-0003", "Sugar sachet", row.lotDate, "DR-1103", "Acme Trading", row.expires,
+      "expired 5 days ago", 100, 0.9, 90,
+    ]);
+    const unitCostCell = cells[9];
+    expect(unitCostCell.type).toBe(Number);
+    expect(unitCostCell.format).toBe("#,##0.00");
+  });
+
+  it("renders null reference/supplier/unit cost/value at risk when unset", () => {
+    const row: ExpiryExportRow = {
+      status: "Expiring", code: "OS-0003", item: "Sticky pad", lotDate: new Date("2026-09-07T00:00:00Z"),
+      reference: null, supplier: null, expires: new Date("2026-10-01T00:00:00Z"), days: "expires in 15 days",
+      remaining: 24, unitCost: null, valueAtRisk: null,
+    };
+    const values = EXPIRY_EXPORT_COLUMNS.map((c) => c.cell(row).value);
+    expect(values[4]).toBeNull();
+    expect(values[5]).toBeNull();
+    expect(values[9]).toBeNull();
+    expect(values[10]).toBeNull();
   });
 });

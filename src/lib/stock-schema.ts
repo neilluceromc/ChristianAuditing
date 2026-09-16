@@ -37,12 +37,47 @@ export const receiptSchema = z.object({
   reference: z.string().trim().max(60).optional().default(""),
   unitCost: z.number().min(0).max(99_999_999.99).multipleOf(0.01, "Two decimals at most").nullable(),
   occurredAt: dateStr,
+  // Spec §4.3/§6.5: optional, after Lot date on the form. Blank means "no
+  // expiry" — most items never expire — never "expires immediately".
+  expiresAt: dateStr.optional().default(""),
 }).superRefine((d, ctx) => {
   if (d.occurredAt && d.occurredAt > todayStr()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["occurredAt"], message: "That date is in the future" });
   }
+  // Both sides are plain `YYYY-MM-DD` strings, so lexicographic `<` is
+  // chronological order — the same trick `todayStr()`'s own comparison
+  // above relies on.
+  if (d.expiresAt && d.lotDate && d.expiresAt < d.lotDate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Expires cannot be before the lot date" });
+  }
 });
 export type ReceiptInput = z.infer<typeof receiptSchema>;
+
+/**
+ * Spec §4.3. `quantity` is left optional here — the default is "the lot's
+ * remaining", which only the server knows (the schema never sees a lot) —
+ * so `writeOffLot` (movement-actions.ts, Task 5) resolves the omitted case
+ * itself, under the item lock, before this schema's own `min(1)` even
+ * matters (a resolved default is always >= 1 because a closed lot is never
+ * offered for write-off in the first place).
+ */
+export const writeOffSchema = z.object({
+  lotId: z.string().min(1, "Pick a lot"),
+  quantity: z.number().int().min(1, "At least one").optional(),
+  reason: reasonRequired({ min: 3, max: 200, message: "Say why" }),
+});
+export type WriteOffInput = z.infer<typeof writeOffSchema>;
+
+/** Spec §4.3/§5.2: `setLotCost` refuses when the lot's `unitCost` is already set — this schema only shapes the new value. */
+export const setLotCostSchema = z.object({
+  lotId: z.string().min(1, "Pick a lot"),
+  unitCost: z.number().min(0).max(99_999_999.99).multipleOf(0.01, "Two decimals at most"),
+});
+export type SetLotCostInput = z.infer<typeof setLotCostSchema>;
+
+/** Spec §2.3/§4.3: the three kinds a `StockLotDocument` can be tagged with — same set `document-actions.ts`'s `uploadLotDocument` validates against. */
+export const LOT_DOCUMENT_KINDS = ["delivery-receipt", "invoice", "other"] as const;
+export type LotDocumentKind = (typeof LOT_DOCUMENT_KINDS)[number];
 
 export const issueSchema = z.object({
   itemId: z.string().min(1, "Pick an item"),

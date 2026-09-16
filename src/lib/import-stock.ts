@@ -13,17 +13,14 @@ import type { BlockCause, BlockedRow } from "./import-vocabulary";
  * `unitCost` entry ("unit cost"/"cost") that this array omitted entirely
  * before this round.
  *
- * `unitCost` is now MATCHED — recognised, never reported as an unrecognised
+ * `unitCost` is MATCHED — recognised, never reported as an unrecognised
  * column and never needing `STOCK_KNOWN_UNIMPORTED_COLUMNS`'s typo-avoidance
- * list to excuse it — but consumed by NOTHING below: neither
- * `StockCreateData` nor `StockUpdatePatch` (below) carries a field for it, so
- * `planStockRows` reads every other column off a row and simply never calls
- * `textAt`/`cellAt` for this one. Spec §6: unit cost is recorded on a receipt
- * (`StockLot.unitCost`, a per-lot figure), never on the item itself, so
- * there is nowhere for a sheet value to land even now that the column has a
- * name — the page's own banner (`STOCK_UNIT_COST_NOTICE`, `import-
- * columns.ts`) is what tells the operator why nothing happened with a column
- * they filled in.
+ * list to excuse it. Phase 22 Task 2 (spec §4.5/§8 item 6): it is now read
+ * on a CREATE row, pricing the opening lot that row's `openingQty` creates —
+ * carried on `StockCreateData.unitCost` below. An UPDATE row still never
+ * touches it: `StockUpdatePatch` carries no such field, because an existing
+ * item's ledger already has its own lots, each priced (or not) on its own
+ * receipt — there is no single "the item's cost" for an edit to overwrite.
  *
  * `name`, `category` and `unit` are the three required columns — every one
  * of them is needed to create an item, and an update row that omits one
@@ -70,9 +67,14 @@ export type StockField =
  * keys today, but running BOTH sides through the one shared rule is what
  * keeps a lookup from ever missing by case or stray whitespace if that ever
  * stops being true.
+ *
+ * `archived` (Phase 22 Task 2, spec §4.5/§8 item 1): carried on the resolved
+ * category so `planStockRows` can block a CREATE row that names a retired
+ * category (`archived-stock-category`) without a second lookup — the same
+ * map entry that resolves the category also says whether it is live.
  */
 export interface StockRefs {
-  categoriesByKey: Map<string, { id: string; prefix: string } | null>;
+  categoriesByKey: Map<string, { id: string; prefix: string; archived: boolean } | null>;
   itemsByCode: Map<string, string>;
 }
 
@@ -86,6 +88,8 @@ export interface StockCreateData {
   reorderLevel: number;
   notes: string | null;
   openingQty: number;
+  /** Phase 22 Task 2 (spec §4.5): prices the opening lot `applyStockImport` creates when `openingQty > 0`; `null` when the cell was blank. */
+  unitCost: number | null;
 }
 
 /**
@@ -127,13 +131,29 @@ function textOrNull(headers: HeaderMatch<StockField>, cells: unknown[], field: S
   return t === "" ? null : t;
 }
 
-/** The row's own identity key for the two-pass duplicate check: the code
+/**
+ * The row's own identity key(s) for the two-pass duplicate check: the code
  * when the row gives one, else category+name — the same pair that would
- * otherwise resolve to the same brand-new item. */
-function identityKey(headers: HeaderMatch<StockField>, raw: unknown[]): string {
+ * otherwise resolve to the same brand-new item.
+ *
+ * Phase 22 Task 2 (spec §4.5): a code row that MATCHES an existing item also
+ * registers the `new:`-shaped key its own Category/Name cells would produce
+ * — so a separate codeless row elsewhere in the file naming that same
+ * category+name (intending to CREATE what is, in truth, the item this row
+ * already updates) collides with it and both block as `duplicate-in-file`,
+ * rather than silently creating a duplicate record. `StockRefs.itemsByCode`
+ * carries only an id (no category/name), so this reads the ROW's own cells
+ * — the same cells an update row already carries informationally even
+ * though the patch itself never touches category (see `resolveCategory`'s
+ * own comment on why category is not re-checked for an update).
+ */
+function identityKeys(headers: HeaderMatch<StockField>, raw: unknown[], refs: StockRefs): string[] {
   const codeRaw = textAt(headers, raw, "code");
-  if (codeRaw !== "") return `code:${refKey(codeRaw)}`;
-  return `new:${refKey(textAt(headers, raw, "category"))}|${refKey(textAt(headers, raw, "name"))}`;
+  const newKey = () => `new:${refKey(textAt(headers, raw, "category"))}|${refKey(textAt(headers, raw, "name"))}`;
+  if (codeRaw === "") return [newKey()];
+  const keys = [`code:${refKey(codeRaw)}`];
+  if (refs.itemsByCode.has(tagKey(codeRaw))) keys.push(newKey());
+  return keys;
 }
 
 type IntResult = { ok: true; value: number } | { ok: false };
@@ -151,7 +171,7 @@ const UNIT_MAX = 20;
 
 interface CategoryResolution {
   ok: boolean;
-  category: { id: string; prefix: string } | null;
+  category: { id: string; prefix: string; archived: boolean } | null;
   detail: string;
 }
 
@@ -186,8 +206,9 @@ export function planStockRows(headers: HeaderMatch<StockField>, cells: unknown[]
   const keyCounts = new Map<string, number>();
   for (const raw of cells) {
     if (raw.every(isBlank)) continue;
-    const key = identityKey(headers, raw);
-    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+    for (const key of identityKeys(headers, raw, refs)) {
+      keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+    }
   }
 
   const present = (field: StockField) => headers.map.has(field);
@@ -209,8 +230,10 @@ export function planStockRows(headers: HeaderMatch<StockField>, cells: unknown[]
 
     // Rule 2 (two-pass, this file): a code — or, absent one, a category+name
     // pair — claimed by more than one row here blocks BOTH, before either
-    // is allowed to resolve against the database.
-    if ((keyCounts.get(identityKey(headers, raw)) ?? 0) > 1) {
+    // is allowed to resolve against the database. A code row matching an
+    // existing item checks its derived `new:` key too (identityKeys' own
+    // comment), so it blocks even when its OWN primary key is unique.
+    if (identityKeys(headers, raw, refs).some((k) => (keyCounts.get(k) ?? 0) > 1)) {
       block("duplicate-in-file", codeRaw || nameRaw);
       return;
     }
@@ -341,6 +364,15 @@ export function planStockRows(headers: HeaderMatch<StockField>, cells: unknown[]
     }
     const category = resolved.category!;
 
+    // Phase 22 Task 2 (spec §4.5/§8 item 1): the category resolves — it is
+    // not unknown — but it is retired. Checked before the code/prefix
+    // cross-check below so a well-formed code naming an archived category
+    // still reports the true cause rather than sailing through.
+    if (category.archived) {
+      block("archived-stock-category", categoryRaw);
+      return;
+    }
+
     let code: string | null = null;
     if (codeKey !== "") {
       const parsed = parseStockCode(codeKey)!;
@@ -389,9 +421,27 @@ export function planStockRows(headers: HeaderMatch<StockField>, cells: unknown[]
       openingQty = parsed.value;
     }
 
+    // Phase 22 Task 2 (spec §4.5/§8 item 6): unit cost now prices the
+    // opening lot `applyStockImport` creates when `openingQty > 0` — read
+    // the same way as the other optional numeric cells (blank means null,
+    // a malformed or negative value blocks as bad-number). A value on a
+    // row with no opening quantity is simply carried through unused, same
+    // as filling in Pack size on a row with no pack — this parser has no
+    // way to know a lot won't exist yet, and it is not its job to decide.
+    const unitCostRaw = textAt(headers, raw, "unitCost");
+    let unitCost: number | null = null;
+    if (unitCostRaw !== "") {
+      const parsed = Number(unitCostRaw);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        block("bad-number", unitCostRaw);
+        return;
+      }
+      unitCost = parsed;
+    }
+
     const data: StockCreateData = {
       code, categoryId: category.id, prefix: category.prefix, name: nameRaw, unit: unitRaw,
-      packSize, reorderLevel, notes: textOrNull(headers, raw, "notes"), openingQty,
+      packSize, reorderLevel, notes: textOrNull(headers, raw, "notes"), openingQty, unitCost,
     };
     rows.push({ kind: "create", row: sheetRow, data });
     counts.create += 1;

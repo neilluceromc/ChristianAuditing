@@ -1,4 +1,21 @@
 /**
+ * Phase 22 Task 2 (spec §2.3/§4.3): the three document kinds a
+ * `StockLotDocument` can carry, worded as the indefinite-article noun phrase
+ * `stock.document-added`'s sentence names — "a delivery receipt" reads as a
+ * sentence; "delivery-receipt" does not. Kept local rather than derived from
+ * `LOT_DOCUMENT_KINDS` (`stock-schema.ts`): that array is the identity list
+ * (what a kind IS), this is prose (what a kind is CALLED in a sentence), and
+ * the two have never been the same shape anywhere else in this file either
+ * (`REQUEST_DOCUMENT_LABEL` etc. are themselves separate from
+ * `REQUEST_DOCUMENT_KINDS` for the same reason).
+ */
+const LOT_DOCUMENT_ARTICLE_LABEL: Record<string, string> = {
+  "delivery-receipt": "a delivery receipt",
+  invoice: "an invoice",
+  other: "a document",
+};
+
+/**
  * One row = one subject-first sentence (README 4b). The entityLabel is
  * enriched server-side (asset tag / employee name); the sentence never
  * exposes raw ids.
@@ -202,6 +219,32 @@ export function auditSentence(entry: ActivityEntryLike): string {
     }
     case "stocktake.cancelled":
       return `${entry.actorLabel} cancelled the stocktake ${entry.entityLabel}`;
+    // Phase 22 Task 2 (spec §4.1/§5.4): writeOffLot/setLotCost/
+    // uploadLotDocument's own audit rows. `entityLabel` here is the lot's
+    // item (resolved server-side, `stock-lot` entities labelled by item code
+    // and reference — Task 5's `entityLabels`), so these read like
+    // `stock.received`/`stock.issued` above: no raw ids, the quantity/cost/
+    // kind that makes the row worth reading without opening the diff.
+    case "stock.written-off": {
+      // `quantity` already carries its unit noun ("12 sachets") — the same
+      // one `unitsLabel` (stock-balance.ts) would produce — because a
+      // write-off has no before/after balance for the sentence to derive a
+      // bare number and a unit word from separately, unlike stock.issued's
+      // subtraction above.
+      const qty = diff?.quantity?.to;
+      const reason = diff?.reason?.to;
+      return `${entry.actorLabel} wrote off ${qty ?? "stock"} of ${entry.entityLabel}${typeof reason === "string" && reason ? ` — ${reason}` : ""}`;
+    }
+    case "stock.lot-cost-set": {
+      const cost = diff?.unitCost?.to;
+      const costStr = typeof cost === "number" ? `₱${cost.toFixed(2)}` : "a cost";
+      return `${entry.actorLabel} priced a lot of ${entry.entityLabel} at ${costStr}`;
+    }
+    case "stock.document-added": {
+      const kind = diff?.kind?.to;
+      const label = typeof kind === "string" ? (LOT_DOCUMENT_ARTICLE_LABEL[kind] ?? "a document") : "a document";
+      return `${entry.actorLabel} attached ${label} to ${entry.entityLabel}`;
+    }
     default:
       return `${entry.actorLabel} ${entry.action} ${entry.entityLabel}`;
   }

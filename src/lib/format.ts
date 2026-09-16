@@ -48,6 +48,21 @@ export function fmtMoney(value: number | string | null | undefined): string {
   return moneyFmt.format(Number(value));
 }
 
+/**
+ * Phase 22 (facts-tasks-4-7.md "Exports and reports"): `fmtMoney` rounds to
+ * whole pesos, which is right for balances but wrong for a lot's unit cost —
+ * ₱0.90 and ₱9.25 both round to "₱1" / "₱9" under `fmtMoney`. Two decimals,
+ * always.
+ */
+const moneyExactFmt = new Intl.NumberFormat("en-PH", {
+  style: "currency", currency: "PHP", minimumFractionDigits: 2, maximumFractionDigits: 2,
+});
+
+export function fmtMoneyExact(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return moneyExactFmt.format(Number(value));
+}
+
 const DAY_MS = 86_400_000;
 
 export function fmtRelativeDays(value: Date | string, now: Date = new Date()): string {

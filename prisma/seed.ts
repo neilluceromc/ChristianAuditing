@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import { encryptSecret } from "../src/server/crypto";
 import { secretAad } from "../src/server/webhooks/sign";
 import { SEED_PASSWORD } from "./fixtures";
+import { allocate, type LotState, type Allocation } from "../src/lib/stock-allocation";
+import { localDateISO } from "../src/lib/format";
 
 const prisma = new PrismaClient();
 
@@ -29,7 +31,8 @@ async function main() {
       "AssetDocument", "PurchaseUnit", "PurchaseRequest", "Asset", "PolicySlot",
       "EquipmentPolicy", "EmployeeTransfer", "Employee", "AssetType", "AssetCategory", "Vendor",
       "Department", "FeatureFlag", "User",
-      "StocktakeLine", "Stocktake", "StockMovement", "StockLot", "StockItem", "StockCategory" CASCADE`);
+      "StocktakeLine", "Stocktake", "StockMovement", "StockLotDocument", "StockAllocation", "StockLot",
+      "StockItem", "StockCategory" CASCADE`);
 
   const hash = await bcrypt.hash(SEED_PASSWORD, 10);
 
@@ -557,29 +560,70 @@ async function main() {
       data: { code, name, unit, packSize, reorderLevel, categoryId: stockCats[cat].id },
     });
     stockItems[code] = item;
+    // Spec §2.8/§2.7 step 2: every OPENING movement gets an OPENING lot first
+    // (uncosted, dated 30 days back) so the ledger invariant (§2.4 — every
+    // positive movement has a lotId) holds from a fresh seed, the same as a
+    // migrated D1 database after the backfill.
+    const openingLot = await prisma.stockLot.create({
+      data: { itemId: item.id, origin: "OPENING", lotDate: day(-30), unitCost: null, quantity: opening, receivedById: purchasing.id },
+    });
     await prisma.stockMovement.create({
-      data: { itemId: item.id, kind: "OPENING", quantity: opening, actorId: purchasing.id, occurredAt: day(-30), reason: "Opening stock" },
+      data: { itemId: item.id, kind: "OPENING", quantity: opening, lotId: openingLot.id, actorId: purchasing.id, occurredAt: day(-30), reason: "Opening stock" },
     });
   }
-  const receipt = async (code: string, qty: number, daysAgo: number, unitCost: number, reference: string) => {
+  const receipt = async (code: string, qty: number, daysAgo: number, unitCost: number | null, reference: string, expiresAt: Date | null = null) => {
     const lot = await prisma.stockLot.create({
-      data: { itemId: stockItems[code].id, supplierId: vendors[2].id, lotDate: day(-daysAgo), unitCost, quantity: qty, reference, receivedById: purchasing.id },
+      data: { itemId: stockItems[code].id, supplierId: vendors[2].id, lotDate: day(-daysAgo), expiresAt, origin: "RECEIPT", unitCost, quantity: qty, reference, receivedById: purchasing.id },
     });
     await prisma.stockMovement.create({ data: { itemId: stockItems[code].id, kind: "RECEIPT", quantity: qty, lotId: lot.id, actorId: purchasing.id, occurredAt: day(-daysAgo) } });
   };
   await receipt("OS-0001", 20, 21, 245, "DR-1101");
   await receipt("OS-0002", 60, 21, 8.5, "DR-1101");
-  await receipt("CM-0001", 12, 18, 95, "DR-1102");
-  await receipt("PN-0001", 60, 14, 9.25, "DR-1103");
-  await receipt("PN-0002", 100, 14, 3.1, "DR-1103");
+  await receipt("CM-0001", 12, 18, 95, "DR-1102", day(200));
+  await receipt("PN-0001", 60, 14, 9.25, "DR-1103", day(10));
+  await receipt("PN-0002", 100, 14, 3.1, "DR-1103", day(20));
   await receipt("PN-0004", 48, 7, 12, "DR-1104");
+  // D2 additions (spec §2.8): an uncosted receipt (the "Set unit cost" case)
+  // and a receipt that already arrived expired, with nothing issued from it.
+  await receipt("OS-0003", 24, 9, null, "DR-1105");
+  await receipt("PN-0003", 100, 20, 0.9, "DR-1103", day(-5));
+
+  // Spec §4.1's allocate() is the single source of truth for which lots an
+  // outflow draws from — the seed calls it exactly as movement-actions.ts
+  // does, reading each item's lots and allocations written so far under no
+  // lock (single-writer seed) instead of the server's row lock.
+  const lotStatesFor = async (itemId: string): Promise<LotState[]> => {
+    const lots = await prisma.stockLot.findMany({
+      where: { itemId },
+      include: { allocations: { select: { quantity: true } } },
+    });
+    return lots.map((lot) => ({
+      id: lot.id,
+      remaining: lot.quantity - lot.allocations.reduce((sum, a) => sum + a.quantity, 0),
+      unitCost: lot.unitCost === null ? null : lot.unitCost.toNumber(),
+      lotDate: lot.lotDate,
+      expiresAt: lot.expiresAt,
+    }));
+  };
+  const writeAllocations = async (movementId: string, allocations: Allocation[]) => {
+    await prisma.stockAllocation.createMany({
+      data: allocations.map((a) => ({ movementId, lotId: a.lotId, quantity: a.quantity })),
+    });
+  };
   const issue = async (code: string, qty: number, daysAgo: number, dept: string, empNo: string | null, reason: string) => {
-    await prisma.stockMovement.create({
+    const itemId = stockItems[code].id;
+    const today = localDateISO(day(-daysAgo));
+    const result = allocate(await lotStatesFor(itemId), qty, today, "skip");
+    if (!result.ok) {
+      throw new Error(`Seed issue ${code} -${qty}: allocate() came up short by ${result.short} (expired remaining ${result.expiredRemaining})`);
+    }
+    const movement = await prisma.stockMovement.create({
       data: {
-        itemId: stockItems[code].id, kind: "ISSUE", quantity: -qty, actorId: purchasing.id, occurredAt: day(-daysAgo),
+        itemId, kind: "ISSUE", quantity: -qty, actorId: purchasing.id, occurredAt: day(-daysAgo),
         departmentId: depts[dept].id, employeeId: empNo ? emp(empNo).id : null, reason,
       },
     });
+    await writeAllocations(movement.id, result.allocations);
   };
   await issue("OS-0001", 12, 15, "Finance", null, "Monthly paper");
   await issue("OS-0002", 24, 12, "Sales", "EMP-0042", "New hires");
@@ -598,12 +642,31 @@ async function main() {
       ] },
     },
   });
-  await prisma.stockMovement.createMany({
-    data: [
-      { itemId: stockItems["CM-0001"].id, kind: "ADJUSTMENT", quantity: -2, reason: "Stocktake ST-0001", stocktakeId: st.id, actorId: purchasing.id, occurredAt: day(-10) },
-      { itemId: stockItems["CM-0003"].id, kind: "ADJUSTMENT", quantity: 1, reason: "Stocktake ST-0001", stocktakeId: st.id, actorId: purchasing.id, occurredAt: day(-10) },
-    ],
-  });
+  // CM-0001 −2: a stocktake correction, so it allocates through the same
+  // allocate() path as an issue but with the "first" policy (spec §2.8).
+  {
+    const itemId = stockItems["CM-0001"].id;
+    const today = localDateISO(day(-10));
+    const result = allocate(await lotStatesFor(itemId), 2, today, "first");
+    if (!result.ok) {
+      throw new Error(`Seed stocktake CM-0001 -2: allocate() came up short by ${result.short} (expired remaining ${result.expiredRemaining})`);
+    }
+    const movement = await prisma.stockMovement.create({
+      data: { itemId, kind: "ADJUSTMENT", quantity: -2, reason: "Stocktake ST-0001", stocktakeId: st.id, actorId: purchasing.id, occurredAt: day(-10) },
+    });
+    await writeAllocations(movement.id, result.allocations);
+  }
+  // CM-0003 +1: a positive adjustment gets its own ADJUSTMENT lot, uncosted,
+  // the same as the migration's backfill would produce for a D1 row.
+  {
+    const itemId = stockItems["CM-0003"].id;
+    const lot = await prisma.stockLot.create({
+      data: { itemId, origin: "ADJUSTMENT", lotDate: day(-10), unitCost: null, quantity: 1, receivedById: purchasing.id },
+    });
+    await prisma.stockMovement.create({
+      data: { itemId, kind: "ADJUSTMENT", quantity: 1, lotId: lot.id, reason: "Stocktake ST-0001", stocktakeId: st.id, actorId: purchasing.id, occurredAt: day(-10) },
+    });
+  }
   await prisma.$executeRaw`SELECT setval('stocktake_ref_seq', 1)`;
 
   console.log("Seed complete.");

@@ -371,6 +371,7 @@ interface StockCategoryRow {
   id: string;
   name: string;
   prefix: string;
+  archivedAt: Date | null;
 }
 interface StockItemRow {
   id: string;
@@ -408,11 +409,16 @@ export function buildStockRefs(categories: StockCategoryRow[], items: StockItemR
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
-  const categoriesByKey = new Map<string, { id: string; prefix: string } | null>();
+  // Phase 22 (spec §4.5): the planner blocks a row that names an archived
+  // category, so the ref carries that flag alongside id and prefix.
+  const categoriesByKey = new Map<string, { id: string; prefix: string; archived: boolean } | null>();
   for (const c of categories) {
     for (const raw of [c.name, c.prefix]) {
       const key = refKey(raw);
-      categoriesByKey.set(key, (counts.get(key) ?? 0) > 1 ? null : { id: c.id, prefix: c.prefix });
+      categoriesByKey.set(
+        key,
+        (counts.get(key) ?? 0) > 1 ? null : { id: c.id, prefix: c.prefix, archived: c.archivedAt !== null },
+      );
     }
   }
   return {
@@ -435,7 +441,7 @@ export function buildStockRefs(categories: StockCategoryRow[], items: StockItemR
  */
 export async function resolveStockRefs(): Promise<StockRefs> {
   const [categories, items] = await Promise.all([
-    prisma.stockCategory.findMany({ select: { id: true, name: true, prefix: true }, orderBy: { name: "asc" } }),
+    prisma.stockCategory.findMany({ select: { id: true, name: true, prefix: true, archivedAt: true }, orderBy: { name: "asc" } }),
     prisma.stockItem.findMany({ select: { id: true, code: true }, orderBy: { code: "asc" } }),
   ]);
   return buildStockRefs(categories, items);

@@ -15,7 +15,7 @@ export default async function ReceiveStockPage({
   const sp = toSearchParams(await searchParams);
   const initialItemId = sp.get("item");
 
-  const [items, suppliers, metaRows] = await Promise.all([
+  const [items, supplierRows, metaRows] = await Promise.all([
     stockItemOptions(),
     supplierOptions(),
     prisma.stockItem.findMany({
@@ -23,6 +23,10 @@ export default async function ReceiveStockPage({
       select: { id: true, code: true, unit: true, packSize: true },
     }),
   ]);
+  // Leftover 3 (spec §8): receive-form.tsx's SupplierOption never used
+  // `archived` (supplierOptions() with no includeId never returns one
+  // anyway) — stripped here rather than widening the form's own type.
+  const suppliers = supplierRows.map(({ id, name }) => ({ id, name }));
   const meta: Record<string, StockItemMeta> = {};
   for (const r of metaRows) meta[r.id] = { unit: r.unit, packSize: r.packSize, code: r.code };
 

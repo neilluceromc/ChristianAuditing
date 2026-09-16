@@ -110,7 +110,6 @@ export default async function StocktakeDetailPage({
               <StocktakeCount
                 stocktakeId={st.id}
                 lines={st.lines.map((l) => ({ id: l.id, code: l.code, name: l.name, unit: l.unit, countedQty: l.countedQty }))}
-                canCount={manage}
               />
             )}
           </CardBody>

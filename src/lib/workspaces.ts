@@ -107,6 +107,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         { label: "Receive stock", href: "/stock/receive", roles: ["admin", "purchasing_staff"] },
         { label: "Issue stock", href: "/stock/issue", roles: ["admin", "purchasing_staff"] },
         { label: "Stocktakes", href: "/stock/stocktakes" },
+        { label: "Reports", href: "/stock/reports" },
         { label: "Stock categories", href: "/stock/categories", roles: ["admin", "purchasing_staff"] },
         { label: "Import items", href: "/stock/import", roles: ["admin", "purchasing_staff"] },
       ],

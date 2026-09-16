@@ -3,6 +3,7 @@ import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { Pill } from "@/components/ui/pill";
 import { unitsLabel } from "@/lib/stock-balance";
 import { fmtDate } from "@/lib/format";
+import { ExpiryPill } from "@/components/stock/expiry-pill";
 import type { StockItemRow } from "@/server/modules/stock/queries";
 
 export function StockItemsTable({ rows }: { rows: StockItemRow[] }) {
@@ -37,6 +38,7 @@ export function StockItemsTable({ rows }: { rows: StockItemRow[] }) {
               <span className="inline-flex items-center justify-end gap-2">
                 <span className="font-mono text-xs text-fg">{unitsLabel(r.balance, r.unit)}</span>
                 {r.low && <Pill tone="accent">LOW</Pill>}
+                <ExpiryPill expiring={r.expiring} />
               </span>
             </Td>
             <Td align="right" mono>{r.reorderLevel}</Td>
