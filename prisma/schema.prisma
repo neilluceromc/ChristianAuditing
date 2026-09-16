@@ -157,6 +157,7 @@ model User {
   requestDocuments         RequestDocument[]       @relation("requestDocuments")
   stockLotsReceived        StockLot[]              @relation("stockLotsReceived")
   stockMovements           StockMovement[]         @relation("stockMovements")
+  stockLotDocuments        StockLotDocument[]      @relation("stockLotDocuments")
   stocktakesOpened         Stocktake[]             @relation("stocktakesOpened")
   stocktakesPosted         Stocktake[]             @relation("stocktakesPosted")
   stocktakeLinesCounted    StocktakeLine[]         @relation("stocktakeLinesCounted")
@@ -757,6 +758,14 @@ enum StocktakeState {
   CANCELLED
 }
 
+/// Spec §2.1 (D2). Origin of a lot: a normal receipt, an opening-stock
+/// backfill, or a positive stocktake/manual adjustment.
+enum StockLotOrigin {
+  RECEIPT
+  OPENING
+  ADJUSTMENT
+}
+
 /// Phase 19 (spec §2.1). `prefix` numbers the category's items (OS-0001);
 /// `nextNumber` is the series counter, advanced inside the create transaction.
 model StockCategory {
@@ -795,23 +804,30 @@ model StockItem {
 }
 
 /// Spec §2.3 — one per receipt; D2 consumes lots oldest-first, D1 only records them.
+/// D2 (spec §2.1) adds expiry and origin; a lot's remaining quantity and every
+/// value stay derived from StockAllocation, never stored.
 model StockLot {
-  id           String          @id @default(cuid())
+  id           String             @id @default(cuid())
   itemId       String
-  item         StockItem       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  item         StockItem          @relation(fields: [itemId], references: [id], onDelete: Restrict)
   supplierId   String?
-  supplier     Vendor?         @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier     Vendor?            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   lotDate      DateTime
-  unitCost     Decimal?        @db.Decimal(12, 2)
+  expiresAt    DateTime?
+  origin       StockLotOrigin     @default(RECEIPT)
+  unitCost     Decimal?           @db.Decimal(12, 2)
   quantity     Int
   reference    String?
   receivedById String
-  receivedBy   User            @relation("stockLotsReceived", fields: [receivedById], references: [id], onDelete: Restrict)
-  createdAt    DateTime        @default(now())
+  receivedBy   User               @relation("stockLotsReceived", fields: [receivedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime           @default(now())
   movements    StockMovement[]
+  allocations  StockAllocation[]
+  documents    StockLotDocument[]
 
   @@index([itemId])
   @@index([supplierId])
+  @@index([itemId, expiresAt])
 }
 
 /// Spec §2.4 — APPEND-ONLY (trigger stock_movement_append_only). quantity is
@@ -835,11 +851,47 @@ model StockMovement {
   actor        User              @relation("stockMovements", fields: [actorId], references: [id], onDelete: Restrict)
   occurredAt   DateTime          @default(now())
   createdAt    DateTime          @default(now())
+  allocations  StockAllocation[]
 
   @@index([itemId, occurredAt, id])
   @@index([kind])
   @@index([stocktakeId])
   @@index([departmentId])
+}
+
+/// Spec §2.2 (D2) — APPEND-ONLY (trigger stock_allocation_append_only). Splits
+/// a negative movement's quantity across the lots it drew from; a lot's
+/// remaining quantity is always `quantity - SUM(allocation.quantity)`, never
+/// a column.
+model StockAllocation {
+  id         String        @id @default(cuid())
+  movementId String
+  movement   StockMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  lotId      String
+  lot        StockLot      @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  quantity   Int
+  createdAt  DateTime      @default(now())
+
+  @@unique([movementId, lotId])
+  @@index([lotId])
+  @@index([movementId])
+}
+
+/// Spec §2.3 (D2) — mirrors RequestDocument field for field; a delivery
+/// receipt, invoice or other file attached to a lot.
+model StockLotDocument {
+  id           String   @id @default(cuid())
+  lotId        String
+  lot          StockLot @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  kind         String
+  fileName     String
+  path         String
+  checksum     String
+  uploadedById String?
+  uploadedBy   User?    @relation("stockLotDocuments", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime @default(now())
+
+  @@index([lotId])
 }
 
 /// Spec §2.5.
