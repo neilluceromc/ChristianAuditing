@@ -310,6 +310,14 @@ test.describe("asset record", () => {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
       "base64",
     );
+    // Same hydration race `waitForHydration` exists for above: setInputFiles
+    // dispatches a native change event the instant the (server-rendered)
+    // input exists in the DOM, which can land before React's delegated
+    // onChange is wired up — the upload() handler never runs, and the panel
+    // just sits in its untouched default state (no error, no rate-limit
+    // banner, no leftover doc link either — which is why this was easy to
+    // mistake for a rate-limit collision from the tests ahead of this one).
+    await waitForHydration(page.getByLabel("Upload document"));
     await page.getByLabel("Upload document").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hi") });
     await expect(page.getByText(/Accepted: PDF, PNG, JPG/)).toBeVisible();
     // A fixed "photo.png" name means a rerun's assertion below is satisfied
