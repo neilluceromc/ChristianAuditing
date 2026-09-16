@@ -1,18 +1,20 @@
 # Phase 22 — Stock control D2: FIFO lots and costing, expiry, reports, receipt documents
 
-**Status:** implemented on branch `phase-22-stock-control-d2` (10 tasks, `D-1`…`D-15` — `D-16`+ reserved for
-the final whole-branch review and its fix wave), code-complete 2026-09-16 at final tree `dfb1a0f`, unmerged
-and unpushed. Design approved in conversation 2026-09-16 (no requisitions; uncosted stock is real but
-valueless; expiry optional on any lot with earliest-expiry-first consumption; three reports; allocation rows
-written at issue time with D1 history backfilled in the migration); the user said "proceed to dev": the
-method ran through to the finishing menu without further check-ins; merging, pushing and redeploying stay the
-user's decisions, not pre-authorised. Battery at close: `tsc` clean · `lint` clean · **23 migrations**, schema
-up to date · **1404 unit / 79 files** · **319 e2e / 31 files** by `--list`, across seven foreground chunks
-with explicit file paths (chunk E split into E1/E2 per §9.3, since the combined chunk would have carried 67
-tests), `E2E_PORT=3100 --workers=1 --global-timeout=540000` — **A 54 passed (3.4m) · B 67 passed (3.9m) · C 63
-passed (4.1m) · D 38 passed (2.7m) · E1 36 passed (5.6m) · E2 31 passed (3.0m) · F 30 passed (3.2m) = 319**,
-zero failed, zero did-not-run, all first pass. See the plan's `D-1`…`D-15` and "Measured at close" for the
-full record.
+**Status:** implemented on branch `phase-22-stock-control-d2` (10 tasks, `D-1`…`D-20` — the final-review
+fix wave added `D-16`…`D-19`, the final battery `D-20`), code-complete 2026-09-16 at final tree `a4b57b5`,
+final-review fix wave included; unmerged and unpushed. Design approved in conversation 2026-09-16 (no
+requisitions; uncosted stock is real but valueless; expiry optional on any lot with earliest-expiry-first
+consumption; three reports; allocation rows written at issue time with D1 history backfilled in the
+migration); the user said "proceed to dev": the method ran through to the finishing menu without further
+check-ins; merging, pushing and redeploying stay the user's decisions, not pre-authorised. Battery on the
+final tree: `tsc` clean · `lint` clean · **23 migrations**, schema up to date · **1404 unit / 79 files** ·
+**319 e2e / 31 files** by `--list`, across seven foreground chunks with explicit file paths (chunk E split
+into E1/E2 per §9.3, since the combined chunk would have carried 67 tests), `E2E_PORT=3100 --workers=1
+--global-timeout=540000` — **A 54 passed (3.3m) · B 67 passed (3.9m) · C 63 passed (4.0m) · D 38 passed
+(2.6m) · E1 36 passed (5.7m) · E2 31 passed (3.1m) · F 30 passed (3.3m) = 319**, zero failed, zero
+did-not-run (chunk A's first pass hit one pre-existing e2e test-side flake, reproduced and fixed test-only
+before the clean re-run — see the plan's `D-20`). See the plan's `D-1`…`D-20` and "Measured at close" for
+the full record.
 
 **Plan:** `docs/superpowers/plans/2026-09-16-phase-22-stock-control-d2.md` (written next).
 
