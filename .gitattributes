@@ -1,0 +1,9 @@
+# Binary fixtures must never be line-ending-normalised: a PDF without a NUL byte
+# looks like text to git's heuristic, and core.autocrlf=true on the Windows
+# laptop would CRLF-mangle it on checkout (Phase 22 Task 8's delivery-receipt.pdf).
+*.pdf  binary
+*.xlsx binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
