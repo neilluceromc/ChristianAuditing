@@ -56,21 +56,36 @@ as `purchasing@`. Both pass e2e and axe; nobody has looked at them.
 
 ## 5. Development candidates parked here
 
-### 5.1 D2 — stock control, second half (own brainstorm and spec)
+### 5.1 D2 — stock control, second half (own brainstorm and spec) — **SHIPPED in Phase 22**
+(`phase-22-stock-control-d2`, code-complete 2026-09-16 at final tree `dfb1a0f`, unmerged and unpushed)
 
-Consumes what Phase 19 records. Scope agreed in the D1 brainstorm (spec
-`superpowers/specs/2026-09-09-stock-control-design.md` §1 "Out"):
+Consumed what Phase 19 records. Scope agreed in the D1 brainstorm (spec
+`superpowers/specs/2026-09-09-stock-control-design.md` §1 "Out"); implemented per spec
+`superpowers/specs/2026-09-16-stock-control-d2-design.md`, plan
+`superpowers/plans/2026-09-16-phase-22-stock-control-d2.md` (10 tasks, `D-1`…`D-15`):
 
-- **FIFO lot consumption**: an issue consumes the oldest `StockLot`s first; cost of issue and on-hand value
-  from lot `unitCost`; an allocation table (movement → lot, quantity) so a lot's remaining quantity is
-  derived, never stored.
-- **Expiry**: an optional expiry date on pantry lots with warnings (list facet, item page, maybe Home).
-- **Reports and exports**: quantities and value on hand, item history, consumption by department and month.
-- **Receipt documents** (a fourth per-owner document table mirroring `AssetDocument`).
-- Open question to settle first: whether Purchasing wants **requisitions** after using the ledger.
-- Known deferred minors from D1 to fold in: the importer does not refuse an archived category (plan D-10);
-  `SupplierOption.archived` unused; a redundant OPEN check in the review; `canCount` always true; the
-  planner's duplicate-key gap; a Home worklist low-stock signal.
+- **FIFO lot consumption** — **shipped:** an issue consumes the oldest `StockLot`s first; cost of issue and
+  on-hand value from lot `unitCost`; an allocation table (movement → lot, quantity) so a lot's remaining
+  quantity is derived, never stored.
+- **Expiry** — **shipped:** an optional expiry date on any lot with warnings (list facet and pill, item page
+  Lots card, the "Expiring within 30 days" Home tile) and earliest-expiry-first consumption on issue and
+  write-off.
+- **Reports and exports** — **shipped:** on-hand and value (category subtotals, an uncosted toggle),
+  consumption by department and month (grid, flat export), and expiring/expired lots (window chips) — each
+  with an xlsx export.
+- **Receipt documents** — **shipped:** `StockLotDocument`, a fourth per-owner document table mirroring
+  `AssetDocument`, attached from the Lots card and downloaded through a role-gated route.
+- Open question, now decided: whether Purchasing wants **requisitions** after using the ledger —
+  **decided no on 2026-09-16** (D2 brainstorm); revisit only if Purchasing asks after using the ledger.
+- Known deferred minors from D1 — **all closed in Phase 22** (spec §8, "The D1 leftovers closed here"): the
+  importer now refuses an archived category, in the planner and the apply path (plan D-10 closed);
+  `SupplierOption.archived` — the unused prop removed from `receive-form.tsx`, and the caller's population
+  of it with it; the redundant `state === "OPEN"` re-check in `stocktake-review.tsx` removed; `canCount` —
+  the always-true prop removed from `stocktake-count.tsx` (its one call site never rendered it any other
+  way); the planner's duplicate-key gap — an import code row now also registers the matched item's `new:`
+  key; a Home worklist low-stock signal — shipped as the "Below reorder level" `Stat` tile on Purchasing
+  Home, linking to `/stock?low=1`. One more landed as a bonus, not originally on this list: the import's
+  unit cost is now honoured on CREATE rows (the "Unit cost is ignored" notice removed) — spec §8 item 6.
 
 ### 5.2 Other candidates (PICKUP §4 item 5, unchanged order)
 
