@@ -6,12 +6,16 @@ import { actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { canManageStock } from "@/lib/stock-access";
-import { adjustSchema, issueSchema, receiptSchema, todayStr } from "@/lib/stock-schema";
+import {
+  adjustSchema, issueSchema, receiptSchema, setLotCostSchema, todayStr, writeOffSchema,
+} from "@/lib/stock-schema";
 import { canIssue, signedQuantity } from "@/lib/stock-movement-rules";
 import { unitsLabel } from "@/lib/stock-balance";
+import { localDateISO } from "@/lib/format";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
+import { ActionFailure, openLots, recordInflowLot, recordOutflow } from "./ledger";
 
 function revalidateItem(itemId: string) {
   revalidatePath("/stock");
@@ -19,20 +23,9 @@ function revalidateItem(itemId: string) {
   revalidatePath("/audit");
 }
 
-/**
- * R2/I-1, the same local class `item-actions.ts` and `stocktake-actions.ts`
- * each declare: a refusal discovered inside `$transaction` must THROW so
- * Prisma rolls back whatever the callback already wrote, never `return` — a
- * plain `return` from an interactive transaction's callback COMMITS. Nothing
- * is written above `issueStock`'s three in-transaction refusals today, but
- * the pattern is declared here (not just followed ad hoc) so the next writer
- * who adds a write above one of them inherits the rollback for free instead
- * of having to notice the hazard themselves.
- */
-class ActionFailure extends Error {
-  constructor(public readonly result: ActionResult<never>) {
-    super(result.ok ? undefined : result.message);
-  }
+/** Spec §5.4/R3: names the lot in an audit diff — its reference when it has one, else its lot date. */
+function lotLabel(lot: { reference: string | null; lotDate: Date }): string {
+  return lot.reference || localDateISO(lot.lotDate);
 }
 
 /**
@@ -68,6 +61,7 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ movem
       data: {
         itemId: item.id, supplierId: d.supplierId || null,
         lotDate: new Date(`${d.lotDate || d.occurredAt || todayStr()}T00:00:00Z`),
+        expiresAt: d.expiresAt ? new Date(`${d.expiresAt}T00:00:00Z`) : null,
         unitCost: d.unitCost ?? null, quantity: d.quantity, reference: d.reference || null, receivedById: user.id,
       },
     });
@@ -126,15 +120,17 @@ export async function issueStock(input: unknown): Promise<ActionResult<{ balance
         if (!employee) throw new ActionFailure(validationError({ employeeId: "Unknown employee" }));
         employeeId = employee.id;
       }
-      await tx.stockMovement.create({
-        data: {
-          itemId: item.id, kind: "ISSUE", quantity: signedQuantity("ISSUE", d.quantity), departmentId: dept.id,
-          employeeId: employeeId || null, reason: d.reason || null, actorId: user.id,
-        },
+      const { cost } = await recordOutflow(tx, {
+        item, kind: "ISSUE", quantity: d.quantity, policy: "skip", today: localDateISO(new Date()),
+        fields: { departmentId: dept.id, employeeId, reason: d.reason || null, actorId: user.id },
       });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: item.id, action: "stock.issued",
-        diff: { quantity: { from: balance, to: balance - d.quantity }, department: { from: null, to: dept.name } },
+        diff: {
+          quantity: { from: balance, to: balance - d.quantity },
+          department: { from: null, to: dept.name },
+          cost: { from: null, to: cost },
+        },
       });
       return { balance: balance - d.quantity };
     });
@@ -150,7 +146,12 @@ export async function issueStock(input: unknown): Promise<ActionResult<{ balance
  * `delta` writes the signed change as-is; `set` computes `target - balance`
  * under the same row lock. A zero result changes nothing, so it succeeds
  * without writing a no-op movement (the append-only ledger would otherwise
- * carry rows nobody can ever undo).
+ * carry rows nobody can ever undo). Spec §5.2: a positive result becomes an
+ * uncosted ADJUSTMENT lot (`recordInflowLot`); a negative one draws down the
+ * item's lots expired-first (`recordOutflow`, policy `"first"`) — wrapped in
+ * `try/catch` because that helper can now throw `ActionFailure` on a
+ * shortfall, even though the invariant Σ remaining = balance means a
+ * well-formed adjustment should never actually hit it.
  */
 export async function adjustStock(input: unknown): Promise<ActionResult<{ balance: number }>> {
   const user = await actionUser();
@@ -162,26 +163,142 @@ export async function adjustStock(input: unknown): Promise<ActionResult<{ balanc
   const d = parsed.data;
 
   const item = await prisma.stockItem.findUnique({
-    where: { id: d.itemId }, select: { id: true, code: true, archivedAt: true },
+    where: { id: d.itemId }, select: { id: true, code: true, unit: true, archivedAt: true },
   });
   if (!item) return conflict("That item no longer exists.");
   if (item.archivedAt) return conflict(`${item.code} is archived — restore it first.`);
 
-  const result = await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT "id" FROM "StockItem" WHERE "id" = ${item.id} FOR UPDATE`;
-    const sum = await tx.stockMovement.aggregate({ where: { itemId: item.id }, _sum: { quantity: true } });
-    const balance = sum._sum.quantity ?? 0;
-    const q = d.mode === "delta" ? d.quantity : d.quantity - balance;
-    if (q === 0) return { balance };
-    await tx.stockMovement.create({
-      data: { itemId: item.id, kind: "ADJUSTMENT", quantity: q, reason: d.reason, actorId: user.id },
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "StockItem" WHERE "id" = ${item.id} FOR UPDATE`;
+      const sum = await tx.stockMovement.aggregate({ where: { itemId: item.id }, _sum: { quantity: true } });
+      const balance = sum._sum.quantity ?? 0;
+      const q = d.mode === "delta" ? d.quantity : d.quantity - balance;
+      if (q === 0) return { balance };
+      if (q > 0) {
+        await recordInflowLot(tx, {
+          item, origin: "ADJUSTMENT", quantity: q, unitCost: null,
+          fields: { reason: d.reason, actorId: user.id },
+        });
+      } else {
+        await recordOutflow(tx, {
+          item, kind: "ADJUSTMENT", quantity: -q, policy: "first", today: localDateISO(new Date()),
+          fields: { reason: d.reason, actorId: user.id },
+        });
+      }
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: item.id, action: "stock.adjusted",
+        diff: { balance: { from: balance, to: balance + q }, reason: { from: null, to: d.reason } },
+      });
+      return { balance: balance + q };
     });
-    await writeAudit(tx, {
-      actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: item.id, action: "stock.adjusted",
-      diff: { balance: { from: balance, to: balance + q }, reason: { from: null, to: d.reason } },
-    });
-    return { balance: balance + q };
+    revalidateItem(item.id);
+    return ok(result);
+  } catch (e) {
+    if (e instanceof ActionFailure) return e.result;
+    throw e;
+  }
+}
+
+/**
+ * Spec §5.2 (new). `quantity` defaults to the lot's own remaining, resolved
+ * here under the item lock (the schema never sees a lot, so it cannot
+ * default this itself) — a request for MORE than that resolves to a
+ * shortfall `recordOutflow` itself refuses with `Only N left on this lot`.
+ * The one case `recordOutflow`'s own guard cannot cover is the RESOLVED
+ * default being zero (a closed lot with nothing left): `allocate()` treats
+ * `quantity <= 0` as a programming error and throws a raw `Error`, not an
+ * `ActionFailure`, so that case is refused here before ever calling it.
+ */
+export async function writeOffLot(input: unknown): Promise<ActionResult<{ balance: number }>> {
+  const user = await actionUser();
+  if (!user || !canManageStock(user.role)) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = writeOffSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+
+  const lot = await prisma.stockLot.findUnique({
+    where: { id: d.lotId },
+    select: {
+      id: true, reference: true, lotDate: true,
+      item: { select: { id: true, code: true, unit: true, archivedAt: true } },
+    },
   });
-  revalidateItem(item.id);
-  return ok(result);
+  if (!lot) return conflict("That lot no longer exists.");
+  if (lot.item.archivedAt) return conflict(`${lot.item.code} is archived — restore it first.`);
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "StockItem" WHERE "id" = ${lot.item.id} FOR UPDATE`;
+      const lots = await openLots(tx, lot.item.id);
+      const remaining = lots.find((l) => l.id === lot.id)?.remaining ?? 0;
+      const quantity = d.quantity ?? remaining;
+      if (quantity <= 0) throw new ActionFailure(conflict("Only 0 left on this lot"));
+
+      await recordOutflow(tx, {
+        item: lot.item, kind: "ADJUSTMENT", quantity, policy: "first",
+        today: localDateISO(new Date()), onlyLotId: lot.id,
+        fields: { reason: d.reason, actorId: user.id },
+      });
+
+      const sum = await tx.stockMovement.aggregate({ where: { itemId: lot.item.id }, _sum: { quantity: true } });
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: lot.item.id, action: "stock.written-off",
+        diff: {
+          lot: { from: null, to: lotLabel(lot) },
+          quantity: { from: null, to: unitsLabel(quantity, lot.item.unit) },
+          reason: { from: null, to: d.reason },
+        },
+      });
+      return { balance: sum._sum.quantity ?? 0 };
+    });
+    revalidateItem(lot.item.id);
+    return ok(result);
+  } catch (e) {
+    if (e instanceof ActionFailure) return e.result;
+    throw e;
+  }
+}
+
+/** Spec §4.3/§5.2 (new). `unitCost` is settable exactly once — the conditional `updateMany` is the guard against a race with a second `setLotCost` call, not just the pre-check above it. */
+export async function setLotCost(input: unknown): Promise<ActionResult<null>> {
+  const user = await actionUser();
+  if (!user || !canManageStock(user.role)) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = setLotCostSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+
+  const lot = await prisma.stockLot.findUnique({
+    where: { id: d.lotId },
+    select: {
+      id: true, unitCost: true, reference: true, lotDate: true,
+      item: { select: { id: true, code: true, archivedAt: true } },
+    },
+  });
+  if (!lot) return conflict("That lot no longer exists.");
+  if (lot.item.archivedAt) return conflict(`${lot.item.code} is archived — restore it first.`);
+  if (lot.unitCost !== null) return conflict("This lot already has a cost");
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "StockItem" WHERE "id" = ${lot.item.id} FOR UPDATE`;
+      const written = await tx.stockLot.updateMany({
+        where: { id: lot.id, unitCost: null }, data: { unitCost: d.unitCost },
+      });
+      if (written.count === 0) throw new ActionFailure(conflict("This lot already has a cost"));
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: lot.item.id, action: "stock.lot-cost-set",
+        diff: { lot: { from: null, to: lotLabel(lot) }, unitCost: { from: null, to: d.unitCost } },
+      });
+    });
+  } catch (e) {
+    if (e instanceof ActionFailure) return e.result;
+    throw e;
+  }
+  revalidateItem(lot.item.id);
+  return ok(null);
 }

@@ -11,9 +11,9 @@ import { readGrid } from "@/server/import/read-sheet";
 import { matchHeaders } from "@/lib/import-assets";
 import { STOCK_IMPORT_HEADERS, planStockRows, stockChanges, type StockPlan } from "@/lib/import-stock";
 import { formatStockCode, parseStockCode } from "@/lib/stock-code";
-import { signedQuantity } from "@/lib/stock-movement-rules";
 import { groupByCause, type CauseGroup } from "@/lib/import-vocabulary";
 import { resolveStockRefs } from "./resolve";
+import { recordInflowLot } from "../stock/ledger";
 import { conflict, forbidden, ok, rateLimited, type ActionResult } from "@/server/action-result";
 
 export interface StockPlanResult {
@@ -132,6 +132,17 @@ export async function applyStockImport(
       const outcome = await prisma.$transaction(async (tx) => {
         if (row.kind === "create") {
           const d = row.data;
+          // Ruling R5 / spec §4.5: the planner already blocks a row naming an
+          // archived category (`archived-stock-category`), but a category can
+          // be archived in the gap between the dry-run plan and this click —
+          // re-read it here, right before the write, and refuse the same way
+          // every other vanished-or-changed reference refuses in this loop
+          // (a per-row `RowWriteError`, not a whole-file failure).
+          const category = await tx.stockCategory.findUnique({ where: { id: d.categoryId }, select: { archivedAt: true } });
+          if (!category) throw new RowWriteError(`names ${STOCK_ROW_SUBJECT.fk}`);
+          if (category.archivedAt) {
+            throw new RowWriteError("names an archived category — restore it under Stock categories, or name an active one");
+          }
           let code = d.code;
           if (code) {
             // An explicit code: raise the series past it so a LATER manual
@@ -153,11 +164,12 @@ export async function applyStockImport(
             },
           });
           if (d.openingQty > 0) {
-            await tx.stockMovement.create({
-              data: {
-                itemId: item.id, kind: "OPENING", quantity: signedQuantity("OPENING", d.openingQty),
-                actorId: actor.id, reason: "Opening stock (import)", occurredAt: new Date(),
-              },
+            // Spec §4.5/decision 3: a `unitCost` cell on this CREATE row
+            // prices the opening lot this inflow creates; blank stays
+            // uncosted, same as every other opening lot.
+            await recordInflowLot(tx, {
+              item, origin: "OPENING", quantity: d.openingQty, unitCost: d.unitCost,
+              fields: { reason: "Opening stock (import)", occurredAt: new Date(), actorId: actor.id },
             });
           }
           await writeAudit(tx, {

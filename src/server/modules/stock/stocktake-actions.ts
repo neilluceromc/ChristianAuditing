@@ -10,24 +10,13 @@ import { writeAudit } from "@/server/audit";
 import { canManageStock } from "@/lib/stock-access";
 import { countSchema, stocktakeOpenSchema } from "@/lib/stock-schema";
 import { planStocktakePost } from "@/lib/stocktake";
+import { localDateISO } from "@/lib/format";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
+import { ActionFailure, recordInflowLot, recordOutflow } from "./ledger";
 
 const idSchema = z.object({ id: z.string().min(1) });
-
-/**
- * R2, same local class as `item-actions.ts`'s `createStockItem`: a refusal
- * discovered inside `$transaction` must THROW so Prisma rolls back whatever
- * the callback already wrote (the per-line ADJUSTMENT creates + audits in
- * `postStocktake`), not `return` — a plain `return` from an interactive
- * transaction's callback commits everything written so far.
- */
-class ActionFailure extends Error {
-  constructor(public readonly result: ActionResult<never>) {
-    super(result.ok ? undefined : result.message);
-  }
-}
 
 function revalidateStocktake(id?: string) {
   revalidatePath("/stock/stocktakes");
@@ -199,7 +188,15 @@ export async function postStocktake(input: unknown): Promise<ActionResult<{ adju
       await tx.$queryRaw`SELECT "id" FROM "Stocktake" WHERE "id" = ${id} FOR UPDATE`;
       const st = await tx.stocktake.findUnique({
         where: { id },
-        select: { id: true, refNo: true, state: true, lines: { select: { id: true, itemId: true, bookQty: true, countedQty: true } } },
+        select: {
+          id: true, refNo: true, state: true,
+          lines: {
+            select: {
+              id: true, itemId: true, bookQty: true, countedQty: true,
+              item: { select: { code: true, unit: true } },
+            },
+          },
+        },
       });
       if (!st) throw new ActionFailure(conflict("That stocktake no longer exists."));
       if (st.state !== "OPEN") throw new ActionFailure(conflict("This stocktake is no longer open."));
@@ -212,16 +209,32 @@ export async function postStocktake(input: unknown): Promise<ActionResult<{ adju
         ? await tx.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true } })
         : [];
       const current = new Map(sums.map((s) => [s.itemId, s._sum.quantity ?? 0]));
+      const itemsById = new Map(st.lines.map((l) => [l.itemId, { id: l.itemId, code: l.item.code, unit: l.item.unit }]));
       const plan = planStocktakePost(st.lines, current);
+      const reason = `Stocktake ${st.refNo}`;
 
+      // Spec §5.2: routed through the ledger helpers instead of a bare
+      // `stockMovement.create` — a positive line becomes an uncosted
+      // ADJUSTMENT lot, a negative one draws down the item's lots
+      // expired-first, so a stocktake's corrections carry allocations like
+      // every other outflow/inflow.
       for (const adj of plan.adjustments) {
         const before = current.get(adj.itemId) ?? 0;
-        await tx.stockMovement.create({
-          data: { itemId: adj.itemId, kind: "ADJUSTMENT", quantity: adj.quantity, reason: `Stocktake ${st.refNo}`, stocktakeId: st.id, actorId: user.id },
-        });
+        const item = itemsById.get(adj.itemId)!;
+        if (adj.quantity > 0) {
+          await recordInflowLot(tx, {
+            item, origin: "ADJUSTMENT", quantity: adj.quantity, unitCost: null,
+            fields: { reason, stocktakeId: st.id, actorId: user.id },
+          });
+        } else {
+          await recordOutflow(tx, {
+            item, kind: "ADJUSTMENT", quantity: -adj.quantity, policy: "first", today: localDateISO(new Date()),
+            fields: { reason, stocktakeId: st.id, actorId: user.id },
+          });
+        }
         await writeAudit(tx, {
           actorId: user.id, actorLabel: user.name, entityType: "stock-item", entityId: adj.itemId, action: "stock.adjusted",
-          diff: { balance: { from: before, to: before + adj.quantity }, reason: { from: null, to: `Stocktake ${st.refNo}` } },
+          diff: { balance: { from: before, to: before + adj.quantity }, reason: { from: null, to: reason } },
         });
       }
 
