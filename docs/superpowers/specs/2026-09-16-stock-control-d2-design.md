@@ -126,10 +126,11 @@ The seed does not rely on the backfill: it writes lots and allocations directly 
   nothing issued from it — the seeded expired lot with units remaining.
 - Expiry: `PN-0001`'s receipt lot (60 sachets, 14 days ago) gets `expiresAt` 10 days ahead — the seeded
   issue of 110 then consumes that lot first (earliest expiry) and 50 of the uncosted opening lot, leaving
-  40 on the opening lot; `PN-0004`'s receipt lot (48 bottles, 7 days ago, nothing issued) gets `expiresAt`
-  **20 days ahead** — the seeded expiring lot with units remaining, so the expiry report's Expiring block
-  and the Home tile are non-empty on a fresh database; `CM-0001`'s lot gets `expiresAt` 200 days ahead; the
-  other lots stay undated.
+  40 on the opening lot; `PN-0002`'s receipt lot (100 creamer sachets at 3.10, 14 days ago, nothing issued
+  from that item) gets `expiresAt` **20 days ahead** — the seeded expiring lot with units remaining, so the
+  expiry report's Expiring block and the Home tile are non-empty on a fresh database (`PN-0004` cannot serve:
+  its seeded issue of 50 would consume its expiring lot first); `CM-0001`'s lot gets `expiresAt` 200 days
+  ahead; the other lots stay undated.
 - The seed's `issue()` helper allocates through `allocate()` in `"skip"` mode as it writes each issue, so
   seeded allocations follow the same rule the actions apply; the two stocktake adjustments become an
   allocation (−2 on `CM-0001`, taken from the opening lot as the oldest) and an adjustment lot (+1 on
