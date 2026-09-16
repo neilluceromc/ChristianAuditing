@@ -278,6 +278,7 @@ describe("BLOCK_CAUSES", () => {
       "opening-on-existing": "link",
       "same-name-in-department": "option",
       "department-via-import": "option",
+      "archived-stock-category": "link",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);
@@ -392,6 +393,18 @@ describe("BLOCK_CAUSES", () => {
     expect(fix.option).toBe("keepCurrentDepartment");
     expect(spec.explain).toMatch(/transfer/i);
     expect(spec.explain).not.toMatch(/employment|offboarding/i);
+  });
+
+  // Phase 22 Task 2 (spec §4.5/§8 item 1): the category IS resolved (unlike
+  // unknown-stock-category) but archived, so the fix is "restore it or pick
+  // an active one" — a link to the categories page, never an option, since
+  // no in-file decision can un-archive a category.
+  it("gives archived-stock-category the spec's exact copy and a link fix, distinct from unknown-stock-category", () => {
+    const spec = blockSpec("archived-stock-category");
+    expect(spec.label).toBe("Category is archived");
+    expect(spec.explain).toBe("That category is archived. Restore it under Stock categories, or name an active one.");
+    expect(spec.fix).toEqual({ kind: "link", label: "Open stock categories", href: "/stock/categories" });
+    expect(spec.label).not.toBe(blockSpec("unknown-stock-category").label);
   });
 });
 

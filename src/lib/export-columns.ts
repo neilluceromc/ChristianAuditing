@@ -178,6 +178,108 @@ export const STOCK_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Last movement", width: 14, cell: (r) => ({ value: r.lastMovementAt, type: Date, format: "yyyy-mm-dd" }) },
 ];
 
+/**
+ * Phase 22 (spec §4.4): the `/stock/reports/on-hand` export — one row per
+ * item, grouped by category on screen but flat here (the same "flatten the
+ * grouped screen into one sheet" convention `CONSUMPTION_EXPORT_COLUMNS`
+ * below follows too). `valueOnHand`/`oldestLot`/`nearestExpiry` are `null`
+ * for an item with no open lots at all (never created a receipt, or
+ * everything issued) — the money and date cell shapes both already treat
+ * `null` as an empty cell, so no special-casing is needed here.
+ */
+export interface OnHandExportRow {
+  code: string;
+  name: string;
+  category: string;
+  unit: string;
+  balance: number;
+  openLots: number;
+  costedUnits: number;
+  uncostedUnits: number;
+  valueOnHand: number | null;
+  oldestLot: Date | null;
+  nearestExpiry: Date | null;
+}
+
+export const ON_HAND_EXPORT_COLUMNS: XlsxColumn<OnHandExportRow>[] = [
+  { label: "Code", width: 12, cell: (r) => ({ value: r.code }) },
+  { label: "Name", width: 30, cell: (r) => ({ value: r.name }) },
+  { label: "Category", width: 20, cell: (r) => ({ value: r.category }) },
+  { label: "Unit", width: 10, cell: (r) => ({ value: r.unit }) },
+  { label: "Balance", width: 10, cell: (r) => ({ value: r.balance, type: Number }) },
+  { label: "Open lots", width: 10, cell: (r) => ({ value: r.openLots, type: Number }) },
+  { label: "Costed units", width: 12, cell: (r) => ({ value: r.costedUnits, type: Number }) },
+  { label: "Uncosted units", width: 14, cell: (r) => ({ value: r.uncostedUnits, type: Number }) },
+  { label: "Value on hand", width: 14, cell: (r) => ({ value: r.valueOnHand, type: Number, format: "#,##0.00" }) },
+  { label: "Oldest lot", width: 13, cell: (r) => ({ value: r.oldestLot, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Nearest expiry", width: 14, cell: (r) => ({ value: r.nearestExpiry, type: Date, format: "yyyy-mm-dd" }) },
+];
+
+/**
+ * Phase 22 (spec §4.4): the `/stock/reports/consumption` export — the flat
+ * sheet behind the on-screen department × month grid (spec §6.2), one row
+ * per department × month × item so a pivot-minded reader can re-slice it
+ * however they like; `month` is the `monthKey` string (`stock-reports.ts`),
+ * not a `Date` — there is no single day a month-grain figure falls on.
+ */
+export interface ConsumptionExportRow {
+  department: string;
+  month: string;
+  category: string;
+  code: string;
+  item: string;
+  units: number;
+  cost: number | null;
+  uncostedUnits: number;
+}
+
+export const CONSUMPTION_EXPORT_COLUMNS: XlsxColumn<ConsumptionExportRow>[] = [
+  { label: "Department", width: 20, cell: (r) => ({ value: r.department }) },
+  { label: "Month", width: 10, cell: (r) => ({ value: r.month }) },
+  { label: "Category", width: 18, cell: (r) => ({ value: r.category }) },
+  { label: "Code", width: 12, cell: (r) => ({ value: r.code }) },
+  { label: "Item", width: 28, cell: (r) => ({ value: r.item }) },
+  { label: "Units", width: 10, cell: (r) => ({ value: r.units, type: Number }) },
+  { label: "Cost", width: 13, cell: (r) => ({ value: r.cost, type: Number, format: "#,##0.00" }) },
+  { label: "Uncosted units", width: 14, cell: (r) => ({ value: r.uncostedUnits, type: Number }) },
+];
+
+/**
+ * Phase 22 (spec §4.4): the `/stock/reports/expiry` export — both on-screen
+ * blocks (Expired, Expiring within N days) flattened into one sheet, told
+ * apart by `status` ("Expired" / "Expiring"). `days` is `expiryLabel`'s own
+ * display string (`stock-allocation.ts`) — "expired 2 days ago" reads
+ * better in a downloaded sheet than a bare signed integer, and the screen's
+ * own "Days" column shows the same text (spec §6.3).
+ */
+export interface ExpiryExportRow {
+  status: string;
+  code: string;
+  item: string;
+  lotDate: Date;
+  reference: string | null;
+  supplier: string | null;
+  expires: Date;
+  days: string;
+  remaining: number;
+  unitCost: number | null;
+  valueAtRisk: number | null;
+}
+
+export const EXPIRY_EXPORT_COLUMNS: XlsxColumn<ExpiryExportRow>[] = [
+  { label: "Status", width: 12, cell: (r) => ({ value: r.status }) },
+  { label: "Code", width: 12, cell: (r) => ({ value: r.code }) },
+  { label: "Item", width: 28, cell: (r) => ({ value: r.item }) },
+  { label: "Lot date", width: 13, cell: (r) => ({ value: r.lotDate, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Reference", width: 16, cell: (r) => ({ value: r.reference }) },
+  { label: "Supplier", width: 20, cell: (r) => ({ value: r.supplier }) },
+  { label: "Expires", width: 13, cell: (r) => ({ value: r.expires, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Days", width: 20, cell: (r) => ({ value: r.days }) },
+  { label: "Remaining", width: 10, cell: (r) => ({ value: r.remaining, type: Number }) },
+  { label: "Unit cost", width: 12, cell: (r) => ({ value: r.unitCost, type: Number, format: "#,##0.00" }) },
+  { label: "Value at risk", width: 14, cell: (r) => ({ value: r.valueAtRisk, type: Number, format: "#,##0.00" }) },
+];
+
 export const FAREWELL_EXPORT_COLUMNS: XlsxColumn<{
   tag: string; model: string; outcome: string; reason: string | null;
   cost: number | null; refNo: string; state: string;

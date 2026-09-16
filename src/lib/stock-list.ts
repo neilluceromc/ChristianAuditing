@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import type { ListConfig, ListState, SortKey } from "./url-state";
 
 export const STOCK_LIST_CONFIG: ListConfig = {
-  facets: ["category", "low", "archived"],
+  facets: ["category", "low", "archived", "expiring"],
   sortable: ["code", "name"],
   defaultSort: [{ key: "code", dir: "asc" }],
 };
@@ -17,8 +17,9 @@ export function buildStockItemWhere(state: ListState): Prisma.StockItemWhereInpu
     ];
   }
   if (state.filters.category?.length) where.categoryId = { in: state.filters.category };
-  // `low` is DERIVED (balance vs reorderLevel) — applied by the query after
-  // the balances are computed, never here.
+  // `low` and `expiring` are both DERIVED (balance vs reorderLevel; any open
+  // lot expired or expiring within the window) — applied by the query over
+  // the candidate set after balances/lots are computed, never here.
   return where;
 }
 

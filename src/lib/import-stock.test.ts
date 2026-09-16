@@ -7,7 +7,8 @@ import { STOCK_IMPORT_HEADERS, planStockRows, stockChanges, type StockRefs, type
 // export-columns.ts) — not a subset. The flagship workflow (re-uploading an
 // unedited template/export) exercises every column at once, "Unit cost"
 // included — it must be a RECOGNISED column (review fix round 1, Minor #1),
-// never break header matching, and never land in a planned row's data.
+// never break header matching, and (Phase 22 Task 2) it now prices a CREATE
+// row's opening lot rather than landing nowhere.
 const HEADER = [
   "Code", "Name", "Category", "Unit", "Pack size", "Reorder level", "Opening quantity", "Unit cost", "Notes",
 ];
@@ -23,8 +24,11 @@ function cells(over: Partial<Record<keyof typeof COL, unknown>>): unknown[] {
   return row;
 }
 
-const OS = { id: "cat-os", prefix: "OS" };
-const CM = { id: "cat-cm", prefix: "CM" };
+const OS = { id: "cat-os", prefix: "OS", archived: false };
+const CM = { id: "cat-cm", prefix: "CM", archived: false };
+// Phase 22 Task 2: an archived category, still resolvable (by name or
+// prefix) so an UPDATE row naming it is unaffected — only a CREATE blocks.
+const RT = { id: "cat-rt", prefix: "RT", archived: true };
 
 const REFS: StockRefs = {
   categoriesByKey: new Map([
@@ -32,6 +36,8 @@ const REFS: StockRefs = {
     [refKey("OS"), OS],
     [refKey("Cleaning materials"), CM],
     [refKey("CM"), CM],
+    [refKey("Retired supplies"), RT],
+    [refKey("RT"), RT],
     // A name/prefix collision: two different categories' keys land on the
     // same refKey — undecidable, so this must read as `null`.
     [refKey("Twin"), null],
@@ -118,15 +124,39 @@ describe("planStockRows", () => {
     expect(plan.counts).toEqual({ create: 1, update: 0, blocked: 0 });
   });
 
-  // Minor #1: `unitCost` is now a recognised header (matched into
-  // `headers.map`), but `STOCK_IMPORT_HEADERS`'s own comment promises it is
-  // consumed by nothing — pin that at the planner level too, not just at
-  // the header-matching level above.
-  it("never writes the unitCost column into planned row data, even though the header is recognised", () => {
-    const row = [cells({ name: "x", category: "OS", unit: "piece", unitCost: 12.5 })];
+  // Phase 22 Task 2 (spec §4.5/§8 item 6): unit cost now prices a CREATE
+  // row's opening lot instead of landing nowhere.
+  it("carries a present unitCost cell into a CREATE row's data", () => {
+    const row = [cells({ name: "x", category: "OS", unit: "piece", openingQty: 10, unitCost: 12.5 })];
     const plan = planStockRows(headers, row, REFS);
     const data = (plan.rows[0] as { data: Record<string, unknown> }).data;
-    expect(data).not.toHaveProperty("unitCost");
+    expect(data.unitCost).toBe(12.5);
+  });
+
+  it("reads a blank unitCost cell as null on a CREATE row", () => {
+    const row = [cells({ name: "x", category: "OS", unit: "piece" })];
+    const plan = planStockRows(headers, row, REFS);
+    const data = (plan.rows[0] as { data: Record<string, unknown> }).data;
+    expect(data.unitCost).toBeNull();
+  });
+
+  it("blocks a non-numeric unitCost as bad-number", () => {
+    const row = [cells({ name: "x", category: "OS", unit: "piece", unitCost: "abc" })];
+    const plan = planStockRows(headers, row, REFS);
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-number", detail: "abc" });
+  });
+
+  it("blocks a negative unitCost as bad-number", () => {
+    const row = [cells({ name: "x", category: "OS", unit: "piece", unitCost: -1 })];
+    const plan = planStockRows(headers, row, REFS);
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-number" });
+  });
+
+  it("never carries unitCost onto an UPDATE row's patch — an existing item's lots are each priced on their own receipt", () => {
+    const row = [cells({ code: "OS-0001", name: "x", category: "OS", unit: "ream", unitCost: 12.5 })];
+    const plan = planStockRows(headers, row, REFS);
+    const patch = (plan.rows[0] as { data: Record<string, unknown> }).data;
+    expect(patch).not.toHaveProperty("unitCost");
   });
 
   it("a code matching the category's prefix creates with that code", () => {
@@ -246,6 +276,32 @@ describe("planStockRows", () => {
     const row = [cells({ name: "x", category: "Twin", unit: "piece" })];
     const plan = planStockRows(headers, row, REFS);
     expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "unknown-stock-category", detail: "ambiguous" });
+  });
+
+  // Phase 22 Task 2 (spec §4.5/§8 item 1): the category resolves — it is not
+  // unknown — but it is archived. Distinct cause, distinct from bad-stock-code too.
+  it("blocks a CREATE row naming an archived category as archived-stock-category", () => {
+    const row = [cells({ name: "x", category: "Retired supplies", unit: "piece" })];
+    const plan = planStockRows(headers, row, REFS);
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "archived-stock-category", detail: "Retired supplies" });
+  });
+
+  it("blocks an archived category named by prefix too", () => {
+    const row = [cells({ name: "x", category: "rt", unit: "piece" })];
+    const plan = planStockRows(headers, row, REFS);
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "archived-stock-category" });
+  });
+
+  it("checks archived before the code/prefix cross-check, even behind an otherwise-valid explicit code", () => {
+    const row = [cells({ code: "RT-0009", name: "x", category: "Retired supplies", unit: "piece" })];
+    const plan = planStockRows(headers, row, REFS);
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "archived-stock-category" });
+  });
+
+  it("does not block an UPDATE row naming an archived category — category isn't re-checked on update", () => {
+    const row = [cells({ code: "OS-0001", name: "x", category: "Retired supplies", unit: "ream" })];
+    const plan = planStockRows(headers, row, REFS);
+    expect(plan.rows[0]).toMatchObject({ kind: "update", itemId: "item-os-1" });
   });
 
   // Important (review fix round 1): a blank Category cell is a MISSING
@@ -368,6 +424,45 @@ describe("planStockRows", () => {
     ];
     const plan = planStockRows(headers, rows, REFS);
     expect(plan.counts).toEqual({ create: 2, update: 0, blocked: 0 });
+  });
+
+  // Phase 22 Task 2 (spec §4.5): the two-key duplicate — a code row matching
+  // an existing item ALSO registers the `new:` key its own Category/Name
+  // cells would produce, so a separate codeless row naming that same
+  // category+name collides with it. Both block, the same symmetry every
+  // other duplicate-in-file pair already has.
+  it("blocks a code row and a codeless row that name the same item once by code and once by name", () => {
+    const rows = [
+      cells({ code: "OS-0001", name: "Bond paper A4", category: "OS", unit: "ream" }), // matches item-os-1
+      cells({ name: "Bond paper A4", category: "OS", unit: "ream" }), // codeless, same category+name
+    ];
+    const plan = planStockRows(headers, rows, REFS);
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "duplicate-in-file" });
+    expect(plan.rows[1]).toMatchObject({ kind: "blocked", cause: "duplicate-in-file" });
+    expect(plan.counts).toEqual({ create: 0, update: 0, blocked: 2 });
+  });
+
+  it("does not derive a second key for a CREATE row's own explicit code (one matching no existing item)", () => {
+    const rows = [
+      cells({ code: "OS-0009", name: "New OS item", category: "OS", unit: "ream" }), // brand new code
+      cells({ name: "New OS item", category: "OS", unit: "ream" }), // codeless, same category+name
+    ];
+    const plan = planStockRows(headers, rows, REFS);
+    // Two DIFFERENT create intents that happen to share a name/category —
+    // the secondary `new:` key is only derived from a code that MATCHES an
+    // existing item (identityKeys' own rule), so these two do not collide.
+    expect(plan.counts).toEqual({ create: 2, update: 0, blocked: 0 });
+  });
+
+  it("an update row whose own name/category does not collide with any other row still updates normally", () => {
+    const rows = [
+      cells({ code: "OS-0001", name: "Bond paper A4", category: "OS", unit: "ream", reorderLevel: 5 }),
+      cells({ name: "Some other item", category: "OS", unit: "piece" }),
+    ];
+    const plan = planStockRows(headers, rows, REFS);
+    expect(plan.rows[0]).toMatchObject({ kind: "update", itemId: "item-os-1" });
+    expect(plan.rows[1]).toMatchObject({ kind: "create" });
+    expect(plan.counts).toEqual({ create: 1, update: 1, blocked: 0 });
   });
 
   it("skips a wholly blank row, counted nowhere", () => {

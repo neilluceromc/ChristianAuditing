@@ -25,6 +25,18 @@ describe("buildStockItemWhere (spec §4.1-style list rules)", () => {
     expect(w).not.toHaveProperty("low");
     expect(w).toEqual({ archivedAt: null });
   });
+
+  it("leaves the expiring facet out of the where too — it is derived from lots after the query, like low", () => {
+    const w = buildStockItemWhere(st({ filters: { expiring: ["1"] } }));
+    expect(w).not.toHaveProperty("expiring");
+    expect(w).toEqual({ archivedAt: null });
+  });
+});
+
+describe("STOCK_LIST_CONFIG", () => {
+  it("carries the expiring facet alongside category, low and archived", () => {
+    expect(STOCK_LIST_CONFIG.facets).toEqual(["category", "low", "archived", "expiring"]);
+  });
 });
 
 describe("buildStockOrderBy", () => {

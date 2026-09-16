@@ -133,6 +133,14 @@ export const BLOCK_CAUSES = [
   // cell disagrees with the record must not move it silently. Appended, per
   // this array's own rule above — never inserted.
   "department-via-import",
+  // Phase 22 Task 2 (spec §4.5/§8 item 1): a CREATE row naming a category
+  // that still resolves (by name or prefix) but is archived. Distinct from
+  // `unknown-stock-category` — the category isn't unknown, it's retired —
+  // so the honest fix is "restore it or pick a live one", not "go create
+  // it". `applyStockImport` (Task 3/5) re-checks this at write time too,
+  // since a category can be archived between the dry run and the click.
+  // Appended, per this array's own rule above — never inserted.
+  "archived-stock-category",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -570,6 +578,16 @@ const SPECS: Record<BlockCause, BlockSpec> = {
       "Department changes are recorded with Transfer on the employee page so every change carries a " +
       "date — use the option to keep current departments and apply the rest, or use Transfer instead.",
     fix: { kind: "option", label: "Keep current departments, apply the rest", option: "keepCurrentDepartment" },
+  },
+
+  // Phase 22 Task 2: no option fix — an archived category cannot be
+  // "restored" by re-planning the same file with a decision flipped, the way
+  // `opening-on-existing`'s option can. The only real fixes are on the
+  // categories page.
+  "archived-stock-category": {
+    label: "Category is archived",
+    explain: "That category is archived. Restore it under Stock categories, or name an active one.",
+    fix: { kind: "link", label: "Open stock categories", href: "/stock/categories" },
   },
 };
 
