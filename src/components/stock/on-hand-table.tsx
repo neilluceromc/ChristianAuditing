@@ -1,24 +1,10 @@
 import Link from "next/link";
 import { Fragment } from "react";
 import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
-import { Pill } from "@/components/ui/pill";
 import { fmtDate, fmtMoneyExact } from "@/lib/format";
 import { unitsLabel } from "@/lib/stock-balance";
-import type { ExpiringStatus } from "@/server/modules/stock/queries";
+import { ExpiryPill } from "@/components/stock/expiry-pill";
 import type { OnHandCategoryGroup } from "@/server/modules/stock/report-queries";
-
-/** Same two states the item page and stock list pill (Task 6) render — EXPIRED outranks EXPIRING, matching `computeOnHandRows`'s own precedence. */
-function ExpiringPill({ expiring }: { expiring: ExpiringStatus }) {
-  if (expiring === "expired") {
-    return (
-      <Pill className="border-[var(--danger-bg)] bg-[var(--danger-bg)]/12 text-[var(--danger-bg)]">
-        EXPIRED
-      </Pill>
-    );
-  }
-  if (expiring === "expiring") return <Pill tone="accent">EXPIRING</Pill>;
-  return null;
-}
 
 /** Spec §6.1: category groups with a subtotal row each, then one grand total row. 10 columns; subtotal/total rows blank the columns they don't summarize. */
 export function OnHandTable({
@@ -70,7 +56,7 @@ export function OnHandTable({
                 <Td>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="font-mono text-xs text-fg-muted">{fmtDate(item.nearestExpiry)}</span>
-                    <ExpiringPill expiring={item.expiring} />
+                    <ExpiryPill expiring={item.expiring} />
                   </span>
                 </Td>
               </Tr>

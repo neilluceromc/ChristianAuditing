@@ -280,7 +280,7 @@ export async function consumptionExportRows(range: { from: string; to: string },
 // ---------------------------------------------------------------------------
 
 export interface ExpiryLotRow {
-  id: string; itemId: string; code: string; item: string; lotDate: Date; expiresAt: Date;
+  id: string; itemId: string; code: string; item: string; unit: string; lotDate: Date; expiresAt: Date;
   reference: string | null; supplier: string | null; remaining: number;
   unitCost: number | null; valueAtRisk: number | null;
 }
@@ -295,7 +295,7 @@ async function computeExpiryLots(state: ListState): Promise<ExpiryLotRow[]> {
     select: {
       id: true, itemId: true, lotDate: true, expiresAt: true, reference: true, unitCost: true, quantity: true,
       supplier: { select: { name: true } },
-      item: { select: { code: true, name: true } },
+      item: { select: { code: true, name: true, unit: true } },
     },
   });
   if (!lots.length) return [];
@@ -310,7 +310,7 @@ async function computeExpiryLots(state: ListState): Promise<ExpiryLotRow[]> {
     if (remaining <= 0) return [];
     const unitCost = l.unitCost === null ? null : Number(l.unitCost);
     return [{
-      id: l.id, itemId: l.itemId, code: l.item.code, item: l.item.name, lotDate: l.lotDate, expiresAt: l.expiresAt!,
+      id: l.id, itemId: l.itemId, code: l.item.code, item: l.item.name, unit: l.item.unit, lotDate: l.lotDate, expiresAt: l.expiresAt!,
       reference: l.reference, supplier: l.supplier?.name ?? null, remaining, unitCost,
       valueAtRisk: unitCost === null ? null : unitCost * remaining,
     }];

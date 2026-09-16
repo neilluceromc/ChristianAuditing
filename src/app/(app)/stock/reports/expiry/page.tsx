@@ -6,10 +6,9 @@ import { canManageStock } from "@/lib/stock-access";
 import { expiryReport } from "@/server/modules/stock/report-queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
-import { Select } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { ReportTabs } from "@/components/stock/report-tabs";
+import { ReportCategoryFacet } from "@/components/stock/report-category-facet";
 import { ExpiryWindowChips } from "@/components/stock/expiry-window-chips";
 import { ExpiryTable } from "@/components/stock/expiry-table";
 
@@ -32,7 +31,7 @@ export default async function StockExpiryReportPage({
   const today = localDateISO();
   const report = await expiryReport(windowDays, state);
   const manage = canManageStock(user.role);
-  const categoryId = state.filters.category?.[0] ?? "";
+  const categoryParam = state.filters.category?.join(",") ?? "";
 
   return (
     <>
@@ -50,21 +49,17 @@ export default async function StockExpiryReportPage({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <ExpiryWindowChips
             active={windowDays}
-            hrefFor={(days) => "/stock/reports/expiry" + queryFor({ category: categoryId, days: String(days) })}
+            hrefFor={(days) => "/stock/reports/expiry" + queryFor({ category: categoryParam, days: String(days) })}
           />
           <div className="flex items-center gap-2">
-            <form method="get" className="flex items-center gap-2">
-              <input type="hidden" name="days" value={windowDays} />
-              <Select name="category" aria-label="Category" defaultValue={categoryId} className="max-w-[200px]">
-                <option value="">All categories</option>
-                {report.facets.category.map((c) => (
-                  <option key={c.value} value={c.value}>{c.label} ({c.count})</option>
-                ))}
-              </Select>
-              <Button type="submit" size="sm">Apply</Button>
-            </form>
+            <ReportCategoryFacet
+              basePath="/stock/reports/expiry"
+              state={state}
+              options={report.facets.category}
+              extraParams={{ days: String(windowDays) }}
+            />
             <ButtonLink
-              href={"/stock/reports/expiry/export" + queryFor({ category: categoryId, days: String(windowDays) })}
+              href={"/stock/reports/expiry/export" + queryFor({ category: categoryParam, days: String(windowDays) })}
               size="sm"
             >
               Export

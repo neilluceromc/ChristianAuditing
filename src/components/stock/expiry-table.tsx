@@ -3,30 +3,8 @@ import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fmtDate, fmtMoneyExact } from "@/lib/format";
 import { expiryLabel } from "@/lib/stock-allocation";
+import { WriteOffDialog } from "@/components/stock/write-off-dialog";
 import type { ExpiryLotRow } from "@/server/modules/stock/report-queries";
-
-/**
- * Task 6's `write-off-dialog.tsx` had not landed in this worktree as of this
- * commit (`ls src/components/stock/` — checked immediately before writing
- * this file and again before committing). Per the task-7 brief this is a
- * minimal placeholder ONLY: a disabled button naming the reason, not a
- * duplicate of Task 6's dialog. It does not attempt Task 6's real contract
- * (`WriteOffDialog({ lot, itemCode, unit, trigger? })`) — `ExpiryLotRow` does
- * not even carry `unit`, which that contract needs; swapping this out is
- * Task 6/whoever integrates the dialog into this table's job, not this one.
- */
-function WriteOffPlaceholder() {
-  return (
-    <button
-      type="button"
-      disabled
-      title="Write off (Task 6)"
-      className="rounded-(--radius-btn) border border-border-strong bg-surface px-2.5 py-1 text-[11px] font-medium text-fg-muted opacity-55"
-    >
-      Write off
-    </button>
-  );
-}
 
 /** Spec §6.3: one block (Expired or Expiring within N days) as a table, or the block's own empty copy. */
 export function ExpiryTable({
@@ -91,7 +69,11 @@ export function ExpiryTable({
                   <Td align="right" mono>{fmtMoneyExact(r.valueAtRisk)}</Td>
                   {canManage && (
                     <Td align="right">
-                      <WriteOffPlaceholder />
+                      <WriteOffDialog
+                        lot={{ id: r.id, remaining: r.remaining, expired, reference: r.reference }}
+                        itemCode={r.code}
+                        unit={r.unit}
+                      />
                     </Td>
                   )}
                 </Tr>

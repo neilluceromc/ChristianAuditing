@@ -14,6 +14,7 @@ import { Stat } from "@/components/ui/stat";
 import { Banner } from "@/components/ui/banner";
 import { AdjustDialog } from "@/components/stock/adjust-dialog";
 import { ItemArchiveControls } from "@/components/stock/item-archive-controls";
+import { ExpiryPill } from "@/components/stock/expiry-pill";
 import { LotsCard } from "@/components/stock/lots-card";
 import { MovementHistory } from "@/components/stock/movement-history";
 
@@ -44,8 +45,7 @@ export default async function StockItemPage({
           <span className="inline-flex gap-2">
             <Pill>{item.category.name}</Pill>
             {item.low && <Pill tone="accent">LOW</Pill>}
-            {item.expiring === "expiring" && <Pill tone="accent">EXPIRING</Pill>}
-            {item.expiring === "expired" && <Pill tone="accent">EXPIRED</Pill>}
+            <ExpiryPill expiring={item.expiring} />
             {item.archived && <Pill>ARCHIVED</Pill>}
           </span>
         }
