@@ -3372,7 +3372,7 @@ entry to find the next free number gives you 81, which is taken. **Append at 101
 
 ---
 
-## 9. Stakeholder requirements from the 2026-09-02 Admin meeting (B and C shipped in Phase 18; D's first half shipped in Phase 19, see (l); D2 not yet planned)
+## 9. Stakeholder requirements from the 2026-09-02 Admin meeting (B and C shipped in Phase 18; D's first half shipped in Phase 19, see (l); D2 code-complete in Phase 22, see (o))
 
 > ⚠️ **"Admin" below means the PURCHASING DEPARTMENT** — confirmed by the user on 2026-09-06
 > (*"remember admin = purchasing"*). In this codebase `admin` is the sysadmin role and Purchasing is
@@ -3441,15 +3441,17 @@ and the secrets surface simultaneously.** It must live beside the asset register
   - Locating an asset by tag, QR, barcode, serial or other identifier — **tag, QR and serial already
     work**; barcode is the Code 128 on the label sheet, readable by the USB desk scanner.
 
-- **D · Consumables and stock control — first half (D1) shipped in Phase 19, see (l); D2 not yet
-  planned.** The largest single piece of work in the project so far — bigger than any phase to date.
+- **D · Consumables and stock control — first half (D1) shipped in Phase 19, see (l); D2 code-complete
+  in Phase 22, see (o).** The largest single piece of work in the project so far — bigger than any phase to date.
   Office supplies, pantry supplies. Stock-in and stock-out recording with automatic available quantities
   — **shipped**: items, categories with an automatic code series, an append-only movement ledger
   (opening/receipt/issue/adjustment) with balances always derived, a blind-count stocktake with variance
-  review, a spreadsheet importer, and a balances export, all under `/stock`. Still open for **D2**: **FIFO
-  handling for pantry items** with physical tagging where appropriate (the lots D1 records are what D2
-  will consume oldest-first); system-generated reports for quantities, item history, and budget/inventory
-  views by department and month. Reconciliation between receipts, movements and physical counts is the
+  review, a spreadsheet importer, and a balances export, all under `/stock`. **D2, Phase 22 (see (o))**:
+  FIFO lot allocation with optional expiry (the lots D1 recorded are now consumed earliest-expiry-first,
+  then oldest-first), lot costing set once, write-off, receipt documents, and three reports — on hand and
+  value, consumption by department and month, expiring and expired lots — each with an xlsx export;
+  physical tagging of pantry stock was not built (consumables stay quantity-tracked, per the warning
+  above). Reconciliation between receipts, movements and physical counts is the
   stocktake D1 already ships. **automatic item-code series by category or source document** (examples
   raised: separate series for cleaning materials, supplies, furniture and fixtures), searchable and
   supporting new-item creation, and distinguishing existing items from new ones with updates that don't
