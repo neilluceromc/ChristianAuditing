@@ -4,7 +4,7 @@ import type { ListState } from "@/lib/url-state";
 import { localDateISO } from "@/lib/format";
 import { DEFAULT_EXPIRY_WINDOW, expiryLabel, isExpired, lotRemaining, onHand, type LotState } from "@/lib/stock-allocation";
 import {
-  consumptionGrid, expiryBuckets, monthKey, monthsBetween,
+  consumptionGrid, expiryBuckets, manilaDayBounds, monthKey, monthsBetween,
   type ConsumptionCell, type ConsumptionGrid,
 } from "@/lib/stock-reports";
 import { EXPORT_CAP } from "@/lib/export-columns";
@@ -181,9 +181,10 @@ interface ConsumptionAggRow {
  * (joined to lot cost) for just those movement ids.
  */
 async function computeConsumptionRows(range: { from: string; to: string }, state: ListState): Promise<ConsumptionAggRow[]> {
-  const fromDate = new Date(`${range.from}T00:00:00Z`);
-  const toDate = new Date(`${range.to}T00:00:00Z`);
-  const where: Prisma.StockMovementWhereInput = { kind: "ISSUE", occurredAt: { gte: fromDate, lte: toDate } };
+  // Asia/Manila calendar days, `to` inclusive: issues carry the real transaction
+  // time, so the window must run to local midnight after `to` (Task 5 review).
+  const { start, endExclusive } = manilaDayBounds(range.from, range.to);
+  const where: Prisma.StockMovementWhereInput = { kind: "ISSUE", occurredAt: { gte: start, lt: endExclusive } };
   if (state.filters.category?.length) where.item = { categoryId: { in: state.filters.category } };
 
   const movements = await prisma.stockMovement.findMany({

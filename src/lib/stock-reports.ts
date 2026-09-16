@@ -153,10 +153,29 @@ export function expiryBuckets<T extends { expiresAt: Date | null }>(
  * (`stock-list.ts`), which drives the item list's own facets and sorting.
  */
 export const STOCK_REPORT_LIST_CONFIG: ListConfig = {
-  facets: ["category"],
+  // `uncosted` is the on-hand report's toggle (`?uncosted=1`); parseListState
+  // copies a query param into `state.filters` only for a listed facet (Task 5
+  // review), so it must be named here or the toggle is dead.
+  facets: ["category", "uncosted"],
   sortable: [],
   defaultSort: [],
 };
+
+/**
+ * The instants that bound a range of Asia/Manila calendar days: `start` is
+ * `from` at local midnight, `endExclusive` is the day AFTER `to` at local
+ * midnight, so `occurredAt >= start && occurredAt < endExclusive` takes every
+ * movement stamped on those days. Issues, adjustments and write-offs carry
+ * the real transaction time (only receipts are dated to UTC midnight), so a
+ * `[from 00:00Z, to 00:00Z]` window would drop everything after 08:00 Manila
+ * on the last day — the Task 5 review's Critical.
+ */
+export function manilaDayBounds(from: string, to: string): { start: Date; endExclusive: Date } {
+  const start = new Date(`${from}T00:00:00+08:00`);
+  const toStart = new Date(`${to}T00:00:00+08:00`);
+  const endExclusive = new Date(toStart.getTime() + 86_400_000);
+  return { start, endExclusive };
+}
 
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  consumptionGrid, defaultConsumptionRange, expiryBuckets, monthKey, monthsBetween, parseExpiryWindow,
-  parseReportRange, STOCK_REPORT_LIST_CONFIG,
+  consumptionGrid, defaultConsumptionRange, expiryBuckets, manilaDayBounds, monthKey, monthsBetween,
+  parseExpiryWindow, parseReportRange, STOCK_REPORT_LIST_CONFIG,
 } from "./stock-reports";
 
 describe("monthKey", () => {
@@ -85,6 +85,25 @@ describe("consumptionGrid", () => {
   });
 });
 
+describe("manilaDayBounds (Task 5 review)", () => {
+  it("bounds a range of Asia/Manila calendar days, to inclusive", () => {
+    const { start, endExclusive } = manilaDayBounds("2026-09-01", "2026-09-16");
+    // 1 Sep 00:00 Manila is 31 Aug 16:00Z; the day after 16 Sep starts at 16 Sep 16:00Z.
+    expect(start.toISOString()).toBe("2026-08-31T16:00:00.000Z");
+    expect(endExclusive.toISOString()).toBe("2026-09-16T16:00:00.000Z");
+  });
+  it("keeps an issue stamped late on the last day inside the window", () => {
+    const { start, endExclusive } = manilaDayBounds("2026-09-16", "2026-09-16");
+    const lateOnThe16th = new Date("2026-09-16T15:59:59Z"); // 23:59:59 Manila
+    const firstOfThe17th = new Date("2026-09-16T16:00:00Z"); // 00:00 Manila next day
+    expect(lateOnThe16th >= start && lateOnThe16th < endExclusive).toBe(true);
+    expect(firstOfThe17th < endExclusive).toBe(false);
+  });
+  it("lists the uncosted toggle as a report facet so ?uncosted=1 reaches the state", () => {
+    expect(STOCK_REPORT_LIST_CONFIG.facets).toContain("uncosted");
+  });
+});
+
 describe("expiryBuckets", () => {
   const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
   const TODAY = "2026-09-16";
@@ -116,8 +135,8 @@ describe("expiryBuckets", () => {
 });
 
 describe("STOCK_REPORT_LIST_CONFIG", () => {
-  it("carries only the category facet and no sort", () => {
-    expect(STOCK_REPORT_LIST_CONFIG.facets).toEqual(["category"]);
+  it("carries the category facet and the on-hand uncosted toggle, and no sort", () => {
+    expect(STOCK_REPORT_LIST_CONFIG.facets).toEqual(["category", "uncosted"]);
     expect(STOCK_REPORT_LIST_CONFIG.sortable).toEqual([]);
   });
 });
