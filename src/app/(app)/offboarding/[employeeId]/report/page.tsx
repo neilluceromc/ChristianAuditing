@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { decidedItems, getWizard } from "@/server/modules/offboarding/queries";
 import { OUTCOME_LABEL } from "@/lib/offboarding";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
+import { offboardingCompletionText } from "@/lib/deadlines";
 import { PrintButton } from "@/components/ui/print-button";
 import { ButtonLink } from "@/components/ui/button-link";
 
@@ -53,6 +54,7 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
           <div className="flex gap-2"><dt className="w-24 text-[#667085]">Department</dt><dd>{employee.department}</dd></div>
           <div className="flex gap-2"><dt className="w-24 text-[#667085]">Joined</dt><dd className="font-mono">{employee.joined}</dd></div>
           <div className="flex gap-2"><dt className="w-24 text-[#667085]">M365</dt><dd className="font-mono">{employee.m365Status ?? "no sync yet"}</dd></div>
+          <div className="flex gap-2 col-span-2"><dt className="w-24 text-[#667085]">Completion</dt><dd>{offboardingCompletionText(employee.dueAt, data.completedAt, localDateISO(new Date()))}</dd></div>
         </dl>
 
         <table className="w-full border-collapse text-[12px]">

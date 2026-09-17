@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { chipsForOutcome } from "@/lib/reason-chips";
 import { RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, reasonRequiredFor, type ReturnOutcome } from "@/lib/lifecycle";
 import { replaceAsset } from "@/server/modules/lifecycle/actions";
 
@@ -70,9 +71,10 @@ export function ReplaceControl({ assetId, tag, employeeId, employeeName, spares 
               </Select>
             )}
           </FormField>
-          <FormField label="Reason" required={reasonRequiredFor(outcome)} error={fieldErrors.reason}>
-            {(p) => <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={reason} onChange={(e) => setReason(e.target.value)} />}
-          </FormField>
+          <ReasonField
+            required={reasonRequiredFor(outcome)} error={fieldErrors.reason} value={reason} onChange={setReason}
+            chips={chipsForOutcome(outcome)} disabled={pending}
+          />
         </div>
       </Dialog>
     </>

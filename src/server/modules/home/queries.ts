@@ -11,7 +11,7 @@ import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
-import { loanRow, groupWork, type WorkGroup, type WorkRow, type WorkSectionId } from "@/lib/worklist";
+import { loanRow, leaverRow, groupWork, type WorkGroup, type WorkRow, type WorkSectionId } from "@/lib/worklist";
 
 const DAY_MS = 86_400_000;
 const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY_MS));
@@ -68,7 +68,7 @@ export async function worklist(
       where: { employment: "OFFBOARDING" },
       orderBy: { updatedAt: "asc" },
       take: CAP.small,
-      select: { id: true, name: true, employeeNo: true, updatedAt: true, _count: { select: { assets: { where: { cls: "IT" } } } } },
+      select: { id: true, name: true, employeeNo: true, offboardingDueAt: true, _count: { select: { assets: { where: { cls: "IT" } } } } },
     }),
     prisma.employee.findMany({
       where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
@@ -177,23 +177,9 @@ export async function worklist(
     });
   }
 
+  const todayISO = localDateISO(now);
   for (const e of leavers) {
-    rows.push({
-      key: `queue:${e.id}`,
-      section: "queue",
-      title: `${e.name} is leaving`,
-      // "0 items still out" is true but useless as a call to action — when the
-      // kit is already back, what's left is the accounts half of offboarding
-      meta: e._count.assets > 0
-        ? `${e.employeeNo} · ${e._count.assets} item${e._count.assets === 1 ? "" : "s"} still out`
-        : `${e.employeeNo} · equipment returned · accounts still to close`,
-      // Phase 7: both halves of offboarding (kit and accounts) live in the
-      // wizard now, so the one action that clears this row opens it.
-      href: `/offboarding/${e.id}`,
-      action: e._count.assets > 0 ? "Collect equipment" : "Close accounts",
-      severity: daysSince(e.updatedAt, now),
-      rank: 2,
-    });
+    rows.push(leaverRow({ id: e.id, name: e.name, employeeNo: e.employeeNo, itemsOut: e._count.assets, offboardingDueAt: e.offboardingDueAt }, todayISO));
   }
 
   for (const e of hires) {
@@ -519,6 +505,7 @@ export interface PurchasingHome {
   /** Phase 22 (spec §0 decision 7 / §6.5): the two Stock tiles — items at or below reorder level, and open lots expiring within `DEFAULT_EXPIRY_WINDOW`. */
   lowStock: number;
   expiringLots: number;
+  stocktakesOverdue: number;
 }
 
 const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
@@ -581,6 +568,7 @@ export async function purchasingHome(userId: string, role: Role, now: Date = new
     awaitingItCheck,
     lowStock: stockSignals.low,
     expiringLots: stockSignals.expiringLots,
+    stocktakesOverdue: stockSignals.stocktakesOverdue,
   };
 }
 

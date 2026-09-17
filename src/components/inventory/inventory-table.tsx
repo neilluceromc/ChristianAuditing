@@ -52,6 +52,7 @@ export function InventoryTable({
   cls,
   direct,
   employees,
+  recentEmployees,
   repairMode = false,
   sortHrefs,
 }: {
@@ -65,6 +66,7 @@ export function InventoryTable({
   direct: boolean;
   /** ACTIVE employees for the bulk drawer's assign mode (Task 9); empty when the caller can't mutate. */
   employees: ComboOption[];
+  recentEmployees?: string[];
   /** the repairs saved view: adds Stage + Down (README 7b) */
   repairMode?: boolean;
   /**
@@ -261,6 +263,7 @@ export function InventoryTable({
           cls={cls}
           direct={direct}
           employees={employees}
+          recentEmployees={recentEmployees}
           onDone={clearSelection}
         />
       )}

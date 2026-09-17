@@ -27,6 +27,7 @@ import { assetDiff } from "@/lib/asset-diff";
 import { TAG_SHAPE, tagKey } from "@/lib/tag-key";
 import { humanizeGuard } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
+import { rememberPicks } from "@/server/recent-picks";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -341,6 +342,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
       return created;
     });
     revalidatePath("/inventory");
+    await rememberPicks(user.id, { vendor: d.vendorId || null });
     return ok({ id: asset.id });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
@@ -434,6 +436,10 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   // `applyAssetImport` via `assetDiff` (`src/lib/asset-diff.ts`, C-1, Task 10
   // round two) so the two paths cannot drift apart the way they already had.
   const { diff, changed } = assetDiff(asset as unknown as Record<string, unknown>, data);
+  // Phase 23: this return is also why a no-op save remembers no vendor pick —
+  // the operator did choose one, but nothing changed, so no transaction ran and
+  // `rememberPicks` below is never reached. Deliberate: Recent tracks picks that
+  // produced a write, not every time a form was opened and closed.
   if (Object.keys(diff).length === 0) return ok({ id: asset.id }); // no audit noise for no-ops
 
   try {
@@ -451,6 +457,7 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   }
   revalidatePath(`/inventory/${asset.id}`);
   revalidatePath("/inventory");
+  await rememberPicks(user.id, { vendor: d.vendorId || null });
   return ok({ id: asset.id });
 }
 

@@ -25,6 +25,7 @@ import {
   RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
 } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange } from "./apply";
+import { rememberPicks } from "@/server/recent-picks";
 
 type Tx = Prisma.TransactionClient;
 type Actor = { id: string; name: string };
@@ -169,6 +170,7 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
   });
   if (failure) return failure;
   revalidateAsset(d.assetId, [d.employeeId]);
+  await rememberPicks(user.id, { employee: d.employeeId });
   return ok(out!);
 }
 
@@ -313,6 +315,7 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
   if (failure) return failure;
   revalidateAsset(d.oldAssetId, [d.employeeId]);
   revalidatePath(`/inventory/${d.newAssetId}`);
+  await rememberPicks(user.id, { employee: d.employeeId });
   return ok(out!);
 }
 
@@ -521,6 +524,7 @@ export async function bulkAssign(input: unknown): Promise<ActionResult<{ assigne
   revalidatePath("/inventory");
   revalidatePath(`/employees/${d.employeeId}`);
   revalidatePath("/");
+  await rememberPicks(user.id, { employee: d.employeeId });
   return ok({ assigned, skipped });
 }
 

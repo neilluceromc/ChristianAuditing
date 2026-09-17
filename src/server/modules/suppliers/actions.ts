@@ -4,13 +4,14 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { actionUser } from "@/server/auth/guards";
+import { actionRole, actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { diffOf } from "@/lib/audit-diff";
 import { canManageSuppliers } from "@/lib/supplier-access";
 import { supplierSchema, toSupplierData } from "@/lib/supplier-schema";
 import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
+import { findSameSupplierName } from "@/server/modules/suppliers/queries";
 
 const DUPLICATE = { name: "A supplier with this name already exists" };
 const isP2002 = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
@@ -114,6 +115,22 @@ export async function archiveSupplier(input: unknown): Promise<ActionResult<null
   });
   revalidate(id);
   return ok(null);
+}
+
+const checkSameSupplierNameSchema = z.object({ name: z.string(), excludeId: z.string().optional() });
+
+/** Phase 23 (spec §8): read-only — the supplier form's own live check, never a write. */
+export async function checkSameSupplierName(
+  input: unknown,
+): Promise<ActionResult<{ match: { id: string; name: string } | null }>> {
+  const user = await actionRole("admin", "purchasing_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = checkSameSupplierNameSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { name, excludeId } = parsed.data;
+  return ok({ match: await findSameSupplierName(name, excludeId) });
 }
 
 export async function restoreSupplier(input: unknown): Promise<ActionResult<null>> {

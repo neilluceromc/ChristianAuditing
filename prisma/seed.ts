@@ -5,10 +5,27 @@ import { secretAad } from "../src/server/webhooks/sign";
 import { SEED_PASSWORD } from "./fixtures";
 import { allocate, type LotState, type Allocation } from "../src/lib/stock-allocation";
 import { localDateISO } from "../src/lib/format";
+import { dayFromISO } from "../src/lib/deadlines";
 
 const prisma = new PrismaClient();
 
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000);
+/**
+ * Phase 23: the two day-precision columns (`Employee.offboardingDueAt`,
+ * `Stocktake.dueAt`) are stored at UTC midnight everywhere else — the migration
+ * backfills with `date_trunc('day', …)` and both writers go through
+ * `dayFromISO` (Global Constraints: day-precision UTC midnight in storage).
+ * `day()` above is wall-clock, so seeding through it left a time-of-day on
+ * those two columns and the first save of the seeded leaver through the
+ * employee form normalised it, writing a phantom `offboardingDueAt` audit diff
+ * for a date nobody touched. `dayFloor` drops the clock from a `day()` value.
+ *
+ * It floors to the MANILA day, not the UTC day: between 00:00 and 08:00 Manila
+ * the two differ, and every reader (`localDateISO`, `daysUntil`, the Due facet)
+ * is on the Manila calendar — so "2 days overdue" has to stay 2 whatever hour
+ * the seed runs at.
+ */
+const dayFloor = (d: Date) => dayFromISO(localDateISO(d));
 
 async function main() {
   // The seed creates five accounts sharing one password, and README publishes
@@ -120,6 +137,9 @@ async function main() {
           // and without it a reseed leaves the anchor null, so an executed
           // return would vanish from the farewell report
           offboardingAt: employment === "ACTIVE" ? null : day(-3),
+          // Phase 23: Dennis (EMP-0090) is two days overdue so the list column, the
+          // wizard pill, the Home row and the "Overdue" filter all have something to show.
+          offboardingDueAt: employment === "OFFBOARDING" ? dayFloor(day(-2)) : null,
         },
       }),
     ),
@@ -633,7 +653,7 @@ async function main() {
   // One POSTED stocktake on Cleaning materials, ten days ago, with two adjustments.
   const st = await prisma.stocktake.create({
     data: {
-      refNo: "ST-0001", categoryId: stockCats.CM.id, state: "POSTED", openedAt: day(-10), openedById: purchasing.id,
+      refNo: "ST-0001", categoryId: stockCats.CM.id, state: "POSTED", openedAt: day(-10), dueAt: dayFloor(day(-8)), openedById: purchasing.id,
       postedAt: day(-10), postedById: purchasing.id, note: "Monthly pantry-side count",
       lines: { create: [
         { itemId: stockItems["CM-0001"].id, bookQty: 36, countedQty: 34, countedAt: day(-10), countedById: purchasing.id },

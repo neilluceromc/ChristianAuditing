@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { isPastDue } from "./deadlines";
 import type { ListConfig, ListState, SortKey } from "./url-state";
 
 /**
@@ -11,8 +12,8 @@ import type { ListConfig, ListState, SortKey } from "./url-state";
  * inventory sort would be.
  */
 export const OFFBOARDING_LIST_CONFIG: ListConfig = {
-  facets: ["department", "progress"],
-  sortable: ["name", "started", "undecided"],
+  facets: ["department", "progress", "due"],
+  sortable: ["name", "started", "undecided", "due"],
   defaultSort: [{ key: "name", dir: "asc" }],
 };
 
@@ -21,6 +22,12 @@ export type Progress = "open" | "complete";
 /** Derived, never stored: any undecided item at all keeps the row "open". */
 export function progressOf(undecided: number): Progress {
   return undecided > 0 ? "open" : "complete";
+}
+
+export type Due = "overdue" | "on-track";
+/** Derived: a row with no date is on track (spec §4.6). */
+export function dueOf(dueAt: Date | null, todayISO: string): Due {
+  return dueAt !== null && isPastDue(dueAt, todayISO) ? "overdue" : "on-track";
 }
 
 /** Always scoped to the queue itself; `progress` narrows in memory (plan P-5), not here. */
@@ -42,8 +49,11 @@ export function buildOffboardingOrderBy(sort: SortKey[]): Prisma.EmployeeOrderBy
   const order = sort.length ? sort : OFFBOARDING_LIST_CONFIG.defaultSort;
   if (order.some((s) => s.key === "undecided")) return null;
   return [
-    ...order.map(({ key, dir }): Prisma.EmployeeOrderByWithRelationInput =>
-      (key === "started" ? { offboardingAt: dir } : { [key]: dir })),
+    ...order.map(({ key, dir }): Prisma.EmployeeOrderByWithRelationInput => {
+      if (key === "started") return { offboardingAt: dir };
+      if (key === "due") return { offboardingDueAt: { sort: dir, nulls: "last" } };
+      return { [key]: dir };
+    }),
     { employeeNo: "asc" },
     { id: "asc" },
   ];

@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import { unitsLabel } from "@/lib/stock-balance";
 import { writeOffLot } from "@/server/modules/stock/movement-actions";
 import { useStockRunner } from "./use-stock-runner";
@@ -91,16 +92,7 @@ export function WriteOffDialog({
             />
             <FormError>{fieldErrors.quantity}</FormError>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-fg">Reason</label>
-            <Textarea
-              aria-label="Reason"
-              invalid={!!fieldErrors.reason}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-            <FormError>{fieldErrors.reason}</FormError>
-          </div>
+          <ReasonField error={fieldErrors.reason} value={reason} onChange={setReason} chips={REASON_CHIPS["stock.write-off"]} disabled={pending} />
         </div>
       </Dialog>
     </>

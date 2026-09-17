@@ -2,13 +2,14 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { listStocktakes } from "@/server/modules/stock/queries";
 import { canManageStock } from "@/lib/stock-access";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
 import { PageHeader } from "@/components/ui/page-header";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Pill } from "@/components/ui/pill";
 import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
+import { DuePill } from "@/components/ui/due-pill";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { StocktakeState } from "@prisma/client";
@@ -25,6 +26,7 @@ export default async function StocktakesPage({
   const page = parsePage(sp);
   const data = await listStocktakes(page);
   const manage = canManageStock(user.role);
+  const today = localDateISO(new Date());
 
   const newAction = manage ? (
     <ButtonLink href="/stock/stocktakes/new" variant="primary">New stocktake</ButtonLink>
@@ -46,6 +48,7 @@ export default async function StocktakesPage({
                 <Th>Scope</Th>
                 <Th>State</Th>
                 <Th>Opened</Th>
+                <Th>Close by</Th>
                 <Th>Posted</Th>
                 <Th align="right">Counted</Th>
               </Tr>
@@ -59,6 +62,7 @@ export default async function StocktakesPage({
                   <Td>{s.scope}</Td>
                   <Td><Pill tone={STATE_TONE[s.state]}>{s.state}</Pill></Td>
                   <Td mono>{fmtDate(s.openedAt)}</Td>
+                  <Td>{s.state === "OPEN" ? <DuePill dueAt={s.dueAt} today={today} withDate /> : <span className="font-mono">{fmtDate(s.dueAt)}</span>}</Td>
                   <Td mono>{s.postedAt ? fmtDate(s.postedAt) : "—"}</Td>
                   <Td align="right" mono>{s.counted} / {s.total}</Td>
                 </Tr>

@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import { unitsLabel } from "@/lib/stock-balance";
 import { issueStock } from "@/server/modules/stock/movement-actions";
 import { useStockRunner } from "./use-stock-runner";
@@ -17,12 +19,6 @@ import type { StockItemMeta } from "./receive-form";
 export interface DepartmentOption {
   id: string;
   name: string;
-}
-
-export interface EmployeeOption {
-  id: string;
-  name: string;
-  employeeNo: string;
 }
 
 const CLAIMED = ["itemId", "quantity", "departmentId", "employeeId", "reason"];
@@ -46,13 +42,17 @@ export function IssueForm({
   balances,
   departments,
   employees,
+  recentEmployees,
+  recentItems,
   initialItemId,
 }: {
   items: ComboOption[];
   meta: Record<string, StockItemMeta>;
   balances: Record<string, number>;
   departments: DepartmentOption[];
-  employees: EmployeeOption[];
+  employees: ComboOption[];
+  recentEmployees: string[];
+  recentItems: string[];
   initialItemId?: string | null;
 }) {
   const [form, setForm] = useState<FormState>(() =>
@@ -102,7 +102,7 @@ export function IssueForm({
             {(p) => (
               <EntityCombobox
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                options={items} value={form.itemId}
+                options={items} recent={recentItems} autoFocus value={form.itemId}
                 onChange={(id) => setForm((f) => ({ ...f, itemId: id }))}
                 placeholder="Type a code or name…"
               />
@@ -132,25 +132,12 @@ export function IssueForm({
           </FormField>
           <FormField label="Employee" error={fieldErrors.employeeId}>
             {(p) => (
-              <Select
-                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={form.employeeId} onChange={(e) => set("employeeId", e.target.value)}
-              >
-                <option value="">— none —</option>
-                {employees.map((e) => (
-                  <option key={e.id} value={e.id}>{e.name} ({e.employeeNo})</option>
-                ))}
-              </Select>
+              <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                options={employees} recent={recentEmployees} value={form.employeeId || null}
+                onChange={(id) => set("employeeId", id ?? "")} placeholder="Type a name or EMP number…" />
             )}
           </FormField>
-          <FormField label="Purpose" error={fieldErrors.reason} className="sm:col-span-2">
-            {(p) => (
-              <Input
-                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={form.purpose} onChange={(e) => set("purpose", e.target.value)}
-              />
-            )}
-          </FormField>
+          <ReasonField label="Purpose" error={fieldErrors.reason} value={form.purpose} onChange={(v) => set("purpose", v)} chips={REASON_CHIPS["stock.issue"]} rows={2} disabled={pending} className="sm:col-span-2" />
         </CardBody>
       </Card>
       <div>

@@ -1,9 +1,11 @@
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { stockItemBalances, stockItemOptions } from "@/server/modules/stock/queries";
+import { recentPicks } from "@/server/recent-picks";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { IssueForm, type DepartmentOption, type EmployeeOption } from "@/components/stock/issue-form";
+import { IssueForm, type DepartmentOption } from "@/components/stock/issue-form";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 import type { StockItemMeta } from "@/components/stock/receive-form";
 
 export default async function IssueStockPage({
@@ -11,11 +13,11 @@ export default async function IssueStockPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireRole("admin", "purchasing_staff");
+  const user = await requireRole("admin", "purchasing_staff");
   const sp = toSearchParams(await searchParams);
   const initialItemId = sp.get("item");
 
-  const [items, departmentRows, employeeRows, metaRows] = await Promise.all([
+  const [items, departmentRows, employeeRows, metaRows, recentEmployees, recentItems] = await Promise.all([
     stockItemOptions(),
     prisma.department.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.employee.findMany({
@@ -24,6 +26,8 @@ export default async function IssueStockPage({
     prisma.stockItem.findMany({
       where: { archivedAt: null }, select: { id: true, code: true, unit: true, packSize: true },
     }),
+    recentPicks(user.id, "employee"),
+    recentPicks(user.id, "stock-item"),
   ]);
 
   // R3: stockItemBalances(ids) returns a Map — a Map never crosses to a client component, so it's
@@ -35,7 +39,7 @@ export default async function IssueStockPage({
   for (const r of metaRows) meta[r.id] = { unit: r.unit, packSize: r.packSize, code: r.code };
 
   const departments: DepartmentOption[] = departmentRows;
-  const employees: EmployeeOption[] = employeeRows;
+  const employees: ComboOption[] = employeeRows.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }));
 
   return (
     <>
@@ -46,6 +50,8 @@ export default async function IssueStockPage({
         balances={balances}
         departments={departments}
         employees={employees}
+        recentEmployees={recentEmployees}
+        recentItems={recentItems}
         initialItemId={initialItemId}
       />
     </>

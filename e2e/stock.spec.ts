@@ -74,6 +74,23 @@ async function waitForHydration(target: Locator) {
   }).toPass({ timeout: 20_000 });
 }
 
+/**
+ * Phase 23 turned the Supplier and Employee `<select>`s on /stock/receive and
+ * /stock/issue into `EntityCombobox`es, so `selectOption` no longer applies:
+ * type to filter, then click the option. Copied from
+ * e2e/quick-forms.spec.ts:110-120 — house rule: never import across spec files.
+ *
+ * The list MUST be scoped to this combobox's own `<ul role="listbox">`, which
+ * `EntityCombobox` renders as the input's following sibling: both pages give
+ * the Item combobox `autoFocus` (P-3) and it opens its list on that focus, so
+ * a bare `getByRole("option")` would be ambiguous for the ~120 ms the blurred
+ * list takes to close.
+ */
+async function pickFromCombo(combo: Locator, type: string, option: RegExp) {
+  await combo.fill(type);
+  await combo.locator("xpath=following-sibling::ul").getByRole("option", { name: option }).first().click();
+}
+
 const PURCHASING = "purchasing@thebackroomop.com";
 const IT = "it@thebackroomop.com";
 const FINANCE = "finance@thebackroomop.com";
@@ -175,7 +192,9 @@ test.describe.serial("stock", () => {
     await expect(page.getByText("5 packs × 10 = 50 pieces")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByLabel(/^Quantity\b/)).toHaveValue("50");
 
-    await page.getByLabel("Supplier").selectOption({ label: "TechServe PH" });
+    const supplier = page.getByLabel("Supplier");
+    await pickFromCombo(supplier, "TechServe", /TechServe PH/);
+    await expect(supplier).toHaveValue("TechServe PH");
     await page.getByLabel("Reference").fill("DR-9001");
     await page.getByRole("button", { name: "Record receipt" }).click();
 
@@ -211,7 +230,9 @@ test.describe.serial("stock", () => {
     await waitForHydration(quantityField);
     await quantityField.fill("20");
     await page.getByLabel(/^Department\b/).selectOption({ label: "HR" });
-    await page.getByLabel("Employee").selectOption({ label: "Marites Bautista (EMP-0042)" });
+    const employee = page.getByLabel("Employee");
+    await pickFromCombo(employee, "Marites", /EMP-0042/);
+    await expect(employee).toHaveValue("Marites Bautista · EMP-0042");
     await page.getByLabel("Purpose").fill("Test");
     await page.getByRole("button", { name: "Record issue" }).click();
 

@@ -68,6 +68,23 @@ const PURCHASING = "purchasing@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
 /**
+ * Phase 23 turned /stock/receive's Supplier `<select>` into an
+ * `EntityCombobox`, so `selectOption` no longer applies: type to filter, then
+ * click the option. Copied from e2e/quick-forms.spec.ts:110-120 — house rule:
+ * never import across spec files.
+ *
+ * The list MUST be scoped to this combobox's own `<ul role="listbox">`, which
+ * `EntityCombobox` renders as the input's following sibling: the Item combobox
+ * on the same page carries `autoFocus` (P-3) and opens its list on that focus,
+ * so a bare `getByRole("option")` would be ambiguous for the ~120 ms the
+ * blurred list takes to close.
+ */
+async function pickFromCombo(combo: Locator, type: string, option: RegExp) {
+  await combo.fill(type);
+  await combo.locator("xpath=following-sibling::ul").getByRole("option", { name: option }).first().click();
+}
+
+/**
  * A lot's own reference (or a lot-only quantity shape like "12 of 12") also
  * shows up in the item page's History table (a RECEIPT row's detail column
  * repeats the lot's reference), so a bare `getByRole("row", { name })` is
@@ -107,7 +124,9 @@ test.describe.serial("stock lots", () => {
     const quantityField = page.getByLabel(/^Quantity\b/);
     await waitForHydration(quantityField);
     await quantityField.fill("12");
-    await page.getByLabel("Supplier").selectOption({ label: "TechServe PH" });
+    const supplier = page.getByLabel("Supplier");
+    await pickFromCombo(supplier, "TechServe", /TechServe PH/);
+    await expect(supplier).toHaveValue("TechServe PH");
     await page.getByLabel("Reference").fill("DR-9004");
     await page.getByLabel("Expires").fill(expiresAt);
     await page.getByRole("button", { name: "Record receipt" }).click();

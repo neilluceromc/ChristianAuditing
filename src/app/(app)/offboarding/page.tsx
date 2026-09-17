@@ -3,7 +3,7 @@ import { requireUser } from "@/server/auth/guards";
 import { parseListState, serializeListState, toggleSort, toSearchParams, type ListState } from "@/lib/url-state";
 import { OFFBOARDING_LIST_CONFIG } from "@/lib/offboarding-list";
 import { listOffboarding } from "@/server/modules/offboarding/queries";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, localDateISO } from "@/lib/format";
 import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -11,6 +11,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+import { DuePill } from "@/components/ui/due-pill";
 import { OffboardingToolbar } from "@/components/offboarding/offboarding-toolbar";
 
 export default async function OffboardingPage({
@@ -41,6 +42,7 @@ export default async function OffboardingPage({
   // same story as nobody being offboarded at all. Same test suppliers/page.tsx
   // and stock/page.tsx use to pick their empty-state copy.
   const filtered = Boolean(state.q) || Object.keys(state.filters).length > 0;
+  const today = localDateISO(new Date());
 
   return (
     <>
@@ -80,6 +82,9 @@ export default async function OffboardingPage({
                   <Th width={104} sort={sortDir("started")} sortIndex={sortIndex("started")}>
                     <Link href={sortHref("started")}>Started</Link>
                   </Th>
+                  <Th width={168} sort={sortDir("due")} sortIndex={sortIndex("due")}>
+                    <Link href={sortHref("due")}>Due</Link>
+                  </Th>
                   <Th width={84}>Items out</Th>
                   <Th width={150} sort={sortDir("undecided")} sortIndex={sortIndex("undecided")}>
                     <Link href={sortHref("undecided")}>Undecided</Link>
@@ -105,6 +110,7 @@ export default async function OffboardingPage({
                     </Td>
                     <Td>{r.department}</Td>
                     <Td mono>{fmtDate(r.started)}</Td>
+                    <Td>{r.dueAt ? <DuePill dueAt={r.dueAt} today={today} withDate /> : <span className="text-fg-faint">—</span>}</Td>
                     <Td mono>{r.itemsOut}</Td>
                     <Td mono className="text-[10.5px]">
                       {r.total === 0 ? (

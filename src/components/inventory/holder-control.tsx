@@ -7,12 +7,13 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS, chipsForOutcome } from "@/lib/reason-chips";
 import { requestAssign, requestReturn } from "@/server/modules/employees/actions";
 import { assignAsset, returnAsset } from "@/server/modules/lifecycle/actions";
 import {
@@ -20,7 +21,7 @@ import {
 } from "@/lib/lifecycle";
 
 type Props =
-  | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[]; direct: boolean }
+  | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[]; direct: boolean; recentEmployees?: string[] }
   | { assetId: string; tag: string; mode: "return"; holder: { id: string; name: string }; direct: boolean };
 
 /**
@@ -139,7 +140,8 @@ export function HolderControl(props: Props) {
             <FormField label="Assign to" required error={fieldErrors.employeeId}>
               {(p) => (
                 <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  options={props.employees} value={employeeId} onChange={setEmployeeId} placeholder="Type a name or EMP number…" />
+                  options={props.employees} value={employeeId} onChange={setEmployeeId} placeholder="Type a name or EMP number…"
+                  recent={props.recentEmployees} />
               )}
             </FormField>
           )}
@@ -152,9 +154,10 @@ export function HolderControl(props: Props) {
               )}
             </FormField>
           )}
-          <FormField label="Reason" required={!isAssign && returnReasonRequired} error={fieldErrors.reason}>
-            {(p) => <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={reason} onChange={(e) => setReason(e.target.value)} />}
-          </FormField>
+          <ReasonField
+            required={!isAssign && returnReasonRequired} error={fieldErrors.reason} value={reason} onChange={setReason}
+            chips={isAssign ? REASON_CHIPS["asset.assign"] : props.direct ? chipsForOutcome(outcome) : []} disabled={pending}
+          />
         </div>
       </Dialog>
     </>

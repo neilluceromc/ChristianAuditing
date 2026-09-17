@@ -7,10 +7,10 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog } from "@/components/ui/dialog";
-import { FormField } from "@/components/ui/form-field";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import { canAct, type PurchaseAction } from "@/lib/purchase-flow";
 import {
   cancelRequest, completeRequest, itRejectRequest, itReviewRequest, requestMoreInfo, submitRequest,
@@ -132,14 +132,10 @@ export function RequestActions({
       >
         <div className="flex flex-col gap-3">
           <p className="text-xs text-fg-muted">{asking ? COPY[asking].prompt : ""}</p>
-          <FormField label="Reason" required error={fieldError}>
-            {(p) => (
-              <Textarea
-                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={reason} onChange={(e) => setReason(e.target.value)}
-              />
-            )}
-          </FormField>
+          <ReasonField
+            required error={fieldError} value={reason} onChange={setReason}
+            chips={REASON_CHIPS["purchase.reason"]} disabled={pending}
+          />
         </div>
       </Dialog>
     </div>

@@ -326,6 +326,10 @@ model Employee {
   /// routine return from years ago can't land on a farewell report. Cleared if
   /// they go back to ACTIVE; kept once OFFBOARDED so the report stays readable.
   offboardingAt    DateTime?
+  /// Phase 23 (spec §2.1). Complete-by date for the current offboarding, day-precision UTC like
+  /// loanDueAt. Set when employment enters OFFBOARDING (default addWorkingDays(today, 5), editable
+  /// in the employee form), cleared on ACTIVE, kept once OFFBOARDED for the farewell report.
+  offboardingDueAt DateTime?
   joinedAt         DateTime
   assets           Asset[]
   reservations     Reservation[]
@@ -907,6 +911,8 @@ model Stocktake {
   postedAt   DateTime?
   postedById String?
   postedBy   User?           @relation("stocktakesPosted", fields: [postedById], references: [id], onDelete: Restrict)
+  /// Phase 23 (spec §2.2). Close-by date, set once at open (default openedAt + 3 days). Day-precision UTC.
+  dueAt      DateTime
   note       String?
   lines      StocktakeLine[]
   movements  StockMovement[]

@@ -107,6 +107,7 @@ export type AdjustInput = z.infer<typeof adjustSchema>;
 export const stocktakeOpenSchema = z.object({
   categoryId: z.string().min(1),
   note: z.string().trim().max(500).optional().default(""),
+  dueAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker"),
 });
 export type StocktakeOpenInput = z.infer<typeof stocktakeOpenSchema>;
 

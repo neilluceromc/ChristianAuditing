@@ -1,9 +1,10 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { fieldClasses } from "@/components/ui/input";
 import { useOverlayLayer } from "@/components/ui/use-focus-trap";
+import { recentOptions } from "@/lib/recent-picks";
 
 export interface ComboOption {
   value: string;
@@ -20,6 +21,8 @@ export function EntityCombobox({
   id,
   invalid,
   "aria-describedby": describedBy,
+  recent,
+  autoFocus,
 }: {
   options: ComboOption[];
   value: string | null;
@@ -28,6 +31,8 @@ export function EntityCombobox({
   id?: string;
   invalid?: boolean;
   "aria-describedby"?: string;
+  recent?: string[];
+  autoFocus?: boolean;
 }) {
   const listId = useId();
   const [open, setOpen] = useState(false);
@@ -42,9 +47,13 @@ export function EntityCombobox({
   useOverlayLayer(open, () => setOpen(false));
 
   const selected = options.find((o) => o.value === value) ?? null;
-  const shown = query
+  const filtered = query
     ? options.filter((o) => (o.label + " " + (o.sub ?? "")).toLowerCase().includes(query.toLowerCase()))
     : options;
+  const recentShown = query ? [] : recentOptions(options, recent ?? []);
+  const recentSet = new Set(recentShown.map((o) => o.value));
+  const rest = query ? filtered : options.filter((o) => !recentSet.has(o.value));
+  const shown = [...recentShown, ...rest];
 
   function pick(option: ComboOption | null) {
     onChange(option?.value ?? null);
@@ -66,6 +75,7 @@ export function EntityCombobox({
         aria-invalid={invalid || undefined}
         className={fieldClasses(invalid)}
         placeholder={placeholder}
+        autoFocus={autoFocus}
         value={open ? query : (selected ? `${selected.label}${selected.sub ? ` · ${selected.sub}` : ""}` : "")}
         onFocus={() => { setOpen(true); setActive(0); }}
         onBlur={() => setTimeout(() => setOpen(false), 120)} // let option mousedown land first
@@ -86,22 +96,29 @@ export function EntityCombobox({
         >
           {shown.length === 0 && <li className="px-2 py-1.5 text-xs text-fg-muted">No matches.</li>}
           {shown.map((option, i) => (
-            <li
-              key={option.value}
-              id={`${listId}-${option.value}`}
-              role="option"
-              aria-selected={option.value === value}
-              className={cn(
-                "cursor-pointer rounded-[5px] px-2 py-1.5 text-xs",
-                i === active ? "bg-accent-tint text-fg" : "text-fg-secondary",
+            <Fragment key={option.value}>
+              {recentShown.length > 0 && i === 0 && (
+                <li role="presentation" className="px-2 pb-0.5 pt-1 text-[10px] uppercase tracking-[0.06em] text-fg-faint">Recent</li>
               )}
-              onMouseEnter={() => setActive(i)}
-              onMouseDown={(e) => { e.preventDefault(); pick(option); }}
-            >
-              <span className="font-medium">{option.label}</span>
-              {option.sub && <span className="ml-1.5 font-mono text-[10px] text-fg-faint">{option.sub}</span>}
-              {option.note && <span className="ml-1.5 text-[10px] text-fg-muted">{option.note}</span>}
-            </li>
+              {recentShown.length > 0 && i === recentShown.length && (
+                <li role="presentation" className="px-2 pb-0.5 pt-1 text-[10px] uppercase tracking-[0.06em] text-fg-faint">All</li>
+              )}
+              <li
+                id={`${listId}-${option.value}`}
+                role="option"
+                aria-selected={option.value === value}
+                className={cn(
+                  "cursor-pointer rounded-[5px] px-2 py-1.5 text-xs",
+                  i === active ? "bg-accent-tint text-fg" : "text-fg-secondary",
+                )}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => { e.preventDefault(); pick(option); }}
+              >
+                <span className="font-medium">{option.label}</span>
+                {option.sub && <span className="ml-1.5 font-mono text-[10px] text-fg-faint">{option.sub}</span>}
+                {option.note && <span className="ml-1.5 text-[10px] text-fg-muted">{option.note}</span>}
+              </li>
+            </Fragment>
           ))}
         </ul>
       )}

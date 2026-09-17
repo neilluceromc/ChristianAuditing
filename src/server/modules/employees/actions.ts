@@ -16,6 +16,8 @@ import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass,
 import { isApprover } from "@/lib/approval-access";
 import { reasonRequired, reasonOptional } from "@/lib/reason";
 import { findSameName } from "@/server/modules/employees/queries";
+import { dayFromISO, defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
+import { localDateISO } from "@/lib/format";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -222,6 +224,8 @@ export async function requestAssignReserved(input: unknown): Promise<ActionResul
  * history to start from); `updateEmployee`'s own data omits it entirely, so
  * the edit form cannot move a department as a side effect of any other edit.
  */
+const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
+
 const employeeSchema = z.object({
   id: z.string().min(1),
   name: z.string().trim().min(2, "Name the person").max(120),
@@ -229,6 +233,7 @@ const employeeSchema = z.object({
   employment: z.enum(["ACTIVE", "OFFBOARDING", "OFFBOARDED"]),
   /** null = never synced ("no sync yet"); custom strings stored as-is → Neutral family */
   m365Status: z.string().trim().max(60).nullable(),
+  offboardingDueAt: z.union([z.literal(""), dateStr]).optional(),
 });
 
 export async function updateEmployee(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -242,6 +247,27 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
 
   const employee = await prisma.employee.findUnique({ where: { id: d.id } });
   if (!employee) return conflict("That employee no longer exists.");
+
+  const today = localDateISO(new Date());
+  // Ruling R8: the floor guards a CHANGE, not a re-send. An employee whose
+  // completion date is already in the past (the seed's Dennis, and every row
+  // the migration backfilled) must still be able to have their name or title
+  // edited — an unconditional floor made the whole form unsavable, since the
+  // form posts the stored date back untouched. Only a date that actually
+  // differs from what is stored has to be today or later.
+  const storedDueISO = employee.offboardingDueAt ? localDateISO(employee.offboardingDueAt) : null;
+  let offboardingDueAt: Date | null;
+  if (d.employment === "OFFBOARDING") {
+    if (d.offboardingDueAt) {
+      if (d.offboardingDueAt !== storedDueISO && d.offboardingDueAt < minOffboardingDue(today)) {
+        return validationError({ offboardingDueAt: "Pick today or later" });
+      }
+      offboardingDueAt = dayFromISO(d.offboardingDueAt);
+    } else {
+      offboardingDueAt = employee.offboardingDueAt ?? dayFromISO(defaultOffboardingDue(today));
+    }
+  } else if (d.employment === "ACTIVE") offboardingDueAt = null;
+  else offboardingDueAt = employee.offboardingDueAt; // OFFBOARDED keeps the record
 
   const data = {
     name: d.name,
@@ -259,6 +285,7 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
         : d.employment === "ACTIVE"
           ? null
           : employee.offboardingAt,
+    offboardingDueAt,
   };
   const diff = diffOf(employee as unknown as Record<string, unknown>, data);
   if (Object.keys(diff).length === 0) return ok({ id: employee.id });
@@ -273,10 +300,19 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   });
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
+  // Phase 23: this is the only writer of `offboardingDueAt`, and that date is
+  // rendered on four further surfaces — the offboarding list's Due column and
+  // facet, the wizard header's pill, the farewell report's completion line and
+  // the IT worklist's leaver row (Home and /inventory/work). The dynamic
+  // segments take the `"page"` form, the same shape `revalidateStockReads`
+  // uses (`src/server/modules/stock/revalidate.ts`).
+  revalidatePath("/offboarding");
+  revalidatePath("/offboarding/[employeeId]", "page");
+  revalidatePath("/offboarding/[employeeId]/report", "page");
+  revalidatePath("/inventory/work");
+  revalidatePath("/");
   return ok({ id: employee.id });
 }
-
-const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
 
 const createEmployeeSchema = employeeSchema.omit({ id: true }).extend({
   departmentId: z.string().min(1, "Pick a department"),
@@ -306,6 +342,10 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
   if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) {
     return validationError({ departmentId: "Unknown department" });
   }
+  const today = localDateISO(new Date());
+  if (d.employment === "OFFBOARDING" && d.offboardingDueAt && d.offboardingDueAt < minOffboardingDue(today)) {
+    return validationError({ offboardingDueAt: "Pick today or later" });
+  }
   // Phase 20 (spec §5): same-name-same-department is a warning that needs a
   // deliberate confirm — checked BEFORE the employeeNo uniqueness check
   // (that one is a hard collision; this one is a "are you sure").
@@ -334,6 +374,7 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
     m365Status: d.m365Status === "" ? null : d.m365Status,
     joinedAt,
     offboardingAt: d.employment === "OFFBOARDING" ? new Date() : null,
+    offboardingDueAt: d.employment === "OFFBOARDING" ? dayFromISO(d.offboardingDueAt || defaultOffboardingDue(today)) : null,
   };
 
   let id = "";
@@ -345,7 +386,10 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
         actorId: user.id, actorLabel: user.name,
         entityType: "employee", entityId: created.id,
         action: "create",
-        diff: { employeeNo: { from: null, to: d.employeeNo }, name: { from: null, to: d.name } },
+        diff: {
+          employeeNo: { from: null, to: d.employeeNo }, name: { from: null, to: d.name },
+          ...(data.offboardingDueAt ? { offboardingDueAt: { from: null, to: data.offboardingDueAt } } : {}),
+        },
       });
     });
   } catch (err) {

@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import type { AssetClass } from "@prisma/client";
 import { statusesFor } from "@/lib/asset-class";
 import { requestStatusChange } from "@/server/modules/inventory/actions";
@@ -102,11 +103,10 @@ export function StatusControl({
               </Select>
             )}
           </FormField>
-          <FormField label="Reason" required={!direct} error={fieldErrors.reason}>
-            {(p) => (
-              <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={reason} onChange={(e) => setReason(e.target.value)} />
-            )}
-          </FormField>
+          <ReasonField
+            required={!direct} error={fieldErrors.reason} value={reason} onChange={setReason}
+            chips={REASON_CHIPS["asset.status"]} disabled={pending}
+          />
         </div>
       </Dialog>
     </>

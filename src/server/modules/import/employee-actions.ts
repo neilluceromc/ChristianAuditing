@@ -17,6 +17,8 @@ import {
 import { groupByCause, optionsFromForm, type CauseGroup } from "@/lib/import-vocabulary";
 import { resolveEmployeeRefs } from "./resolve";
 import { conflict, forbidden, ok, rateLimited, type ActionResult } from "@/server/action-result";
+import { dayFromISO, defaultOffboardingDue } from "@/lib/deadlines";
+import { localDateISO } from "@/lib/format";
 
 export interface EmployeePlanResult {
   plan: EmployeePlan;
@@ -140,13 +142,16 @@ export async function applyEmployeeImport(
   let updated = 0;
   let unchanged = 0;
   const failures: { row: number; reason: string }[] = [];
+  const today = localDateISO(new Date());
 
   for (const row of plan.rows) {
     if (row.kind === "blocked") continue;
     try {
       const outcome = await prisma.$transaction(async (tx) => {
         if (row.kind === "create") {
-          const employee = await tx.employee.create({ data: row.data });
+          const employee = await tx.employee.create({
+            data: { ...row.data, offboardingDueAt: row.data.employment === "OFFBOARDING" ? dayFromISO(defaultOffboardingDue(today)) : null },
+          });
           // Scope decision 15: this importer is the only surface that can
           // create an employee already OFFBOARDING/OFFBOARDED — the
           // employee analogue of A-5 (asset import's own status-on-create
@@ -160,6 +165,7 @@ export async function applyEmployeeImport(
             employment: { from: null, to: employee.employment },
           };
           if (employee.offboardingAt) diff.offboardingAt = { from: null, to: employee.offboardingAt };
+          if (employee.offboardingDueAt) diff.offboardingDueAt = { from: null, to: employee.offboardingDueAt };
           await writeAudit(tx, {
             actorId: actor.id,
             actorLabel: actor.name,

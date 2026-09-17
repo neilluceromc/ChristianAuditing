@@ -16,6 +16,7 @@ import {
 } from "@/server/action-result";
 import { ActionFailure, openLots, recordInflowLot, recordOutflow } from "./ledger";
 import { revalidateStockReads } from "./revalidate";
+import { rememberPicks } from "@/server/recent-picks";
 
 function revalidateItem(itemId: string) {
   // Phase 22 (spec §7): the list, the item, the audit and the three reports —
@@ -76,6 +77,7 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ movem
     return { movementId: mv.id, balance: sum._sum.quantity ?? 0 };
   });
   revalidateItem(item.id);
+  await rememberPicks(user.id, { "stock-item": item.id, vendor: d.supplierId || null });
   return ok(result);
 }
 
@@ -135,6 +137,7 @@ export async function issueStock(input: unknown): Promise<ActionResult<{ balance
       return { balance: balance - d.quantity };
     });
     revalidateItem(item.id);
+    await rememberPicks(user.id, { "stock-item": item.id, employee: d.employeeId || null });
     return ok(result);
   } catch (e) {
     if (e instanceof ActionFailure) return e.result;

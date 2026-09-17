@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
+import { localDateISO } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmployeeForm } from "@/components/employees/employee-form";
 
@@ -31,6 +32,7 @@ export default async function EditEmployeePage({ params }: { params: Promise<{ i
           departmentId: employee.departmentId,
           employment: employee.employment,
           m365Status: employee.m365Status,
+          offboardingDueAt: employee.offboardingDueAt ? localDateISO(employee.offboardingDueAt) : "",
         }}
       />
     </>

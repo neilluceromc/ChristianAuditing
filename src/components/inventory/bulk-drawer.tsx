@@ -7,13 +7,14 @@ import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import { DEFAULT_STATUS, statusesFor } from "@/lib/asset-class";
 import { DEFAULT_LOAN_DAYS, defaultLoanDue, minLoanDue } from "@/lib/lifecycle";
 import { bulkRequestStatusChange } from "@/server/modules/inventory/actions";
@@ -32,6 +33,7 @@ export function BulkDrawer({
   cls,
   direct,
   employees,
+  recentEmployees,
   onDone,
 }: {
   open: boolean;
@@ -43,6 +45,7 @@ export function BulkDrawer({
   cls: AssetClass;
   direct: boolean;
   employees: ComboOption[];
+  recentEmployees?: string[];
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -269,6 +272,7 @@ export function BulkDrawer({
                       value={employeeId}
                       onChange={setEmployeeId}
                       placeholder="Type a name or EMP number…"
+                      recent={recentEmployees}
                     />
                   )}
                 </FormField>
@@ -293,17 +297,10 @@ export function BulkDrawer({
                     )}
                   </FormField>
                 )}
-                <FormField label="Reason" error={fieldErrors.reason}>
-                  {(props) => (
-                    <Textarea
-                      id={props.id}
-                      aria-describedby={props["aria-describedby"]}
-                      invalid={props.invalid}
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                    />
-                  )}
-                </FormField>
+                <ReasonField
+                  error={fieldErrors.reason} value={reason} onChange={setReason}
+                  chips={REASON_CHIPS["asset.assign"]} disabled={pending}
+                />
               </>
             ) : (
               <>
@@ -322,17 +319,10 @@ export function BulkDrawer({
                     </Select>
                   )}
                 </FormField>
-                <FormField label="Reason" required={!direct} error={fieldErrors.reason} hint="Goes into every approval's payload.">
-                  {(props) => (
-                    <Textarea
-                      id={props.id}
-                      aria-describedby={props["aria-describedby"]}
-                      invalid={props.invalid}
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                    />
-                  )}
-                </FormField>
+                <ReasonField
+                  required={!direct} error={fieldErrors.reason} hint="Goes into every approval's payload." value={reason} onChange={setReason}
+                  chips={REASON_CHIPS["asset.status"]} disabled={pending}
+                />
               </>
             )}
             <div className="flex justify-end gap-2">

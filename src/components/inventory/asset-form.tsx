@@ -14,6 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import { CREATABLE_BY_CLASS, type CreatableStatus } from "@/lib/asset-rules";
 import { CLASS_EXAMPLE, DEFAULT_STATUS } from "@/lib/asset-class";
 import { nextTags, preferredPrefix, RUN_REFUSAL } from "@/lib/receiving";
@@ -46,6 +48,7 @@ export function AssetForm({
   types,
   employees,
   vendors = [],
+  recentVendors,
   suggestions,
   initial,
   action,
@@ -56,6 +59,7 @@ export function AssetForm({
   types: Array<{ id: string; name: string; categoryId: string }>;
   employees: ComboOption[];
   vendors?: Array<{ id: string; name: string }>;
+  recentVendors?: string[];
   /** Per-category next-tag suggestion data (Task 11's `tagSuggestions`) — new mode only. */
   suggestions?: Record<string, CategorySuggestion>;
   initial?: AssetFormInitial;
@@ -215,22 +219,16 @@ export function AssetForm({
       });
       if (res.ok) {
         if (mode === "new") {
-          let failed = 0;
-          for (const { file, kind } of files) {
+          // Parallel, not sequential: storeUpload can throw (disk I/O) — a
+          // thrown upload counts as a failure exactly like `!up.ok`; it must
+          // never abort the batch or strand the user on the form after the
+          // asset was already created.
+          const results = await Promise.all(files.map(async ({ file, kind }) => {
             const fd = new FormData();
-            fd.set("assetId", res.data.id);
-            fd.set("kind", kind);
-            fd.set("file", file);
-            try {
-              const up = await uploadDocument(fd);
-              if (!up.ok) failed += 1;
-            } catch {
-              // storeUpload can throw (disk I/O) — a thrown upload counts as a
-              // failure exactly like `!up.ok`; it must never abort the loop or
-              // strand the user on the form after the asset was already created.
-              failed += 1;
-            }
-          }
+            fd.set("assetId", res.data.id); fd.set("kind", kind); fd.set("file", file);
+            try { return (await uploadDocument(fd)).ok; } catch { return false; }
+          }));
+          const failed = results.filter((ok) => !ok).length;
           router.push(
             failed
               ? `/inventory/${res.data.id}/documents?failed=${failed}&of=${files.length}`
@@ -263,6 +261,7 @@ export function AssetForm({
       disabled?: boolean;
       placeholder?: string;
       onBlur?: () => void;
+      autoFocus?: boolean;
     } = {},
   ) => (
     <FormField label={label} required={opts.required} hint={opts.hint} error={errors[key]}>
@@ -278,6 +277,7 @@ export function AssetForm({
           inputMode={opts.type === "number" ? "decimal" : undefined}
           disabled={opts.disabled}
           placeholder={opts.placeholder}
+          autoFocus={opts.autoFocus}
           value={form[key]}
           onChange={(e) => set(key)(e.target.value)}
           onBlur={opts.onBlur}
@@ -302,8 +302,9 @@ export function AssetForm({
             disabled: mode === "edit",
             placeholder: CLASS_EXAMPLE[cls].tag,
             onBlur: mode === "new" ? () => scheduleIdentifierCheck("tag", form.tag, tagCheckTimer) : undefined,
+            autoFocus: mode === "new",
           })}
-          {field("Model", "model", { required: true, placeholder: CLASS_EXAMPLE[cls].model })}
+          {field("Model", "model", { required: true, placeholder: CLASS_EXAMPLE[cls].model, autoFocus: mode === "edit" })}
           {field("Brand", "brand")}
           {field("Serial", "serial", {
             onBlur: mode === "new" ? () => scheduleIdentifierCheck("serial", form.serial, serialCheckTimer) : undefined,
@@ -365,14 +366,10 @@ export function AssetForm({
           {field("Cost (₱)", "cost", { type: "number" })}
           <FormField label="Vendor" error={errors.vendorId}>
             {(p) => (
-              <Select
-                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={form.vendorId}
-                onChange={(e) => setForm((f) => ({ ...f, vendorId: e.target.value }))}
-              >
-                <option value="">—</option>
-                {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </Select>
+              <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                options={vendors.map((v) => ({ value: v.id, label: v.name }))} recent={recentVendors}
+                value={form.vendorId || null} onChange={(id) => setForm((f) => ({ ...f, vendorId: id ?? "" }))}
+                placeholder="Type a vendor name…" />
             )}
           </FormField>
           {field("Invoice / receipt no.", "invoiceRef")}
@@ -483,15 +480,10 @@ export function AssetForm({
                     />
                   )}
                 </FormField>
-                <FormField label="Reason" error={errors.assignReason}>
-                  {(p) => (
-                    <Textarea
-                      id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                      value={assignReason}
-                      onChange={(e) => setAssignReason(e.target.value)}
-                    />
-                  )}
-                </FormField>
+                <ReasonField
+                  error={errors.assignReason} value={assignReason} onChange={setAssignReason}
+                  chips={REASON_CHIPS["asset.assign"]} disabled={pending}
+                />
               </>
             )}
           </CardBody>

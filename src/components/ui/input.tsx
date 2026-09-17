@@ -15,9 +15,26 @@ export const fieldClasses = (invalid?: boolean) =>
       : "border-border-strong focus:border-accent focus:shadow-[0_0_0_3px_var(--focus-shadow)]",
   );
 
+/**
+ * Spec §6.1 / §8 (ruling R7): text-ish inputs get `enterKeyHint="next"` so a
+ * soft keyboard offers "next" instead of "go". One default here rather than ~20
+ * call sites; a caller that wants "done"/"send"/"search" just passes its own.
+ * Types with their own keyboard affordance (`date`, `checkbox`, `radio`,
+ * `file`, `submit`, …) and `<Textarea>` are left alone. Desktop browsers ignore
+ * the attribute entirely — no rendering, a11y-tree or test-surface change.
+ */
+const HINTED_TYPES = ["text", "search", "email", "tel", "url", "number"];
+
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   { invalid, className, ...rest },
   ref,
 ) {
-  return <input ref={ref} aria-invalid={invalid || undefined} className={cn(fieldClasses(invalid), className)} {...rest} />;
+  const enterKeyHint =
+    rest.enterKeyHint ?? (rest.type === undefined || HINTED_TYPES.includes(rest.type) ? "next" : undefined);
+  return (
+    <input
+      ref={ref} aria-invalid={invalid || undefined} className={cn(fieldClasses(invalid), className)}
+      {...rest} enterKeyHint={enterKeyHint}
+    />
+  );
 });

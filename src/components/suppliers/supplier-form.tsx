@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { CONTRACT_STATUS_LABEL, VENDOR_CONTRACT_STATUSES, type SupplierInput } from "@/lib/supplier-schema";
 import { createSupplier, updateSupplier } from "@/server/modules/suppliers/actions";
+import { SupplierSameName } from "./supplier-same-name";
 import { useSupplierRunner } from "./use-supplier-runner";
 
 const EMPTY: SupplierInput = {
@@ -54,9 +55,12 @@ export function SupplierForm(props: Props) {
         <CardHeader title="Profile" />
         <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField label="Name" required error={fieldErrors.name}>
-            {(p) => <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+            {(p) => <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} autoFocus
               value={form.name} onChange={(e) => set("name", e.target.value)} />}
           </FormField>
+          <div className="sm:col-span-2">
+            <SupplierSameName name={form.name} excludeId={props.mode === "edit" ? props.id : undefined} />
+          </div>
           <FormField label="Registered name" error={fieldErrors.registeredName}>
             {(p) => <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
               value={form.registeredName} onChange={(e) => set("registeredName", e.target.value)} />}

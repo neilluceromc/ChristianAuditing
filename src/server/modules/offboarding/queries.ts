@@ -3,13 +3,13 @@ import { prisma } from "@/server/db/client";
 import { pagedSnapshot } from "@/server/paged";
 import { OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import {
   decisionOf, reportTotals, returnTargetStatus,
   type Decision, type DecisionCandidate, type ReportTotals,
 } from "@/lib/offboarding";
 import {
-  buildOffboardingOrderBy, buildOffboardingWhere, progressOf, sortByUndecided, type Progress,
+  buildOffboardingOrderBy, buildOffboardingWhere, dueOf, progressOf, sortByUndecided, type Due, type Progress,
 } from "@/lib/offboarding-list";
 import { pageOf, ENTITY_PAGE_SIZE } from "@/lib/paging";
 import type { ListState } from "@/lib/url-state";
@@ -35,6 +35,8 @@ export interface OffboardingRow {
   /** Phase 20 (spec §4.2): `employee.offboardingAt` — the "started" sort key. */
   started: Date | null;
   joined: string;
+  /** Phase 23 (spec §4.6/§5.4): `employee.offboardingDueAt` — the Due facet/sort's own field. */
+  dueAt: Date | null;
 }
 
 export interface ApprovalLike {
@@ -150,6 +152,7 @@ function toOffboardingRow(e: OffboardingCandidate): OffboardingRow {
     undecided: heldIdSet.size - decidedHeld,
     started: e.offboardingAt,
     joined: fmtDate(e.joinedAt),
+    dueAt: e.offboardingDueAt,
   };
 }
 
@@ -159,13 +162,22 @@ function withoutFilter(state: ListState, facet: string): ListState {
 }
 
 /**
- * Phase 20 (spec §4.2): Department counts by real SQL groupBy; Progress
- * counts are derived, so they can only be had by computing rows over the
- * candidate set (plan P-5) — both computed over `where` minus their OWN key,
- * the same convention `employeeFacetOptions`/`facetOptions` already use.
+ * Phase 20 (spec §4.2): Department counts by real SQL groupBy; Progress and
+ * (Phase 23) Due counts are derived, so they can only be had by computing rows
+ * over the candidate set (plan P-5) — each computed over `where` minus their
+ * OWN key, the same convention `employeeFacetOptions`/`facetOptions` already
+ * use.
+ *
+ * Both derived facets share ONE candidate pass, and that is exact, not a
+ * shortcut: `buildOffboardingWhere` reads neither `progress` nor `due` (only
+ * `department`), so `withoutFilter(state, "progress")` is already
+ * "without `due`" too — the two clears produce the identical query. Hence the
+ * single `derivedCandidates` list feeding both counters. The flip side is that
+ * an active `progress` filter does not narrow the Due counts and vice versa,
+ * the same way `department` has always behaved (final review Minor 7).
  */
-async function offboardingFacets(state: ListState): Promise<{ department: FacetOption[]; progress: FacetOption[] }> {
-  const [deptGroups, departments, progressCandidates] = await Promise.all([
+async function offboardingFacets(state: ListState): Promise<{ department: FacetOption[]; progress: FacetOption[]; due: FacetOption[] }> {
+  const [deptGroups, departments, derivedCandidates] = await Promise.all([
     prisma.employee.groupBy({
       by: ["departmentId"], where: buildOffboardingWhere(withoutFilter(state, "department")), _count: true,
     }),
@@ -176,8 +188,14 @@ async function offboardingFacets(state: ListState): Promise<{ department: FacetO
     }),
   ]);
 
+  const today = localDateISO(new Date());
   const progressCounts: Record<Progress, number> = { open: 0, complete: 0 };
-  for (const e of progressCandidates) progressCounts[progressOf(toOffboardingRow(e).undecided)] += 1;
+  const dueCounts: Record<Due, number> = { overdue: 0, "on-track": 0 };
+  for (const e of derivedCandidates) {
+    const row = toOffboardingRow(e);
+    progressCounts[progressOf(row.undecided)] += 1;
+    dueCounts[dueOf(row.dueAt, today)] += 1;
+  }
 
   return {
     department: departments.map((d) => ({
@@ -186,6 +204,10 @@ async function offboardingFacets(state: ListState): Promise<{ department: FacetO
     progress: [
       { value: "open", label: "Open", count: progressCounts.open },
       { value: "complete", label: "Complete", count: progressCounts.complete },
+    ],
+    due: [
+      { value: "overdue", label: "Overdue", count: dueCounts.overdue },
+      { value: "on-track", label: "On track", count: dueCounts["on-track"] },
     ],
   };
 }
@@ -202,24 +224,29 @@ async function offboardingFacets(state: ListState): Promise<{ department: FacetO
  */
 export async function listOffboarding(state: ListState): Promise<{
   rows: OffboardingRow[]; total: number; page: number; pageCount: number;
-  facets: { department: FacetOption[]; progress: FacetOption[] };
+  facets: { department: FacetOption[]; progress: FacetOption[]; due: FacetOption[] };
 }> {
   const where = buildOffboardingWhere(state);
   const orderBy = buildOffboardingOrderBy(state.sort);
   const progressFilter = (state.filters.progress ?? []).filter(
     (p): p is Progress => p === "open" || p === "complete",
   );
+  const dueFilter = (state.filters.due ?? []).filter((d): d is Due => d === "overdue" || d === "on-track");
 
   let rows: OffboardingRow[];
   let pg: ReturnType<typeof pageOf>;
 
-  if (progressFilter.length > 0 || orderBy === null) {
+  if (progressFilter.length > 0 || dueFilter.length > 0 || orderBy === null) {
     const stableOrder: Prisma.EmployeeOrderByWithRelationInput[] =
       orderBy ?? [{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }];
     const candidates = await prisma.employee.findMany({ where, orderBy: stableOrder, include: OFFBOARDING_INCLUDE });
     let computed = candidates.map(toOffboardingRow);
     if (progressFilter.length > 0) {
       computed = computed.filter((r) => progressFilter.includes(progressOf(r.undecided)));
+    }
+    if (dueFilter.length > 0) {
+      const today = localDateISO(new Date());
+      computed = computed.filter((r) => dueFilter.includes(dueOf(r.dueAt, today)));
     }
     if (orderBy === null) {
       const undecidedSort = state.sort.find((s) => s.key === "undecided");
@@ -303,6 +330,7 @@ export interface WizardData {
     employment: string;
     m365Status: string | null;
     joined: string;
+    dueAt: Date | null;
   };
   policyName: string | null;
   slots: WizardSlot[];
@@ -310,6 +338,8 @@ export interface WizardData {
   /** held items with no live decision — Continue is blocked while this is > 0 */
   undecided: number;
   totals: ReportTotals;
+  /** Phase 23 (spec §5.4): the newest `offboarding.completed` audit entry's `createdAt`, null while still open. */
+  completedAt: Date | null;
 }
 
 /**
@@ -324,7 +354,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   });
   if (!employee) return null;
 
-  const [held, allReturns, blockers, policies, exceptions] = await Promise.all([
+  const [held, allReturns, blockers, policies, exceptions, completed] = await Promise.all([
     prisma.asset.findMany({
       where: { assigneeId: employeeId },
       include: { category: true },
@@ -370,6 +400,16 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
       where: { employeeId },
       orderBy: [{ employeeId: "asc" }, { id: "asc" }],
     }),
+    // Phase 23 (spec §5.4): only an OFFBOARDED record can have a completion
+    // entry, so the query rides this same Promise.all as a conditional member
+    // rather than costing the OFFBOARDED render a sixth serial round trip.
+    employee.employment === "OFFBOARDED"
+      ? prisma.auditEntry.findFirst({
+          where: { entityType: "employee", entityId: employee.id, action: "offboarding.completed" },
+          orderBy: { createdAt: "desc" },
+          select: { createdAt: true },
+        })
+      : Promise.resolve(null),
   ]);
 
   // The window lives in candidatesFor — see its comment. Applied to the row list
@@ -452,6 +492,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
       employment: employee.employment,
       m365Status: employee.m365Status,
       joined: fmtDate(employee.joinedAt),
+      dueAt: employee.offboardingDueAt,
     },
     policyName: policy?.name ?? null,
     slots: loadout.slots.map(({ slot, asset }) => ({
@@ -467,5 +508,6 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     totals: reportTotals(
       rows.filter((i) => i.decision).map((i) => ({ outcome: i.decision!.outcome, cost: i.cost })),
     ),
+    completedAt: completed?.createdAt ?? null,
   };
 }
