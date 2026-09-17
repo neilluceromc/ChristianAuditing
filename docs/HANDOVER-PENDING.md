@@ -102,6 +102,20 @@ Phase 17 D-11 (approvals double count, work-page note wording, `parsePage` dupli
 Phase 18 D-19 (edit-save toast vs redirect wording) and its review minors; Phase 19 D-30 (export plain
 branch ordering done; audit sentences done; the rest cosmetic). None blocks anything.
 
+Phase 23 `D-15` (the final review's six deferred Minors, all cosmetic or one-line): the Purchasing Home
+tile "Stocktakes past close-by" stays `neutral` when the count is > 0 where the other overdue surfaces
+turn `accent`; the receive form's supplier combobox has no visible "No supplier" clear, so clearing a
+chosen supplier means emptying the field by hand; `EntityCombobox`'s `autoFocus` opens the dropdown on
+mount, which is what puts a second listbox on `/stock/issue` and `/stock/receive` and is why the e2e's
+combobox picks are scoped to their own listbox; the offboarding `progress` and `due` facet counts do not
+narrow each other (exactly as `department` has always behaved, now written down in the query's own
+comment); the wizard header renders no `DuePill` once an employee is OFFBOARDED, so a completed
+offboarding loses the date from the header while the report still carries it; and two wording
+reconciliations between spec §5.4/§8 and what landed. Also parked, and named in the fix wave's report
+rather than dropped: `revalidateStocktake` still does not revalidate `/` (final-review Minor 6's other
+half — inert today, since every `(app)` route is dynamically rendered), and `createEmployee`'s
+unconditional date floor keeps its position (Task 4 Minor 5). None blocks anything.
+
 ---
 
 ## 6. The IT side — the current focus (2026-09-10 →)

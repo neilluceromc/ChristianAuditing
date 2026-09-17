@@ -1,7 +1,11 @@
 # Phase 23 — Parkinson sweep: quick forms and complete-by dates
 
-**Status:** design approved in conversation 2026-09-17 (both readings of the law; defaults editable at
-start; one phase, two sweeps; five sections approved one by one). Not yet planned.
+**Status:** implemented on branch `phase-23-parkinson-sweep` (10 tasks, `D-1`…`D-20` — the final-review
+fix wave added `D-16`…`D-19`, the final battery `D-20`), code-complete 2026-09-17 at final tree
+`09bf0a5`, final-review fix wave included; unmerged and unpushed. Design approved in conversation
+2026-09-17 (both readings of the law; defaults editable at start; one phase, two sweeps; five sections
+approved one by one). The sections below carry an *Amended (D-n)* note wherever execution proved the
+design wrong or unreachable; the plan's amendment block is the full record.
 
 **Why:** Parkinson's Law — *any task inflates until all of the available time is spent* — has two
 readings for a UI, and the survey of 2026-09-17 found both failing here. (1) Tasks take longer than
@@ -198,6 +202,12 @@ export function isPastDue(dueAt: Date, todayISO: string): boolean; // localDateI
 One list, reviewable in one file. Every chip is ≥ 5 characters so no chip can produce a refused
 reason under any `reasonRequired` minimum in the codebase (3, or 5 for `returnAssetToIt`).
 
+*Amended (D-2):* the ≥ 5 rule was over-strict and is now ≥ 4. Every chip site's minimum is 3
+(`reasonRequired()` defaults to 3; the stock adjust and write-off schemas use `min: 3`), and the only
+min-5 field, `returnAssetToIt`, has no chips at all — so the approved wording "Lost" stays in
+`stock.write-off` and `asset.missing`, and `asset.assign`'s third chip reads "On loan". The unit test
+asserts a floor of 4.
+
 ```ts
 export const REASON_CHIPS = {
   "stock.adjust":      ["Count correction", "Damaged", "Spoiled", "Found extra"],
@@ -367,6 +377,23 @@ open entry. Preference writes stay out of the trail (decision 7).
 - **`enterKeyHint`** — text inputs in the operational forms get `enterKeyHint="next"`, the last text
   input of a dialog `"done"`. Textareas unchanged.
 
+*Amended (D-8):* `ReasonField` ships without the optional `id` and `"aria-label"` props. P-10 turned the
+two stock dialogs' bare `aria-label="Reason"` textareas into `FormField`-based `ReasonField`s that take
+their accessible name from the visible label, so nothing needs to override it.
+
+*Amended (D-18, ruling R6):* the chip group's `aria-label` is **"Quick picks"**, and the chips carry no
+`aria-label` at all — their visible text is their accessible name. `getByLabel(text)` matches
+`aria-label` by case-insensitive *substring*, so a group named "Quick reasons" and chips named
+"Use reason: …" made `getByLabel("Reason")` / `("Purpose")` resolve to a textarea plus a group plus N
+chips at 21 pre-existing call sites across 13 spec files. Nothing chip-side may contain a field's own
+label word.
+
+*Amended (D-16, ruling R7):* `enterKeyHint` is one default in the shared `Input` component — typeable
+types (`text`, `search`, `email`, `tel`, `url`, `number`, and an unset `type`) render
+`enterKeyHint="next"` unless the caller passes its own, rendered after the `{...rest}` spread so a
+caller always wins. There are no per-site edits, and the "done on a dialog's last field" nuance is
+dropped.
+
 ### 6.2 Employee form (`components/employees/employee-form.tsx`)
 
 - New mode: `departmentId` starts `""`; the select's first option is `<option value="">Choose a
@@ -385,6 +412,13 @@ open entry. Preference writes stay out of the trail (decision 7).
   to `/employees/[id]/edit`.
 - Report (`/report`): one line under the header — "Completed on time (due D)", "Completed N d late
   (due D)", or, while open, "Still open · N d overdue (due D)" / "Due in N d (due D)".
+
+*Amended (D-13, ruling R4):* there is no `/employees/<id>/history` route and none is owed by this
+phase. An employee record has a Timeline (actor + action) and only `/audit` renders diff field names,
+so field-level employee history — including a changed `offboardingDueAt` — is read on
+`/audit?entity=employee`. The e2e asserts the newest row for the employee shows `offboardingDueAt` and
+`update`; the diff's old → new values are not rendered for employees and are not asserted. Same
+amendment applies to §9.2 case 3.
 
 ### 6.4 Stocktakes
 
@@ -418,6 +452,20 @@ open entry. Preference writes stay out of the trail (decision 7).
 | Enter in a draft line with empty description | no new line; nothing else happens |
 | Supplier same-name match | inline warning under Name with a link to the existing supplier; save is not blocked by the warning (`Vendor.name` is `@unique`, so an exact duplicate is still refused on save, as today) |
 
+*Amended (D-4, ruling R3):* the two date rows above describe two layers, and only one of them is
+reachable from the UI. Because the input carries `min` and the form has no `noValidate`, the browser's
+own constraint validation refuses a past date and the form never submits — so "Pick today or later" and
+"Pick tomorrow or later" are server guards that a user cannot normally see. Both layers stay; the e2e
+strips `min` with `evaluate` before submitting and asserts the server text, which is the guard the spec
+cares about.
+
+*Amended (D-17, ruling R8):* "Offboarding date before today" applies only to a **changed** date. A
+leaver backfilled or seeded with a past due date could not be saved at all: `min={today}` blocked the
+stored value natively and `updateEmployee`'s floor was unconditional, so editing anything else on that
+employee's form was impossible. The input's `min` is now the earlier of today and the stored value, and
+the server floor fires only when the submitted date differs from the stored one. `createEmployee`'s
+floor is unconditional still — nothing is stored yet there.
+
 ---
 
 ## 8. The shrink list — one row per file
@@ -447,6 +495,14 @@ open entry. Preference writes stay out of the trail (decision 7).
 
 No field changes its required-ness; no default is applied without being visible in the field.
 
+*Amended (P-2):* `loadout-view.tsx` has no `EntityCombobox` — its assign dialog picks a spare from a
+list, not a typeahead — so the "assign dialog combobox gets Recent" half of that row is void and the
+file gets chips only. Recent applies to `holder-control.tsx`, `bulk-drawer.tsx`, `issue-form.tsx`,
+`receive-form.tsx` and `asset-form.tsx`.
+
+*Amended (D-16, ruling R7):* "text inputs `enterKeyHint`" landed as one default inside the shared
+`Input` component rather than per site — see §6.1.
+
 ---
 
 ## 9. Testing
@@ -466,6 +522,12 @@ No field changes its required-ness; no default is applied without being visible 
 - `stock-schema.test.ts`: `stocktakeOpenSchema` accepts a date and refuses a malformed one.
 - `employees` action schema: `offboardingDueAt` optional, blank allowed, malformed refused (a small
   schema-only test next to the existing employee tests).
+
+*Amended (D-1, ruling R1):* the employee-schema unit test was dropped. `employeeSchema` is
+module-private in a `"use server"` file, which may export only async server actions, so it cannot be
+reached from a unit test without moving it. The date floor and the blank-department refusal are covered
+end to end instead, by `e2e/deadlines.spec.ts` cases 2 and 7. Measured unit total at close: **1476
+tests / 82 files**.
 
 ### 9.2 E2E (foreground, `E2E_PORT=3100 --workers=1 --global-timeout=540000`)
 
@@ -500,12 +562,31 @@ No field changes its required-ness; no default is applied without being visible 
    triage shows none.
 9. axe on `/stock/issue`, `/stock/receive`, `/employees/new`, `/purchases/suppliers/new`.
 
+*Amended (D-13, ruling R4):* case 3's "History tab shows `offboardingDueAt` old → new" is read on
+`/audit?entity=employee` instead — there is no `/employees/<id>/history` route, an employee's Timeline
+carries actor + action only, and only `/audit` renders diff field names. The case asserts the newest
+row for Dennis Ong shows `offboardingDueAt` and `update`, plus a DB poll; old → new values are not
+rendered for employees and are not asserted.
+
+*Amended (D-17, ruling R8):* `deadlines.spec.ts` ships **9** cases, not 8. The fix wave added case 9 —
+an overdue leaver's form saved with a Title change only, `min` deliberately left in place, asserting
+`validity.rangeUnderflow === false`, `✓ Saved`, `offboardingDueAt` unchanged to the millisecond, and an
+audit diff of exactly `["title"]`.
+
+*Measured at close (D-20):* 9 + 9 cases, and `--list` **337 tests in 33 files** overall.
+
 ### 9.3 Battery at the close
 
 `tsc` · `lint` · unit · `npx prisma migrate status` (24) · `npx playwright test --list` (count and
 file total recorded) · the seven chunks of Phase 22 with two additions: `e2e/deadlines.spec.ts` joins
 chunk F (30 → 38), `e2e/quick-forms.spec.ts` joins chunk D (38 → 47). Every chunk stays under the
 ten-minute foreground cap. `npm run db:seed` last; port 3100 free before, between and after.
+
+*Measured (D-20):* chunk F is **39**, not 38 — `deadlines.spec.ts` ships 9 cases after the fix wave's
+regression case. Measured at close: `tsc` clean · `lint` clean · **1476 unit / 82 files** · **24
+migrations**, up to date · `--list` **337 / 33** · **A 54 (3.4m) · B 67 (5.8m) · C 63 (5.9m) · D 47
+(4.7m) · E1 36 (8.9m) · E2 31 (4.1m) · F 39 (4.8m) = 337**, zero failed, zero did-not-run, after one
+test-only fix (`09bf0a5`); seed last, clean; port free throughout.
 
 ---
 
