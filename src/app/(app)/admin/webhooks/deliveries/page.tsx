@@ -2,6 +2,7 @@ import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
 import { DELIVERY_TABS, parseDeliveryTab } from "@/lib/webhooks";
+import { RETENTION_NOTE } from "@/lib/retention";
 import { listDeliveries } from "@/server/modules/admin/queries";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -26,6 +27,7 @@ export default async function DeliveriesPage({
         breadcrumb={[{ label: "Webhooks", href: "/admin/webhooks" }, { label: "Delivery attempts" }]}
       />
       <div className="flex flex-col gap-3">
+        <p className="text-xs text-fg-muted">{RETENTION_NOTE}</p>
         {/* `Tabs`, not a hand-rolled nav: this is the same `?state=` contract
             and the same affordance /purchases and /reservations render, and
             `endpoint-editor.tsx` already links into `?state=DEAD`. The labels
