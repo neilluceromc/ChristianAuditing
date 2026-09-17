@@ -1,7 +1,10 @@
 # Phase 24 — IT gaps 2: Replace groups, repairs view in SQL, worker retention
 
-**Status:** design approved in conversation 2026-09-17 (scope = the three open IT items; retention 90 days
-for finished deliveries and jobs; approach A "reuse what exists"; three sections approved). Not yet planned.
+**Status:** implemented on branch `phase-24-it-gaps-2` (6 tasks, `D-1`…`D-10` — the final whole-branch
+review added `D-8`, the fix wave `D-9`, the final battery `D-10`), code-complete 2026-09-17 at final tree
+`7601cab`, final-review fix wave included; unmerged and unpushed. Design approved in conversation
+2026-09-17 (scope = the three open IT items; retention 90 days for finished deliveries and jobs;
+approach A "reuse what exists"; three sections approved).
 
 **Why:** After Phase 23 the parked IT list had three items still open — the rest of the list recorded in
 `docs/HANDOVER-PENDING.md` §6 had already been closed in Phase 20. (1) The Replace dialog ranks same-type
@@ -179,6 +182,14 @@ A DEAD delivery cannot hold a live job (the worker dead-letters both in the same
 strands nothing; a DELIVERED one's job is DONE. A job whose delivery row was pruned but which somehow ran
 again is already handled: `deliverWebhook` throws `Permanent` for a missing row.
 
+*Amended (D-9):* the delete repeats the status + cutoff predicate — `deleteMany({ where: { id: { in: ids },
+status: { in: [...] }, createdAt|updatedAt: { lt: cutoff } } })` for both tables, against the one `cutoff`
+the selects already share. As written above the predicate held only at *select* time, so an admin's Replay
+landing between the two round trips (`DEAD → PENDING` plus a live job, in one transaction) would have had
+its revived row deleted anyway, dead-lettering the job and silently voiding the replay. `pruneTable` is
+unchanged: its exits read the *picked* batch's length, never the delete's count, so a row that survives the
+delete because its status moved cannot stall or loop the sweep — it no longer matches the select either.
+
 ### 5.3 `src/worker/index.ts`
 
 - After `await recoverStale();` at start: `await safePrune();`.
@@ -213,6 +224,11 @@ pruneRetention()
 `"worker:prune": "tsx src/worker/prune.ts"` beside `worker:once`. Not a `"use server"` module, not
 importable by the app; the compose `worker` service picks the loop up unchanged (same image, same command).
 
+*Amended (D-9):* the one-shot swallows a rejecting `$disconnect` — `.finally(() => prisma.$disconnect().catch(() => {}))`.
+As written, a disconnect that rejected became an unhandled rejection and a non-zero exit after a
+*successful* prune. The `.then` log line is unchanged, and `e2e/it-gaps.spec.ts` case 9 now captures the
+command's stdout and asserts it, so the operator-facing artifact this section prescribes is pinned.
+
 ### 5.5 Audit
 
 No domain write changes. Pruned rows are operational records, not audited entities; the worker log line
@@ -229,6 +245,17 @@ is the record of each pass.
 {heading && <li role="presentation" className=…>{heading}</li>}` — same class string, same
 `role="presentation"`, so existing Recent/All behaviour and the Phase 23 e2e assertions are unchanged.
 Keyboard navigation still indexes `shown`.
+
+*Amended (D-9):* options under a grouped heading carry `aria-describedby` → that heading's `id`;
+Recent/All headings are not described. A `role="presentation"` row is outside the accessibility tree, so
+as written above the same-type signal — which decision 4 had just removed from every option's accessible
+name — was conveyed to sighted users only, and the Replace dialog exists to give exactly that signal
+(final review I-2, ruling R3). Each heading `li` therefore gets an `id`, and an option whose heading is a
+real `group` (never the synthetic "Recent"/"All") points at it. `aria-describedby` does not contribute to
+the accessible name, so the flat-`li` shape, the class string, the `role="presentation"`, keyboard
+navigation and every existing assertion are untouched, and the five recent-enabled callers announce
+exactly as before. The fuller shape (`role="group"` with an `aria-label` per block) stays a documented
+option in `docs/HANDOVER-PENDING.md` §6, not a change this phase makes.
 
 ### 6.2 Replace dialog
 
@@ -247,7 +274,7 @@ Under the `PageHeader`, one muted line: `<p className="text-xs text-fg-muted">{R
 | Situation | Response |
 |---|---|
 | Prune query fails (connection, lock) | logged `[worker] prune failed: …`; the loop continues; next attempt in an hour |
-| Prune while a row is mid-retry | impossible by predicate: only `DELIVERED`/`DEAD` deliveries and `DONE`/`DEAD` jobs qualify |
+| Prune while a row is mid-retry | impossible by predicate: only `DELIVERED`/`DEAD` deliveries and `DONE`/`DEAD` jobs qualify — *amended (D-9):* the predicate is carried by **both** the select and the delete, so a row that leaves the finished statuses between the two (an admin's Replay) is not deleted |
 | `repairStageIds` returns an empty set | `pagedSnapshot` over `id IN ()` → total 0, page 1 of 1, no rows; the empty state renders as today |
 | Combobox option without `group` after grouped rows | no heading (the helper returns null) — mixed lists degrade gracefully |
 | `worker:prune` run while the worker loop is also pruning | both delete by id lists; a row deleted by the other pass simply lowers this pass's count |
