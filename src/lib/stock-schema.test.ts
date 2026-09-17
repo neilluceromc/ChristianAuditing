@@ -151,10 +151,18 @@ describe("adjustSchema", () => {
 
 describe("stocktakeOpenSchema", () => {
   it("accepts the literal 'all' for every category", () => {
-    expect(stocktakeOpenSchema.safeParse({ categoryId: "all" }).success).toBe(true);
+    expect(stocktakeOpenSchema.safeParse({ categoryId: "all", dueAt: "2026-09-20" }).success).toBe(true);
   });
   it("refuses an empty categoryId", () => {
-    expect(stocktakeOpenSchema.safeParse({ categoryId: "" }).success).toBe(false);
+    expect(stocktakeOpenSchema.safeParse({ categoryId: "", dueAt: "2026-09-20" }).success).toBe(false);
+  });
+  it("refuses a dueAt that isn't YYYY-MM-DD", () => {
+    const r = stocktakeOpenSchema.safeParse({ categoryId: "all", dueAt: "20/09/2026" });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0]?.message).toBe("Use the date picker");
+  });
+  it("refuses a missing dueAt", () => {
+    expect(stocktakeOpenSchema.safeParse({ categoryId: "all" }).success).toBe(false);
   });
 });
 

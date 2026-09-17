@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LOAN_DAYS, LOAN_DUE_SOON_DAYS, WORK_SECTIONS, groupWork, loanRow, type WorkRow } from "./worklist";
+import { dayFromISO } from "./deadlines";
+import {
+  DEFAULT_LOAN_DAYS, LOAN_DUE_SOON_DAYS, WORK_SECTIONS, groupWork, leaverRow, loanRow, type LeaverLike, type WorkRow,
+} from "./worklist";
 
 const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>
   ({ key, section, title: key, meta: "", href: "/x", action: "Do", severity, rank });
@@ -71,5 +74,52 @@ describe("loanRow (Phase 16 §4.3)", () => {
   });
   it("section blurb names the three cases", () => {
     expect(WORK_SECTIONS.find((s) => s.id === "loans")?.blurb).toBe("Loans overdue, due this week, or with no due date.");
+  });
+});
+
+describe("leaverRow (spec §4.5)", () => {
+  const TODAY = "2026-09-16";
+  const leaver = (offboardingDueAt: Date | null, itemsOut = 2): LeaverLike =>
+    ({ id: "e1", name: "Ana Cruz", employeeNo: "EMP-0001", itemsOut, offboardingDueAt });
+
+  it("no date asks for one", () => {
+    const r = leaverRow(leaver(null), TODAY);
+    expect(r.title).toBe("Ana Cruz is leaving — no completion date");
+    expect(r.action).toBe("Set date");
+    expect(r.severity).toBe(1000);
+    expect(r.href).toBe("/employees/e1/edit");
+    expect(r.section).toBe("queue");
+    expect(r.rank).toBe(2);
+    expect(r.key).toBe("queue:e1");
+  });
+
+  it("overdue by 3 days", () => {
+    const r = leaverRow(leaver(dayFromISO("2026-09-13")), TODAY);
+    expect(r.severity).toBe(503);
+    expect(r.meta.endsWith("3 d overdue")).toBe(true);
+    expect(r.action).toBe("Collect equipment");
+    expect(r.href).toBe("/offboarding/e1");
+  });
+
+  it("due today", () => {
+    expect(leaverRow(leaver(dayFromISO(TODAY)), TODAY).severity).toBe(2);
+  });
+
+  it("due in 4 days", () => {
+    expect(leaverRow(leaver(dayFromISO("2026-09-20")), TODAY).severity).toBe(0);
+  });
+
+  it("equipment already returned reads as closing accounts", () => {
+    const r = leaverRow(leaver(dayFromISO("2026-09-20"), 0), TODAY);
+    expect(r.action).toBe("Close accounts");
+    expect(r.meta).toBe("EMP-0001 · equipment returned · accounts still to close · due in 4 d");
+  });
+
+  it("within one groupWork call, the overdue leaver sorts above the fresh one and both stay below a rank-0 SLA row", () => {
+    const sla = row("queue", "sla1", 1, 0);
+    const overdue = leaverRow(leaver(dayFromISO("2026-09-13")), TODAY);
+    const fresh = leaverRow(leaver(dayFromISO("2026-09-20")), TODAY);
+    const g = groupWork([fresh, sla, overdue], new Set(), {});
+    expect(g[0].rows.map((r) => r.key)).toEqual([sla.key, overdue.key, fresh.key]);
   });
 });

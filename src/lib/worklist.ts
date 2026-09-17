@@ -3,6 +3,8 @@
  * user chose, each row with the one action that clears it. Pure; the queries
  * live in home/queries.ts.
  */
+import { dueStatus } from "./deadlines";
+
 export { DEFAULT_LOAN_DAYS } from "./lifecycle";
 /** A loan due within this many days is already on the list. */
 export const LOAN_DUE_SOON_DAYS = 7;
@@ -60,6 +62,23 @@ export function loanRow(a: LoanLike, now: Date): WorkRow | null {
   const until = -overdue;
   if (until <= LOAN_DUE_SOON_DAYS) return { ...base, title: `${a.tag} due in ${until} d`, meta: `${holder} · due ${due}`, action: "Review", severity: LOAN_DUE_SOON_DAYS - until };
   return null;
+}
+
+export interface LeaverLike { id: string; name: string; employeeNo: string; itemsOut: number; offboardingDueAt: Date | null }
+
+/** Spec §4.5: the queue section's leaver rule, mirroring loanRow. Key stays `queue:<id>` so existing dismissals hold. */
+export function leaverRow(e: LeaverLike, todayISO: string): WorkRow {
+  const base = { key: `queue:${e.id}`, section: "queue" as const, rank: 2 };
+  const kit = e.itemsOut > 0
+    ? `${e.employeeNo} · ${e.itemsOut} item${e.itemsOut === 1 ? "" : "s"} still out`
+    : `${e.employeeNo} · equipment returned · accounts still to close`;
+  const action = e.itemsOut > 0 ? "Collect equipment" : "Close accounts";
+  if (e.offboardingDueAt === null) {
+    return { ...base, title: `${e.name} is leaving — no completion date`, meta: `${kit} · set a completion date`, href: `/employees/${e.id}/edit`, action: "Set date", severity: 1000 };
+  }
+  const due = dueStatus(e.offboardingDueAt, todayISO);
+  const severity = due.overdue ? 500 - due.days : due.days === 0 ? 2 : due.days === 1 ? 1 : 0;
+  return { ...base, title: `${e.name} is leaving`, meta: `${kit} · ${due.text}`, href: `/offboarding/${e.id}`, action, severity };
 }
 
 export function groupWork(
