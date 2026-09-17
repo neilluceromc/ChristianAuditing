@@ -135,10 +135,18 @@ async function balanceOf(itemId: string): Promise<number> {
   return agg._sum.quantity ?? 0;
 }
 
-/** Every chip button in `ReasonField` is named `Use reason: <text>` (spec §6.1). */
+/**
+ * `ReasonField`'s chips carry NO `aria-label` (ruling R6 — one containing
+ * "Reason"/"Purpose" would break `getByLabel` on the field itself), so a chip's
+ * accessible name is just its visible text and there is no common prefix to key
+ * off. Both helpers therefore go through the chip group, which `ReasonField`
+ * names "Quick picks" and renders only when `chips.length > 0` — so
+ * `chipsIn(scope)` is naturally zero when the outcome has no chips.
+ */
+const chipsIn = (scope: Page | Locator) =>
+  scope.getByRole("group", { name: "Quick picks" }).getByRole("button");
 const chipButton = (scope: Page | Locator, chip: string) =>
-  scope.getByRole("button", { name: `Use reason: ${chip}` });
-const anyChipButton = (scope: Page | Locator) => scope.getByRole("button", { name: /^Use reason: / });
+  scope.getByRole("group", { name: "Quick picks" }).getByRole("button", { name: chip, exact: true });
 
 /** Case 1 makes these picks; case 2 reads them back out of the Recent group. */
 const ISSUE_CHIP = REASON_CHIPS["stock.issue"][0]; // "Regular supply"
@@ -193,9 +201,10 @@ test.describe.serial("quick forms", () => {
     await options.filter({ hasText: target.employeeNo }).click();
     await expect(employeeCombo).toHaveValue(`${target.name} · ${target.employeeNo}`);
 
-    // Decision 8: a chip only fills the box. `exact` matters: getByLabel's
-    // default is a case-insensitive SUBSTRING match, and the chip row's own
-    // `aria-label="Quick purposes"` (reason-field.tsx) matches "Purpose" too.
+    // Decision 8: a chip only fills the box. Ruling R6 made the chip row's
+    // label the fixed "Quick picks" and stripped the chips' own aria-labels, so
+    // `getByLabel("Purpose")` reaches the textarea and nothing else; `exact`
+    // stays because getByLabel's default is a case-insensitive SUBSTRING match.
     await chipButton(page, ISSUE_CHIP).click();
     await expect(page.getByLabel("Purpose", { exact: true })).toHaveValue(ISSUE_CHIP);
 
@@ -459,17 +468,21 @@ test.describe.serial("quick forms", () => {
     // TRIAGE is the default and chipsForOutcome("TRIAGE") is empty.
     await expect(outcome).toHaveValue("TRIAGE");
     expect(chipsForOutcome("TRIAGE")).toEqual([]);
-    await expect(anyChipButton(returnDialog)).toHaveCount(0);
+    // Zero chips means `ReasonField` renders no "Quick picks" group at all
+    // (`chips.length > 0` guard), so the group-scoped count is 0 either way.
+    await expect(returnDialog.getByRole("group", { name: "Quick picks" })).toHaveCount(0);
+    await expect(chipsIn(returnDialog)).toHaveCount(0);
 
     await outcome.selectOption({ label: RETURN_OUTCOME_LABEL.MISSING });
     const missingChips = chipsForOutcome("MISSING");
-    await expect(anyChipButton(returnDialog)).toHaveCount(missingChips.length);
+    await expect(chipsIn(returnDialog)).toHaveCount(missingChips.length);
     for (const chip of missingChips) {
       await expect(chipButton(returnDialog, chip)).toBeVisible();
     }
 
     await outcome.selectOption({ label: RETURN_OUTCOME_LABEL.TRIAGE });
-    await expect(anyChipButton(returnDialog)).toHaveCount(0);
+    await expect(returnDialog.getByRole("group", { name: "Quick picks" })).toHaveCount(0);
+    await expect(chipsIn(returnDialog)).toHaveCount(0);
 
     // Nothing is submitted — the laptop stays with its holder.
     await returnDialog.getByRole("button", { name: "Cancel" }).click();

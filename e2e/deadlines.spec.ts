@@ -400,4 +400,55 @@ test.describe.serial("deadlines", () => {
     await waitForHydration(page.getByLabel("Close by"));
     await expectNoSeriousAxe(page, "/stock/stocktakes/new");
   });
+
+  test("9. an already-overdue leaver's form saves an unrelated edit and leaves the past date alone", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    // Ruling R8's regression guard. Dennis is 2 d overdue, so before the fix
+    // the form's `min` (= today) made the STORED value fail native constraint
+    // validation and the browser silently refused to submit — every edit of
+    // every field on this page was dead — and with `min` stripped the server's
+    // unconditional floor refused the same unchanged date. The date is neither
+    // touched nor re-picked here: only the Title changes, exactly as an
+    // operator fixing a typo would. `min` is deliberately NOT dropped (unlike
+    // case 2), because the browser's own validation is half of what regressed.
+    const d = await dennis();
+    const seededDue = d.offboardingDueAt!;
+    const seededTitle = d.title;
+    const newTitle = `${seededTitle} (R8)`;
+
+    try {
+      await login(page, IT);
+      await page.goto(`/employees/${d.id}/edit`);
+      const title = page.getByLabel("Title");
+      await waitForHydration(title);
+      const due = page.getByLabel("Complete offboarding by");
+      await expect(due).toHaveValue(localDateISO(seededDue));
+      // The floor moved down to the stored value, so the field is valid as it
+      // stands — this is the assertion that pins the fix, not just its effect.
+      await expect(due).toHaveAttribute("min", localDateISO(seededDue));
+      expect(await due.evaluate((el: HTMLInputElement) => el.validity.rangeUnderflow)).toBe(false);
+
+      await title.fill(newTitle);
+      await page.getByRole("button", { name: "Save changes" }).click();
+      await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible({ timeout: 30_000 });
+
+      const after = await dennis();
+      expect(after.title).toBe(newTitle);
+      // Unchanged in the DB, to the millisecond: the past date was accepted as
+      // a re-send, not floored, not normalised, not quietly moved to today.
+      expect(after.offboardingDueAt!.toISOString()).toBe(seededDue.toISOString());
+      // And no phantom date diff in the audit row for this update (Minor 4 —
+      // the seed now stores the column at UTC midnight, so `diffOf` sees it
+      // unchanged).
+      const entry = await db.auditEntry.findFirstOrThrow({
+        where: { entityType: "employee", entityId: d.id, action: "update" },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(Object.keys(entry.diff as Record<string, unknown>)).toEqual(["title"]);
+    } finally {
+      await db.employee.update({ where: { id: d.id }, data: { title: seededTitle, offboardingDueAt: seededDue } });
+    }
+  });
 });

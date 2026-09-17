@@ -97,7 +97,16 @@ test.describe.serial("registration", () => {
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
     await page.getByLabel("Model").fill("ThinkPad E14 (e2e reg)");
     await page.getByLabel("Brand").fill("Lenovo");
-    await page.getByLabel("Vendor").selectOption({ label: "TechServe PH" });
+    // Phase 23 turned this Vendor `<select>` into an `EntityCombobox`: type to
+    // filter, then click the option, scoped to this combobox's own
+    // `<ul role="listbox">` (the input's following sibling) so the assign
+    // combobox further down the form can never be matched instead. Idiom
+    // copied from e2e/quick-forms.spec.ts:110-120 — house rule: never import
+    // across spec files.
+    const vendor = page.getByLabel("Vendor");
+    await vendor.fill("TechServe");
+    await vendor.locator("xpath=following-sibling::ul").getByRole("option", { name: /TechServe PH/ }).first().click();
+    await expect(vendor).toHaveValue("TechServe PH");
     await page.getByLabel(/Documents/).setInputFiles({
       name: "quote.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 e2e"),
     });
