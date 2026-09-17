@@ -300,6 +300,14 @@ export function DraftForm({
                       type="number" min="0" step="0.01" inputMode="decimal"
                       value={u.unitPrice}
                       onChange={(e) => set(i, "unitPrice")(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        if (i === units.length - 1 && u.description.trim()) {
+                          setUnits((rows) => [...rows, emptyRow()]);
+                          requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[aria-label="Line ${i + 2} description"]`)?.focus());
+                        }
+                      }}
                     />
                   </td>
                   <td className="py-1">

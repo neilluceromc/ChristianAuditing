@@ -81,7 +81,7 @@ export function StocktakeCount({
           </Tr>
         </THead>
         <TBody>
-          {lines.map((l) => (
+          {lines.map((l, i) => (
             <Tr key={l.id}>
               <Td mono>{l.code}</Td>
               <Td>{l.name}</Td>
@@ -93,6 +93,7 @@ export function StocktakeCount({
                     type="number"
                     min={0}
                     step={1}
+                    autoFocus={i === 0}
                     className="w-24 text-right"
                     value={values[l.id] ?? ""}
                     onChange={(e) => setValue(l.id, e.target.value)}

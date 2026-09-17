@@ -1,13 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { packToUnits, unitsLabel } from "@/lib/stock-balance";
@@ -53,11 +52,15 @@ export function ReceiveForm({
   items,
   meta,
   suppliers,
+  recentItems,
+  recentVendors,
   initialItemId,
 }: {
   items: ComboOption[];
   meta: Record<string, StockItemMeta>;
   suppliers: SupplierOption[];
+  recentItems: string[];
+  recentVendors: string[];
   initialItemId?: string | null;
 }) {
   const [form, setForm] = useState<FormState>(() => ({
@@ -65,6 +68,8 @@ export function ReceiveForm({
     itemId: initialItemId && meta[initialItemId] ? initialItemId : null,
   }));
   const [notice, setNotice] = useState<{ itemId: string; message: string } | null>(null);
+  const [lastItemId, setLastItemId] = useState<string | null>(null);
+  const quantityId = useRef("");
   const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useStockRunner(CLAIMED);
 
   const selectedMeta = form.itemId ? meta[form.itemId] : null;
@@ -112,6 +117,7 @@ export function ReceiveForm({
     run(() => receiveStock(payload()), message, {
       onOk: () => {
         if (itemId) setNotice({ itemId, message });
+        if (itemId) setLastItemId(itemId);
         // Clear item/quantity/packs/reference/cost; keep the date and supplier for the next line.
         setForm((f) => ({ ...emptyForm(), supplierId: f.supplierId, lotDate: f.lotDate, occurredAt: f.occurredAt }));
       },
@@ -130,6 +136,12 @@ export function ReceiveForm({
       {notice && (
         <Banner tone="settled" title={notice.message}>
           <Link href={`/stock/items/${notice.itemId}`} className="text-accent hover:underline">View item</Link>
+          {lastItemId && !form.itemId && (
+            <Button type="button" size="sm" variant="ghost" className="ml-2"
+              onClick={() => { onItemChange(lastItemId); requestAnimationFrame(() => document.getElementById(quantityId.current)?.focus()); }}>
+              Same item again
+            </Button>
+          )}
         </Banner>
       )}
       <Card>
@@ -139,19 +151,22 @@ export function ReceiveForm({
             {(p) => (
               <EntityCombobox
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                options={items} value={form.itemId} onChange={onItemChange}
+                options={items} recent={recentItems} autoFocus value={form.itemId} onChange={onItemChange}
                 placeholder="Type a code or name…"
               />
             )}
           </FormField>
           <FormField label="Quantity" required error={fieldErrors.quantity}>
-            {(p) => (
-              <Input
-                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                type="number" min={1} step={1}
-                value={form.quantity} onChange={(e) => set("quantity", e.target.value)}
-              />
-            )}
+            {(p) => {
+              quantityId.current = p.id;
+              return (
+                <Input
+                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                  type="number" min={1} step={1}
+                  value={form.quantity} onChange={(e) => set("quantity", e.target.value)}
+                />
+              );
+            }}
           </FormField>
           {selectedMeta?.packSize ? (
             <FormField label="Packs" hint={packsHelper} error={fieldErrors.packs}>
@@ -166,15 +181,12 @@ export function ReceiveForm({
           ) : null}
           <FormField label="Supplier" error={fieldErrors.supplierId}>
             {(p) => (
-              <Select
+              <EntityCombobox
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={form.supplierId} onChange={(e) => set("supplierId", e.target.value)}
-              >
-                <option value="">No supplier</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </Select>
+                options={suppliers.map((s) => ({ value: s.id, label: s.name }))} recent={recentVendors}
+                value={form.supplierId || null} onChange={(id) => set("supplierId", id ?? "")}
+                placeholder="Type a supplier name…"
+              />
             )}
           </FormField>
           <FormField label="Lot date" error={fieldErrors.lotDate}>
