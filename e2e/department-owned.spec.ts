@@ -274,6 +274,12 @@ test.describe.serial("new employee", () => {
     await page.getByLabel("Employee number").fill("emp-9001");
     await page.getByLabel("Name").fill("Someone Else");
     await page.getByLabel("Title").fill("Clerk");
+    // Phase 23 (D-20): the create form no longer pre-selects the first
+    // department — it opens on "Choose a department" so a blank one is refused
+    // ("Pick a department", deadlines.spec.ts case 7). Without an explicit pick
+    // the form is refused on the department before it ever reaches the
+    // duplicate-employee-number check this case exists to prove.
+    await page.getByLabel("Department").selectOption({ label: "IT" });
     await page.getByRole("button", { name: "Create employee" }).click();
     await expect(page.getByText("That employee number is already in use")).toBeVisible();
     expect(await db.employee.count({ where: { employeeNo: { equals: "emp-9001", mode: "insensitive" } } })).toBe(1);
