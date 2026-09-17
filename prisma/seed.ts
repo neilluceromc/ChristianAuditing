@@ -120,6 +120,9 @@ async function main() {
           // and without it a reseed leaves the anchor null, so an executed
           // return would vanish from the farewell report
           offboardingAt: employment === "ACTIVE" ? null : day(-3),
+          // Phase 23: Dennis (EMP-0090) is two days overdue so the list column, the
+          // wizard pill, the Home row and the "Overdue" filter all have something to show.
+          offboardingDueAt: employment === "OFFBOARDING" ? day(-2) : null,
         },
       }),
     ),
@@ -633,7 +636,7 @@ async function main() {
   // One POSTED stocktake on Cleaning materials, ten days ago, with two adjustments.
   const st = await prisma.stocktake.create({
     data: {
-      refNo: "ST-0001", categoryId: stockCats.CM.id, state: "POSTED", openedAt: day(-10), openedById: purchasing.id,
+      refNo: "ST-0001", categoryId: stockCats.CM.id, state: "POSTED", openedAt: day(-10), dueAt: day(-8), openedById: purchasing.id,
       postedAt: day(-10), postedById: purchasing.id, note: "Monthly pantry-side count",
       lines: { create: [
         { itemId: stockItems["CM-0001"].id, bookQty: 36, countedQty: 34, countedAt: day(-10), countedById: purchasing.id },
