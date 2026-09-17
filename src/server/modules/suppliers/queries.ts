@@ -202,3 +202,13 @@ export async function supplierOptions(includeId?: string | null): Promise<Array<
   }
   return rows;
 }
+
+/** Phase 23 (spec §8): the supplier form's live duplicate nudge — case-insensitive contains, first match, never the row being edited. */
+export async function findSameSupplierName(name: string, excludeId?: string): Promise<{ id: string; name: string } | null> {
+  const q = name.trim();
+  if (q.length < 3) return null;
+  return prisma.vendor.findFirst({
+    where: { name: { contains: q, mode: "insensitive" }, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { id: true, name: true }, orderBy: { name: "asc" },
+  });
+}

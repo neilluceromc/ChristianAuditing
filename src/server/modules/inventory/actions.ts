@@ -27,6 +27,7 @@ import { assetDiff } from "@/lib/asset-diff";
 import { TAG_SHAPE, tagKey } from "@/lib/tag-key";
 import { humanizeGuard } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
+import { rememberPicks } from "@/server/recent-picks";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -341,6 +342,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
       return created;
     });
     revalidatePath("/inventory");
+    await rememberPicks(user.id, { vendor: d.vendorId || null });
     return ok({ id: asset.id });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
@@ -451,6 +453,7 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   }
   revalidatePath(`/inventory/${asset.id}`);
   revalidatePath("/inventory");
+  await rememberPicks(user.id, { vendor: d.vendorId || null });
   return ok({ id: asset.id });
 }
 

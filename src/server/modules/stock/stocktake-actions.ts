@@ -11,6 +11,7 @@ import { canManageStock } from "@/lib/stock-access";
 import { countSchema, stocktakeOpenSchema } from "@/lib/stock-schema";
 import { planStocktakePost } from "@/lib/stocktake";
 import { localDateISO } from "@/lib/format";
+import { dayFromISO, minStocktakeDue } from "@/lib/deadlines";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -51,6 +52,9 @@ export async function openStocktake(input: unknown): Promise<ActionResult<{ id: 
   const parsed = stocktakeOpenSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
+  const today = localDateISO(new Date());
+  if (d.dueAt < minStocktakeDue(today)) return validationError({ dueAt: "Pick tomorrow or later" });
+  const dueAt = dayFromISO(d.dueAt);
   const scope = d.categoryId === "all" ? null : d.categoryId;
 
   let categoryName = "All categories";
@@ -94,7 +98,7 @@ export async function openStocktake(input: unknown): Promise<ActionResult<{ id: 
         ? await tx.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true } })
         : [];
       const balanceById = new Map(sums.map((s) => [s.itemId, s._sum.quantity ?? 0]));
-      const st = await tx.stocktake.create({ data: { refNo, categoryId: scope, openedById: user.id, note: d.note || null } });
+      const st = await tx.stocktake.create({ data: { refNo, categoryId: scope, openedById: user.id, note: d.note || null, dueAt } });
       if (ids.length) {
         await tx.stocktakeLine.createMany({
           data: ids.map((id) => ({ stocktakeId: st.id, itemId: id, bookQty: balanceById.get(id) ?? 0 })),
@@ -102,7 +106,7 @@ export async function openStocktake(input: unknown): Promise<ActionResult<{ id: 
       }
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "stocktake", entityId: st.id, action: "stocktake.opened",
-        diff: { scope: { from: null, to: categoryName }, lines: { from: null, to: ids.length } },
+        diff: { scope: { from: null, to: categoryName }, lines: { from: null, to: ids.length }, dueAt: { from: null, to: d.dueAt } },
       });
       return { id: st.id, refNo };
     });

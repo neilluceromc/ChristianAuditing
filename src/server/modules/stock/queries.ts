@@ -12,6 +12,7 @@ import {
 } from "@/lib/stock-allocation";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
+import { manilaDayBounds } from "@/lib/stock-reports";
 
 /** Spec §5.1/§6.4-6.5: the EXPIRING/EXPIRED pill's tri-state, shared by the item list, the item detail and the reports. */
 export type ExpiringStatus = "expired" | "expiring" | null;
@@ -449,7 +450,7 @@ export async function listStockCategories(): Promise<Array<{ id: string; name: s
 }
 
 export async function listStocktakes(page: number): Promise<{
-  rows: Array<{ id: string; refNo: string; scope: string; state: StocktakeState; openedAt: Date; postedAt: Date | null; counted: number; total: number }>;
+  rows: Array<{ id: string; refNo: string; scope: string; state: StocktakeState; openedAt: Date; postedAt: Date | null; dueAt: Date; counted: number; total: number }>;
   page: number; pageCount: number; total: number;
 }> {
   const { rows, total, page: pg, pageCount } = await pagedSnapshot(
@@ -466,7 +467,7 @@ export async function listStocktakes(page: number): Promise<{
     total, page: pg, pageCount,
     rows: rows.map((s) => ({
       id: s.id, refNo: s.refNo, scope: s.category?.name ?? "All", state: s.state,
-      openedAt: s.openedAt, postedAt: s.postedAt,
+      openedAt: s.openedAt, postedAt: s.postedAt, dueAt: s.dueAt,
       counted: s.lines.filter((l) => l.countedQty !== null).length, total: s.lines.length,
     })),
   };
@@ -474,7 +475,7 @@ export async function listStocktakes(page: number): Promise<{
 
 export interface StocktakeDetail {
   id: string; refNo: string; scope: string; categoryId: string | null; state: StocktakeState;
-  openedAt: Date; openedBy: string; postedAt: Date | null; postedBy: string | null; note: string | null;
+  openedAt: Date; openedBy: string; postedAt: Date | null; postedBy: string | null; dueAt: Date; note: string | null;
   lines: Array<{ id: string; itemId: string; code: string; name: string; unit: string; bookQty: number; countedQty: number | null; currentQty: number }>;
   /** I-4: the stocktake's OWN posted ADJUSTMENT movements, item id -> signed quantity. Always empty for OPEN (nothing posted yet) and for CANCELLED (nothing was ever written). A Map is fine here — this is server-only; the page converts it before any client boundary (R3/D-4). */
   adjustments: Map<string, number>;
@@ -519,7 +520,7 @@ export async function getStocktake(id: string): Promise<StocktakeDetail | null> 
   return {
     id: st.id, refNo: st.refNo, scope: st.category?.name ?? "All", categoryId: st.categoryId, state: st.state,
     openedAt: st.openedAt, openedBy: st.openedBy.name, postedAt: st.postedAt, postedBy: st.postedBy?.name ?? null,
-    note: st.note,
+    dueAt: st.dueAt, note: st.note,
     lines: st.lines.map((l) => ({
       id: l.id, itemId: l.itemId, code: l.item.code, name: l.item.name, unit: l.item.unit,
       bookQty: l.bookQty, countedQty: l.countedQty, currentQty: currentById.get(l.itemId) ?? 0,
@@ -606,13 +607,14 @@ export async function stockExportRows(state: ListState, today: string = localDat
  * excluding already-expired lots (those are a different block, and a
  * different worry). Four queries total, as two independent parallel pairs.
  */
-export async function stockHomeSignals(today: string): Promise<{ low: number; expiringLots: number }> {
-  const [candidates, expiryLots] = await Promise.all([
+export async function stockHomeSignals(today: string): Promise<{ low: number; expiringLots: number; stocktakesOverdue: number }> {
+  const [candidates, expiryLots, stocktakesOverdue] = await Promise.all([
     prisma.stockItem.findMany({ where: { archivedAt: null }, select: { id: true, reorderLevel: true } }),
     prisma.stockLot.findMany({
       where: { expiresAt: { not: null }, item: { archivedAt: null } },
       select: { id: true, expiresAt: true, quantity: true },
     }),
+    prisma.stocktake.count({ where: { state: "OPEN", dueAt: { lt: manilaDayBounds(today, today).start } } }),
   ]);
 
   const [balanceSums, allocSums] = await Promise.all([
@@ -634,5 +636,5 @@ export async function stockHomeSignals(today: string): Promise<{ low: number; ex
     return remaining > 0 && !isExpired(l.expiresAt, today) && l.expiresAt!.getTime() <= windowEndMs;
   }).length;
 
-  return { low, expiringLots };
+  return { low, expiringLots, stocktakesOverdue };
 }
