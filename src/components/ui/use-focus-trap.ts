@@ -23,6 +23,13 @@ function focusableIn(container: HTMLElement): HTMLElement[] {
   );
 }
 
+const FIELD = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [role="combobox"]';
+function firstFieldIn(container: HTMLElement): HTMLElement | null {
+  return Array.from(container.querySelectorAll<HTMLElement>(FIELD)).find(
+    (el) => el.getClientRects().length > 0 && !el.closest("[inert]"),
+  ) ?? null;
+}
+
 /**
  * Module-level overlay layer stack shared by every overlay primitive.
  * - ESC is handled by the TOP layer only (one ESC = one layer).
@@ -138,6 +145,10 @@ function popLayer(layer: Layer) {
  * Returns a CALLBACK REF — attach it to the overlay panel. Container
  * attachment is a state dependency, so the trap installs correctly even
  * when the overlay is conditionally mounted ({open && <Dialog …>}).
+ *
+ * initialFocus "first" = the first form control (input/select/textarea/
+ * [role=combobox]) in the container, falling back to the first focusable
+ * element when the container has no form control (plan P-4).
  */
 export function useFocusTrap(
   active: boolean,
@@ -163,7 +174,7 @@ export function useFocusTrap(
     pushLayer(layer);
 
     if (initialFocus === "container") container.focus();
-    else (focusableIn(container)[0] ?? container).focus();
+    else (firstFieldIn(container) ?? focusableIn(container)[0] ?? container).focus();
 
     return () => {
       popLayer(layer);
