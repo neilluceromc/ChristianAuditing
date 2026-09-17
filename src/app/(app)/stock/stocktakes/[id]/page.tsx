@@ -4,10 +4,11 @@ import { requireUser } from "@/server/auth/guards";
 import { getStocktake } from "@/server/modules/stock/queries";
 import { canManageStock } from "@/lib/stock-access";
 import { postedReviewRows, varianceRows } from "@/lib/stocktake";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
+import { DuePill } from "@/components/ui/due-pill";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
 import { StocktakeCount } from "@/components/stock/stocktake-count";
@@ -29,6 +30,7 @@ export default async function StocktakeDetailPage({
   if (!st) notFound();
 
   const manage = canManageStock(user.role);
+  const today = localDateISO(new Date());
   // A non-manager, and any non-OPEN stocktake, only ever sees the review — the
   // count screen exists solely for a manager mid-count on an OPEN stocktake.
   const showReview = st.state !== "OPEN" || !manage || sp.get("view") === "review";
@@ -78,7 +80,12 @@ export default async function StocktakeDetailPage({
           { label: "Stocktakes", href: "/stock/stocktakes" },
           { label: st.refNo },
         ]}
-        badge={<Pill tone={STATE_TONE[st.state]}>{st.state}</Pill>}
+        badge={
+          <span className="inline-flex items-center gap-1.5">
+            <Pill tone={STATE_TONE[st.state]}>{st.state}</Pill>
+            {st.state === "OPEN" && <DuePill dueAt={st.dueAt} today={today} withDate />}
+          </span>
+        }
       />
       <div className="flex flex-col gap-4">
         <Card>

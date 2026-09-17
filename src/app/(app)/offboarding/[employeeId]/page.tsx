@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { getWizard } from "@/server/modules/offboarding/queries";
 import { canContinue, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
@@ -11,6 +11,7 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { DuePill } from "@/components/ui/due-pill";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
@@ -38,6 +39,7 @@ export default async function OffboardingWizardPage({
   if (!data) notFound();
 
   const { employee, items, totals, undecided } = data;
+  const today = localDateISO(new Date());
   const canMutate = user.role === "admin" || user.role === "it_staff";
   const active = employee.employment === "OFFBOARDING";
   const canDecide = canMutate && active;
@@ -62,6 +64,9 @@ export default async function OffboardingWizardPage({
           <span className="inline-flex items-center gap-1.5">
             <StatusDot value={employee.employment} ns="employment" />
             <span className="font-mono text-[10.5px] text-fg-muted">{employee.employment}</span>
+            {employee.dueAt
+              ? <DuePill dueAt={employee.dueAt} today={today} withDate />
+              : active && canMutate && <Link href={`/employees/${employeeId}/edit`} className="text-[10.5px] text-accent underline hover:text-accent-hover">Set a completion date</Link>}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
         }

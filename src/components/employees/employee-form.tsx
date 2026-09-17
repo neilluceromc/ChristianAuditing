@@ -11,12 +11,17 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { M365_CANONICAL } from "@/lib/labels";
+import { localDateISO } from "@/lib/format";
+import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { createEmployee, updateEmployee } from "@/server/modules/employees/actions";
 import { SameNameCheck } from "./same-name-check";
 
 const CUSTOM = "__custom";
-const today = () => new Date().toISOString().slice(0, 10);
-type Initial = { name: string; title: string; departmentId: string; employment: string; m365Status: string | null };
+const today = () => localDateISO(new Date());
+type Initial = {
+  name: string; title: string; departmentId: string; employment: string; m365Status: string | null;
+  offboardingDueAt: string;
+};
 // Phase 20: the edit branch never renders the Department select (a department
 // change goes through Transfer), so it takes no departments — the page does not
 // query them for nothing.
@@ -28,7 +33,7 @@ export function EmployeeForm(props: Props) {
   const departments = props.departments ?? [];
   const initial: Initial = props.mode === "edit"
     ? props.initial
-    : { name: "", title: "", departmentId: departments[0]?.id ?? "", employment: "ACTIVE", m365Status: null };
+    : { name: "", title: "", departmentId: "", employment: "ACTIVE", m365Status: null, offboardingDueAt: "" };
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const isCustom = initial.m365Status !== null && !(M365_CANONICAL as readonly string[]).includes(initial.m365Status);
@@ -41,6 +46,7 @@ export function EmployeeForm(props: Props) {
     employment: initial.employment,
     m365Select: initial.m365Status === null ? "" : isCustom ? CUSTOM : initial.m365Status,
     m365Custom: isCustom ? initial.m365Status! : "",
+    offboardingDueAt: initial.offboardingDueAt,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +68,10 @@ export function EmployeeForm(props: Props) {
       // a department change goes through Transfer, never a side effect of
       // any other edit. `createEmployee` gets it back (a new person has no
       // transfer history to start from).
-      const common = { name: form.name, title: form.title, employment: form.employment, m365Status };
+      const common = {
+        name: form.name, title: form.title, employment: form.employment, m365Status,
+        offboardingDueAt: form.employment === "OFFBOARDING" ? form.offboardingDueAt : "",
+      };
       const res = props.mode === "edit"
         ? await updateEmployee({ id: props.employeeId, ...common })
         : await createEmployee({
@@ -118,6 +127,7 @@ export function EmployeeForm(props: Props) {
               {(p) => (
                 <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                   value={form.departmentId} onChange={(e) => setForm((f) => ({ ...f, departmentId: e.target.value }))}>
+                  <option value="">Choose a department</option>
                   {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </Select>
               )}
@@ -145,13 +155,27 @@ export function EmployeeForm(props: Props) {
           <FormField label="Employment" required error={errors.employment} hint="The offboarding wizard (Phase 7) owns the full flow.">
             {(p) => (
               <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={form.employment} onChange={(e) => setForm((f) => ({ ...f, employment: e.target.value }))}>
+                value={form.employment}
+                onChange={(e) => {
+                  const employment = e.target.value;
+                  setForm((f) => ({
+                    ...f, employment,
+                    offboardingDueAt: employment === "OFFBOARDING" ? (f.offboardingDueAt || defaultOffboardingDue(today())) : "",
+                  }));
+                }}>
                 <option value="ACTIVE">ACTIVE</option>
                 <option value="OFFBOARDING">OFFBOARDING</option>
                 <option value="OFFBOARDED">OFFBOARDED</option>
               </Select>
             )}
           </FormField>
+          {form.employment === "OFFBOARDING" && (
+            <FormField label="Complete offboarding by" required error={errors.offboardingDueAt} hint="5 working days by default.">
+              {(p) => <Input id={p.id} type="date" aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                min={minOffboardingDue(today())} value={form.offboardingDueAt}
+                onChange={(e) => setForm((f) => ({ ...f, offboardingDueAt: e.target.value }))} />}
+            </FormField>
+          )}
         </CardBody>
       </Card>
       <Card>

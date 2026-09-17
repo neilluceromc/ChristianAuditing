@@ -8,7 +8,7 @@ import type { FacetOption } from "@/server/modules/inventory/queries";
 
 /**
  * Scaled-down suppliers-toolbar.tsx: no search box (the queue has none — R2,
- * `listOffboarding` never reads `state.q`), two facets. `progress`'s own
+ * `listOffboarding` never reads `state.q`), three facets. `progress`'s own
  * facet options come back from the server labelled "Open"/"Complete" (the
  * same short words `progressOf` returns), but the wizard's actual choice is
  * between "nothing left to decide" and "something still is" — this component
@@ -20,12 +20,14 @@ const PROGRESS_LABEL: Record<string, string> = {
   complete: "All decided",
 };
 
+const DUE_LABEL: Record<string, string> = { overdue: "Overdue", "on-track": "On track" };
+
 export function OffboardingToolbar({
   state,
   facets,
 }: {
   state: ListState;
-  facets: Record<"department" | "progress", FacetOption[]>;
+  facets: Record<"department" | "progress" | "due", FacetOption[]>;
 }) {
   const router = useRouter();
 
@@ -48,6 +50,12 @@ export function OffboardingToolbar({
         options={progressOptions}
         selected={state.filters.progress ?? []}
         onApply={(values) => go(withFilter(state, "progress", values))}
+      />
+      <FacetDropdown
+        label="Due"
+        options={facets.due.map((o) => ({ ...o, label: DUE_LABEL[o.value] ?? o.label }))}
+        selected={state.filters.due ?? []}
+        onApply={(values) => go(withFilter(state, "due", values))}
       />
     </div>
   );
