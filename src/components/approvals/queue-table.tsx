@@ -193,7 +193,7 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
           <p className="text-xs text-fg-muted">A rejection is a human decision — the reason is recorded on the approval and in the audit trail.</p>
           <ReasonField
             required error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={REASON_CHIPS["approval.reject"]}
+            chips={REASON_CHIPS["approval.reject"]} disabled={pending}
           />
         </div>
       </Dialog>

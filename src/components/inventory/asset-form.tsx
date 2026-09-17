@@ -482,7 +482,7 @@ export function AssetForm({
                 </FormField>
                 <ReasonField
                   error={errors.assignReason} value={assignReason} onChange={setAssignReason}
-                  chips={REASON_CHIPS["asset.assign"]}
+                  chips={REASON_CHIPS["asset.assign"]} disabled={pending}
                 />
               </>
             )}

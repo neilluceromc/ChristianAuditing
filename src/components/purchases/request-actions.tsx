@@ -134,7 +134,7 @@ export function RequestActions({
           <p className="text-xs text-fg-muted">{asking ? COPY[asking].prompt : ""}</p>
           <ReasonField
             required error={fieldError} value={reason} onChange={setReason}
-            chips={REASON_CHIPS["purchase.reason"]}
+            chips={REASON_CHIPS["purchase.reason"]} disabled={pending}
           />
         </div>
       </Dialog>

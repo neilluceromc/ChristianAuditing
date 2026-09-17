@@ -137,7 +137,7 @@ export function IssueForm({
                 onChange={(id) => set("employeeId", id ?? "")} placeholder="Type a name or EMP number…" />
             )}
           </FormField>
-          <ReasonField label="Purpose" error={fieldErrors.reason} value={form.purpose} onChange={(v) => set("purpose", v)} chips={REASON_CHIPS["stock.issue"]} rows={2} className="sm:col-span-2" />
+          <ReasonField label="Purpose" error={fieldErrors.reason} value={form.purpose} onChange={(v) => set("purpose", v)} chips={REASON_CHIPS["stock.issue"]} rows={2} disabled={pending} className="sm:col-span-2" />
         </CardBody>
       </Card>
       <div>

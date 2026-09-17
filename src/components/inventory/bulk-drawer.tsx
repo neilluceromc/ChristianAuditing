@@ -299,7 +299,7 @@ export function BulkDrawer({
                 )}
                 <ReasonField
                   error={fieldErrors.reason} value={reason} onChange={setReason}
-                  chips={REASON_CHIPS["asset.assign"]}
+                  chips={REASON_CHIPS["asset.assign"]} disabled={pending}
                 />
               </>
             ) : (
@@ -321,7 +321,7 @@ export function BulkDrawer({
                 </FormField>
                 <ReasonField
                   required={!direct} error={fieldErrors.reason} hint="Goes into every approval's payload." value={reason} onChange={setReason}
-                  chips={REASON_CHIPS["asset.status"]}
+                  chips={REASON_CHIPS["asset.status"]} disabled={pending}
                 />
               </>
             )}

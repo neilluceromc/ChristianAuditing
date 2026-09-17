@@ -69,7 +69,10 @@ export function ReceiveForm({
   }));
   const [notice, setNotice] = useState<{ itemId: string; message: string } | null>(null);
   const [lastItemId, setLastItemId] = useState<string | null>(null);
-  const quantityId = useRef("");
+  // Ruling R9: a plain forwarded ref, not an id captured during render —
+  // `Input` forwards its ref, so "Same item again" can focus the box without
+  // `FormField`'s render prop writing to a ref as a side effect of rendering.
+  const quantityRef = useRef<HTMLInputElement>(null);
   const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = useStockRunner(CLAIMED);
 
   const selectedMeta = form.itemId ? meta[form.itemId] : null;
@@ -138,7 +141,7 @@ export function ReceiveForm({
           <Link href={`/stock/items/${notice.itemId}`} className="text-accent hover:underline">View item</Link>
           {lastItemId && !form.itemId && (
             <Button type="button" size="sm" variant="ghost" className="ml-2"
-              onClick={() => { onItemChange(lastItemId); requestAnimationFrame(() => document.getElementById(quantityId.current)?.focus()); }}>
+              onClick={() => { onItemChange(lastItemId); requestAnimationFrame(() => quantityRef.current?.focus()); }}>
               Same item again
             </Button>
           )}
@@ -157,16 +160,14 @@ export function ReceiveForm({
             )}
           </FormField>
           <FormField label="Quantity" required error={fieldErrors.quantity}>
-            {(p) => {
-              quantityId.current = p.id;
-              return (
-                <Input
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  type="number" min={1} step={1}
-                  value={form.quantity} onChange={(e) => set("quantity", e.target.value)}
-                />
-              );
-            }}
+            {(p) => (
+              <Input
+                ref={quantityRef}
+                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                type="number" min={1} step={1}
+                value={form.quantity} onChange={(e) => set("quantity", e.target.value)}
+              />
+            )}
           </FormField>
           {selectedMeta?.packSize ? (
             <FormField label="Packs" hint={packsHelper} error={fieldErrors.packs}>

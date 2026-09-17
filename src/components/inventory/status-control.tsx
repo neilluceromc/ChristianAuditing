@@ -105,7 +105,7 @@ export function StatusControl({
           </FormField>
           <ReasonField
             required={!direct} error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={REASON_CHIPS["asset.status"]}
+            chips={REASON_CHIPS["asset.status"]} disabled={pending}
           />
         </div>
       </Dialog>

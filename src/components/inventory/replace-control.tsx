@@ -73,7 +73,7 @@ export function ReplaceControl({ assetId, tag, employeeId, employeeName, spares 
           </FormField>
           <ReasonField
             required={reasonRequiredFor(outcome)} error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={chipsForOutcome(outcome)}
+            chips={chipsForOutcome(outcome)} disabled={pending}
           />
         </div>
       </Dialog>

@@ -101,7 +101,7 @@ export function WaiveSlotDialog({
         </p>
         <ReasonField
           required error={fieldErrors.reason} value={reason} onChange={setReason}
-          chips={REASON_CHIPS["policy.exception"]}
+          chips={REASON_CHIPS["policy.exception"]} disabled={pending}
         />
       </div>
     </Dialog>
@@ -215,7 +215,7 @@ export function AddSlotDialog({
         </label>
         <ReasonField
           required error={fieldErrors.reason} value={reason} onChange={setReason}
-          chips={REASON_CHIPS["policy.exception"]}
+          chips={REASON_CHIPS["policy.exception"]} disabled={pending}
         />
       </div>
     </Dialog>

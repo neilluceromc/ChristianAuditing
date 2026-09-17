@@ -578,7 +578,7 @@ export function LoadoutView({
           <ReasonField
             hint={direct ? "Optional — recorded in the audit trail." : "Optional — lands in the approval payload."}
             error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={REASON_CHIPS["asset.assign"]}
+            chips={REASON_CHIPS["asset.assign"]} disabled={pending}
           />
         </div>
       </Dialog>
@@ -616,7 +616,7 @@ export function LoadoutView({
           )}
           <ReasonField
             required={!direct || reasonRequiredFor(outcome)} error={fieldErrors.reason} value={returnReason} onChange={setReturnReason}
-            chips={direct ? chipsForOutcome(outcome) : []}
+            chips={direct ? chipsForOutcome(outcome) : []} disabled={pending}
           />
         </div>
       </Dialog>
@@ -697,7 +697,7 @@ export function LoadoutView({
           </FormField>
           <ReasonField
             required={reasonRequiredFor(outcome)} error={fieldErrors.reason} value={returnReason} onChange={setReturnReason}
-            chips={chipsForOutcome(outcome)}
+            chips={chipsForOutcome(outcome)} disabled={pending}
           />
         </div>
       </Dialog>

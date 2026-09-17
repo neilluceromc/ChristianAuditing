@@ -436,6 +436,10 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   // `applyAssetImport` via `assetDiff` (`src/lib/asset-diff.ts`, C-1, Task 10
   // round two) so the two paths cannot drift apart the way they already had.
   const { diff, changed } = assetDiff(asset as unknown as Record<string, unknown>, data);
+  // Phase 23: this return is also why a no-op save remembers no vendor pick —
+  // the operator did choose one, but nothing changed, so no transaction ran and
+  // `rememberPicks` below is never reached. Deliberate: Recent tracks picks that
+  // produced a write, not every time a form was opened and closed.
   if (Object.keys(diff).length === 0) return ok({ id: asset.id }); // no audit noise for no-ops
 
   try {

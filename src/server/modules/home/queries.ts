@@ -68,7 +68,7 @@ export async function worklist(
       where: { employment: "OFFBOARDING" },
       orderBy: { updatedAt: "asc" },
       take: CAP.small,
-      select: { id: true, name: true, employeeNo: true, updatedAt: true, offboardingDueAt: true, _count: { select: { assets: { where: { cls: "IT" } } } } },
+      select: { id: true, name: true, employeeNo: true, offboardingDueAt: true, _count: { select: { assets: { where: { cls: "IT" } } } } },
     }),
     prisma.employee.findMany({
       where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },

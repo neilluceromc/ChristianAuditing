@@ -56,6 +56,16 @@ export function EmployeeForm(props: Props) {
   // updateEmployee's schema has no such field (it also never receives
   // departmentId, see `common` below).
   const [confirmSameName, setConfirmSameName] = useState(false);
+  // Ruling R8: the completion-date `min` is the EARLIER of today's floor and
+  // the date already in the field. This form has no `noValidate` and Save is a
+  // `type="submit"`, so a `min` above the stored value sets `rangeUnderflow`
+  // and the browser silently refuses to submit — which froze EVERY edit (name,
+  // title, M365, employment) on an already-overdue leaver behind a native
+  // tooltip that reads as a dead button. An untouched past date is therefore
+  // floored at itself; a date the operator actually moves still cannot land
+  // before today, and `updateEmployee` applies exactly the same rule server-side.
+  const dueFloor = minOffboardingDue(today());
+  const dueMin = form.offboardingDueAt && form.offboardingDueAt < dueFloor ? form.offboardingDueAt : dueFloor;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -172,7 +182,7 @@ export function EmployeeForm(props: Props) {
           {form.employment === "OFFBOARDING" && (
             <FormField label="Complete offboarding by" required error={errors.offboardingDueAt} hint="5 working days by default.">
               {(p) => <Input id={p.id} type="date" aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                min={minOffboardingDue(today())} value={form.offboardingDueAt}
+                min={dueMin} value={form.offboardingDueAt}
                 onChange={(e) => setForm((f) => ({ ...f, offboardingDueAt: e.target.value }))} />}
             </FormField>
           )}

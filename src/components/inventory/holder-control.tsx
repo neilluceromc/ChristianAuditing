@@ -156,7 +156,7 @@ export function HolderControl(props: Props) {
           )}
           <ReasonField
             required={!isAssign && returnReasonRequired} error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={isAssign ? REASON_CHIPS["asset.assign"] : props.direct ? chipsForOutcome(outcome) : []}
+            chips={isAssign ? REASON_CHIPS["asset.assign"] : props.direct ? chipsForOutcome(outcome) : []} disabled={pending}
           />
         </div>
       </Dialog>

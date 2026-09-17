@@ -249,10 +249,19 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   if (!employee) return conflict("That employee no longer exists.");
 
   const today = localDateISO(new Date());
+  // Ruling R8: the floor guards a CHANGE, not a re-send. An employee whose
+  // completion date is already in the past (the seed's Dennis, and every row
+  // the migration backfilled) must still be able to have their name or title
+  // edited — an unconditional floor made the whole form unsavable, since the
+  // form posts the stored date back untouched. Only a date that actually
+  // differs from what is stored has to be today or later.
+  const storedDueISO = employee.offboardingDueAt ? localDateISO(employee.offboardingDueAt) : null;
   let offboardingDueAt: Date | null;
   if (d.employment === "OFFBOARDING") {
     if (d.offboardingDueAt) {
-      if (d.offboardingDueAt < minOffboardingDue(today)) return validationError({ offboardingDueAt: "Pick today or later" });
+      if (d.offboardingDueAt !== storedDueISO && d.offboardingDueAt < minOffboardingDue(today)) {
+        return validationError({ offboardingDueAt: "Pick today or later" });
+      }
       offboardingDueAt = dayFromISO(d.offboardingDueAt);
     } else {
       offboardingDueAt = employee.offboardingDueAt ?? dayFromISO(defaultOffboardingDue(today));
@@ -291,6 +300,17 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   });
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
+  // Phase 23: this is the only writer of `offboardingDueAt`, and that date is
+  // rendered on four further surfaces — the offboarding list's Due column and
+  // facet, the wizard header's pill, the farewell report's completion line and
+  // the IT worklist's leaver row (Home and /inventory/work). The dynamic
+  // segments take the `"page"` form, the same shape `revalidateStockReads`
+  // uses (`src/server/modules/stock/revalidate.ts`).
+  revalidatePath("/offboarding");
+  revalidatePath("/offboarding/[employeeId]", "page");
+  revalidatePath("/offboarding/[employeeId]/report", "page");
+  revalidatePath("/inventory/work");
+  revalidatePath("/");
   return ok({ id: employee.id });
 }
 

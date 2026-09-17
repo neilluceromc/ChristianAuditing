@@ -133,7 +133,7 @@ export function TransferDialog({
           </FormField>
           <ReasonField
             error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={REASON_CHIPS["employee.transfer"]}
+            chips={REASON_CHIPS["employee.transfer"]} disabled={pending}
           />
         </div>
       </Dialog>

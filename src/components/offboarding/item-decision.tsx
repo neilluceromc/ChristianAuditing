@@ -162,7 +162,7 @@ export function ItemDecision({
             : "Optional for a clean return."
         }
         error={fieldErrors.reason} value={reason} onChange={setReason}
-        chips={picked ? chipsForOutcome(picked) : []} rows={2}
+        chips={picked ? chipsForOutcome(picked) : []} rows={2} disabled={pending}
       />
     </div>
   );

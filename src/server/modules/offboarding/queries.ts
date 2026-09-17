@@ -162,13 +162,22 @@ function withoutFilter(state: ListState, facet: string): ListState {
 }
 
 /**
- * Phase 20 (spec §4.2): Department counts by real SQL groupBy; Progress
- * counts are derived, so they can only be had by computing rows over the
- * candidate set (plan P-5) — both computed over `where` minus their OWN key,
- * the same convention `employeeFacetOptions`/`facetOptions` already use.
+ * Phase 20 (spec §4.2): Department counts by real SQL groupBy; Progress and
+ * (Phase 23) Due counts are derived, so they can only be had by computing rows
+ * over the candidate set (plan P-5) — each computed over `where` minus their
+ * OWN key, the same convention `employeeFacetOptions`/`facetOptions` already
+ * use.
+ *
+ * Both derived facets share ONE candidate pass, and that is exact, not a
+ * shortcut: `buildOffboardingWhere` reads neither `progress` nor `due` (only
+ * `department`), so `withoutFilter(state, "progress")` is already
+ * "without `due`" too — the two clears produce the identical query. Hence the
+ * single `derivedCandidates` list feeding both counters. The flip side is that
+ * an active `progress` filter does not narrow the Due counts and vice versa,
+ * the same way `department` has always behaved (final review Minor 7).
  */
 async function offboardingFacets(state: ListState): Promise<{ department: FacetOption[]; progress: FacetOption[]; due: FacetOption[] }> {
-  const [deptGroups, departments, progressCandidates] = await Promise.all([
+  const [deptGroups, departments, derivedCandidates] = await Promise.all([
     prisma.employee.groupBy({
       by: ["departmentId"], where: buildOffboardingWhere(withoutFilter(state, "department")), _count: true,
     }),
@@ -182,7 +191,7 @@ async function offboardingFacets(state: ListState): Promise<{ department: FacetO
   const today = localDateISO(new Date());
   const progressCounts: Record<Progress, number> = { open: 0, complete: 0 };
   const dueCounts: Record<Due, number> = { overdue: 0, "on-track": 0 };
-  for (const e of progressCandidates) {
+  for (const e of derivedCandidates) {
     const row = toOffboardingRow(e);
     progressCounts[progressOf(row.undecided)] += 1;
     dueCounts[dueOf(row.dueAt, today)] += 1;
@@ -345,7 +354,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   });
   if (!employee) return null;
 
-  const [held, allReturns, blockers, policies, exceptions] = await Promise.all([
+  const [held, allReturns, blockers, policies, exceptions, completed] = await Promise.all([
     prisma.asset.findMany({
       where: { assigneeId: employeeId },
       include: { category: true },
@@ -391,6 +400,16 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
       where: { employeeId },
       orderBy: [{ employeeId: "asc" }, { id: "asc" }],
     }),
+    // Phase 23 (spec §5.4): only an OFFBOARDED record can have a completion
+    // entry, so the query rides this same Promise.all as a conditional member
+    // rather than costing the OFFBOARDED render a sixth serial round trip.
+    employee.employment === "OFFBOARDED"
+      ? prisma.auditEntry.findFirst({
+          where: { entityType: "employee", entityId: employee.id, action: "offboarding.completed" },
+          orderBy: { createdAt: "desc" },
+          select: { createdAt: true },
+        })
+      : Promise.resolve(null),
   ]);
 
   // The window lives in candidatesFor — see its comment. Applied to the row list
@@ -462,10 +481,6 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   // computeLoadout is generic over assets, not slots, so the slot it hands back
   // is typed SlotLike and has lost its assetType include — look the name back up.
   const typeName = new Map((policy?.slots ?? []).map((s) => [s.id, s.assetType?.name ?? "any"]));
-
-  const completed = employee.employment === "OFFBOARDED"
-    ? await prisma.auditEntry.findFirst({ where: { entityType: "employee", entityId: employee.id, action: "offboarding.completed" }, orderBy: { createdAt: "desc" }, select: { createdAt: true } })
-    : null;
 
   return {
     employee: {
