@@ -15,6 +15,7 @@ import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { recentPicks } from "@/server/recent-picks";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
@@ -70,6 +71,7 @@ export default async function InventoryPage({
   // only for a role that can mutate this class at all — the same condition
   // InventoryTable already uses to decide whether the drawer exists.
   const employees = canMutate ? await activeEmployeeOptions() : [];
+  const recentEmployees = canMutate ? await recentPicks(user.id, "employee") : [];
 
   const [{ rows, total, page, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
     listAssets(state, purchaseYear, cls),
@@ -192,6 +194,7 @@ export default async function InventoryPage({
               cls={cls}
               direct={direct}
               employees={employees}
+              recentEmployees={recentEmployees}
               repairMode={repairMode}
               sortHrefs={sortHrefs}
             />

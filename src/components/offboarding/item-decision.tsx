@@ -4,11 +4,12 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
-import { FormError, FormField } from "@/components/ui/form-field";
+import { FormError } from "@/components/ui/form-field";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { chipsForOutcome } from "@/lib/reason-chips";
 import type { AssetClass } from "@prisma/client";
 import { OUTCOME_LABEL, outcomeStatus, outcomesFor, reasonRequired, type Outcome } from "@/lib/offboarding";
 import { useScan } from "./scan-provider";
@@ -153,27 +154,16 @@ export function ItemDecision({
         </span>
       </div>
       <FormError id={outcomeErrorId}>{fieldErrors.outcome}</FormError>
-      <FormField
-        label="Reason"
+      <ReasonField
         required={picked ? reasonRequired(picked) : false}
         hint={
           picked && reasonRequired(picked)
             ? `${OUTCOME_LABEL[picked]} needs a reason — it lands${direct ? "" : " in the approval and"} on the farewell report.`
             : "Optional for a clean return."
         }
-        error={fieldErrors.reason}
-      >
-        {(p) => (
-          <Textarea
-            id={p.id}
-            aria-describedby={p["aria-describedby"]}
-            invalid={p.invalid}
-            rows={2}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        )}
-      </FormField>
+        error={fieldErrors.reason} value={reason} onChange={setReason}
+        chips={picked ? chipsForOutcome(picked) : []} rows={2}
+      />
     </div>
   );
 }

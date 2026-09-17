@@ -9,9 +9,10 @@ import { Dialog } from "@/components/ui/dialog";
 import { FormError, FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import { addSlotException, removeSlotException, waiveSlot } from "@/server/modules/employees/exception-actions";
 import type { ActionResult } from "@/server/action-result";
 
@@ -98,17 +99,10 @@ export function WaiveSlotDialog({
           This person stops needing a {slot.name} — it drops off their loadout and, if required, stops
           counting as a policy gap. The policy itself is untouched; this only applies to them.
         </p>
-        <FormField label="Reason" required error={fieldErrors.reason}>
-          {(p) => (
-            <Textarea
-              id={p.id}
-              aria-describedby={p["aria-describedby"]}
-              invalid={p.invalid}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          )}
-        </FormField>
+        <ReasonField
+          required error={fieldErrors.reason} value={reason} onChange={setReason}
+          chips={REASON_CHIPS["policy.exception"]}
+        />
       </div>
     </Dialog>
   );
@@ -219,17 +213,10 @@ export function AddSlotDialog({
           <Checkbox checked={loaner} onChange={(e) => setLoaner(e.target.checked)} />
           loaner slot — filled only by a device on loan (TEMPORARY)
         </label>
-        <FormField label="Reason" required error={fieldErrors.reason}>
-          {(p) => (
-            <Textarea
-              id={p.id}
-              aria-describedby={p["aria-describedby"]}
-              invalid={p.invalid}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          )}
-        </FormField>
+        <ReasonField
+          required error={fieldErrors.reason} value={reason} onChange={setReason}
+          chips={REASON_CHIPS["policy.exception"]}
+        />
       </div>
     </Dialog>
   );

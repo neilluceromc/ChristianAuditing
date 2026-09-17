@@ -332,6 +332,7 @@ export function RegisterForm({
               <Select
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 value={categoryId}
+                autoFocus
                 onChange={(e) => {
                   setCategoryId(e.target.value);
                   setTypeId("");

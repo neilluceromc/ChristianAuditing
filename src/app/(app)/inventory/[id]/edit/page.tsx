@@ -4,6 +4,7 @@ import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { AssetForm } from "@/components/inventory/asset-form";
 import { updateAsset } from "@/server/modules/inventory/actions";
+import { recentPicks } from "@/server/recent-picks";
 import { canEditAsset, canSeeClass } from "@/lib/asset-class";
 
 export default async function EditAssetPage({ params }: { params: Promise<{ id: string }> }) {
@@ -26,6 +27,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
       orderBy: { name: "asc" },
     }),
   ]);
+  const recentVendors = await recentPicks(user.id, "vendor");
 
   async function action(payload: Record<string, unknown>) {
     "use server";
@@ -47,6 +49,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
         types={types.map((t) => ({ id: t.id, name: t.name, categoryId: t.categoryId }))}
         employees={[]}
         vendors={vendors.map((v) => ({ id: v.id, name: v.name }))}
+        recentVendors={recentVendors}
         initial={{
           tag: asset.tag,
           model: asset.model,

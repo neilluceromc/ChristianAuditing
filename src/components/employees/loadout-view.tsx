@@ -16,9 +16,10 @@ import { Select } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS, chipsForOutcome } from "@/lib/reason-chips";
 import { TagRef } from "@/components/inventory/tag-ref";
 import { AddSlotDialog, RemoveExceptionButton, WaiveSlotDialog } from "@/components/employees/slot-exception-controls";
 import { requestAssign, requestAssignReserved, requestReturn } from "@/server/modules/employees/actions";
@@ -574,16 +575,11 @@ export function LoadoutView({
               )}
             </FormField>
           )}
-          <FormField
-            label="Reason"
+          <ReasonField
             hint={direct ? "Optional — recorded in the audit trail." : "Optional — lands in the approval payload."}
-            error={fieldErrors.reason}
-          >
-            {(p) => (
-              <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={reason} onChange={(e) => setReason(e.target.value)} />
-            )}
-          </FormField>
+            error={fieldErrors.reason} value={reason} onChange={setReason}
+            chips={REASON_CHIPS["asset.assign"]}
+          />
         </div>
       </Dialog>
 
@@ -618,12 +614,10 @@ export function LoadoutView({
               )}
             </FormField>
           )}
-          <FormField label="Reason" required={!direct || reasonRequiredFor(outcome)} error={fieldErrors.reason}>
-            {(p) => (
-              <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={returnReason} onChange={(e) => setReturnReason(e.target.value)} />
-            )}
-          </FormField>
+          <ReasonField
+            required={!direct || reasonRequiredFor(outcome)} error={fieldErrors.reason} value={returnReason} onChange={setReturnReason}
+            chips={direct ? chipsForOutcome(outcome) : []}
+          />
         </div>
       </Dialog>
 
@@ -701,12 +695,10 @@ export function LoadoutView({
               </Select>
             )}
           </FormField>
-          <FormField label="Reason" required={reasonRequiredFor(outcome)} error={fieldErrors.reason}>
-            {(p) => (
-              <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                value={returnReason} onChange={(e) => setReturnReason(e.target.value)} />
-            )}
-          </FormField>
+          <ReasonField
+            required={reasonRequiredFor(outcome)} error={fieldErrors.reason} value={returnReason} onChange={setReturnReason}
+            chips={chipsForOutcome(outcome)}
+          />
         </div>
       </Dialog>
 

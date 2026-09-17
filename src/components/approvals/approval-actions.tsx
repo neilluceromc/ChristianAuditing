@@ -6,10 +6,10 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
-import { FormField } from "@/components/ui/form-field";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import {
   approveApproval, claimApproval, escalateApproval, rejectApproval, releaseApproval, retryApproval,
 } from "@/server/modules/approvals/actions";
@@ -103,12 +103,10 @@ export function ApprovalActions({
     >
       <div className="flex flex-col gap-3">
         <p className="text-xs text-fg-muted">A rejection is a human decision — the reason is recorded on the approval and in the audit trail.</p>
-        <FormField label="Reason" required error={fieldErrors.reason}>
-          {(p) => (
-            <Textarea id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-              value={reason} onChange={(e) => setReason(e.target.value)} />
-          )}
-        </FormField>
+        <ReasonField
+          required error={fieldErrors.reason} value={reason} onChange={setReason}
+          chips={REASON_CHIPS["approval.reject"]}
+        />
       </div>
     </Dialog>
   );

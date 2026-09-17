@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { AssetForm } from "@/components/inventory/asset-form";
 import { createAsset } from "@/server/modules/inventory/actions";
 import { tagSuggestions } from "@/server/modules/inventory/tag-suggest";
+import { recentPicks } from "@/server/recent-picks";
 import { toSearchParams } from "@/lib/url-state";
 import { ASSET_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, isDirectLifecycle, parseCls, withClsQS } from "@/lib/asset-class";
 
@@ -43,6 +44,7 @@ export default async function NewAssetPage({
     }),
   ]);
   const suggestions = await tagSuggestions(categories.map((c) => c.id));
+  const recentVendors = await recentPicks(user.id, "vendor");
 
   return (
     <>
@@ -56,6 +58,7 @@ export default async function NewAssetPage({
         types={types.map((t) => ({ id: t.id, name: t.name, categoryId: t.categoryId }))}
         employees={employees.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }))}
         vendors={vendors}
+        recentVendors={recentVendors}
         suggestions={suggestions}
         action={createAsset}
         directClasses={directClasses}

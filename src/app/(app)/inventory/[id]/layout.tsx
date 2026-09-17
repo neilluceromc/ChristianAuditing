@@ -20,6 +20,7 @@ import { LoanDueControl } from "@/components/inventory/loan-due-control";
 import { ReplaceControl } from "@/components/inventory/replace-control";
 import { TriageControl } from "@/components/inventory/triage-control";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { recentPicks } from "@/server/recent-picks";
 
 export default async function AssetRecordLayout({
   params,
@@ -51,6 +52,7 @@ export default async function AssetRecordLayout({
   const canReplace = direct && canReturn;
   const canTriage = direct && !pending && asset.returnedAt !== null;
   const employees = canAssign ? await activeEmployeeOptions() : [];
+  const recentEmployees = canAssign ? await recentPicks(user.id, "employee") : [];
   const spares = canReplace ? await spareOptions(asset.typeId) : [];
   // Phase 20 (spec §6.5, gap 5): while an approval is queued, the record
   // still reads the pre-approval status everywhere (see the Banner below) —
@@ -103,7 +105,7 @@ export default async function AssetRecordLayout({
             <>
               {canCheck && <ItCheck assetId={asset.id} tag={asset.tag} />}
               {canTriage && <TriageControl assetId={asset.id} tag={asset.tag} />}
-              {canAssign && <HolderControl mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} direct={direct} />}
+              {canAssign && <HolderControl mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} direct={direct} recentEmployees={recentEmployees} />}
               {canReturn && asset.assignee && (
                 <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} direct={direct} />
               )}

@@ -7,8 +7,9 @@ import { Dialog } from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { ReasonField } from "@/components/patterns/reason-field";
+import { REASON_CHIPS } from "@/lib/reason-chips";
 import { localDateISO } from "@/lib/format";
 import { transferEmployee } from "@/server/modules/employees/transfer-actions";
 import { useEmployeeRunner } from "./use-employee-runner";
@@ -130,17 +131,10 @@ export function TransferDialog({
               />
             )}
           </FormField>
-          <FormField label="Reason" error={fieldErrors.reason}>
-            {(p) => (
-              <Textarea
-                id={p.id}
-                aria-describedby={p["aria-describedby"]}
-                invalid={p.invalid}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-            )}
-          </FormField>
+          <ReasonField
+            error={fieldErrors.reason} value={reason} onChange={setReason}
+            chips={REASON_CHIPS["employee.transfer"]}
+          />
         </div>
       </Dialog>
     </>
