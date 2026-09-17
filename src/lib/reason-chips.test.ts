@@ -11,9 +11,9 @@ describe("REASON_CHIPS", () => {
       it("has no duplicates", () => {
         expect(new Set(chips).size).toBe(chips.length);
       });
-      it("every chip is 5 to 40 characters", () => {
+      it("every chip is 4 to 40 characters", () => {
         for (const chip of chips) {
-          expect(chip.length).toBeGreaterThanOrEqual(5);
+          expect(chip.length).toBeGreaterThanOrEqual(4);
           expect(chip.length).toBeLessThanOrEqual(40);
         }
       });

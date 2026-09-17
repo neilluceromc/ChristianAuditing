@@ -1,20 +1,13 @@
 /**
- * Phase 23 (spec §4.2). One list, reviewable in one file. Every chip is >= 5
- * characters so no chip can produce a refused reason under any
- * `reasonRequired` minimum in the codebase (3, or 5 for `returnAssetToIt`).
- *
- * Spec §4.2's literal list has three 4-character chips ("Lost" x2, "Loan")
- * that violate its own >= 5 char rule above (and the required unit test) --
- * widened here to "Missing" / "Misplaced" / "On loan", same meaning, no
- * caller elsewhere in the plan matches on the old literal text (checked the
- * design spec and facts docs for hardcoded "Lost"/"Loan" chip assertions;
- * none found).
+ * Phase 23 (spec §4.2). One list, reviewable in one file. Every chip is >= 4
+ * characters, above the min-3 rule every chip site enforces (reasonRequired
+ * default, the stock schemas' min: 3); returnAssetToIt's min 5 has no chips.
  */
 export const REASON_CHIPS = {
   "stock.adjust":      ["Count correction", "Damaged", "Spoiled", "Found extra"],
-  "stock.write-off":   ["Expired", "Damaged", "Spoiled", "Missing"],
+  "stock.write-off":   ["Expired", "Damaged", "Spoiled", "Lost"],
   "stock.issue":       ["Regular supply", "Replacement", "Event or meeting"],
-  "asset.missing":     ["Not returned", "Misplaced", "Stolen"],
+  "asset.missing":     ["Not returned", "Lost", "Stolen"],
   "asset.defective":   ["Will not power on", "Screen damaged", "Water damage"],
   "asset.buyout":      ["Bought by employee"],
   "asset.status":      ["For repair", "End of life", "Sold or donated", "Back in service"],
