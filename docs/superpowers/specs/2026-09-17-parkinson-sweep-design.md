@@ -2,7 +2,7 @@
 
 **Status:** implemented on `phase-23-parkinson-sweep`, MERGED TO `main` via `--no-ff` `18228b0` and pushed 2026-09-17 (10 tasks, `D-1`…`D-20` — the final-review
 fix wave added `D-16`…`D-19`, the final battery `D-20`), code-complete 2026-09-17 at final tree
-`09bf0a5`, final-review fix wave included; branch and worktree removed; staging not yet redeployed (migration 24 applies at the next `-Force` run). Design approved in conversation
+`09bf0a5`, final-review fix wave included; branch and worktree removed; staging redeployed 2026-09-17 with migration 24 applied. Design approved in conversation
 2026-09-17 (both readings of the law; defaults editable at start; one phase, two sweeps; five sections
 approved one by one). The sections below carry an *Amended (D-n)* note wherever execution proved the
 design wrong or unreachable; the plan's amendment block is the full record.
