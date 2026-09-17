@@ -122,8 +122,9 @@ export function buildAssetWhere(
   if (f.assignee?.length) where.assigneeId = { in: f.assignee };
   // `stage` is DERIVED, and one of its four values (beyond-repair) compares
   // repairQuote against cost — something no Prisma filter can express. So the
-  // facet narrows to the repair CANDIDATE set here and repairStage() makes the
-  // final cut in listAssets: one source of truth, correct counts.
+  // facet narrows to the repair CANDIDATE set here and repairStageIds' SQL
+  // CASE makes the final cut (Phase 24: listAssets pages that id set): one
+  // source of truth, correct counts.
   // AND coexists with the q-driven OR above; Prisma ands them together.
   if ((f.stage ?? []).some(isRepairStage)) {
     // append, not assign: nothing else sets AND today, but an assignment here

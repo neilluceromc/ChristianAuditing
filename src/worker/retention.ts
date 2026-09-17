@@ -6,13 +6,14 @@ export interface PruneResult { deliveries: number; jobs: number }
 /** One full pass: finished deliveries and jobs older than the cutoff, deleted in id batches. */
 export async function pruneRetention(now: Date = new Date()): Promise<PruneResult> {
   const cutoff = retentionCutoff(now);
+  // Predicate repeated in the delete (final review I-1): a Replay between select and delete revives a DEAD row — it must survive.
   const deliveries = await pruneTable(
     () => prisma.webhookDelivery.findMany({ where: { status: { in: ["DELIVERED", "DEAD"] }, createdAt: { lt: cutoff } }, select: { id: true }, take: PRUNE_BATCH }),
-    (ids) => prisma.webhookDelivery.deleteMany({ where: { id: { in: ids } } }),
+    (ids) => prisma.webhookDelivery.deleteMany({ where: { id: { in: ids }, status: { in: ["DELIVERED", "DEAD"] }, createdAt: { lt: cutoff } } }),
   );
   const jobs = await pruneTable(
     () => prisma.job.findMany({ where: { status: { in: ["DONE", "DEAD"] }, updatedAt: { lt: cutoff } }, select: { id: true }, take: PRUNE_BATCH }),
-    (ids) => prisma.job.deleteMany({ where: { id: { in: ids } } }),
+    (ids) => prisma.job.deleteMany({ where: { id: { in: ids }, status: { in: ["DONE", "DEAD"] }, updatedAt: { lt: cutoff } } }),
   );
   return { deliveries, jobs };
 }

@@ -164,7 +164,6 @@ export async function listAssets(
   page: number;
   pageCount: number;
 }> {
-  const where = buildAssetWhere(state, purchaseYear, cls);
   const orderBy = buildAssetOrderBy(state.sort);
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
 
@@ -184,6 +183,7 @@ export async function listAssets(
     return { total, page, pageCount, rows: cut.map(toRow) };
   }
 
+  const where = buildAssetWhere(state, purchaseYear, cls);
   const { rows: assets, total, page, pageCount } = await pagedSnapshot(
     ENTITY_PAGE_SIZE,
     state.page,
@@ -299,9 +299,8 @@ export async function facetOptions(
  * date_part groupBy would be a second, driftable copy of the same rule
  * (the CSV-duplication mistake this project has already made once). Fetching
  * a thin `purchasedAt`-only projection and reducing it in memory is the same
- * move this module already makes wherever SQL can't express the grouping
- * (see the repair-mode branch of `listAssets` above) — team-scale fleet, so
- * this is cheap.
+ * move this module already makes wherever SQL can't express the grouping —
+ * team-scale fleet, so this is cheap.
  *
  * Matches the `without(facet)` rule in `facetOptions`: called with no
  * `purchaseYear` of its own, so a bucket's count is "every OTHER active

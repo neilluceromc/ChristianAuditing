@@ -47,8 +47,11 @@ import { fmtDate } from "@/lib/format";
  *
  * Phase 24 fixture facts, likewise read off the seeded database rather than
  * assumed:
- *   The IT spares `spareOptions` offers are BR-LT-0181 (Laptop), BR-MN-0910
- *   and BR-MN-0911 (Monitor), BR-PH-0301 (Phone), BR-HS-0502 (Headset).
+ *   The IT spares `spareOptions` offers are BR-LT-0181 (Laptop), BR-MN-0911
+ *   (Monitor), BR-PH-0301 (Phone) and BR-HS-0502 (Headset) — four, not five:
+ *   BR-MN-0910 is a SPARE Monitor too, but it carries an ACTIVE reservation
+ *   and `spareOptions`' `reservations: { none: { state: "ACTIVE" } }`
+ *   (queries.ts) excludes it.
  *   Against BR-LT-0201's own type exactly ONE of them is same-type
  *   (BR-LT-0181), which is what makes cases 4 and 7 a pair: case 7 stamps
  *   `returnedAt` on that single same-type spare (plan P-3 — `spareOptions`
@@ -262,6 +265,13 @@ test.describe("it gaps", () => {
     // decision 4) — the grouping is said once per block, never once per row.
     await expect(dialog.getByRole("option", { name: /Same type|Other spare/ })).toHaveCount(0);
 
+    // R3 (final review I-2): options under a grouped heading describe themselves by it, so
+    // aria-activedescendant users still hear the group; the heading row itself is presentation-only.
+    const firstOption = dialog.getByRole("option").first();
+    const describedBy = await firstOption.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    await expect(dialog.locator(`[id="${describedBy}"]`)).toHaveText("Same type");
+
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toBeHidden();
   });
@@ -390,6 +400,10 @@ test.describe("it gaps", () => {
       await expect(dialog.getByRole("listbox").locator('li[role="presentation"]')).toHaveText(["Other spares"]);
       await expect(dialog.getByRole("option", { name: /BR-LT-0181/ })).toHaveCount(0);
 
+      // R3 (final review I-2): the one grouped heading here describes every option under it.
+      const describedBy = await dialog.getByRole("option").first().getAttribute("aria-describedby");
+      await expect(dialog.locator(`[id="${describedBy}"]`)).toHaveText("Other spares");
+
       await dialog.getByRole("button", { name: "Cancel" }).click();
       await expect(dialog).toBeHidden();
     } finally {
@@ -488,7 +502,10 @@ test.describe("it gaps", () => {
       // this case owes the whole path — tsx entry, relative worker imports,
       // its own PrismaClient against this worktree's database — not just the
       // function's logic (which src/lib/retention.test.ts already unit-tests).
-      execSync("npm run worker:prune", { timeout: 120_000 });
+      // M-7 (final review): capture the one-shot's stdout and pin the operator-facing
+      // line spec §5.4 prescribes verbatim — exit code 0 alone said nothing about it.
+      const out = execSync("npm run worker:prune", { timeout: 120_000, encoding: "utf8" });
+      expect(out).toMatch(/\[prune\] removed 1 deliveries and 1 jobs older than 90 days/);
 
       expect(await db.webhookDelivery.findUnique({ where: { id: oldD.id } })).toBeNull();
       expect(await db.job.findUnique({ where: { id: oldJ.id } })).toBeNull();
