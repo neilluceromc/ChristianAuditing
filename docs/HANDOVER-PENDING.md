@@ -188,8 +188,8 @@ affordances before choosing, and shipped the half that needed no schema change.*
 
 **Shipped in Phase 26 — holds that work + a repair end-date.** Phase 25's audit found both and split
 them off because both need schema work; Phase 26 got its own brainstorm, spec and plan and delivered
-both on `phase-26-holds-and-repair-end` (final tree `1442289` after the final-review fix wave; unmerged
-and unpushed, migration 25 pending on staging until the first `-Force` redeploy after a merge). Both
+both on `phase-26-holds-and-repair-end` (final tree `1442289` after the final-review fix wave; merged to
+`main` as `a5883ad` and pushed 2026-09-22; migration 25 pending on staging until the first `-Force` redeploy). Both
 bullets below are closed — kept for the history, not as work:
 
 - **Shipped in Phase 26 — reservations that can actually be created, released and expired.** Nothing in `src/server` ever created
