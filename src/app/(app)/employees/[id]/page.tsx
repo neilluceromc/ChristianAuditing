@@ -4,9 +4,10 @@ import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { computeLoadout, effectiveSlots, resolvePolicy } from "@/lib/loadout";
 import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
-import { fmtDate, fmtMoney, fmtRelativeDays } from "@/lib/format";
+import { fmtDate, fmtMoney, fmtRelativeDays, localDateISO } from "@/lib/format";
 import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
 import { isRecentTransfer } from "@/lib/transfer-schema";
+import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -17,6 +18,7 @@ import { Stat } from "@/components/ui/stat";
 import { StatusDot } from "@/components/ui/status";
 import { LoadoutView, type HoldingItem, type SlotTile, type SpareOption } from "@/components/employees/loadout-view";
 import { AcknowledgementCard } from "@/components/employees/acknowledgement-card";
+import { StartOffboardingDialog } from "@/components/employees/start-offboarding-dialog";
 import { TransferDialog } from "@/components/employees/transfer-dialog";
 import { TransfersCard } from "@/components/employees/transfers-card";
 import { getTransfers } from "@/server/modules/employees/queries";
@@ -26,6 +28,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const employee = await prisma.employee.findUnique({ where: { id }, include: { department: true } });
   if (!employee) notFound();
+  const today = localDateISO(new Date());
 
   const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes, acks, transfers, departments] = await Promise.all([
     prisma.asset.findMany({ where: { assigneeId: id }, orderBy: { tag: "asc" } }),
@@ -166,6 +169,14 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
                 departments={otherDepartments}
               />
             )}
+            {canMutate && employee.employment === "ACTIVE" && (
+              <StartOffboardingDialog
+                employeeId={id}
+                employeeName={employee.name}
+                defaultDue={defaultOffboardingDue(today)}
+                minDue={minOffboardingDue(today)}
+              />
+            )}
             {canMutate && <ButtonLink variant="primary" href={`/employees/${id}/edit`}>Edit</ButtonLink>}
           </>
         }
@@ -232,6 +243,8 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             spares={spares}
             holding={holding}
             frozen={employee.employment !== "ACTIVE"}
+            dueAt={employee.employment === "OFFBOARDING" ? employee.offboardingDueAt : null}
+            today={today}
             canMutate={canMutate}
             direct={direct}
           />
