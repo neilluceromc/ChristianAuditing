@@ -6,6 +6,8 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 import { encryptSecret } from "../src/server/crypto";
 import { secretAad } from "../src/server/webhooks/sign";
 import { TIMELINE_PAGE_SIZE } from "../src/lib/timeline";
+import { addDays, dayFromISO } from "../src/lib/deadlines";
+import { localDateISO } from "../src/lib/format";
 
 /**
  * Phase 17 (Task 8) — the scale sweep. Every list added a real page in this
@@ -160,7 +162,7 @@ async function seedScaleFixtures() {
       employeeId: reservationEmployees[i].id,
       state: "ACTIVE" as const,
       reason: "scale fixture hold",
-      expiresAt: new Date(now.getTime() + 7 * 86_400_000),
+      expiresAt: dayFromISO(addDays(localDateISO(now), 7)),
     })),
   });
 
