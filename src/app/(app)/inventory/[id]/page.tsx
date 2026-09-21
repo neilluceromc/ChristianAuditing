@@ -117,7 +117,9 @@ export default async function AssetOverviewPage({
                         // null means two different things and only one is "stopped"
                         value:
                           down !== null
-                            ? `${down} d out of service`
+                            ? asset.status === "DEFECTIVE"
+                              ? `${down} d out of service`
+                              : `down ${down} d, back since ${fmtDate(asset.repairEndedAt)}`
                             : asset.status === "DEFECTIVE"
                               ? "start date unknown"
                               : "clock stopped",

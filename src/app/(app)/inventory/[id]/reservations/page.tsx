@@ -2,11 +2,13 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
-import { fmtDate } from "@/lib/format";
-import { DEFAULT_STATUS } from "@/lib/asset-class";
+import { fmtDate, localDateISO } from "@/lib/format";
+import { DEFAULT_STATUS, isDirectLifecycle } from "@/lib/asset-class";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
 import { EmptyState } from "@/components/ui/empty-state";
+import { HoldPill } from "@/components/ui/hold-pill";
+import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
 
 export default async function AssetReservationsPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -18,6 +20,8 @@ export default async function AssetReservationsPage({ params }: { params: Promis
     include: { employee: true },
     orderBy: { createdAt: "desc" },
   });
+  const today = localDateISO(new Date());
+  const canRelease = isDirectLifecycle(user.role, asset.cls);
 
   if (reservations.length === 0) {
     return (
@@ -38,6 +42,7 @@ export default async function AssetReservationsPage({ params }: { params: Promis
           <Th>Reason</Th>
           <Th width={110}>Expires</Th>
           <Th width={110}>Resolved</Th>
+          <Th width={96}><span className="sr-only">Actions</span></Th>
         </Tr>
       </THead>
       <TBody>
@@ -51,8 +56,13 @@ export default async function AssetReservationsPage({ params }: { params: Promis
               </a>
             </Td>
             <Td>{r.reason ?? "—"}</Td>
-            <Td mono>{fmtDate(r.expiresAt)}</Td>
+            <Td mono>
+              {r.state === "ACTIVE" && r.expiresAt ? <HoldPill expiresAt={r.expiresAt} today={today} withDate /> : fmtDate(r.expiresAt)}
+            </Td>
             <Td mono>{fmtDate(r.resolvedAt)}</Td>
+            <Td>
+              {r.state === "ACTIVE" && canRelease ? <ReleaseHoldButton reservationId={r.id} tag={asset.tag} size="sm" /> : null}
+            </Td>
           </Tr>
         ))}
       </TBody>
