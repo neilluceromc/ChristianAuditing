@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, CONSUMPTION_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS,
   EXPIRY_EXPORT_COLUMNS, EXPORT_CAP, FAREWELL_EXPORT_COLUMNS, HOLDINGS_EXPORT_COLUMNS, IDS_CAP,
-  ON_HAND_EXPORT_COLUMNS, capRefusalText, idsRefusalText,
-  type ConsumptionExportRow, type ExpiryExportRow, type HoldingsExportRow, type OnHandExportRow,
+  OFFBOARDING_EXPORT_COLUMNS, ON_HAND_EXPORT_COLUMNS, capRefusalText, idsRefusalText,
+  type ConsumptionExportRow, type ExpiryExportRow, type HoldingsExportRow, type OffboardingExportRow,
+  type OnHandExportRow,
 } from "./export-columns";
 
 describe("export column specs", () => {
@@ -273,5 +274,24 @@ describe("EXPIRY_EXPORT_COLUMNS (Phase 22 spec §4.4)", () => {
     expect(values[5]).toBeNull();
     expect(values[9]).toBeNull();
     expect(values[10]).toBeNull();
+  });
+});
+
+describe("OFFBOARDING_EXPORT_COLUMNS (Phase 25, spec §6.5)", () => {
+  it("carries the seven queue columns in this exact order", () => {
+    expect(OFFBOARDING_EXPORT_COLUMNS.map((c) => c.label)).toEqual([
+      "Employee no", "Name", "Department", "Started", "Complete by", "Undecided", "Progress",
+    ]);
+  });
+  it("writes dates as dates, the count as a number and progress as the word", () => {
+    const row: OffboardingExportRow = {
+      employeeNo: "EMP-0090", name: "Dennis Ong", department: "Operations",
+      started: new Date("2026-09-18T00:00:00Z"), dueAt: null, undecided: 3, progress: "Open",
+    };
+    const cells = OFFBOARDING_EXPORT_COLUMNS.map((c) => c.cell(row));
+    expect(cells[3]).toEqual({ value: row.started, type: Date, format: "yyyy-mm-dd" });
+    expect(cells[4]).toEqual({ value: null, type: Date, format: "yyyy-mm-dd" });
+    expect(cells[5]).toEqual({ value: 3, type: Number });
+    expect(cells[6]).toEqual({ value: "Open" });
   });
 });

@@ -142,6 +142,8 @@ export interface DecisionCandidate {
 }
 
 export interface Decision {
+  /** Phase 25: the winning approval's id, so the wizard can link the ref to /approvals/{id}. */
+  id: string;
   refNo: string;
   outcome: Outcome;
   state: string;
@@ -204,6 +206,7 @@ export function decisionOf(
   const winner = live[0];
   if (!winner) return null;
   return {
+    id: winner.id,
     refNo: winner.refNo,
     outcome: winner.outcome,
     state: winner.state,

@@ -337,3 +337,19 @@ export const HOLDINGS_EXPORT_COLUMNS: XlsxColumn<HoldingsExportRow>[] = [
     cell: (r) => (isHoldingsFillerRow(r) ? { value: "" } : { value: r.loanDue, type: Date, format: "yyyy-mm-dd" }),
   },
 ];
+
+/** Phase 25 (spec §6.5): one row of the offboarding queue export. */
+export interface OffboardingExportRow {
+  employeeNo: string; name: string; department: string;
+  started: Date | null; dueAt: Date | null; undecided: number; progress: "Open" | "Complete";
+}
+
+export const OFFBOARDING_EXPORT_COLUMNS: XlsxColumn<OffboardingExportRow>[] = [
+  { label: "Employee no", width: 14, cell: (r) => ({ value: r.employeeNo }) },
+  { label: "Name", width: 26, cell: (r) => ({ value: r.name }) },
+  { label: "Department", width: 20, cell: (r) => ({ value: r.department }) },
+  { label: "Started", width: 13, cell: (r) => ({ value: r.started, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Complete by", width: 13, cell: (r) => ({ value: r.dueAt, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Undecided", width: 11, cell: (r) => ({ value: r.undecided, type: Number }) },
+  { label: "Progress", width: 11, cell: (r) => ({ value: r.progress }) },
+];
