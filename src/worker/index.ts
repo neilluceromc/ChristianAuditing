@@ -4,6 +4,8 @@ import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";
 import { MAX_JOB_ATTEMPTS } from "../lib/jobs";
 import { pruneRetention } from "./retention";
 import { RETENTION_DAYS, pruneDue } from "../lib/retention";
+import { expireHolds } from "./holds";
+import { expireDue } from "../lib/holds";
 
 const WORKER_ID = `worker-${process.pid}`;
 const POLL_MS = 3_000;
@@ -12,6 +14,7 @@ const ONCE = process.argv.includes("--once");
 
 let draining = false;
 let lastPruneAt: Date | null = null;
+let lastExpireAt: Date | null = null;
 
 interface LeasedJob {
   id: string;
@@ -113,14 +116,28 @@ async function safePrune(): Promise<void> {
   }
 }
 
+/** Phase 26 (spec §4.3): holds expire at start and hourly; a failure is logged and never stops job processing. */
+async function safeExpire(): Promise<void> {
+  try {
+    const n = await expireHolds();
+    if (n) console.log(`[worker] expired ${n} hold${n === 1 ? "" : "s"}`);
+  } catch (err) {
+    console.error(`[worker] hold sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    lastExpireAt = new Date();
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`[worker] ${WORKER_ID} starting${ONCE ? " (--once)" : ""}`);
   await recoverStale();
   await safePrune();
+  await safeExpire();
   let cycles = 0;
   for (;;) {
     if (draining) break;
     if (pruneDue(lastPruneAt, new Date())) await safePrune();
+    if (expireDue(lastExpireAt, new Date())) await safeExpire();
     const worked = await tick();
     if (!worked) {
       if (ONCE) break;

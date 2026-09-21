@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
-import { toSearchParams } from "@/lib/url-state";
-import { parsePage } from "@/lib/paging";
+import { parseListState, toSearchParams } from "@/lib/url-state";
+import { HOLDS_LIST_CONFIG } from "@/lib/holds";
 import {
   RESERVATION_TABS, listReservations, parseReservationTab,
 } from "@/server/modules/reservations/queries";
@@ -23,7 +23,8 @@ export default async function ReservationsPage({
   const user = await requireUser();
   const sp = toSearchParams(await searchParams);
   const tab = parseReservationTab(sp.get("state"));
-  const { rows, counts, page, pageCount } = await listReservations(tab, parsePage(sp));
+  const state = parseListState(sp, HOLDS_LIST_CONFIG);
+  const { rows, counts, page, pageCount } = await listReservations(tab, state);
   const hrefFor = (p: number) => {
     const qs = new URLSearchParams({ state: tab });
     if (p > 1) qs.set("page", String(p));
