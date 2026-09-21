@@ -24,6 +24,7 @@ export interface ReservationRow {
   reason: string | null;
   expiresAt: Date | null;
   expires: string;
+  created: string;
   resolved: string;
   /** how it closed: the clock, or a person */
   closedBy: "clock" | "person" | null;
@@ -53,6 +54,7 @@ export async function listReservations(tab: ReservationTab, state: ListState): P
       id: r.id, state: r.state, assetId: r.assetId, tag: r.asset.tag, model: r.asset.model, assetStatus: r.asset.status,
       employeeId: r.employeeId, employeeName: r.employee.name, employeeNo: r.employee.employeeNo, reason: r.reason,
       expiresAt: r.expiresAt, expires: fmtDate(r.expiresAt),
+      created: fmtDate(r.createdAt),
       // Phase 26: the sweep now stamps resolvedAt on expiry; the seeded EXPIRED row predates it and keeps reading expiresAt.
       resolved: fmtDate(r.resolvedAt ?? (r.state === "EXPIRED" ? r.expiresAt : null)),
       closedBy: r.state === "EXPIRED" ? "clock" : r.state === "RELEASED" ? "person" : null,
