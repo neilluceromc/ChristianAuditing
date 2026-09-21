@@ -159,7 +159,7 @@ them. Each line below now says where it stands.
 
 **Phase 25 (IT navigation sweep) audited the whole IT surface — 47 routes — for dead ends and unwired
 affordances before choosing, and shipped the half that needed no schema change.** It is code-complete on
-`phase-25-it-navigation-sweep` at final tree `fab0780`, unmerged and unpushed; see `HANDOVER.md` (r).
+`phase-25-it-navigation-sweep` at final tree `fab0780`, merged to `main` via `--no-ff` `bb577f8` and pushed 2026-09-21; see `HANDOVER.md` (r).
 
 - **Shipped in Phase 25 —** starting an offboarding meant a trip through the Edit form. A new
   `startOffboarding` server action — a faithful twin of the Edit path (same guard order, same
