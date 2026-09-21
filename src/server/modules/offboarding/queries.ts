@@ -174,9 +174,16 @@ function withoutFilter(state: ListState, facet: string): ListState {
  * shortcut: `buildOffboardingWhere` reads neither `progress` nor `due` (only
  * `department`), so `withoutFilter(state, "progress")` is already
  * "without `due`" too — the two clears produce the identical query. Hence the
- * single `derivedCandidates` list feeding both counters. The flip side is that
- * an active `progress` filter does not narrow the Due counts and vice versa,
- * the same way `department` has always behaved (final review Minor 7).
+ * single `derivedCandidates` list feeding both counters. Phase 25 (spec
+ * §6.4): those counters are no longer tallied independently — `narrowedFacetCounts`
+ * (`src/lib/offboarding-list.ts`) takes that one candidate pass and counts
+ * each derived facet's options against the OTHER derived facet's active
+ * filter, so an active `progress` filter narrows the Due counts and vice
+ * versa, the way SQL facets narrow each other elsewhere — while neither
+ * facet narrows itself, since its own options must stay pickable. `department`
+ * alone keeps the old convention (counted with its own filter cleared, never
+ * narrowed by `progress`/`due`) because it is applied in SQL before these
+ * candidate rows exist at all.
  */
 async function offboardingFacets(state: ListState): Promise<{ department: FacetOption[]; progress: FacetOption[]; due: FacetOption[] }> {
   const [deptGroups, departments, derivedCandidates] = await Promise.all([
