@@ -1,6 +1,8 @@
 import type { ApprovalType, Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
+import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
+import { parseListState, serializeListState, withFilter } from "@/lib/url-state";
 import { stockHomeSignals } from "@/server/modules/stock/queries";
 import { DIRECT_KIND_LABEL, DIRECT_WINDOW_DAYS, slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
@@ -355,6 +357,8 @@ export interface FleetSlice {
   status: string;
   count: number;
   share: number;
+  /** Phase 25: the inventory filtered to this status — the same URL the status facet produces. */
+  href: string;
 }
 
 export interface Fleet {
@@ -393,6 +397,10 @@ export async function fleet(now: Date = new Date()): Promise<Fleet> {
       status: g.status,
       count: g._count._all,
       share: total === 0 ? 0 : Math.round((g._count._all / total) * 100),
+      href: "/inventory" + serializeListState(
+        withFilter(parseListState(new URLSearchParams(), INVENTORY_LIST_CONFIG), "status", [g.status]),
+        INVENTORY_LIST_CONFIG,
+      ),
     }))
     .sort((a, b) => b.count - a.count);
 
