@@ -150,6 +150,21 @@ test.describe("it navigation sweep (Phase 25)", () => {
       expect(after.offboardingDueAt && localDateISO(after.offboardingDueAt)).toBe(defaultOffboardingDue(today));
       // Read-only (R3): the row itself is never deleted, only counted.
       expect(await db.auditEntry.count({ where: { entityType: "employee", entityId: carlo.id } })).toBe(before + 1);
+      // …and read, so the DIFF the action writes is pinned too (spec §8 case 1
+      // asks for "one update row WITH the three fields"; final review I-4a).
+      const row = await db.auditEntry.findFirst({
+        where: { entityType: "employee", entityId: carlo.id },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
+      expect(row?.action).toBe("update");
+      const diff = row!.diff as Record<string, { from: unknown; to: unknown }>;
+      expect(Object.keys(diff).sort()).toEqual(["employment", "offboardingAt", "offboardingDueAt"]);
+      expect(diff.employment).toEqual({ from: "ACTIVE", to: "OFFBOARDING" });
+      // Prisma stores a `Date` inside a `Json` column as its ISO string, which
+      // is exactly what `diffOf` would have produced — the assertion that makes
+      // the hand-built diff (parked M-P25-1) safe to leave as it is.
+      expect(diff.offboardingAt.to).toBe(after.offboardingAt!.toISOString());
+      expect(diff.offboardingDueAt.to).toBe(after.offboardingDueAt!.toISOString());
 
       await page.goto(`/employees/${carlo.id}`);
       await expect(page.getByRole("button", { name: "Start offboarding" })).toHaveCount(0);
@@ -320,7 +335,13 @@ test.describe("it navigation sweep (Phase 25)", () => {
     // exact — the segment beside it names itself "DEPLOYED: N assets" (sr-only).
     const legend = page.getByRole("link", { name: "DEPLOYED", exact: true });
     await expect(legend).toHaveAttribute("href", "/inventory?status=DEPLOYED");
-    await legend.click();
+    // The SEGMENT is the control this phase actually invented (percentage
+    // width, sr-only name, inside an overflow-hidden wrapper), so it is the one
+    // asserted and clicked; the legend copy only has to agree with it (I-4b).
+    const segment = page.getByRole("link", { name: /^DEPLOYED: \d+ assets$/ });
+    await expect(segment).toHaveAttribute("href", "/inventory?status=DEPLOYED");
+    expect(await legend.getAttribute("href")).toBe(await segment.getAttribute("href"));
+    await segment.click();
     await page.waitForURL(/\/inventory\?status=DEPLOYED$/);
 
     const rows = page.locator("tbody tr");
@@ -329,8 +350,11 @@ test.describe("it navigation sweep (Phase 25)", () => {
     const rowCount = await rows.count();
     expect(rowCount).toBeGreaterThan(0);
     await expect(rows.locator("td").filter({ hasText: /^DEPLOYED$/ })).toHaveCount(rowCount);
-    // The facet trigger, not the sortable "Status" column header button.
-    await expect(page.locator('button[aria-haspopup="dialog"]').filter({ hasText: "Status" })).toContainText("1");
+    // A dropdown read, not `toContainText("1")` on the facet trigger — that
+    // would also pass on a badge reading "11" or "21" (M-P25-5). The Status
+    // facet counts WITHOUT its own selection (`facetOptions`' `without(facet)`),
+    // so DEPLOYED's option count is exactly what the filtered list shows.
+    expect((await facetCounts(page, "Status")).DEPLOYED).toBe(String(rowCount));
     await expectNoSeriousAxe(page);
   });
 
@@ -431,6 +455,9 @@ test.describe("it navigation sweep (Phase 25)", () => {
 
     // The seed gives its OFFBOARDED row no due date at all (offboardingDueAt is
     // set only for OFFBOARDING), so the pill this asserts needs one put there.
+    // Read first, restore to what was read (M-8): hard-coding `null` back would
+    // silently become a fixture mutation the day the seed dates this row.
+    const faithBefore = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0093" } });
     await db.employee.update({
       where: { id: faith.id },
       data: { offboardingDueAt: new Date(Date.now() - 5 * 86_400_000) },
@@ -442,7 +469,7 @@ test.describe("it navigation sweep (Phase 25)", () => {
       await expect(page.locator("header").getByText("closed", { exact: true })).toBeVisible();
       await expectNoSeriousAxe(page);
     } finally {
-      await db.employee.update({ where: { id: faith.id }, data: { offboardingDueAt: null } });
+      await db.employee.update({ where: { id: faith.id }, data: { offboardingDueAt: faithBefore.offboardingDueAt } });
     }
   });
 

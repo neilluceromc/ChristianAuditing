@@ -1,21 +1,10 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
+/** Phase 25 (spec §6.2): the record layout keeps its own header and tabs mounted — only the tab body suspends, so only the body gets a skeleton (final review I-1). */
 export default function AssetRecordLoading() {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-end justify-between pb-1">
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-3 w-40" />
-          <Skeleton className="h-6 w-56" />
-        </div>
-        <Skeleton className="h-8 w-64" />
-      </div>
-      <div className="flex gap-2">
-        {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8 w-24" />)}
-      </div>
-      <div className="flex flex-col gap-3 rounded-(--radius-card) border border-border bg-surface p-4 shadow-card">
-        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-4 w-full" />)}
-      </div>
+    <div className="flex flex-col gap-3 rounded-(--radius-card) border border-border bg-surface p-4 shadow-card">
+      {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-4 w-full" />)}
     </div>
   );
 }

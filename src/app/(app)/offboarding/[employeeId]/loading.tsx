@@ -1,6 +1,7 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function EmployeeRecordLoading() {
+/** Phase 25 (final review I-2): the wizard and the farewell report suspend as a record, not as the queue list above them. */
+export default function OffboardingRecordLoading() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-end justify-between pb-1">

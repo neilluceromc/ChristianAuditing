@@ -10,17 +10,22 @@ import type { Fleet } from "@/server/modules/home/queries";
  * inventory filtered to that status. The bar wrapper lost its `role="img"` —
  * a group of real links is not an image — and each segment names itself with
  * visually hidden text (no aria-label needed).
+ * Final review I-3: the wrapper is `overflow-hidden`, which clips the global
+ * `:focus-visible` outline (offset +2px) away, so a segment draws its ring
+ * INSIDE itself instead. And a status whose share rounds to 0 is skipped — a
+ * zero-width segment would be a focusable link of no area; the legend below
+ * still lists every status, so its link stays reachable.
  */
 export function FleetBar({ fleet }: { fleet: Fleet }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex h-3 w-full overflow-hidden rounded-full bg-border-faint">
-        {fleet.slices.map((s) => (
+        {fleet.slices.filter((s) => s.share > 0).map((s) => (
           <Link
             key={s.status}
             href={s.href}
             title={`${s.status} ${s.count}`}
-            className="block h-full hover:opacity-80"
+            className="block h-full hover:opacity-80 focus-visible:[outline-offset:-2px]"
             style={{
               width: `${s.share}%`,
               background: `var(--st-${statusFamily(s.status)}-dot)`,

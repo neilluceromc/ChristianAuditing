@@ -300,12 +300,13 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   });
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
-  // Phase 23: this is the only writer of `offboardingDueAt`, and that date is
-  // rendered on four further surfaces — the offboarding list's Due column and
-  // facet, the wizard header's pill, the farewell report's completion line and
-  // the IT worklist's leaver row (Home and /inventory/work). The dynamic
-  // segments take the `"page"` form, the same shape `revalidateStockReads`
-  // uses (`src/server/modules/stock/revalidate.ts`).
+  // Phase 23/25: the two writers of `offboardingDueAt` are this action and
+  // `startOffboarding` below — their revalidation lists must stay identical.
+  // That date is rendered on four further surfaces — the offboarding list's
+  // Due column and facet, the wizard header's pill, the farewell report's
+  // completion line and the IT worklist's leaver row (Home and
+  // /inventory/work). The dynamic segments take the `"page"` form, the same
+  // shape `revalidateStockReads` uses (`src/server/modules/stock/revalidate.ts`).
   revalidatePath("/offboarding");
   revalidatePath("/offboarding/[employeeId]", "page");
   revalidatePath("/offboarding/[employeeId]/report", "page");
@@ -364,6 +365,7 @@ export async function startOffboarding(input: unknown): Promise<ActionResult<{ i
       },
     });
   });
+  // The same seven revalidations as updateEmployee (see its Phase 23/25 note) — keep the two lists identical.
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
   revalidatePath("/offboarding");
