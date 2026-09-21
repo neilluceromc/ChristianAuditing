@@ -40,7 +40,9 @@ export function HolderControl(props: Props) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [employeeId, setEmployeeId] = useState<string | null>(props.mode === "assign" ? props.heldFor?.id ?? null : null);
+  const [employeeId, setEmployeeId] = useState<string | null>(
+    props.mode === "assign" && props.heldFor && props.employees.some((o) => o.value === props.heldFor!.id) ? props.heldFor.id : null,
+  );
   const [mode, setMode] = useState<"DEPLOYED" | "TEMPORARY">("DEPLOYED");
   const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
   const [outcome, setOutcome] = useState<ReturnOutcome>("TRIAGE");
@@ -54,7 +56,9 @@ export function HolderControl(props: Props) {
 
   function close() {
     setOpen(false); setReason("");
-    setEmployeeId(props.mode === "assign" ? props.heldFor?.id ?? null : null);
+    setEmployeeId(
+      props.mode === "assign" && props.heldFor && props.employees.some((o) => o.value === props.heldFor!.id) ? props.heldFor.id : null,
+    );
     setMode("DEPLOYED"); setLoanDueAt(defaultLoanDue(new Date()));
     setOutcome("TRIAGE");
     if (props.mode === "reserve") setExpiresAt(props.defaultExpiry);
@@ -191,7 +195,7 @@ export function HolderControl(props: Props) {
             </FormField>
           )}
           <ReasonField
-            required={!isAssign && !isReserve && returnReasonRequired} error={fieldErrors.reason} value={reason} onChange={setReason}
+            required={!isAssign && returnReasonRequired} error={fieldErrors.reason} value={reason} onChange={setReason}
             chips={isReserve ? REASON_CHIPS["hold.place"] : isAssign ? REASON_CHIPS["asset.assign"] : props.direct ? chipsForOutcome(outcome) : []} disabled={pending}
           />
         </div>
