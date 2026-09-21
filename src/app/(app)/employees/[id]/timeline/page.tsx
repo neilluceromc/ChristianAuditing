@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
@@ -70,8 +71,8 @@ export default async function EmployeeTimelinePage({
     item: {
       id: `approval-${a.id}`, at: fmtDate(a.createdAt), status: a.state,
       title: (<>
-        <span className="font-mono text-xs text-accent">{a.refNo}</span> · {APPROVAL_TYPE_LABEL[a.type]}
-        {a.asset ? <> · <span className="font-mono text-xs">{a.asset.tag}</span></> : null} —{" "}
+        <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link> · {APPROVAL_TYPE_LABEL[a.type]}
+        {a.asset ? <> · <Link href={`/inventory/${a.asset.id}`} className="font-mono text-xs hover:underline">{a.asset.tag}</Link></> : null} —{" "}
         <span className="font-mono text-xs">{a.state}</span>
       </>),
     } satisfies TimelineItem,
@@ -82,7 +83,7 @@ export default async function EmployeeTimelinePage({
     item: {
       id: `res-${r.id}`, at: fmtDate(r.createdAt), status: r.state,
       title: (<>
-        hold on <span className="font-mono text-xs text-accent">{r.asset.tag}</span> —{" "}
+        hold on <Link href={`/inventory/${r.asset.id}`} className="font-mono text-xs text-accent hover:underline">{r.asset.tag}</Link> —{" "}
         <span className="font-mono text-xs">{r.state}</span>
       </>),
     } satisfies TimelineItem,

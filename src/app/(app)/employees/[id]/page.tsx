@@ -220,6 +220,26 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
                 <Stat label="Oldest item" value={oldest ? fmtDate(oldest) : "—"} />
                 <Stat label="Open requests" value={String(openApprovals.length)} />
               </div>
+              {openApprovals.length > 0 && (
+                // Phase 25 (spec §4 row 6): the count above, the requests themselves here.
+                <ul className="flex flex-wrap gap-x-2 gap-y-1 pt-2">
+                  {[...openApprovals]
+                    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+                    .slice(0, 5)
+                    .map((a) => (
+                      <li key={a.id}>
+                        <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link>
+                      </li>
+                    ))}
+                  {openApprovals.length > 5 && (
+                    <li>
+                      <Link href={`/employees/${id}/timeline`} className="text-xs text-fg-muted hover:underline">
+                        +{openApprovals.length - 5} more
+                      </Link>
+                    </li>
+                  )}
+                </ul>
+              )}
             </CardBody>
           </Card>
 

@@ -26,7 +26,7 @@ export async function entityLabels(
     byType.get(e.entityType)!.add(e.entityId);
   }
   const map = new Map<string, { label: string; href: string | null }>();
-  const [assets, employees, approvals, purchases, policies, users, flags, endpoints, vendors, stockItems, stocktakes, stockCategories] = await Promise.all([
+  const [assets, employees, approvals, purchases, policies, users, flags, endpoints, vendors, stockItems, stocktakes, stockCategories, departments] = await Promise.all([
     byType.has("asset")
       ? prisma.asset.findMany({ where: { id: { in: [...byType.get("asset")!] } }, select: { id: true, tag: true } })
       : [],
@@ -78,6 +78,9 @@ export async function entityLabels(
     byType.has("stock-category")
       ? prisma.stockCategory.findMany({ where: { id: { in: [...byType.get("stock-category")!] } }, select: { id: true, name: true } })
       : [],
+    byType.has("department")
+      ? prisma.department.findMany({ where: { id: { in: [...byType.get("department")!] } }, select: { id: true, name: true } })
+      : [],
   ]);
   for (const a of assets) map.set(`asset:${a.id}`, { label: a.tag, href: `/inventory/${a.id}` });
   for (const e of employees) map.set(`employee:${e.id}`, { label: e.name, href: `/employees/${e.id}` });
@@ -97,6 +100,9 @@ export async function entityLabels(
   for (const s of stockItems) map.set(`stock-item:${s.id}`, { label: `${s.code} · ${s.name}`, href: `/stock/items/${s.id}` });
   for (const s of stocktakes) map.set(`stocktake:${s.id}`, { label: s.refNo, href: `/stock/stocktakes/${s.id}` });
   for (const c of stockCategories) map.set(`stock-category:${c.id}`, { label: c.name, href: "/stock/categories" });
+  // Departments have no detail page — reference-actions.ts writes entityType
+  // "department" on create/rename/delete.
+  for (const d of departments) map.set(`department:${d.id}`, { label: d.name, href: null });
   for (const e of entries) {
     const key = `${e.entityType}:${e.entityId}`;
     if (!map.has(key)) map.set(key, { label: e.entityId.slice(0, 10) + "…", href: null });

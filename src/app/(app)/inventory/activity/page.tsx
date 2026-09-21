@@ -36,13 +36,14 @@ export default async function InventoryActivityPage({
   const labels = await entityLabels(entries);
 
   const items: ActivityItem[] = entries.map((e) => {
-    const entityLabel = labels.get(`${e.entityType}:${e.entityId}`)!.label;
+    const entity = labels.get(`${e.entityType}:${e.entityId}`)!;
     return {
       id: e.id,
-      sentence: auditSentence({ actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel }),
+      sentence: auditSentence({ actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: entity.label }),
       when: fmtDateTime(e.createdAt),
       actor: e.actorLabel,
       dotValue: actionDot(e.action),
+      entity,
     };
   });
 
