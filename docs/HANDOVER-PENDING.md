@@ -186,10 +186,13 @@ affordances before choosing, and shipped the half that needed no schema change.*
   answers a stale wizard link with "Not in the offboarding queue"; and `/offboarding` gained an Export
   button and route mirroring `/employees/export` row for row.
 
-**Next IT candidate — Phase 26: reservations that work + a repair end-date.** Phase 25's audit found both
-and split them off because both need schema work; Phase 26 gets its own brainstorm.
+**Shipped in Phase 26 — holds that work + a repair end-date.** Phase 25's audit found both and split
+them off because both need schema work; Phase 26 got its own brainstorm, spec and plan and delivered
+both on `phase-26-holds-and-repair-end` (final tree `1442289` after the final-review fix wave; unmerged
+and unpushed, migration 25 pending on staging until the first `-Force` redeploy after a merge). Both
+bullets below are closed — kept for the history, not as work:
 
-- **Reservations that can actually be created, released and expired.** Nothing in `src/server` ever creates
+- **Shipped in Phase 26 — reservations that can actually be created, released and expired.** Nothing in `src/server` ever created
   a `Reservation` — the only writer anywhere is `prisma/seed.ts` — and `HolderControl` exposes only
   `mode: "assign" | "return"`, so no screen can place a hold. `ReservationState` carries `RELEASED` and
   `EXPIRED`, but the single state write in the codebase is `ACTIVE → FULFILLED` when the reserved employee
@@ -197,13 +200,22 @@ and split them off because both need schema work; Phase 26 gets its own brainsto
   as live. `/reservations`' own empty-state copy ("Reserve a spare from an asset record when it is promised
   to someone but not yet assigned") and its banner ("Holds are placed and released on the asset record")
   therefore both describe a control that does not exist — and so did `HANDOVER.md` §8's "read-only by
-  design" line, corrected there by this audit. The phase would add the create/release actions, an expiry
-  sweep, and the `/reservations` list parity (pagination, sortable headers, facets) that §8 still carries.
-- **Recording when a repair ended.** `RETURNED OK` shows `—` in the Down column because `downDays`
+  design" line, corrected there by this audit. **All of that shipped:** `reserveAsset` and `releaseHold`
+  (`src/server/modules/reservations/actions.ts`, one audit row each) place and release a hold from the
+  asset record, an empty policy slot's **Reserve a spare…** menu item on a profile, the profile's
+  holding area and `/reservations`; `src/worker/holds.ts` sweeps ACTIVE holds past their Manila day to
+  EXPIRED once at start and hourly after; and `/reservations` gained search, Employee and Department
+  facets, four sortable headers, whole-row click and Release, so the empty state and the banner describe
+  controls that now exist.
+- **Shipped in Phase 26 — recording when a repair ended.** `RETURNED OK` showed `—` in the Down column because `downDays`
   returns `null` for anything not `status === "DEFECTIVE"`, and nothing anywhere records when a repair
   actually ended, so a completed repair's downtime cannot be reported at all. The phase would store a
   repair end-date on the asset (or on the repair record) and teach `downDays` to close the interval, which
-  makes the Down column truthful for returned-OK assets and the repairs saved view reportable.
+  makes the Down column truthful for returned-OK assets and the repairs saved view reportable. **That is
+  what shipped:** `Asset.repairEndedAt` (migration 25, additive and nullable) is stamped by
+  `prepareLifecycle` on every path that leaves DEFECTIVE and cleared when an asset re-enters it, and
+  `downDays` closes the interval on it — the dash now survives only where no end was ever recorded,
+  because the migration's backfill fills only rows whose audit history shows the transition.
 
 Still open, and named out of scope by Phase 24's spec §0 decision 1 and Phase 25's §2 — each stays
 recorded in PICKUP §5 / HANDOVER §8:
