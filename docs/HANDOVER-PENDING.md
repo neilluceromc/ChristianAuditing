@@ -6,7 +6,7 @@ the short front door stays [`PICKUP.md`](PICKUP.md). This file only lists what i
 start on each item.
 
 **Where the code stands at parking time.** `main` = `origin/main` at `93291f0`. Phases 1–19 are merged and
-pushed. Staging (the office laptop, `192.168.203.153`) runs the **Phase 18** build (`4cf5697`, 19
+pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.153` before) runs the **Phase 18** build (`4cf5697`, 19
 migrations); **Phase 19 (stock control D1, migration 20) is merged but NOT yet deployed.**
 
 ---
@@ -33,7 +33,7 @@ migrations); **Phase 19 (stock control D1, migration 20) is merged but NOT yet d
 From [`staging-run-sheet.md`](staging-run-sheet.md); none of these can be done by an agent (UAC elevation
 is blocked in auto mode):
 
-- Decide **which machine owns `192.168.203.153`**, or use a DNS name — the value is printed on every label.
+- Decide **which machine owns `192.168.203.183`** (renumbered from `.153` on 2026-09-21), or use a DNS name — the value is printed on every label, so any label printed before 2026-09-21 encodes the dead `.153` address and needs reprinting.
 - Network profile → **Private**; add the inbound firewall rule for TCP 3000 (inert while Public).
 - UniFi **DHCP reservation** for the address.
 - Reach the app from **another PC and a phone**.

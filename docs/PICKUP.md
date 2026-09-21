@@ -169,7 +169,7 @@ These were made with the user and would be invisible to anyone reading only the 
 7. **Deploy the prototype to the staging laptop and let Purchasing and Finance use it.** Chosen by the user
    on 2026-09-07 as the next step before any more features. The ordered checklist is
    [`staging-run-sheet.md`](staging-run-sheet.md) (also delivered as a PDF). It hinges on one decision only
-   the user can make — **which machine owns the reserved address `192.168.203.153`**, or whether to use a
+   the user can make — **which machine owns the reserved address `192.168.203.183`** (the laptop was renumbered from `.153` on 2026-09-21; `.env` and this file follow), or whether to use a
    DNS name instead — because that value is printed onto every label. Physical steps nobody else can do:
    the UniFi DHCP reservation, the phone reachability test, the printed sheet (tape-measure the 100 mm bar,
    scan one QR).
