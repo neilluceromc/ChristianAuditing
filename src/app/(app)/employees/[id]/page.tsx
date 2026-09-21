@@ -8,6 +8,7 @@ import { fmtDate, fmtMoney, fmtRelativeDays, localDateISO } from "@/lib/format";
 import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
 import { isRecentTransfer } from "@/lib/transfer-schema";
 import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
+import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -18,14 +19,22 @@ import { Stat } from "@/components/ui/stat";
 import { StatusDot } from "@/components/ui/status";
 import { LoadoutView, type HoldingItem, type SlotTile, type SpareOption } from "@/components/employees/loadout-view";
 import { AcknowledgementCard } from "@/components/employees/acknowledgement-card";
+import { EmployeeCreatedNotice } from "@/components/employees/employee-created-notice";
 import { StartOffboardingDialog } from "@/components/employees/start-offboarding-dialog";
 import { TransferDialog } from "@/components/employees/transfer-dialog";
 import { TransfersCard } from "@/components/employees/transfers-card";
 import { getTransfers } from "@/server/modules/employees/queries";
 
-export default async function EmployeePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EmployeePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireUser();
   const { id } = await params;
+  const sp = toSearchParams(await searchParams);
   const employee = await prisma.employee.findUnique({ where: { id }, include: { department: true } });
   if (!employee) notFound();
   const today = localDateISO(new Date());
@@ -146,6 +155,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
 
   return (
     <>
+      {sp.get("created") === "1" && <EmployeeCreatedNotice name={employee.name} employeeNo={employee.employeeNo} id={id} />}
       <PageHeader
         title={employee.name}
         breadcrumb={[{ label: "Employees", href: "/employees" }, { label: employee.employeeNo }]}
@@ -253,21 +263,23 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <LoadoutView
-            employeeId={id}
-            slots={slots}
-            unslotted={loadout.unslotted.map(toTileAsset)}
-            onLoan={loadout.onLoan.map(toTileAsset)}
-            waived={waived}
-            itTypes={itTypes}
-            spares={spares}
-            holding={holding}
-            frozen={employee.employment !== "ACTIVE"}
-            dueAt={employee.employment === "OFFBOARDING" ? employee.offboardingDueAt : null}
-            today={today}
-            canMutate={canMutate}
-            direct={direct}
-          />
+          <div id="loadout" tabIndex={-1} className="outline-none">
+            <LoadoutView
+              employeeId={id}
+              slots={slots}
+              unslotted={loadout.unslotted.map(toTileAsset)}
+              onLoan={loadout.onLoan.map(toTileAsset)}
+              waived={waived}
+              itTypes={itTypes}
+              spares={spares}
+              holding={holding}
+              frozen={employee.employment !== "ACTIVE"}
+              dueAt={employee.employment === "OFFBOARDING" ? employee.offboardingDueAt : null}
+              today={today}
+              canMutate={canMutate}
+              direct={direct}
+            />
+          </div>
           <TransfersCard transfers={transfers} />
         </div>
       </div>
