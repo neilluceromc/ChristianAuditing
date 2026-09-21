@@ -16,6 +16,8 @@ export const REASON_CHIPS = {
   "policy.exception":  ["Role needs it", "Remote work setup", "Uses own device", "Not needed for this role"],
   "approval.reject":   ["Not needed", "Duplicate request", "Wrong item"],
   "purchase.reason":   ["Over budget", "Need specifications", "Duplicate request"],
+  "hold.place":        ["New hire setup", "Replacement pending", "Project loan"],
+  "hold.release":      ["No longer needed", "Assigned another unit", "Hire cancelled"],
 } as const satisfies Record<string, readonly string[]>;
 export type ReasonContext = keyof typeof REASON_CHIPS;
 

@@ -1,22 +1,11 @@
 import { fmtDate } from "@/lib/format";
+// Phase 26: the tabs moved to @/lib/holds so they have a unit test; re-exported
+// here so every existing caller of this module still compiles unchanged.
+import { RESERVATION_TABS, type ReservationTab } from "@/lib/holds";
 import { ENTITY_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 
-/**
- * Tabs write `?state=`. EXPIRED (the clock ran out) and RELEASED (a person let
- * it go) share the Closed tab but must stay distinguishable — README 5c.
- */
-export const RESERVATION_TABS = [
-  { id: "ACTIVE", label: "Active", states: ["ACTIVE"] },
-  { id: "FULFILLED", label: "Fulfilled", states: ["FULFILLED"] },
-  { id: "CLOSED", label: "Closed", states: ["RELEASED", "EXPIRED"] },
-] as const;
-
-export type ReservationTab = (typeof RESERVATION_TABS)[number]["id"];
-
-export function parseReservationTab(raw: string | null | undefined): ReservationTab {
-  return (RESERVATION_TABS.some((t) => t.id === raw) ? raw : "ACTIVE") as ReservationTab;
-}
+export { RESERVATION_TABS, parseReservationTab, type ReservationTab } from "@/lib/holds";
 
 export interface ReservationRow {
   id: string;

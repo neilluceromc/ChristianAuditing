@@ -120,7 +120,7 @@ export async function worklist(
       take: CAP.large,
       select: {
         id: true, tag: true, model: true, status: true, vendorId: true, rmaRef: true,
-        repairQuote: true, cost: true, defectiveSince: true, vendor: { select: { name: true } },
+        repairQuote: true, cost: true, defectiveSince: true, repairEndedAt: true, vendor: { select: { name: true } },
       },
     }),
     // Loans: ordered by due date (nulls first), limited to CAP.large
@@ -255,9 +255,9 @@ export async function worklist(
     const cost = a.cost === null ? null : Number(a.cost);
     const stage = repairStage({
       status: a.status, vendorId: a.vendorId, rmaRef: a.rmaRef,
-      repairQuote: quote, cost, defectiveSince: a.defectiveSince,
+      repairQuote: quote, cost, defectiveSince: a.defectiveSince, repairEndedAt: a.repairEndedAt,
     }) ?? "to-assess";
-    const down = downDays({ status: a.status, defectiveSince: a.defectiveSince }, now) ?? 0;
+    const down = downDays({ status: a.status, defectiveSince: a.defectiveSince, repairEndedAt: a.repairEndedAt }, now) ?? 0;
     const beyond = beyondRepair(quote, cost);
     rows.push({
       key: `repairs:${a.id}`,

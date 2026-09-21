@@ -50,6 +50,13 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     expect(auditSentence({ ...base, action: "lifecycle.triage", diff: { triage: { from: null, to: "Keep as spare" } } }))
       .toBe("J. Sarmiento triaged BR-LT-0148: Keep as spare");
   });
+  it("Phase 26 holds read as sentences", () => {
+    const base = { actorLabel: "J. Sarmiento", entityLabel: "BR-HS-0502" };
+    expect(auditSentence({ ...base, action: "reservation.placed", diff: { hold: { from: null, to: "EMP-0097" }, expiresAt: { from: null, to: "2026-09-28T00:00:00.000Z" } } }))
+      .toBe("J. Sarmiento reserved BR-HS-0502 for EMP-0097 until 28 Sept 2026");
+    expect(auditSentence({ ...base, action: "reservation.released", diff: { hold: { from: "EMP-0097", to: null } } }))
+      .toBe("J. Sarmiento released the hold on BR-HS-0502");
+  });
   it("finance.return carries the reason — the reason IS the record", () => {
     expect(auditSentence({ ...base, action: "finance.return", diff: { financeReturn: { from: null, to: "Serial does not match the box" } } }))
       .toBe("J. Sarmiento sent BR-LT-0148 back to IT \u00b7 Serial does not match the box");
@@ -292,5 +299,9 @@ describe("actionDot — Phase 12's asset actions are explicit, not left to the n
   it("finance.resubmit reads as in flight, exactly like submit", () => {
     expect(actionDot("finance.resubmit")).toBe("SUBMITTED");
     expect(actionDot("finance.resubmit")).toBe(actionDot("submit"));
+  });
+  it("Phase 26 holds get their own dots", () => {
+    expect(actionDot("reservation.placed")).toBe("ACTIVE");
+    expect(actionDot("reservation.released")).toBe("CANCELLED");
   });
 });

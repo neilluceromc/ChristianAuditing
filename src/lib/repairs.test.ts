@@ -8,7 +8,7 @@ import {
 
 const asset = (over: Partial<RepairLike> = {}): RepairLike => ({
   status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: null,
-  cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z"), ...over,
+  cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z"), repairEndedAt: null, ...over,
 });
 
 describe("the four stages are derived, not stored", () => {
@@ -67,19 +67,25 @@ describe("the Down column — the number that changes behaviour", () => {
   const now = new Date("2026-08-18T00:00:00Z");
 
   it("counts whole days out of service", () => {
-    expect(downDays({ status: "DEFECTIVE", defectiveSince: new Date("2026-08-01T00:00:00Z") }, now)).toBe(17);
+    expect(downDays({ status: "DEFECTIVE", defectiveSince: new Date("2026-08-01T00:00:00Z"), repairEndedAt: null }, now)).toBe(17);
   });
 
-  it("is null once the item no longer reads DEFECTIVE — the clock stopped and we don't record when", () => {
-    expect(downDays({ status: "SPARE", defectiveSince: new Date("2026-08-01T00:00:00Z") }, now)).toBeNull();
+  it("closes the interval on repairEndedAt once the item no longer reads DEFECTIVE", () => {
+    expect(downDays({ status: "SPARE", defectiveSince: new Date("2026-08-01T00:00:00Z"), repairEndedAt: new Date("2026-08-11T00:00:00Z") }, now)).toBe(10);
+  });
+  it("is null for a closed repair with no recorded end — the clock stopped and we don't know when", () => {
+    expect(downDays({ status: "SPARE", defectiveSince: new Date("2026-08-01T00:00:00Z"), repairEndedAt: null }, now)).toBeNull();
+  });
+  it("ignores a stale end while the item reads DEFECTIVE again", () => {
+    expect(downDays({ status: "DEFECTIVE", defectiveSince: new Date("2026-08-15T00:00:00Z"), repairEndedAt: new Date("2026-08-11T00:00:00Z") }, now)).toBe(3);
   });
 
   it("is null without a defectiveSince, never 0 — unknown is not 'today'", () => {
-    expect(downDays({ status: "DEFECTIVE", defectiveSince: null }, now)).toBeNull();
+    expect(downDays({ status: "DEFECTIVE", defectiveSince: null, repairEndedAt: null }, now)).toBeNull();
   });
 
   it("never goes negative on a clock-skewed row", () => {
-    expect(downDays({ status: "DEFECTIVE", defectiveSince: new Date("2026-08-19T00:00:00Z") }, now)).toBe(0);
+    expect(downDays({ status: "DEFECTIVE", defectiveSince: new Date("2026-08-19T00:00:00Z"), repairEndedAt: null }, now)).toBe(0);
   });
 });
 

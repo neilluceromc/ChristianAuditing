@@ -53,6 +53,7 @@ export function stageOf(a: {
   cost: Prisma.Decimal | null;
   repairQuote: Prisma.Decimal | null;
   defectiveSince: Date | null;
+  repairEndedAt: Date | null;
 }): RepairStage | null {
   return repairStage({
     status: a.status,
@@ -61,6 +62,7 @@ export function stageOf(a: {
     repairQuote: a.repairQuote === null ? null : Number(a.repairQuote),
     cost: a.cost === null ? null : Number(a.cost),
     defectiveSince: a.defectiveSince,
+    repairEndedAt: a.repairEndedAt,
   });
 }
 
@@ -78,6 +80,7 @@ function toRow(a: {
   purchasedAt: Date | null;
   warrantyUntil: Date | null;
   defectiveSince: Date | null;
+  repairEndedAt: Date | null;
   vendorId: string | null;
   rmaRef: string | null;
   cost: Prisma.Decimal | null;

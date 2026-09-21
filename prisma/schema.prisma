@@ -408,6 +408,10 @@ model Asset {
   rmaRef               String?
   repairQuote          Decimal?         @db.Decimal(12, 2)
   defectiveSince       DateTime?
+  /// Phase 26: set when the status leaves DEFECTIVE, cleared when it re-enters;
+  /// pairs with defectiveSince to close the Down interval. NULL on a closed
+  /// repair = ended before this was recorded (the Down column shows "—").
+  repairEndedAt        DateTime?
   notes                String?
   financeConfirmedAt   DateTime?
   financeConfirmedById String?
