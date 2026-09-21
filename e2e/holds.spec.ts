@@ -9,7 +9,9 @@ import { defaultHoldExpiry } from "@/lib/holds";
 
 /**
  * Phase 26 (spec §7) — holds that work, and the repair end date. Eleven cases,
- * each with its own fixture and a `finally` that puts the database back:
+ * each with its own fixture and a `finally` that puts the database back
+ * (reservations deleted by id, or by this test's own `createdAt` window when
+ * the UI created the row and the test failed before reading it back):
  *   1  reserve from the asset record — dialog defaults, audit sentence, the
  *      HOLD marker on the list, and the spare leaving the Replace picker.
  *   2  reserve from an empty profile slot (the ⋯ menu's "Reserve a spare…").
@@ -126,11 +128,13 @@ const holdingRow = (page: Page, tag: string) =>
 
 test.describe("holds", () => {
   test("1. reserving a spare from its record writes the hold, marks the list, and takes it out of the Replace picker", async ({ page }) => {
+    const startedAt = new Date();
     const headset = await assetOf("BR-HS-0502");
     const laptop = await assetOf("BR-LT-0201");
     const nina = await employeeOf("EMP-0097");
     const today = localDateISO(new Date());
     const expiry = defaultHoldExpiry(today);
+    let holdId: string | null = null;
 
     try {
       await login(page, IT);
@@ -157,6 +161,7 @@ test.describe("holds", () => {
       await expect(page.getByRole("button", { name: "Reserve", exact: true })).toHaveCount(0);
 
       const hold = await db.reservation.findFirstOrThrow({ where: { assetId: headset.id, state: "ACTIVE" } });
+      holdId = hold.id;
       expect(hold.employeeId).toBe(nina.id);
       expect(hold.reason).toBe("New hire setup");
       expect(localDateISO(hold.expiresAt!)).toBe(expiry);
@@ -190,13 +195,16 @@ test.describe("holds", () => {
 
       await expectNoSeriousAxe(page);
     } finally {
-      await db.reservation.deleteMany({ where: { assetId: headset.id, state: "ACTIVE" } });
+      // by id once known; before that, only what THIS test could have created
+      await db.reservation.deleteMany({ where: holdId ? { id: holdId } : { assetId: headset.id, state: "ACTIVE", createdAt: { gte: startedAt } } });
     }
   });
 
   test("2. an empty policy slot reserves a spare from its ⋯ menu, and the holding area shows it", async ({ page }) => {
+    const startedAt = new Date();
     const nina = await employeeOf("EMP-0097");
     const phone = await assetOf("BR-PH-0301");
+    let holdId: string | null = null;
 
     try {
       await login(page, IT);
@@ -221,12 +229,14 @@ test.describe("holds", () => {
       await expect(row.getByRole("button", { name: "Release", exact: true })).toBeVisible();
 
       const hold = await db.reservation.findFirstOrThrow({ where: { assetId: phone.id, state: "ACTIVE" } });
+      holdId = hold.id;
       expect(hold.employeeId).toBe(nina.id);
       expect(localDateISO(hold.expiresAt!)).toBe(defaultHoldExpiry(localDateISO(new Date())));
 
       await expectNoSeriousAxe(page);
     } finally {
-      await db.reservation.deleteMany({ where: { assetId: phone.id, state: "ACTIVE" } });
+      // by id once known; before that, only what THIS test could have created
+      await db.reservation.deleteMany({ where: holdId ? { id: holdId } : { assetId: phone.id, state: "ACTIVE", createdAt: { gte: startedAt } } });
     }
   });
 
@@ -267,6 +277,7 @@ test.describe("holds", () => {
   });
 
   test("4. an expiry before today is refused and writes no hold", async ({ page }) => {
+    const startedAt = new Date();
     const headset = await assetOf("BR-HS-0502");
     const today = localDateISO(new Date());
 
@@ -298,7 +309,8 @@ test.describe("holds", () => {
 
       await expectNoSeriousAxe(page);
     } finally {
-      await db.reservation.deleteMany({ where: { assetId: headset.id, state: "ACTIVE" } });
+      // the net stays, but narrowed to what THIS test could have created
+      await db.reservation.deleteMany({ where: { assetId: headset.id, state: "ACTIVE", createdAt: { gte: startedAt } } });
     }
   });
 
@@ -349,14 +361,16 @@ test.describe("holds", () => {
     const paolo = await employeeOf("EMP-0071");
     const expiresAt = dayFromISO(defaultHoldExpiry(localDateISO(new Date())));
 
-    const ninaHold = await db.reservation.create({
-      data: { assetId: phone.id, employeeId: nina.id, state: "ACTIVE", reason: "e2e — release from the profile", expiresAt },
-    });
-    const paoloHold = await db.reservation.create({
-      data: { assetId: monitor.id, employeeId: paolo.id, state: "ACTIVE", reason: "e2e — release from the list", expiresAt },
-    });
+    let ninaHold: { id: string } | null = null;
+    let paoloHold: { id: string } | null = null;
 
     try {
+      ninaHold = await db.reservation.create({
+        data: { assetId: phone.id, employeeId: nina.id, state: "ACTIVE", reason: "e2e — release from the profile", expiresAt },
+      });
+      paoloHold = await db.reservation.create({
+        data: { assetId: monitor.id, employeeId: paolo.id, state: "ACTIVE", reason: "e2e — release from the list", expiresAt },
+      });
       await login(page, IT);
       // (a) the profile's holding area. Nina also holds the seeded BR-MN-0910,
       // so the Release button has to be scoped to the BR-PH-0301 row.
@@ -386,7 +400,7 @@ test.describe("holds", () => {
 
       await expectNoSeriousAxe(page);
     } finally {
-      await db.reservation.deleteMany({ where: { id: { in: [ninaHold.id, paoloHold.id] } } });
+      await db.reservation.deleteMany({ where: { id: { in: [ninaHold, paoloHold].flatMap((h) => (h ? [h.id] : [])) } } });
     }
   });
 

@@ -1,4 +1,5 @@
 import { requireUser } from "@/server/auth/guards";
+import { isDirectLifecycle } from "@/lib/asset-class";
 import { clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, type ListState } from "@/lib/url-state";
 import { HOLDS_LIST_CONFIG } from "@/lib/holds";
 import { localDateISO } from "@/lib/format";
@@ -26,7 +27,7 @@ export default async function ReservationsPage({
   const state = parseListState(sp, HOLDS_LIST_CONFIG);
   const { rows, counts, total, page, pageCount, facets } = await listReservations(tab, state);
   const today = localDateISO(new Date());
-  const canRelease = user.role === "admin" || user.role === "it_staff";
+  const canRelease = isDirectLifecycle(user.role, "IT");
 
   const href = (s: ListState, t: ReservationTab = tab) => {
     const qs = serializeListState(s, HOLDS_LIST_CONFIG);

@@ -33,7 +33,7 @@ export interface AssetRow {
   /** derived repair stage id; null if the asset was never defective */
   stage: RepairStage | null;
   stageLabel: string | null;
-  /** days out of service; null unless it currently reads DEFECTIVE */
+  /** days out of service: to now while DEFECTIVE, closed on repairEndedAt otherwise; null when never defective or the end was never recorded (Phase 26) */
   down: number | null;
 }
 

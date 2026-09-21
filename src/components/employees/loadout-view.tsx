@@ -287,6 +287,9 @@ export function LoadoutView({
     }
   }
 
+  // A spare promised to someone else: unpickable here, and it has to LOOK unpickable (final review M-6).
+  const isHeld = (s: { reservedFor: string | null; reservedForThis: boolean }) => s.reservedFor !== null && !s.reservedForThis;
+
   const sparesForSlot = fillSlot ? spares.filter((s) => s.typeId && s.typeId === fillSlot.typeId) : [];
 
   // The tile a Replace dialog opened for isn't self-describing its slot's
@@ -627,8 +630,9 @@ export function LoadoutView({
                 <label
                   key={s.id}
                   className={cn(
-                    "flex cursor-pointer items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                    pickedSpare === s.id ? "border-accent bg-accent-tint" : "border-border hover:bg-surface-subtle",
+                    "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                    isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
+                    pickedSpare === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
                   )}
                 >
                   <input
@@ -636,7 +640,7 @@ export function LoadoutView({
                     name="spare"
                     className="sr-only"
                     checked={pickedSpare === s.id}
-                    disabled={s.reservedFor !== null && !s.reservedForThis}
+                    disabled={isHeld(s)}
                     onChange={() => setPickedSpare(s.id)}
                   />
                   <span className="font-mono text-accent">{s.tag}</span>
@@ -765,8 +769,9 @@ export function LoadoutView({
               <label
                 key={s.id}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                  replacementId === s.id ? "border-accent bg-accent-tint" : "border-border hover:bg-surface-subtle",
+                  "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                  isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
+                  replacementId === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
                 )}
               >
                 <input
@@ -774,7 +779,7 @@ export function LoadoutView({
                   name="replacement"
                   className="sr-only"
                   checked={replacementId === s.id}
-                  disabled={s.reservedFor !== null && !s.reservedForThis}
+                  disabled={isHeld(s)}
                   onChange={() => setReplacementId(s.id)}
                 />
                 <span className="font-mono text-accent">{s.tag}</span>
@@ -791,8 +796,9 @@ export function LoadoutView({
               <label
                 key={s.id}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                  replacementId === s.id ? "border-accent bg-accent-tint" : "border-border hover:bg-surface-subtle",
+                  "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                  isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
+                  replacementId === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
                 )}
               >
                 <input
@@ -800,7 +806,7 @@ export function LoadoutView({
                   name="replacement"
                   className="sr-only"
                   checked={replacementId === s.id}
-                  disabled={s.reservedFor !== null && !s.reservedForThis}
+                  disabled={isHeld(s)}
                   onChange={() => setReplacementId(s.id)}
                 />
                 <span className="font-mono text-accent">{s.tag}</span>

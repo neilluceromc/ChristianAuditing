@@ -493,6 +493,11 @@ model Reservation {
   employee   Employee         @relation(fields: [employeeId], references: [id])
   state      ReservationState @default(ACTIVE)
   reason     String?
+  /// Phase 26 (spec §4.3). Last day the hold is live, day-precision UTC midnight like
+  /// Employee.offboardingDueAt and Stocktake.dueAt: every writer goes through dayFromISO (or the
+  /// seed's dayFloor), so the worker's raw-instant cutoff — start of today, Asia/Manila — and
+  /// holdStatus's calendar arithmetic name the same day. A wall-clock value here would be
+  /// swept a day early for any time-of-day from 16:00 UTC on.
   expiresAt  DateTime?
   resolvedAt DateTime?
   createdAt  DateTime         @default(now())

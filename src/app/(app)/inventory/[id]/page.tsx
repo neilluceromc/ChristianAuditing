@@ -12,6 +12,7 @@ import { Banner } from "@/components/ui/banner";
 import { Pill } from "@/components/ui/pill";
 import { CreatedNotice } from "@/components/inventory/created-notice";
 import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
+import { statusFamily } from "@/lib/status";
 
 export default async function AssetOverviewPage({
   params,
@@ -119,7 +120,9 @@ export default async function AssetOverviewPage({
                           down !== null
                             ? asset.status === "DEFECTIVE"
                               ? `${down} d out of service`
-                              : `down ${down} d, back since ${fmtDate(asset.repairEndedAt)}`
+                              : statusFamily(asset.status) === "closed"
+                                ? `down ${down} d, closed ${fmtDate(asset.repairEndedAt)}`
+                                : `down ${down} d, back since ${fmtDate(asset.repairEndedAt)}`
                             : asset.status === "DEFECTIVE"
                               ? "start date unknown"
                               : "clock stopped",

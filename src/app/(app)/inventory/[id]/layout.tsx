@@ -49,7 +49,7 @@ export default async function AssetRecordLayout({
   const canResubmit = canManageClass(user.role, asset.cls) && returned;
   const pending = asset.approvals[0];
   const direct = isDirectLifecycle(user.role, asset.cls);
-  const hold = await activeHoldFor(asset.id);
+  const hold = asset.cls === "IT" ? await activeHoldFor(asset.id) : null;
   const today = localDateISO(new Date());
   // Spec §7.1: offered only when the action would be legal; a pending approval
   // freezes both (the server would answer "already has an open request").

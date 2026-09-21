@@ -41,10 +41,13 @@ export async function listReservations(tab: ReservationTab, state: ListState): P
   const { rows: reservations, total, page, pageCount } = await pagedSnapshot(
     ENTITY_PAGE_SIZE, state.page,
     async (tx) => {
-      const grouped = await tx.reservation.groupBy({ by: ["state"], _count: true });
-      const countOf = (s: string) => grouped.find((g) => g.state === s)?._count ?? 0;
-      counts = { ACTIVE: countOf("ACTIVE"), FULFILLED: countOf("FULFILLED"), CLOSED: countOf("RELEASED") + countOf("EXPIRED") };
-      return tx.reservation.count({ where });
+      // Phase 26 fix wave (I-2): the badges count what the tab links carry — the
+      // same search and facets — so a badge never promises rows its list lacks.
+      const entries = await Promise.all(
+        RESERVATION_TABS.map(async (t) => [t.id, await tx.reservation.count({ where: buildHoldWhere(t.id, state) })] as const),
+      );
+      counts = Object.fromEntries(entries) as Record<ReservationTab, number>;
+      return counts[tab];
     },
     (tx, pg) => tx.reservation.findMany({ where, include: { asset: true, employee: { include: { department: true } } }, orderBy, skip: pg.skip, take: pg.take }),
   );
@@ -76,7 +79,7 @@ async function holdFacets(tab: ReservationTab, state: ListState): Promise<HoldFa
   for (const r of byDept) deptCount.set(r.employee.departmentId, (deptCount.get(r.employee.departmentId) ?? 0) + 1);
   return {
     employee: employees.map((e) => ({ value: e.id, label: e.name, count: byEmployee.find((g) => g.employeeId === e.id)?._count ?? 0 })),
-    department: departments.map((d) => ({ value: d.id, label: d.name, count: deptCount.get(d.id) ?? 0 })).filter((o) => o.count > 0),
+    department: departments.map((d) => ({ value: d.id, label: d.name, count: deptCount.get(d.id) ?? 0 })),
   };
 }
 

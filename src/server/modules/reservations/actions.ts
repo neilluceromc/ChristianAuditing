@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
@@ -43,37 +44,56 @@ export async function reserveAsset(input: unknown): Promise<ActionResult<{ id: s
   if (d.expiresAt < minHoldExpiry(today)) return validationError({ expiresAt: "Pick today or later" });
 
   let out: { id: string; tag: string } | null = null;
-  const failure = await prisma.$transaction(async (tx) => {
-    const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
-    if (!asset) return conflict("That asset no longer exists.");
-    if (asset.cls !== "IT") return conflict("Holds are for IT spares.");
-    if (!isAssignable(asset)) return conflict(`${asset.tag} is not a spare.`);
-    const held = await tx.reservation.findFirst({ where: { assetId: asset.id, state: "ACTIVE" }, include: { employee: { select: { employeeNo: true } } } });
-    if (held) return conflict(`${asset.tag} is already held for ${held.employee.employeeNo} — release that hold first.`);
-    if (await openApprovalForAsset(tx, asset.id)) return conflict(`${asset.tag} has an open request — decide it first.`);
-    const employee = await tx.employee.findUnique({ where: { id: d.employeeId } });
-    if (!employee) return conflict("That employee no longer exists.");
-    if (employee.employment !== "ACTIVE") return conflict(`${employee.name} is ${employee.employment.toLowerCase()} — slots are frozen.`);
+  try {
+    const failure = await prisma.$transaction(async (tx) => {
+      const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
+      if (!asset) return conflict("That asset no longer exists.");
+      if (asset.cls !== "IT") return conflict("Holds are for IT spares.");
+      if (!isAssignable(asset)) return conflict(`${asset.tag} is not a spare.`);
+      const held = await tx.reservation.findFirst({ where: { assetId: asset.id, state: "ACTIVE" }, include: { employee: { select: { employeeNo: true } } } });
+      if (held) return conflict(`${asset.tag} is already held for ${held.employee.employeeNo} — release that hold first.`);
+      if (await openApprovalForAsset(tx, asset.id)) return conflict(`${asset.tag} has an open request — decide it first.`);
+      const employee = await tx.employee.findUnique({ where: { id: d.employeeId } });
+      if (!employee) return conflict("That employee no longer exists.");
+      if (employee.employment !== "ACTIVE") return conflict(`${employee.name} is ${employee.employment.toLowerCase()} — slots are frozen.`);
 
-    const expiresAt = dayFromISO(d.expiresAt);
-    const reason = d.reason?.trim() ? d.reason.trim() : null;
-    const created = await tx.reservation.create({
-      data: { assetId: asset.id, employeeId: employee.id, state: "ACTIVE", reason, expiresAt },
+      const expiresAt = dayFromISO(d.expiresAt);
+      const reason = d.reason || null;
+      const created = await tx.reservation.create({
+        data: { assetId: asset.id, employeeId: employee.id, state: "ACTIVE", reason, expiresAt },
+      });
+      await writeAudit(tx, {
+        actorId: user.id, actorLabel: user.name,
+        entityType: "asset", entityId: asset.id,
+        action: "reservation.placed",
+        diff: {
+          hold: { from: null, to: employee.employeeNo },
+          expiresAt: { from: null, to: expiresAt },
+          ...(reason ? { reason: { from: null, to: reason } } : {}),
+        },
+      });
+      out = { id: created.id, tag: asset.tag };
+      return null;
     });
-    await writeAudit(tx, {
-      actorId: user.id, actorLabel: user.name,
-      entityType: "asset", entityId: asset.id,
-      action: "reservation.placed",
-      diff: {
-        hold: { from: null, to: employee.employeeNo },
-        expiresAt: { from: null, to: expiresAt },
-        ...(reason ? { reason: { from: null, to: reason } } : {}),
-      },
-    });
-    out = { id: created.id, tag: asset.tag };
-    return null;
-  });
-  if (failure) return failure;
+    if (failure) return failure;
+  } catch (err) {
+    // The partial unique index Reservation_one_active_hold_per_asset (migration
+    // 20260814090100) turns a concurrent-reserve race into a constraint
+    // violation: both transactions passed the findFirst above and one INSERT
+    // lost. Say it in the pre-check's words — re-read from the winner's row —
+    // instead of letting the throw escape the action.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      const [asset, winner] = await Promise.all([
+        prisma.asset.findUnique({ where: { id: d.assetId }, select: { tag: true } }),
+        prisma.reservation.findFirst({ where: { assetId: d.assetId, state: "ACTIVE" }, select: { employee: { select: { employeeNo: true } } } }),
+      ]);
+      const tag = asset?.tag ?? "That asset";
+      return conflict(winner
+        ? `${tag} is already held for ${winner.employee.employeeNo} — release that hold first.`
+        : `${tag} is already held — release that hold first.`);
+    }
+    throw err;
+  }
   revalidateHold(d.assetId, d.employeeId);
   return ok(out!);
 }
@@ -100,7 +120,7 @@ export async function releaseHold(input: unknown): Promise<ActionResult<{ id: st
     if (hold.state !== "ACTIVE") return conflict("That hold is already closed.");
     const r = await tx.reservation.updateMany({ where: { id: hold.id, state: "ACTIVE" }, data: { state: "RELEASED", resolvedAt: now } });
     if (r.count === 0) return conflict("That hold is already closed.");
-    const reason = d.reason?.trim() ? d.reason.trim() : null;
+    const reason = d.reason || null;
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
       entityType: "asset", entityId: hold.asset.id,

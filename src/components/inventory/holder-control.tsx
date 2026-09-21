@@ -195,7 +195,7 @@ export function HolderControl(props: Props) {
             </FormField>
           )}
           <ReasonField
-            required={!isAssign && returnReasonRequired} error={fieldErrors.reason} value={reason} onChange={setReason}
+            required={returnReasonRequired} error={fieldErrors.reason} value={reason} onChange={setReason}
             chips={isReserve ? REASON_CHIPS["hold.place"] : isAssign ? REASON_CHIPS["asset.assign"] : props.direct ? chipsForOutcome(outcome) : []} disabled={pending}
           />
         </div>

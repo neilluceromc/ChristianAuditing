@@ -52,7 +52,7 @@ export function HoldsTable({
           <Th width={104} {...sortProps("expiresAt")}>Expires</Th>
           <Th width={110} {...sortProps("createdAt")}>Created</Th>
           <Th width={160}>Closed</Th>
-          <Th width={90} aria-label="Actions" />
+          {canRelease && <Th width={90} aria-label="Actions" />}
         </Tr>
       </THead>
       <TBody>
@@ -97,9 +97,9 @@ export function HoldsTable({
                 </span>
               )}
             </Td>
-            <Td>
-              {r.state === "ACTIVE" && canRelease ? <ReleaseHoldButton reservationId={r.id} tag={r.tag} size="sm" /> : null}
-            </Td>
+            {canRelease && (
+              <Td>{r.state === "ACTIVE" ? <ReleaseHoldButton reservationId={r.id} tag={r.tag} size="sm" /> : null}</Td>
+            )}
           </Tr>
         ))}
       </TBody>

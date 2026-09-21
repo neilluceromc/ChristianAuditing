@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { addDays, dayFromISO, isPastDue } from "./deadlines";
 import { localDateISO } from "./format";
-import { PRUNE_INTERVAL_MS, pruneDue } from "./retention";
+import { pruneDue } from "./retention";
 import type { ListConfig, ListState, SortKey } from "./url-state";
 
 /** Phase 26 (spec §0 decision 1): a hold lasts seven calendar days unless IT picks another date; today is the floor. */
@@ -11,17 +11,17 @@ export const minHoldExpiry = (todayISO: string) => todayISO;
 
 export interface HoldStatus { days: number; text: string; tone: "neutral" | "accent"; expired: boolean }
 
+/** A hold is live through the whole of its last day (Asia/Manila) — the same rule as isPastDue. */
+export function isHoldExpired(expiresAt: Date, todayISO: string): boolean { return isPastDue(expiresAt, todayISO); }
+
 /** The pill's words — deliberately "expires…", never "due…", so a hold and a deadline never read alike on one screen. */
 export function holdStatus(expiresAt: Date, todayISO: string): HoldStatus {
   const days = Math.round((dayFromISO(localDateISO(expiresAt)).getTime() - dayFromISO(todayISO).getTime()) / 86_400_000);
   const text = days < 0 ? `expired ${-days} d ago` : days === 0 ? "expires today" : days === 1 ? "expires tomorrow" : `expires in ${days} d`;
-  return { days, text, tone: days <= 0 ? "accent" : "neutral", expired: days < 0 };
+  return { days, text, tone: days <= 0 ? "accent" : "neutral", expired: isHoldExpired(expiresAt, todayISO) };
 }
-/** A hold is live through the whole of its last day (Asia/Manila) — the same rule as isPastDue. */
-export function isHoldExpired(expiresAt: Date, todayISO: string): boolean { return isPastDue(expiresAt, todayISO); }
 
 /** The worker sweeps hourly, on the same gate retention uses. */
-export const HOLDS_SWEEP_INTERVAL_MS = PRUNE_INTERVAL_MS;
 export const expireDue = pruneDue;
 
 /**
