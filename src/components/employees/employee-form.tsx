@@ -92,7 +92,7 @@ export function EmployeeForm(props: Props) {
             confirmSameName,
           });
       if (res.ok) {
-        if (props.mode === "new") { router.push(`/employees/${res.data.id}`); return; }
+        if (props.mode === "new") { router.push(`/employees/${res.data.id}?created=1`); return; }
         setSaved(true); setTimeout(() => setSaved(false), 3000); router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
@@ -125,7 +125,7 @@ export function EmployeeForm(props: Props) {
             </>
           )}
           <FormField label="Name" required error={errors.name}>
-            {(p) => <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+            {(p) => <Input id={p.id} autoFocus aria-describedby={p["aria-describedby"]} invalid={p.invalid}
               value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />}
           </FormField>
           <FormField label="Title" required error={errors.title} hint="Title drives role-based equipment policies.">

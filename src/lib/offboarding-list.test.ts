@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { dayFromISO } from "./deadlines";
 import {
-  OFFBOARDING_LIST_CONFIG, buildOffboardingOrderBy, buildOffboardingWhere, dueOf, progressOf, sortByUndecided,
+  OFFBOARDING_LIST_CONFIG, buildOffboardingOrderBy, buildOffboardingWhere, derivedFilters, dueOf,
+  narrowedFacetCounts, progressOf, sortByUndecided,
 } from "./offboarding-list";
 import { parseListState } from "./url-state";
 
@@ -86,5 +87,41 @@ describe("dueOf (spec §4.6)", () => {
   });
   it("today or later is on track", () => {
     expect(dueOf(dayFromISO(TODAY), TODAY)).toBe("on-track");
+  });
+});
+
+describe("derivedFilters (Phase 25)", () => {
+  it("keeps only the known progress and due values", () => {
+    const state = { q: "", page: 1, sort: [], filters: { progress: ["open", "bogus"], due: ["overdue"] } };
+    expect(derivedFilters(state)).toEqual({ progressFilter: ["open"], dueFilter: ["overdue"] });
+  });
+  it("is empty when neither facet is active", () => {
+    expect(derivedFilters({ q: "", page: 1, sort: [], filters: {} })).toEqual({ progressFilter: [], dueFilter: [] });
+  });
+});
+
+describe("narrowedFacetCounts (Phase 25, spec §6.4) — progress and due narrow each other", () => {
+  const today = "2026-09-21";
+  const rows = [
+    { undecided: 2, dueAt: new Date("2026-09-10T00:00:00Z") }, // open · overdue
+    { undecided: 0, dueAt: new Date("2026-09-10T00:00:00Z") }, // complete · overdue
+    { undecided: 1, dueAt: new Date("2026-10-01T00:00:00Z") }, // open · on-track
+    { undecided: 0, dueAt: null },                               // complete · on-track (no date)
+  ];
+  it("with no filters counts every row on both facets", () => {
+    expect(narrowedFacetCounts(rows, [], [], today)).toEqual({
+      progress: { open: 2, complete: 2 }, due: { overdue: 2, "on-track": 2 },
+    });
+  });
+  it("an active due filter narrows the progress counts", () => {
+    expect(narrowedFacetCounts(rows, [], ["overdue"], today).progress).toEqual({ open: 1, complete: 1 });
+  });
+  it("an active progress filter narrows the due counts", () => {
+    expect(narrowedFacetCounts(rows, ["open"], [], today).due).toEqual({ overdue: 1, "on-track": 1 });
+  });
+  it("a facet's own filter never narrows its own counts", () => {
+    const r = narrowedFacetCounts(rows, ["open"], ["overdue"], today);
+    expect(r.progress).toEqual({ open: 1, complete: 1 });
+    expect(r.due).toEqual({ overdue: 1, "on-track": 1 });
   });
 });

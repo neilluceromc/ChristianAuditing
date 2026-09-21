@@ -1,6 +1,6 @@
 # Phase 25 — IT navigation sweep: start offboarding from the profile, every reference a link, new-hire finish line, employees list parity, safety nets
 
-**Status:** design approved in conversation 2026-09-21 (audit-first; ranked by clicks saved on the four daily IT paths — new hire, swap/repair, move/reassign, leaver; scope cut into two phases: this sweep, then Phase 26 = reservations that work + repair end-date). Not yet planned or implemented.
+**Status:** design approved in conversation 2026-09-21 (audit-first; ranked by clicks saved on the four daily IT paths — new hire, swap/repair, move/reassign, leaver; scope cut into two phases: this sweep, then Phase 26 = reservations that work + repair end-date). **Implemented on branch `phase-25-it-navigation-sweep` (8 tasks, `D-1`…`D-12` — the final whole-branch review added `D-10`, the fix wave `D-11`, the final battery `D-12`), code-complete 2026-09-21 at final tree `fab0780`, final-review fix wave included; unmerged and unpushed.** Battery on that tree: `tsc` clean · `lint` clean · **24 migrations**, schema up to date (this phase adds none) · **1493 unit / 84 files** · **353 e2e / 34 files** across the seven foreground chunks, zero failed. Where a ruling or the final review changed this design, the section carries an *Amended (D-n)* note; plan `docs/superpowers/plans/2026-09-21-phase-25-it-navigation-sweep.md` holds the full D-block.
 
 **Companion facts file (scratch, git-ignored):** `.superpowers/sdd/phase-25-facts.md` — the route map, link matrix, per-screen affordance inventory and parked-items extract this design was ranked from. Every claim below was verified against `main` @ `a9970ad`.
 
@@ -55,6 +55,8 @@ In the header `actions`, between `TransferDialog` and `Edit`, when `canMutate &&
 
 When `employment !== "ACTIVE"` the button is absent; the existing frozen banner in `LoadoutView` (already linking to the wizard) gains a `DuePill` reading `employee.offboardingDueAt` (`withDate`) so the profile shows the date without opening the wizard — `LoadoutView` receives `dueAt: Date | null` as a new prop.
 
+*Amended (D-10, final-review M-7):* the banner is shown whenever `employment !== "ACTIVE"`, but the due date is passed **only for `OFFBOARDING`**. An unoverridden `DuePill` on a closed case would read "overdue" — the exact thing §3.4 exists to prevent — so the OFFBOARDED state carries no pill here and the wizard header's `closed` pill (§3.4) is where a completed case shows its date. Recorded as a deliberate deviation from this paragraph, not fixed.
+
 ### 3.3 Wizard request links (`src/app/(app)/offboarding/[employeeId]/page.tsx`, `src/server/modules/offboarding/queries.ts`)
 
 `WizardItem.blockedBy` gains `id: string` (`{ id, refNo, type }`): the `blockers` query inside `getWizard` (`offboarding/queries.ts:385-390`) adds `id: true` to its select and `openByAsset` carries it. `Decision` (`src/lib/offboarding.ts`) gains `id: string`, copied from the winning `DecisionCandidate` in `decisionOf` (the candidate already carries it). The three `<Link href="/approvals">` at the collect step (decided ref and blocked ref) and the summary become `href={`/approvals/${id}`}`. The `items` prop passed to the scan pool is unchanged (it carries `blockedBy: refNo | null` for the verdict text only).
@@ -79,6 +81,10 @@ When `employment !== "ACTIVE"` the button is absent; the existing frozen banner 
 | 8 | Audit entity labels (`audit/queries.ts` `entityLabels`) | add `department` to the resolved types: `prisma.department.findMany({ select: { id, name } })` → `{ label: name, href: null }` | none (the audit page already renders label-without-link when `href` is null) |
 
 Rule (Phase 23, D-block): none of these links carries an `aria-label` containing a nearby field's label word; visible reference text is the link text. The fleet-bar segment label reads `"DEFECTIVE: 3 assets"` — no form field sits near it.
+
+*Amended (D-3/D-6, global constraints):* row 7's segments carry that name as `sr-only` text rather than an `aria-label`, which satisfies the same accessible name while keeping the phase-wide no-`aria-label` rule literal; the wrapper's `role="img"` was dropped, because real links inside an image role contradict ARIA (ruling **R2** — `e2e/home-finance.spec.ts`'s assertion was rewritten in its own test-only commit rather than the markup weakened).
+
+*Amended (D-11, final-review I-3):* two corrections to row 7. The segment link draws its focus ring **inside** itself (`focus-visible:[outline-offset:-2px]`), because the global outline is clipped by the bar's `overflow-hidden` wrapper and a keyboard user would otherwise see nothing; and segments with `share === 0` are **skipped**, since a zero-width focusable link is a tab stop nobody can see or click. The legend still maps every status, so each one keeps a reachable link.
 
 ---
 
@@ -113,6 +119,8 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
 No message text from `error.message` is shown (it may carry internals); the digest is enough for the log. Server logs are untouched.
 
 ### 6.2 `loading.tsx` ×4 — `offboarding/loading.tsx`, `reservations/loading.tsx` (list shape: title + toolbar + ten `SkeletonRow`s, copied from `employees/loading.tsx` with the right column count), `inventory/[id]/loading.tsx` and `employees/[id]/loading.tsx` (record shape: a header line, a 5-tab strip, one card block of six `Skeleton` lines). The record-level file covers the record page and every tab route beneath it.
+
+*Amended (D-11, final-review I-1, I-2 and M-1):* the record-shaped skeletons keep **only the body**. A record-level `loading.tsx` renders *inside* its own layout, so the header line and the 5-tab strip this paragraph asked for were drawn a second time under the real ones — `inventory/[id]/loading.tsx` is now the card block alone, and `employees/[id]/loading.tsx` keeps its header line but loses the tab strip entirely (the employee record has no layout and no tabs, so the strip promised a control that never arrives). A **fifth** file was added that this section did not list: `offboarding/[employeeId]/loading.tsx`, record-shaped — without it the list-shaped `offboarding/loading.tsx` also covered the wizard and the farewell report, so both flashed a ten-row list skeleton.
 
 ### 6.3 `offboarding/[employeeId]/not-found.tsx` — `EmptyState` "Not in the offboarding queue" / "They may be active again, or the link is stale." / `ButtonLink` → `/offboarding`; the page's existing `notFound()` call now lands here.
 
@@ -156,7 +164,9 @@ Route shape = `employees/export/route.ts`: `requireUser()`, `parseListState(url.
 12. Offboarding: facet counts narrow each other (`due=overdue` changes the progress counts); Export downloads an `.xlsx` whose row count equals the queue total; the completed leaver's wizard header shows the due pill reading "closed" (the seeded OFFBOARDED employee has no due date, so the case sets one directly and restores `null` in `finally`).
 13. Audit: none is seeded, so the case renames a seeded department through `/admin/departments` (which writes a `department` / `rename` entry), asserts `/audit` shows the department's name as the entity label, and in `finally` renames it back and deletes both audit rows.
 
-`--list` expected: 340 + 13 = **353 tests / 34 files**; the new file joins chunk F. Specs that assert on touched markup and run in the battery anyway: `directory`, `offboarding`, `offboarding-v2`, `custody`, `approvals-audit`, `axe-sweep` (new links: `link-name` satisfied by visible text or the fleet-bar aria-label), `deadlines`.
+*Amended (D-2):* cases 3, 12 and 13 **build their own fixtures** — the seed carries no decided offboarding item, no due date on its OFFBOARDED employee and no department audit entry — and each restores what it changed. *Amended (D-8, ruling R3):* `AuditEntry` is append-only at the database (a trigger refuses deletes), so **no case deletes an audit row**; the `finally` blocks restore mutable fields only and rely on the file's `beforeAll` reseed, and case 6 has no `finally` at all because its only write is such a row. *Amended (D-11, final-review I-4):* case 1 asserts the audit row's `action` and its three diff keys with ISO `to` values (not just the row count), and case 9 asserts the segment's href equals the legend's, clicks the **segment**, and checks the Status facet's DEPLOYED count against the filtered row count.
+
+`--list` expected: 340 + 13 = **353 tests / 34 files**; the new file joins chunk F. **Measured at close: `Total: 353 tests in 34 files`, chunk F 55 passed (5.6m), battery 353 / 353 (D-12).** Specs that assert on touched markup and run in the battery anyway: `directory`, `offboarding`, `offboarding-v2`, `custody`, `approvals-audit`, `axe-sweep` (new links: `link-name` satisfied by visible text or the fleet-bar aria-label), `deadlines`.
 
 **Walk (foreground, 3100):** `error.tsx` via the dev kitchen-sink's throw control if one exists, else a temporary `?throw=1` guard in the kitchen-sink page removed before commit; the four skeletons by throttling in the Browser pane.
 

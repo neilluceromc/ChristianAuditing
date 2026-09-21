@@ -201,7 +201,14 @@ test.describe("home — fleet coverage, age distribution and warranty runway", (
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
-    await expect(page.getByRole("img", { name: "Fleet of 25 assets by status" })).toBeVisible();
+    // Phase 25 (spec §4 row 7): the fleet bar is a GROUP OF LINKS now, not an
+    // image — every segment and every legend status links to the inventory
+    // filtered to that status, so the old `role="img"` name
+    // ("Fleet of 25 assets by status") no longer exists. The legend link
+    // carries the bare status as its name; the segment carries sr-only text.
+    // The age histogram two assertions below is untouched — it is still an img.
+    await expect(page.getByRole("link", { name: "DEPLOYED", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^DEPLOYED: \d+ assets$/ })).toBeVisible();
     await expect(page.getByText("spare pool covers 4 of the 10 slots the incoming hires need")).toBeVisible();
 
     // Note the EN DASH (–) in the bucket labels, not a hyphen.

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
@@ -62,7 +63,7 @@ export default async function AssetTimelinePage({
       status: a.state,
       title: (
         <>
-          <span className="font-mono text-xs text-accent">{a.refNo}</span> · {APPROVAL_TYPE_LABEL[a.type]} —{" "}
+          <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link> · {APPROVAL_TYPE_LABEL[a.type]} —{" "}
           <span className="font-mono text-xs">{a.state}</span>
         </>
       ),

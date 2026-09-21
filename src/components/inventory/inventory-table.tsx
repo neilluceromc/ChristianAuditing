@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { AssetClass } from "@prisma/client";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
@@ -223,7 +224,16 @@ export function InventoryTable({
                         // still reads SPARE, and the marker says who wants it.
                         <span className="inline-flex items-center gap-1.5">
                           <Pill tone="accent">HOLD</Pill>
-                          <span className="text-[11px] text-fg-muted">for {row.hold}</span>
+                          <span className="text-[11px] text-fg-muted">
+                            for{" "}
+                            <Link
+                              href={`/employees/${row.hold.id}`}
+                              className="text-accent hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {row.hold.name}
+                            </Link>
+                          </span>
                         </span>
                       ) : (
                         <span className="text-fg-faint">—</span>

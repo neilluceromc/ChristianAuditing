@@ -300,12 +300,74 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   });
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
-  // Phase 23: this is the only writer of `offboardingDueAt`, and that date is
-  // rendered on four further surfaces — the offboarding list's Due column and
-  // facet, the wizard header's pill, the farewell report's completion line and
-  // the IT worklist's leaver row (Home and /inventory/work). The dynamic
-  // segments take the `"page"` form, the same shape `revalidateStockReads`
-  // uses (`src/server/modules/stock/revalidate.ts`).
+  // Phase 23/25: the two writers of `offboardingDueAt` are this action and
+  // `startOffboarding` below — their revalidation lists must stay identical.
+  // That date is rendered on four further surfaces — the offboarding list's
+  // Due column and facet, the wizard header's pill, the farewell report's
+  // completion line and the IT worklist's leaver row (Home and
+  // /inventory/work). The dynamic segments take the `"page"` form, the same
+  // shape `revalidateStockReads` uses (`src/server/modules/stock/revalidate.ts`).
+  revalidatePath("/offboarding");
+  revalidatePath("/offboarding/[employeeId]", "page");
+  revalidatePath("/offboarding/[employeeId]/report", "page");
+  revalidatePath("/inventory/work");
+  revalidatePath("/");
+  return ok({ id: employee.id });
+}
+
+const startOffboardingSchema = z.object({
+  employeeId: z.string().min(1),
+  offboardingDueAt: dateStr,
+});
+
+/**
+ * Phase 25 (spec §3.1): the profile's "Start offboarding" button. A DIRECT
+ * employee edit — exactly what the Edit form does when Employment is switched
+ * to OFFBOARDING: same guard order, same date floor and message, same audit
+ * vocabulary (`action: "update"`), same revalidations — so every surface that
+ * already renders the Edit-form path renders this one identically.
+ */
+export async function startOffboarding(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = startOffboardingSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+
+  const employee = await prisma.employee.findUnique({ where: { id: d.employeeId } });
+  if (!employee) return conflict("That employee no longer exists.");
+  if (employee.employment !== "ACTIVE") {
+    return conflict(`${employee.name} is already ${employee.employment.toLowerCase()}.`);
+  }
+
+  const today = localDateISO(new Date());
+  if (d.offboardingDueAt < minOffboardingDue(today)) {
+    return validationError({ offboardingDueAt: "Pick today or later" });
+  }
+
+  const now = new Date();
+  const due = dayFromISO(d.offboardingDueAt);
+  await prisma.$transaction(async (tx) => {
+    await tx.employee.update({
+      where: { id: employee.id },
+      data: { employment: "OFFBOARDING", offboardingAt: now, offboardingDueAt: due },
+    });
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name,
+      entityType: "employee", entityId: employee.id,
+      action: "update",
+      diff: {
+        employment: { from: employee.employment, to: "OFFBOARDING" },
+        offboardingAt: { from: employee.offboardingAt, to: now },
+        offboardingDueAt: { from: employee.offboardingDueAt, to: due },
+      },
+    });
+  });
+  // The same seven revalidations as updateEmployee (see its Phase 23/25 note) — keep the two lists identical.
+  revalidatePath(`/employees/${employee.id}`);
+  revalidatePath("/employees");
   revalidatePath("/offboarding");
   revalidatePath("/offboarding/[employeeId]", "page");
   revalidatePath("/offboarding/[employeeId]/report", "page");

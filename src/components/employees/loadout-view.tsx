@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
+import { DuePill } from "@/components/ui/due-pill";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Menu, type MenuItem } from "@/components/ui/menu";
@@ -78,6 +79,8 @@ export function LoadoutView({
   spares,
   holding,
   frozen,
+  dueAt,
+  today,
   canMutate,
   direct,
 }: {
@@ -93,6 +96,9 @@ export function LoadoutView({
   spares: SpareOption[];
   holding: HoldingItem[];
   frozen: boolean;
+  /** Phase 25: the leaver's complete-by date (OFFBOARDING only; null otherwise) and the Asia/Manila today for the pill. */
+  dueAt: Date | null;
+  today: string;
   canMutate: boolean;
   direct: boolean;
 }) {
@@ -268,6 +274,11 @@ export function LoadoutView({
       {error && <Banner tone="fault" title={error} />}
       {frozen && (
         <Banner tone="attention" title="Offboarding in progress — slots are frozen">
+          {dueAt && (
+            <span className="mr-2 inline-flex align-middle">
+              <DuePill dueAt={dueAt} today={today} withDate />
+            </span>
+          )}
           No new assignments for a leaver.{" "}
           <Link href={`/offboarding/${employeeId}`} className="text-accent underline hover:text-accent-hover">
             Open the offboarding wizard

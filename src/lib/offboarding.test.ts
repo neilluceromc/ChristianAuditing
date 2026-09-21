@@ -130,7 +130,7 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
 
   it("reports the outcome, ref, state, reason and stored target of a live decision", () => {
     expect(decisionOf([cand({ toStatus: "MISSING", state: "CLAIMED", reason: "never handed back" })], { held: true })).toEqual({
-      refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back", toStatus: "MISSING",
+      id: "a1", refNo: "APR-2100", outcome: "MISSING", state: "CLAIMED", reason: "never handed back", toStatus: "MISSING",
       decidedBy: null, decidedAt: null,
     });
   });
@@ -184,7 +184,7 @@ describe("decisionOf — decided is derived, and REJECTED re-opens the item", ()
       cand({ id: "old", refNo: "APR-2100", state: "REJECTED", createdAt: at(0) }),
       cand({ id: "new", refNo: "APR-2101", state: "PENDING", toStatus: "BUYOUT", createdAt: at(5_000) }),
     ], { held: true })).toEqual({
-      refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null, toStatus: "BUYOUT",
+      id: "new", refNo: "APR-2101", outcome: "BUYOUT", state: "PENDING", reason: null, toStatus: "BUYOUT",
       decidedBy: null, decidedAt: null,
     });
   });

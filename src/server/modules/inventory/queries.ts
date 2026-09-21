@@ -27,7 +27,7 @@ export interface AssetRow {
   status: string;
   assignee: string | null;
   /** ACTIVE-reservation holder. The asset still reads SPARE — the hold is a marker, not a status. */
-  hold: string | null;
+  hold: { id: string; name: string } | null;
   purchased: string;
   warranty: string;
   /** derived repair stage id; null if the asset was never defective */
@@ -84,7 +84,7 @@ function toRow(a: {
   repairQuote: Prisma.Decimal | null;
   category: { name: string };
   assignee: { name: string } | null;
-  reservations: Array<{ employee: { name: string } }>;
+  reservations: Array<{ employee: { id: string; name: string } }>;
 }): AssetRow {
   const stage = stageOf(a);
   return {
@@ -94,7 +94,7 @@ function toRow(a: {
     category: a.category.name,
     status: a.status,
     assignee: a.assignee?.name ?? null,
-    hold: a.reservations[0]?.employee.name ?? null,
+    hold: a.reservations[0] ? { id: a.reservations[0].employee.id, name: a.reservations[0].employee.name } : null,
     purchased: fmtDate(a.purchasedAt),
     warranty: fmtDate(a.warrantyUntil),
     stage,

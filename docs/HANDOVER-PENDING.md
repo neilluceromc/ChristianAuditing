@@ -107,10 +107,15 @@ tile "Stocktakes past close-by" stays `neutral` when the count is > 0 where the 
 turn `accent`; the receive form's supplier combobox has no visible "No supplier" clear, so clearing a
 chosen supplier means emptying the field by hand; `EntityCombobox`'s `autoFocus` opens the dropdown on
 mount, which is what puts a second listbox on `/stock/issue` and `/stock/receive` and is why the e2e's
-combobox picks are scoped to their own listbox; the offboarding `progress` and `due` facet counts do not
-narrow each other (exactly as `department` has always behaved, now written down in the query's own
-comment); the wizard header renders no `DuePill` once an employee is OFFBOARDED, so a completed
-offboarding loses the date from the header while the report still carries it; and two wording
+combobox picks are scoped to their own listbox; **✅ CLOSED in Phase 25 —** the offboarding
+`progress` and `due` facet counts did not narrow each other (exactly as `department` has always behaved,
+written down in the query's own comment at the time), and now do: the pure `narrowedFacetCounts` in
+`src/lib/offboarding-list.ts` tallies each facet over the candidate set with that facet's own selection
+removed, so `due=overdue` changes the progress counts and `progress=complete` zeroes the due counts, while
+`department` keeps its documented SQL-groupBy behaviour; **✅ CLOSED in Phase 25 —** the wizard header
+rendered no `DuePill` once an employee was OFFBOARDED, so a completed offboarding lost the date from the
+header while the report still carried it, and now renders one with the new `DuePill.override` reading a
+neutral `closed`, so the date stays visible without a finished case ever reading "overdue"; and two wording
 reconciliations between spec §5.4/§8 and what landed. Also parked, and named in the fix wave's report
 rather than dropped: `revalidateStocktake` still does not revalidate `/` (final-review Minor 6's other
 half — inert today, since every `(app)` route is dynamically rendered), and `createEmployee`'s
@@ -152,8 +157,56 @@ them. Each line below now says where it stands.
   `DELIVERED`/`DEAD` deliveries and `DONE`/`DEAD` jobs older than 90 days in id batches, at start and
   hourly, with `npm run worker:prune` for a one-off pass and the rule stated on the deliveries page.
 
-Still open, and named out of scope by Phase 24's spec §0 decision 1 — each stays recorded in PICKUP §5 /
-HANDOVER §8:
+**Phase 25 (IT navigation sweep) audited the whole IT surface — 47 routes — for dead ends and unwired
+affordances before choosing, and shipped the half that needed no schema change.** It is code-complete on
+`phase-25-it-navigation-sweep` at final tree `fab0780`, unmerged and unpushed; see `HANDOVER.md` (r).
+
+- **Shipped in Phase 25 —** starting an offboarding meant a trip through the Edit form. A new
+  `startOffboarding` server action — a faithful twin of the Edit path (same guard order, same
+  `minOffboardingDue` floor, one transaction with one audit row, the same seven revalidations) — puts a
+  **Start offboarding** button with a **Complete by** date, defaulted to five working days, on the profile
+  header for admin/IT whenever the employee is ACTIVE, and lands on the collection wizard.
+- **Shipped in Phase 25 —** every reference shown on screen was a dead end that had to be retyped into a
+  search. Eight sites became links: the asset record's pending banner ("Open request"), the asset
+  timeline's ref, the employee timeline's refs and asset tags, both IT activity feeds (a trailing entity
+  chip; the Purchasing callers pass none and are unchanged), the `HOLD` pill's holder, the profile's five
+  newest open requests with `+N more`, the Home fleet bar's segments and legend
+  (`/inventory?status=<STATUS>`), and `department` in the audit page's entity labels (name resolved, no
+  link — there is no department route).
+- **Shipped in Phase 25 —** a newly created employee landed on a profile with no next step, and
+  `/employees` honoured `sort` in SQL but rendered plain headers, so sorting was reachable only by editing
+  the URL. Creating now redirects to `?created=1` and the profile shows a banner offering **Assign
+  devices** (a focusable `#loadout` anchor) and **Accountability form**; the Name field takes focus on the
+  form; and a new client `EmployeesTable` builds `sortHrefs` exactly as `/inventory` does, with focusable
+  rows that open on click or Enter under the house's selection and stop-propagation rules.
+- **Shipped in Phase 25 —** the four deferred safety-net items. `(app)/error.tsx` catches a render
+  failure inside the shell (digest, **Try again**, **Home**; it never prints `error.message`); five
+  `loading.tsx` skeletons cover `/offboarding`, `/reservations`, the asset record, the employee record and
+  the offboarding wizard, each shaped like the page beneath it; `offboarding/[employeeId]/not-found.tsx`
+  answers a stale wizard link with "Not in the offboarding queue"; and `/offboarding` gained an Export
+  button and route mirroring `/employees/export` row for row.
+
+**Next IT candidate — Phase 26: reservations that work + a repair end-date.** Phase 25's audit found both
+and split them off because both need schema work; Phase 26 gets its own brainstorm.
+
+- **Reservations that can actually be created, released and expired.** Nothing in `src/server` ever creates
+  a `Reservation` — the only writer anywhere is `prisma/seed.ts` — and `HolderControl` exposes only
+  `mode: "assign" | "return"`, so no screen can place a hold. `ReservationState` carries `RELEASED` and
+  `EXPIRED`, but the single state write in the codebase is `ACTIVE → FULFILLED` when the reserved employee
+  is assigned the asset, and nothing sweeps a hold at its `expiresAt`, so a long-expired hold still renders
+  as live. `/reservations`' own empty-state copy ("Reserve a spare from an asset record when it is promised
+  to someone but not yet assigned") and its banner ("Holds are placed and released on the asset record")
+  therefore both describe a control that does not exist — and so did `HANDOVER.md` §8's "read-only by
+  design" line, corrected there by this audit. The phase would add the create/release actions, an expiry
+  sweep, and the `/reservations` list parity (pagination, sortable headers, facets) that §8 still carries.
+- **Recording when a repair ended.** `RETURNED OK` shows `—` in the Down column because `downDays`
+  returns `null` for anything not `status === "DEFECTIVE"`, and nothing anywhere records when a repair
+  actually ended, so a completed repair's downtime cannot be reported at all. The phase would store a
+  repair end-date on the asset (or on the repair record) and teach `downDays` to close the interval, which
+  makes the Down column truthful for returned-OK assets and the repairs saved view reportable.
+
+Still open, and named out of scope by Phase 24's spec §0 decision 1 and Phase 25's §2 — each stays
+recorded in PICKUP §5 / HANDOVER §8:
 
 - `/audit` class scoping of approval, category and type rows (only `asset` rows of the other class are
   excluded today).
@@ -164,5 +217,11 @@ HANDOVER §8:
   accessibility finding additively instead (a heading `id` plus `aria-describedby` on the options under a
   *grouped* heading), because the group shape contradicts spec §6.1's flat-`li` instruction and would
   change the DOM `e2e/it-gaps.spec.ts` cases 4 and 7 assert on. **Only if AT feedback asks for it.**
+- **New, from Phase 25 (spec §2, non-goals):** the Home **age histogram**'s buckets stay unlinked. The
+  fleet bar's segments and legend became links this phase, but an age bucket has no facet on `/inventory`
+  to point at, so linking it means inventing one — deliberately out of scope rather than forgotten.
+- **New, from Phase 25 (spec §2, non-goals):** **list keyboard shortcuts** beyond a focusable row's
+  Enter. The employees list got `tabIndex={0}` rows that open on Enter; arrow-key roving, type-ahead and
+  a shortcut layer across the lists were not attempted and would be a pattern decision, not a page edit.
 
 The brainstorm for the next IT phase decides which of these, and what else, goes in.

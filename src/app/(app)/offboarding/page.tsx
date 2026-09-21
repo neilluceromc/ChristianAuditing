@@ -49,6 +49,7 @@ export default async function OffboardingPage({
       <PageHeader
         title="Offboarding"
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
+        actions={<ButtonLink href={"/offboarding/export" + serializeListState(state, OFFBOARDING_LIST_CONFIG)}>Export</ButtonLink>}
       />
       <div className="flex flex-col gap-2">
         <OffboardingToolbar state={state} facets={facets} />

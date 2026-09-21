@@ -162,7 +162,8 @@ export default async function AssetRecordLayout({
             title={`${pending.refNo} · ${APPROVAL_TYPE_LABEL[pending.type]} is ${pending.state.toLowerCase()}`}
           >
             Queued in the approval pipeline — until it executes, this asset still reads{" "}
-            <span className="font-mono">{asset.status}</span> everywhere.
+            <span className="font-mono">{asset.status}</span> everywhere.{" "}
+            <Link href={`/approvals/${pending.id}`} className="text-accent underline hover:text-accent-hover">Open request</Link>
           </Banner>
         </div>
       )}

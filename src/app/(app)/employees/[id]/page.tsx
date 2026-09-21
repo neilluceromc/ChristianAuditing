@@ -4,9 +4,11 @@ import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { computeLoadout, effectiveSlots, resolvePolicy } from "@/lib/loadout";
 import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
-import { fmtDate, fmtMoney, fmtRelativeDays } from "@/lib/format";
+import { fmtDate, fmtMoney, fmtRelativeDays, localDateISO } from "@/lib/format";
 import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
 import { isRecentTransfer } from "@/lib/transfer-schema";
+import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
+import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -17,15 +19,25 @@ import { Stat } from "@/components/ui/stat";
 import { StatusDot } from "@/components/ui/status";
 import { LoadoutView, type HoldingItem, type SlotTile, type SpareOption } from "@/components/employees/loadout-view";
 import { AcknowledgementCard } from "@/components/employees/acknowledgement-card";
+import { EmployeeCreatedNotice } from "@/components/employees/employee-created-notice";
+import { StartOffboardingDialog } from "@/components/employees/start-offboarding-dialog";
 import { TransferDialog } from "@/components/employees/transfer-dialog";
 import { TransfersCard } from "@/components/employees/transfers-card";
 import { getTransfers } from "@/server/modules/employees/queries";
 
-export default async function EmployeePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EmployeePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireUser();
   const { id } = await params;
+  const sp = toSearchParams(await searchParams);
   const employee = await prisma.employee.findUnique({ where: { id }, include: { department: true } });
   if (!employee) notFound();
+  const today = localDateISO(new Date());
 
   const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes, acks, transfers, departments] = await Promise.all([
     prisma.asset.findMany({ where: { assigneeId: id }, orderBy: { tag: "asc" } }),
@@ -143,6 +155,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
 
   return (
     <>
+      {sp.get("created") === "1" && <EmployeeCreatedNotice name={employee.name} employeeNo={employee.employeeNo} id={id} />}
       <PageHeader
         title={employee.name}
         breadcrumb={[{ label: "Employees", href: "/employees" }, { label: employee.employeeNo }]}
@@ -164,6 +177,14 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
                 employeeName={employee.name}
                 currentTitle={employee.title}
                 departments={otherDepartments}
+              />
+            )}
+            {canMutate && employee.employment === "ACTIVE" && (
+              <StartOffboardingDialog
+                employeeId={id}
+                employeeName={employee.name}
+                defaultDue={defaultOffboardingDue(today)}
+                minDue={minOffboardingDue(today)}
               />
             )}
             {canMutate && <ButtonLink variant="primary" href={`/employees/${id}/edit`}>Edit</ButtonLink>}
@@ -209,6 +230,26 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
                 <Stat label="Oldest item" value={oldest ? fmtDate(oldest) : "—"} />
                 <Stat label="Open requests" value={String(openApprovals.length)} />
               </div>
+              {openApprovals.length > 0 && (
+                // Phase 25 (spec §4 row 6): the count above, the requests themselves here.
+                <ul className="flex flex-wrap gap-x-2 gap-y-1 pt-2">
+                  {[...openApprovals]
+                    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+                    .slice(0, 5)
+                    .map((a) => (
+                      <li key={a.id}>
+                        <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link>
+                      </li>
+                    ))}
+                  {openApprovals.length > 5 && (
+                    <li>
+                      <Link href={`/employees/${id}/timeline`} className="text-xs text-fg-muted hover:underline">
+                        +{openApprovals.length - 5} more
+                      </Link>
+                    </li>
+                  )}
+                </ul>
+              )}
             </CardBody>
           </Card>
 
@@ -222,19 +263,23 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <LoadoutView
-            employeeId={id}
-            slots={slots}
-            unslotted={loadout.unslotted.map(toTileAsset)}
-            onLoan={loadout.onLoan.map(toTileAsset)}
-            waived={waived}
-            itTypes={itTypes}
-            spares={spares}
-            holding={holding}
-            frozen={employee.employment !== "ACTIVE"}
-            canMutate={canMutate}
-            direct={direct}
-          />
+          <div id="loadout" tabIndex={-1} className="outline-none">
+            <LoadoutView
+              employeeId={id}
+              slots={slots}
+              unslotted={loadout.unslotted.map(toTileAsset)}
+              onLoan={loadout.onLoan.map(toTileAsset)}
+              waived={waived}
+              itTypes={itTypes}
+              spares={spares}
+              holding={holding}
+              frozen={employee.employment !== "ACTIVE"}
+              dueAt={employee.employment === "OFFBOARDING" ? employee.offboardingDueAt : null}
+              today={today}
+              canMutate={canMutate}
+              direct={direct}
+            />
+          </div>
           <TransfersCard transfers={transfers} />
         </div>
       </div>

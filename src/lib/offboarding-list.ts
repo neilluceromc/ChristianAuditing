@@ -73,3 +73,32 @@ export function sortByUndecided<T extends { undecided: number; name: string; emp
   return [...rows].sort((a, b) =>
     (a.undecided - b.undecided) * mult || a.name.localeCompare(b.name) || a.employeeNo.localeCompare(b.employeeNo));
 }
+
+/** Phase 25: the two in-memory facets' active values, parsed once for the list, the facet counts and the export. */
+export function derivedFilters(state: ListState): { progressFilter: Progress[]; dueFilter: Due[] } {
+  return {
+    progressFilter: (state.filters.progress ?? []).filter((p): p is Progress => p === "open" || p === "complete"),
+    dueFilter: (state.filters.due ?? []).filter((d): d is Due => d === "overdue" || d === "on-track"),
+  };
+}
+
+/**
+ * Phase 25 (spec §6.4): each derived facet's counts are tallied over the rows
+ * that pass the OTHER derived facet's active filter, so `progress` and `due`
+ * narrow each other the way SQL facets do. A facet never narrows itself
+ * (its own options must stay pickable). `department` is not involved: it is
+ * applied in SQL before these rows exist.
+ */
+export function narrowedFacetCounts<T extends { undecided: number; dueAt: Date | null }>(
+  rows: T[], progressFilter: Progress[], dueFilter: Due[], todayISO: string,
+): { progress: Record<Progress, number>; due: Record<Due, number> } {
+  const progress: Record<Progress, number> = { open: 0, complete: 0 };
+  const due: Record<Due, number> = { overdue: 0, "on-track": 0 };
+  for (const r of rows) {
+    const p = progressOf(r.undecided);
+    const d = dueOf(r.dueAt, todayISO);
+    if (dueFilter.length === 0 || dueFilter.includes(d)) progress[p] += 1;
+    if (progressFilter.length === 0 || progressFilter.includes(p)) due[d] += 1;
+  }
+  return { progress, due };
+}

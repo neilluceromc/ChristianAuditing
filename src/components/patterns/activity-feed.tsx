@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Avatar } from "@/components/ui/avatar";
 import { Pill } from "@/components/ui/pill";
 import { StatusDot } from "@/components/ui/status";
@@ -12,6 +13,8 @@ export interface ActivityItem {
   dotValue: string;
   /** rendered ONLY on cross-domain feeds (Home, Phase 6) — scoped logs pass undefined */
   domain?: string;
+  /** Phase 25 (spec §4 row 4): the entity the sentence is about — a trailing link chip when it still exists. */
+  entity?: { label: string; href: string | null };
 }
 
 /** One renderer for all five activity routes — the domain pill is the only variance (README 4b). */
@@ -23,6 +26,11 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
           <Avatar name={item.actor} size="sm" />
           {item.domain && <Pill>{item.domain}</Pill>}
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-fg-secondary">{item.sentence}</span>
+          {item.entity?.href && (
+            <Link href={item.entity.href} className="shrink-0 font-mono text-[10.5px] text-accent hover:underline">
+              {item.entity.label}
+            </Link>
+          )}
           <span className="shrink-0 font-mono text-[10.5px] text-fg-muted">{item.when}</span>
           <StatusDot value={item.dotValue} />
         </li>
