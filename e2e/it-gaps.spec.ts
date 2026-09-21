@@ -309,7 +309,7 @@ test.describe("it gaps", () => {
   test("6. repair-stage parity: the SQL CASE (repairStageIds) matches repairStage() over every seeded IT asset, and the chip total matches too", async ({ page }) => {
     const assets = await db.asset.findMany({
       where: { cls: "IT" },
-      select: { id: true, tag: true, status: true, vendorId: true, rmaRef: true, repairQuote: true, cost: true, defectiveSince: true },
+      select: { id: true, tag: true, status: true, vendorId: true, rmaRef: true, repairQuote: true, cost: true, defectiveSince: true, repairEndedAt: true },
     });
 
     // Phase 20 (spec §6.6, plan P-1): the real parity proof — run the exact
@@ -343,6 +343,7 @@ test.describe("it gaps", () => {
         repairQuote: a.repairQuote === null ? null : Number(a.repairQuote),
         cost: a.cost === null ? null : Number(a.cost),
         defectiveSince: a.defectiveSince,
+        repairEndedAt: a.repairEndedAt,
       };
       const stage = repairStage(like);
       if (stage) byStage.set(stage, (byStage.get(stage) ?? 0) + 1);

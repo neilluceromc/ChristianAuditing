@@ -47,6 +47,9 @@ export function actionDot(action: string): string {
   // submitted it, and the feed should read as attention in every case.
   if (action === "it-reject" || action === "request-info" || action === "finance.return")
     return "PENDING"; // attention: it came back
+  // Phase 26: holds are placed and released on the asset.
+  if (action === "reservation.placed") return "ACTIVE";
+  if (action === "reservation.released") return "CANCELLED";
   if (action === "cancel") return "CANCELLED"; // closed
   if (action === "complete" || action === "offboarding.completed" || action === "finance.confirm")
     return "COMPLETED"; // settled

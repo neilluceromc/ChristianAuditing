@@ -40,7 +40,7 @@ type Actor = { id: string; name: string };
 class DirectRefusal extends Error {}
 
 const assetSelect = {
-  id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, returnedAt: true, loanDueAt: true, model: true,
+  id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, repairEndedAt: true, returnedAt: true, loanDueAt: true, model: true,
 } as const;
 
 /** Load + the three refusals every direct action shares: exists, direct for this role, no open approval. */

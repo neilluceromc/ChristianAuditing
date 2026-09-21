@@ -514,10 +514,10 @@ async function main() {
   // Reservations — all four states
   await prisma.reservation.createMany({
     data: [
-      { assetId: (await asset("BR-MN-0910")).id, employeeId: emp("EMP-0097").id, state: "ACTIVE", reason: "New hire setup", expiresAt: day(7) },
+      { assetId: (await asset("BR-MN-0910")).id, employeeId: emp("EMP-0097").id, state: "ACTIVE", reason: "New hire setup", expiresAt: dayFloor(day(7)) },
       { assetId: (await asset("BR-MN-0911")).id, employeeId: emp("EMP-0088").id, state: "FULFILLED", resolvedAt: day(-3) },
       { assetId: (await asset("BR-HS-0502")).id, employeeId: emp("EMP-0051").id, state: "RELEASED", resolvedAt: day(-5) },
-      { assetId: (await asset("BR-PH-0301")).id, employeeId: emp("EMP-0063").id, state: "EXPIRED", expiresAt: day(-2) },
+      { assetId: (await asset("BR-PH-0301")).id, employeeId: emp("EMP-0063").id, state: "EXPIRED", expiresAt: dayFloor(day(-2)) },
     ],
   });
 

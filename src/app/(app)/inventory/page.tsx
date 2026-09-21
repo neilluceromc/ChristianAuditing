@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
+import { localDateISO } from "@/lib/format";
 import {
   clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter,
 } from "@/lib/url-state";
@@ -72,6 +73,7 @@ export default async function InventoryPage({
   // InventoryTable already uses to decide whether the drawer exists.
   const employees = canMutate ? await activeEmployeeOptions() : [];
   const recentEmployees = canMutate ? await recentPicks(user.id, "employee") : [];
+  const today = localDateISO(new Date());
 
   const [{ rows, total, page, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
     listAssets(state, purchaseYear, cls),
@@ -197,6 +199,7 @@ export default async function InventoryPage({
               recentEmployees={recentEmployees}
               repairMode={repairMode}
               sortHrefs={sortHrefs}
+              today={today}
             />
             <div className="flex items-center justify-between pt-1">
               <span className="font-mono text-[11px] text-fg-muted">

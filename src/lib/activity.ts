@@ -1,3 +1,5 @@
+import { fmtDate } from "./format";
+
 /**
  * Phase 22 Task 2 (spec §2.3/§4.3): the three document kinds a
  * `StockLotDocument` can carry, worded as the indefinite-article noun phrase
@@ -114,6 +116,13 @@ export function auditSentence(entry: ActivityEntryLike): string {
         : `${entry.actorLabel} put ${entry.entityLabel} in place of ${String(diff?.replaces?.to ?? "?")} for ${String(diff?.assignee?.to ?? "someone")}`;
     case "lifecycle.triage":
       return `${entry.actorLabel} triaged ${entry.entityLabel}: ${String(diff?.triage?.to ?? "?")}`;
+    // Phase 26 (spec §4.1): holds are placed and released on the asset.
+    case "reservation.placed": {
+      const until = diff?.expiresAt?.to;
+      return `${entry.actorLabel} reserved ${entry.entityLabel} for ${String(diff?.hold?.to ?? "someone")}${typeof until === "string" ? ` until ${fmtDate(new Date(until))}` : ""}`;
+    }
+    case "reservation.released":
+      return `${entry.actorLabel} released the hold on ${entry.entityLabel}`;
     case "comment":
       return `${entry.actorLabel} commented on ${entry.entityLabel}`;
     case "unit-update":

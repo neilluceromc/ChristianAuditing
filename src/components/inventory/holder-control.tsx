@@ -16,13 +16,15 @@ import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS, chipsForOutcome } from "@/lib/reason-chips";
 import { requestAssign, requestReturn } from "@/server/modules/employees/actions";
 import { assignAsset, returnAsset } from "@/server/modules/lifecycle/actions";
+import { reserveAsset } from "@/server/modules/reservations/actions";
 import {
   DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, minLoanDue, type ReturnOutcome,
 } from "@/lib/lifecycle";
 
 type Props =
-  | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[]; direct: boolean; recentEmployees?: string[] }
-  | { assetId: string; tag: string; mode: "return"; holder: { id: string; name: string }; direct: boolean };
+  | { assetId: string; tag: string; mode: "assign"; employees: ComboOption[]; direct: boolean; recentEmployees?: string[]; heldFor?: { id: string; name: string } }
+  | { assetId: string; tag: string; mode: "return"; holder: { id: string; name: string }; direct: boolean }
+  | { assetId: string; tag: string; mode: "reserve"; employees: ComboOption[]; recentEmployees?: string[]; defaultExpiry: string; minExpiry: string };
 
 /**
  * Phase 14 (spec §7): assign / return from the asset itself, so a department
@@ -38,41 +40,55 @@ export function HolderControl(props: Props) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [employeeId, setEmployeeId] = useState<string | null>(
+    props.mode === "assign" && props.heldFor && props.employees.some((o) => o.value === props.heldFor!.id) ? props.heldFor.id : null,
+  );
   const [mode, setMode] = useState<"DEPLOYED" | "TEMPORARY">("DEPLOYED");
   const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
   const [outcome, setOutcome] = useState<ReturnOutcome>("TRIAGE");
+  const [expiresAt, setExpiresAt] = useState(props.mode === "reserve" ? props.defaultExpiry : "");
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
   const isAssign = props.mode === "assign";
+  const isReserve = props.mode === "reserve";
 
   function close() {
-    setOpen(false); setReason(""); setEmployeeId(null); setMode("DEPLOYED"); setLoanDueAt(defaultLoanDue(new Date()));
-    setOutcome("TRIAGE"); setError(null); setFieldErrors({}); setRetryAfter(null);
+    setOpen(false); setReason("");
+    setEmployeeId(
+      props.mode === "assign" && props.heldFor && props.employees.some((o) => o.value === props.heldFor!.id) ? props.heldFor.id : null,
+    );
+    setMode("DEPLOYED"); setLoanDueAt(defaultLoanDue(new Date()));
+    setOutcome("TRIAGE");
+    if (props.mode === "reserve") setExpiresAt(props.defaultExpiry);
+    setError(null); setFieldErrors({}); setRetryAfter(null);
   }
 
   function submit() {
     setError(null); setFieldErrors({});
     startTransition(async () => {
-      const res = props.mode === "assign"
-        ? (props.direct
-            ? await assignAsset({
-                assetId: props.assetId, employeeId: employeeId ?? "", status: mode,
-                loanDueAt: mode === "TEMPORARY" ? loanDueAt : undefined, reason,
-              })
-            : await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason }))
-        : (props.direct ? await returnAsset({ assetId: props.assetId, outcome, reason }) : await requestReturn({ employeeId: props.holder.id, assetId: props.assetId, reason }));
+      const res = props.mode === "reserve"
+        ? await reserveAsset({ assetId: props.assetId, employeeId: employeeId ?? "", expiresAt, reason })
+        : props.mode === "assign"
+          ? (props.direct
+              ? await assignAsset({
+                  assetId: props.assetId, employeeId: employeeId ?? "", status: mode,
+                  loanDueAt: mode === "TEMPORARY" ? loanDueAt : undefined, reason,
+                })
+              : await requestAssign({ employeeId: employeeId ?? "", assetId: props.assetId, reason }))
+          : (props.direct ? await returnAsset({ assetId: props.assetId, outcome, reason }) : await requestReturn({ employeeId: props.holder.id, assetId: props.assetId, reason }));
       if (res.ok) {
         toast(
-          props.direct
-            ? (props.mode === "assign"
-                ? (mode === "TEMPORARY"
-                    ? `${props.tag} on loan to ${(res.data as { employeeName: string }).employeeName} until ${loanDueAt}`
-                    : `${props.tag} assigned to ${(res.data as { employeeName: string }).employeeName}`)
-                : `${props.tag} returned · now ${(res.data as { status: string }).status}`)
-            : `${(res.data as { refNo: string }).refNo} created — waiting in the approval queue`,
+          props.mode === "reserve"
+            ? `${props.tag} reserved for ${props.employees.find((o) => o.value === employeeId)?.label ?? "them"}`
+            : props.direct
+              ? (props.mode === "assign"
+                  ? (mode === "TEMPORARY"
+                      ? `${props.tag} on loan to ${(res.data as { employeeName: string }).employeeName} until ${loanDueAt}`
+                      : `${props.tag} assigned to ${(res.data as { employeeName: string }).employeeName}`)
+                  : `${props.tag} returned · now ${(res.data as { status: string }).status}`)
+              : `${(res.data as { refNo: string }).refNo} created — waiting in the approval queue`,
           "settled",
         );
         close();
@@ -92,28 +108,32 @@ export function HolderControl(props: Props) {
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        {isAssign ? (props.direct ? "Assign" : "Assign holder") : "Return"}
+        {isReserve ? "Reserve" : isAssign ? (props.direct ? "Assign" : "Assign holder") : "Return"}
       </Button>
       <Dialog
         open={open}
         onClose={close}
         title={
-          props.direct
-            ? (isAssign ? `Assign ${props.tag}` : `Return ${props.tag}`)
-            : (isAssign ? "Assign a holder" : "Request a return")
+          isReserve
+            ? `Reserve ${props.tag}`
+            : props.direct
+              ? (isAssign ? `Assign ${props.tag}` : `Return ${props.tag}`)
+              : (isAssign ? "Assign a holder" : "Request a return")
         }
         footer={
           <>
             <Button variant="ghost" onClick={close}>Cancel</Button>
-            <Button variant="primary" loading={pending} onClick={submit} disabled={isAssign && !employeeId}>
-              {props.direct ? "Confirm" : (isAssign ? "Request assign" : "Request return")}
+            <Button variant="primary" loading={pending} onClick={submit} disabled={(isAssign || isReserve) && !employeeId}>
+              {isReserve ? "Reserve" : props.direct ? "Confirm" : (isAssign ? "Request assign" : "Request return")}
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           <p className="text-xs text-fg-muted">
-            {props.direct ? (
+            {isReserve ? (
+              <>Promises this spare to one person. It still reads SPARE and marked HOLD until it is assigned, released or the hold expires.</>
+            ) : props.direct ? (
               <>Applies now and is recorded in the audit trail under your name.</>
             ) : isAssign ? (
               <>Creates a <span className="font-mono">lifecycle.assign</span> approval; {props.tag} stays where it is until it executes.</>
@@ -145,7 +165,27 @@ export function HolderControl(props: Props) {
               )}
             </FormField>
           )}
-          {!isAssign && props.direct && (
+          {isAssign && props.heldFor && (
+            <p className="text-xs text-fg-muted">Held for {props.heldFor.name} — assigning to anyone else is refused until the hold is released.</p>
+          )}
+          {isReserve && (
+            <FormField label="For" required error={fieldErrors.employeeId}>
+              {(p) => (
+                <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                  options={props.employees} value={employeeId} onChange={setEmployeeId} placeholder="Type a name or EMP number…"
+                  recent={props.recentEmployees} autoFocus />
+              )}
+            </FormField>
+          )}
+          {isReserve && (
+            <FormField label="Expires" required error={fieldErrors.expiresAt}>
+              {(p) => (
+                <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} type="date"
+                  min={props.minExpiry} value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+              )}
+            </FormField>
+          )}
+          {props.mode === "return" && props.direct && (
             <FormField label="What happens to it" required error={fieldErrors.outcome}>
               {(p) => (
                 <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={outcome} onChange={(e) => setOutcome(e.target.value as ReturnOutcome)}>
@@ -155,8 +195,8 @@ export function HolderControl(props: Props) {
             </FormField>
           )}
           <ReasonField
-            required={!isAssign && returnReasonRequired} error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={isAssign ? REASON_CHIPS["asset.assign"] : props.direct ? chipsForOutcome(outcome) : []} disabled={pending}
+            required={returnReasonRequired} error={fieldErrors.reason} value={reason} onChange={setReason}
+            chips={isReserve ? REASON_CHIPS["hold.place"] : isAssign ? REASON_CHIPS["asset.assign"] : props.direct ? chipsForOutcome(outcome) : []} disabled={pending}
           />
         </div>
       </Dialog>

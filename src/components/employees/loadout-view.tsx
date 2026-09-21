@@ -10,6 +10,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { DuePill } from "@/components/ui/due-pill";
 import { FormField } from "@/components/ui/form-field";
+import { HoldPill } from "@/components/ui/hold-pill";
 import { Input } from "@/components/ui/input";
 import { Menu, type MenuItem } from "@/components/ui/menu";
 import { Pill } from "@/components/ui/pill";
@@ -18,18 +19,22 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS, chipsForOutcome } from "@/lib/reason-chips";
+import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
 import { TagRef } from "@/components/inventory/tag-ref";
 import { AddSlotDialog, RemoveExceptionButton, WaiveSlotDialog } from "@/components/employees/slot-exception-controls";
 import { requestAssign, requestAssignReserved, requestReturn } from "@/server/modules/employees/actions";
+import { reserveAsset } from "@/server/modules/reservations/actions";
 import { assignAsset, assignReserved, replaceAsset, returnAsset } from "@/server/modules/lifecycle/actions";
 import { removeSlotException } from "@/server/modules/employees/exception-actions";
 import {
   DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, minLoanDue, reasonRequiredFor,
   type ReturnOutcome,
 } from "@/lib/lifecycle";
+import { defaultHoldExpiry, minHoldExpiry } from "@/lib/holds";
 import type { ActionResult } from "@/server/action-result";
 
 export interface SlotTile {
@@ -65,6 +70,9 @@ export interface HoldingItem {
   note: string; // "reserved · expires 23 Aug 2026" | "assignment queued · APR-2042"
   kind: "reserved" | "queued";
   visible: boolean;
+  /** Phase 26 (spec §5.2): the live reservation this row came from — null for a queued (approval) row. */
+  reservationId: string | null;
+  expiresAt: Date | null;
 }
 
 const STRIPES = "repeating-linear-gradient(135deg, var(--border-faint) 0 6px, var(--surface-subtle) 6px 12px)";
@@ -116,6 +124,10 @@ export function LoadoutView({
   const [outcome, setOutcome] = useState<ReturnOutcome>("TRIAGE");
   const [waivingSlot, setWaivingSlot] = useState<SlotTile | null>(null);
   const [addingSlot, setAddingSlot] = useState(false);
+  const [reservingSlot, setReservingSlot] = useState<SlotTile | null>(null);
+  const [reserveSpare, setReserveSpare] = useState<string | null>(null);
+  const [reserveExpiry, setReserveExpiry] = useState(defaultHoldExpiry(today));
+  const [reserveReason, setReserveReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
@@ -225,6 +237,22 @@ export function LoadoutView({
     });
   }
 
+  function submitReserve() {
+    if (!reservingSlot || !reserveSpare) return;
+    setError(null);
+    setFieldErrors({});
+    startTransition(async () => {
+      handle(
+        await reserveAsset({ assetId: reserveSpare, employeeId, expiresAt: reserveExpiry, reason: reserveReason }),
+        ({ tag }) => {
+          toast(`${tag} reserved`, "settled");
+          setReservingSlot(null);
+          router.refresh();
+        },
+      );
+    });
+  }
+
   function submitReservedBatch() {
     setError(null);
     startTransition(async () => {
@@ -259,6 +287,9 @@ export function LoadoutView({
     }
   }
 
+  // A spare promised to someone else: unpickable here, and it has to LOOK unpickable (final review M-6).
+  const isHeld = (s: { reservedFor: string | null; reservedForThis: boolean }) => s.reservedFor !== null && !s.reservedForThis;
+
   const sparesForSlot = fillSlot ? spares.filter((s) => s.typeId && s.typeId === fillSlot.typeId) : [];
 
   // The tile a Replace dialog opened for isn't self-describing its slot's
@@ -267,6 +298,25 @@ export function LoadoutView({
   const replacingTypeId = replacing ? slots.find((s) => s.asset?.id === replacing.id)?.typeId ?? null : null;
   const sameTypeSpares = replacing ? spares.filter((s) => s.typeId === replacingTypeId) : [];
   const otherSpares = replacing ? spares.filter((s) => s.typeId !== replacingTypeId) : [];
+
+  // Phase 26 (spec §5.2): the Reserve dialog's own picker — unlike Fill/Replace,
+  // an already-held spare is excluded outright (reserving one out from under
+  // an existing hold is exactly what release-then-reserve is for), and the
+  // combobox needs the same "Same type" / "Other spares" grouping.
+  const sameTypeFirst = (a: SpareOption, b: SpareOption) => {
+    const aSame = a.typeId === reservingSlot?.typeId ? 0 : 1;
+    const bSame = b.typeId === reservingSlot?.typeId ? 0 : 1;
+    return aSame !== bSame ? aSame - bSame : a.tag.localeCompare(b.tag);
+  };
+  const reserveOptions: ComboOption[] = reservingSlot
+    ? spares
+        .filter((s) => s.reservedFor === null)
+        .sort(sameTypeFirst)
+        .map((s) => ({
+          value: s.id, label: s.tag, sub: s.model,
+          group: s.typeId === reservingSlot.typeId ? "Same type" : "Other spares",
+        }))
+    : [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -328,6 +378,19 @@ export function LoadoutView({
             const showWaive = mayAct && !tile.exceptionId;
             const showRemoveException = mayAct && !!tile.exceptionId;
             const menuItems: MenuItem[] = [];
+            if (mayAct && direct && !a) {
+              menuItems.push({
+                label: "Reserve a spare…",
+                onSelect: () => {
+                  setReservingSlot(tile);
+                  setReserveSpare(null);
+                  setReserveExpiry(defaultHoldExpiry(today));
+                  setReserveReason("");
+                  setFieldErrors({});
+                  setError(null);
+                },
+              });
+            }
             if (showReplace && a) menuItems.push({ label: "⇄ Replace", onSelect: () => setReplacing(a) });
             if (showWaive) menuItems.push({ label: "Waive for this person…", onSelect: () => setWaivingSlot(tile) });
             if (showRemoveException && tile.exceptionId) {
@@ -506,7 +569,16 @@ export function LoadoutView({
                   className={cn("font-mono hover:underline", h.kind === "queued" ? "text-fg-muted" : "text-accent")}
                 />
                 <span className={cn(h.kind === "queued" && "text-fg-muted")}>{h.model}</span>
-                <span className="ml-auto font-mono text-[10px] text-fg-muted">{h.note}</span>
+                {h.kind === "reserved" ? (
+                  <span className="ml-auto inline-flex items-center gap-2">
+                    {h.expiresAt && <HoldPill expiresAt={h.expiresAt} today={today} />}
+                    {mayAct && direct && h.reservationId && (
+                      <ReleaseHoldButton reservationId={h.reservationId} tag={h.tag} size="sm" />
+                    )}
+                  </span>
+                ) : (
+                  <span className="ml-auto font-mono text-[10px] text-fg-muted">{h.note}</span>
+                )}
               </div>
             ))}
           </CardBody>
@@ -558,8 +630,9 @@ export function LoadoutView({
                 <label
                   key={s.id}
                   className={cn(
-                    "flex cursor-pointer items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                    pickedSpare === s.id ? "border-accent bg-accent-tint" : "border-border hover:bg-surface-subtle",
+                    "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                    isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
+                    pickedSpare === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
                   )}
                 >
                   <input
@@ -567,6 +640,7 @@ export function LoadoutView({
                     name="spare"
                     className="sr-only"
                     checked={pickedSpare === s.id}
+                    disabled={isHeld(s)}
                     onChange={() => setPickedSpare(s.id)}
                   />
                   <span className="font-mono text-accent">{s.tag}</span>
@@ -590,6 +664,47 @@ export function LoadoutView({
             hint={direct ? "Optional — recorded in the audit trail." : "Optional — lands in the approval payload."}
             error={fieldErrors.reason} value={reason} onChange={setReason}
             chips={REASON_CHIPS["asset.assign"]} disabled={pending}
+          />
+        </div>
+      </Dialog>
+
+      {/* Reserve-a-spare dialog (spec §5.2): the empty slot's ⋯ menu affordance, a sibling of the fill-slot dialog above. */}
+      <Dialog
+        open={reservingSlot !== null}
+        onClose={() => setReservingSlot(null)}
+        title={reservingSlot ? `Reserve a spare for the ${reservingSlot.name} slot` : ""}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setReservingSlot(null)}>Cancel</Button>
+            <Button variant="primary" loading={pending} disabled={!reserveSpare} onClick={submitReserve}>Reserve</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <FormField label="Spare" required error={fieldErrors.assetId}>
+            {(p) => (
+              <EntityCombobox
+                id={p.id}
+                aria-describedby={p["aria-describedby"]}
+                invalid={p.invalid}
+                options={reserveOptions}
+                value={reserveSpare}
+                onChange={setReserveSpare}
+                placeholder="Type a tag…"
+                autoFocus
+              />
+            )}
+          </FormField>
+          <FormField label="Expires" required error={fieldErrors.expiresAt}>
+            {(p) => (
+              <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} type="date"
+                min={minHoldExpiry(today)} value={reserveExpiry} onChange={(e) => setReserveExpiry(e.target.value)} />
+            )}
+          </FormField>
+          <ReasonField
+            hint="Optional — recorded in the audit trail."
+            error={fieldErrors.reason} value={reserveReason} onChange={setReserveReason}
+            chips={REASON_CHIPS["hold.place"]} disabled={pending}
           />
         </div>
       </Dialog>
@@ -654,8 +769,9 @@ export function LoadoutView({
               <label
                 key={s.id}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                  replacementId === s.id ? "border-accent bg-accent-tint" : "border-border hover:bg-surface-subtle",
+                  "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                  isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
+                  replacementId === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
                 )}
               >
                 <input
@@ -663,6 +779,7 @@ export function LoadoutView({
                   name="replacement"
                   className="sr-only"
                   checked={replacementId === s.id}
+                  disabled={isHeld(s)}
                   onChange={() => setReplacementId(s.id)}
                 />
                 <span className="font-mono text-accent">{s.tag}</span>
@@ -679,8 +796,9 @@ export function LoadoutView({
               <label
                 key={s.id}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                  replacementId === s.id ? "border-accent bg-accent-tint" : "border-border hover:bg-surface-subtle",
+                  "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                  isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
+                  replacementId === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
                 )}
               >
                 <input
@@ -688,6 +806,7 @@ export function LoadoutView({
                   name="replacement"
                   className="sr-only"
                   checked={replacementId === s.id}
+                  disabled={isHeld(s)}
                   onChange={() => setReplacementId(s.id)}
                 />
                 <span className="font-mono text-accent">{s.tag}</span>

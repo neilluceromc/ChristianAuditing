@@ -9,6 +9,7 @@ import { StatusDot } from "@/components/ui/status";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/ui/pill";
+import { HoldPill } from "@/components/ui/hold-pill";
 import { BULK_MAX } from "@/lib/inventory-list";
 import type { ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
@@ -56,6 +57,7 @@ export function InventoryTable({
   recentEmployees,
   repairMode = false,
   sortHrefs,
+  today,
 }: {
   rows: AssetRow[];
   state: ListState;
@@ -70,6 +72,8 @@ export function InventoryTable({
   recentEmployees?: string[];
   /** the repairs saved view: adds Stage + Down (README 7b) */
   repairMode?: boolean;
+  /** Phase 26: the Manila day for the HOLD cell's expiry text. */
+  today: string;
   /**
    * One `/inventory` URL per sortable key, keyed by that key — the result of
    * clicking that column header, already computed by the page. This is a
@@ -234,6 +238,7 @@ export function InventoryTable({
                               {row.hold.name}
                             </Link>
                           </span>
+                          {row.hold.expiresAt && <HoldPill expiresAt={row.hold.expiresAt} today={today} />}
                         </span>
                       ) : (
                         <span className="text-fg-faint">—</span>

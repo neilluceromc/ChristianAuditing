@@ -1,19 +1,20 @@
-import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
-import { toSearchParams } from "@/lib/url-state";
-import { parsePage } from "@/lib/paging";
+import { isDirectLifecycle } from "@/lib/asset-class";
+import { clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, type ListState } from "@/lib/url-state";
+import { HOLDS_LIST_CONFIG } from "@/lib/holds";
+import { localDateISO } from "@/lib/format";
 import {
-  RESERVATION_TABS, listReservations, parseReservationTab,
+  RESERVATION_TABS, listReservations, parseReservationTab, type ReservationTab,
 } from "@/server/modules/reservations/queries";
 import { Banner } from "@/components/ui/banner";
+import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
-import { StatusDot } from "@/components/ui/status";
-import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { Tabs } from "@/components/ui/tabs";
+import { HoldsTable } from "@/components/reservations/holds-table";
+import { HoldsToolbar } from "@/components/reservations/holds-toolbar";
 
 export default async function ReservationsPage({
   searchParams,
@@ -23,12 +24,19 @@ export default async function ReservationsPage({
   const user = await requireUser();
   const sp = toSearchParams(await searchParams);
   const tab = parseReservationTab(sp.get("state"));
-  const { rows, counts, page, pageCount } = await listReservations(tab, parsePage(sp));
-  const hrefFor = (p: number) => {
-    const qs = new URLSearchParams({ state: tab });
-    if (p > 1) qs.set("page", String(p));
-    return `/reservations?${qs}`;
+  const state = parseListState(sp, HOLDS_LIST_CONFIG);
+  const { rows, counts, total, page, pageCount, facets } = await listReservations(tab, state);
+  const today = localDateISO(new Date());
+  const canRelease = isDirectLifecycle(user.role, "IT");
+
+  const href = (s: ListState, t: ReservationTab = tab) => {
+    const qs = serializeListState(s, HOLDS_LIST_CONFIG);
+    return "/reservations" + (qs ? `${qs}&state=${t}` : `?state=${t}`);
   };
+  const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0;
+  const sortHrefs: Record<string, string> = Object.fromEntries(
+    HOLDS_LIST_CONFIG.sortable.map((key) => [key, href({ ...state, sort: toggleSort(state.sort, key), page: 1 })]),
+  );
 
   return (
     <>
@@ -40,7 +48,7 @@ export default async function ReservationsPage({
         <Banner tone="neutral" title="A hold never changes an asset's status">
           Reserved stock still reads <span className="font-mono">SPARE</span> in inventory, marked{" "}
           <span className="font-mono">HOLD</span> — pretending it is gone creates phantom spares. Holds
-          are placed and released on the asset record.
+          are placed from the asset record or the person&apos;s profile and released there or here.
         </Banner>
 
         <Tabs
@@ -52,71 +60,34 @@ export default async function ReservationsPage({
                 <span className="font-mono text-[10px] text-fg-muted">{counts[t.id]}</span>
               </span>
             ),
-            href: `/reservations?state=${t.id}`,
+            href: href({ ...state, page: 1 }, t.id),
             active: t.id === tab,
           }))}
           className="pb-1"
         />
 
-        {rows.length === 0 ? (
+        <HoldsToolbar tab={tab} state={state} total={total} facets={facets} />
+
+        {rows.length > 0 ? (
+          <>
+            <HoldsTable rows={rows} state={state} sortHrefs={sortHrefs} today={today} canRelease={canRelease} />
+            <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
+          </>
+        ) : hasFilters ? (
+          <EmptyState
+            title="Your filters matched nothing"
+            actions={<ButtonLink href={href(clearFilters(state))}>Clear filters</ButtonLink>}
+          />
+        ) : (
           <EmptyState
             title={tab === "ACTIVE" ? "No active holds" : "Nothing in this tab"}
             description={
               tab === "ACTIVE"
-                ? "Reserve a spare from an asset record when it is promised to someone but not yet assigned."
+                ? "Reserve a spare from its record or from a person's profile."
                 : "Holds land here once they are fulfilled, released or expired."
             }
           />
-        ) : (
-          <Table>
-            <THead>
-              <Tr>
-                <Th width={19}><span className="sr-only">Hold state colour</span></Th>
-                <Th width={104}>State</Th>
-                <Th width={112}>Asset</Th>
-                <Th>Model</Th>
-                <Th width={96}>Reads</Th>
-                <Th width={186}>For</Th>
-                <Th>Reason</Th>
-                <Th width={104}>Expires</Th>
-                <Th width={160}>Closed</Th>
-              </Tr>
-            </THead>
-            <TBody>
-              {rows.map((r) => (
-                <Tr key={r.id}>
-                  <Td className="pr-0"><StatusDot value={r.state} /></Td>
-                  <Td mono className="text-[10.5px]">{r.state}</Td>
-                  <Td mono>
-                    <Link href={`/inventory/${r.assetId}`} className="text-accent hover:underline">{r.tag}</Link>
-                  </Td>
-                  <Td>{r.model}</Td>
-                  {/* the point of the column: the hold did not move the status */}
-                  <Td mono className="text-[10.5px]">{r.assetStatus}</Td>
-                  <Td>
-                    <Link href={`/employees/${r.employeeId}`} className="text-accent hover:underline">
-                      {r.employeeName}
-                    </Link>
-                    <span className="pl-1.5 font-mono text-[10.5px] text-fg-muted">{r.employeeNo}</span>
-                  </Td>
-                  <Td>{r.reason ?? "—"}</Td>
-                  <Td mono>{r.expires}</Td>
-                  <Td>
-                    {r.closedBy === null ? (
-                      <span className="text-fg-faint">—</span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-fg-muted">
-                        <Icon name={r.closedBy === "clock" ? "sla" : "employee"} size={13} />
-                        {r.closedBy === "clock" ? "expired" : "released"} {r.resolved}
-                      </span>
-                    )}
-                  </Td>
-                </Tr>
-              ))}
-            </TBody>
-          </Table>
         )}
-        {rows.length > 0 && <Pagination page={page} pageCount={pageCount} hrefFor={hrefFor} />}
       </div>
     </>
   );

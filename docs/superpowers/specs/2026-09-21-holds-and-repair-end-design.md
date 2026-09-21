@@ -1,6 +1,6 @@
 # Phase 26 — Holds that work and the repair end-date: reserve a spare for a person, release or expire a hold, `/reservations` list parity, `Asset.repairEndedAt`
 
-**Status:** design approved in conversation 2026-09-21 (approach A — direct IT actions, one nullable column, an hourly worker sweep; decisions 1–8 below). Not yet planned or implemented.
+**Status:** **implemented on branch `phase-26-holds-and-repair-end`** (6 tasks, `D-1`…`D-10` — the spec corrections before the plan are `D-2`, the final whole-branch review added `D-8`, the fix wave `D-9`, the final battery `D-10`), **code-complete 2026-09-21 at final tree `1442289`**, the final-review fix wave included; **unmerged and unpushed** — merging, pushing and the staging redeploy are the user's decisions, not pre-authorised — and **migration 25 `repair_end_and_holds` is pending on staging** until the first `-Force` redeploy after a merge. Design approved in conversation 2026-09-21 (approach A — direct IT actions, one nullable column, an hourly worker sweep; decisions 1–8 below); the `*Amended (D-n):*` notes below record where execution changed it.
 
 **Companion facts file (scratch, git-ignored):** `.superpowers/sdd/phase-26-facts.md` — verbatim code of every reservation read/write, the lifecycle preparer, the repair rules and their consumers, the worker hook, the seed rows and the e2e anchors. Every claim below was verified against `main` @ `6530623`.
 
@@ -16,6 +16,8 @@
 6. **Approach A**: direct admin/IT actions (no approval type — a hold is IT-internal bookkeeping, like triage), audit entries on the asset, `Asset.repairEndedAt` with an audit-history backfill, one migration (25). Approaches B (holds as approvals) and C (derive repair end from history at render time) rejected: B adds a queue for an act nobody approves; C makes the Down column a JSON query per row, unsortable and wrong for pre-vocabulary history.
 7. **Expiry writes no audit row** (the worker has no acting user); the reservation row's state and `resolvedAt` are the record and already render on the employee timeline; the worker log line is the operator trail.
 8. **One live hold per asset stays an application-level rule**, checked inside the reserve transaction — the codebase has never had a partial unique index and Prisma's schema cannot declare one.
+
+   *Amended (D-8):* the premise was wrong — the partial unique index `Reservation_one_active_hold_per_asset` has existed since migration `20260814090100`, so the in-transaction check stays the friendly first answer, the index is the guarantee, and `reserveAsset`'s `P2002` catch translates a lost race into the same pinned conflict copy.
 
 ---
 
@@ -80,6 +82,8 @@ export function buildHoldOrderBy(sort: SortKey[]): Prisma.ReservationOrderByWith
 ```
 
 The `daysUntil`/`dueStatus` shape in `src/lib/deadlines.ts` is the model for `holdStatus`; text differs ("expires…" not "due…") so the two never read alike on one screen.
+
+*Amended (D-9):* `holdStatus` also says "expires tomorrow" at one day, mirroring `dueStatus`, so the full pill copy is "expires in N d" / "expires tomorrow" / "expires today" / "expired N d ago".
 
 ### 3.3 Repair rules — `src/lib/repairs.ts`
 
@@ -148,6 +152,8 @@ export async function expireHolds(now = new Date()): Promise<number> {
 ```
 `index.ts`: `let lastExpireAt: Date | null = null;` and `safeExpire()` mirroring `safePrune` (try → `const n = await expireHolds(); if (n) console.log(\`[worker] expired ${n} hold${n === 1 ? "" : "s"}\`)`, catch → `console.error(\`[worker] hold sweep failed: …\`)`, finally → `lastExpireAt = new Date()`); called after `safePrune()` at start and `if (expireDue(lastExpireAt, new Date())) await safeExpire();` in the loop. `--once` runs it once. Relative imports only (`../lib/holds`, `../server/db/client`).
 
+*Amended (D-9):* `Reservation.expiresAt` is stored day-precision — UTC midnight — and `schema.prisma` declares the invariant; every writer in `src/`, `e2e/` and `prisma/` goes through `dayFromISO`/`dayFloor`, which is what makes the sweep's `lt: start of today` and `isHoldExpired`'s calendar comparison the same rule.
+
 ---
 
 ## 5. Screens
@@ -167,6 +173,8 @@ The layout loads `hold = await activeHoldFor(asset.id)` and passes `today`. Pred
 - An empty policy slot's `⋯` menu gains **Reserve a spare…** (admin/IT, `direct`, employee ACTIVE) — the whole empty tile is already the Assign affordance, so the menu is the only place a second action fits. The dialog's spare combobox is built from the `spares` the page already passes (unheld IT spares only, "Same type" first then "Other spares" by tag), with **Expires** and **Reason** as on the record; calls `reserveAsset({ assetId, employeeId, expiresAt, reason })`; toast "{tag} reserved"; refresh.
 - The slot's "fill" spare picker keeps its `reservedFor` labels and additionally sets `disabled` on a spare held for someone else (the guard would refuse it; the label says why).
 - Holding area: each `kind: "reserved"` row shows `HoldPill` and a **Release** button for admin/IT (`ReleaseHoldButton` with `size="sm"`); `HoldingItem` gains `reservationId` and `expiresAt`. The day-one "Assign all N reserved" button is unchanged.
+
+*Amended (D-2):* the profile's Reserve affordance is the empty slot's `⋯` menu item **Reserve a spare…**, not the tile itself, because the whole empty tile is already the Assign affordance.
 
 ### 5.3 Inventory list — `components/inventory/inventory-table.tsx`
 
@@ -190,13 +198,15 @@ State = `parseReservationTab(sp.get("state"))` + `parseListState(sp, HOLDS_LIST_
 - Deleting an employee is not possible while reservations reference them (existing FK); nothing new.
 - Seed: BR-MN-0910's ACTIVE hold for EMP-0097 (`expiresAt` +7 d) is the live fixture; BR-PH-0301's EXPIRED row has no `resolvedAt` and keeps reading its `expiresAt`; BR-MN-0911 (RETURNED OK fixture, `defectiveSince` −70 d, no audit transition) keeps a dash in Down after the backfill — the e2e creates a real DEFECTIVE→SPARE transition on another asset.
 
+*Amended (D-9):* the record's Repair card reads "down N d, closed {date}" when the asset's status family is closed (RETIRED/SOLD/DONATED) and keeps "down N d, back since {date}" while it is in service.
+
 ## 7. Tests
 
 **Unit (vitest).** `src/lib/holds.test.ts`: `defaultHoldExpiry`/`minHoldExpiry`; `holdStatus` text and tone for +3 d, today, −2 d; `isHoldExpired` boundary (yesterday true, today false); `expireDue`; `parseReservationTab` (moved, its existing behaviour); `buildHoldWhere` (tab states, `q` OR, both facets) and `buildHoldOrderBy` (each key, nulls last on `expiresAt`, id tiebreak). `src/lib/repairs.test.ts`: `downDays` closed interval, null when not DEFECTIVE without an end, DEFECTIVE ignores `repairEndedAt`, the twelve-row fixture still passes (`repairEndedAt: null` added to `repairStageFixture` rows). `src/lib/activity.test.ts` (if present): the two sentences.
 
 **End to end — new `e2e/holds.spec.ts`** (reseed in `beforeAll`; local helpers; every mutating case restores mutable fields in `finally` — reservations it created are deleted by id, `repairEndedAt`/`defectiveSince`/`status` restored; never delete audit rows):
 1. Reserve from the record: as IT on `BR-HS-0502` (a seeded SPARE headset with no ACTIVE hold and no open request — its only reservation is the RELEASED history row): the **Reserve** button, dialog Expires prefilled today + 7, pick Nina Robles, a chip, Reserve → toast, the held banner with "expires in 7 d", the HOLD pill on `/inventory?q=HS-0502` with "expires in 7 d", the audit sentence on the asset timeline, and the headset absent from BR-LT-0201's Replace picker. `finally`: delete the created reservation by id.
-2. Reserve from a profile slot: on Nina Robles' profile (EMP-0097 — the only seeded employee with an equipment policy, "Finance standard", and empty phone/dock/headset slots; Carlo Dizon has no policy) the empty **phone** slot's `⋯` menu offers **Reserve a spare…**; pick `BR-PH-0301` (a seeded SPARE phone; its EXPIRED history row is not ACTIVE), Reserve → the holding area lists it with the pill and a Release button. `finally`: delete the reservation by id.
+2. Reserve from a profile slot: on Nina Robles' profile (EMP-0097 — the only seeded employee with an equipment policy, "Finance standard", and empty phone/dock/headset slots; Carlo Dizon has no policy — *Amended (D-2)*) the empty **phone** slot's `⋯` menu offers **Reserve a spare…**; pick `BR-PH-0301` (a seeded SPARE phone; its EXPIRED history row is not ACTIVE), Reserve → the holding area lists it with the pill and a Release button. `finally`: delete the reservation by id.
 3. Conflict: on `BR-MN-0910` (held for Nina Robles) the **Reserve** button is absent, the banner reads "Held for Nina Robles" with the pill; the Assign dialog preselects Nina and shows the held line; picking Paolo Santos and submitting is refused with `EMP-0097` in the message; the asset still reads SPARE and the hold is still ACTIVE.
 4. Floor: strip `min`, pick yesterday → "Pick today or later"; no row written.
 5. Release from the record → RELEASED with `resolvedAt`; audit sentence "released the hold".
@@ -207,6 +217,8 @@ State = `parseReservationTab(sp.get("state"))` + `parseListState(sp, HOLDS_LIST_
 10. Backfill honesty: on the fresh seed `BR-MN-0911` (a closed repair with no audit transition) shows a dash in Down on the repairs view and the record says "back since —" is NOT shown (only the stage); i.e. `repairEndedAt` is null after the migration's backfill.
 11. Repair end: as IT on `BR-MN-0911` (SPARE; the seeded RETURNED OK fixture) change status → DEFECTIVE (the record shows "0 d out of service"; `defectiveSince` is today, `repairEndedAt` null), then → SPARE: `repairEndedAt` is set, the record reads "down 0 d, back since <today>", the repairs view `?stage=returned-ok` shows `0 d` in Down for it; change → DEFECTIVE again: `repairEndedAt` back to null and Down counts from the new start. `finally`: restore `status: SPARE`, the seeded `defectiveSince`, `repairEndedAt: null`, `returnedAt: null` (read all four before the case).
 Expected `--list` about 364 tests / 35 files; the new file joins chunk F. Existing specs that touch holds or the Down column run in the battery: `offboarding` (reservations describe), `paging` (30 seeded holds; the Active tab count), `custody`, `it-gaps` (Replace picker), `it-nav` case 7 (HOLD link), `axe-sweep`, `direct-lifecycle`.
+
+*Amended (D-9):* P-8's cleanup rule is "by id, or by the test's own `createdAt` window when the UI created the row and the case failed before reading it back" — a `finally` deletes the read-back reservation id when it has one and falls back to `{ assetId, state: "ACTIVE", createdAt: { gte: startedAt } }` otherwise; no case deletes audit rows.
 
 **Walk (foreground, 3100):** the three Reserve/Release surfaces and the held Assign dialog; `npm run worker:once` proof of one expiry against `inventory_dev`.
 
@@ -221,6 +233,6 @@ Modified: `prisma/schema.prisma`, `src/lib/repairs.ts` (+test), `src/lib/activit
 - Migration 25 is additive and nullable, forward-only, house shape (bare `ALTER TABLE`, commented backfill citing the decision); staging gets it at the next `-Force` redeploy after a merge; never seed staging.
 - Guard order role then `checkRate`; one `writeAudit` per domain write in the same transaction; `ActionResult` returns; audit action strings `reservation.placed` / `reservation.released` and no others.
 - No `aria-label` near a form field may contain that field's label word; heading rows stay `role="presentation"`; links inside clickable rows stop propagation.
-- Copy: "Reserve", "Reserve a spare", "Release", "For", "Expires", "Held for {name}", "Pick today or later", "expires in N d" / "expires today" / "expired N d ago".
+- Copy: "Reserve", "Reserve a spare", "Release", "For", "Expires", "Held for {name}", "Pick today or later", "expires in N d" / "expires today" / "expired N d ago". *Amended (D-9):* the pill also says "expires tomorrow" at one day, mirroring `dueStatus`.
 - Dev only in a worktree with its own `.env` (`inventory_dev`, `APP_BASE_URL=http://192.168.203.183:3100`); `npx prisma generate` after `npm ci`; `npx prisma migrate dev` in the worktree only; dev server `npm run dev -- -p 3100` foreground, one walker at a time; Playwright foreground `E2E_PORT=3100 --workers=1 --global-timeout=540000`, one process; nobody seeds while another agent walks or tests; `npm run worker:once` hits `inventory_dev` only; `netstat`/`taskkill` port hygiene.
 - Never read or print `.env`; docs are CRLF; new files `git add`ed before a pathspec commit; wrong messages fixed with a new commit; `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.

@@ -35,6 +35,7 @@ export interface RepairLike {
   repairQuote: number | null;
   cost: number | null;
   defectiveSince: Date | null;
+  repairEndedAt: Date | null;
 }
 
 export function isRepairStage(value: string): value is RepairStage {
@@ -65,16 +66,19 @@ export function repairStage(a: RepairLike): RepairStage | null {
 }
 
 /**
- * Days out of service — the column that changes behaviour. null once the item
- * no longer reads DEFECTIVE: the clock stopped and we don't record when, so a
- * number here would be a lie.
+ * Days out of service — the column that changes behaviour. While DEFECTIVE it
+ * counts to now; once the item reads anything else it closes on
+ * `repairEndedAt` (Phase 26), and is null for a closed repair whose end was
+ * never recorded — a number there would be a guess.
  */
 export function downDays(
-  a: Pick<RepairLike, "status" | "defectiveSince">,
+  a: Pick<RepairLike, "status" | "defectiveSince" | "repairEndedAt">,
   now: Date = new Date(),
 ): number | null {
-  if (a.status !== "DEFECTIVE" || !a.defectiveSince) return null;
-  return Math.max(0, Math.floor((now.getTime() - a.defectiveSince.getTime()) / 86_400_000));
+  if (!a.defectiveSince) return null;
+  const end = a.status === "DEFECTIVE" ? now : a.repairEndedAt;
+  if (!end) return null;
+  return Math.max(0, Math.floor((end.getTime() - a.defectiveSince.getTime()) / 86_400_000));
 }
 
 /** The sentence on the record when repairing costs too much of a new unit. */
@@ -156,62 +160,62 @@ export interface RepairStageFixtureRow {
 export const repairStageFixture: RepairStageFixtureRow[] = [
   {
     label: "DEFECTIVE, no vendor, no RMA, no quote — nothing to go on yet",
-    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z") },
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z"), repairEndedAt: null },
     expected: "to-assess",
   },
   {
     label: "DEFECTIVE with a vendor",
-    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z") },
+    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z"), repairEndedAt: null },
     expected: "at-vendor",
   },
   {
     label: "DEFECTIVE with an RMA ref, no vendor",
-    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: "RMA-8802", repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z") },
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: "RMA-8802", repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z"), repairEndedAt: null },
     expected: "at-vendor",
   },
   {
     label: "DEFECTIVE, a vendor AND a high quote — the quote outranks being at a vendor",
-    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: null, repairQuote: 34_000, cost: 55_000, defectiveSince: null },
+    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: null, repairQuote: 34_000, cost: 55_000, defectiveSince: null, repairEndedAt: null },
     expected: "beyond-repair",
   },
   {
     label: "DEFECTIVE, quote exactly 60% on round pesos",
-    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 33_000, cost: 55_000, defectiveSince: null },
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 33_000, cost: 55_000, defectiveSince: null, repairEndedAt: null },
     expected: "beyond-repair",
   },
   {
     label: "DEFECTIVE, the centavo edge — 6000.57 on 10000.95 is exactly 60%",
-    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 6_000.57, cost: 10_000.95, defectiveSince: null },
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 6_000.57, cost: 10_000.95, defectiveSince: null, repairEndedAt: null },
     expected: "beyond-repair",
   },
   {
     label: "DEFECTIVE, one centavo under the edge — 6000.56 on 10000.95",
-    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 6_000.56, cost: 10_000.95, defectiveSince: null },
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 6_000.56, cost: 10_000.95, defectiveSince: null, repairEndedAt: null },
     expected: "to-assess",
   },
   {
     label: "DEFECTIVE, quote clearly under 60% — repair it",
-    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 18_400, cost: 55_000, defectiveSince: null },
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 18_400, cost: 55_000, defectiveSince: null, repairEndedAt: null },
     expected: "to-assess",
   },
   {
     label: "DEFECTIVE, quote present but cost is 0 — nothing to compare against",
-    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 5_000, cost: 0, defectiveSince: null },
+    asset: { status: "DEFECTIVE", vendorId: null, rmaRef: null, repairQuote: 5_000, cost: 0, defectiveSince: null, repairEndedAt: null },
     expected: "to-assess",
   },
   {
     label: "DEFECTIVE, no quote, but both a vendor AND an RMA — still at-vendor, not double-counted",
-    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: "RMA-9001", repairQuote: null, cost: 55_000, defectiveSince: null },
+    asset: { status: "DEFECTIVE", vendorId: "v1", rmaRef: "RMA-9001", repairQuote: null, cost: 55_000, defectiveSince: null, repairEndedAt: null },
     expected: "at-vendor",
   },
   {
     label: "not DEFECTIVE, but it was — returned OK",
-    asset: { status: "SPARE", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z") },
+    asset: { status: "SPARE", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: new Date("2026-08-01T00:00:00Z"), repairEndedAt: null },
     expected: "returned-ok",
   },
   {
     label: "never DEFECTIVE — no stage at all",
-    asset: { status: "DEPLOYED", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: null },
+    asset: { status: "DEPLOYED", vendorId: null, rmaRef: null, repairQuote: null, cost: 55_000, defectiveSince: null, repairEndedAt: null },
     expected: null,
   },
 ];

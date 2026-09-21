@@ -126,6 +126,7 @@ export default async function EmployeePage({
       note: `reserved${r.expiresAt ? ` · expires ${fmtDate(r.expiresAt)}` : ""}`,
       kind: "reserved" as const,
       visible: canSeeClass(user.role, r.asset.cls),
+      reservationId: r.id, expiresAt: r.expiresAt,
     })),
     ...openApprovals
       .filter((a) => a.asset && a.asset.assigneeId !== id)
@@ -134,6 +135,7 @@ export default async function EmployeePage({
         note: `assignment queued · ${a.refNo}`,
         kind: "queued" as const,
         visible: canSeeClass(user.role, a.asset!.cls),
+        reservationId: null, expiresAt: null,
       })),
   ];
 

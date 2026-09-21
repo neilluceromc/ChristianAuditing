@@ -2,21 +2,25 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset, lastLifecycleChange, spareOptions } from "@/server/modules/inventory/queries";
+import { activeHoldFor } from "@/server/modules/reservations/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, localDateISO } from "@/lib/format";
 import { CLASS_LABEL, canEditAsset, canManageClass, isAssignable, isAwaitingItCheck, isDirectLifecycle } from "@/lib/asset-class";
+import { defaultHoldExpiry, minHoldExpiry } from "@/lib/holds";
 import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
 import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
+import { HoldPill } from "@/components/ui/hold-pill";
 import { RecordTabs } from "@/components/inventory/record-tabs";
 import { StatusControl } from "@/components/inventory/status-control";
 import { FinanceReview } from "@/components/inventory/finance-review";
 import { ItCheck } from "@/components/inventory/it-check";
 import { HolderControl } from "@/components/inventory/holder-control";
 import { LoanDueControl } from "@/components/inventory/loan-due-control";
+import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
 import { ReplaceControl } from "@/components/inventory/replace-control";
 import { TriageControl } from "@/components/inventory/triage-control";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
@@ -45,14 +49,18 @@ export default async function AssetRecordLayout({
   const canResubmit = canManageClass(user.role, asset.cls) && returned;
   const pending = asset.approvals[0];
   const direct = isDirectLifecycle(user.role, asset.cls);
+  const hold = asset.cls === "IT" ? await activeHoldFor(asset.id) : null;
+  const today = localDateISO(new Date());
   // Spec §7.1: offered only when the action would be legal; a pending approval
   // freezes both (the server would answer "already has an open request").
   const canAssign = canMutate && !pending && !asset.assignee && isAssignable(asset);
   const canReturn = canMutate && !pending && asset.assignee !== null;
   const canReplace = direct && canReturn;
   const canTriage = direct && !pending && asset.returnedAt !== null;
-  const employees = canAssign ? await activeEmployeeOptions() : [];
-  const recentEmployees = canAssign ? await recentPicks(user.id, "employee") : [];
+  const canReserve = direct && !pending && !asset.assignee && isAssignable(asset) && !hold;
+  const canReleaseHold = direct && !!hold;
+  const employees = canAssign || canReserve ? await activeEmployeeOptions() : [];
+  const recentEmployees = canAssign || canReserve ? await recentPicks(user.id, "employee") : [];
   const spares = canReplace ? await spareOptions(asset.typeId) : [];
   // Phase 20 (spec §6.5, gap 5): while an approval is queued, the record
   // still reads the pre-approval status everywhere (see the Banner below) —
@@ -101,11 +109,22 @@ export default async function AssetRecordLayout({
           </span>
         }
         actions={
-          canMutate || canEdit || canCheck || canConfirm || canResubmit || canAssign || canReturn || canReplace || canTriage ? (
+          canMutate || canEdit || canCheck || canConfirm || canResubmit || canAssign || canReturn || canReplace || canTriage || canReserve ? (
             <>
               {canCheck && <ItCheck assetId={asset.id} tag={asset.tag} />}
               {canTriage && <TriageControl assetId={asset.id} tag={asset.tag} />}
-              {canAssign && <HolderControl mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} direct={direct} recentEmployees={recentEmployees} />}
+              {canAssign && (
+                <HolderControl
+                  mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} direct={direct} recentEmployees={recentEmployees}
+                  heldFor={hold ? { id: hold.employee.id, name: hold.employee.name } : undefined}
+                />
+              )}
+              {canReserve && (
+                <HolderControl
+                  mode="reserve" assetId={asset.id} tag={asset.tag} employees={employees} recentEmployees={recentEmployees}
+                  defaultExpiry={defaultHoldExpiry(today)} minExpiry={minHoldExpiry(today)}
+                />
+              )}
               {canReturn && asset.assignee && (
                 <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} direct={direct} />
               )}
@@ -155,6 +174,21 @@ export default async function AssetRecordLayout({
           <LoanDueControl assetId={asset.id} tag={asset.tag} loanDueAt={asset.loanDueAt?.toISOString().slice(0, 10) ?? null} />
         )}
       </div>
+      {hold && (
+        <div className="pb-3">
+          <Banner
+            tone="inflight"
+            title={<>Held for <Link href={`/employees/${hold.employee.id}`} className="underline hover:text-accent-hover">{hold.employee.name}</Link></>}
+            actions={canReleaseHold ? <ReleaseHoldButton reservationId={hold.id} tag={asset.tag} size="sm" /> : undefined}
+          >
+            <span className="inline-flex flex-wrap items-center gap-2">
+              {hold.expiresAt && <HoldPill expiresAt={hold.expiresAt} today={today} withDate />}
+              {hold.reason && <span className="text-fg-secondary">{hold.reason}</span>}
+              <span className="font-mono text-[10.5px] text-fg-muted">{hold.employee.employeeNo}</span>
+            </span>
+          </Banner>
+        </div>
+      )}
       {pending && (
         <div className="pb-3">
           <Banner

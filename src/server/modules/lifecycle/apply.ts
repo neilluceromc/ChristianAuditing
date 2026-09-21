@@ -6,7 +6,7 @@ import {
 
 export type LifecycleAsset = {
   id: string; tag: string; cls: AssetClass; status: AssetStatus;
-  assigneeId: string | null; defectiveSince: Date | null; returnedAt: Date | null; loanDueAt: Date | null;
+  assigneeId: string | null; defectiveSince: Date | null; repairEndedAt: Date | null; returnedAt: Date | null; loanDueAt: Date | null;
 };
 
 export type LifecycleChange =
@@ -93,12 +93,15 @@ export async function prepareLifecycle(
     diff.loanDueAt = { from: asset.loanDueAt, to: nextDue };
   }
 
-  // The repairs view's Down clock starts when a device ENTERS defective, and
-  // is never cleared ("has a defectiveSince but no longer reads DEFECTIVE" is
-  // the RETURNED OK stage).
+  // Phase 26 (spec §3.4): the repairs view's Down clock starts when a device
+  // ENTERS defective and closes when it LEAVES — both stamped here so every
+  // path (direct, bulk, triage, worker-executed approvals) records them alike.
   if (change.status === "DEFECTIVE" && asset.status !== "DEFECTIVE") {
-    updates.defectiveSince = now;
-    diff.defectiveSince = { from: asset.defectiveSince, to: now };
+    updates.defectiveSince = now;   diff.defectiveSince = { from: asset.defectiveSince, to: now };
+    updates.repairEndedAt = null;   diff.repairEndedAt = { from: asset.repairEndedAt, to: null };
+  }
+  if (change.status !== "DEFECTIVE" && asset.status === "DEFECTIVE") {
+    updates.repairEndedAt = now;    diff.repairEndedAt = { from: asset.repairEndedAt, to: now };
   }
 
   // Spec §4.1: a return landing an IT device on its default status is "back,

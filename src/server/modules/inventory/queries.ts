@@ -27,13 +27,13 @@ export interface AssetRow {
   status: string;
   assignee: string | null;
   /** ACTIVE-reservation holder. The asset still reads SPARE — the hold is a marker, not a status. */
-  hold: { id: string; name: string } | null;
+  hold: { id: string; name: string; expiresAt: Date | null } | null;
   purchased: string;
   warranty: string;
   /** derived repair stage id; null if the asset was never defective */
   stage: RepairStage | null;
   stageLabel: string | null;
-  /** days out of service; null unless it currently reads DEFECTIVE */
+  /** days out of service: to now while DEFECTIVE, closed on repairEndedAt otherwise; null when never defective or the end was never recorded (Phase 26) */
   down: number | null;
 }
 
@@ -53,6 +53,7 @@ export function stageOf(a: {
   cost: Prisma.Decimal | null;
   repairQuote: Prisma.Decimal | null;
   defectiveSince: Date | null;
+  repairEndedAt: Date | null;
 }): RepairStage | null {
   return repairStage({
     status: a.status,
@@ -61,6 +62,7 @@ export function stageOf(a: {
     repairQuote: a.repairQuote === null ? null : Number(a.repairQuote),
     cost: a.cost === null ? null : Number(a.cost),
     defectiveSince: a.defectiveSince,
+    repairEndedAt: a.repairEndedAt,
   });
 }
 
@@ -78,13 +80,14 @@ function toRow(a: {
   purchasedAt: Date | null;
   warrantyUntil: Date | null;
   defectiveSince: Date | null;
+  repairEndedAt: Date | null;
   vendorId: string | null;
   rmaRef: string | null;
   cost: Prisma.Decimal | null;
   repairQuote: Prisma.Decimal | null;
   category: { name: string };
   assignee: { name: string } | null;
-  reservations: Array<{ employee: { id: string; name: string } }>;
+  reservations: Array<{ expiresAt: Date | null; employee: { id: string; name: string } }>;
 }): AssetRow {
   const stage = stageOf(a);
   return {
@@ -94,7 +97,7 @@ function toRow(a: {
     category: a.category.name,
     status: a.status,
     assignee: a.assignee?.name ?? null,
-    hold: a.reservations[0] ? { id: a.reservations[0].employee.id, name: a.reservations[0].employee.name } : null,
+    hold: a.reservations[0] ? { id: a.reservations[0].employee.id, name: a.reservations[0].employee.name, expiresAt: a.reservations[0].expiresAt } : null,
     purchased: fmtDate(a.purchasedAt),
     warranty: fmtDate(a.warrantyUntil),
     stage,
