@@ -803,11 +803,9 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    between any two chunks, or after the last. See plan `D-16`…`D-20`, "Measured at close", and §0 item 9
    for the chunk commands.
 
-   **Done on 2026-09-21: merged to `main` via `--no-ff` `bb577f8` and pushed (the push also carried the
-   three docs-only commits `9dd7ba5`, `98a94a1` (spec) and `5acb5fd` (plan)); the merged tree is byte-identical
-   to the tested tip `641e96f`; branch and worktree removed.** There is no migration, so the staging redeploy
-   that carries this phase is a code-only `scripts/deploy-staging.ps1 -Force` — NOT yet run; staging still
-   serves the Phase 24 merge `48c37f7` at `http://192.168.203.183:3000`.
+   **What remains: merging to `main`, pushing, and the staging redeploy are the user's decisions, not
+   pre-authorised — migration 23's backfill asserts itself, so it either applies cleanly or the deploy
+   fails loudly; `docs/HANDOVER-PENDING.md` §5.1 is shipped and its requisition question decided no.**
 
    **(p) PHASE 23 (Parkinson sweep: quick forms and complete-by dates) IS MERGED TO `main`
    via `--no-ff` `18228b0` AND PUSHED (2026-09-17; final tree `09bf0a5`; branch and worktree removed;
