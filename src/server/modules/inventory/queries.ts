@@ -12,7 +12,7 @@ import {
   REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
 } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
-import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { ENTITY_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
@@ -164,30 +164,26 @@ export async function listAssets(
   page: number;
   pageCount: number;
 }> {
-  const where = buildAssetWhere(state, purchaseYear, cls);
   const orderBy = buildAssetOrderBy(state.sort);
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
 
-  // Repair mode pages in memory: beyond-repair compares repairQuote against
-  // cost, which no Prisma filter can express, so repairStage() has to make the
-  // cut after the read — and then the count has to come from the cut set, not
-  // from the candidate set, or "12 assets" would be a lie. buildAssetWhere has
-  // already narrowed this to the defective corner of a team-scale fleet (the
-  // same reasoning the employees list uses for its loadout filter).
+  // Repair mode (Phase 24, spec §5.1): the stage cut runs in SQL — repairStageIds already applies
+  // REPAIR_STAGE_CASE_SQL and intersects every other active filter and purchaseYear — so the list
+  // pages that id set through the same count/skip/take snapshot as every other view. Until this
+  // phase it loaded every candidate row with its includes and paged the array in memory.
   if (stages.length > 0) {
-    const matched = (await prisma.asset.findMany({ where, orderBy, include: LIST_INCLUDE }))
-      .map(toRow)
-      .filter((r) => r.stage !== null && stages.includes(r.stage));
-    const total = matched.length;
-    const pg = pageOf(total, state.page, ENTITY_PAGE_SIZE);
-    return {
-      total,
-      page: pg.page,
-      pageCount: pg.pageCount,
-      rows: matched.slice(pg.skip, pg.skip + pg.take),
-    };
+    const ids = (await repairStageIds(state, purchaseYear, cls)) ?? [];
+    const idWhere: Prisma.AssetWhereInput = { id: { in: ids } };
+    const { rows: cut, total, page, pageCount } = await pagedSnapshot(
+      ENTITY_PAGE_SIZE,
+      state.page,
+      (tx) => tx.asset.count({ where: idWhere }),
+      (tx, pg) => tx.asset.findMany({ where: idWhere, orderBy, skip: pg.skip, take: pg.take, include: LIST_INCLUDE }),
+    );
+    return { total, page, pageCount, rows: cut.map(toRow) };
   }
 
+  const where = buildAssetWhere(state, purchaseYear, cls);
   const { rows: assets, total, page, pageCount } = await pagedSnapshot(
     ENTITY_PAGE_SIZE,
     state.page,
@@ -303,9 +299,8 @@ export async function facetOptions(
  * date_part groupBy would be a second, driftable copy of the same rule
  * (the CSV-duplication mistake this project has already made once). Fetching
  * a thin `purchasedAt`-only projection and reducing it in memory is the same
- * move this module already makes wherever SQL can't express the grouping
- * (see the repair-mode branch of `listAssets` above) — team-scale fleet, so
- * this is cheap.
+ * move this module already makes wherever SQL can't express the grouping —
+ * team-scale fleet, so this is cheap.
  *
  * Matches the `without(facet)` rule in `facetOptions`: called with no
  * `purchaseYear` of its own, so a bucket's count is "every OTHER active
@@ -380,13 +375,11 @@ export async function invisibleAssetIds(role: Role): Promise<string[]> {
 }
 
 /**
- * Phase 15/20 (spec §6.4, gap 4): the Replace picker — same-type spares
- * first, then any assignable IT spare. `note` names WHICH group each row is
- * in (`EntityCombobox` already renders `option.note`) — when no same-type
- * spare exists every row still reads "Other spare" rather than the
- * headerless list Phase 15 shipped with, because `note` here is not "this
- * one matched" but "which group this row belongs to", true for every row
- * whether or not `preferTypeId` ever matches anything.
+ * Phase 15/20/24 (spec §6.4, gap 4): the Replace picker — same-type spares
+ * first, then any assignable IT spare. `group` names WHICH group each row is
+ * in — the two groups render as combobox headings (Phase 24) instead of the
+ * per-row note Phase 15/20 shipped with — true for every row whether or not
+ * `preferTypeId` ever matches anything.
  */
 export async function spareOptions(preferTypeId: string | null): Promise<ComboOption[]> {
   const rows = await prisma.asset.findMany({
@@ -397,7 +390,7 @@ export async function spareOptions(preferTypeId: string | null): Promise<ComboOp
   const isSameType = (t: string | null) => preferTypeId !== null && t === preferTypeId;
   const rank = (t: string | null) => (isSameType(t) ? 0 : 1);
   return rows.sort((a, b) => rank(a.typeId) - rank(b.typeId) || a.tag.localeCompare(b.tag))
-    .map((a) => ({ value: a.id, label: a.tag, sub: a.model, note: isSameType(a.typeId) ? "Same type" : "Other spare" }));
+    .map((a) => ({ value: a.id, label: a.tag, sub: a.model, group: isSameType(a.typeId) ? "Same type" : "Other spares" }));
 }
 
 /**

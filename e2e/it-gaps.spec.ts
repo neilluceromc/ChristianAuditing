@@ -4,18 +4,28 @@ import AxeBuilder from "@axe-core/playwright";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 import { REPAIR_STAGES, REPAIR_STAGE_CASE_SQL, repairStage, type RepairLike } from "@/lib/repairs";
+import { ENTITY_PAGE_SIZE } from "@/lib/paging";
+import { RETENTION_DAYS, RETENTION_NOTE } from "@/lib/retention";
 import { fmtDate } from "@/lib/format";
 
 /**
- * Phase 20, Task 8 — the six closed IT gaps from spec §6 (6 cases), each
- * independent (own fixtures, no serial dependency) so a failure in one never
- * cascades into the next:
+ * Phase 20, Task 8 — the six closed IT gaps from spec §6; Phase 24 (spec §4–5)
+ * rewrote case 4 and added cases 7–9, so nine in all. Every case is independent
+ * (own fixtures, no serial dependency, and each restores what it changed) so a
+ * failure in one never cascades into the next:
  *   1 (§6.1) bulk status skipped list names each tag and why.
  *   2 (§6.2) the register form's live identifier check is class-scoped.
  *   3 (§6.3) a loan-covered required slot reads "on loan", not a policy gap.
- *   4 the Replace picker's spare options carry "Same type"/"Other spare".
+ *   4 (P24 §4.1) the Replace picker groups spares under "Same type" and
+ *     "Other spares" headings, with no per-row note left behind.
  *   5 (§6.5) a direct return updates the record's "Last change" line.
  *   6 (§6.6) the repair-stage cut (`repairStage`) matches the DB one row at a time.
+ *   7 (P24 §4.1) with no same-type spare in reach, only "Other spares" renders.
+ *   8 (P24 §5.1) the repairs view pages that same SQL cut: the toolbar total is
+ *     the cut size, a page holds at most ENTITY_PAGE_SIZE rows, in
+ *     defectiveSince order, and page 2 reads off the same cut.
+ *   9 (P24 §4.2) `npm run worker:prune` removes only finished deliveries and
+ *     jobs older than RETENTION_DAYS, and the deliveries page states the rule.
  *
  * Seeded fixtures this file depends on (prisma/seed.ts), verified against
  * source rather than assumed from the brief:
@@ -34,6 +44,29 @@ import { fmtDate } from "@/lib/format";
  *   (prisma/seed.ts:38) — the same string both the "Last change" line's
  *   `AuditEntry.actorLabel` (R9) and, in the sibling offboarding-v2.spec.ts,
  *   the offboarding Decision's `claimedBy.name` resolve to for this user.
+ *
+ * Phase 24 fixture facts, likewise read off the seeded database rather than
+ * assumed:
+ *   The IT spares `spareOptions` offers are BR-LT-0181 (Laptop), BR-MN-0911
+ *   (Monitor), BR-PH-0301 (Phone) and BR-HS-0502 (Headset) — four, not five:
+ *   BR-MN-0910 is a SPARE Monitor too, but it carries an ACTIVE reservation
+ *   and `spareOptions`' `reservations: { none: { state: "ACTIVE" } }`
+ *   (queries.ts) excludes it.
+ *   Against BR-LT-0201's own type exactly ONE of them is same-type
+ *   (BR-LT-0181), which is what makes cases 4 and 7 a pair: case 7 stamps
+ *   `returnedAt` on that single same-type spare (plan P-3 — `spareOptions`
+ *   filters `returnedAt: null`) and restores it in a `finally`, leaving the
+ *   "Other spares" block untouched. Case 1 moves BR-HS-0502 to DISPOSE, so
+ *   cases 4 and 7 assert on BR-MN-0911 and on heading ORDER, never on the
+ *   whole option list.
+ *   The seeded repair cut is small: its four stages hold 2/3/1/1 IT assets,
+ *   well under one page, so case 8's `?page=2` exercises `pageOf`'s clamp
+ *   inside `pagedSnapshot` (it asserts a real second page the moment a cut
+ *   outgrows ENTITY_PAGE_SIZE).
+ *   Every seeded WebhookDelivery is fresh (2 DELIVERED, 1 RETRYING, 2 DEAD)
+ *   and the only seeded Job is PENDING, so in case 9 the 91-day-old DELIVERED
+ *   delivery and DONE job it creates are the only rows the prune may take —
+ *   which is what lets that case assert exact before/after counts.
  */
 
 const db = new PrismaClient();
@@ -75,6 +108,9 @@ async function waitForHydration(target: Locator) {
 }
 
 const IT = "it@thebackroomop.com";
+// The seeded admin, as e2e/admin.spec.ts spells it — /admin/webhooks/deliveries
+// is `requireRole("admin")`, so case 9's page check cannot run as IT.
+const ADMIN = "admin@thebackroomop.com";
 
 test.describe("it gaps", () => {
   test("1. bulk status change on two IT tags, one in a closed status, lists the skip in the drawer and the toast", async ({ page }) => {
@@ -188,7 +224,7 @@ test.describe("it gaps", () => {
     await expect(row).toContainText("complete");
   });
 
-  test("4. the Replace picker's spare options carry \"Same type\" and \"Other spare\" notes", async ({ page }) => {
+  test("4. the Replace picker groups spares under \"Same type\" and \"Other spares\" headings", async ({ page }) => {
     // BR-LT-0148 (the brief's own suggestion) carries the seeded APR-2039
     // (CLAIMED) — an OPEN approval — so `canReturn`/`canReplace`
     // (layout.tsx: `!pending`) are both false there and no Replace button
@@ -203,14 +239,38 @@ test.describe("it gaps", () => {
 
     const combo = dialog.getByRole("combobox", { name: "Replacement" });
     await combo.click();
-    // spareOptions (src/server/modules/inventory/queries.ts:386) notes every
-    // IT spare "Same type" or "Other spare" against the replaced asset's own
-    // type — BR-LT-0181 (Laptop) is the only same-type spare, so it matches
-    // uniquely; every non-laptop spare (BR-HS-0502, BR-MN-0911, BR-PH-0301)
-    // reads "Other spare", so that query is scoped to one tag to avoid a
-    // strict-mode multiple-match error.
-    await expect(dialog.getByRole("option", { name: /BR-LT-0181.*Same type/ })).toBeVisible();
-    await expect(dialog.getByRole("option", { name: /BR-MN-0911.*Other spare/ })).toBeVisible();
+    // Phase 24 (spec §4.1): `spareOptions` now hands every IT spare a `group`
+    // ("Same type" / "Other spares") against the replaced asset's own type and
+    // EntityCombobox renders a `role="presentation"` heading row whenever that
+    // group changes (headingBefore). The listbox carries no `recent` prop here
+    // (replace-control.tsx), so the Recent block is empty and these two are the
+    // only headings. Asserted on DOM text, not on what the eye reads: the
+    // heading's own class uppercases it in CSS only.
+    const list = dialog.getByRole("listbox");
+    const headings = list.locator('li[role="presentation"]');
+    await expect(headings).toHaveText(["Same type", "Other spares"]);
+
+    // DOM order, which is the whole point of a heading: heading, BR-LT-0181
+    // (the only same-type spare), heading, then the rest by tag.
+    const texts = await list.locator("li").allTextContents();
+    const sameAt = texts.indexOf("Same type");
+    const otherAt = texts.indexOf("Other spares");
+    const lt0181 = texts.findIndex((t) => t.startsWith("BR-LT-0181"));
+    const mn0911 = texts.findIndex((t) => t.startsWith("BR-MN-0911"));
+    expect(sameAt).toBeLessThan(lt0181);
+    expect(lt0181).toBeLessThan(otherAt);
+    expect(otherAt).toBeLessThan(mn0911);
+
+    // The per-row note that carried this before the headings is gone (spec
+    // decision 4) — the grouping is said once per block, never once per row.
+    await expect(dialog.getByRole("option", { name: /Same type|Other spare/ })).toHaveCount(0);
+
+    // R3 (final review I-2): options under a grouped heading describe themselves by it, so
+    // aria-activedescendant users still hear the group; the heading row itself is presentation-only.
+    const firstOption = dialog.getByRole("option").first();
+    const describedBy = await firstOption.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    await expect(dialog.locator(`[id="${describedBy}"]`)).toHaveText("Same type");
 
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toBeHidden();
@@ -256,14 +316,16 @@ test.describe("it gaps", () => {
     // CASE expression `repairStageIds` executes as `$queryRaw`, over the same
     // candidate predicate ("cls"='IT' AND (status='DEFECTIVE' OR
     // defectiveSince IS NOT NULL)), and assert per asset that the SQL stage
-    // equals repairStage() in JS. Correcting an earlier draft's comment:
-    // `listAssets` (src/server/modules/inventory/queries.ts) does NOT page
-    // this SQL cut — it fetches the repair candidate set and filters in JS
-    // via toRow -> stageOf -> repairStage; only `repairStageIds` (reached by
-    // the export route and the two bulk actions) ever executes
-    // REPAIR_STAGE_CASE_SQL. This block is the one place in the whole
-    // battery that reads the raw SQL for every stage, including
-    // beyond-repair's arithmetic and centavo rule (BR-LT-0090 in the seed).
+    // equals repairStage() in JS. Since Phase 24 (spec §5.1) `listAssets`
+    // (src/server/modules/inventory/queries.ts) pages this very SQL id set
+    // through `pagedSnapshot` instead of filtering the candidate rows in JS,
+    // so the screen and the actions now read one cut — but `repairStageIds`
+    // remains the ONE executor of REPAIR_STAGE_CASE_SQL (listAssets, the
+    // export route and the two bulk actions all reach the SQL through it).
+    // Case 8 is where the paging of that cut is asserted; this block is the
+    // one place in the whole battery that reads the raw SQL for every stage,
+    // including beyond-repair's arithmetic and centavo rule (BR-LT-0090 in
+    // the seed).
     const sqlRows = await db.$queryRaw<Array<{ id: string; stage: string }>>(Prisma.sql`
       SELECT "id", ${Prisma.raw(REPAIR_STAGE_CASE_SQL)} AS stage
       FROM "Asset"
@@ -298,19 +360,171 @@ test.describe("it gaps", () => {
     await login(page, IT);
     for (const stage of REPAIR_STAGES) {
       // A second, screen-facing agreement point: the toolbar's own "N
-      // assets" total (aria-live="polite") is `listAssets`' JS-filtered
-      // count for this stage. RepairChips itself
+      // assets" total (aria-live="polite") is the count of `listAssets`' cut
+      // for this stage — since Phase 24 the SQL id set itself, counted in
+      // `pagedSnapshot`. RepairChips itself
       // (src/components/inventory/repair-chips.tsx) renders no numeric
       // badge on the chips — verified against source — so the total-assets
       // label is the real, visible parity point, not a per-chip count. The
       // SQL agreement is already proven above; this only re-confirms the
-      // screen matches the same JS rule.
+      // screen shows the same number repairStage() derives in JS.
       await page.goto(`/inventory?stage=${stage}`);
       const total = page.getByText(/^\d+ assets?$/);
       await expect(total).toBeVisible({ timeout: 15_000 });
       const text = await total.textContent();
       const shown = Number(text!.match(/\d+/)![0]);
       expect(shown, `stage ${stage}`).toBe(byStage.get(stage) ?? 0);
+    }
+  });
+
+  test("7. with no same-type spare the Replace picker shows only the \"Other spares\" heading", async ({ page }) => {
+    // Plan P-3: the seed's ONLY same-type spare for BR-LT-0201 is BR-LT-0181,
+    // so making that one row ineligible is the whole experiment. `returnedAt`
+    // is the reversible lever — `spareOptions` filters `returnedAt: null`
+    // (a returned-untriaged spare is not offerable yet) — and it changes no
+    // status, so the `finally` puts the seed back exactly as it was for the
+    // cases after this one, and for a second run of the whole file.
+    const spare = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0181" } });
+    await db.asset.update({ where: { id: spare.id }, data: { returnedAt: new Date() } });
+    try {
+      const laptop = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0201" } });
+      await login(page, IT);
+      await page.goto(`/inventory/${laptop.id}`);
+      await page.getByRole("button", { name: "Replace" }).click();
+      const dialog = page.getByRole("dialog", { name: "Replace BR-LT-0201" });
+      await waitForHydration(dialog);
+
+      await dialog.getByRole("combobox", { name: "Replacement" }).click();
+      // One heading, not an empty "Same type" block above it: headingBefore
+      // only emits a heading for a group that actually has a row.
+      await expect(dialog.getByRole("listbox").locator('li[role="presentation"]')).toHaveText(["Other spares"]);
+      await expect(dialog.getByRole("option", { name: /BR-LT-0181/ })).toHaveCount(0);
+
+      // R3 (final review I-2): the one grouped heading here describes every option under it.
+      const describedBy = await dialog.getByRole("option").first().getAttribute("aria-describedby");
+      await expect(dialog.locator(`[id="${describedBy}"]`)).toHaveText("Other spares");
+
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+    } finally {
+      await db.asset.update({ where: { id: spare.id }, data: { returnedAt: null } });
+    }
+  });
+
+  test("8. the repairs view pages the SQL cut: the total is the cut size, a page holds at most ENTITY_PAGE_SIZE rows, in defectiveSince order", async ({ page }) => {
+    // The same raw cut case 6 proves correct, reused here as the ORACLE for
+    // what the screen owes: Phase 24 (spec §5.1) made `listAssets` page that
+    // id set through `pagedSnapshot`'s count/skip/take, so the toolbar total
+    // is the size of the cut and the table holds one page of it — where the
+    // pre-Phase-24 list loaded every candidate row and sliced in memory.
+    const sqlRows = await db.$queryRaw<Array<{ id: string; stage: string }>>(Prisma.sql`
+      SELECT "id", ${Prisma.raw(REPAIR_STAGE_CASE_SQL)} AS stage
+      FROM "Asset"
+      WHERE "cls" = 'IT'::"AssetClass" AND ("status" = 'DEFECTIVE' OR "defectiveSince" IS NOT NULL)
+    `);
+    const idsByStage = new Map<string, string[]>();
+    for (const r of sqlRows) idsByStage.set(r.stage, [...(idsByStage.get(r.stage) ?? []), r.id]);
+
+    await login(page, IT);
+    for (const stage of REPAIR_STAGES) {
+      const ids = idsByStage.get(stage) ?? [];
+      if (ids.length === 0) continue;
+      // `[{ defectiveSince: "asc" }, { id: "asc" }]` is exactly what
+      // buildAssetOrderBy(sort=defectiveSince) hands Prisma (its id tiebreak
+      // is appended to every sort), so the expected order is produced by the
+      // same rule the page uses — including PostgreSQL's NULLS LAST on an
+      // ascending column, which a hand-written expectation would get wrong.
+      const expected = (
+        await db.asset.findMany({
+          where: { id: { in: ids } },
+          orderBy: [{ defectiveSince: "asc" }, { id: "asc" }],
+          select: { tag: true },
+        })
+      ).map((a) => a.tag);
+
+      await page.goto(`/inventory?stage=${stage}&sort=defectiveSince`);
+      const total = page.getByText(/^\d+ assets?$/);
+      await expect(total).toBeVisible({ timeout: 15_000 });
+      expect(Number((await total.textContent())!.match(/\d+/)![0]), `stage ${stage} total`).toBe(ids.length);
+
+      await expect(page.locator("tbody tr"), `stage ${stage} rows on page 1`).toHaveCount(
+        Math.min(ids.length, ENTITY_PAGE_SIZE),
+      );
+      // The tag cell is the only link inside a row (inventory-table.tsx:
+      // model, category, assignee, status… are plain text), so this reads the
+      // first column without depending on the checkbox / status-dot offsets.
+      const tagCells = page.locator('tbody tr td a[href^="/inventory/"]');
+      expect(await tagCells.allTextContents(), `stage ${stage} order on page 1`).toEqual(
+        expected.slice(0, ENTITY_PAGE_SIZE),
+      );
+
+      // Page 2 of the same cut. Every seeded stage cut is far smaller than a
+      // page (3 rows at most), so today `?page=2` is out of range and the
+      // clamp `pageOf` applies INSIDE pagedSnapshot's snapshot — on the SQL
+      // cut's own count — lands back on page 1 with the total unchanged. The
+      // first branch is the real second page the moment a cut outgrows a page.
+      await page.goto(`/inventory?stage=${stage}&sort=defectiveSince&page=2`);
+      await expect(total).toBeVisible({ timeout: 15_000 });
+      expect(Number((await total.textContent())!.match(/\d+/)![0]), `stage ${stage} total on page 2`).toBe(ids.length);
+      expect(await tagCells.allTextContents(), `stage ${stage} page 2`).toEqual(
+        ids.length > ENTITY_PAGE_SIZE
+          ? expected.slice(ENTITY_PAGE_SIZE, 2 * ENTITY_PAGE_SIZE)
+          : expected.slice(0, ENTITY_PAGE_SIZE),
+      );
+    }
+  });
+
+  test("9. retention: worker:prune removes finished deliveries and jobs older than 90 days and nothing else; the deliveries page states the rule", async ({ page }) => {
+    const endpoint = await db.webhookEndpoint.findFirstOrThrow({ where: { active: true } });
+    const old = new Date(Date.now() - (RETENTION_DAYS + 1) * 86_400_000);
+    // Counted here, not off the seed: cases 1 and 5 above may have enqueued
+    // work of their own, and all of it is fresh, so it must survive the prune.
+    const before = { deliveries: await db.webhookDelivery.count(), jobs: await db.job.count() };
+    // Plan P-5: an EXECUTE_APPROVAL job, never DELIVER_WEBHOOK — the latter
+    // carries the `Job_deliver_payload_shape` check and the one-live-job-per-
+    // delivery index, neither of which is what retention is about. Prisma
+    // keeps an explicitly supplied `@updatedAt` value on create, which is what
+    // makes the 91-day-old job possible at all (jobs prune by updatedAt, P-4).
+    const oldD = await db.webhookDelivery.create({
+      data: { endpointId: endpoint.id, event: "approval.executed", payload: { e2e: "old" }, status: "DELIVERED", attempts: 1, deliveredAt: old, createdAt: old },
+    });
+    const freshD = await db.webhookDelivery.create({
+      data: { endpointId: endpoint.id, event: "approval.executed", payload: { e2e: "fresh" }, status: "DELIVERED", attempts: 1, deliveredAt: new Date() },
+    });
+    const oldJ = await db.job.create({
+      data: { type: "EXECUTE_APPROVAL", payload: { approvalId: "e2e-old" }, status: "DONE", attempts: 1, createdAt: old, updatedAt: old },
+    });
+    const freshJ = await db.job.create({
+      data: { type: "EXECUTE_APPROVAL", payload: { approvalId: "e2e-fresh" }, status: "DONE", attempts: 1 },
+    });
+    try {
+      // The npm script the operator runs, not pruneRetention() imported here:
+      // this case owes the whole path — tsx entry, relative worker imports,
+      // its own PrismaClient against this worktree's database — not just the
+      // function's logic (which src/lib/retention.test.ts already unit-tests).
+      // M-7 (final review): capture the one-shot's stdout and pin the operator-facing
+      // line spec §5.4 prescribes verbatim — exit code 0 alone said nothing about it.
+      const out = execSync("npm run worker:prune", { timeout: 120_000, encoding: "utf8" });
+      expect(out).toMatch(/\[prune\] removed 1 deliveries and 1 jobs older than 90 days/);
+
+      expect(await db.webhookDelivery.findUnique({ where: { id: oldD.id } })).toBeNull();
+      expect(await db.job.findUnique({ where: { id: oldJ.id } })).toBeNull();
+      expect(await db.webhookDelivery.findUnique({ where: { id: freshD.id } })).not.toBeNull();
+      expect(await db.job.findUnique({ where: { id: freshJ.id } })).not.toBeNull();
+      // "and nothing else": every pre-existing row (fresh DELIVERED, RETRYING
+      // and DEAD deliveries; the PENDING job) plus the one fresh fixture each.
+      expect(await db.webhookDelivery.count()).toBe(before.deliveries + 1);
+      expect(await db.job.count()).toBe(before.jobs + 1);
+
+      // The rule is also stated where the attempts are read. RETENTION_NOTE is
+      // imported, never retyped, so this cannot drift from RETENTION_DAYS.
+      await login(page, ADMIN);
+      await page.goto("/admin/webhooks/deliveries");
+      await expect(page.getByText(RETENTION_NOTE, { exact: true })).toBeVisible();
+      await expectNoSeriousAxe(page);
+    } finally {
+      await db.webhookDelivery.deleteMany({ where: { id: { in: [oldD.id, freshD.id] } } });
+      await db.job.deleteMany({ where: { id: { in: [oldJ.id, freshJ.id] } } });
     }
   });
 });

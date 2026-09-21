@@ -120,20 +120,49 @@ unconditional date floor keeps its position (Task 4 Minor 5). None blocks anythi
 
 ## 6. The IT side — the current focus (2026-09-10 →)
 
-The user chose to work on the IT workspace next. Candidates already on record (PICKUP §5, HANDOVER §8):
+The user chose to work on the IT workspace next. Candidates already on record (PICKUP §5, HANDOVER §8).
+**Corrected 2026-09-17 (Phase 24, `D-2`):** this list was carrying three items as open that Phase 20 had
+already closed — the Phase 24 brainstorm found it out, took the three that really were open, and shipped
+them. Each line below now says where it stands.
 
-- `bulkChangeStatus` returns a bare `{ changed, skipped }` while `bulkAssign` names the skipped tags and
-  why (Phase 16 put the change out of scope).
-- `checkIdentifiers` leaks tag/serial existence across classes (accepted for Phase 16; a class-scoped check
-  or a neutral message would close it).
-- The Replace dialog's headerless "other spares" list.
+- **Closed in Phase 20 —** `bulkChangeStatus` returned a bare `{ changed, skipped }` while `bulkAssign`
+  named the skipped tags and why (Phase 16 put the change out of scope). Phase 20 §6 gap 1 gave both the
+  same `{ tag, reason }[]` shape, and the bulk drawer renders the skipped list the same way for both.
+- **Closed in Phase 20 —** `checkIdentifiers` leaked tag/serial existence across classes (accepted for
+  Phase 16). Phase 20 §6 gap 2 made `cls` required and scoped both `where` clauses to it; a genuine
+  cross-class collision now surfaces only at submit, as the pre-existing neutral conflict copy.
+- **Shipped in Phase 24 —** the Replace dialog's headerless "other spares" list. `ComboOption` gained
+  `group?: string` and `EntityCombobox` renders a heading wherever `headingBefore()` says the group
+  changed, so the picker reads SAME TYPE / OTHER SPARES — and only OTHER SPARES when no same-type spare
+  exists, which was the gap. The per-row "Same type" / "Other spare" note is gone: under a heading it
+  said the same thing twice.
 - **Answered in Phase 21 —** Direct IT changes leave no PENDING row, so the record's pending banner and
   `Open requests` stat only ever show Purchasing or legacy approvals for IT devices. Not built as a
   pending row: `Approval.appliedDirectly` (migration 22) makes every direct change queryable, the Closed
   tab's route chips and `via` filter separate it from queue approvals, its detail page carries a "How it
   was applied" card, and an admin Home section totals the last 7 days by kind.
-- The loaner rule reads a standard slot as "missing" while a person's only device of that type is on loan.
-- The repair-stage saved view still groups DEFECTIVE assets in memory rather than in SQL (Phase 17 left it).
-- Webhook delivery rows have no retention policy.
+- **Closed in Phase 20 —** the loaner rule read a standard slot as "missing" while a person's only device
+  of that type was on loan. Phase 20 §6 gap 3 marks such a slot `coveredByLoan`, so the tile reads "on
+  loan" instead of a policy gap.
+- **Shipped in Phase 24 —** the repair-stage saved view still grouped DEFECTIVE assets in memory rather
+  than in SQL (Phase 17 left it). The stage cut has been SQL since Phase 20; `listAssets` now pages
+  `repairStageIds`' id set through `pagedSnapshot` instead of loading every candidate row with its
+  includes. Stage *facet counts* deliberately stay on the candidate set (spec §0 decision 5).
+- **Shipped in Phase 24 —** webhook delivery rows had no retention policy. The worker prunes
+  `DELIVERED`/`DEAD` deliveries and `DONE`/`DEAD` jobs older than 90 days in id batches, at start and
+  hourly, with `npm run worker:prune` for a one-off pass and the rule stated on the deliveries page.
 
-The brainstorm for the IT phase decides which of these, and what else, goes in.
+Still open, and named out of scope by Phase 24's spec §0 decision 1 — each stays recorded in PICKUP §5 /
+HANDOVER §8:
+
+- `/audit` class scoping of approval, category and type rows (only `asset` rows of the other class are
+  excluded today).
+- Case-insensitive uniqueness for reference data (categories, types, departments, policy titles).
+- The activity page's action facet, and its import-update sentences.
+- **New, from Phase 24's final review (I-2, ruling R3):** the fuller ARIA shape for a grouped combobox —
+  `role="group"` with an `aria-label` per block wrapping that block's options. Phase 24 closed the
+  accessibility finding additively instead (a heading `id` plus `aria-describedby` on the options under a
+  *grouped* heading), because the group shape contradicts spec §6.1's flat-`li` instruction and would
+  change the DOM `e2e/it-gaps.spec.ts` cases 4 and 7 assert on. **Only if AT feedback asks for it.**
+
+The brainstorm for the next IT phase decides which of these, and what else, goes in.

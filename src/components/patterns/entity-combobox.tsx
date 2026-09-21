@@ -5,12 +5,13 @@ import { cn } from "@/lib/cn";
 import { fieldClasses } from "@/components/ui/input";
 import { useOverlayLayer } from "@/components/ui/use-focus-trap";
 import { recentOptions } from "@/lib/recent-picks";
+import { headingBefore } from "@/lib/combo-groups";
 
 export interface ComboOption {
   value: string;
   label: string;
   sub?: string;
-  note?: string; // e.g. "reserved for K. Uy" — shown, not disabling
+  group?: string; // Phase 24: heading label; consecutive rows sharing a group sit under one heading
 }
 
 export function EntityCombobox({
@@ -61,6 +62,18 @@ export function EntityCombobox({
     setOpen(false);
   }
 
+  // Phase 24 (final review I-2, ruling R3): the heading row is role="presentation" — outside the
+  // accessibility tree — so options under a grouped heading point at it with aria-describedby and
+  // aria-activedescendant users still hear "Same type" / "Other spares". The synthetic Recent/All
+  // headings are not described: the recent-enabled callers announce exactly as before.
+  let groupHeadingId: string | undefined;
+  const rows = shown.map((option, i) => {
+    const heading = headingBefore(shown, i, recentShown.length);
+    const headingId = `${listId}-h${i}`;
+    if (heading !== null) groupHeadingId = heading === option.group ? headingId : undefined;
+    return { option, heading, headingId, describedBy: option.group !== undefined ? groupHeadingId : undefined };
+  });
+
   return (
     <div className="relative">
       <input
@@ -95,18 +108,16 @@ export function EntityCombobox({
           style={{ animation: "fade var(--dur-2) var(--ease-std)" }}
         >
           {shown.length === 0 && <li className="px-2 py-1.5 text-xs text-fg-muted">No matches.</li>}
-          {shown.map((option, i) => (
+          {rows.map(({ option, heading, headingId, describedBy }, i) => (
             <Fragment key={option.value}>
-              {recentShown.length > 0 && i === 0 && (
-                <li role="presentation" className="px-2 pb-0.5 pt-1 text-[10px] uppercase tracking-[0.06em] text-fg-faint">Recent</li>
-              )}
-              {recentShown.length > 0 && i === recentShown.length && (
-                <li role="presentation" className="px-2 pb-0.5 pt-1 text-[10px] uppercase tracking-[0.06em] text-fg-faint">All</li>
+              {heading && (
+                <li id={headingId} role="presentation" className="px-2 pb-0.5 pt-1 text-[10px] uppercase tracking-[0.06em] text-fg-faint">{heading}</li>
               )}
               <li
                 id={`${listId}-${option.value}`}
                 role="option"
                 aria-selected={option.value === value}
+                aria-describedby={describedBy}
                 className={cn(
                   "cursor-pointer rounded-[5px] px-2 py-1.5 text-xs",
                   i === active ? "bg-accent-tint text-fg" : "text-fg-secondary",
@@ -116,7 +127,6 @@ export function EntityCombobox({
               >
                 <span className="font-medium">{option.label}</span>
                 {option.sub && <span className="ml-1.5 font-mono text-[10px] text-fg-faint">{option.sub}</span>}
-                {option.note && <span className="ml-1.5 text-[10px] text-fg-muted">{option.note}</span>}
               </li>
             </Fragment>
           ))}

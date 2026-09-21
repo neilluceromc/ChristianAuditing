@@ -18,7 +18,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "worker": "tsx src/worker/index.ts",
-    "worker:once": "tsx src/worker/index.ts --once"
+    "worker:once": "tsx src/worker/index.ts --once",
+    "worker:prune": "tsx src/worker/prune.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.13.0",

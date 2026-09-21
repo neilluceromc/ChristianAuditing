@@ -2,6 +2,8 @@ import { prisma } from "../server/db/client";
 import { executeApproval } from "./execute-approval";
 import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";
 import { MAX_JOB_ATTEMPTS } from "../lib/jobs";
+import { pruneRetention } from "./retention";
+import { RETENTION_DAYS, pruneDue } from "../lib/retention";
 
 const WORKER_ID = `worker-${process.pid}`;
 const POLL_MS = 3_000;
@@ -9,6 +11,7 @@ const STALE_MS = 5 * 60_000;
 const ONCE = process.argv.includes("--once");
 
 let draining = false;
+let lastPruneAt: Date | null = null;
 
 interface LeasedJob {
   id: string;
@@ -96,12 +99,28 @@ async function tick(): Promise<boolean> {
   return true;
 }
 
+/** Phase 24 (spec §5.3): retention runs at start and hourly; a failure is logged and never stops job processing. */
+async function safePrune(): Promise<void> {
+  try {
+    const r = await pruneRetention();
+    if (r.deliveries || r.jobs) {
+      console.log(`[worker] pruned ${r.deliveries} deliver${r.deliveries === 1 ? "y" : "ies"}, ${r.jobs} job${r.jobs === 1 ? "" : "s"} older than ${RETENTION_DAYS} days`);
+    }
+  } catch (err) {
+    console.error(`[worker] prune failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    lastPruneAt = new Date();
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`[worker] ${WORKER_ID} starting${ONCE ? " (--once)" : ""}`);
   await recoverStale();
+  await safePrune();
   let cycles = 0;
   for (;;) {
     if (draining) break;
+    if (pruneDue(lastPruneAt, new Date())) await safePrune();
     const worked = await tick();
     if (!worked) {
       if (ONCE) break;
