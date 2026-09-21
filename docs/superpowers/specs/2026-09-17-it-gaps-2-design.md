@@ -2,7 +2,8 @@
 
 **Status:** implemented on branch `phase-24-it-gaps-2` (6 tasks, `D-1`…`D-10` — the final whole-branch
 review added `D-8`, the fix wave `D-9`, the final battery `D-10`), code-complete 2026-09-17 at final tree
-`7601cab`, final-review fix wave included; unmerged and unpushed. Design approved in conversation
+`7601cab`, final-review fix wave included; merged to `main` via `--no-ff` `48c37f7` and pushed 2026-09-21;
+staging redeployed 2026-09-21 (code-only `-Force`, no migration) and runs it at `http://192.168.203.183:3000`. Design approved in conversation
 2026-09-17 (scope = the three open IT items; retention 90 days for finished deliveries and jobs;
 approach A "reuse what exists"; three sections approved).
 
