@@ -9,11 +9,13 @@ import {
   type Decision, type DecisionCandidate, type ReportTotals,
 } from "@/lib/offboarding";
 import {
-  buildOffboardingOrderBy, buildOffboardingWhere, dueOf, progressOf, sortByUndecided, type Due, type Progress,
+  buildOffboardingOrderBy, buildOffboardingWhere, derivedFilters, dueOf, narrowedFacetCounts, progressOf,
+  sortByUndecided,
 } from "@/lib/offboarding-list";
 import { pageOf, ENTITY_PAGE_SIZE } from "@/lib/paging";
 import type { ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
+import { EXPORT_CAP, type OffboardingExportRow } from "@/lib/export-columns";
 
 /** One row of the /offboarding queue. */
 export interface OffboardingRow {
@@ -189,25 +191,22 @@ async function offboardingFacets(state: ListState): Promise<{ department: FacetO
   ]);
 
   const today = localDateISO(new Date());
-  const progressCounts: Record<Progress, number> = { open: 0, complete: 0 };
-  const dueCounts: Record<Due, number> = { overdue: 0, "on-track": 0 };
-  for (const e of derivedCandidates) {
-    const row = toOffboardingRow(e);
-    progressCounts[progressOf(row.undecided)] += 1;
-    dueCounts[dueOf(row.dueAt, today)] += 1;
-  }
+  const { progressFilter, dueFilter } = derivedFilters(state);
+  // Phase 25 (spec §6.4): each derived facet's counts are narrowed by the OTHER
+  // derived facet's active filter (department is already in the SQL where).
+  const counts = narrowedFacetCounts(derivedCandidates.map(toOffboardingRow), progressFilter, dueFilter, today);
 
   return {
     department: departments.map((d) => ({
       value: d.id, label: d.name, count: deptGroups.find((g) => g.departmentId === d.id)?._count ?? 0,
     })),
     progress: [
-      { value: "open", label: "Open", count: progressCounts.open },
-      { value: "complete", label: "Complete", count: progressCounts.complete },
+      { value: "open", label: "Open", count: counts.progress.open },
+      { value: "complete", label: "Complete", count: counts.progress.complete },
     ],
     due: [
-      { value: "overdue", label: "Overdue", count: dueCounts.overdue },
-      { value: "on-track", label: "On track", count: dueCounts["on-track"] },
+      { value: "overdue", label: "Overdue", count: counts.due.overdue },
+      { value: "on-track", label: "On track", count: counts.due["on-track"] },
     ],
   };
 }
@@ -228,10 +227,7 @@ export async function listOffboarding(state: ListState): Promise<{
 }> {
   const where = buildOffboardingWhere(state);
   const orderBy = buildOffboardingOrderBy(state.sort);
-  const progressFilter = (state.filters.progress ?? []).filter(
-    (p): p is Progress => p === "open" || p === "complete",
-  );
-  const dueFilter = (state.filters.due ?? []).filter((d): d is Due => d === "overdue" || d === "on-track");
+  const { progressFilter, dueFilter } = derivedFilters(state);
 
   let rows: OffboardingRow[];
   let pg: ReturnType<typeof pageOf>;
@@ -292,7 +288,8 @@ export interface WizardItem {
   // ApprovalType, not string: it comes straight off the Approval row, and the
   // wizard renders it through APPROVAL_TYPE_LABEL the same way decideItem's
   // refusal does
-  blockedBy: { refNo: string; type: ApprovalType } | null;
+  // Phase 25: carries `id` so the wizard can link the blocker's refNo to /approvals/{id}.
+  blockedBy: { id: string; refNo: string; type: ApprovalType } | null;
 }
 
 export interface WizardSlot {
@@ -387,7 +384,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
         assetId: { in: await heldIds(employeeId) },
         state: { in: [...OPEN_APPROVAL_STATES] },
       },
-      select: { refNo: true, type: true, assetId: true },
+      select: { id: true, refNo: true, type: true, assetId: true },
     }),
     prisma.equipmentPolicy.findMany({
       include: { slots: { include: { assetType: true }, orderBy: [{ name: "asc" }, { id: "asc" }] } },
@@ -418,7 +415,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
   const returns = since ? allReturns.filter((r) => r.createdAt >= since) : [];
   const byAsset = candidatesFor(employee, allReturns);
   const openByAsset = new Map(
-    blockers.filter((b) => b.assetId).map((b) => [b.assetId!, { refNo: b.refNo, type: b.type }]),
+    blockers.filter((b) => b.assetId).map((b) => [b.assetId!, { id: b.id, refNo: b.refNo, type: b.type }]),
   );
 
   /**
@@ -509,5 +506,37 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
       rows.filter((i) => i.decision).map((i) => ({ outcome: i.decision!.outcome, cost: i.cost })),
     ),
     completedAt: completed?.createdAt ?? null,
+  };
+}
+
+/**
+ * Phase 25 (spec §6.5): the queue as `/offboarding` shows it — same where,
+ * same in-memory progress/due cut, same sort — unpaged, capped before any
+ * row is loaded (same shape as `employeeExportRows`).
+ */
+export async function offboardingExportRows(
+  state: ListState,
+): Promise<{ rows: OffboardingExportRow[] } | { over: number }> {
+  const where = buildOffboardingWhere(state);
+  const total = await prisma.employee.count({ where });
+  if (total > EXPORT_CAP) return { over: total };
+  const orderBy = buildOffboardingOrderBy(state.sort);
+  const candidates = await prisma.employee.findMany({
+    where,
+    orderBy: orderBy ?? [{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }],
+    include: OFFBOARDING_INCLUDE,
+  });
+  const today = localDateISO(new Date());
+  const { progressFilter, dueFilter } = derivedFilters(state);
+  let rows = candidates.map(toOffboardingRow);
+  if (progressFilter.length > 0) rows = rows.filter((r) => progressFilter.includes(progressOf(r.undecided)));
+  if (dueFilter.length > 0) rows = rows.filter((r) => dueFilter.includes(dueOf(r.dueAt, today)));
+  if (orderBy === null) rows = sortByUndecided(rows, state.sort.find((s) => s.key === "undecided")?.dir ?? "asc");
+  return {
+    rows: rows.map((r) => ({
+      employeeNo: r.employeeNo, name: r.name, department: r.department,
+      started: r.started, dueAt: r.dueAt, undecided: r.undecided,
+      progress: progressOf(r.undecided) === "open" ? "Open" : "Complete",
+    })),
   };
 }

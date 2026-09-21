@@ -65,7 +65,14 @@ export default async function OffboardingWizardPage({
             <StatusDot value={employee.employment} ns="employment" />
             <span className="font-mono text-[10.5px] text-fg-muted">{employee.employment}</span>
             {employee.dueAt
-              ? <DuePill dueAt={employee.dueAt} today={today} withDate />
+              ? (
+                <DuePill
+                  dueAt={employee.dueAt}
+                  today={today}
+                  withDate
+                  override={employee.employment === "OFFBOARDED" ? { tone: "neutral", text: "closed" } : undefined}
+                />
+              )
               : active && canMutate && <Link href={`/employees/${employeeId}/edit`} className="text-[10.5px] text-accent underline hover:text-accent-hover">Set a completion date</Link>}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
@@ -317,7 +324,7 @@ export default async function OffboardingWizardPage({
                     {i.decision ? (
                       <div className="flex flex-col gap-1 text-xs text-fg-secondary">
                         <span className="font-mono text-[11px]">
-                          <Link href="/approvals" className="text-accent hover:underline">{i.decision.refNo}</Link>
+                          <Link href={`/approvals/${i.decision.id}`} className="text-accent hover:underline">{i.decision.refNo}</Link>
                           {" · "}
                           {i.status} → {i.decision.toStatus ?? "?"}
                         </span>
@@ -333,7 +340,7 @@ export default async function OffboardingWizardPage({
                       // otherwise refuse the decision with no way to see why
                       <p className="text-xs" style={{ color: "var(--st-attention-text)" }}>
                         {i.tag} is held by{" "}
-                        <Link href="/approvals" className="font-mono text-accent hover:underline">
+                        <Link href={`/approvals/${i.blockedBy.id}`} className="font-mono text-accent hover:underline">
                           {i.blockedBy.refNo}
                         </Link>{" "}
                         {/* the same label decideItem's refusal uses — one block
@@ -481,7 +488,7 @@ export default async function OffboardingWizardPage({
                       {/* linked like the collect step's copy of the same refNo —
                           the report is where you most want the jump */}
                       <Td mono className="text-[10.5px]">
-                        <Link href="/approvals" className="text-accent hover:underline">{i.decision.refNo}</Link>
+                        <Link href={`/approvals/${i.decision.id}`} className="text-accent hover:underline">{i.decision.refNo}</Link>
                         {" · "}
                         {i.decision.state}
                       </Td>
