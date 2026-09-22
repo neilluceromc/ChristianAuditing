@@ -80,6 +80,26 @@ export interface HoldingItem {
   expiresAt: Date | null;
 }
 
+/**
+ * Phase 29 (ruling R8): one hold marks ONE tile. Keyed only on the type, a
+ * per-tile `find` lit up every empty slot of that type and gave each its own
+ * "Assign reserved" for the SAME asset (and `markChanged` could then ring a
+ * tile that never changed). This consumes each reserved-for-this-person spare
+ * into the first empty tile of its type, in the order the grid renders.
+ */
+function reservationsBySlot(ordered: SlotTile[], spares: SpareOption[]): Map<string, SpareOption> {
+  const pool = spares.filter((s) => s.reservedForThis && s.typeId !== null && !s.pendingRef);
+  const out = new Map<string, SpareOption>();
+  for (const tile of ordered) {
+    if (tile.asset) continue;
+    const i = pool.findIndex((s) => s.typeId === tile.typeId);
+    if (i < 0) continue;
+    out.set(tile.slotId, pool[i]);
+    pool.splice(i, 1);
+  }
+  return out;
+}
+
 export function LoadoutView({
   employeeId,
   employeeName,
@@ -147,6 +167,9 @@ export function LoadoutView({
   // the tile dims while the action runs, then rings once for 2 s.
   const [busySlotId, setBusySlotId] = useState<string | null>(null);
   const [changedSlotId, setChangedSlotId] = useState<string | null>(null);
+  // Phase 29 (plan P-6): the tile "Fill N gaps" wants focused, held until the
+  // grid has actually mounted — from the Table view every tile ref is null.
+  const [pendingFocusSlotId, setPendingFocusSlotId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const tileRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -155,6 +178,8 @@ export function LoadoutView({
   // Phase 29 (spec §4.4): required gaps first, then what is filled or on loan,
   // then optional gaps. `tileRefs` and the roving grid keys index THIS order.
   const ordered = orderTiles(slots);
+  // Ruling R8: resolved once for the whole grid, so a hold cannot mark two tiles.
+  const reservedBySlot = reservationsBySlot(ordered, spares);
 
   function markChanged(slotId: string | null) {
     if (!slotId) return;
@@ -390,13 +415,35 @@ export function LoadoutView({
       const action = (e as CustomEvent<{ action: "focus-gap" | "fill-first" }>).detail?.action;
       const idx = ordered.findIndex((t) => !t.asset && !t.coveredByLoan && t.required);
       if (idx < 0) return;
-      if (action === "focus-gap") tileRefs.current[idx]?.focus();
+      // Both actions land on the grid, so the Table view has to give way first
+      // — every tile ref is null while it is mounted, and the optional chain
+      // would swallow the whole thing silently. Deliberately NOT `pickView`:
+      // a jump from the header is not the operator choosing a view, so it
+      // must not overwrite the Table they asked to be remembered.
+      setView("slots");
+      if (action === "focus-gap") setPendingFocusSlotId(ordered[idx].slotId);
       else if (action === "fill-first" && mayAct) openFill(ordered[idx]);
     }
     window.addEventListener("br:loadout", onLoadout);
     return () => window.removeEventListener("br:loadout", onLoadout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ordered, mayAct]);
+
+  // The focus itself waits for the commit that mounts the grid: refs are set
+  // before effects run, so the render `setView("slots")` schedules is the one
+  // that finds the tile. Keyed on the slot id, not the index, so a refresh
+  // that reorders the grid still lands on the tile the operator asked for.
+  useEffect(() => {
+    if (!pendingFocusSlotId || view !== "slots") return;
+    const idx = ordered.findIndex((t) => t.slotId === pendingFocusSlotId);
+    // The slot went away (a refresh filled or waived it) — drop the request
+    // rather than leaving it armed for whatever reuses that id later.
+    if (idx < 0) { setPendingFocusSlotId(null); return; }
+    const el = tileRefs.current[idx];
+    if (!el) return;
+    el.focus();
+    setPendingFocusSlotId(null);
+  }, [pendingFocusSlotId, view, ordered]);
 
   // The tile a Replace dialog opened for isn't self-describing its slot's
   // type — look it up from `slots` so the picker can rank same-type
@@ -531,11 +578,10 @@ export function LoadoutView({
                   return { label: "Remove exception", onSelect: () => removeException(tile.exceptionId!) };
               }
             });
-            // Phase 29 (spec §4.4): a hold placed for THIS person that fits this
-            // empty slot — the tile says so, and offers the one-click assign.
-            const reservedHere = !a
-              ? spares.find((s) => s.reservedForThis && s.typeId && s.typeId === tile.typeId && !s.pendingRef) ?? null
-              : null;
+            // Phase 29 (spec §4.4): the hold this slot got out of the one
+            // consuming pass above — the tile says so, and offers the
+            // one-click assign. Never the same asset on two tiles (R8).
+            const reservedHere = reservedBySlot.get(tile.slotId) ?? null;
             const busy = busySlotId === tile.slotId;
             const changed = changedSlotId === tile.slotId;
 
@@ -955,12 +1001,20 @@ export function LoadoutView({
       >
         <div className="flex flex-col gap-3">
           {/* Plan P-9: a searchable picker, and what it CANNOT offer is said in
-              one muted line rather than shown as unpickable rows. */}
-          {replaceOptions.length === 0 ? (
+              one muted line rather than shown as unpickable rows. "There is
+              nothing to buy" and "everything there is is promised" are
+              different problems and must not share a sentence. */}
+          {spares.length === 0 ? (
             <p className="text-xs text-fg-muted">
               No spares in stock —{" "}
               <Link href="/inventory/register" className="text-accent underline hover:text-accent-hover">register one</Link> or{" "}
               <Link href="/purchases/new" className="text-accent underline hover:text-accent-hover">route a purchase</Link>.
+            </p>
+          ) : replaceOptions.length === 0 ? (
+            <p className="text-xs text-fg-muted">
+              {excludedCount === 1
+                ? "The only spare is held or queued for someone else"
+                : `All ${excludedCount} spares are held or queued for someone else`}
             </p>
           ) : (
             <FormField
