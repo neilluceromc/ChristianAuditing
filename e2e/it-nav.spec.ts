@@ -352,10 +352,15 @@ test.describe("it navigation sweep (Phase 25)", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${nina.id}`);
-    // Phase 29 (spec §4.3): the four-Stat grid became state-aware — a person
-    // holding nothing reads "No items yet" instead, so Nina (day one, holds
-    // nothing) no longer has an "Open requests" tile to read. The LIST the
-    // case is really about is unconditional and still there.
+    // PROVISIONAL — Phase 29 ruling R11: the Stat grid currently hides behind
+    // "No items yet" (spec §4.3 made it state-aware on `held.length === 0`), so
+    // Nina — day one, holds nothing, one PENDING request — has no "Open
+    // requests" tile left to read. The final fix wave restores the Open
+    // requests Stat, and this assertion goes back to expecting "1" open request
+    // for Nina:
+    //   await expect(page.getByText("Open requests", { exact: true }).locator("..")).toContainText("1");
+    // Until then the LIST the case is really about is unconditional and still
+    // asserted below, and the count is asserted on Dennis instead.
     await expect(page.getByText("No items yet")).toBeVisible();
     await expect(page.getByRole("link", { name: "APR-2041" })).toHaveAttribute("href", `/approvals/${approval.id}`);
     await expectNoSeriousAxe(page);

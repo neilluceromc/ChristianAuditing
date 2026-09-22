@@ -241,6 +241,34 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       // Asserted on whatever tile that is, so the grid's own slot order is not
       // silently pinned here as well.
       await expect(page.locator(":focus")).toHaveAttribute("aria-label", /, empty, required$/);
+
+      // …and back out again THROUGH THE NEW PATH, driven to submission: plan
+      // P-7's filled tile IS its menu's trigger, and "Return…" behind it is the
+      // only way off a loadout from this screen now. Case 1 opens that dialog
+      // and cancels; this is the case that commits it, so the phase's own
+      // trigger → menu → dialog → write chain is covered end to end. (The
+      // `finally` below still runs: a DB restore is the idempotent safety net
+      // for a run that dies before reaching here, not this assertion's job.)
+      const filledPhoneTile = page.getByRole("button", { name: /^phone slot, Samsung A54, required$/ });
+      await expect(filledPhoneTile).toBeVisible({ timeout: 15_000 });
+      await filledPhoneTile.click();
+      await page.getByRole("menu").getByRole("menuitem", { name: "Return…" }).click();
+      // Spec §4.6: the dialog names tag · model · holder, not just the tag.
+      const returnPhone = page.getByRole("dialog", { name: "Return BR-PH-0301 · Samsung A54 from Nina Robles?" });
+      await waitForHydration(returnPhone);
+      // "Back for triage" is the default outcome (lifecycle.ts), which needs no
+      // reason — filled anyway, so the audit trail says why this happened.
+      await expect(returnPhone.getByLabel("What happens to it")).toHaveValue("TRIAGE");
+      await returnPhone.getByLabel("Reason").fill("returned from the tile menu (e2e)");
+      await returnPhone.getByRole("button", { name: "Confirm" }).click();
+
+      await expect(page.getByText("BR-PH-0301 returned · now SPARE")).toBeVisible({ timeout: 15_000 });
+      // The slot is a gap again…
+      await expect(page.getByRole("button", { name: /^phone slot, .*, required$/ }))
+        .toHaveAttribute("aria-label", /, empty, /, { timeout: 15_000 });
+      // …and the state-chosen primary has followed it all the way back.
+      await expect(page.getByRole("button", { name: "Assign kit" })).toBeVisible({ timeout: 15_000 });
+      expect((await db.asset.findUniqueOrThrow({ where: { id: phone.id } })).assigneeId).toBeNull();
     } finally {
       await db.asset.update({
         where: { id: phone.id },
