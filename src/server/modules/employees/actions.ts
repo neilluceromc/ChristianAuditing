@@ -18,6 +18,8 @@ import { reasonRequired, reasonOptional } from "@/lib/reason";
 import { findSameName } from "@/server/modules/employees/queries";
 import { dayFromISO, defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { localDateISO } from "@/lib/format";
+import { nextEmployeeNo as nextNo } from "@/lib/employee-no";
+import { previewPolicyFor } from "@/lib/policy-preview";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -399,33 +401,25 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
 
+  const errors: Record<string, string> = {};
   const joinedAt = new Date(`${d.joinedAt}T00:00:00Z`);
-  if (Number.isNaN(joinedAt.getTime())) return validationError({ joinedAt: "Use the date picker" });
-  if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) {
-    return validationError({ departmentId: "Unknown department" });
-  }
+  if (Number.isNaN(joinedAt.getTime())) errors.joinedAt = "Use the date picker";
+  if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) errors.departmentId = "Unknown department";
   const today = localDateISO(new Date());
   if (d.employment === "OFFBOARDING" && d.offboardingDueAt && d.offboardingDueAt < minOffboardingDue(today)) {
-    return validationError({ offboardingDueAt: "Pick today or later" });
+    errors.offboardingDueAt = "Pick today or later";
   }
-  // Phase 20 (spec §5): same-name-same-department is a warning that needs a
-  // deliberate confirm — checked BEFORE the employeeNo uniqueness check
-  // (that one is a hard collision; this one is a "are you sure").
-  if (!d.confirmSameName) {
+  // Phase 20 (spec §5) → Phase 29 (plan P-3): the same-name warning is one statement, carried under a key no field
+  // claims so the form hands it to the banner that holds the checkbox — never under Name.
+  if (!d.confirmSameName && !errors.departmentId) {
     const match = await findSameName(d.name, d.departmentId);
     if (match) {
-      return validationError({
-        name:
-          `Another ${d.name} exists in ${match.department} (${match.employeeNo}) — tick 'This is a different ` +
-          "person' to add them anyway",
-      });
+      errors._sameName = "Not added — tick 'This is a different person' to add them anyway"; // ruling R3: the banner's title already names the match, with the linked number
     }
   }
-  const taken = await prisma.employee.findFirst({
-    where: { employeeNo: { equals: d.employeeNo, mode: "insensitive" } },
-    select: { id: true },
-  });
-  if (taken) return validationError({ employeeNo: "That employee number is already in use" });
+  const taken = await prisma.employee.findFirst({ where: { employeeNo: { equals: d.employeeNo, mode: "insensitive" } }, select: { id: true } });
+  if (taken) errors.employeeNo = "That employee number is already in use";
+  if (Object.keys(errors).length) return validationError(errors);
 
   const data = {
     employeeNo: d.employeeNo,
@@ -480,7 +474,7 @@ const checkSameNameSchema = z.object({
  */
 export async function checkSameName(
   input: unknown,
-): Promise<ActionResult<{ match: { employeeNo: string; department: string } | null }>> {
+): Promise<ActionResult<{ match: { id: string; employeeNo: string; department: string } | null }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -490,5 +484,45 @@ export async function checkSameName(
   const { name, departmentId, excludeId } = parsed.data;
   if (!name.trim() || !departmentId) return ok({ match: null });
   const match = await findSameName(name, departmentId, excludeId);
-  return ok({ match: match ? { employeeNo: match.employeeNo, department: match.department } : null });
+  return ok({ match: match ? { id: match.id, employeeNo: match.employeeNo, department: match.department } : null });
+}
+
+const checkEmployeeNoSchema = z.object({ employeeNo: z.string() });
+
+/** Phase 29 (spec §5.2): read-only — the create form's live number check; the same insensitive query createEmployee refuses on. */
+export async function checkEmployeeNo(input: unknown): Promise<ActionResult<{ taken: { id: string; name: string } | null }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = checkEmployeeNoSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const no = parsed.data.employeeNo.trim();
+  if (!no) return ok({ taken: null });
+  const taken = await prisma.employee.findFirst({ where: { employeeNo: { equals: no, mode: "insensitive" } }, select: { id: true, name: true } });
+  return ok({ taken });
+}
+
+/** Phase 29 (spec §5.2): the next free EMP-#### — a suggestion the operator accepts with one click, never a prefill. */
+export async function nextEmployeeNo(): Promise<ActionResult<{ next: string | null }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const rows = await prisma.employee.findMany({ select: { employeeNo: true } });
+  return ok({ next: nextNo(rows.map((r) => r.employeeNo)) });
+}
+
+const previewPolicySchema = z.object({ title: z.string(), departmentId: z.string() });
+
+/** Phase 29 (spec §5.3): read-only — which policy the typed title (or the department) will resolve to. */
+export async function previewPolicy(input: unknown): Promise<ActionResult<{ preview: { name: string; slots: number; via: "title" | "department" } | null }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = previewPolicySchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const policies = await prisma.equipmentPolicy.findMany({ include: { slots: { select: { id: true } } }, orderBy: [{ name: "asc" }] });
+  return ok({ preview: previewPolicyFor(parsed.data.title, parsed.data.departmentId, policies) });
 }

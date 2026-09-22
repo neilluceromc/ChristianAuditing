@@ -37,3 +37,22 @@ export async function saveColumns(input: unknown): Promise<ActionResult<null>> {
   });
   return ok(null);
 }
+
+const LOADOUT_VIEW_KEY = "view:loadout";
+const loadoutViewSchema = z.object({ view: z.enum(["slots", "table"]) });
+
+/** Phase 29 (spec §4.8): the Slots/Table choice, per user — the same upsert shape as saveColumns; not audited. */
+export async function saveLoadoutView(input: unknown): Promise<ActionResult<null>> {
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = loadoutViewSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  await prisma.userPreference.upsert({
+    where: { userId_key: { userId: user.id, key: LOADOUT_VIEW_KEY } },
+    update: { value: parsed.data.view },
+    create: { userId: user.id, key: LOADOUT_VIEW_KEY, value: parsed.data.view },
+  });
+  return ok(null);
+}

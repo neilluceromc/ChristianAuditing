@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { buildEmployeeOrderBy, buildEmployeeWhere } from "@/lib/employees-list";
+import { buildEmployeeOrderBy, buildEmployeeWhere, orderByLoadout } from "@/lib/employees-list";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate } from "@/lib/format";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
@@ -64,11 +64,12 @@ async function gapKeptIds(where: Prisma.EmployeeWhereInput, orderBy: Prisma.Empl
   return candidates.filter((c) => (missingAll.get(c.id) ?? 0) > 0).map((c) => c.id);
 }
 
-/** Spec §4: the plain list pages in SQL; the gaps filter cuts a NARROW candidate pass, then fetches the page's rows. */
+/** Spec §4: the plain list pages in SQL; the gaps filter and the Loadout sort (Phase 29, plan P-4) cut a NARROW candidate pass first, then page in memory. */
 async function pageEmployees(state: ListState, gapsOnly: boolean) {
   const where = buildEmployeeWhere(state);
   const orderBy = buildEmployeeOrderBy(state.sort);
-  if (!gapsOnly) {
+  const loadoutSort = state.sort.find((s) => s.key === "loadout");
+  if (!gapsOnly && !loadoutSort) {
     const { rows: employees, ...pg } = await pagedSnapshot(
       ENTITY_PAGE_SIZE,
       state.page,
@@ -78,15 +79,16 @@ async function pageEmployees(state: ListState, gapsOnly: boolean) {
     const missing = await resolveMissing(employees);
     return { pg, employees, missing };
   }
-  const keptIds = await gapKeptIds(where, orderBy);
-  const pg = pageOf(keptIds.length, state.page, ENTITY_PAGE_SIZE);
-  const pageIds = keptIds.slice(pg.skip, pg.skip + pg.take);
-  const rows = await prisma.employee.findMany({ where: { id: { in: pageIds } }, include: rowInclude });
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  // a page id can vanish between the candidate pass and this fetch (e.g. offboarded mid-request) -- drop it rather than throw
-  const employees = pageIds.flatMap((id) => { const r = byId.get(id); return r ? [r] : []; });
-  const missing = await resolveMissing(employees);
-  return { pg, employees, missing };
+  // Candidate pass: everything the where admits, resolved once; then the gaps cut and/or the derived order.
+  const candidates = await prisma.employee.findMany({ where, orderBy, include: rowInclude });
+  const missingAll = await resolveMissing(candidates);
+  let kept = gapsOnly ? candidates.filter((c) => (missingAll.get(c.id) ?? 0) > 0) : candidates;
+  if (loadoutSort) {
+    kept = orderByLoadout(kept.map((c) => ({ ...c, missingRequired: missingAll.get(c.id) ?? null })), loadoutSort.dir);
+  }
+  const pg = pageOf(kept.length, state.page, ENTITY_PAGE_SIZE);
+  const employees = kept.slice(pg.skip, pg.skip + pg.take);
+  return { pg, employees, missing: missingAll };
 }
 
 /**
@@ -102,8 +104,14 @@ export async function listEmployees(state: ListState, gapsOnly: boolean): Promis
   total: number;
   page: number;
   pageCount: number;
+  hiddenLeavers: number;
 }> {
   const { pg, employees, missing } = await pageEmployees(state, gapsOnly);
+  const hiddenLeavers = state.filters.employment?.length || (state.filters.leavers ?? []).includes("1")
+    ? 0
+    : await prisma.employee.count({
+        where: { ...buildEmployeeWhere({ ...state, filters: { ...state.filters, leavers: ["1"] } }), employment: "OFFBOARDED" },
+      });
   return {
     rows: employees.map((e): EmployeeListRow => ({
       id: e.id,
@@ -120,6 +128,7 @@ export async function listEmployees(state: ListState, gapsOnly: boolean): Promis
     total: pg.total,
     page: pg.page,
     pageCount: pg.pageCount,
+    hiddenLeavers,
   };
 }
 
