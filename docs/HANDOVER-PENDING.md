@@ -11,10 +11,10 @@ and pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.15
 but NOT yet deployed.**
 
 **Where the code stands today (2026-09-22).** Staging runs the **Phase 26** merge (`e96fb2a`,
-**25 migrations**) since the 2026-09-22 forced redeploy. `main` carries Phases 1–26 plus two unpushed
-docs commits (`385b484`, `8c24c3b`) beyond `origin/main` `8dc21a1`. **Phase 27
-(`phase-27-leftovers-sweep`) is code-complete at final tree `66445ed`, UNMERGED and UNPUSHED, and adds
-migration 26** — see §1 below and `PICKUP.md` §4 item 1.
+**25 migrations**) since the 2026-09-22 forced redeploy. `main` = `origin/main` since the Phase 27 push
+(merged via `--no-ff` `5dd3372` and pushed 2026-09-22, carrying the docs commits `385b484` and `8c24c3b`). **Phase 27
+(`phase-27-leftovers-sweep`, final tree `66445ed`) is on `main`; staging is NOT yet redeployed and its
+migration 26 is pending there** — see §1 below and `PICKUP.md` §4 item 1.
 
 ---
 
@@ -39,9 +39,9 @@ migration 26** — see §1 below and `PICKUP.md` §4 item 1.
   (`repair_end_and_holds`) the 2026-09-22 one.
 
 - **Phase 27's migration 26 is the next one to apply, and it needs a check run first.**
-  `phase-27-leftovers-sweep` is code-complete at `66445ed` but **UNMERGED and UNPUSHED** — merging,
-  pushing and the redeploy are all the user's decisions. Migration 26 `case_insensitive_names` applies
-  on the first `-Force` redeploy after that branch is merged, and `migrate status` should then read
+  `phase-27-leftovers-sweep` (final tree `66445ed`) is **merged to `main` (`5dd3372`) and pushed** — the
+  redeploy is the user's decision. Migration 26 `case_insensitive_names` applies
+  on the next `-Force` redeploy, and `migrate status` should then read
   **26 found, up to date**. It is additive — one ordinary index on `AuditEntry ("entityType",
   "action")` plus seven `lower()` UNIQUE indexes on asset categories, asset types (scoped by
   `"categoryId"`), departments, equipment policies, vendors, and stock categories by name and by prefix
@@ -293,8 +293,8 @@ bullets below are closed — kept for the history, not as work:
 
 **Shipped in Phase 27 — IT and quality leftovers sweep.** The three items below were named out of
 scope by Phase 24's spec §0 decision 1 and Phase 25's §2, carried by Phase 26, and closed together on
-`phase-27-leftovers-sweep` (final tree `66445ed`, code-complete 2026-09-22; **unmerged and unpushed**;
-it adds **migration 26** — see §1). Kept for the history, not as work:
+`phase-27-leftovers-sweep` (final tree `66445ed`, code-complete 2026-09-22; **merged to `main` as `5dd3372`
+and pushed 2026-09-22**; it adds **migration 26**, pending on staging — see §1). Kept for the history, not as work:
 
 - **Shipped in Phase 27 —** `/audit` class scoping of approval, category and type rows (only `asset`
   rows of the other class were excluded). `invisibleAuditRefs(role)` builds four id lists from the SEE
