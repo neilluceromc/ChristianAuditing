@@ -5,8 +5,7 @@ import {
   clearFilters, parseListState, serializeListState, toSearchParams, withFilter,
 } from "@/lib/url-state";
 import { AUDIT_ENTITY_TYPES, AUDIT_LIST_CONFIG, buildAuditWhere } from "@/lib/audit-list";
-import { listAudit } from "@/server/modules/audit/queries";
-import { invisibleAssetIds } from "@/server/modules/inventory/queries";
+import { invisibleAuditRefs, listAudit } from "@/server/modules/audit/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
@@ -17,7 +16,9 @@ import { AuditToolbar } from "@/components/patterns/audit-toolbar";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import type { FacetOptionLike } from "@/components/patterns/facet-dropdown";
 
-const humanize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replaceAll("-", " ");
+// Phase 27 (P-10): "vendor" is what the table is called; "Supplier" is what the operator calls it.
+const ENTITY_LABEL_OVERRIDE: Record<string, string> = { vendor: "Supplier" };
+const humanize = (s: string) => ENTITY_LABEL_OVERRIDE[s] ?? s.charAt(0).toUpperCase() + s.slice(1).replaceAll("-", " ");
 
 export default async function AuditPage({
   searchParams,
@@ -26,7 +27,7 @@ export default async function AuditPage({
 }) {
   const user = await requireUser();
   const state = parseListState(toSearchParams(await searchParams), AUDIT_LIST_CONFIG);
-  const hidden = await invisibleAssetIds(user.role);
+  const hidden = await invisibleAuditRefs(user.role);
 
   // Entity facet counts read WITHOUT the entity filter applied (so unchecking
   // never zeroes the other options out) — one groupBy, no filter loop.

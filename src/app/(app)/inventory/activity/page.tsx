@@ -1,7 +1,6 @@
 import { requireUser } from "@/server/auth/guards";
 import { pagedSnapshot } from "@/server/paged";
-import { entityLabels } from "@/server/modules/audit/queries";
-import { invisibleAssetIds } from "@/server/modules/inventory/queries";
+import { entityLabels, invisibleAuditRefs } from "@/server/modules/audit/queries";
 import { auditSentence } from "@/lib/activity";
 import { fmtDateTime } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
@@ -19,7 +18,7 @@ export default async function InventoryActivityPage({
   const user = await requireUser();
   const sp = toSearchParams(await searchParams);
 
-  const hidden = await invisibleAssetIds(user.role);
+  const hidden = (await invisibleAuditRefs(user.role)).assetIds;
   const where = { entityType: "asset", ...(hidden.length ? { entityId: { notIn: hidden } } : {}) };
   const { rows: entries, ...pg } = await pagedSnapshot(
     LOG_PAGE_SIZE,

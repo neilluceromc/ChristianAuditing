@@ -1,7 +1,8 @@
 import { requireUser } from "@/server/auth/guards";
 import { pagedSnapshot } from "@/server/paged";
 import { entityLabels } from "@/server/modules/audit/queries";
-import { financeActivityWhere } from "@/server/modules/finance/queries";
+import { feedWhere } from "@/lib/activity-list";
+import { NO_HIDDEN_REFS } from "@/lib/audit-list";
 import { auditSentence } from "@/lib/activity";
 import { fmtDateTime } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
@@ -21,13 +22,14 @@ export default async function FinanceActivityPage({
   await requireUser();
   const sp = toSearchParams(await searchParams);
 
+  const where = feedWhere("finance", NO_HIDDEN_REFS);
   const { rows: entries, ...pg } = await pagedSnapshot(
     LOG_PAGE_SIZE,
     parsePage(sp),
-    (tx) => tx.auditEntry.count({ where: financeActivityWhere }),
+    (tx) => tx.auditEntry.count({ where }),
     (tx, pg) =>
       tx.auditEntry.findMany({
-        where: financeActivityWhere,
+        where,
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         skip: pg.skip,
         take: pg.take,
