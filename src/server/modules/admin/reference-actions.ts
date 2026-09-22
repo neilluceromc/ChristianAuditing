@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Prisma, type AssetClass, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionUser } from "@/server/auth/guards";
+import { isUniqueViolation } from "@/server/prisma-errors";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { MANAGEABLE_CLASSES, canManageClass } from "@/lib/asset-class";
@@ -54,9 +55,22 @@ const AUDIT_TYPE: Record<RefEntity, string> = {
 
 const nameSchema = z.string().trim().min(2, "At least 2 characters").max(60);
 
-function isUnique(err: unknown): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+/**
+ * Phase 27 (spec §4.2): the case-insensitive pre-check that names the winner. Types are scoped to
+ * their category; a rename excludes the row itself, so "Laptop" → "LAPTOP" is a rename, not a clash.
+ * The lower() unique index behind it (migration 26) is the guarantee; this is the friendly first answer.
+ */
+async function nameTakenBy(
+  tx: Prisma.TransactionClient, entity: RefEntity, name: string, opts: { categoryId?: string; excludeId?: string },
+): Promise<string | null> {
+  const where = { name: { equals: name, mode: "insensitive" as const }, ...(opts.excludeId ? { id: { not: opts.excludeId } } : {}) };
+  const row =
+    entity === "category" ? await tx.assetCategory.findFirst({ where, select: { name: true } })
+    : entity === "department" ? await tx.department.findFirst({ where, select: { name: true } })
+    : await tx.assetType.findFirst({ where: { ...where, categoryId: opts.categoryId }, select: { name: true } });
+  return row?.name ?? null;
 }
+const TAKEN = (existing: string) => validationError({ name: `That name is already taken by "${existing}"` });
 
 const createSchema = z.object({
   entity: entitySchema,
@@ -86,7 +100,9 @@ export async function createRefRow(input: unknown): Promise<ActionResult<{ id: s
 
   try {
     let id = "";
-    await prisma.$transaction(async (tx) => {
+    const failure = await prisma.$transaction(async (tx) => {
+      const taken = await nameTakenBy(tx, entity, name, { categoryId: categoryId ?? undefined });
+      if (taken) return TAKEN(taken);
       if (entity === "category") id = (await tx.assetCategory.create({ data: { name, cls: cls! } })).id;
       else if (entity === "department") id = (await tx.department.create({ data: { name } })).id;
       else id = (await tx.assetType.create({ data: { name, categoryId: categoryId! } })).id;
@@ -96,11 +112,13 @@ export async function createRefRow(input: unknown): Promise<ActionResult<{ id: s
         action: "create",
         diff: entity === "category" ? { name: { from: null, to: name }, cls: { from: null, to: cls } } : { name: { from: null, to: name } },
       });
+      return null;
     });
+    if (failure) return failure;
     revalidatePath(PATHS[entity]);
     return ok({ id });
   } catch (err) {
-    if (isUnique(err)) return validationError({ name: "That name already exists" });
+    if (isUniqueViolation(err)) return validationError({ name: "That name already exists" });
     throw err;
   }
 }
@@ -123,7 +141,12 @@ export async function renameRefRow(input: unknown): Promise<ActionResult<null>> 
   if (row.name === name) return ok(null);
 
   try {
-    await prisma.$transaction(async (tx) => {
+    const failure = await prisma.$transaction(async (tx) => {
+      const taken = await nameTakenBy(tx, entity, name, {
+        excludeId: id,
+        categoryId: entity === "type" ? (await tx.assetType.findUniqueOrThrow({ where: { id }, select: { categoryId: true } })).categoryId : undefined,
+      });
+      if (taken) return TAKEN(taken);
       if (entity === "category") await tx.assetCategory.update({ where: { id }, data: { name } });
       else if (entity === "department") await tx.department.update({ where: { id }, data: { name } });
       else await tx.assetType.update({ where: { id }, data: { name } });
@@ -132,11 +155,13 @@ export async function renameRefRow(input: unknown): Promise<ActionResult<null>> 
         entityType: AUDIT_TYPE[entity], entityId: id,
         action: "rename", diff: { name: { from: row.name, to: name } },
       });
+      return null;
     });
+    if (failure) return failure;
     revalidatePath(PATHS[entity]);
     return ok(null);
   } catch (err) {
-    if (isUnique(err)) return validationError({ name: "That name already exists" });
+    if (isUniqueViolation(err)) return validationError({ name: "That name already exists" });
     throw err;
   }
 }

@@ -107,7 +107,7 @@ export async function getSupplier(
         select: { id: true, label: true, bankName: true, accountName: true, accountLast4: true },
       },
       documents: {
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         select: {
           id: true, kind: true, fileName: true, createdAt: true,
           uploadedBy: { select: { name: true } },

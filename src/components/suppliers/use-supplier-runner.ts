@@ -59,5 +59,5 @@ export function useSupplierRunner(claimedFieldKeys: string[] = []) {
     setRetryAfter(null);
   }
 
-  return { pending, error, setError, fieldErrors, setFieldErrors, retryAfter, setRetryAfter, reset, run };
+  return { pending, error, fieldErrors, retryAfter, setRetryAfter, reset, run };
 }
