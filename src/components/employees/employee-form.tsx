@@ -64,7 +64,16 @@ export function EmployeeForm(props: Props) {
   // back under `_sameName` — no FormField claims it, so it is routed to the
   // SameNameCheck banner instead of dead-ending under Name.
   const [sameNameRefusal, setSameNameRefusal] = useState<string | null>(null);
-  const [addAnother, setAddAnother] = useState(false);
+  // Controller ruling R10: which submit button triggered the in-flight
+  // submission — read from the DOM submitter at submit time (see `submit`
+  // below), never from React state set in a click handler. The click and
+  // the form's native submit run in the same task, but `onSubmit={submit}`
+  // can still be the previous render's closure when the click handler's
+  // setState is read, so a state flag set on click is not reliably observed
+  // by that same submit. `submittedIntent` here is only ever WRITTEN inside
+  // `submit` itself and only ever READ on a later render (the buttons'
+  // `loading` props), which has no such race.
+  const [submittedIntent, setSubmittedIntent] = useState<"create" | "create-add" | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLFormElement>(null);
   // Ruling R8: the completion-date `min` is the EARLIER of today's floor and
@@ -95,6 +104,12 @@ export function EmployeeForm(props: Props) {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    // R10: the triggering button, read from the DOM's own record of which
+    // submitter fired this event — never from a state flag a click handler
+    // set. A keyboard Enter submit (no explicit submitter) falls back to
+    // "create", the primary action.
+    const intent = (e.nativeEvent as SubmitEvent).submitter?.getAttribute("value") ?? "create";
+    setSubmittedIntent(intent === "create-add" ? "create-add" : "create");
     setErrors({});
     setError(null);
     setSameNameRefusal(null);
@@ -120,7 +135,7 @@ export function EmployeeForm(props: Props) {
           });
       if (res.ok) {
         if (props.mode === "new") {
-          if (addAnother) {
+          if (intent === "create-add") {
             toast(`Added ${form.name}`, "settled");
             setForm((f) => ({
               ...f, employeeNo: "", joinedAt: today(), name: "", title: "", employment: "ACTIVE",
@@ -128,7 +143,6 @@ export function EmployeeForm(props: Props) {
             }));
             setConfirmSameName(false);
             setSameNameRefusal(null);
-            setAddAnother(false);
             nameRef.current?.focus();
           } else {
             router.push(`/employees/${res.data.id}?created=1`);
@@ -282,11 +296,11 @@ export function EmployeeForm(props: Props) {
       </Card>
       <div className="sticky bottom-0 z-10 -mx-1 flex items-center gap-3 border-t border-border bg-surface px-1 py-3">
         {props.mode === "new" && <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>}
-        <Button type="submit" variant="primary" loading={pending && !addAnother} onClick={() => setAddAnother(false)}>
+        <Button type="submit" name="intent" value="create" variant="primary" loading={pending && submittedIntent === "create"}>
           {props.mode === "new" ? "Create employee" : saved ? "✓ Saved" : "Save changes"}
         </Button>
         {props.mode === "new" && (
-          <Button type="submit" variant="secondary" loading={pending && addAnother} onClick={() => setAddAnother(true)}>
+          <Button type="submit" name="intent" value="create-add" variant="secondary" loading={pending && submittedIntent === "create-add"}>
             Create and add another
           </Button>
         )}
