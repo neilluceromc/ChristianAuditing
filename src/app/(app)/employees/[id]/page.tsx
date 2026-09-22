@@ -53,7 +53,20 @@ export default async function EmployeePage({
       // row; recorded as a follow-up). Pinned to the IT class explicitly so
       // this picker never offers a STORED car by accident.
       where: { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null },
-      include: { reservations: { where: { state: "ACTIVE" }, include: { employee: true } } },
+      include: {
+        reservations: { where: { state: "ACTIVE" }, include: { employee: true } },
+        // Phase 29 (final review I-1, ruling R7): the pickers' own
+        // `openApprovals` is scoped to THIS employee, so a spare another
+        // person's request is already waiting on read as free here — exactly
+        // the case the pinned "held or queued for someone else" line claims is
+        // excluded. Asked per asset instead, so the scope matches the copy.
+        approvals: {
+          where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
+          select: { refNo: true },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
+      },
       orderBy: { tag: "asc" },
     }),
     prisma.employeeSlotException.findMany({
@@ -123,8 +136,10 @@ export default async function EmployeePage({
     reservedFor: a.reservations[0]?.employee.name ?? null,
     reservedForThis: a.reservations[0]?.employeeId === id,
     // Phase 29 (spec §4.5): a spare an open approval already promises is not
-    // pickable here — the pickers say which request holds it.
-    pendingRef: pendingByAsset.get(a.id) ?? null,
+    // pickable here — the pickers say which request holds it. The asset's own
+    // open approval comes first (any requester, I-1); this person's map is
+    // kept as the fallback so the ref stays the one the rest of the page shows.
+    pendingRef: a.approvals[0]?.refNo ?? pendingByAsset.get(a.id) ?? null,
   }));
 
   const holding: HoldingItem[] = [
@@ -224,7 +239,18 @@ export default async function EmployeePage({
                 </div>
               )}
               {held.length === 0 ? (
-                <p className="text-xs text-fg-muted">No items yet</p>
+                // Phase 29 (rulings R11/R14, spec §4.2): "No items yet" replaces
+                // Book value and Oldest item (Items held is implied by the
+                // line itself) — never the Open-requests count, which on a
+                // day-one hire is the ONLY number the panel has to give.
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-fg-muted">No items yet</p>
+                  {openApprovals.length > 0 && (
+                    <div className="grid grid-cols-1 gap-2">
+                      <Stat label="Open requests" value={String(openApprovals.length)} />
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   <Stat label="Items held" value={String(held.length)} />

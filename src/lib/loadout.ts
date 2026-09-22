@@ -183,9 +183,19 @@ export function orderTiles<T extends { asset: unknown | null; required: boolean;
 
 export type TileMenuItem = "replace" | "return" | "open" | "reserve" | "waive" | "remove-exception";
 
-/** Phase 29 (spec §4.4): the items a tile's menu offers, in order. Pure so the view and the tests agree. */
+/**
+ * Phase 29 (spec §4.4): the items a tile's menu offers, in order. Pure so the
+ * view and the tests agree.
+ *
+ * Ruling R13: Waive is offered on ANY policy slot — a "policy slot" being one
+ * without an exception of its own (`waivable`) — optional slots included. Spec
+ * §4.4's "when the slot is required" is deliberately not applied: the pre-phase
+ * menu offered it on optional slots too, and waiving one is a legitimate tidy
+ * (it clears an "optional — not a gap" tile the person will never fill). The
+ * slot's `required` flag is therefore NOT an input here.
+ */
 export function tileMenuItems(
-  tile: { filled: boolean; pending: boolean; required: boolean; exceptionId: string | null; waivable: boolean },
+  tile: { filled: boolean; pending: boolean; exceptionId: string | null; waivable: boolean },
   ctx: { mayAct: boolean; direct: boolean },
 ): TileMenuItem[] {
   if (tile.filled) {

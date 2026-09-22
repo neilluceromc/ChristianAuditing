@@ -296,11 +296,18 @@ export function EmployeeForm(props: Props) {
       </Card>
       <div className="sticky bottom-0 z-10 -mx-1 flex items-center gap-3 border-t border-border bg-surface px-1 py-3">
         {props.mode === "new" && <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>}
-        <Button type="submit" name="intent" value="create" variant="primary" loading={pending && submittedIntent === "create"}>
+        {/* Final review M-4: `loading` is per-button, so while one submit is in
+            flight the OTHER stayed clickable and a fast second click submitted
+            the form twice (the unique index turns the second into a needless
+            fault banner). Both disable while anything is pending; the one that
+            fired keeps its spinner. */}
+        <Button type="submit" name="intent" value="create" variant="primary"
+          disabled={pending} loading={pending && submittedIntent === "create"}>
           {props.mode === "new" ? "Create employee" : saved ? "✓ Saved" : "Save changes"}
         </Button>
         {props.mode === "new" && (
-          <Button type="submit" name="intent" value="create-add" variant="secondary" loading={pending && submittedIntent === "create-add"}>
+          <Button type="submit" name="intent" value="create-add" variant="secondary"
+            disabled={pending} loading={pending && submittedIntent === "create-add"}>
             Create and add another
           </Button>
         )}

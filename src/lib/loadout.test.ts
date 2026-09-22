@@ -188,6 +188,13 @@ describe("profilePrimary — one state-chosen primary per profile (spec §4.1)",
     expect(profilePrimary({ employment: "ACTIVE", totalSlots: 6, filled: 6, missingRequired: 0 })).toBeNull();
     expect(profilePrimary({ employment: "ACTIVE", totalSlots: 0, filled: 0, missingRequired: 0 })).toBeNull();
   });
+  // Ruling R6: an ALL-OPTIONAL policy with nothing assigned gets no primary —
+  // `filled === 0` alone must not read as "day one, assign the kit" when there
+  // is no required gap to fill. This is the case the day-one branch above can
+  // be made to pass without, so it is pinned on its own.
+  it("an all-optional policy with nothing assigned → none (R6)", () => {
+    expect(profilePrimary({ employment: "ACTIVE", totalSlots: 3, filled: 0, missingRequired: 0 })).toBeNull();
+  });
   it("a leaver → the wizard; offboarded → none", () => {
     expect(profilePrimary({ employment: "OFFBOARDING", totalSlots: 6, filled: 0, missingRequired: 5 })).toEqual({ kind: "wizard", label: "Open the offboarding wizard" });
     expect(profilePrimary({ employment: "OFFBOARDED", totalSlots: 6, filled: 0, missingRequired: 5 })).toBeNull();
@@ -207,24 +214,24 @@ describe("orderTiles — required gaps first, then filled, then optional gaps (s
 
 describe("tileMenuItems — what a tile's menu offers (spec §4.4)", () => {
   const ctx = { mayAct: true, direct: true };
-  it("a filled tile: Replace, Return, Open record, then Waive for a required policy slot", () => {
-    expect(tileMenuItems({ filled: true, pending: false, required: true, exceptionId: null, waivable: true }, ctx)).toEqual(["replace", "return", "open", "waive"]);
+  it("a filled tile: Replace, Return, Open record, then Waive for a policy slot", () => {
+    expect(tileMenuItems({ filled: true, pending: false, exceptionId: null, waivable: true }, ctx)).toEqual(["replace", "return", "open", "waive"]);
   });
   it("a filled exception tile offers Remove exception instead of Waive", () => {
-    expect(tileMenuItems({ filled: true, pending: false, required: true, exceptionId: "x1", waivable: false }, ctx)).toEqual(["replace", "return", "open", "remove-exception"]);
+    expect(tileMenuItems({ filled: true, pending: false, exceptionId: "x1", waivable: false }, ctx)).toEqual(["replace", "return", "open", "remove-exception"]);
   });
   it("a pending tile only opens the record", () => {
-    expect(tileMenuItems({ filled: true, pending: true, required: true, exceptionId: null, waivable: true }, ctx)).toEqual(["open"]);
+    expect(tileMenuItems({ filled: true, pending: true, exceptionId: null, waivable: true }, ctx)).toEqual(["open"]);
   });
   it("an empty tile: Reserve (direct only) and Waive", () => {
-    expect(tileMenuItems({ filled: false, pending: false, required: true, exceptionId: null, waivable: true }, ctx)).toEqual(["reserve", "waive"]);
-    expect(tileMenuItems({ filled: false, pending: false, required: true, exceptionId: null, waivable: true }, { mayAct: true, direct: false })).toEqual(["waive"]);
+    expect(tileMenuItems({ filled: false, pending: false, exceptionId: null, waivable: true }, ctx)).toEqual(["reserve", "waive"]);
+    expect(tileMenuItems({ filled: false, pending: false, exceptionId: null, waivable: true }, { mayAct: true, direct: false })).toEqual(["waive"]);
   });
   it("without mayAct, a filled tile only opens the record and an empty tile has nothing", () => {
-    expect(tileMenuItems({ filled: true, pending: false, required: true, exceptionId: null, waivable: true }, { mayAct: false, direct: false })).toEqual(["open"]);
-    expect(tileMenuItems({ filled: false, pending: false, required: true, exceptionId: null, waivable: true }, { mayAct: false, direct: false })).toEqual([]);
+    expect(tileMenuItems({ filled: true, pending: false, exceptionId: null, waivable: true }, { mayAct: false, direct: false })).toEqual(["open"]);
+    expect(tileMenuItems({ filled: false, pending: false, exceptionId: null, waivable: true }, { mayAct: false, direct: false })).toEqual([]);
   });
   it("Replace needs the direct path; the request path still returns", () => {
-    expect(tileMenuItems({ filled: true, pending: false, required: true, exceptionId: null, waivable: true }, { mayAct: true, direct: false })).toEqual(["return", "open", "waive"]);
+    expect(tileMenuItems({ filled: true, pending: false, exceptionId: null, waivable: true }, { mayAct: true, direct: false })).toEqual(["return", "open", "waive"]);
   });
 });

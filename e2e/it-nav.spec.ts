@@ -352,21 +352,17 @@ test.describe("it navigation sweep (Phase 25)", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${nina.id}`);
-    // PROVISIONAL — Phase 29 ruling R11: the Stat grid currently hides behind
-    // "No items yet" (spec §4.3 made it state-aware on `held.length === 0`), so
-    // Nina — day one, holds nothing, one PENDING request — has no "Open
-    // requests" tile left to read. The final fix wave restores the Open
-    // requests Stat, and this assertion goes back to expecting "1" open request
-    // for Nina:
-    //   await expect(page.getByText("Open requests", { exact: true }).locator("..")).toContainText("1");
-    // Until then the LIST the case is really about is unconditional and still
-    // asserted below, and the count is asserted on Dennis instead.
+    // Phase 29 (rulings R11/R14): Nina is day one — she holds nothing, so the
+    // panel reads "No items yet" INSTEAD of Book value and Oldest item, and
+    // the count her one PENDING request (APR-2041) makes must survive that.
+    // Stat renders label and value as two spans in one wrapper.
     await expect(page.getByText("No items yet")).toBeVisible();
+    await expect(page.getByText("Open requests", { exact: true }).locator("..")).toContainText("1");
     await expect(page.getByRole("link", { name: "APR-2041" })).toHaveAttribute("href", `/approvals/${approval.id}`);
     await expectNoSeriousAxe(page);
 
-    // …and the count itself, on the fixture that still shows it: Dennis Ong
-    // holds three items, so his panel keeps the grid. Counted from the DB
+    // …and the same count on the OTHER branch of that panel: Dennis Ong holds
+    // three items, so his shows the full four-Stat grid. Counted from the DB
     // rather than hard-coded, because earlier cases in this file create and
     // delete approvals of their own against him.
     const dennis = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });

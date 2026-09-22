@@ -43,6 +43,12 @@ export function EmployeesToolbar({
           <Icon name="search" size={14} />
         </span>
         <Input
+          // Phase 29 (final review I-2): the box is uncontrolled, and a search
+          // change is a SOFT navigation — this component keeps its instance, so
+          // React only rewrites `defaultValue`, which a dirtied input ignores
+          // and "Clear search" left the typed text sitting in an empty search.
+          // Keyed on the URL's q, the input remounts and takes the new default.
+          key={state.q}
           type="search"
           aria-label="Search employees"
           placeholder="Search name, number, title, department · Enter"

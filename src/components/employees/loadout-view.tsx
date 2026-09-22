@@ -195,11 +195,29 @@ export function LoadoutView({
     else setError(res.message);
   }
 
+  /**
+   * Phase 29 (final review M-3): the reservation-driven writes are the only
+   * ones whose REFUSAL leaves a lie on screen — the tile keeps its
+   * "reserved · {tag}" line for a hold the server has just told us it could
+   * not honour (released, expired, or already assigned elsewhere). Re-read the
+   * server state so the line goes with it; the banner `handle` raises is
+   * client state and survives the refresh.
+   */
+  function handleReserved<T>(res: ActionResult<T>, onOk: (data: T) => void) {
+    if (!res.ok) router.refresh();
+    handle(res, onOk);
+  }
+
   function pickView(v: string) {
     const next: "slots" | "table" = v === "table" ? "table" : "slots";
     setView(next);
-    // Fire-and-forget (plan P-11): remembering the view must never block it.
-    void saveLoadoutView({ view: next });
+    // Fire-and-forget (plan P-11): remembering the view must never block it —
+    // but a refusal is not nothing, so spec §7's console warning says so
+    // (final review M-2). Never a toast: the operator asked for a view, not
+    // for a preference write.
+    void saveLoadoutView({ view: next }).then((r) => {
+      if (!r.ok) console.warn("view:loadout not saved", r.kind);
+    });
   }
 
   /** The slot a held asset sits in — the Return/Replace dialogs only carry the asset. */
@@ -252,13 +270,13 @@ export function LoadoutView({
     setBusySlotId(slotId);
     startTransition(async () => {
       if (direct) {
-        handle(await assignAsset({ assetId, employeeId, reason: "" }), ({ tag, employeeName: assignedTo }) => {
+        handleReserved(await assignAsset({ assetId, employeeId, reason: "" }), ({ tag, employeeName: assignedTo }) => {
           toast(`${tag} assigned to ${assignedTo}`, "settled");
           markChanged(slotId);
           router.refresh();
         });
       } else {
-        handle(await requestAssign({ employeeId, assetId, reason: "" }), ({ refNo }) => {
+        handleReserved(await requestAssign({ employeeId, assetId, reason: "" }), ({ refNo }) => {
           toast(`${refNo} created — tile shows pending until it executes`, "settled");
           markChanged(slotId);
           router.refresh();
@@ -353,12 +371,12 @@ export function LoadoutView({
     setError(null);
     startTransition(async () => {
       if (direct) {
-        handle(await assignReserved({ employeeId }), ({ assigned }) => {
+        handleReserved(await assignReserved({ employeeId }), ({ assigned }) => {
           toast(`${assigned} reserved spare${assigned === 1 ? "" : "s"} assigned`, "settled");
           router.refresh();
         });
       } else {
-        handle(await requestAssignReserved({ employeeId }), ({ created }) => {
+        handleReserved(await requestAssignReserved({ employeeId }), ({ created }) => {
           toast(`${created} assign request${created === 1 ? "" : "s"} created from reservations`, "settled");
           router.refresh();
         });
@@ -473,10 +491,13 @@ export function LoadoutView({
 
   // Phase 26 (spec §5.2): the Reserve dialog's own picker — unlike Fill/Replace,
   // an already-held spare is excluded outright (reserving one out from under
-  // an existing hold is exactly what release-then-reserve is for).
+  // an existing hold is exactly what release-then-reserve is for), including
+  // one held for THIS person, which is why the filter is not `unpickable`.
+  // Phase 29 (final review I-1): a spare an open approval already promises is
+  // excluded here too — the same `pendingRef` rule Fill and Replace apply.
   const reserveOptions: ComboOption[] = reservingSlot
     ? spares
-        .filter((s) => s.reservedFor === null)
+        .filter((s) => s.reservedFor === null && !s.pendingRef)
         .sort(sameTypeFirstFor(reservingSlot.typeId))
         .map((s) => ({
           value: s.id, label: s.tag, sub: s.model,
@@ -549,7 +570,7 @@ export function LoadoutView({
             // Phase 29 (spec §4.4): WHICH items the menu offers is a pure rule
             // (`tileMenuItems`) — this only turns each kind into its handler.
             const kinds = tileMenuItems(
-              { filled: !!a, pending: !!a?.pendingRef, required: tile.required, exceptionId: tile.exceptionId, waivable: !tile.exceptionId },
+              { filled: !!a, pending: !!a?.pendingRef, exceptionId: tile.exceptionId, waivable: !tile.exceptionId },
               { mayAct, direct },
             );
             const menuItems: MenuItem[] = kinds.map((k) => {

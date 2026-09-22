@@ -477,7 +477,9 @@ export async function checkSameName(
 ): Promise<ActionResult<{ match: { id: string; employeeNo: string; department: string } | null }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
-  const rate = await checkRate(user.id);
+  // Phase 29 (final review I-4): a read-only check meters on the "check" kind,
+  // never the 60/min write budget the create button itself still needs.
+  const rate = await checkRate(user.id, "check");
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = checkSameNameSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
@@ -493,7 +495,8 @@ const checkEmployeeNoSchema = z.object({ employeeNo: z.string() });
 export async function checkEmployeeNo(input: unknown): Promise<ActionResult<{ taken: { id: string; name: string } | null }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
-  const rate = await checkRate(user.id);
+  // Final review I-4: read-only — the "check" budget, not the mutation one.
+  const rate = await checkRate(user.id, "check");
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = checkEmployeeNoSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
@@ -507,7 +510,8 @@ export async function checkEmployeeNo(input: unknown): Promise<ActionResult<{ ta
 export async function nextEmployeeNo(): Promise<ActionResult<{ next: string | null }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
-  const rate = await checkRate(user.id);
+  // Final review I-4: read-only — the "check" budget, not the mutation one.
+  const rate = await checkRate(user.id, "check");
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const rows = await prisma.employee.findMany({ select: { employeeNo: true } });
   return ok({ next: nextNo(rows.map((r) => r.employeeNo)) });
@@ -519,7 +523,8 @@ const previewPolicySchema = z.object({ title: z.string(), departmentId: z.string
 export async function previewPolicy(input: unknown): Promise<ActionResult<{ preview: { name: string; slots: number; via: "title" | "department" } | null }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
-  const rate = await checkRate(user.id);
+  // Final review I-4: read-only — the "check" budget, not the mutation one.
+  const rate = await checkRate(user.id, "check");
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = previewPolicySchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));

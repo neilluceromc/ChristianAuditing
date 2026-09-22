@@ -360,10 +360,14 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     const departments = await page.locator("tbody tr td:nth-child(2)").allInnerTexts();
     expect(departments.map((d) => d.trim())).toEqual(Array(financeCount).fill("Finance"));
 
-    // The × inside the field: the search comes off without retyping the URL.
+    // The × inside the field: the search comes off without retyping the URL —
+    // and off the BOX too. A search change is a soft navigation, so the
+    // uncontrolled input kept its typed text while the list showed everyone
+    // (final review I-2); the value assertion is the half that caught it.
     await page.getByRole("button", { name: "Clear search" }).click();
     await expect(page).toHaveURL(/\/employees$/);
     await expect(page.getByRole("button", { name: "Clear search" })).toHaveCount(0);
+    await expect(search).toHaveValue("");
   });
 
   test("8. the New form: Name focused, the live number check, Next free, the policy preview, one same-name refusal, Create and add another", async ({ page }) => {
@@ -436,6 +440,14 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await expect(name).toBeFocused();
       const first = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-9301" } });
       expect(first.name).toBe("Carlo Dizon");
+
+      // Final review I-3: the emptied field asks again, so the suggestion has
+      // MOVED ON — EMP-9301 is now the highest EMP-####, making EMP-9302 the
+      // next free. The mount-time answer (EMP-0100, read before any of these
+      // creates) must not come back, or "Use it" would offer a number the
+      // live check refuses 400 ms later.
+      await expect(page.getByText(/^Next free: EMP-9302/)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(/^Next free: EMP-0100/)).toHaveCount(0);
 
       // …and the other submit still lands on the new profile.
       await name.fill("Ux Probe Two");
