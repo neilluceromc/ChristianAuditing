@@ -1,6 +1,6 @@
 # Phase 29 — Laws of UX applied to the employee area
 
-**Status:** design approved in conversation 2026-09-22 (decisions 1–10 below). Not yet planned or implemented.
+**Status:** implemented on `phase-29-employee-uiux` (plan `docs/superpowers/plans/2026-09-22-phase-29-employee-ux.md`, final tree `9660e6e`, 2026-09-22); code-complete, UNMERGED and UNPUSHED; no migration. Amendments made during execution are marked *Amended (R-n)* below and listed in the plan's D-block.
 
 **Predecessor:** a read-only audit of the three screens as they render and as their code reads (worktree `phase-29-employee-uiux` at `67f4e9e`, walked as IT and as a viewer): 43 findings — 11 on `/employees`, 12 on `/employees/new`, 20 on `/employees/[id]` — each tied to the law it breaks, with the code line, the cost to the operator and a fix. This design takes about 35 of them; §2 records the rest. Nothing here needs a migration.
 
@@ -42,6 +42,8 @@ Make the employee area obey the laws its operators feel every day: one loudest t
 - **Accessibility**: tiles keep their accessible names ("laptop slot, empty, required"); a non-interactive viewer tile keeps the name on a `div`; menus are the existing roving-focus `Menu`; product `aria-label`s never contain a nearby field's label word.
 - **Role discipline** unchanged: viewers see no Import/New/Edit/menus; frozen leavers keep their frozen slots.
 
+*Amended (R15): the four read-only live checks meter against their own `check` rate kind at 240/min, so a bulk-add burst cannot starve the 60/min mutation budget; `RateEvent.kind` is a plain `String`, so still no migration.*
+
 ---
 
 ## 4. `/employees/[id]` — the profile
@@ -61,9 +63,13 @@ Make the employee area obey the laws its operators feel every day: one loudest t
 
 "Accountability form" leaves the header; the acknowledgement card's "Print form" and the created notice keep the link. The pure rule `profilePrimary(state): { label; action } | null` lives in `src/lib/loadout.ts` and is unit-tested.
 
+*Amended (R6): an ACTIVE person under an all-optional policy with nothing assigned gets NO primary — `missingRequired` is 0 and §4.4 calls optional slots “not a gap”, so “Assign kit” would demand what the policy does not.*
+
 ### 4.2 One truth for the numbers (F-PROFILE-3, 15)
 
 The left panel drops the duplicate name. The progress line reads **"1 required gap"** (or "No required gaps") as the headline — `loadout.missingRequired`, the number the list prints — with **"3 of 6 slots filled"** as the secondary line; the `ProgressBar` keeps `filled / totalSlots` for its geometry and gets `label="Slots filled"`. It sits directly above the slot grid. The four `Stat`s render only when they have data: on a person with no items, one muted line "No items yet" replaces Book value and Oldest item.
+
+*Amended (R14/R11): this section is binding against the plan's “replaces the four Stats” — “No items yet” replaces Book value and Oldest item only, Items held is implied by the line, and the Open requests Stat stays whenever `openApprovals.length > 0`.*
 
 ### 4.3 Empty cards (F-PROFILE-19)
 
@@ -78,15 +84,21 @@ The left panel drops the duplicate name. The progress line reads **"1 required g
 - **The decorative block** shrinks to a 6 px status strip carrying the `StatusDot` tone; the age reads once, in the tile's meta line.
 - **Viewers**: `!mayAct` renders the tile as a `div` with the same accessible name via `aria-label`, no `+` glyph, no tab stop, no menu; the tag stays a link.
 
+*Amended (P-7): the filled tile's own `<button>` IS the `Menu` trigger and the always-visible ⋯ is a second `Menu` with the same items, rather than one menu shared by two anchors. (P-8): the tag inside a tile stays TEXT, not a link — a link nested in the tile button fails axe `nested-interactive`; it is a link only on the inert viewer tile. (R13): “Waive this slot…” is offered on any policy slot without an exception, optional ones included (pre-phase behaviour), and the dead `required` parameter left `tileMenuItems`. (R2): the inert branch is `!canMutate`, so a viewer's tiles stay inert on a frozen profile too.*
+
 ### 4.5 Dialogs (F-PROFILE-6, 7, 16, 17)
 
 - **Fill**: a sole eligible spare is preselected. A spare with an open assign approval renders "assignment queued · APR-2041" and is disabled, like a held spare (`pendingRef` computed for every candidate from the `openApprovals` the page already loads, not only for held ones). The no-spares message reads "No spare {type} in stock — **register one** or **route a purchase**", both links (`/inventory/register`, `/purchases/new`).
 - **Replace**: the flat radiogroup becomes the Reserve dialog's `EntityCombobox` (`autoFocus`, groups "Same type" then "Other spares", held and queued spares disabled with their note); the reason chips and outcome copy unchanged.
 - **Return**: title **"Return {tag} · {model} from {employee name}?"**.
 
+*Amended (P-9): `EntityCombobox` has no disabled options, so Replace EXCLUDES held and queued spares instead of disabling them, with a muted count line saying so, and a three-way empty state tells “no spares in stock” apart from “every spare is held or queued”. (R7): `pendingRef` is computed from every open approval on the asset, not only this employee's, so Fill, Replace and the Reserve picker all skip a spare another person's approval is waiting on.*
+
 ### 4.6 Reservations on the tile (F-PROFILE-8, 9)
 
 An empty tile whose type has a hold reserved for this person shows a meta line **"reserved · {tag}"** and an **Assign reserved** button (calls the existing `requestAssignReserved` for that one asset). "Assign all N reserved" renders whenever `reservedCount > 0` and the person is not frozen.
+
+*Amended (R8): “the tile” is read strictly — one consuming pass over the ordered tiles attaches each reserved spare to at most the FIRST empty matching tile, so one reservation never lights several same-type tiles.*
 
 ### 4.7 Feedback (F-PROFILE-11)
 
@@ -108,6 +120,8 @@ The Person card runs **Name, Title, Department, Employee number, Joined, Employm
 
 `checkEmployeeNo(no)` → `{ taken: boolean; existing?: { id; name } }` (case-insensitive, trimmed). Under the field, after the debounce: **"EMP-0099 is already Carlo Dizon's"** (the name linking to the profile) in the error tone, or nothing. When the field is empty, `nextEmployeeNo()` → the smallest unused number above the highest `EMP-####` in the table (`"EMP-0100"`), shown as **"Next free: EMP-0100"** with a **Use it** button that fills the field; nothing is prefilled silently. If no employee number follows the `EMP-####` pattern, no suggestion renders.
 
+*Amended (R9): the taken-number line shows the number AS TYPED, not uppercased — the operator sees what they entered.*
+
 ### 5.3 The policy preview (F-NEW-7)
 
 `previewPolicy(title, departmentId)` → `{ name; slots } | null` through `resolvePolicy` (title beats department, as the profile resolves it). Under Title, after the debounce: **"matches {policy} · {slots} slots"** or **"no policy matches this title yet"**; the line re-evaluates when Department changes.
@@ -118,9 +132,13 @@ The Person card runs **Name, Title, Department, Employee number, Joined, Employm
 - `createEmployee` validates every rule and returns all field errors in one `validationError`; after a refusal the form focuses the first invalid control and scrolls it into view.
 - Department stays blank on create (the Phase 23 rule; pinned by `deadlines.spec.ts`).
 
+*Amended (P-3/R3): the refusal arrives under the `_sameName` key and renders as the banner's BODY line, “Not added — tick ‘This is a different person’ to add them anyway”, while the title keeps “Another {name} exists in {department} ({no})” with the number linked — the full sentence in both places would have repeated the title word for word.*
+
 ### 5.5 The action bar (F-NEW-10, 11, 12)
 
 Pinned to the bottom of the form column (`sticky bottom-0`, surface background, top border): **Cancel** (ghost; `router.back()`), **Create employee** (primary), **Create and add another** (secondary). "Add another" saves, toasts "Added {name}", and resets the form keeping Department, focusing Name. Text fields trim on blur so the stored value is the shown value; Joined carries the hint "defaults to today".
+
+*Amended (R10): which button submitted is read from the DOM at submit time (`(e.nativeEvent as SubmitEvent).submitter`, with `name`/`value` on the two buttons), not from React state, which the same task could read stale.*
 
 ---
 
@@ -135,6 +153,8 @@ Columns: Employee · Department · **Loadout** · Items · Employment · M365 ·
 - Count line: **"9 people"**, plus **" · 1 leaver hidden"** (the number a link to the Show-leavers href) when the default cut hides anyone — `listEmployees` returns `hiddenLeavers`.
 - Search: placeholder **"Search name, number, title, department · Enter"**; a clear **×** button (`aria-label="Clear search"`) when `q` is set; `buildEmployeeWhere` adds `{ department: { name: { contains, mode: "insensitive" } } }` to the OR.
 - The two toggles (**Show leavers**, **Policy gaps only**) render as pill switches with a leading check when on (`role="switch"`, `aria-checked`), still plain links; the Department and Employment facets keep the `FacetDropdown`.
+
+*Amended (P-2): the toggles stay LINKS reached by `getByRole("link")` — pill-styled with a leading check and `aria-current` rather than `role="switch"`/`aria-checked`, which three existing specs pin. (R16, parked): `key={state.q}` on the search input also remounts it on Enter, so the box loses focus after a search; the fix belongs with the five sibling toolbars that share the shape.*
 
 ### 6.3 Header and empty states (F-LIST-9, 10, 11)
 
