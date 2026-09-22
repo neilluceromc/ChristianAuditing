@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEmployeeOrderBy, buildEmployeeWhere, EMPLOYEES_LIST_CONFIG } from "./employees-list";
+import { buildEmployeeOrderBy, buildEmployeeWhere, EMPLOYEES_LIST_CONFIG, orderByLoadout } from "./employees-list";
 import { parseListState } from "./url-state";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), EMPLOYEES_LIST_CONFIG);
@@ -11,6 +11,7 @@ describe("buildEmployeeWhere", () => {
         { name: { contains: "mar", mode: "insensitive" } },
         { employeeNo: { contains: "mar", mode: "insensitive" } },
         { title: { contains: "mar", mode: "insensitive" } },
+        { department: { name: { contains: "mar", mode: "insensitive" } } },
       ],
       employment: { not: "OFFBOARDED" },
     });
@@ -49,5 +50,24 @@ describe("buildEmployeeOrderBy", () => {
   it("falls back to the default sort", () => {
     expect(buildEmployeeOrderBy([])).toEqual([{ name: "asc" }, { id: "asc" }]);
     expect(EMPLOYEES_LIST_CONFIG.defaultSort).toEqual([{ key: "name", dir: "asc" }]);
+  });
+  it("the derived 'loadout' key is filtered out — buildEmployeeOrderBy never sees it (plan P-4)", () => {
+    expect(buildEmployeeOrderBy([{ key: "loadout", dir: "asc" }])).toEqual([{ id: "asc" }]);
+  });
+});
+
+describe("the Loadout sort key (spec decision 8)", () => {
+  it("is declared sortable and never reaches buildEmployeeOrderBy", () => {
+    expect(EMPLOYEES_LIST_CONFIG.sortable).toEqual(["name", "employeeNo", "joinedAt", "loadout"]);
+  });
+  const rows = [
+    { id: "1", name: "Ana", missingRequired: 0 }, { id: "2", name: "Ben", missingRequired: 3 },
+    { id: "3", name: "Cy", missingRequired: null }, { id: "4", name: "Dee", missingRequired: 1 }, { id: "5", name: "Eve", missingRequired: 3 },
+  ];
+  it("ascending completeness: most gaps first, ties by name, no policy last", () => {
+    expect(orderByLoadout(rows, "asc").map((r) => r.id)).toEqual(["2", "5", "4", "1", "3"]);
+  });
+  it("descending: fewest gaps first, no policy still last", () => {
+    expect(orderByLoadout(rows, "desc").map((r) => r.id)).toEqual(["1", "4", "2", "5", "3"]);
   });
 });
