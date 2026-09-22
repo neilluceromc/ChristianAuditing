@@ -1,8 +1,14 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
+import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 import { E2E_BASE_URL } from "../playwright.config";
+
+// Phase 27, Task 6: the reference-name cases at the foot of this file read and
+// restore rows directly, so this file gains the client every other spec that
+// touches the database already carries.
+const db = new PrismaClient();
 
 async function login(page: Page, email: string) {
   await page.goto("/logout");
@@ -17,10 +23,25 @@ async function expectNoSeriousAxe(page: Page) {
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
 }
 
+// Copied from e2e/it-nav.spec.ts:88-97 — house rule: never import helpers
+// across spec files, since each file reseeds independently.
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(
+      true,
+    );
+  }).toPass({ timeout: 20_000 });
+}
+
 // Spec files share one database and run alphabetically — each reseeds so no file
 // inherits another's mutations.
 test.beforeAll(() => {
   execSync("npm run db:seed", { timeout: 120_000 });
+});
+test.afterAll(async () => {
+  await db.$disconnect();
 });
 
 test.describe.serial("users & roles", () => {
@@ -307,5 +328,66 @@ test.describe("admin home", () => {
     // The IT Home's sections must NOT be here — that was the bug.
     await expect(page.getByText("Your shift")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
+  });
+});
+
+/**
+ * Phase 27 (spec §4.2, Task 6): reference names are unique whatever the case.
+ * The create template is e2e/it-core.spec.ts's "reference data" test, the
+ * rename-with-cleanup template e2e/it-nav.spec.ts case 13 — neither lived in
+ * this file before. A refused create writes nothing, so only the rename case
+ * needs a `finally`; the rename's own audit row stays (append-only, R3).
+ *
+ * The error slot is matched as `p[role="alert"]`, not `getByRole("alert")`:
+ * Next.js renders its own always-present, always-empty
+ * `<div role="alert" id="__next-route-announcer__">` on every page, so the
+ * role alone is ambiguous. Both error slots in play here — ref-table.tsx's
+ * inline paragraph and `FormError` — are `<p role="alert">`.
+ */
+test.describe("reference names are unique whatever the case (Phase 27)", () => {
+  test("a category that differs only by case is refused, naming the existing row", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/asset-categories");
+    const input = page.getByLabel("New category name");
+    await waitForHydration(input);
+    await input.fill("laptop");
+    await input.press("Enter");
+    await expect(page.locator('p[role="alert"]')).toHaveText('That name is already taken by "Laptop"', { timeout: 10_000 });
+    // NOT `getByRole("row", { name: /^laptop/ })`: the refused text is still
+    // sitting in the add row's own `<input>`, and an input's VALUE counts
+    // towards its row's accessible name — that locator matches the form row
+    // whether or not anything was written. The refusal writes nothing, and the
+    // table is what proves it:
+    expect(await db.assetCategory.count({ where: { name: "laptop" } })).toBe(0);
+  });
+
+  test("renaming a row to its own name in another case is a rename, not a clash", async ({ page }) => {
+    const headset = await db.assetCategory.findFirstOrThrow({ where: { name: "Headset" } });
+    try {
+      await login(page, "admin@thebackroomop.com");
+      await page.goto("/admin/asset-categories");
+      const actions = page.getByRole("button", { name: "Actions for Headset" });
+      await waitForHydration(actions);
+      await actions.click();
+      await page.getByRole("menuitem", { name: "Rename" }).click();
+      // The rename input only exists once the menu item has opened it; Enter is
+      // ref-table.tsx's save gesture (blur cancels).
+      const input = page.getByLabel("Rename Headset");
+      await input.fill("HEADSET");
+      await input.press("Enter");
+      await expect(page.getByText("HEADSET", { exact: true })).toBeVisible({ timeout: 10_000 });
+    } finally {
+      await db.assetCategory.update({ where: { id: headset.id }, data: { name: "Headset" } });
+    }
+  });
+
+  test("a department that differs only by case is refused", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    await page.goto("/admin/departments");
+    const input = page.getByLabel("New department name");
+    await waitForHydration(input);
+    await input.fill("hr");
+    await input.press("Enter");
+    await expect(page.locator('p[role="alert"]')).toHaveText('That name is already taken by "HR"', { timeout: 10_000 });
   });
 });

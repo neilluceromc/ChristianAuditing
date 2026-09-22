@@ -58,7 +58,9 @@ import { fmtDate } from "@/lib/format";
  *   filters `returnedAt: null`) and restores it in a `finally`, leaving the
  *   "Other spares" block untouched. Case 1 moves BR-HS-0502 to DISPOSE, so
  *   cases 4 and 7 assert on BR-MN-0911 and on heading ORDER, never on the
- *   whole option list.
+ *   whole option list — still true now that Phase 27 (M-11) gave case 1 a
+ *   `finally` that puts BR-HS-0502 back to SPARE: whether that one spare is in
+ *   the "Other spares" block or out of it, neither case reads the list whole.
  *   The seeded repair cut is small: its four stages hold 2/3/1/1 IT assets,
  *   well under one page, so case 8's `?page=2` exercises `pageOf`'s clamp
  *   inside `pagedSnapshot` (it asserts a real second page the moment a cut
@@ -114,43 +116,52 @@ const ADMIN = "admin@thebackroomop.com";
 
 test.describe("it gaps", () => {
   test("1. bulk status change on two IT tags, one in a closed status, lists the skip in the drawer and the toast", async ({ page }) => {
-    await login(page, IT);
-    // status=SPARE,DONATED (comma-joined multi-value facet, url-state.ts) so
-    // both candidates are on the page at once without touching BR-LT-0181 /
-    // BR-MN-0911, which case 4 still needs untouched.
-    await page.goto("/inventory?status=SPARE,DONATED");
-    // This is the first hit of /inventory's selectable table in this file —
-    // hydrating before the first `.check()` avoids a real flake seen while
-    // writing this test: a checkbox clicked before the client island
-    // attaches its own listeners visually toggles (the native input fires
-    // its default behaviour) but never reaches `toggleRow`, so the drawer
-    // opens reading zero selected.
-    await waitForHydration(page.getByLabel(/Select BR-HS-0502/));
-    await page.getByLabel(/Select BR-HS-0502/).check();
-    await page.getByLabel(/Select BR-LT-0075/).check();
-    await page.getByRole("button", { name: "Bulk actions…" }).click();
-    const drawer = page.getByRole("dialog", { name: "Bulk actions" });
-    await waitForHydration(drawer);
-    await expectNoSeriousAxe(page);
+    // Phase 27 (M-11): the original status is captured BEFORE anything moves,
+    // the case-7 way, so the `finally` can put BR-HS-0502 back instead of
+    // leaving it at DISPOSE for the rest of the file and the next run.
+    const hsBefore = await db.asset.findUniqueOrThrow({ where: { tag: "BR-HS-0502" } });
+    try {
+      await login(page, IT);
+      // status=SPARE,DONATED (comma-joined multi-value facet, url-state.ts) so
+      // both candidates are on the page at once without touching BR-LT-0181 /
+      // BR-MN-0911, which case 4 still needs untouched.
+      await page.goto("/inventory?status=SPARE,DONATED");
+      // This is the first hit of /inventory's selectable table in this file —
+      // hydrating before the first `.check()` avoids a real flake seen while
+      // writing this test: a checkbox clicked before the client island
+      // attaches its own listeners visually toggles (the native input fires
+      // its default behaviour) but never reaches `toggleRow`, so the drawer
+      // opens reading zero selected.
+      await waitForHydration(page.getByLabel(/Select BR-HS-0502/));
+      await page.getByLabel(/Select BR-HS-0502/).check();
+      await page.getByLabel(/Select BR-LT-0075/).check();
+      await page.getByRole("button", { name: "Bulk actions…" }).click();
+      const drawer = page.getByRole("dialog", { name: "Bulk actions" });
+      await waitForHydration(drawer);
+      await expectNoSeriousAxe(page);
 
-    await drawer.getByLabel(/Target status/).selectOption("DISPOSE");
-    await drawer.getByRole("button", { name: "Confirm" }).click();
+      await drawer.getByLabel(/Target status/).selectOption("DISPOSE");
+      await drawer.getByRole("button", { name: "Confirm" }).click();
 
-    // The toast (bulk-drawer.tsx): count, destination, then the skip suffix.
-    // "Success: " is toast.tsx's own tone label for "settled" (TONE_LABEL),
-    // the same prefix e2e/transfers.spec.ts's own toast assertions include.
-    await expect(page.getByText("Success: 1 asset now DISPOSE · 1 skipped", { exact: true })).toBeVisible({ timeout: 10_000 });
-    // The drawer stays open on the skipped banner rather than auto-closing.
-    await expect(drawer.getByText("1 skipped", { exact: true })).toBeVisible();
-    const skippedRow = drawer.getByRole("listitem").filter({ hasText: "BR-LT-0075" });
-    await expect(skippedRow).toContainText("closed status DONATED — cannot change");
+      // The toast (bulk-drawer.tsx): count, destination, then the skip suffix.
+      // "Success: " is toast.tsx's own tone label for "settled" (TONE_LABEL),
+      // the same prefix e2e/transfers.spec.ts's own toast assertions include.
+      await expect(page.getByText("Success: 1 asset now DISPOSE · 1 skipped", { exact: true })).toBeVisible({ timeout: 10_000 });
+      // The drawer stays open on the skipped banner rather than auto-closing.
+      await expect(drawer.getByText("1 skipped", { exact: true })).toBeVisible();
+      const skippedRow = drawer.getByRole("listitem").filter({ hasText: "BR-LT-0075" });
+      await expect(skippedRow).toContainText("closed status DONATED — cannot change");
 
-    const [hs, lt] = await Promise.all([
-      db.asset.findUniqueOrThrow({ where: { tag: "BR-HS-0502" } }),
-      db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0075" } }),
-    ]);
-    expect(hs.status).toBe("DISPOSE");
-    expect(lt.status).toBe("DONATED"); // untouched — the skip really skipped
+      const [hs, lt] = await Promise.all([
+        db.asset.findUniqueOrThrow({ where: { tag: "BR-HS-0502" } }),
+        db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0075" } }),
+      ]);
+      expect(hs.status).toBe("DISPOSE");
+      expect(lt.status).toBe("DONATED"); // untouched — the skip really skipped
+    } finally {
+      // The bulk change's audit row stays (R3, append-only); the status goes back.
+      await db.asset.update({ where: { id: hsBefore.id }, data: { status: hsBefore.status } });
+    }
   });
 
   test("2. register form: a Purchasing-class tag produces no live hint (class-scoped), but the server's own tag uniqueness still refuses it at submit", async ({ page }) => {
@@ -206,22 +217,29 @@ test.describe("it gaps", () => {
       data: { policyId: policy.id, name: "laptop", assetTypeId: loanLaptop.typeId, required: true },
     });
 
-    await login(page, IT);
-    await page.goto(`/employees/${leo.id}`);
-    const tile = page.getByRole("button", { name: /^laptop slot, on loan, required$/ });
-    await expect(tile).toBeVisible({ timeout: 15_000 });
-    await expect(tile.getByText("LOAN", { exact: true })).toBeVisible();
-    await expect(tile.getByText("policy gap")).toHaveCount(0);
+    try {
+      await login(page, IT);
+      await page.goto(`/employees/${leo.id}`);
+      const tile = page.getByRole("button", { name: /^laptop slot, on loan, required$/ });
+      await expect(tile).toBeVisible({ timeout: 15_000 });
+      await expect(tile.getByText("LOAN", { exact: true })).toBeVisible();
+      await expect(tile.getByText("policy gap")).toHaveCount(0);
 
-    // src/app/(app)/employees/page.tsx: `missingRequired === 0` renders
-    // "complete" — the per-employee progress line the brief names. Verified
-    // against source: the record page itself (loadout-view.tsx,
-    // employees/[id]/page.tsx) carries no "missing"/"complete" text at all,
-    // so this is where `missingRequired` (computeLoadout, src/lib/loadout.ts)
-    // actually surfaces.
-    await page.goto("/employees");
-    const row = page.getByRole("row", { name: /EMP-0095/ });
-    await expect(row).toContainText("complete");
+      // src/app/(app)/employees/page.tsx: `missingRequired === 0` renders
+      // "complete" — the per-employee progress line the brief names. Verified
+      // against source: the record page itself (loadout-view.tsx,
+      // employees/[id]/page.tsx) carries no "missing"/"complete" text at all,
+      // so this is where `missingRequired` (computeLoadout, src/lib/loadout.ts)
+      // actually surfaces.
+      await page.goto("/employees");
+      const row = page.getByRole("row", { name: /EMP-0095/ });
+      await expect(row).toContainText("complete");
+    } finally {
+      // Phase 27 (M-11): the policy and its slot were this case's own fixtures,
+      // so they leave with it. Slot before policy — PolicySlot.policyId is an FK.
+      await db.policySlot.deleteMany({ where: { policyId: policy.id } });
+      await db.equipmentPolicy.delete({ where: { id: policy.id } });
+    }
   });
 
   test("4. the Replace picker groups spares under \"Same type\" and \"Other spares\" headings", async ({ page }) => {

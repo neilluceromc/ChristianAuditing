@@ -408,4 +408,26 @@ test.describe.serial("suppliers", () => {
     await page.goto("/purchases/suppliers/import");
     await expectNoSeriousAxe(page);
   });
+
+  /**
+   * Phase 27 (spec §4.2, Task 6). Case 10 already proves an EXACT duplicate is
+   * refused; this is the case-insensitive half — "bayside networks" against the
+   * "Bayside Networks" case 1 created and every later case carries. The refusal
+   * writes nothing, so there is nothing to clean up and the form stays on /new.
+   */
+  test("12. a supplier whose name differs only by case is refused, naming the existing supplier", async ({ page }) => {
+    await login(page, PURCHASING);
+    await page.goto("/purchases/suppliers/new");
+    const nameField = page.getByLabel(/^Name\b/);
+    await waitForHydration(nameField);
+    await nameField.fill("bayside networks");
+    await page.getByLabel("Registered name").fill("Bayside Networks Corp.");
+    await page.getByLabel("Category").fill("IT hardware");
+    await page.getByLabel("Contact person").fill("Paolo Santos");
+    await page.getByLabel("Email").fill("paolo@bayside.ph");
+    await page.getByRole("button", { name: "Create supplier" }).click();
+    await expect(page.locator('p[role="alert"]')).toHaveText('A supplier with this name already exists: "Bayside Networks"', { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/purchases\/suppliers\/new$/);
+    expect(await db.vendor.count({ where: { name: "bayside networks" } })).toBe(0);
+  });
 });
