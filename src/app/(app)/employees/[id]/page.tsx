@@ -81,8 +81,6 @@ export default async function EmployeePage({
   const primary = profilePrimary({
     employment: employee.employment, totalSlots: loadout.totalSlots, filled: loadout.filled, missingRequired: loadout.missingRequired,
   });
-  // Task 4 wires `initialView` into LoadoutView's `initialView` prop (the br:loadout event listener lands there too).
-  void initialView;
   const pendingByAsset = new Map(openApprovals.filter((a) => a.assetId).map((a) => [a.assetId!, a.refNo]));
   const typeName = new Map(policies.flatMap((p) => p.slots).map((s) => [s.id, s.assetType?.name ?? "any"]));
 
@@ -124,6 +122,9 @@ export default async function EmployeePage({
     id: a.id, tag: a.tag, model: a.model, typeId: a.typeId,
     reservedFor: a.reservations[0]?.employee.name ?? null,
     reservedForThis: a.reservations[0]?.employeeId === id,
+    // Phase 29 (spec §4.5): a spare an open approval already promises is not
+    // pickable here — the pickers say which request holds it.
+    pendingRef: pendingByAsset.get(a.id) ?? null,
   }));
 
   const holding: HoldingItem[] = [
@@ -268,6 +269,9 @@ export default async function EmployeePage({
           <div id="loadout" tabIndex={-1} className="outline-none">
             <LoadoutView
               employeeId={id}
+              employeeName={employee.name}
+              initialView={initialView}
+              canLinkPolicies={user.role === "admin" || user.role === "it_staff"}
               slots={slots}
               unslotted={loadout.unslotted.map(toTileAsset)}
               onLoan={loadout.onLoan.map(toTileAsset)}
