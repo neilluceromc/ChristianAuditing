@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/icon";
 import { StatusDot } from "@/components/ui/status";
-import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+import { Table, TBody, Td, Th, THead, Tr, rowOpenProps } from "@/components/ui/table";
 import { HoldPill } from "@/components/ui/hold-pill";
 import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
 import type { ListState } from "@/lib/url-state";
@@ -34,7 +34,6 @@ export function HoldsTable({
   }
 
   function open(assetId: string) {
-    if (window.getSelection()?.toString()) return; // a text selection is not a click
     router.push(`/inventory/${assetId}`);
   }
 
@@ -59,12 +58,8 @@ export function HoldsTable({
         {rows.map((r) => (
           <Tr
             key={r.id}
-            tabIndex={0}
             className="cursor-pointer"
-            onClick={() => open(r.assetId)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && e.target === e.currentTarget) { e.preventDefault(); open(r.assetId); }
-            }}
+            {...rowOpenProps(() => open(r.assetId))}
           >
             <Td className="pr-0"><StatusDot value={r.state} /></Td>
             <Td mono className="text-[10.5px]">{r.state}</Td>

@@ -40,7 +40,7 @@ export function Worklist({
           </div>
           <p className="text-[11px] text-fg-muted">{g.section.blurb}</p>
           {!seeAllBase && g.capped && (
-            <p className="text-[11px] text-fg-muted">Showing the first {g.total} — the oldest first.</p>
+            <p className="text-[11px] text-fg-muted">Showing the first {g.rows.length} — the oldest first.</p>
           )}
           <ol className="flex flex-col">
             {g.rows.map((row) => (

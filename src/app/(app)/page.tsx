@@ -129,7 +129,7 @@ export default async function Home() {
                   <Stat label="Awaiting IT check" value={d.awaitingItCheck} hint="IT assets you registered" />
                   <Stat label="Below reorder level" value={<Link href="/stock?low=1" className="hover:underline">{d.lowStock}</Link>} />
                   <Stat label="Expiring within 30 days" value={<Link href="/stock/reports/expiry" className="hover:underline">{d.expiringLots}</Link>} />
-                  <Stat label="Stocktakes past close-by" value={<Link href="/stock/stocktakes" className="hover:underline">{d.stocktakesOverdue}</Link>} />
+                  <Stat label="Stocktakes past close-by" tone={d.stocktakesOverdue > 0 ? "accent" : "neutral"} value={<Link href="/stock/stocktakes" className="hover:underline">{d.stocktakesOverdue}</Link>} />
                 </div>
                 <TodoList rows={d.todo} empty="Nothing of yours is waiting — every request has moved on." />
               </div>

@@ -90,7 +90,9 @@ export function EntityCombobox({
         placeholder={placeholder}
         autoFocus={autoFocus}
         value={open ? query : (selected ? `${selected.label}${selected.sub ? ` · ${selected.sub}` : ""}` : "")}
-        onFocus={() => { setOpen(true); setActive(0); }}
+        // Phase 27 (spec §5.5): focus alone never opens the list — a click, typing or ArrowDown does, so an autoFocus field no longer pops a listbox on page load.
+        onFocus={() => setActive(0)}
+        onClick={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)} // let option mousedown land first
         onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); if (!e.target.value) onChange(null); }}
         onKeyDown={(e) => {

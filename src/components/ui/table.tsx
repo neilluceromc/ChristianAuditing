@@ -130,3 +130,16 @@ export function Td({
     </td>
   );
 }
+
+/**
+ * Phase 27 (spec §5.4): a whole-row link — focusable, opens on click (not on a text selection) and on
+ * Enter pressed on the row itself, never on a link or button inside it. Written once here; the
+ * inventory, employees and holds tables spread it onto their <Tr>.
+ */
+export function rowOpenProps(open: () => void): Pick<React.HTMLAttributes<HTMLTableRowElement>, "tabIndex" | "onClick" | "onKeyDown"> {
+  return {
+    tabIndex: 0,
+    onClick: () => { if (window.getSelection()?.toString()) return; open(); },
+    onKeyDown: (e) => { if (e.key === "Enter" && e.target === e.currentTarget) { e.preventDefault(); open(); } },
+  };
+}
