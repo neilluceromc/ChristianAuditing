@@ -5,9 +5,11 @@ import { actionDot } from "@/components/patterns/activity-feed";
 const base = { actorLabel: "J. Sarmiento", action: "update", diff: null as unknown, entityLabel: "BR-LT-0148" };
 
 describe("auditSentence — subject-first, one sentence (README 4b)", () => {
+  // Phase 27 fix wave (M-1): `fieldList` sorts on the label, so the order here
+  // is alphabetical rather than the order this object literal happens to use.
   it("update names the fields", () => {
     expect(auditSentence({ ...base, diff: { status: { from: "SPARE", to: "DEPLOYED" }, assignee: { from: null, to: "EMP-0042" } } }))
-      .toBe("J. Sarmiento updated status, assignee on BR-LT-0148");
+      .toBe("J. Sarmiento updated assignee, status on BR-LT-0148");
   });
   it("create reads as registration", () => {
     expect(auditSentence({ ...base, action: "create" })).toBe("J. Sarmiento created BR-LT-0148");
@@ -114,7 +116,7 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
         action: "import-update",
         diff: { model: { from: "Old", to: "New" }, cost: { from: 100, to: 200 } },
       }),
-    ).toBe("J. Sarmiento updated model, cost on BR-LT-0148 by import");
+    ).toBe("J. Sarmiento updated cost, model on BR-LT-0148 by import"); // sorted (M-1)
   });
   it("names the purchase transitions in the language of the handoff", () => {
     const pr = { ...base, actorLabel: "P. Reyes", entityLabel: "PR-0198", diff: null as unknown };
@@ -360,6 +362,17 @@ describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sent
     expect(actionLabel("lifecycle.assign")).toBe("Assigned");
     expect(actionLabel("import-update")).toBe("Imported (update)");
     expect(actionLabel("stock.received")).toBe("stock.received");
-    expect(Object.keys(ACTION_LABELS).length).toBeGreaterThanOrEqual(36);
+    expect(Object.keys(ACTION_LABELS).length).toBeGreaterThanOrEqual(42);
+  });
+  it("the worker's approved-request executions read like the direct action, marked as approved", () => {
+    expect(auditSentence({ ...base, action: "lifecycle.assign executed", actorLabel: "worker", diff: { assignee: { from: null, to: "EMP-0042" } } }))
+      .toBe("worker assigned BR-LT-0148 to EMP-0042 (approved request)");
+    expect(auditSentence({ ...base, action: "lifecycle.change-status executed", actorLabel: "worker", diff: { status: { from: "SPARE", to: "RETIRED" } } }))
+      .toBe("worker changed BR-LT-0148 to RETIRED (approved request)");
+    expect(auditSentence({ ...base, action: "lifecycle.transfer", diff: { assignee: { from: "EMP-0001", to: "EMP-0002" } } }))
+      .toBe("J. Sarmiento transferred BR-LT-0148 to EMP-0002");
+    expect(actionLabel("lifecycle.assign executed")).toBe("Assigned (approved request)");
+    expect(actionLabel("lifecycle.transfer")).toBe("Asset transferred");
+    expect(Object.keys(ACTION_LABELS).length).toBeGreaterThanOrEqual(42);
   });
 });

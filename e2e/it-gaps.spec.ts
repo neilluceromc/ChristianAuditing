@@ -210,14 +210,20 @@ test.describe("it gaps", () => {
     // "the Laptop category's first AssetType id" the brief names, read
     // directly off the held asset rather than assumed from AssetType
     // creation/query order.
-    const policy = await db.equipmentPolicy.create({
-      data: { name: "Contractor kit", appliesToTitle: "Contractor" },
-    });
-    await db.policySlot.create({
-      data: { policyId: policy.id, name: "laptop", assetTypeId: loanLaptop.typeId, required: true },
-    });
+    // Phase 27 fix wave (M-4): both fixtures are created INSIDE the try, so a
+    // throw from the slot create still leaves the policy to the `finally` —
+    // with migration 26's EquipmentPolicy_name_lower_key a leaked "Contractor
+    // kit" would fail every later run of this case until a reseed.
+    let policy: { id: string } | null = null;
 
     try {
+      policy = await db.equipmentPolicy.create({
+        data: { name: "Contractor kit", appliesToTitle: "Contractor" },
+      });
+      await db.policySlot.create({
+        data: { policyId: policy.id, name: "laptop", assetTypeId: loanLaptop.typeId, required: true },
+      });
+
       await login(page, IT);
       await page.goto(`/employees/${leo.id}`);
       const tile = page.getByRole("button", { name: /^laptop slot, on loan, required$/ });
@@ -237,8 +243,10 @@ test.describe("it gaps", () => {
     } finally {
       // Phase 27 (M-11): the policy and its slot were this case's own fixtures,
       // so they leave with it. Slot before policy — PolicySlot.policyId is an FK.
-      await db.policySlot.deleteMany({ where: { policyId: policy.id } });
-      await db.equipmentPolicy.delete({ where: { id: policy.id } });
+      if (policy) {
+        await db.policySlot.deleteMany({ where: { policyId: policy.id } });
+        await db.equipmentPolicy.delete({ where: { id: policy.id } });
+      }
     }
   });
 

@@ -30,7 +30,8 @@ export async function ActivityListPage({
   const hidden = await invisibleAuditRefs(user.role);
   const { items, total, page, pageCount, actionOptions } = await listActivity(feed, state, hidden);
   const filtered = (state.filters.action ?? []).length > 0;
-  const href = (p: number) => base + serializeListState({ ...state, page: p }, ACTIVITY_LIST_CONFIG);
+  // no search on the feeds — a stray ?q= must not stick to every link
+  const href = (p: number) => base + serializeListState({ ...state, q: "", page: p }, ACTIVITY_LIST_CONFIG);
 
   return (
     <>

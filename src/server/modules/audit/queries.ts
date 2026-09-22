@@ -33,7 +33,7 @@ export async function entityLabels(
     byType.get(e.entityType)!.add(e.entityId);
   }
   const map = new Map<string, { label: string; href: string | null }>();
-  const [assets, employees, approvals, purchases, policies, users, flags, endpoints, vendors, stockItems, stocktakes, stockCategories, departments] = await Promise.all([
+  const [assets, employees, approvals, purchases, policies, users, flags, endpoints, vendors, stockItems, stocktakes, stockCategories, departments, assetCategories, assetTypes] = await Promise.all([
     byType.has("asset")
       ? prisma.asset.findMany({ where: { id: { in: [...byType.get("asset")!] } }, select: { id: true, tag: true } })
       : [],
@@ -88,6 +88,17 @@ export async function entityLabels(
     byType.has("department")
       ? prisma.department.findMany({ where: { id: { in: [...byType.get("department")!] } }, select: { id: true, name: true } })
       : [],
+    // Phase 27 fix wave (I-2): the two types this phase class-scopes on /audit
+    // had no branch, so the filter it made meaningful printed truncated cuids.
+    byType.has("asset-category")
+      ? prisma.assetCategory.findMany({ where: { id: { in: [...byType.get("asset-category")!] } }, select: { id: true, name: true } })
+      : [],
+    byType.has("asset-type")
+      ? prisma.assetType.findMany({
+          where: { id: { in: [...byType.get("asset-type")!] } },
+          select: { id: true, name: true, category: { select: { name: true } } },
+        })
+      : [],
   ]);
   for (const a of assets) map.set(`asset:${a.id}`, { label: a.tag, href: `/inventory/${a.id}` });
   for (const e of employees) map.set(`employee:${e.id}`, { label: e.name, href: `/employees/${e.id}` });
@@ -110,6 +121,12 @@ export async function entityLabels(
   // Departments have no detail page — reference-actions.ts writes entityType
   // "department" on create/rename/delete.
   for (const d of departments) map.set(`department:${d.id}`, { label: d.name, href: null });
+  // Phase 27 fix wave (I-2): the admin reference lists, the same shape
+  // `equipment-policy`/`feature-flag`/`webhook-endpoint` already use.
+  for (const c of assetCategories) map.set(`asset-category:${c.id}`, { label: c.name, href: "/admin/asset-categories" });
+  // `AssetType.name` is unique only WITHIN its category (@@unique([categoryId, name])),
+  // so the label names the category too — the same reason `user` carries its email.
+  for (const t of assetTypes) map.set(`asset-type:${t.id}`, { label: `${t.category.name} · ${t.name}`, href: "/admin/asset-types" });
   for (const e of entries) {
     const key = `${e.entityType}:${e.entityId}`;
     if (!map.has(key)) map.set(key, { label: e.entityId.slice(0, 10) + "…", href: null });

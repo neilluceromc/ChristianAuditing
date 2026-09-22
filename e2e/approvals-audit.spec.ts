@@ -243,10 +243,11 @@ test.describe("audit log", () => {
    *     would throw. It is deleted in `finally`; the category too.
    * Both audit rows STAY — `AuditEntry` is append-only at the database (R3).
    *
-   * The rows are located by the truncated entity id the page actually prints:
-   * `entityLabels` (audit/queries.ts) has no `asset-category` branch, so an
-   * asset-category row falls through to the `entityId.slice(0, 10) + "…"`
-   * fallback and the category's NAME never reaches the screen.
+   * Phase 27 fix wave (I-2): `entityLabels` (audit/queries.ts) now resolves
+   * `asset-category`, so the row is located by the category's NAME — the label
+   * the page prints — instead of the `entityId.slice(0, 10) + "…"` fallback it
+   * used to fall through to. A name is what distinguishes "the row is hidden"
+   * from "the row is there under another label"; a cuid prefix could not.
    */
   test("class hygiene: IT's audit log hides Purchasing categories and approvals; admin's shows them", async ({ page }) => {
     const cat = await db.assetCategory.create({ data: { name: "Phase 27 Fleet", cls: "PURCHASING" } });
@@ -271,7 +272,7 @@ test.describe("audit log", () => {
         diff: { claimedBy: { from: null, to: "e2e" } },
       },
     });
-    const catRow = new RegExp(cat.id.slice(0, 10));
+    const catRow = new RegExp(cat.name);
     try {
       await login(page, "it@thebackroomop.com");
       await page.goto("/audit?entity=asset-category");
@@ -297,7 +298,7 @@ test.describe("activity feeds", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/activity");
     const feed = page.locator("ol");
-    await expect(feed.getByText("worker lifecycle.assign executed BR-LT-0181")).toBeVisible();
+    await expect(feed.getByText(/^worker assigned BR-LT-0181 to .+ \(approved request\)$/)).toBeVisible();
     // domain pill only ever renders on cross-domain feeds (Home, Phase 6) —
     // a scoped feed like this one never sets `domain`, so neither word appears.
     await expect(feed).not.toContainText(/\basset\b/i);

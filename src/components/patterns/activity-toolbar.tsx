@@ -13,7 +13,8 @@ export function ActivityToolbar({
   state: ListState; total: number; actionOptions: FacetOptionLike[]; base: string;
 }) {
   const router = useRouter();
-  const href = (s: ListState) => base + serializeListState(s, ACTIVITY_LIST_CONFIG);
+  // no search on the feeds — a stray ?q= must not stick to every link
+  const href = (s: ListState) => base + serializeListState({ ...s, q: "" }, ACTIVITY_LIST_CONFIG);
   const selected = state.filters.action ?? [];
   return (
     <div className="flex flex-wrap items-center gap-2">

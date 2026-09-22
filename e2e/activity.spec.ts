@@ -130,12 +130,16 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     expect(Object.keys(counts)).toContain("Assigned");
     expect(Number(counts["Assigned"])).toBeGreaterThan(0);
     await page.getByRole("button", { name: "Action" }).click();
-    await page.getByRole("dialog", { name: "Filter by Action" }).getByLabel("Assigned").check();
+    // Phase 27 fix wave (I-1): the facet now also lists "Assigned (approved request)" for the
+    // worker's executions, so a substring label match would resolve to two rows — the option is
+    // picked by its exact label span instead.
+    const actionFilter = page.getByRole("dialog", { name: "Filter by Action" });
+    await actionFilter.locator("label").filter({ has: page.getByText("Assigned", { exact: true }) }).getByRole("checkbox").check();
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page).toHaveURL(/action=lifecycle\.assign/);
     const feed = page.locator("ol");
     await expect(feed.locator("li").first()).toBeVisible();
-    for (const text of await feed.locator("li").allInnerTexts()) expect(text).toMatch(/assigned|executed/i);
+    for (const text of await feed.locator("li").allInnerTexts()) expect(text).toMatch(/assigned/i);
     // the other options keep their counts while one is selected
     const narrowed = await facetCounts(page, "Action");
     expect(Object.keys(narrowed).length).toBe(Object.keys(counts).length);
@@ -187,11 +191,12 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     await page.goto("/employees/activity");
     // `AuditEntry.diff` is Postgres `jsonb`, which stores object keys in ITS
     // own order (shorter key first, then bytewise) rather than the insertion
-    // order written above — so `Object.keys` in `fieldList` (lib/activity.ts)
-    // reads joinedAt before departmentId whatever order the create used.
+    // order written above — so the sentence sorts its field names instead
+    // (`fieldList`, lib/activity.ts, Phase 27 fix wave M-1) and the order here
+    // is alphabetical, independent of both the writer and the storage.
     // The point of the case is unchanged: both keys print as WORDS ("join
     // date", "department"), never as `joinedAt`/`departmentId`.
-    await expect(page.locator("ol").getByText("e2e importer updated join date, department on Nina Robles by import")).toBeVisible();
+    await expect(page.locator("ol").getByText("e2e importer updated department, join date on Nina Robles by import")).toBeVisible();
     await expect(page.locator("ol")).not.toContainText("departmentId");
   });
 

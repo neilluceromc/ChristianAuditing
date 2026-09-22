@@ -6,6 +6,14 @@ export const ACTION_LABELS: Record<string, string> = {
   "import-create": "Imported (new)", "import-update": "Imported (update)",
   "lifecycle.assign": "Assigned", "lifecycle.return": "Returned", "lifecycle.change-status": "Status changed",
   "lifecycle.replace": "Replaced", "lifecycle.triage": "Triaged", "loan.due-changed": "Loan due date changed",
+  // Phase 27 fix wave (I-1): the approvals worker's own actions (`<APPROVAL_TYPE_LABEL> executed`,
+  // worker/execute-approval.ts) — without these the Action facet listed a raw string and split "Assigned" in two.
+  "lifecycle.transfer": "Asset transferred",
+  "lifecycle.assign executed": "Assigned (approved request)",
+  "lifecycle.replace executed": "Replaced (approved request)",
+  "lifecycle.transfer executed": "Asset transferred (approved request)",
+  "lifecycle.return executed": "Returned (approved request)",
+  "lifecycle.change-status executed": "Status changed (approved request)",
   "reservation.placed": "Hold placed", "reservation.released": "Hold released",
   "document.uploaded": "Document attached", "document.signed": "Document signed",
   "secret.created": "Secret added", SECRET_READ: "Secret read",
@@ -35,7 +43,8 @@ export function fieldLabel(key: string): string {
   return FIELD_LABELS[key] ?? key.replace(/Id$/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
 }
 
-const fieldList = (diff: Record<string, unknown> | null) => (diff ? Object.keys(diff).map(fieldLabel).join(", ") : "fields");
+// sorted on the label: jsonb stores keys shortest-first, so storage order is neither the writer's nor alphabetical
+const fieldList = (diff: Record<string, unknown> | null) => (diff ? Object.keys(diff).map(fieldLabel).sort().join(", ") : "fields");
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
@@ -69,7 +78,14 @@ export interface ActivityEntryLike {
 
 export function auditSentence(entry: ActivityEntryLike): string {
   const diff = (entry.diff ?? null) as Record<string, { from: unknown; to: unknown }> | null;
-  switch (entry.action) {
+  // Phase 27 fix wave (I-1): the approvals worker writes "<lifecycle.*> executed" on the asset with the
+  // same prepared diff a direct action writes — one sentence body serves both, with a suffix saying
+  // the change came through an approved request.
+  const EXECUTED = " executed";
+  const viaApproval = entry.action.endsWith(EXECUTED);
+  const action = viaApproval ? entry.action.slice(0, -EXECUTED.length) : entry.action;
+  const suffix = viaApproval ? " (approved request)" : "";
+  switch (action) {
     case "create":
       return `${entry.actorLabel} created ${entry.entityLabel}`;
     case "update":
@@ -137,21 +153,25 @@ export function auditSentence(entry: ActivityEntryLike): string {
     // Phase 15: direct IT lifecycle changes. Subject-first, no refNo — the
     // approval row exists (already EXECUTED) but the sentence is about the asset.
     case "lifecycle.assign":
-      return `${entry.actorLabel} assigned ${entry.entityLabel} to ${String(diff?.assignee?.to ?? "someone")}`;
+      return `${entry.actorLabel} assigned ${entry.entityLabel} to ${String(diff?.assignee?.to ?? "someone")}${suffix}`;
+    case "lifecycle.transfer": {
+      const to = diff?.assignee?.to;
+      return `${entry.actorLabel} transferred ${entry.entityLabel}${to ? ` to ${String(to)}` : ""}${suffix}`;
+    }
     case "lifecycle.return": {
       const to = diff?.status?.to;
       return diff?.returnedAt?.to
-        ? `${entry.actorLabel} returned ${entry.entityLabel} for triage`
-        : `${entry.actorLabel} returned ${entry.entityLabel} as ${String(to ?? "?")}`;
+        ? `${entry.actorLabel} returned ${entry.entityLabel} for triage${suffix}`
+        : `${entry.actorLabel} returned ${entry.entityLabel} as ${String(to ?? "?")}${suffix}`;
     }
     case "lifecycle.change-status":
-      return `${entry.actorLabel} changed ${entry.entityLabel} to ${String(diff?.status?.to ?? "?")}`;
+      return `${entry.actorLabel} changed ${entry.entityLabel} to ${String(diff?.status?.to ?? "?")}${suffix}`;
     case "lifecycle.replace":
       return diff?.replacedBy
-        ? `${entry.actorLabel} replaced ${entry.entityLabel} with ${String(diff.replacedBy.to)}`
-        : `${entry.actorLabel} put ${entry.entityLabel} in place of ${String(diff?.replaces?.to ?? "?")} for ${String(diff?.assignee?.to ?? "someone")}`;
+        ? `${entry.actorLabel} replaced ${entry.entityLabel} with ${String(diff.replacedBy.to)}${suffix}`
+        : `${entry.actorLabel} put ${entry.entityLabel} in place of ${String(diff?.replaces?.to ?? "?")} for ${String(diff?.assignee?.to ?? "someone")}${suffix}`;
     case "lifecycle.triage":
-      return `${entry.actorLabel} triaged ${entry.entityLabel}: ${String(diff?.triage?.to ?? "?")}`;
+      return `${entry.actorLabel} triaged ${entry.entityLabel}: ${String(diff?.triage?.to ?? "?")}${suffix}`;
     // Phase 26 (spec §4.1): holds are placed and released on the asset.
     case "reservation.placed": {
       const until = diff?.expiresAt?.to;
@@ -292,6 +312,7 @@ export function auditSentence(entry: ActivityEntryLike): string {
     case "document.uploaded":
       return `${entry.actorLabel} attached ${String(diff?.document?.to ?? "a document")} to ${entry.entityLabel}`;
     case "document.signed": {
+      // the writer (inventory/document-actions.ts) keys this diff by the file name alone
       const fileName = diff ? Object.keys(diff)[0] ?? "a document" : "a document";
       return `${entry.actorLabel} marked ${fileName} signed on ${entry.entityLabel}`;
     }
