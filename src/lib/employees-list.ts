@@ -37,8 +37,8 @@ export function buildEmployeeWhere(state: ListState): Prisma.EmployeeWhereInput 
 
 /** Phase 17 (spec §4): both sort keys, then the id tiebreaker every list orders by. */
 export function buildEmployeeOrderBy(sort: SortKey[]): Prisma.EmployeeOrderByWithRelationInput[] {
-  // "loadout" is derived, not a column — pageEmployees orders it in memory (plan P-4)
-  const order = (sort.length ? sort : EMPLOYEES_LIST_CONFIG.defaultSort).filter((s) => s.key !== "loadout");
+  const kept = sort.filter((s) => s.key !== "loadout"); // "loadout" is derived, not a column — pageEmployees orders it in memory (plan P-4)
+  const order = kept.length ? kept : EMPLOYEES_LIST_CONFIG.defaultSort;
   return [...order.map(({ key, dir }) => ({ [key]: dir })), { id: "asc" }];
 }
 

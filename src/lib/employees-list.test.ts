@@ -51,8 +51,8 @@ describe("buildEmployeeOrderBy", () => {
     expect(buildEmployeeOrderBy([])).toEqual([{ name: "asc" }, { id: "asc" }]);
     expect(EMPLOYEES_LIST_CONFIG.defaultSort).toEqual([{ key: "name", dir: "asc" }]);
   });
-  it("the derived 'loadout' key is filtered out — buildEmployeeOrderBy never sees it (plan P-4)", () => {
-    expect(buildEmployeeOrderBy([{ key: "loadout", dir: "asc" }])).toEqual([{ id: "asc" }]);
+  it("the derived 'loadout' key is filtered out, falling back to the default order (plan P-4)", () => {
+    expect(buildEmployeeOrderBy([{ key: "loadout", dir: "asc" }])).toEqual(buildEmployeeOrderBy([]));
   });
 });
 
