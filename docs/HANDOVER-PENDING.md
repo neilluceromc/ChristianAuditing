@@ -11,15 +11,15 @@ and pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.15
 but NOT yet deployed.**
 
 **Where the code stands today (2026-09-22).** Staging runs the **Phase 26** merge (`e96fb2a`,
-**25 migrations**) since the 2026-09-22 forced redeploy. `main` = `origin/main` = `758ed3f` since the
-Phase 27 push (merged via `--no-ff` `5dd3372` and pushed 2026-09-22, carrying the docs commits
-`385b484` and `8c24c3b`), with no unpushed commits on it. **Phase 27 (`phase-27-leftovers-sweep`,
+**25 migrations**) since the 2026-09-22 forced redeploy. `main` = `origin/main` since the
+Phase 28 push (Phase 27 merged via `--no-ff` `5dd3372`, Phase 28 via `--no-ff` `7214066`, both pushed
+2026-09-22), with no unpushed commits on it. **Phase 27 (`phase-27-leftovers-sweep`,
 final tree `66445ed`) is on `main`; staging is NOT yet redeployed and its migration 26 is pending
 there** — see §1 below and `PICKUP.md` §4 item 2. **Phase 28
-(`phase-28-back-control`, a Back control on every page that has a parent) is CODE-COMPLETE on its own
-branch at final tree `5a8bbcf` and is UNMERGED and UNPUSHED** — a bounded change with no
-spec and no plan document (the record is `HANDOVER.md` (u)); merging, pushing and the redeploy are the
-user's decisions. **It adds no migration** (26 stays), so the redeploy that would carry it is code-only
+(`phase-28-back-control`, a Back control on every page that has a parent; final tree `5a8bbcf`) is on
+`main` too (merged `7214066`, pushed 2026-09-22)** — a bounded change with no
+spec and no plan document (the record is `HANDOVER.md` (u)); the redeploy is the
+user's decision. **It adds no migration** (26 stays), so the redeploy that would carry it is code-only
 — but it would ride the same `-Force` that finally applies Phase 27's migration 26, so the
 duplicate check comes first. See `PICKUP.md` §4 item 1.
 
