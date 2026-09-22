@@ -1,6 +1,6 @@
 # Phase 27 — IT and quality leftovers sweep
 
-**Status:** design approved in conversation 2026-09-22 (decisions 1–9 below). Not yet planned or implemented.
+**Status:** design approved in conversation 2026-09-22 (decisions 1–9 below); **implemented on branch `phase-27-leftovers-sweep`** — plan `docs/superpowers/plans/2026-09-22-phase-27-leftovers-sweep.md` (7 tasks, `D-1`…`D-10`: the pre-flight rulings R1–R4 are `D-1`, the final whole-branch review added `D-8`, its fix wave `D-9`, the final battery `D-10`) — **code-complete 2026-09-22 at final tree `66445ed`**, final-review fix wave included. The branch is **UNMERGED and UNPUSHED**: merging, pushing and the staging redeploy are the user's decisions, not pre-authorised. **Migration 26 `20260922010908_case_insensitive_names` is PENDING on staging** and applies on the first `scripts/deploy-staging.ps1 -Force` after the merge — run §3.1's duplicate check first; staging was checked clean on 2026-09-22. Battery on the final tree: `tsc` and `lint` clean, **26 migrations** (schema up to date), **1528 unit / 87 files**, **377 e2e / 36 files** across the seven foreground chunks — A 54 · B 67 · C 64 · D 50 · E1 37 · E2 39 · F 66 — zero failed, zero did-not-run. What shipped, in prose: `docs/HANDOVER.md` **(t)**. The `*Amended (D-n):*` notes below record every place the execution departed from this document.
 
 **Predecessors:** Phase 24 (`2026-09-17-it-gaps-2-design.md`) and Phase 25 (`2026-09-21-it-navigation-sweep-design.md`) each named three IT items out of scope; Phase 26 closed the two that needed schema work. This phase closes the three that remain, pays down the parked Minors of Phases 17–26, and records the three design decisions those phases left open. Facts gathered by two read-only scouts on 2026-09-22 (audit scoping, reference-data uniqueness, the activity feeds; every parked Minor re-verified against current code).
 
@@ -70,6 +70,8 @@ select 'AssetCategory', lower(name), count(*) from "AssetCategory" group by 2 ha
 
 ### 3.2 Shared Prisma error helper — `src/server/prisma-errors.ts` (new)
 
+*Amended (D-2):* the module was **not** new — `src/server/prisma-errors.ts` already existed, exporting the `asActionResult` P2028/P2025/P2003 handler that the flag, user and webhook actions use. Task 1 **appended** `isUniqueViolation` and `uniqueTarget` to it with their own unit test; nothing already there was touched or merged, and `admin/policy-actions.ts` keeps its own private `asActionResult` (a different P2003 meaning).
+
 ```ts
 import { Prisma } from "@prisma/client";
 
@@ -124,6 +126,8 @@ Entity-facet labels for the four new types: **Supplier**, **Stock item**, **Stoc
 
 ### 3.4 Activity list rules — `src/lib/activity-list.ts` (new, pure, unit-tested)
 
+*Amended (D-2, D-3 / plan P-7):* `financeActivityWhere` was **removed outright** from `finance/queries.ts` rather than rewritten as a wrapper — its only caller was the finance feed, and Home has no copy, so `feedWhere("finance", …)` in this module is now the one definition of the predicate. Task 2's two bridge edits kept the four pages compiling for one task and were deleted by Task 4. One occurrence of the old name survives on purpose: the module's own doc comment says where the predicate came from (M-P27-1, ruled kept as provenance).
+
 ```ts
 export const ACTIVITY_FEEDS = ["inventory", "employees", "finance", "purchases"] as const;
 export type ActivityFeed = (typeof ACTIVITY_FEEDS)[number];
@@ -151,6 +155,8 @@ export function buildActivityWhere(feed: ActivityFeed, state: ListState, hidden:
 `financeActivityWhere` in `finance/queries.ts` becomes `feedWhere("finance", NO_HIDDEN_REFS)` for any remaining caller (Home), so the predicate lives once.
 
 ### 3.5 Sentences, action labels and field names — `src/lib/activity.ts`
+
+*Amended (D-9, from the final review's I-1 and M-1):* the table below was incomplete. The approvals worker writes five **`<lifecycle.*> executed`** asset actions (`execute-approval.ts` × `labels.ts`) that reach `/inventory/activity`, and they had neither a sentence nor a label — so the new Action facet listed a raw `lifecycle.assign executed` beside “Assigned” and choosing “Assigned” dropped every queue-executed assign. All five now run through the lifecycle sentence bodies with the suffix **“ (approved request)”** and carry facet labels of the same shape (“Assigned (approved request)” …), and **`lifecycle.transfer`** gained its own sentence and label (“Asset transferred”). `fieldList` **sorts on the label**, so an `update`/`import-update` sentence lists fields in one stable order whatever order Postgres' jsonb stored them in — which is why the shipped copy is “updated department, join date on Nina Robles by import”; two pre-existing unit assertions were re-pinned to the sorted order (“assignee, status”, “cost, model”). The asset **history tab** still prints the raw `lifecycle.assign executed` string by design: it is a raw-trail path, not one of the four feeds.
 
 **New `auditSentence` cases** (every action that can reach one of the four feeds and falls to the raw-verb default today). `actor` = `entry.actorLabel`, `entity` = `entry.entityLabel`, `diff` = `entry.diff`:
 
@@ -215,6 +221,8 @@ Both the `update` and the `import-update` cases render `Object.keys(diff).map(fi
 
 ### 3.6 Paging helper — `src/lib/paging.ts`, `src/lib/timeline.ts` (Phase 17 D-11)
 
+*Amended (D-1, ruling R4):* the plan's unit expectation `parseIntParam("page=0", "page", 1) === 0` was wrong. `Number.parseInt("0", 10) || fallback` is **1**, because `||` reads 0 as absent — exactly the behaviour both hand-rolled parsers already had, so the helper preserves it rather than changing it. The shipped test expects 1 and says why.
+
 `export function parseIntParam(params: URLSearchParams, key: string, fallback: number): number` — `Number.parseInt(params.get(key) ?? "", 10) || fallback`. `parsePage` becomes `Math.max(1, parseIntParam(params, "page", 1))`; `parseTimelineCursor` reads `skip` through it (its own clamp to `TIMELINE_MAX_SKIP` unchanged). `byWhenDesc` (timeline.ts:27) gains the comment: cuids are ASCII and compare byte-wise, so JS `<`/`>` orders them exactly as Postgres' `id desc` does — the tiebreaker matches the source queries.
 
 ---
@@ -222,6 +230,8 @@ Both the `update` and the `import-update` cases render `Object.keys(diff).map(fi
 ## 4. Server
 
 ### 4.1 Audit queries — `src/server/modules/audit/queries.ts`
+
+*Amended (D-3 / plan P-8):* `invisibleAssetIds` in `inventory/queries.ts` is **kept and called** — `invisibleAuditRefs` uses it for the asset list, so the asset rule lives in one place and the helper keeps a caller. *Amended (D-3 / plan P-9):* the action `groupBy` runs **inside** `listActivity`'s paged-snapshot count closure (stashed in a closure variable, the Phase 26 `listReservations` pattern), so rows, total and facet counts come from one RepeatableRead snapshot; the assignment is split across two statements for Prisma's generic inference. *Amended (D-9, from the final review's I-2):* `entityLabels` had **no branch for `asset-category` or `asset-type`**, so `/audit` and its export printed truncated cuids for exactly the two entity types this section class-scopes. Both now resolve to names — the category's own name linking to `/admin/asset-categories`, and `Category · Type` linking to `/admin/asset-types` — following the file's majority convention for admin rows rather than `department`'s unlinked label.
 
 ```ts
 /** Phase 27 (spec §3.3): every class-bearing row this role may not see. Four empty lists for an all-class role, no query. */
@@ -247,6 +257,8 @@ export async function invisibleAuditRefs(role: Role): Promise<HiddenAuditRefs> {
 - `actionOptions`: `{ value: action, label: actionLabel(action), count }` sorted by count desc, then label.
 
 ### 4.2 Reference data — `admin/reference-actions.ts`, `admin/policy-actions.ts`, `stock/item-actions.ts`, `suppliers/actions.ts`
+
+*Amended (D-4, ruling R5):* the consolidation is **scoped to these five modules**, as this section names them. The plan's grep gate (“`P2002` only in `prisma-errors.ts`”) was wider than the spec: six pre-existing inline `P2002` checks live elsewhere — `suppliers/bank-actions`, `admin/webhook-actions`, `approvals`, `employees`, `offboarding`, and `receiving`/`reservations` actions. Each is correct, carries its own module's message and touches no `lower()` index, so they stay and are recorded in `HANDOVER.md` (t) and `HANDOVER-PENDING.md` §6 as a mechanical swap for whoever next opens those files. Two other execution facts: the policy check surfaces its named message through a thrown marker, because that module's private `asActionResult` would otherwise flatten it; and `inventory/actions.ts`' weaker local `uniqueTarget` was deleted while its two approval-race catches kept their own messages.
 
 Guard order unchanged (role → rate → zod). Before the write, inside the same transaction, one case-insensitive lookup that returns the existing row's name or null:
 
@@ -277,9 +289,13 @@ The `P2002` catch after the write stays as the race net with each module's exist
 
 ### 5.1 `/audit` — `app/(app)/audit/page.tsx`, `audit/export/route.ts`
 
+*Amended (D-3 / plan P-10):* the entity facet labels `vendor` as **“Supplier”** through a one-entry override map consulted before `humanize` (which would print “Vendor”); the other three new types humanise correctly. *Recorded, not fixed (final review M-2):* the row's entity **pill** still renders the raw `vendor` while the facet and the chip say “Supplier”. The fix is a one-line `humanize` on the pill, but the pill is CSS-uppercased and an existing e2e asserts `ASSET` on it, so it needs its own e2e pass — carried in `HANDOVER.md` (t) and `HANDOVER-PENDING.md` §6.
+
 No visible change except: IT and viewer accounts no longer see Purchasing approvals, categories or types in the log or the export; the Entity dropdown lists Supplier, Stock item, Stock category and Stocktake.
 
 ### 5.2 The four activity feeds — `app/(app)/{inventory,employees,finance,purchases}/activity/page.tsx`, new `components/patterns/activity-toolbar.tsx`
+
+*Amended (D-5 / plan P-2):* the wiring this section describes lives in **one** server component, `src/components/patterns/activity-list-page.tsx` (`ActivityListPage`), which does parse → refs → `listActivity` → toolbar → feed → pagination; each `activity/page.tsx` is a five-line wrapper passing `feed`, `title`, `base` and its own empty-state copy. “The four pages shrink to parse, query, render” is met with one copy of the wiring instead of four. *Amended (D-9, final review M-3):* the pagination and facet hrefs **drop a stray `?q=`** — `serializeListState` emitted the (always empty) search key for feeds that have no search box.
 
 Each page becomes: `requireUser` → `parseListState(sp, ACTIVITY_LIST_CONFIG)` → `invisibleAuditRefs(user.role)` → `listActivity(feed, state, hidden)` → `PageHeader` (copy unchanged) → `ActivityToolbar` → `ActivityFeed` → `Pagination` with hrefs from `serializeListState` so a page change keeps the facet. Finance keeps its domain pill.
 
@@ -305,6 +321,8 @@ export function rowOpenProps(open: () => void): Pick<React.HTMLAttributes<HTMLTa
 `InventoryTable`'s row spreads `rowOpenProps(() => router.push(`/inventory/${row.id}`))` (its checkbox cell keeps `stopPropagation`; `selected` and `className` unchanged); `EmployeesTable` and `HoldsTable` replace their duplicated six lines with the same spread. Behaviour of the two existing tables is byte-for-byte the same.
 
 ### 5.5 The small visible fixes
+
+*Amended (D-6 / plan P-3):* `Stat`'s accent is **`text-accent` on the value span plus a `data-tone` attribute** — coloured text, no pill chrome, because a stat number is not a pill; `tone` defaults to `"neutral"`. The `data-tone` attribute was reviewed and kept (state attributes already ship in this codebase). *Amended (D-6 / plan P-5):* the combobox blast radius listed below is corrected — the specs that actually drive an `EntityCombobox` are `custody`, `department-owned`, `direct-lifecycle`, `holds`, `it-gaps`, `quick-forms`, `registration`, `stock` and `stock-lots` (`it-core`, `transfers`, `purchasing-ext` and `stocktake` have none; `suppliers` and `auth-shell` only touch the command palette). They ran green in two foreground chunks — 39 passed (3.4m) and 48 passed (4.5m) — after one sanctioned test fix: `e2e/quick-forms.spec.ts` case 2 relied on focus opening the list and now clicks. *Amended (D-9, final review M-5):* the synthetic “No supplier” option is keyed and identified as **`none`** rather than by its empty value, so it cannot collide with a real option's id; the sentinel is commented on the receive form.
 
 - **Work-page note** (`components/home/worklist.tsx:43`): `Showing the first {g.rows.length} — the oldest first.` — the number of rows actually rendered, which is what "showing" means; `g.total` keeps driving the section header. (Phase 17 D-11.)
 - **Purchasing Home tile** (`app/(app)/page.tsx:132`, `components/ui/stat.tsx`): `Stat` gains `tone?: "neutral" | "accent"` (default neutral; accent renders the value in the `DuePill` accent colour token); the "Stocktakes past close-by" stat passes `tone={d.stocktakesOverdue > 0 ? "accent" : "neutral"}`. (Phase 23 D-15 #1.)
@@ -342,6 +360,8 @@ export function rowOpenProps(open: () => void): Pick<React.HTMLAttributes<HTMLTa
 ---
 
 ## 7. Tests
+
+*Amended (D-7 / plan P-4):* case 3's “upload via the record's Documents tab” is replaced by the e2e **writing the audit rows it renders** (`db.auditEntry.create` for `document.uploaded`, an `import-update` and a Purchasing asset row) and leaving them — `AuditEntry` is append-only, the sentence renderer is the unit under test, and the upload flow itself is already covered by `it-core.spec.ts`. *Amended (D-7):* the shipped `--list` total is **377 tests in 36 files**, not 378 — the plan counted `e2e/it-gaps.spec.ts`' two `try`/`finally` edits as new cases when they are edits to existing ones; thirteen cases are genuinely new (`activity` 7, `admin` +3, `approvals-audit` +1, `stock` +1, `suppliers` +1). *Amended (D-7), ten recorded adaptations, three of them worth keeping as e2e conventions:* the seed holds no `lifecycle.assign` audit row, so activity case 1 writes its own; `?q=<exact tag>` **redirects to the record**, so a search case must use a partial (`?q=0148`); `getByRole("alert")` collides with Next's route announcer, so assertions scope to `p[role="alert"]`; and Postgres' jsonb reorders diff keys, which is why `fieldList` sorts (M-1). *Amended (D-9):* two cases adapted to the fix wave — the audit-hygiene case locates its category row by name now that `entityLabels` resolves it, and activity case 1 picks its facet option by the exact label span, because the new “Assigned (approved request)” label made `getByLabel("Assigned")` ambiguous.
 
 **Unit** (`vitest`): `audit-list.test.ts` rewritten for `HiddenAuditRefs` (each type alone, mixed, all empty → no `NOT`); `activity-list.test.ts` (four feeds, the asset hiding in inventory and finance, the action filter, no filter → the bare base); `activity.test.ts` (each new sentence, `fieldLabel` known keys and the fallback, `update`/`import-update` through the dictionary, the default pinned on `flag-enable`, `actionLabel` fallback); `prisma-errors.test.ts` (array target, string target, non-Prisma error); `paging.test.ts` (`parseIntParam` fallback and `parsePage` clamp); a `Stat` tone test only if a component test harness already exists (none does today — skip).
 
