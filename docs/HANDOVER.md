@@ -1628,11 +1628,12 @@ least-evidenced assumption.) Read items 1–4 below, then stop and ask.
    `reservationsBySlot`'s consuming pass with `reservedCount`, which still counts every hold, so a
    loan-covered empty tile can read “on loan”, “reserved · tag” and offer Assign reserved at once.
 
-   **What remains: merging to `main`, pushing, and the staging redeploy are the user's decisions, not
-   pre-authorised.** The merge is `--no-ff` with a tree-hash comparison afterwards, because the root
-   checkout has no `node_modules` and cannot re-run the battery. The push should carry only `main`,
-   which also holds the two unpushed docs-only commits `401b838` (spec) and `1acd928` (plan) beyond
-   `origin/main` `67f4e9e`. This phase is code-only — it adds no migration — but staging still runs
+   **Merged and pushed (2026-09-23):** `--no-ff` into `main` as `d76903b`, the merged tree byte-identical to the
+   tested tip `e01923a` (tree hashes matched — the root checkout has no `node_modules` and cannot re-run the
+   battery, so the hash check stands in for it); only `main` was pushed, carrying the two docs-only
+   commits `401b838` (spec) and `1acd928` (plan); branch and worktree removed. **What remains: the
+   staging redeploy, the user's decision, not pre-authorised.** This phase is code-only — it adds no
+   migration — but staging still runs
    `e96fb2a` (Phases 19–26, 25 migrations) and Phase 27's **migration 26** `case_insensitive_names` is
    still pending there, so the first `scripts/deploy-staging.ps1 -Force` after a Phase 29 merge applies
    it and the seven-statement duplicate check must be run first.

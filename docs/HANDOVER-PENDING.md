@@ -22,10 +22,10 @@ spec and no plan document (the record is `HANDOVER.md` (u)); the redeploy is the
 user's decision. **It adds no migration** (26 stays), so the redeploy that would carry it is code-only
 — but it would ride the same `-Force` that finally applies Phase 27's migration 26, so the
 duplicate check comes first. **Phase 29 (`phase-29-employee-uiux`, Laws of UX applied to the
-employee area) is CODE-COMPLETE at final tree `9660e6e` but UNMERGED and UNPUSHED, and it adds no
-migration either** — merging, pushing and the redeploy are all the user's decisions. Local `main`
-therefore carries **two unpushed docs-only commits**, `401b838` (the Phase 29 spec) and `1acd928`
-(the plan), beyond `origin/main` `67f4e9e`. See `PICKUP.md` §4 item 1.
+employee area; final tree `9660e6e`) is MERGED TO `main` via `--no-ff` `d76903b` and PUSHED (2026-09-23), and
+it adds no migration either** — the redeploy is the user's decision. The push also carried the two
+docs-only commits `401b838` (the Phase 29 spec) and `1acd928` (the plan) that had sat on local
+`main`; `main` = `origin/main` again. See `PICKUP.md` §4 item 1.
 
 ---
 
