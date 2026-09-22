@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
-import { computeLoadout, effectiveSlots, resolvePolicy } from "@/lib/loadout";
+import { computeLoadout, effectiveSlots, profilePrimary, resolvePolicy } from "@/lib/loadout";
 import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
 import { fmtDate, fmtMoney, fmtRelativeDays, localDateISO } from "@/lib/format";
 import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
@@ -11,8 +11,8 @@ import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Avatar } from "@/components/ui/avatar";
-import { ButtonLink } from "@/components/ui/button-link";
 import { Card, CardBody } from "@/components/ui/card";
+import { DuePill } from "@/components/ui/due-pill";
 import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { Stat } from "@/components/ui/stat";
@@ -20,10 +20,10 @@ import { StatusDot } from "@/components/ui/status";
 import { LoadoutView, type HoldingItem, type SlotTile, type SpareOption } from "@/components/employees/loadout-view";
 import { AcknowledgementCard } from "@/components/employees/acknowledgement-card";
 import { EmployeeCreatedNotice } from "@/components/employees/employee-created-notice";
-import { StartOffboardingDialog } from "@/components/employees/start-offboarding-dialog";
-import { TransferDialog } from "@/components/employees/transfer-dialog";
+import { ProfileActions } from "@/components/employees/profile-actions";
 import { TransfersCard } from "@/components/employees/transfers-card";
 import { getTransfers } from "@/server/modules/employees/queries";
+import { loadoutViewFor } from "@/server/loadout-view";
 
 export default async function EmployeePage({
   params,
@@ -39,7 +39,7 @@ export default async function EmployeePage({
   if (!employee) notFound();
   const today = localDateISO(new Date());
 
-  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes, acks, transfers, departments] = await Promise.all([
+  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes, acks, transfers, departments, initialView] = await Promise.all([
     prisma.asset.findMany({ where: { assigneeId: id }, orderBy: { tag: "asc" } }),
     prisma.reservation.findMany({ where: { employeeId: id, state: "ACTIVE" }, include: { asset: true } }),
     prisma.approval.findMany({
@@ -53,7 +53,20 @@ export default async function EmployeePage({
       // row; recorded as a follow-up). Pinned to the IT class explicitly so
       // this picker never offers a STORED car by accident.
       where: { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null },
-      include: { reservations: { where: { state: "ACTIVE" }, include: { employee: true } } },
+      include: {
+        reservations: { where: { state: "ACTIVE" }, include: { employee: true } },
+        // Phase 29 (final review I-1, ruling R7): the pickers' own
+        // `openApprovals` is scoped to THIS employee, so a spare another
+        // person's request is already waiting on read as free here — exactly
+        // the case the pinned "held or queued for someone else" line claims is
+        // excluded. Asked per asset instead, so the scope matches the copy.
+        approvals: {
+          where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
+          select: { refNo: true },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
+      },
       orderBy: { tag: "asc" },
     }),
     prisma.employeeSlotException.findMany({
@@ -73,10 +86,14 @@ export default async function EmployeePage({
     }),
     getTransfers(id),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
+    loadoutViewFor(user.id),
   ]);
 
   const policy = resolvePolicy(employee, policies);
   const loadout = computeLoadout(effectiveSlots(policy?.slots ?? [], exceptions), held);
+  const primary = profilePrimary({
+    employment: employee.employment, totalSlots: loadout.totalSlots, filled: loadout.filled, missingRequired: loadout.missingRequired,
+  });
   const pendingByAsset = new Map(openApprovals.filter((a) => a.assetId).map((a) => [a.assetId!, a.refNo]));
   const typeName = new Map(policies.flatMap((p) => p.slots).map((s) => [s.id, s.assetType?.name ?? "any"]));
 
@@ -118,6 +135,11 @@ export default async function EmployeePage({
     id: a.id, tag: a.tag, model: a.model, typeId: a.typeId,
     reservedFor: a.reservations[0]?.employee.name ?? null,
     reservedForThis: a.reservations[0]?.employeeId === id,
+    // Phase 29 (spec §4.5): a spare an open approval already promises is not
+    // pickable here — the pickers say which request holds it. The asset's own
+    // open approval comes first (any requester, I-1); this person's map is
+    // kept as the fallback so the ref stays the one the rest of the page shows.
+    pendingRef: a.approvals[0]?.refNo ?? pendingByAsset.get(a.id) ?? null,
   }));
 
   const holding: HoldingItem[] = [
@@ -165,32 +187,24 @@ export default async function EmployeePage({
           <span className="inline-flex items-center gap-1.5">
             <StatusDot value={employee.employment} ns="employment" />
             <span className="font-mono text-[10.5px] text-fg-muted">{employee.employment}</span>
+            {employee.employment === "OFFBOARDING" && employee.offboardingDueAt && (
+              <DuePill dueAt={employee.offboardingDueAt} today={today} withDate />
+            )}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
         }
         actions={
-          <>
-            <ButtonLink href={`/employees/${id}/timeline`}>Timeline</ButtonLink>
-            <ButtonLink href={`/employees/${id}/holdings`}>Export holdings</ButtonLink>
-            <ButtonLink href={`/employees/${id}/form`}>Accountability form</ButtonLink>
-            {canMutate && (
-              <TransferDialog
-                employeeId={id}
-                employeeName={employee.name}
-                currentTitle={employee.title}
-                departments={otherDepartments}
-              />
-            )}
-            {canMutate && employee.employment === "ACTIVE" && (
-              <StartOffboardingDialog
-                employeeId={id}
-                employeeName={employee.name}
-                defaultDue={defaultOffboardingDue(today)}
-                minDue={minOffboardingDue(today)}
-              />
-            )}
-            {canMutate && <ButtonLink variant="primary" href={`/employees/${id}/edit`}>Edit</ButtonLink>}
-          </>
+          <ProfileActions
+            employeeId={id}
+            employeeName={employee.name}
+            currentTitle={employee.title}
+            employment={employee.employment}
+            canMutate={canMutate}
+            primary={primary}
+            departments={otherDepartments}
+            defaultDue={defaultOffboardingDue(today)}
+            minDue={minOffboardingDue(today)}
+          />
         }
       />
       <div className="flex flex-col gap-4 lg:flex-row">
@@ -201,7 +215,6 @@ export default async function EmployeePage({
               <div className="flex flex-col items-start gap-2">
                 <Avatar name={employee.name} size="xxl" />
                 <div>
-                  <p className="text-[15px] font-semibold text-fg">{employee.name}</p>
                   <p className="text-xs text-fg-secondary">{employee.title} · {employee.department.name}</p>
                   {recentTransfer && (
                     <p className="text-[10.5px] text-fg-muted">
@@ -217,21 +230,35 @@ export default async function EmployeePage({
                 </div>
               </div>
               {policy && (
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-baseline justify-between">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-fg-muted">Loadout vs policy</span>
-                    <span className="font-mono text-xs text-fg">{loadout.filled} / {loadout.totalSlots}</span>
-                  </div>
-                  <ProgressBar value={loadout.filled} max={loadout.totalSlots} label="Loadout completeness" />
-                  <span className="text-[10.5px] text-fg-muted">{policy.name}</span>
+                <div className="flex flex-col gap-1" data-testid="loadout-progress">
+                  <span className="text-xs font-medium text-fg">
+                    {loadout.missingRequired === 0 ? "No required gaps" : `${loadout.missingRequired} required gap${loadout.missingRequired === 1 ? "" : "s"}`}
+                  </span>
+                  <ProgressBar value={loadout.filled} max={loadout.totalSlots} label="Slots filled" />
+                  <span className="font-mono text-[10.5px] text-fg-muted">{loadout.filled} of {loadout.totalSlots} slots filled · {policy.name}</span>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <Stat label="Items held" value={String(held.length)} />
-                <Stat label="Book value" value={fmtMoney(bookValue)} />
-                <Stat label="Oldest item" value={oldest ? fmtDate(oldest) : "—"} />
-                <Stat label="Open requests" value={String(openApprovals.length)} />
-              </div>
+              {held.length === 0 ? (
+                // Phase 29 (rulings R11/R14, spec §4.2): "No items yet" replaces
+                // Book value and Oldest item (Items held is implied by the
+                // line itself) — never the Open-requests count, which on a
+                // day-one hire is the ONLY number the panel has to give.
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-fg-muted">No items yet</p>
+                  {openApprovals.length > 0 && (
+                    <div className="grid grid-cols-1 gap-2">
+                      <Stat label="Open requests" value={String(openApprovals.length)} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <Stat label="Items held" value={String(held.length)} />
+                  <Stat label="Book value" value={fmtMoney(bookValue)} />
+                  <Stat label="Oldest item" value={oldest ? fmtDate(oldest) : "—"} />
+                  <Stat label="Open requests" value={String(openApprovals.length)} />
+                </div>
+              )}
               {openApprovals.length > 0 && (
                 // Phase 25 (spec §4 row 6): the count above, the requests themselves here.
                 <ul className="flex flex-wrap gap-x-2 gap-y-1 pt-2">
@@ -268,6 +295,9 @@ export default async function EmployeePage({
           <div id="loadout" tabIndex={-1} className="outline-none">
             <LoadoutView
               employeeId={id}
+              employeeName={employee.name}
+              initialView={initialView}
+              canLinkPolicies={user.role === "admin" || user.role === "it_staff"}
               slots={slots}
               unslotted={loadout.unslotted.map(toTileAsset)}
               onLoan={loadout.onLoan.map(toTileAsset)}

@@ -282,6 +282,16 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+/* A slot tile that just changed rings once and settles — the write landed HERE,
+   said without moving anything (plan P-10). The reduced-motion rule below
+   collapses it to nothing, which is fine: the toast carries the same news. */
+@keyframes changed-ring {
+  from { box-shadow: 0 0 0 3px var(--accent); }
+  to { box-shadow: 0 0 0 0 transparent; }
+}
+.tile-changed {
+  animation: changed-ring 2000ms var(--ease-std) forwards;
+}
 
 /* Hard requirement, not an enhancement. */
 @media (prefers-reduced-motion: reduce) {

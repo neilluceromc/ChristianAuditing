@@ -16,6 +16,15 @@ export const RATE_LIMITS = {
   mutation: { limit: 60, windowMs: 60_000 },
   import: { limit: 10, windowMs: 60_000 },
   import_plan: { limit: 60, windowMs: 60_000 },
+  // Phase 29 (final review I-4): the same reasoning one step further. A live
+  // form check (the taken-number lookup, "next free", the policy preview, the
+  // same-name nudge) writes NOTHING, but four of them now run per keystroke
+  // pause — one create costs ~7–10 events. Sharing the 60/min write budget put
+  // a data-entry burst ("Create and add another", 6–8 people a minute) on the
+  // cap, where the checks fail silently and then the create itself is refused
+  // on a form that did nothing wrong. Its own, far larger budget still bounds
+  // a runaway client; `RateEvent.kind` is a plain `String`, so no migration.
+  check: { limit: 240, windowMs: 60_000 },
 } as const;
 
 export type RateKind = keyof typeof RATE_LIMITS;

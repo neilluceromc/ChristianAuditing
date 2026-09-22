@@ -121,6 +121,21 @@ async function facetCounts(page: Page, facet: string): Promise<Record<string, st
   return counts;
 }
 
+/**
+ * Phase 29 (plan P-5): the profile header keeps ONE state-chosen primary plus
+ * Edit; everything else moved behind a single "More actions" menu, so what used
+ * to be a bare `<button>Start offboarding</button>` is now the menuitem
+ * "Start offboarding…" (with U+2026, the character the product actually
+ * renders). Opening the menu is the only change — the dialog it raises, and
+ * every assertion about that dialog, is exactly as it was.
+ */
+async function openProfileAction(page: Page, item: string) {
+  const more = page.getByRole("button", { name: "More actions" });
+  await waitForHydration(more);
+  await more.click();
+  await page.getByRole("menuitem", { name: item }).click();
+}
+
 const IT = "it@thebackroomop.com";
 const ADMIN = "admin@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
@@ -132,9 +147,7 @@ test.describe("it navigation sweep (Phase 25)", () => {
     try {
       await login(page, IT);
       await page.goto(`/employees/${carlo.id}`);
-      const startButton = page.getByRole("button", { name: "Start offboarding" });
-      await waitForHydration(startButton);
-      await startButton.click();
+      await openProfileAction(page, "Start offboarding…");
 
       const dialog = page.getByRole("dialog", { name: `Start offboarding ${carlo.name}` });
       await waitForHydration(dialog);
@@ -167,9 +180,23 @@ test.describe("it navigation sweep (Phase 25)", () => {
       expect(diff.offboardingDueAt.to).toBe(after.offboardingDueAt!.toISOString());
 
       await page.goto(`/employees/${carlo.id}`);
-      await expect(page.getByRole("button", { name: "Start offboarding" })).toHaveCount(0);
+      // Phase 29 (plan P-5): the offer is gone, but it is gone from INSIDE the
+      // More menu now — ProfileActions only pushes "Transfer…"/"Start
+      // offboarding…" for an ACTIVE person, so the menu opens and is empty of
+      // it. Escape closes it again so the axe scan below sees the resting page.
+      const moreAfter = page.getByRole("button", { name: "More actions" });
+      await waitForHydration(moreAfter);
+      await moreAfter.click();
+      await expect(page.getByRole("menuitem", { name: "Start offboarding…" })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toHaveCount(0);
       await expect(page.getByText("Offboarding in progress — slots are frozen")).toBeVisible();
-      await expect(page.getByText(/due in \d+ d|due today/)).toBeVisible();
+      // Phase 29 (spec §4.1): the PageHeader badge now carries a DuePill of its
+      // own for a leaver, so this text exists twice on the page (the header's
+      // and the frozen banner's). Scoped to the header — the new one — rather
+      // than loosened with .first(), which would have gone on passing if the
+      // header pill were dropped again.
+      await expect(page.locator("main header").first().getByText(/due in \d+ d|due today/)).toBeVisible();
       await expectNoSeriousAxe(page);
     } finally {
       await db.employee.update({
@@ -184,9 +211,7 @@ test.describe("it navigation sweep (Phase 25)", () => {
     try {
       await login(page, IT);
       await page.goto(`/employees/${carlo.id}`);
-      const startButton = page.getByRole("button", { name: "Start offboarding" });
-      await waitForHydration(startButton);
-      await startButton.click();
+      await openProfileAction(page, "Start offboarding…");
 
       const dialog = page.getByRole("dialog", { name: `Start offboarding ${carlo.name}` });
       await waitForHydration(dialog);
@@ -204,7 +229,11 @@ test.describe("it navigation sweep (Phase 25)", () => {
 
       await login(page, VIEWER);
       await page.goto(`/employees/${carlo.id}`);
-      await expect(page.getByRole("button", { name: "Start offboarding" })).toHaveCount(0);
+      // Phase 29 (plan P-5): ProfileActions renders NOTHING for a viewer — no
+      // primary, no Edit, and no More menu for an action to hide inside — so
+      // the absence of the menu is the stronger form of the old assertion.
+      await expect(page.getByRole("button", { name: "More actions" })).toHaveCount(0);
+      await expect(page.getByRole("menuitem", { name: "Start offboarding…" })).toHaveCount(0);
       await expectNoSeriousAxe(page);
     } finally {
       // The refusal path writes nothing; this is the belt-and-braces restore in
@@ -323,10 +352,26 @@ test.describe("it navigation sweep (Phase 25)", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${nina.id}`);
+    // Phase 29 (rulings R11/R14): Nina is day one — she holds nothing, so the
+    // panel reads "No items yet" INSTEAD of Book value and Oldest item, and
+    // the count her one PENDING request (APR-2041) makes must survive that.
     // Stat renders label and value as two spans in one wrapper.
+    await expect(page.getByText("No items yet")).toBeVisible();
     await expect(page.getByText("Open requests", { exact: true }).locator("..")).toContainText("1");
     await expect(page.getByRole("link", { name: "APR-2041" })).toHaveAttribute("href", `/approvals/${approval.id}`);
     await expectNoSeriousAxe(page);
+
+    // …and the same count on the OTHER branch of that panel: Dennis Ong holds
+    // three items, so his shows the full four-Stat grid. Counted from the DB
+    // rather than hard-coded, because earlier cases in this file create and
+    // delete approvals of their own against him.
+    const dennis = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
+    const openForDennis = await db.approval.count({
+      where: { employeeId: dennis.id, state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
+    });
+    await page.goto(`/employees/${dennis.id}`);
+    // Stat renders label and value as two spans in one wrapper.
+    await expect(page.getByText("Open requests", { exact: true }).locator("..")).toContainText(String(openForDennis));
   });
 
   test("9. the fleet bar's legend links into the inventory filtered to that status", async ({ page }) => {

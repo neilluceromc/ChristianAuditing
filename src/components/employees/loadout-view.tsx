@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
@@ -30,6 +30,9 @@ import { requestAssign, requestAssignReserved, requestReturn } from "@/server/mo
 import { reserveAsset } from "@/server/modules/reservations/actions";
 import { assignAsset, assignReserved, replaceAsset, returnAsset } from "@/server/modules/lifecycle/actions";
 import { removeSlotException } from "@/server/modules/employees/exception-actions";
+import { saveLoadoutView } from "@/server/preferences";
+import { orderTiles, tileMenuItems } from "@/lib/loadout";
+import { statusFamily } from "@/lib/status";
 import {
   DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, minLoanDue, reasonRequiredFor,
   type ReturnOutcome,
@@ -61,6 +64,8 @@ export interface SpareOption {
   typeId: string | null;
   reservedFor: string | null; // employee name, or null
   reservedForThis: boolean;
+  /** Phase 29 (spec §4.5): an open approval already promises this spare — unpickable, and it says which request. */
+  pendingRef: string | null;
 }
 
 export interface HoldingItem {
@@ -75,10 +80,31 @@ export interface HoldingItem {
   expiresAt: Date | null;
 }
 
-const STRIPES = "repeating-linear-gradient(135deg, var(--border-faint) 0 6px, var(--surface-subtle) 6px 12px)";
+/**
+ * Phase 29 (ruling R8): one hold marks ONE tile. Keyed only on the type, a
+ * per-tile `find` lit up every empty slot of that type and gave each its own
+ * "Assign reserved" for the SAME asset (and `markChanged` could then ring a
+ * tile that never changed). This consumes each reserved-for-this-person spare
+ * into the first empty tile of its type, in the order the grid renders.
+ */
+function reservationsBySlot(ordered: SlotTile[], spares: SpareOption[]): Map<string, SpareOption> {
+  const pool = spares.filter((s) => s.reservedForThis && s.typeId !== null && !s.pendingRef);
+  const out = new Map<string, SpareOption>();
+  for (const tile of ordered) {
+    if (tile.asset) continue;
+    const i = pool.findIndex((s) => s.typeId === tile.typeId);
+    if (i < 0) continue;
+    out.set(tile.slotId, pool[i]);
+    pool.splice(i, 1);
+  }
+  return out;
+}
 
 export function LoadoutView({
   employeeId,
+  employeeName,
+  initialView,
+  canLinkPolicies,
   slots,
   unslotted,
   onLoan,
@@ -93,6 +119,12 @@ export function LoadoutView({
   direct,
 }: {
   employeeId: string;
+  /** Phase 29 (spec §4.6): the Return dialog names the holder, not just the tag. */
+  employeeName: string;
+  /** Phase 29 (spec §4.8): the remembered Slots/Table choice for this user. */
+  initialView: "slots" | "table";
+  /** Phase 29 (spec §4.2): only a role that can reach Equipment policies gets the link, everyone else the words. */
+  canLinkPolicies: boolean;
   slots: SlotTile[];
   unslotted: SlotTile["asset"][];
   /** Phase 16: TEMPORARY devices no loaner slot claimed — never "extras". */
@@ -112,7 +144,7 @@ export function LoadoutView({
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [view, setView] = useState("slots");
+  const [view, setView] = useState<"slots" | "table">(initialView);
   const [fillSlot, setFillSlot] = useState<SlotTile | null>(null);
   const [pickedSpare, setPickedSpare] = useState<string | null>(null);
   const [reason, setReason] = useState("");
@@ -131,19 +163,65 @@ export function LoadoutView({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  // Phase 29 (plan P-10): which tile is mid-write, and which one just changed —
+  // the tile dims while the action runs, then rings once for 2 s.
+  const [busySlotId, setBusySlotId] = useState<string | null>(null);
+  const [changedSlotId, setChangedSlotId] = useState<string | null>(null);
+  // Phase 29 (plan P-6): the tile "Fill N gaps" wants focused, held until the
+  // grid has actually mounted — from the Table view every tile ref is null.
+  const [pendingFocusSlotId, setPendingFocusSlotId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const tileRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const mayAct = canMutate && !frozen;
-  const dayOne = slots.length > 0 && slots.every((s) => !s.asset);
   const reservedCount = holding.filter((h) => h.kind === "reserved").length;
+  // Phase 29 (spec §4.4): required gaps first, then what is filled or on loan,
+  // then optional gaps. `tileRefs` and the roving grid keys index THIS order.
+  const ordered = orderTiles(slots);
+  // Ruling R8: resolved once for the whole grid, so a hold cannot mark two tiles.
+  const reservedBySlot = reservationsBySlot(ordered, spares);
+
+  function markChanged(slotId: string | null) {
+    if (!slotId) return;
+    setChangedSlotId(slotId);
+    setTimeout(() => setChangedSlotId((c) => (c === slotId ? null : c)), 2000);
+  }
 
   function handle<T>(res: ActionResult<T>, onOk: (data: T) => void) {
+    setBusySlotId(null);
     if (res.ok) onOk(res.data);
     else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
     else if (res.kind === "validation") setFieldErrors(res.fieldErrors ?? {});
     else setError(res.message);
   }
+
+  /**
+   * Phase 29 (final review M-3): the reservation-driven writes are the only
+   * ones whose REFUSAL leaves a lie on screen — the tile keeps its
+   * "reserved · {tag}" line for a hold the server has just told us it could
+   * not honour (released, expired, or already assigned elsewhere). Re-read the
+   * server state so the line goes with it; the banner `handle` raises is
+   * client state and survives the refresh.
+   */
+  function handleReserved<T>(res: ActionResult<T>, onOk: (data: T) => void) {
+    if (!res.ok) router.refresh();
+    handle(res, onOk);
+  }
+
+  function pickView(v: string) {
+    const next: "slots" | "table" = v === "table" ? "table" : "slots";
+    setView(next);
+    // Fire-and-forget (plan P-11): remembering the view must never block it —
+    // but a refusal is not nothing, so spec §7's console warning says so
+    // (final review M-2). Never a toast: the operator asked for a view, not
+    // for a preference write.
+    void saveLoadoutView({ view: next }).then((r) => {
+      if (!r.ok) console.warn("view:loadout not saved", r.kind);
+    });
+  }
+
+  /** The slot a held asset sits in — the Return/Replace dialogs only carry the asset. */
+  const slotIdOf = (assetId: string) => slots.find((s) => s.asset?.id === assetId)?.slotId ?? null;
 
   function submitFill() {
     if (!pickedSpare) {
@@ -152,6 +230,8 @@ export function LoadoutView({
     }
     setError(null);
     setFieldErrors({});
+    const slotId = fillSlot?.slotId ?? null;
+    setBusySlotId(slotId);
     startTransition(async () => {
       if (direct) {
         const isLoan = fillSlot?.loaner ?? false;
@@ -160,12 +240,13 @@ export function LoadoutView({
             assetId: pickedSpare, employeeId, status: isLoan ? "TEMPORARY" : undefined,
             loanDueAt: isLoan ? loanDueAt : undefined, reason,
           }),
-          ({ tag, employeeName }) => {
-            toast(isLoan ? `${tag} on loan to ${employeeName} until ${loanDueAt}` : `${tag} assigned to ${employeeName}`, "settled");
+          ({ tag, employeeName: assignedTo }) => {
+            toast(isLoan ? `${tag} on loan to ${assignedTo} until ${loanDueAt}` : `${tag} assigned to ${assignedTo}`, "settled");
             setFillSlot(null);
             setPickedSpare(null);
             setReason("");
             setLoanDueAt(defaultLoanDue(new Date()));
+            markChanged(slotId);
             router.refresh();
           },
         );
@@ -175,6 +256,29 @@ export function LoadoutView({
           setFillSlot(null);
           setPickedSpare(null);
           setReason("");
+          markChanged(slotId);
+          router.refresh();
+        });
+      }
+    });
+  }
+
+  /** Phase 29 (spec §4.4): the reservation sitting on an empty tile, assigned from the tile itself. */
+  function submitAssignReserved(assetId: string, slotId: string) {
+    setError(null);
+    setFieldErrors({});
+    setBusySlotId(slotId);
+    startTransition(async () => {
+      if (direct) {
+        handleReserved(await assignAsset({ assetId, employeeId, reason: "" }), ({ tag, employeeName: assignedTo }) => {
+          toast(`${tag} assigned to ${assignedTo}`, "settled");
+          markChanged(slotId);
+          router.refresh();
+        });
+      } else {
+        handleReserved(await requestAssign({ employeeId, assetId, reason: "" }), ({ refNo }) => {
+          toast(`${refNo} created — tile shows pending until it executes`, "settled");
+          markChanged(slotId);
           router.refresh();
         });
       }
@@ -185,6 +289,8 @@ export function LoadoutView({
     if (!returning) return;
     setError(null);
     setFieldErrors({});
+    const slotId = slotIdOf(returning.id);
+    setBusySlotId(slotId);
     startTransition(async () => {
       if (direct) {
         handle(await returnAsset({ assetId: returning.id, outcome, reason: returnReason }), ({ tag, status }) => {
@@ -192,6 +298,7 @@ export function LoadoutView({
           setReturning(null);
           setReturnReason("");
           setOutcome("TRIAGE");
+          markChanged(slotId);
           router.refresh();
         });
       } else {
@@ -199,6 +306,7 @@ export function LoadoutView({
           toast(`${refNo} created — return is queued`, "settled");
           setReturning(null);
           setReturnReason("");
+          markChanged(slotId);
           router.refresh();
         });
       }
@@ -212,6 +320,8 @@ export function LoadoutView({
     }
     setError(null);
     setFieldErrors({});
+    const slotId = slotIdOf(replacing.id);
+    setBusySlotId(slotId);
     startTransition(async () => {
       handle(
         await replaceAsset({ employeeId, oldAssetId: replacing.id, newAssetId: replacementId, outcome, reason: returnReason }),
@@ -221,6 +331,7 @@ export function LoadoutView({
           setReplacementId(null);
           setReturnReason("");
           setOutcome("TRIAGE");
+          markChanged(slotId);
           router.refresh();
         },
       );
@@ -241,12 +352,15 @@ export function LoadoutView({
     if (!reservingSlot || !reserveSpare) return;
     setError(null);
     setFieldErrors({});
+    const slotId = reservingSlot.slotId;
+    setBusySlotId(slotId);
     startTransition(async () => {
       handle(
         await reserveAsset({ assetId: reserveSpare, employeeId, expiresAt: reserveExpiry, reason: reserveReason }),
         ({ tag }) => {
           toast(`${tag} reserved`, "settled");
           setReservingSlot(null);
+          markChanged(slotId);
           router.refresh();
         },
       );
@@ -257,12 +371,12 @@ export function LoadoutView({
     setError(null);
     startTransition(async () => {
       if (direct) {
-        handle(await assignReserved({ employeeId }), ({ assigned }) => {
+        handleReserved(await assignReserved({ employeeId }), ({ assigned }) => {
           toast(`${assigned} reserved spare${assigned === 1 ? "" : "s"} assigned`, "settled");
           router.refresh();
         });
       } else {
-        handle(await requestAssignReserved({ employeeId }), ({ created }) => {
+        handleReserved(await requestAssignReserved({ employeeId }), ({ created }) => {
           toast(`${created} assign request${created === 1 ? "" : "s"} created from reservations`, "settled");
           router.refresh();
         });
@@ -274,7 +388,7 @@ export function LoadoutView({
     const idx = tileRefs.current.findIndex((el) => el === document.activeElement);
     if (idx < 0) return;
     const move = (to: number) => {
-      const el = tileRefs.current[Math.min(Math.max(to, 0), slots.length - 1)];
+      const el = tileRefs.current[Math.min(Math.max(to, 0), ordered.length - 1)];
       el?.focus();
     };
     if (e.key === "ArrowRight") { e.preventDefault(); move(idx + 1); }
@@ -282,36 +396,109 @@ export function LoadoutView({
     else if (e.key === "ArrowDown") { e.preventDefault(); move(idx + 4); }
     else if (e.key === "ArrowUp") { e.preventDefault(); move(idx - 4); }
     else if (e.key === "Backspace" && mayAct) {
-      const tile = slots[idx];
-      if (tile.asset && !tile.asset.pendingRef) { e.preventDefault(); setReturning(tile.asset); }
+      // Phase 29 (plan P-7): the tile IS the menu trigger now — Backspace opens
+      // the same menu Enter/Space and a click do, instead of jumping to Return.
+      const tile = ordered[idx];
+      if (tile.asset) { e.preventDefault(); tileRefs.current[idx]?.click(); }
     }
   }
 
   // A spare promised to someone else: unpickable here, and it has to LOOK unpickable (final review M-6).
   const isHeld = (s: { reservedFor: string | null; reservedForThis: boolean }) => s.reservedFor !== null && !s.reservedForThis;
+  // Phase 29 (spec §4.5): a queued approval promises a spare just as firmly as a hold does.
+  const unpickable = (s: SpareOption) => isHeld(s) || !!s.pendingRef;
+  /** The one line a picker row shows on the right — shared by Fill and Replace so they never drift. */
+  const spareNote = (s: SpareOption) =>
+    s.pendingRef ? `assignment queued · ${s.pendingRef}`
+      : s.reservedForThis ? "reserved for them"
+        : s.reservedFor ? `reserved for ${s.reservedFor}`
+          : "spare";
 
   const sparesForSlot = fillSlot ? spares.filter((s) => s.typeId && s.typeId === fillSlot.typeId) : [];
 
+  /** Phase 29 (spec §4.4): opening Fill preselects the sole pickable spare — one less decision. */
+  function openFill(tile: SlotTile) {
+    const eligible = spares.filter((s) => s.typeId && s.typeId === tile.typeId && !unpickable(s));
+    setFillSlot(tile);
+    setPickedSpare(eligible.length === 1 ? eligible[0].id : null);
+    setFieldErrors({});
+    setError(null);
+    setLoanDueAt(defaultLoanDue(new Date()));
+  }
+
+  // Phase 29 (plan P-6): the header's "Fill N gaps" / "Assign kit" reach the
+  // grid through one DOM event — no ref threading across the server boundary.
+  useEffect(() => {
+    function onLoadout(e: Event) {
+      const action = (e as CustomEvent<{ action: "focus-gap" | "fill-first" }>).detail?.action;
+      const idx = ordered.findIndex((t) => !t.asset && !t.coveredByLoan && t.required);
+      if (idx < 0) return;
+      // Both actions land on the grid, so the Table view has to give way first
+      // — every tile ref is null while it is mounted, and the optional chain
+      // would swallow the whole thing silently. Deliberately NOT `pickView`:
+      // a jump from the header is not the operator choosing a view, so it
+      // must not overwrite the Table they asked to be remembered.
+      setView("slots");
+      if (action === "focus-gap") setPendingFocusSlotId(ordered[idx].slotId);
+      else if (action === "fill-first" && mayAct) openFill(ordered[idx]);
+    }
+    window.addEventListener("br:loadout", onLoadout);
+    return () => window.removeEventListener("br:loadout", onLoadout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordered, mayAct]);
+
+  // The focus itself waits for the commit that mounts the grid: refs are set
+  // before effects run, so the render `setView("slots")` schedules is the one
+  // that finds the tile. Keyed on the slot id, not the index, so a refresh
+  // that reorders the grid still lands on the tile the operator asked for.
+  useEffect(() => {
+    if (!pendingFocusSlotId || view !== "slots") return;
+    const idx = ordered.findIndex((t) => t.slotId === pendingFocusSlotId);
+    // The slot went away (a refresh filled or waived it) — drop the request
+    // rather than leaving it armed for whatever reuses that id later.
+    if (idx < 0) { setPendingFocusSlotId(null); return; }
+    const el = tileRefs.current[idx];
+    if (!el) return;
+    el.focus();
+    setPendingFocusSlotId(null);
+  }, [pendingFocusSlotId, view, ordered]);
+
   // The tile a Replace dialog opened for isn't self-describing its slot's
-  // type — look it up from `slots` so the radiogroup can rank same-type
+  // type — look it up from `slots` so the picker can rank same-type
   // spares first. Not `slotTypeOf(replacing)`: no such helper exists.
   const replacingTypeId = replacing ? slots.find((s) => s.asset?.id === replacing.id)?.typeId ?? null : null;
-  const sameTypeSpares = replacing ? spares.filter((s) => s.typeId === replacingTypeId) : [];
-  const otherSpares = replacing ? spares.filter((s) => s.typeId !== replacingTypeId) : [];
+
+  // Phase 26 (spec §5.2) / Phase 29 (plan P-9): both comboboxes rank same-type
+  // spares first and group them under "Same type" / "Other spares".
+  const sameTypeFirstFor = (typeId: string | null) => (a: SpareOption, b: SpareOption) => {
+    const aSame = a.typeId === typeId ? 0 : 1;
+    const bSame = b.typeId === typeId ? 0 : 1;
+    return aSame !== bSame ? aSame - bSame : a.tag.localeCompare(b.tag);
+  };
+
+  // Phase 29 (plan P-9): EntityCombobox has no disabled options, so a spare
+  // held for someone else or already promised by an approval is left OUT of
+  // Replace — the count under the field says how many that was.
+  const replaceable = replacing ? spares.filter((s) => !unpickable(s)) : [];
+  const excludedCount = replacing ? spares.length - replaceable.length : 0;
+  const replaceOptions: ComboOption[] = replaceable
+    .sort(sameTypeFirstFor(replacingTypeId))
+    .map((s) => ({
+      value: s.id, label: s.tag,
+      sub: s.reservedForThis ? `${s.model} · reserved for them` : s.model,
+      group: s.typeId === replacingTypeId ? "Same type" : "Other spares",
+    }));
 
   // Phase 26 (spec §5.2): the Reserve dialog's own picker — unlike Fill/Replace,
   // an already-held spare is excluded outright (reserving one out from under
-  // an existing hold is exactly what release-then-reserve is for), and the
-  // combobox needs the same "Same type" / "Other spares" grouping.
-  const sameTypeFirst = (a: SpareOption, b: SpareOption) => {
-    const aSame = a.typeId === reservingSlot?.typeId ? 0 : 1;
-    const bSame = b.typeId === reservingSlot?.typeId ? 0 : 1;
-    return aSame !== bSame ? aSame - bSame : a.tag.localeCompare(b.tag);
-  };
+  // an existing hold is exactly what release-then-reserve is for), including
+  // one held for THIS person, which is why the filter is not `unpickable`.
+  // Phase 29 (final review I-1): a spare an open approval already promises is
+  // excluded here too — the same `pendingRef` rule Fill and Replace apply.
   const reserveOptions: ComboOption[] = reservingSlot
     ? spares
-        .filter((s) => s.reservedFor === null)
-        .sort(sameTypeFirst)
+        .filter((s) => s.reservedFor === null && !s.pendingRef)
+        .sort(sameTypeFirstFor(reservingSlot.typeId))
         .map((s) => ({
           value: s.id, label: s.tag, sub: s.model,
           group: s.typeId === reservingSlot.typeId ? "Same type" : "Other spares",
@@ -342,10 +529,10 @@ export function LoadoutView({
           aria-label="Loadout view"
           options={[{ value: "slots", label: "Slots" }, { value: "table", label: "Table" }]}
           value={view}
-          onChange={setView}
+          onChange={pickView}
         />
         <div className="flex items-center gap-2">
-          {mayAct && dayOne && reservedCount > 0 && (
+          {mayAct && reservedCount > 0 && (
             <Button variant="primary" size="sm" loading={pending} onClick={submitReservedBatch}>
               {direct ? `Assign all ${reservedCount} reserved` : `Request assign for all ${reservedCount} reserved`}
             </Button>
@@ -358,137 +545,202 @@ export function LoadoutView({
         </div>
       </div>
 
-      {slots.length === 0 && (
+      {/* Phase 29 (spec §4.2): a policy is only actionable for a role that can
+          reach Equipment policies, and never for a leaver — the frozen banner
+          above already says what to do next. */}
+      {slots.length === 0 && !frozen && (
         <Banner tone="neutral" title="No equipment policy applies">
-          Held items are listed below; define a policy under Equipment policies to get the slot grid.
+          Held items are listed below;{" "}
+          {canLinkPolicies ? (
+            <Link href="/admin/equipment-policies" className="underline">define a policy under Equipment policies</Link>
+          ) : (
+            "define a policy under Equipment policies"
+          )}{" "}
+          to get the slot grid.
         </Banner>
       )}
 
       {view === "slots" ? (
         <div role="group" aria-label="Equipment slots" className="grid grid-cols-2 gap-[11px] lg:grid-cols-4" onKeyDown={onGridKeyDown}>
-          {slots.map((tile, i) => {
+          {ordered.map((tile, i) => {
             const a = tile.asset;
             // Phase 20 (spec §6.3): a loan-covered empty slot says so in its
             // accessible name too — the LOAN pill alone was sighted-only.
             const name = `${tile.name} slot, ${a ? a.model : tile.coveredByLoan ? "on loan" : "empty"}, ${tile.required ? "required" : "optional"}`;
-            const showReplace = !!a && direct && mayAct && !a.pendingRef;
-            // Waiving is a policy-slot affordance (an ADD-exception slot is
-            // already only for this person — "Remove exception" is its
-            // undo); an exception tile never offers both at once.
-            const showWaive = mayAct && !tile.exceptionId;
-            const showRemoveException = mayAct && !!tile.exceptionId;
-            const menuItems: MenuItem[] = [];
-            if (mayAct && direct && !a) {
-              menuItems.push({
-                label: "Reserve a spare…",
-                onSelect: () => {
-                  setReservingSlot(tile);
-                  setReserveSpare(null);
-                  setReserveExpiry(defaultHoldExpiry(today));
-                  setReserveReason("");
-                  setFieldErrors({});
-                  setError(null);
-                },
-              });
-            }
-            if (showReplace && a) menuItems.push({ label: "⇄ Replace", onSelect: () => setReplacing(a) });
-            if (showWaive) menuItems.push({ label: "Waive for this person…", onSelect: () => setWaivingSlot(tile) });
-            if (showRemoveException && tile.exceptionId) {
-              const exceptionId = tile.exceptionId;
-              menuItems.push({ label: "Remove exception", onSelect: () => removeException(exceptionId) });
-            }
+            // Phase 29 (spec §4.4): WHICH items the menu offers is a pure rule
+            // (`tileMenuItems`) — this only turns each kind into its handler.
+            const kinds = tileMenuItems(
+              { filled: !!a, pending: !!a?.pendingRef, exceptionId: tile.exceptionId, waivable: !tile.exceptionId },
+              { mayAct, direct },
+            );
+            const menuItems: MenuItem[] = kinds.map((k) => {
+              switch (k) {
+                case "replace":
+                  return { label: "Replace…", onSelect: () => { setReplacing(a!); setReplacementId(null); setFieldErrors({}); setError(null); } };
+                case "return":
+                  return { label: "Return…", danger: true, onSelect: () => setReturning(a!) };
+                case "open":
+                  return { label: "Open record", onSelect: () => router.push(`/inventory/${a!.id}`) };
+                case "reserve":
+                  return {
+                    label: "Reserve a spare…",
+                    onSelect: () => {
+                      setReservingSlot(tile);
+                      setReserveSpare(null);
+                      setReserveExpiry(defaultHoldExpiry(today));
+                      setReserveReason("");
+                      setFieldErrors({});
+                      setError(null);
+                    },
+                  };
+                case "waive":
+                  return { label: "Waive this slot…", onSelect: () => setWaivingSlot(tile) };
+                case "remove-exception":
+                  return { label: "Remove exception", onSelect: () => removeException(tile.exceptionId!) };
+              }
+            });
+            // Phase 29 (spec §4.4): the hold this slot got out of the one
+            // consuming pass above — the tile says so, and offers the
+            // one-click assign. Never the same asset on two tiles (R8).
+            const reservedHere = reservedBySlot.get(tile.slotId) ?? null;
+            const busy = busySlotId === tile.slotId;
+            const changed = changedSlotId === tile.slotId;
+
+            // Shared by all three branches below — the tile is a <div> for a
+            // viewer, a Menu trigger when filled, a Fill trigger when empty.
+            const tileBody = () =>
+              a ? (
+                <>
+                  <span
+                    aria-hidden
+                    className="h-1.5 w-full rounded-full"
+                    style={{ background: `var(--st-${statusFamily(a.status)}-dot, var(--st-neutral-dot))` }}
+                  />
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-muted">{tile.name}</span>
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className={cn("text-[11.5px] font-medium", a.pendingRef ? "text-fg-muted" : "text-fg")}>{a.model}</span>
+                    {a.pendingRef && <Pill tone="accent">PENDING</Pill>}
+                  </span>
+                  {/* Plan P-8: the tag is text, not a link — a link inside the tile
+                      button is axe's nested-interactive. "Open record" is the route. */}
+                  <span className="font-mono text-[11px] text-fg">{a.tag}</span>
+                  {(tile.loaner || tile.exceptionId) && (
+                    <span className="flex flex-wrap items-center gap-1">
+                      {tile.loaner && <Pill>LOAN</Pill>}
+                      {tile.exceptionId && <Pill title={tile.exceptionReason ?? undefined}>EXCEPTION</Pill>}
+                    </span>
+                  )}
+                  <span className="font-mono text-[10px] text-fg-muted">{a.pendingRef ?? a.age}</span>
+                </>
+              ) : (
+                <>
+                  <span aria-hidden className="grid h-[42px] w-full place-items-center rounded-[6px]">
+                    {mayAct && (
+                      <span className="grid size-[30px] place-items-center rounded-full border border-border-strong text-fg-muted">+</span>
+                    )}
+                  </span>
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-secondary">{tile.name}</span>
+                  {/* Phase 29 (spec §4.4): an empty OPTIONAL slot is not work — say
+                      so, instead of repeating the type and the same word again. */}
+                  <span className="font-mono text-[10px] text-fg-muted">
+                    {!tile.required && !tile.coveredByLoan
+                      ? "optional — not a gap"
+                      : `${tile.typeName} · ${tile.required ? "required" : "optional"}`}
+                  </span>
+                  {(tile.loaner || tile.exceptionId || tile.coveredByLoan) && (
+                    <span className="flex flex-wrap items-center gap-1">
+                      {(tile.loaner || tile.coveredByLoan) && <Pill>LOAN</Pill>}
+                      {tile.exceptionId && <Pill title={tile.exceptionReason ?? undefined}>EXCEPTION</Pill>}
+                    </span>
+                  )}
+                  {/* Phase 20 (spec §6.3, gap 3): someone standing in on
+                      their own broken kit's loaner is not a policy gap —
+                      "on loan" replaces the attention-toned text. */}
+                  {tile.coveredByLoan ? (
+                    <span className="font-mono text-[10px] text-fg-muted">on loan</span>
+                  ) : tile.required && (
+                    <span className="font-mono text-[10px] font-medium" style={{ color: "var(--st-attention-text)" }}>
+                      policy gap
+                    </span>
+                  )}
+                  {reservedHere && (
+                    <span className="font-mono text-[10px] text-fg-muted">reserved · {reservedHere.tag}</span>
+                  )}
+                </>
+              );
+
+            const tileClass = cn(
+              "flex w-full flex-col gap-1.5 rounded-(--radius-card) border p-3 text-left transition-colors duration-(--dur-1)",
+              a ? "border-border bg-surface shadow-card" : "border-dashed border-border-strong",
+              !a && tile.required && !tile.coveredByLoan && "bg-[var(--st-attention-bg)]/40",
+              mayAct && "hover:border-accent",
+              busy && "opacity-60",
+              changed && "tile-changed",
+            );
+            // Plan P-10: the tile says it is mid-write, then that it just changed.
+            const shared = {
+              "aria-label": name,
+              "data-pending": busy || undefined,
+              "aria-busy": busy || undefined,
+              "data-changed": changed || undefined,
+            } as const;
+
             return (
-              // A real Menu trigger cannot nest inside the tile's own
-              // <button> (axe: nested-interactive / no-focusable-content) —
-              // it renders as an absolutely positioned SIBLING instead, both
-              // inside this "group relative" wrapper so hover/focus reveal
-              // still works via group-hover / focus-within.
-              <div key={tile.slotId} className="group relative">
-                <button
-                  ref={(el) => { tileRefs.current[i] = el; }}
-                  type="button"
-                  aria-label={name}
-                  onClick={() => {
-                    if (!mayAct) return;
-                    if (!a) { setFillSlot(tile); setPickedSpare(null); setFieldErrors({}); setLoanDueAt(defaultLoanDue(new Date())); }
-                    else if (!a.pendingRef) setReturning(a);
-                  }}
-                  className={cn(
-                    "flex w-full flex-col gap-1.5 rounded-(--radius-card) border p-3 text-left transition-colors duration-(--dur-1)",
-                    a ? "border-border bg-surface shadow-card" : "border-dashed border-border-strong",
-                    !a && tile.required && "bg-[var(--st-attention-bg)]/40",
-                    mayAct && "hover:border-accent",
-                  )}
-                >
-                  {a ? (
-                    <>
-                      <span aria-hidden className="relative h-[56px] w-full rounded-[6px]" style={{ background: STRIPES }}>
-                        <span className="absolute left-1.5 top-1.5"><StatusDot value={a.status} /></span>
-                        {a.pendingRef && (
-                          <span className="absolute right-1.5 top-1.5"><Pill tone="accent">PENDING</Pill></span>
-                        )}
-                      </span>
-                      <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-muted">{tile.name}</span>
-                      <span className={cn("text-[11.5px] font-medium", a.pendingRef ? "text-fg-muted" : "text-fg")}>{a.model}</span>
-                      <span className="font-mono text-[11px] text-accent">{a.tag}</span>
-                      {(tile.loaner || tile.exceptionId) && (
-                        <span className="flex flex-wrap items-center gap-1">
-                          {tile.loaner && <Pill>LOAN</Pill>}
-                          {tile.exceptionId && <Pill title={tile.exceptionReason ?? undefined}>EXCEPTION</Pill>}
-                        </span>
+              // A real Menu trigger cannot nest inside the tile's own <button>
+              // (axe: nested-interactive) — the ⋯ and "Assign reserved" are
+              // SIBLINGS inside this "group relative" wrapper.
+              <div key={tile.slotId} className="group relative flex flex-col gap-1">
+                {!canMutate ? (
+                  // Ruling R2: the inert branch is the VIEWER — no button, no menu, no "+".
+                  <div role="group" {...shared} className={tileClass}>{tileBody()}</div>
+                ) : a ? (
+                  // Plan P-7: the filled tile IS the menu's trigger. Menu's root is
+                  // `relative inline-flex`, so stretch it to fill the grid cell.
+                  <div className="[&>div]:w-full">
+                    <Menu
+                      align="start"
+                      items={menuItems}
+                      trigger={(props) => (
+                        <button ref={(el) => { tileRefs.current[i] = el; }} type="button" {...props} {...shared} className={tileClass}>
+                          {tileBody()}
+                        </button>
                       )}
-                      <span className="flex items-center justify-between font-mono text-[10px] text-fg-muted">
-                        {a.pendingRef ?? a.age}
-                        {mayAct && !a.pendingRef && (
-                          <span aria-hidden className="opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100">− return</span>
-                        )}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span aria-hidden className="grid h-[56px] w-full place-items-center rounded-[6px]">
-                        <span className="grid size-[30px] place-items-center rounded-full border border-border-strong text-fg-muted">+</span>
-                      </span>
-                      <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-secondary">{tile.name}</span>
-                      <span className="font-mono text-[10px] text-fg-muted">
-                        {tile.typeName} · {tile.required ? "required" : "optional"}
-                      </span>
-                      {(tile.loaner || tile.exceptionId || tile.coveredByLoan) && (
-                        <span className="flex flex-wrap items-center gap-1">
-                          {(tile.loaner || tile.coveredByLoan) && <Pill>LOAN</Pill>}
-                          {tile.exceptionId && <Pill title={tile.exceptionReason ?? undefined}>EXCEPTION</Pill>}
-                        </span>
-                      )}
-                      {/* Phase 20 (spec §6.3, gap 3): someone standing in on
-                          their own broken kit's loaner is not a policy gap —
-                          "on loan" replaces the attention-toned text. */}
-                      {tile.coveredByLoan ? (
-                        <span className="font-mono text-[10px] text-fg-muted">on loan</span>
-                      ) : tile.required && (
-                        <span className="font-mono text-[10px] font-medium" style={{ color: "var(--st-attention-text)" }}>
-                          policy gap
-                        </span>
-                      )}
-                    </>
-                  )}
-                </button>
-                {menuItems.length > 0 && (
-                  <div className="absolute right-1.5 top-1.5 opacity-0 transition-opacity duration-(--dur-1) group-hover:opacity-100 focus-within:opacity-100">
+                    />
+                  </div>
+                ) : (
+                  <button
+                    ref={(el) => { tileRefs.current[i] = el; }}
+                    type="button"
+                    {...shared}
+                    className={tileClass}
+                    onClick={() => { if (mayAct) openFill(tile); }}
+                  >
+                    {tileBody()}
+                  </button>
+                )}
+                {menuItems.length > 0 && canMutate && (
+                  // Plan P-7: always visible, not hover-revealed — the same items as the tile's own menu.
+                  <div className="absolute right-1.5 top-1.5">
                     <Menu
                       align="end"
+                      items={menuItems}
                       trigger={(props) => (
                         <button
                           type="button"
                           {...props}
                           aria-label={`Actions for the ${tile.name} slot`}
-                          className="h-auto rounded-[4px] border border-transparent bg-surface/90 px-1.5 py-0.5 font-mono text-[10px] text-fg-muted shadow-card hover:bg-surface hover:text-fg"
+                          className="grid size-7 place-items-center rounded-[6px] border border-transparent bg-surface/90 font-mono text-[12px] text-fg-faint shadow-card hover:text-fg"
                         >
                           ⋯
                         </button>
                       )}
-                      items={menuItems}
                     />
                   </div>
+                )}
+                {reservedHere && mayAct && direct && (
+                  <Button size="sm" variant="secondary" loading={busy} onClick={() => submitAssignReserved(reservedHere.id, tile.slotId)}>
+                    Assign reserved
+                  </Button>
                 )}
               </div>
             );
@@ -507,23 +759,30 @@ export function LoadoutView({
             </Tr>
           </THead>
           <TBody>
-            {[...slots.filter((s) => s.asset).map((s) => ({ a: s.asset!, slot: s.name })),
-              ...onLoan.filter(Boolean).map((a) => ({ a: a!, slot: "on loan" })),
-              ...unslotted.filter(Boolean).map((a) => ({ a: a!, slot: "—" }))].map(({ a, slot }) => (
-              <Tr key={a.id}>
-                <Td className="pr-0"><StatusDot value={a.status} /></Td>
-                <Td mono><TagRef id={a.id} tag={a.tag} visible={a.visible} className="text-accent hover:underline" /></Td>
-                <Td>{a.model}</Td>
+            {/* Phase 29 (spec §4.8): the Table lists the EMPTY slots too — a gap
+                is a row here, not something only the grid can show. */}
+            {[...ordered.map((s) => ({
+                key: s.slotId,
+                a: s.asset,
+                slot: s.name,
+                gap: !s.asset && !s.coveredByLoan ? (s.required ? "policy gap" : "optional") : s.coveredByLoan ? "on loan" : null,
+              })),
+              ...onLoan.filter(Boolean).map((a) => ({ key: a!.id, a: a!, slot: "on loan", gap: null })),
+              ...unslotted.filter(Boolean).map((a) => ({ key: a!.id, a: a!, slot: "—", gap: null }))].map(({ key, a, slot, gap }) => (
+              <Tr key={key}>
+                <Td className="pr-0">{a && <StatusDot value={a.status} />}</Td>
+                <Td mono>{a ? <TagRef id={a.id} tag={a.tag} visible={a.visible} className="text-accent hover:underline" /> : "—"}</Td>
+                <Td>{a ? a.model : "—"}</Td>
                 <Td mono className="text-[10.5px]">{slot}</Td>
-                <Td mono className="text-[10.5px]">{a.status}</Td>
-                <Td mono>{a.age}</Td>
+                <Td mono className="text-[10.5px]">{a ? a.status : gap ?? "—"}</Td>
+                <Td mono>{a ? a.age : "—"}</Td>
               </Tr>
             ))}
           </TBody>
         </Table>
       )}
 
-      {onLoan.length > 0 && view === "slots" && (
+      {onLoan.length > 0 && (
         <Card>
           <CardHeader title="On loan" />
           <CardBody className="flex flex-col gap-1.5">
@@ -539,7 +798,7 @@ export function LoadoutView({
         </Card>
       )}
 
-      {unslotted.length > 0 && view === "slots" && (
+      {unslotted.length > 0 && (
         <Card>
           <CardHeader title="Also holding" />
           <CardBody className="flex flex-col gap-1.5">
@@ -621,9 +880,13 @@ export function LoadoutView({
         <div className="flex flex-col gap-3">
           {sparesForSlot.length === 0 ? (
             <p className="text-xs text-fg-muted">
-              No spare {fillSlot?.typeName} in stock — register one or route a purchase.
+              No spare {fillSlot?.typeName} in stock —{" "}
+              <Link href="/inventory/register" className="text-accent underline hover:text-accent-hover">register one</Link> or{" "}
+              <Link href="/purchases/new" className="text-accent underline hover:text-accent-hover">route a purchase</Link>.
             </p>
           ) : (
+            // Plan P-9: Fill keeps its radiogroup — a row that cannot be picked
+            // still has to SAY why, which a combobox has no room for.
             <div role="radiogroup" aria-label="Pick a spare" className="flex flex-col gap-1">
               {fieldErrors.spare && <p role="alert" className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{fieldErrors.spare}</p>}
               {sparesForSlot.map((s) => (
@@ -631,8 +894,8 @@ export function LoadoutView({
                   key={s.id}
                   className={cn(
                     "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                    isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
-                    pickedSpare === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
+                    unpickable(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
+                    pickedSpare === s.id ? "border-accent bg-accent-tint" : cn("border-border", !unpickable(s) && "hover:bg-surface-subtle"),
                   )}
                 >
                   <input
@@ -640,14 +903,12 @@ export function LoadoutView({
                     name="spare"
                     className="sr-only"
                     checked={pickedSpare === s.id}
-                    disabled={isHeld(s)}
+                    disabled={unpickable(s)}
                     onChange={() => setPickedSpare(s.id)}
                   />
                   <span className="font-mono text-accent">{s.tag}</span>
                   <span className="text-fg-secondary">{s.model}</span>
-                  <span className="ml-auto font-mono text-[10px] text-fg-muted">
-                    {s.reservedForThis ? "reserved for them" : s.reservedFor ? `reserved for ${s.reservedFor}` : "spare"}
-                  </span>
+                  <span className="ml-auto font-mono text-[10px] text-fg-muted">{spareNote(s)}</span>
                 </label>
               ))}
             </div>
@@ -713,7 +974,7 @@ export function LoadoutView({
       <Dialog
         open={returning !== null}
         onClose={() => setReturning(null)}
-        title={returning ? `Return ${returning.tag}?` : ""}
+        title={returning ? `Return ${returning.tag} · ${returning.model} from ${employeeName}?` : ""}
         footer={
           <>
             <Button variant="ghost" onClick={() => setReturning(null)}>Cancel</Button>
@@ -760,63 +1021,43 @@ export function LoadoutView({
         }
       >
         <div className="flex flex-col gap-3">
-          <div role="radiogroup" aria-label="Pick the replacement" className="flex flex-col gap-1">
-            {fieldErrors.replacement && <p role="alert" className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{fieldErrors.replacement}</p>}
-            {sameTypeSpares.length === 0 && otherSpares.length === 0 && (
-              <p className="text-xs text-fg-muted">No spares in stock — register one or route a purchase.</p>
-            )}
-            {sameTypeSpares.map((s) => (
-              <label
-                key={s.id}
-                className={cn(
-                  "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                  isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
-                  replacementId === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
-                )}
-              >
-                <input
-                  type="radio"
-                  name="replacement"
-                  className="sr-only"
-                  checked={replacementId === s.id}
-                  disabled={isHeld(s)}
-                  onChange={() => setReplacementId(s.id)}
+          {/* Plan P-9: a searchable picker, and what it CANNOT offer is said in
+              one muted line rather than shown as unpickable rows. "There is
+              nothing to buy" and "everything there is is promised" are
+              different problems and must not share a sentence. */}
+          {spares.length === 0 ? (
+            <p className="text-xs text-fg-muted">
+              No spares in stock —{" "}
+              <Link href="/inventory/register" className="text-accent underline hover:text-accent-hover">register one</Link> or{" "}
+              <Link href="/purchases/new" className="text-accent underline hover:text-accent-hover">route a purchase</Link>.
+            </p>
+          ) : replaceOptions.length === 0 ? (
+            <p className="text-xs text-fg-muted">
+              {excludedCount === 1
+                ? "The only spare is held or queued for someone else"
+                : `All ${excludedCount} spares are held or queued for someone else`}
+            </p>
+          ) : (
+            <FormField
+              label="Replacement"
+              required
+              error={fieldErrors.replacement}
+              hint={excludedCount ? `${excludedCount} more spare${excludedCount === 1 ? "" : "s"} ${excludedCount === 1 ? "is" : "are"} held or queued for someone else` : undefined}
+            >
+              {(p) => (
+                <EntityCombobox
+                  id={p.id}
+                  aria-describedby={p["aria-describedby"]}
+                  invalid={p.invalid}
+                  options={replaceOptions}
+                  value={replacementId}
+                  onChange={setReplacementId}
+                  placeholder="Type a tag…"
+                  autoFocus
                 />
-                <span className="font-mono text-accent">{s.tag}</span>
-                <span className="text-fg-secondary">{s.model}</span>
-                <span className="ml-auto font-mono text-[10px] text-fg-muted">
-                  {s.reservedForThis ? "reserved for them" : s.reservedFor ? `reserved for ${s.reservedFor}` : "spare"}
-                </span>
-              </label>
-            ))}
-            {sameTypeSpares.length > 0 && otherSpares.length > 0 && (
-              <p className="pt-1 font-mono text-[10px] uppercase tracking-[0.06em] text-fg-muted">other spares</p>
-            )}
-            {otherSpares.map((s) => (
-              <label
-                key={s.id}
-                className={cn(
-                  "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                  isHeld(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
-                  replacementId === s.id ? "border-accent bg-accent-tint" : cn("border-border", !isHeld(s) && "hover:bg-surface-subtle"),
-                )}
-              >
-                <input
-                  type="radio"
-                  name="replacement"
-                  className="sr-only"
-                  checked={replacementId === s.id}
-                  disabled={isHeld(s)}
-                  onChange={() => setReplacementId(s.id)}
-                />
-                <span className="font-mono text-accent">{s.tag}</span>
-                <span className="text-fg-secondary">{s.model}</span>
-                <span className="ml-auto font-mono text-[10px] text-fg-muted">
-                  {s.reservedForThis ? "reserved for them" : s.reservedFor ? `reserved for ${s.reservedFor}` : "spare"}
-                </span>
-              </label>
-            ))}
-          </div>
+              )}
+            </FormField>
+          )}
           <FormField label="What happens to it" required error={fieldErrors.outcome}>
             {(p) => (
               <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}

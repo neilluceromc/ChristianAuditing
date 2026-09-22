@@ -68,6 +68,22 @@ async function waitForHydration(target: Locator) {
   }).toPass({ timeout: 20_000 });
 }
 
+/**
+ * Phase 29 (plan P-5): the profile header keeps ONE state-chosen primary plus
+ * Edit, and everything else moved behind a single "More actions" menu — so the
+ * bare `<button>Transfer</button>` this file used to click is now the menuitem
+ * "Transfer…" (U+2026, the character the product renders). Only the way the
+ * dialog is opened changed; every assertion about the dialog is untouched.
+ * The edit form's "Transfer" LINK (case 5) is a different control and still
+ * reads exactly as it did.
+ */
+async function openProfileAction(page: Page, item: string) {
+  const more = page.getByRole("button", { name: "More actions" });
+  await waitForHydration(more);
+  await more.click();
+  await page.getByRole("menuitem", { name: item }).click();
+}
+
 const ADMIN = "admin@thebackroomop.com";
 const IT = "it@thebackroomop.com";
 
@@ -78,7 +94,7 @@ test.describe.serial("transfers", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${marites.id}`);
-    await page.getByRole("button", { name: "Transfer" }).click();
+    await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
     await expect(dialog.getByRole("heading", { name: "Transfer Marites Bautista" })).toBeVisible();
@@ -147,7 +163,7 @@ test.describe.serial("transfers", () => {
     const slotGroup = page.getByRole("group", { name: "Equipment slots" });
     await expect(slotGroup.getByRole("button")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Transfer" }).click();
+    await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
     await dialog.getByLabel(/^New department\b/).selectOption({ label: "Finance" });
@@ -168,7 +184,7 @@ test.describe.serial("transfers", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${paolo.id}`);
-    await page.getByRole("button", { name: "Transfer" }).click();
+    await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
 
@@ -196,7 +212,7 @@ test.describe.serial("transfers", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${ramon.id}`);
-    await page.getByRole("button", { name: "Transfer" }).click();
+    await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
     await dialog.getByLabel(/^New department\b/).selectOption({ label: "HR" });
@@ -226,7 +242,7 @@ test.describe.serial("transfers", () => {
     await page.getByRole("link", { name: "Transfer" }).click();
     await expect(page).toHaveURL(new RegExp(`/employees/${grace.id}$`));
 
-    await page.getByRole("button", { name: "Transfer" }).click();
+    await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
     await expect(dialog.getByRole("heading", { name: "Transfer Grace Lim" })).toBeVisible();

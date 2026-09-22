@@ -41,18 +41,19 @@ export function EmployeesTable({
         <Tr>
           <Th {...sortProps("name")}>Employee</Th>
           <Th width={110}>Department</Th>
+          <Th width={100} {...sortProps("loadout")}>Loadout</Th>
+          <Th width={60} align="right">Items</Th>
           <Th width={110}>Employment</Th>
           <Th width={120}>M365</Th>
-          <Th width={60} align="right">Items</Th>
-          <Th width={100}>Loadout</Th>
           <Th width={110} {...sortProps("joinedAt")}>Joined</Th>
+          <Th width={28} aria-label="Open" />
         </Tr>
       </THead>
       <TBody>
         {rows.map((row) => (
           <Tr
             key={row.id}
-            className="cursor-pointer"
+            className="cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             {...rowOpenProps(() => open(row.id))}
           >
             <Td>
@@ -70,21 +71,8 @@ export function EmployeesTable({
             </Td>
             <Td>{row.department}</Td>
             <Td>
-              <span className="inline-flex items-center gap-1.5">
-                <StatusDot value={row.employment} ns="employment" />
-                <span className="font-mono text-[10.5px]">{row.employment}</span>
-              </span>
-            </Td>
-            <Td>
-              <span className="inline-flex items-center gap-1.5">
-                <StatusDot value={row.m365 ?? ""} />
-                <span className="font-mono text-[10.5px] text-fg-muted">{row.m365 ?? "no sync yet"}</span>
-              </span>
-            </Td>
-            <Td mono align="right">{row.items}</Td>
-            <Td>
               {row.missingRequired === null ? (
-                <span className="text-fg-faint">—</span>
+                <span className="text-fg-faint">no policy</span>
               ) : row.missingRequired === 0 ? (
                 <span className="font-mono text-[10.5px]" style={{ color: "var(--st-settled-dot)" }}>complete</span>
               ) : (
@@ -93,7 +81,16 @@ export function EmployeesTable({
                 </span>
               )}
             </Td>
+            <Td mono align="right">{row.items}</Td>
+            <Td>
+              <span className="inline-flex items-center gap-1.5">
+                <StatusDot value={row.employment} ns="employment" />
+                <span className="font-mono text-[10.5px]">{row.employment}</span>
+              </span>
+            </Td>
+            <Td mono className="text-[10.5px] text-fg-muted">{row.m365 ?? "no sync yet"}</Td>
             <Td mono>{row.joined}</Td>
+            <Td className="text-fg-faint" aria-hidden>›</Td>
           </Tr>
         ))}
       </TBody>

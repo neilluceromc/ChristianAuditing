@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Banner } from "@/components/ui/banner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { checkSameName } from "@/server/modules/employees/actions";
@@ -18,19 +19,26 @@ import { checkSameName } from "@/server/modules/employees/actions";
  * can carry `confirmSameName` — clearing the match (name/department edited
  * back out of a collision) resets the tick so a stale confirmation can never
  * silently survive onto an unrelated match later.
+ *
+ * Phase 29 (plan P-3, ruling R3): `refusal` is the server's own sentence
+ * (`_sameName`, from a refused `createEmployee`) — no FormField claims that
+ * key, so the create form hands it here and it renders as the banner's body
+ * line, above the checkbox, instead of dead-ending under Name.
  */
 export function SameNameCheck({
   name,
   departmentId,
   excludeId,
   onConfirmChange,
+  refusal,
 }: {
   name: string;
   departmentId: string;
   excludeId?: string;
   onConfirmChange: (confirmed: boolean) => void;
+  refusal?: string | null;
 }) {
-  const [match, setMatch] = useState<{ employeeNo: string; department: string } | null>(null);
+  const [match, setMatch] = useState<{ id: string; employeeNo: string; department: string } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -75,7 +83,19 @@ export function SameNameCheck({
   if (!match) return null;
 
   return (
-    <Banner tone="attention" title={`Another ${name} exists in ${match.department} (${match.employeeNo})`}>
+    <Banner
+      tone="attention"
+      title={
+        <>
+          Another {name} exists in {match.department} (
+          <Link href={`/employees/${match.id}`} className="underline">
+            {match.employeeNo}
+          </Link>
+          )
+        </>
+      }
+    >
+      {refusal && <p className="text-xs">{refusal}</p>}
       <label className="flex items-center gap-2">
         <Checkbox
           aria-label="This is a different person"

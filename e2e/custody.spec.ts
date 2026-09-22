@@ -148,11 +148,20 @@ test.describe.serial("custody", () => {
     await login(page, IT);
     await page.goto(`/employees/${emp.id}`);
 
-    const progress = page.getByText(/^\d+ \/ \d+$/); // "Loadout vs policy" — "<filled> / <totalSlots>"
-    const [filledBefore, totalBefore] = (await progress.textContent())!.split("/").map((n) => Number(n.trim()));
+    // Phase 29 (ruling R4): the bare "<filled> / <totalSlots>" element is gone.
+    // The left panel now spells the same two numbers out — "{filled} of {total}
+    // slots filled · {policy}" — so this reads them out of that sentence
+    // instead, and the later assertions re-read it the same way.
+    const progress = page.getByText(/^\d+ of \d+ slots filled/);
+    const [, filledBefore, totalBefore] = /(\d+) of (\d+)/
+      .exec((await progress.textContent())!)!
+      .map(Number);
 
     await page.getByRole("button", { name: "Actions for the headset slot" }).click();
-    await page.getByRole("menuitem", { name: "Waive for this person…" }).click();
+    // Phase 29 (spec §4.4, ruling R4): the pinned menu label is now the shorter
+    // "Waive this slot…" — the menu is already this slot's, so naming the
+    // person again said nothing.
+    await page.getByRole("menuitem", { name: "Waive this slot…" }).click();
     const waiveDialog = page.getByRole("dialog", { name: "Waive the headset slot?" });
     await expect(waiveDialog).toBeVisible();
     await expectNoSeriousAxe(page); // D-20: the Waive dialog, open
@@ -163,7 +172,7 @@ test.describe.serial("custody", () => {
     // Waiving removes the slot from effectiveSlots entirely — totalSlots
     // drops by one and filled is unchanged (headset was never filled), so
     // the number of missing (total - filled) slots reads one lower.
-    await expect(progress).toHaveText(`${filledBefore} / ${totalBefore - 1}`);
+    await expect(progress).toHaveText(new RegExp(`^${filledBefore} of ${totalBefore - 1} slots filled`));
     const details = page.getByText("Waived for this person (1)");
     await expect(details).toBeVisible();
     await details.click();
@@ -175,7 +184,7 @@ test.describe.serial("custody", () => {
 
     await page.getByRole("button", { name: "Restore" }).click();
     await expect(page.getByText("Exception removed")).toBeVisible({ timeout: 10_000 });
-    await expect(progress).toHaveText(`${filledBefore} / ${totalBefore}`);
+    await expect(progress).toHaveText(new RegExp(`^${filledBefore} of ${totalBefore} slots filled`));
     await expect(page.getByText(/Waived for this person/)).toHaveCount(0);
 
     waives = await db.employeeSlotException.findMany({ where: { employeeId: emp.id, kind: "WAIVE" } });

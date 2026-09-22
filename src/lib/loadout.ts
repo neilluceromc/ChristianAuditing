@@ -165,3 +165,52 @@ export function computeLoadout<A extends HeldAssetLike>(slots: SlotLike[], held:
     coveredByLoan: filledSlots.filter((s) => s.coveredByLoan).length,
   };
 }
+
+/** Phase 29 (spec §4.1): the header's one state-chosen primary; null when Edit should lead. */
+export function profilePrimary(input: { employment: string; totalSlots: number; filled: number; missingRequired: number }): { kind: "assign-kit" | "fill-gaps" | "wizard"; label: string } | null {
+  if (input.employment === "OFFBOARDING") return { kind: "wizard", label: "Open the offboarding wizard" };
+  if (input.employment !== "ACTIVE" || input.totalSlots === 0) return null;
+  if (input.filled === 0 && input.missingRequired > 0) return { kind: "assign-kit", label: "Assign kit" };
+  if (input.missingRequired > 0) return { kind: "fill-gaps", label: `Fill ${input.missingRequired} gap${input.missingRequired === 1 ? "" : "s"}` };
+  return null;
+}
+
+/** Phase 29 (spec §4.4): required gaps first, then filled (and loan-covered) tiles, then optional gaps — stable within each band. */
+export function orderTiles<T extends { asset: unknown | null; required: boolean; coveredByLoan: boolean }>(tiles: T[]): T[] {
+  const band = (t: T) => (!t.asset && !t.coveredByLoan ? (t.required ? 0 : 2) : 1);
+  return [...tiles].sort((a, b) => band(a) - band(b));
+}
+
+export type TileMenuItem = "replace" | "return" | "open" | "reserve" | "waive" | "remove-exception";
+
+/**
+ * Phase 29 (spec §4.4): the items a tile's menu offers, in order. Pure so the
+ * view and the tests agree.
+ *
+ * Ruling R13: Waive is offered on ANY policy slot — a "policy slot" being one
+ * without an exception of its own (`waivable`) — optional slots included. Spec
+ * §4.4's "when the slot is required" is deliberately not applied: the pre-phase
+ * menu offered it on optional slots too, and waiving one is a legitimate tidy
+ * (it clears an "optional — not a gap" tile the person will never fill). The
+ * slot's `required` flag is therefore NOT an input here.
+ */
+export function tileMenuItems(
+  tile: { filled: boolean; pending: boolean; exceptionId: string | null; waivable: boolean },
+  ctx: { mayAct: boolean; direct: boolean },
+): TileMenuItem[] {
+  if (tile.filled) {
+    if (tile.pending || !ctx.mayAct) return ["open"];
+    const items: TileMenuItem[] = [];
+    if (ctx.direct) items.push("replace");
+    items.push("return", "open");
+    if (tile.exceptionId) items.push("remove-exception");
+    else if (tile.waivable) items.push("waive");
+    return items;
+  }
+  if (!ctx.mayAct) return [];
+  const items: TileMenuItem[] = [];
+  if (ctx.direct) items.push("reserve");
+  if (tile.exceptionId) items.push("remove-exception");
+  else if (tile.waivable) items.push("waive");
+  return items;
+}
