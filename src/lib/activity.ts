@@ -1,5 +1,43 @@
 import { fmtDate } from "./format";
 
+/** Phase 27 (spec §3.5): the facet's words for each action a feed can show; an unmapped action shows its raw name. */
+export const ACTION_LABELS: Record<string, string> = {
+  create: "Created", update: "Updated", register: "Registered",
+  "import-create": "Imported (new)", "import-update": "Imported (update)",
+  "lifecycle.assign": "Assigned", "lifecycle.return": "Returned", "lifecycle.change-status": "Status changed",
+  "lifecycle.replace": "Replaced", "lifecycle.triage": "Triaged", "loan.due-changed": "Loan due date changed",
+  "reservation.placed": "Hold placed", "reservation.released": "Hold released",
+  "document.uploaded": "Document attached", "document.signed": "Document signed",
+  "secret.created": "Secret added", SECRET_READ: "Secret read",
+  "approval.requested": "Change requested", comment: "Comment", "unit-update": "Units updated",
+  submit: "Submitted", "it-review": "IT review", "it-reject": "Returned by IT", "request-info": "Info requested",
+  cancel: "Cancelled", complete: "Completed", "finance.confirm": "Finance confirmed", "it.verify": "IT verified",
+  "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "supplier-set": "Supplier set",
+  "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
+  "acknowledgement.recorded": "Acknowledgement signed",
+  "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
+};
+export function actionLabel(action: string): string { return ACTION_LABELS[action] ?? action; }
+
+/** Phase 27 (spec §3.5): raw diff keys → words, shared by the `update` and `import-update` sentences. */
+export const FIELD_LABELS: Record<string, string> = {
+  name: "name", model: "model", serial: "serial", cost: "cost", location: "location", notes: "notes",
+  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", vendorId: "supplier",
+  purchasedAt: "purchase date", warrantyUntil: "warranty end", loanDueAt: "loan due date",
+  employeeNo: "employee number", email: "email", title: "title", employment: "employment", joinedAt: "join date",
+  offboardingAt: "offboarding start", offboardingDueAt: "complete-by date",
+  registeredName: "registered name", contactPerson: "contact person", phone: "phone", address: "address",
+  registrationNo: "registration number", contractStatus: "contract status", contractStart: "contract start", contractEnd: "contract end",
+  unit: "unit", packSize: "pack size", reorderLevel: "reorder level", expiresAt: "expiry",
+};
+/** Known keys read from the table; unknown ones lose a trailing "Id" and split camelCase: "repairEndedAt" → "repair ended at". */
+export function fieldLabel(key: string): string {
+  return FIELD_LABELS[key] ?? key.replace(/Id$/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+const fieldList = (diff: Record<string, unknown> | null) => (diff ? Object.keys(diff).map(fieldLabel).join(", ") : "fields");
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /**
  * Phase 22 Task 2 (spec §2.3/§4.3): the three document kinds a
  * `StockLotDocument` can carry, worded as the indefinite-article noun phrase
@@ -34,10 +72,8 @@ export function auditSentence(entry: ActivityEntryLike): string {
   switch (entry.action) {
     case "create":
       return `${entry.actorLabel} created ${entry.entityLabel}`;
-    case "update": {
-      const fields = diff ? Object.keys(diff).join(", ") : "fields";
-      return `${entry.actorLabel} updated ${fields} on ${entry.entityLabel}`;
-    }
+    case "update":
+      return `${entry.actorLabel} updated ${fieldList(diff)} on ${entry.entityLabel}`;
     case "SECRET_READ": {
       const label = diff?.label?.to;
       return `${entry.actorLabel} revealed the secret "${String(label ?? "?")}" on ${entry.entityLabel}`;
@@ -157,10 +193,8 @@ export function auditSentence(entry: ActivityEntryLike): string {
         : "";
       return `${entry.actorLabel} imported ${entry.entityLabel}${suffix}`;
     }
-    case "import-update": {
-      const fields = diff ? Object.keys(diff).join(", ") : "fields";
-      return `${entry.actorLabel} updated ${fields} on ${entry.entityLabel} by import`;
-    }
+    case "import-update":
+      return `${entry.actorLabel} updated ${fieldList(diff)} on ${entry.entityLabel} by import`;
     // Phase 19 (M-3): the fourteen stock/stocktake actions this module writes
     // (`item-actions.ts`, `movement-actions.ts`, `stocktake-actions.ts`) all
     // fell to the `default` branch and rendered as a raw verb — exactly the
@@ -253,6 +287,39 @@ export function auditSentence(entry: ActivityEntryLike): string {
       const kind = diff?.kind?.to;
       const label = typeof kind === "string" ? (LOT_DOCUMENT_ARTICLE_LABEL[kind] ?? "a document") : "a document";
       return `${entry.actorLabel} attached ${label} to ${entry.entityLabel}`;
+    }
+    // Phase 27 (spec §3.5): every action that can reach a feed reads as a sentence.
+    case "document.uploaded":
+      return `${entry.actorLabel} attached ${String(diff?.document?.to ?? "a document")} to ${entry.entityLabel}`;
+    case "document.signed": {
+      const fileName = diff ? Object.keys(diff)[0] ?? "a document" : "a document";
+      return `${entry.actorLabel} marked ${fileName} signed on ${entry.entityLabel}`;
+    }
+    case "loan.due-changed": {
+      const to = diff?.loanDueAt?.to;
+      return to
+        ? `${entry.actorLabel} moved the loan due date of ${entry.entityLabel} to ${fmtDate(String(to))}`
+        : `${entry.actorLabel} cleared the loan due date of ${entry.entityLabel}`;
+    }
+    case "secret.created":
+      return `${entry.actorLabel} added the secret "${String(diff?.label?.to ?? "")}" to ${entry.entityLabel}`;
+    case "acknowledgement.recorded":
+      return `${entry.actorLabel} recorded ${entry.entityLabel}'s signed acknowledgement of ${plural(Number(diff?.items?.to ?? 0), "item")}`;
+    case "policy.exception.added": {
+      const reason = diff?.reason?.to;
+      return `${entry.actorLabel} added the exception slot ${String(diff?.slot?.to ?? "")} for ${entry.entityLabel}${reason ? ` — ${String(reason)}` : ""}`;
+    }
+    case "policy.exception.waived": {
+      const reason = diff?.reason?.to;
+      return `${entry.actorLabel} waived ${String(diff?.slot?.from ?? "")} for ${entry.entityLabel}${reason ? ` — ${String(reason)}` : ""}`;
+    }
+    case "policy.exception.removed":
+      return `${entry.actorLabel} removed the exception slot ${String(diff?.slot?.from ?? "")} for ${entry.entityLabel}`;
+    case "supplier-set": {
+      const to = diff?.supplier?.to;
+      return to
+        ? `${entry.actorLabel} set ${String(to)} as the supplier on ${entry.entityLabel}`
+        : `${entry.actorLabel} cleared the supplier on ${entry.entityLabel}`;
     }
     default:
       return `${entry.actorLabel} ${entry.action} ${entry.entityLabel}`;

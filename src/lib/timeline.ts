@@ -1,3 +1,5 @@
+import { parseIntParam } from "./paging";
+
 /**
  * Phase 17 (spec §5.2). The two merged timelines read two or three tables
  * newest-first; no single SQL page exists across them, so paging is a cursor:
@@ -24,6 +26,7 @@ export const TIMELINE_MAX_SKIP = 1_000;
 export interface TimelinePoint { id: string; when: Date }
 export interface TimelineCursor { before: Date; skip: number }
 
+// cuids are ASCII, so JS's byte-wise `<`/`>` orders them exactly as Postgres' `id desc` does in the source queries — the tiebreaker matches the page boundary.
 const byWhenDesc = <T extends TimelinePoint>(a: T, b: T) => b.when.getTime() - a.when.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
 /** How many rows to `take` from a source query: a page, plus the rows at the boundary instant already shown on earlier pages. */
@@ -57,7 +60,7 @@ export function parseTimelineCursor(params: URLSearchParams): TimelineCursor | n
   if (!raw) return null;
   const before = new Date(raw);
   if (Number.isNaN(before.getTime())) return null;
-  const parsed = Number.parseInt(params.get("skip") ?? "0", 10) || 0;
+  const parsed = parseIntParam(params, "skip", 0);
   const skip = Math.min(TIMELINE_MAX_SKIP, Math.max(0, parsed));
   return { before, skip };
 }
