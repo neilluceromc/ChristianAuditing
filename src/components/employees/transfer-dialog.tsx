@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -19,28 +19,32 @@ import { useEmployeeRunner } from "./use-employee-runner";
 const today = () => localDateISO(new Date());
 
 /**
- * Phase 20 (spec §3): the Transfer button + dialog on the employee page
- * header, admin/it_staff only (the caller gates rendering — same
- * `canMutate` the Edit button already checks). `departments` is handed in
- * with the employee's CURRENT department already excluded — a transfer to
- * the same department is a schema-level refusal (`transferEmployee`'s own
- * "Already in this department"), so the picker never offers it in the first
- * place. `toTitle` is prefilled with the current title (still required —
- * see transfer-actions.ts's own note on why a same-title transfer is still a
- * real transfer, not a no-op).
+ * Phase 20 (spec §3), Phase 29 (plan P-5): the Transfer dialog on the
+ * employee page header, admin/it_staff only — controlled by the caller
+ * (`ProfileActions`), which owns the trigger (the More menu's "Transfer…"
+ * item) and the `open` state; this component renders no trigger of its own.
+ * `departments` is handed in with the employee's CURRENT department already
+ * excluded — a transfer to the same department is a schema-level refusal
+ * (`transferEmployee`'s own "Already in this department"), so the picker
+ * never offers it in the first place. `toTitle` is prefilled with the
+ * current title (still required — see transfer-actions.ts's own note on why
+ * a same-title transfer is still a real transfer, not a no-op).
  */
 export function TransferDialog({
+  open,
+  onClose,
   employeeId,
   employeeName,
   currentTitle,
   departments,
 }: {
+  open: boolean;
+  onClose: () => void;
   employeeId: string;
   employeeName: string;
   currentTitle: string;
   departments: Array<{ id: string; name: string }>;
 }) {
-  const [open, setOpen] = useState(false);
   const { pending, error, fieldErrors, retryAfter, setRetryAfter, reset, run } =
     useEmployeeRunner(["toDepartmentId", "toTitle", "effectiveAt", "reason"]);
   const [toDepartmentId, setToDepartmentId] = useState(departments[0]?.id ?? "");
@@ -48,95 +52,94 @@ export function TransferDialog({
   const [effectiveAt, setEffectiveAt] = useState(today());
   const [reason, setReason] = useState("");
 
-  function openDialog() {
-    reset();
-    setToDepartmentId(departments[0]?.id ?? "");
-    setToTitle(currentTitle);
-    setEffectiveAt(today());
-    setReason("");
-    setOpen(true);
-  }
+  useEffect(() => {
+    if (open) {
+      reset();
+      setToDepartmentId(departments[0]?.id ?? "");
+      setToTitle(currentTitle);
+      setEffectiveAt(today());
+      setReason("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   function submit() {
     const toDeptName = departments.find((d) => d.id === toDepartmentId)?.name ?? "the new department";
     run(
       () => transferEmployee({ employeeId, toDepartmentId, toTitle, effectiveAt, reason }),
       `Transferred to ${toDeptName}`,
-      { onOk: () => setOpen(false) },
+      { onOk: () => onClose() },
     );
   }
 
   return (
-    <>
-      <Button onClick={openDialog}>Transfer</Button>
-      <Dialog
-        open={open}
-        onClose={() => setOpen(false)}
-        title={`Transfer ${employeeName}`}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button
-              variant="primary"
-              loading={pending}
-              disabled={departments.length === 0}
-              onClick={submit}
-            >
-              Record transfer
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
-          {error && <Banner tone="fault" title={error} />}
-          {departments.length === 0 ? (
-            <p className="text-xs text-fg-muted">No other department exists to transfer into.</p>
-          ) : (
-            <FormField label="New department" required error={fieldErrors.toDepartmentId}>
-              {(p) => (
-                <Select
-                  id={p.id}
-                  aria-describedby={p["aria-describedby"]}
-                  invalid={p.invalid}
-                  value={toDepartmentId}
-                  onChange={(e) => setToDepartmentId(e.target.value)}
-                >
-                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </Select>
-              )}
-            </FormField>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`Transfer ${employeeName}`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            loading={pending}
+            disabled={departments.length === 0}
+            onClick={submit}
+          >
+            Record transfer
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+        {error && <Banner tone="fault" title={error} />}
+        {departments.length === 0 ? (
+          <p className="text-xs text-fg-muted">No other department exists to transfer into.</p>
+        ) : (
+          <FormField label="New department" required error={fieldErrors.toDepartmentId}>
+            {(p) => (
+              <Select
+                id={p.id}
+                aria-describedby={p["aria-describedby"]}
+                invalid={p.invalid}
+                value={toDepartmentId}
+                onChange={(e) => setToDepartmentId(e.target.value)}
+              >
+                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </Select>
+            )}
+          </FormField>
+        )}
+        <FormField label="New title" required error={fieldErrors.toTitle}>
+          {(p) => (
+            <Input
+              id={p.id}
+              aria-describedby={p["aria-describedby"]}
+              invalid={p.invalid}
+              value={toTitle}
+              onChange={(e) => setToTitle(e.target.value)}
+            />
           )}
-          <FormField label="New title" required error={fieldErrors.toTitle}>
-            {(p) => (
-              <Input
-                id={p.id}
-                aria-describedby={p["aria-describedby"]}
-                invalid={p.invalid}
-                value={toTitle}
-                onChange={(e) => setToTitle(e.target.value)}
-              />
-            )}
-          </FormField>
-          <FormField label="Effective date" required error={fieldErrors.effectiveAt}>
-            {(p) => (
-              <Input
-                id={p.id}
-                type="date"
-                max={today()}
-                aria-describedby={p["aria-describedby"]}
-                invalid={p.invalid}
-                value={effectiveAt}
-                onChange={(e) => setEffectiveAt(e.target.value)}
-              />
-            )}
-          </FormField>
-          <ReasonField
-            error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={REASON_CHIPS["employee.transfer"]} disabled={pending}
-          />
-        </div>
-      </Dialog>
-    </>
+        </FormField>
+        <FormField label="Effective date" required error={fieldErrors.effectiveAt}>
+          {(p) => (
+            <Input
+              id={p.id}
+              type="date"
+              max={today()}
+              aria-describedby={p["aria-describedby"]}
+              invalid={p.invalid}
+              value={effectiveAt}
+              onChange={(e) => setEffectiveAt(e.target.value)}
+            />
+          )}
+        </FormField>
+        <ReasonField
+          error={fieldErrors.reason} value={reason} onChange={setReason}
+          chips={REASON_CHIPS["employee.transfer"]} disabled={pending}
+        />
+      </div>
+    </Dialog>
   );
 }
