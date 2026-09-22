@@ -34,7 +34,7 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-// Copied from e2e/it-nav.spec.ts:66-72 (itself from e2e/it-gaps.spec.ts) —
+// Copied from e2e/it-nav.spec.ts:71-77 (itself from e2e/it-gaps.spec.ts) —
 // house rule: never import helpers across spec files, since each file reseeds
 // independently.
 async function login(page: Page, email: string) {
@@ -45,7 +45,7 @@ async function login(page: Page, email: string) {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
-// Copied from e2e/it-nav.spec.ts:75-80.
+// Copied from e2e/it-nav.spec.ts:80-85.
 async function expectNoSeriousAxe(page: Page) {
   await page.mouse.move(0, 0);
   await page.waitForTimeout(700);
@@ -53,7 +53,7 @@ async function expectNoSeriousAxe(page: Page) {
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
 }
 
-// Copied from e2e/it-nav.spec.ts:83-91.
+// Copied from e2e/it-nav.spec.ts:88-96.
 async function waitForHydration(target: Locator) {
   const el = target.first();
   await el.waitFor({ state: "attached", timeout: 20_000 });
