@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { requireUser } from "@/server/auth/guards";
 import {
@@ -9,6 +10,7 @@ import {
 import { filterSectionsForRole, getApprovalsBadge, Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
+import { NavigationTracker } from "@/components/shell/navigation-tracker";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -43,6 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </main>
       </div>
       <CommandPalette role={user.role} sections={sections} />
+      <Suspense fallback={null}><NavigationTracker /></Suspense>
     </div>
   );
 }

@@ -11,10 +11,17 @@ and pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.15
 but NOT yet deployed.**
 
 **Where the code stands today (2026-09-22).** Staging runs the **Phase 26** merge (`e96fb2a`,
-**25 migrations**) since the 2026-09-22 forced redeploy. `main` = `origin/main` since the Phase 27 push
-(merged via `--no-ff` `5dd3372` and pushed 2026-09-22, carrying the docs commits `385b484` and `8c24c3b`). **Phase 27
-(`phase-27-leftovers-sweep`, final tree `66445ed`) is on `main`; staging is NOT yet redeployed and its
-migration 26 is pending there** — see §1 below and `PICKUP.md` §4 item 1.
+**25 migrations**) since the 2026-09-22 forced redeploy. `main` = `origin/main` = `758ed3f` since the
+Phase 27 push (merged via `--no-ff` `5dd3372` and pushed 2026-09-22, carrying the docs commits
+`385b484` and `8c24c3b`), with no unpushed commits on it. **Phase 27 (`phase-27-leftovers-sweep`,
+final tree `66445ed`) is on `main`; staging is NOT yet redeployed and its migration 26 is pending
+there** — see §1 below and `PICKUP.md` §4 item 2. **Phase 28
+(`phase-28-back-control`, a Back control on every page that has a parent) is CODE-COMPLETE on its own
+branch at final tree `5a8bbcf` and is UNMERGED and UNPUSHED** — a bounded change with no
+spec and no plan document (the record is `HANDOVER.md` (u)); merging, pushing and the redeploy are the
+user's decisions. **It adds no migration** (26 stays), so the redeploy that would carry it is code-only
+— but it would ride the same `-Force` that finally applies Phase 27's migration 26, so the
+duplicate check comes first. See `PICKUP.md` §4 item 1.
 
 ---
 
@@ -123,7 +130,7 @@ Consumed what Phase 19 records. Scope agreed in the D1 brainstorm (spec
   Home, linking to `/stock?low=1`. One more landed as a bonus, not originally on this list: the import's
   unit cost is now honoured on CREATE rows (the "Unit cost is ignored" notice removed) — spec §8 item 6.
 
-### 5.2 Other candidates (PICKUP §4 item 13, unchanged order)
+### 5.2 Other candidates (PICKUP §4 item 14, unchanged order)
 
 - **Depreciation module** (Finance; own brainstorm — straight-line by category with a useful life and
   salvage, a monthly schedule report, and Finance's confirmation as the capitalisation date were the ideas

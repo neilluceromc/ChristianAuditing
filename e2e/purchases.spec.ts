@@ -277,7 +277,12 @@ test.describe("purchases — viewer is read-only", () => {
 
     // RequestActions (Edit draft, every transition button) is omitted
     // entirely for a viewer — not merely disabled.
-    await expect(page.locator("main header").first().getByRole("button")).toHaveCount(0);
+    // Phase 28 puts a Back control in every header that has a parent, and a
+    // viewer gets it too: it is navigation, not a transition, so it is the ONE
+    // button allowed here — anything else would be an action leaking through.
+    const headerButtons = page.locator("main header").first().getByRole("button");
+    await expect(headerButtons).toHaveCount(1);
+    await expect(headerButtons).toHaveAccessibleName("Back");
     await expect(page.getByRole("link", { name: "Edit draft" })).toHaveCount(0);
 
     // The thread's composer is gated the same way.
