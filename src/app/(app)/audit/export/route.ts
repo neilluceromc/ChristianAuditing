@@ -1,8 +1,7 @@
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { buildAuditWhere, AUDIT_LIST_CONFIG } from "@/lib/audit-list";
-import { entityLabels } from "@/server/modules/audit/queries";
-import { invisibleAssetIds } from "@/server/modules/inventory/queries";
+import { entityLabels, invisibleAuditRefs } from "@/server/modules/audit/queries";
 import { parseListState } from "@/lib/url-state";
 import { toXlsxBuffer } from "@/server/xlsx/write";
 import { AUDIT_EXPORT_COLUMNS, EXPORT_CAP } from "@/lib/export-columns";
@@ -14,7 +13,7 @@ export async function GET(req: Request) {
   // Same parse + filter as /audit's page, so the sheet and the screen can
   // never disagree about which rows a filtered export includes.
   const state = parseListState(url.searchParams, AUDIT_LIST_CONFIG);
-  const hidden = await invisibleAssetIds(user.role);
+  const hidden = await invisibleAuditRefs(user.role);
   const where = buildAuditWhere(state, hidden);
 
   const count = await prisma.auditEntry.count({ where });

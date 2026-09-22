@@ -625,6 +625,7 @@ model AuditEntry {
   @@index([entityType, createdAt])
   @@index([actorId])
   @@index([entityType, entityId, createdAt])
+  @@index([entityType, action]) // Phase 27 (spec §3.1): the feeds' Action facet filters and counts here
 }
 
 // ── Equipment policies ────────────────────────────────────────────────

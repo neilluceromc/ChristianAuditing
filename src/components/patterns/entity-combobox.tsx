@@ -83,14 +83,16 @@ export function EntityCombobox({
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
-        aria-activedescendant={open && shown[active] ? `${listId}-${shown[active].value}` : undefined}
+        aria-activedescendant={open && shown[active] ? `${listId}-${shown[active].value || "none"}` : undefined}
         aria-describedby={describedBy}
         aria-invalid={invalid || undefined}
         className={fieldClasses(invalid)}
         placeholder={placeholder}
         autoFocus={autoFocus}
         value={open ? query : (selected ? `${selected.label}${selected.sub ? ` · ${selected.sub}` : ""}` : "")}
-        onFocus={() => { setOpen(true); setActive(0); }}
+        // Phase 27 (spec §5.5): focus alone never opens the list — a click, typing or ArrowDown does, so an autoFocus field no longer pops a listbox on page load.
+        onFocus={() => setActive(0)}
+        onClick={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)} // let option mousedown land first
         onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); if (!e.target.value) onChange(null); }}
         onKeyDown={(e) => {
@@ -109,12 +111,13 @@ export function EntityCombobox({
         >
           {shown.length === 0 && <li className="px-2 py-1.5 text-xs text-fg-muted">No matches.</li>}
           {rows.map(({ option, heading, headingId, describedBy }, i) => (
-            <Fragment key={option.value}>
+            // "" is the clear sentinel (receive-form's "No supplier") — give it a real id and key
+            <Fragment key={option.value || "none"}>
               {heading && (
                 <li id={headingId} role="presentation" className="px-2 pb-0.5 pt-1 text-[10px] uppercase tracking-[0.06em] text-fg-faint">{heading}</li>
               )}
               <li
-                id={`${listId}-${option.value}`}
+                id={`${listId}-${option.value || "none"}`}
                 role="option"
                 aria-selected={option.value === value}
                 aria-describedby={describedBy}

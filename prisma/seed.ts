@@ -649,7 +649,7 @@ async function main() {
   await issue("OS-0002", 24, 12, "Sales", "EMP-0042", "New hires");
   await issue("PN-0001", 110, 6, "Operations", null, "Pantry restock");   // leaves PN-0001 at 40 < 60 → LOW
   await issue("PN-0004", 50, 3, "HR", null, "Town hall");
-  await issue("CM-0002", 8, 9, "Operations", null, "Weekly cleaning");
+  await issue("CM-0002", 8, 11, "Operations", null, "Weekly cleaning");
   // One POSTED stocktake on Cleaning materials, ten days ago, with two adjustments.
   const st = await prisma.stocktake.create({
     data: {

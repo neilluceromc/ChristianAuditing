@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, pageOf, parsePage } from "./paging";
+import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, pageOf, parseIntParam, parsePage } from "./paging";
 
 describe("pageOf", () => {
   it("names the two sizes the app already uses", () => {
@@ -25,5 +25,14 @@ describe("parsePage", () => {
     expect(parsePage(new URLSearchParams("page=4"))).toBe(4);
     expect(parsePage(new URLSearchParams("page=0"))).toBe(1);
     expect(parsePage(new URLSearchParams("page=abc"))).toBe(1);
+  });
+});
+
+describe("parseIntParam", () => {
+  it("parses an integer param and falls back on absence or garbage", () => {
+    expect(parseIntParam(new URLSearchParams("skip=7"), "skip", 0)).toBe(7);
+    expect(parseIntParam(new URLSearchParams(""), "skip", 0)).toBe(0);
+    expect(parseIntParam(new URLSearchParams("skip=abc"), "skip", 0)).toBe(0);
+    expect(parseIntParam(new URLSearchParams("page=0"), "page", 1)).toBe(1); // `||` reads 0 as absent — the behaviour both hand-rolled versions already had (ruling R4)
   });
 });

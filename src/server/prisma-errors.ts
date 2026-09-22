@@ -55,3 +55,19 @@ export async function asActionResult<T>(
     throw err;
   }
 }
+
+/** Phase 27 (spec §3.2): any unique-index violation — Prisma's own @unique and the raw lower() indexes alike. */
+export function isUniqueViolation(err: unknown): err is Prisma.PrismaClientKnownRequestError {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+}
+
+/**
+ * P2002 meta.target is a column array (["serial"]) for a Prisma-declared index or the index NAME
+ * string ("StockCategory_prefix_lower_key") for a raw one — callers match with `.includes()`, which
+ * reads both shapes; keep every caller on includes().
+ */
+export function uniqueTarget(err: unknown): string[] {
+  if (!isUniqueViolation(err)) return [];
+  const target = (err.meta as { target?: string[] | string } | undefined)?.target;
+  return Array.isArray(target) ? target : target ? [String(target)] : [];
+}

@@ -14,7 +14,12 @@ export function pageOf(total: number, requested: number, size: number): Page {
   return { page, pageCount, skip: (page - 1) * size, take: size, total };
 }
 
+/** One integer query param: the value, or `fallback` on absence or garbage. Callers clamp. */
+export function parseIntParam(params: URLSearchParams, key: string, fallback: number): number {
+  return Number.parseInt(params.get(key) ?? "", 10) || fallback;
+}
+
 /** For pages without a ListState — the same lower clamp parseListState applies. */
 export function parsePage(params: URLSearchParams): number {
-  return Math.max(1, Number.parseInt(params.get("page") ?? "1", 10) || 1);
+  return Math.max(1, parseIntParam(params, "page", 1));
 }

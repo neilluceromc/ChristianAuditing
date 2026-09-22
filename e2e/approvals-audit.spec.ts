@@ -1,7 +1,16 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
+import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
+
+// Phase 27, Task 6: the audit-hygiene case at the foot of the "audit log"
+// describe builds its own class-bearing fixtures, so this file gains the
+// client every other spec that touches the database already carries.
+const db = new PrismaClient();
+test.afterAll(async () => {
+  await db.$disconnect();
+});
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login (see
@@ -220,6 +229,68 @@ test.describe("audit log", () => {
     await expect(page.getByText("1 entry")).toBeVisible();
     await expect(page.getByRole("row", { name: /SECRET_READ/ })).toBeVisible();
   });
+
+  /**
+   * Phase 27 (spec §3.3/§4.1, Task 6): `invisibleAuditRefs` widened the Phase 14
+   * asset rule to every class-bearing row — approvals on an unseen asset, and
+   * the categories/types of an unseen class.
+   *
+   * Two fixtures are built here rather than read off the seed:
+   *   - the Purchasing AssetCategory (there is no seeded audit row about one), and
+   *   - the approval itself: EVERY seeded approval hangs off an IT asset or off
+   *     no asset at all (APR-2025/2028/2031/2035/2040 carry no assetId; 2036-2041
+   *     name BR-HS/BR-LT/BR-KB tags), so `findFirst({ asset: { cls: "PURCHASING" } })`
+   *     would throw. It is deleted in `finally`; the category too.
+   * Both audit rows STAY — `AuditEntry` is append-only at the database (R3).
+   *
+   * Phase 27 fix wave (I-2): `entityLabels` (audit/queries.ts) now resolves
+   * `asset-category`, so the row is located by the category's NAME — the label
+   * the page prints — instead of the `entityId.slice(0, 10) + "…"` fallback it
+   * used to fall through to. A name is what distinguishes "the row is hidden"
+   * from "the row is there under another label"; a cuid prefix could not.
+   */
+  test("class hygiene: IT's audit log hides Purchasing categories and approvals; admin's shows them", async ({ page }) => {
+    const cat = await db.assetCategory.create({ data: { name: "Phase 27 Fleet", cls: "PURCHASING" } });
+    const vehicle = await db.asset.findFirstOrThrow({ where: { cls: "PURCHASING" }, orderBy: { tag: "asc" } });
+    const requester = await db.user.findUniqueOrThrow({ where: { email: "it@thebackroomop.com" } });
+    const approval = await db.approval.create({
+      data: {
+        refNo: "APR-E2E27", type: "lifecycle_change_status", state: "PENDING", priority: "NORMAL",
+        slaAt: new Date(Date.now() + 86_400_000), requestedById: requester.id, assetId: vehicle.id,
+        payload: { from: { status: "OPERATIONAL" }, to: { status: "STORED" } },
+      },
+    });
+    await db.auditEntry.create({
+      data: {
+        actorLabel: "e2e phase 27", entityType: "asset-category", entityId: cat.id, action: "create",
+        diff: { name: { from: null, to: cat.name }, cls: { from: null, to: "PURCHASING" } },
+      },
+    });
+    await db.auditEntry.create({
+      data: {
+        actorLabel: "e2e phase 27", entityType: "approval", entityId: approval.id, action: "claim",
+        diff: { claimedBy: { from: null, to: "e2e" } },
+      },
+    });
+    const catRow = new RegExp(cat.name);
+    try {
+      await login(page, "it@thebackroomop.com");
+      await page.goto("/audit?entity=asset-category");
+      await expect(page.getByRole("row", { name: catRow })).toHaveCount(0);
+      await page.goto("/audit?entity=approval");
+      await expect(page.getByRole("row", { name: new RegExp(approval.refNo) })).toHaveCount(0);
+
+      await login(page, "admin@thebackroomop.com");
+      await page.goto("/audit?entity=asset-category");
+      await expect(page.getByRole("row", { name: catRow }).first()).toBeVisible({ timeout: 10_000 });
+      await page.goto("/audit?entity=approval");
+      await expect(page.getByRole("row", { name: new RegExp(approval.refNo) }).first()).toBeVisible({ timeout: 10_000 });
+    } finally {
+      // the two audit rows stay (append-only); their subjects go
+      await db.approval.delete({ where: { id: approval.id } });
+      await db.assetCategory.delete({ where: { id: cat.id } });
+    }
+  });
 });
 
 test.describe("activity feeds", () => {
@@ -227,7 +298,7 @@ test.describe("activity feeds", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/activity");
     const feed = page.locator("ol");
-    await expect(feed.getByText("worker lifecycle.assign executed BR-LT-0181")).toBeVisible();
+    await expect(feed.getByText(/^worker assigned BR-LT-0181 to .+ \(approved request\)$/)).toBeVisible();
     // domain pill only ever renders on cross-domain feeds (Home, Phase 6) —
     // a scoped feed like this one never sets `domain`, so neither word appears.
     await expect(feed).not.toContainText(/\basset\b/i);

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionUser } from "@/server/auth/guards";
+import { isUniqueViolation, uniqueTarget } from "@/server/prisma-errors";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { diffOf } from "@/lib/audit-diff";
@@ -16,15 +17,6 @@ import {
 } from "@/server/action-result";
 
 const idSchema = z.object({ id: z.string().min(1) });
-
-function isP2002(e: unknown): e is Prisma.PrismaClientKnownRequestError {
-  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
-}
-
-function p2002Target(e: Prisma.PrismaClientKnownRequestError): string {
-  const target = (e.meta as { target?: string[] | string } | undefined)?.target;
-  return Array.isArray(target) ? target.join(",") : String(target ?? "");
-}
 
 /**
  * R2: this module's one in-transaction-refusal pattern — a small local class
@@ -53,6 +45,18 @@ function revalidateCategories() {
 
 // ---- Categories -----------------------------------------------------------
 
+/** Phase 27 (spec §4.2): name and prefix each checked case-insensitively before the write, naming the existing category. */
+async function stockCategoryClash(
+  tx: Prisma.TransactionClient, d: { name: string; prefix: string }, excludeId?: string,
+): Promise<ActionResult<never> | null> {
+  const not = excludeId ? { id: { not: excludeId } } : {};
+  const byName = await tx.stockCategory.findFirst({ where: { ...not, name: { equals: d.name, mode: "insensitive" } }, select: { name: true } });
+  if (byName) return validationError({ name: `A category with this name already exists: "${byName.name}"` });
+  const byPrefix = await tx.stockCategory.findFirst({ where: { ...not, prefix: { equals: d.prefix, mode: "insensitive" } }, select: { name: true } });
+  if (byPrefix) return validationError({ prefix: `That prefix is already in use by "${byPrefix.name}"` });
+  return null;
+}
+
 export async function createStockCategory(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await actionUser();
   if (!user || !canManageStock(user.role)) return forbidden();
@@ -63,6 +67,8 @@ export async function createStockCategory(input: unknown): Promise<ActionResult<
   const d = parsed.data;
   try {
     const created = await prisma.$transaction(async (tx) => {
+      const clash = await stockCategoryClash(tx, d);
+      if (clash) return clash;
       const cat = await tx.stockCategory.create({ data: { name: d.name, prefix: d.prefix } });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "stock-category", entityId: cat.id,
@@ -70,11 +76,12 @@ export async function createStockCategory(input: unknown): Promise<ActionResult<
       });
       return cat;
     });
+    if ("ok" in created) return created;
     revalidateCategories();
     return ok({ id: created.id });
   } catch (e) {
-    if (isP2002(e)) {
-      return p2002Target(e).includes("prefix")
+    if (isUniqueViolation(e)) {
+      return uniqueTarget(e).some((t) => t.includes("prefix"))
         ? validationError({ prefix: "That prefix is already in use" })
         : validationError({ name: "A category with this name already exists" });
     }
@@ -111,18 +118,22 @@ export async function updateStockCategory(input: unknown): Promise<ActionResult<
   if (Object.keys(diff).length === 0) return ok({ id });
 
   try {
-    await prisma.$transaction(async (tx) => {
+    const failure = await prisma.$transaction(async (tx) => {
+      const clash = await stockCategoryClash(tx, d, id);
+      if (clash) return clash;
       await tx.stockCategory.update({ where: { id }, data });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "stock-category", entityId: id,
         action: "stock.category.updated", diff,
       });
+      return null;
     });
+    if (failure) return failure;
     revalidateCategories();
     return ok({ id });
   } catch (e) {
-    if (isP2002(e)) {
-      return p2002Target(e).includes("prefix")
+    if (isUniqueViolation(e)) {
+      return uniqueTarget(e).some((t) => t.includes("prefix"))
         ? validationError({ prefix: "That prefix is already in use" })
         : validationError({ name: "A category with this name already exists" });
     }

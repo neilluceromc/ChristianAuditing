@@ -126,6 +126,7 @@ export async function markDocumentSigned(input: { docId: string }): Promise<Acti
       actorId: user.id, actorLabel: user.name,
       entityType: "asset", entityId: doc.assetId,
       action: "document.signed",
+      // this diff's single key IS the file name — auditSentence's document.signed case reads Object.keys(diff)[0]; keep it single-keyed
       diff: { [doc.fileName]: { from: "unsigned", to: "SIGNED" } },
     });
   });

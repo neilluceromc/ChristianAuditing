@@ -457,4 +457,29 @@ test.describe.serial("stock", () => {
     await page.goto("/stock/categories");
     await expectNoSeriousAxe(page);
   });
+
+  /**
+   * Phase 27 (spec §4.2, Task 6). Last in the block deliberately: it leans on
+   * "Test supplies"/TS, created by case 1 and carried through the file. Both
+   * halves are REFUSALS, so neither writes a row and no cleanup is needed —
+   * the assertion is that `stockCategoryClash` names the existing category
+   * before the insert, once for the name and once for the prefix.
+   */
+  test("12. a stock category name or prefix that differs only by case is refused, naming the existing category", async ({ page }) => {
+    await login(page, PURCHASING);
+    await page.goto("/stock/categories");
+    const name = page.getByLabel("New category name");
+    await waitForHydration(name);
+    await name.fill("test supplies");
+    await page.getByLabel("New category prefix").fill("ZZ");
+    await page.getByRole("button", { name: "Create category" }).click();
+    await expect(page.locator('p[role="alert"]')).toHaveText('A category with this name already exists: "Test supplies"', { timeout: 10_000 });
+
+    await name.fill("Zebra supplies");
+    await page.getByLabel("New category prefix").fill("ts");
+    await page.getByRole("button", { name: "Create category" }).click();
+    await expect(page.locator('p[role="alert"]')).toHaveText('That prefix is already in use by "Test supplies"', { timeout: 10_000 });
+
+    expect(await db.stockCategory.count({ where: { name: { in: ["test supplies", "Zebra supplies"] } } })).toBe(0);
+  });
 });

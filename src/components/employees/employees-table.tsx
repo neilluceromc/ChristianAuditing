@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui/avatar";
 import { StatusDot } from "@/components/ui/status";
-import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+import { Table, TBody, Td, Th, THead, Tr, rowOpenProps } from "@/components/ui/table";
 import type { ListState } from "@/lib/url-state";
 import type { EmployeeListRow } from "@/server/modules/employees/queries";
 
@@ -32,7 +32,6 @@ export function EmployeesTable({
   }
 
   function open(id: string) {
-    if (window.getSelection()?.toString()) return; // a text selection is not a click
     router.push(`/employees/${id}`);
   }
 
@@ -53,12 +52,8 @@ export function EmployeesTable({
         {rows.map((row) => (
           <Tr
             key={row.id}
-            tabIndex={0}
             className="cursor-pointer"
-            onClick={() => open(row.id)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && e.target === e.currentTarget) { e.preventDefault(); open(row.id); }
-            }}
+            {...rowOpenProps(() => open(row.id))}
           >
             <Td>
               <Link

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
+import { isUniqueViolation } from "@/server/prisma-errors";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import {
@@ -15,10 +16,6 @@ const PATHS = ["/admin/equipment-policies", "/employees", "/"] as const;
 
 function revalidateAll() {
   for (const path of PATHS) revalidatePath(path);
-}
-
-function isUnique(err: unknown): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
 }
 
 /**
@@ -109,6 +106,18 @@ const createSchema = z.object({
   appliesToDepartmentId: z.string().optional(),
 });
 
+/**
+ * Phase 27 (spec §4.2): thrown from inside the create transaction to name the existing policy. This
+ * module's transaction is wrapped by the private `asActionResult` above, which only handles Prisma
+ * errors and rethrows everything else — so a thrown marker rolls the transaction back and surfaces in
+ * `createPolicy`'s own outer `catch`, not here.
+ */
+class PolicyNameTaken extends Error {
+  constructor(public readonly existing: string) {
+    super("policy name taken");
+  }
+}
+
 export async function createPolicy(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
@@ -137,6 +146,8 @@ export async function createPolicy(input: unknown): Promise<ActionResult<{ id: s
     const result = await asActionResult(async () => {
       let id = "";
       await prisma.$transaction(async (tx) => {
+        const clash = await tx.equipmentPolicy.findFirst({ where: { name: { equals: parsed.data.name, mode: "insensitive" } }, select: { name: true } });
+        if (clash) throw new PolicyNameTaken(clash.name);
         const policy = await tx.equipmentPolicy.create({
           data: {
             name: parsed.data.name,
@@ -164,7 +175,8 @@ export async function createPolicy(input: unknown): Promise<ActionResult<{ id: s
     revalidateAll();
     return ok({ id: result });
   } catch (err) {
-    if (isUnique(err)) return validationError({ name: "That policy name already exists" });
+    if (err instanceof PolicyNameTaken) return validationError({ name: `That policy name is already taken by "${err.existing}"` });
+    if (isUniqueViolation(err)) return validationError({ name: "That policy name already exists" });
     throw err;
   }
 }

@@ -258,11 +258,10 @@ test.describe.serial("quick forms", () => {
     const itemCombo = page.getByRole("combobox", { name: /^Item\b/ });
     await waitForHydration(itemCombo);
 
-    // `focus()` rather than `click()`: the Item combobox's own autoFocus list
-    // (P-3) may still be painted over the Employee field at this moment, and
-    // the list opens on focus exactly as it does on a click.
+    // Phase 27 (spec §5.5): focus alone no longer opens the list, so each combobox needs its own
+    // click before its list is expected to be visible.
     const employeeCombo = page.getByLabel("Employee");
-    await employeeCombo.focus();
+    await employeeCombo.click();
     const employeeList = comboList(employeeCombo);
     await expect(employeeList).toBeVisible({ timeout: 10_000 });
     const employeeRows = await employeeList.locator("li").allTextContents();
@@ -270,7 +269,7 @@ test.describe.serial("quick forms", () => {
     expect(employeeRows[1]).toContain(target.name);
     expect(employeeRows[2]).toBe("All"); // exactly one recent pick, then the full list
 
-    await itemCombo.focus();
+    await itemCombo.click();
     const itemList = comboList(itemCombo);
     await expect(itemList).toBeVisible({ timeout: 10_000 });
     const itemRows = await itemList.locator("li").allTextContents();

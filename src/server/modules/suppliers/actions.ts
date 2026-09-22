@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole, actionUser } from "@/server/auth/guards";
+import { isUniqueViolation } from "@/server/prisma-errors";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { diffOf } from "@/lib/audit-diff";
@@ -14,7 +14,6 @@ import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, 
 import { findSameSupplierName } from "@/server/modules/suppliers/queries";
 
 const DUPLICATE = { name: "A supplier with this name already exists" };
-const isP2002 = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
 const idSchema = z.object({ id: z.string().min(1) });
 
 function revalidate(id?: string) {
@@ -33,6 +32,8 @@ export async function createSupplier(input: unknown): Promise<ActionResult<{ id:
   const data = toSupplierData(parsed.data);
   try {
     const created = await prisma.$transaction(async (tx) => {
+      const clash = await tx.vendor.findFirst({ where: { name: { equals: data.name, mode: "insensitive" } }, select: { name: true } });
+      if (clash) return validationError({ name: `A supplier with this name already exists: "${clash.name}"` });
       const v = await tx.vendor.create({ data });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "vendor", entityId: v.id,
@@ -40,10 +41,11 @@ export async function createSupplier(input: unknown): Promise<ActionResult<{ id:
       });
       return v;
     });
+    if ("ok" in created) return created;
     revalidate(created.id);
     return ok({ id: created.id });
   } catch (e) {
-    if (isP2002(e)) return validationError(DUPLICATE);
+    if (isUniqueViolation(e)) return validationError(DUPLICATE);
     throw e;
   }
 }
@@ -78,17 +80,23 @@ export async function updateSupplier(input: unknown): Promise<ActionResult<{ id:
   if (Object.keys(diff).length === 0) return ok({ id });
 
   try {
-    await prisma.$transaction(async (tx) => {
+    const failure = await prisma.$transaction(async (tx) => {
+      const clash = await tx.vendor.findFirst({
+        where: { id: { not: id }, name: { equals: data.name, mode: "insensitive" } }, select: { name: true },
+      });
+      if (clash) return validationError({ name: `A supplier with this name already exists: "${clash.name}"` });
       await tx.vendor.update({ where: { id }, data });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "vendor", entityId: id,
         action: "supplier.updated", diff,
       });
+      return null;
     });
+    if (failure) return failure;
     revalidate(id);
     return ok({ id });
   } catch (e) {
-    if (isP2002(e)) return validationError(DUPLICATE);
+    if (isUniqueViolation(e)) return validationError(DUPLICATE);
     throw e;
   }
 }

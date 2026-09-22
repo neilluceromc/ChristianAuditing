@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { auditSentence } from "./activity";
+import { ACTION_LABELS, actionLabel, auditSentence, fieldLabel } from "./activity";
 import { actionDot } from "@/components/patterns/activity-feed";
 
 const base = { actorLabel: "J. Sarmiento", action: "update", diff: null as unknown, entityLabel: "BR-LT-0148" };
 
 describe("auditSentence — subject-first, one sentence (README 4b)", () => {
+  // Phase 27 fix wave (M-1): `fieldList` sorts on the label, so the order here
+  // is alphabetical rather than the order this object literal happens to use.
   it("update names the fields", () => {
     expect(auditSentence({ ...base, diff: { status: { from: "SPARE", to: "DEPLOYED" }, assignee: { from: null, to: "EMP-0042" } } }))
-      .toBe("J. Sarmiento updated status, assignee on BR-LT-0148");
+      .toBe("J. Sarmiento updated assignee, status on BR-LT-0148");
   });
   it("create reads as registration", () => {
     expect(auditSentence({ ...base, action: "create" })).toBe("J. Sarmiento created BR-LT-0148");
@@ -68,8 +70,8 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     expect(auditSentence({ ...base, action: "finance.resubmit" }))
       .toBe("J. Sarmiento marked BR-LT-0148 corrected for Finance");
   });
-  it("unknown actions degrade to actor — action — entity", () => {
-    expect(auditSentence({ ...base, action: "document.signed" })).toBe("J. Sarmiento document.signed BR-LT-0148");
+  it("unknown actions degrade to actor — action — entity (pinned on one that never reaches a feed)", () => {
+    expect(auditSentence({ ...base, action: "flag-enable" })).toBe("J. Sarmiento flag-enable BR-LT-0148");
   });
   it("import-create reads as an import, not a plain registration", () => {
     expect(auditSentence({ ...base, action: "import-create" })).toBe("J. Sarmiento imported BR-LT-0148");
@@ -114,7 +116,7 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
         action: "import-update",
         diff: { model: { from: "Old", to: "New" }, cost: { from: 100, to: 200 } },
       }),
-    ).toBe("J. Sarmiento updated model, cost on BR-LT-0148 by import");
+    ).toBe("J. Sarmiento updated cost, model on BR-LT-0148 by import"); // sorted (M-1)
   });
   it("names the purchase transitions in the language of the handoff", () => {
     const pr = { ...base, actorLabel: "P. Reyes", entityLabel: "PR-0198", diff: null as unknown };
@@ -303,5 +305,74 @@ describe("actionDot — Phase 12's asset actions are explicit, not left to the n
   it("Phase 26 holds get their own dots", () => {
     expect(actionDot("reservation.placed")).toBe("ACTIVE");
     expect(actionDot("reservation.released")).toBe("CANCELLED");
+  });
+});
+
+describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sentence", () => {
+  const nina = { ...base, entityLabel: "Nina Robles" };
+  it("documents", () => {
+    expect(auditSentence({ ...base, action: "document.uploaded", diff: { document: { from: null, to: "warranty.pdf" } } }))
+      .toBe("J. Sarmiento attached warranty.pdf to BR-LT-0148");
+    expect(auditSentence({ ...base, action: "document.signed", diff: { "handover.pdf": { from: "unsigned", to: "SIGNED" } } }))
+      .toBe("J. Sarmiento marked handover.pdf signed on BR-LT-0148");
+  });
+  it("loan due date moved or cleared", () => {
+    expect(auditSentence({ ...base, action: "loan.due-changed", diff: { loanDueAt: { from: null, to: "2026-10-05T00:00:00.000Z" } } }))
+      .toBe("J. Sarmiento moved the loan due date of BR-LT-0148 to 05 Oct 2026");
+    expect(auditSentence({ ...base, action: "loan.due-changed", diff: { loanDueAt: { from: "2026-10-05T00:00:00.000Z", to: null } } }))
+      .toBe("J. Sarmiento cleared the loan due date of BR-LT-0148");
+  });
+  it("secrets and acknowledgements", () => {
+    expect(auditSentence({ ...base, action: "secret.created", diff: { label: { from: null, to: "BIOS password" } } }))
+      .toBe('J. Sarmiento added the secret "BIOS password" to BR-LT-0148');
+    expect(auditSentence({ ...nina, action: "acknowledgement.recorded", diff: { signedAt: { from: null, to: "x" }, items: { from: null, to: "3" } } }))
+      .toBe("J. Sarmiento recorded Nina Robles's signed acknowledgement of 3 items");
+    expect(auditSentence({ ...nina, action: "acknowledgement.recorded", diff: { items: { from: null, to: "1" } } }))
+      .toBe("J. Sarmiento recorded Nina Robles's signed acknowledgement of 1 item");
+  });
+  it("policy exceptions", () => {
+    expect(auditSentence({ ...nina, action: "policy.exception.added", diff: { slot: { from: null, to: "tablet · iPad" }, reason: { from: null, to: "field work" } } }))
+      .toBe("J. Sarmiento added the exception slot tablet · iPad for Nina Robles — field work");
+    expect(auditSentence({ ...nina, action: "policy.exception.waived", diff: { slot: { from: "headset", to: null }, reason: { from: null, to: "remote" } } }))
+      .toBe("J. Sarmiento waived headset for Nina Robles — remote");
+    expect(auditSentence({ ...nina, action: "policy.exception.removed", diff: { slot: { from: "tablet · iPad", to: null } } }))
+      .toBe("J. Sarmiento removed the exception slot tablet · iPad for Nina Robles");
+  });
+  it("supplier set or cleared on a request", () => {
+    const pr = { ...base, entityLabel: "PR-0188" };
+    expect(auditSentence({ ...pr, action: "supplier-set", diff: { supplier: { from: null, to: "TechServe PH" } } }))
+      .toBe("J. Sarmiento set TechServe PH as the supplier on PR-0188");
+    expect(auditSentence({ ...pr, action: "supplier-set", diff: { supplier: { from: "TechServe PH", to: null } } }))
+      .toBe("J. Sarmiento cleared the supplier on PR-0188");
+  });
+  it("update and import-update print human field names", () => {
+    expect(auditSentence({ ...nina, action: "import-update", diff: { departmentId: { from: "d1", to: "d2" }, joinedAt: { from: "a", to: "b" } } }))
+      .toBe("J. Sarmiento updated department, join date on Nina Robles by import");
+    expect(auditSentence({ ...base, action: "update", diff: { loanDueAt: { from: null, to: "x" }, warrantyUntil: { from: "a", to: "b" } } }))
+      .toBe("J. Sarmiento updated loan due date, warranty end on BR-LT-0148");
+  });
+  it("fieldLabel reads the table and humanises the rest", () => {
+    expect(fieldLabel("departmentId")).toBe("department");
+    expect(fieldLabel("offboardingDueAt")).toBe("complete-by date");
+    expect(fieldLabel("status")).toBe("status");
+    expect(fieldLabel("someOtherId")).toBe("some other");
+    expect(fieldLabel("repairEndedAt")).toBe("repair ended at");
+  });
+  it("actionLabel names the facet options and falls back to the raw action", () => {
+    expect(actionLabel("lifecycle.assign")).toBe("Assigned");
+    expect(actionLabel("import-update")).toBe("Imported (update)");
+    expect(actionLabel("stock.received")).toBe("stock.received");
+    expect(Object.keys(ACTION_LABELS).length).toBeGreaterThanOrEqual(42);
+  });
+  it("the worker's approved-request executions read like the direct action, marked as approved", () => {
+    expect(auditSentence({ ...base, action: "lifecycle.assign executed", actorLabel: "worker", diff: { assignee: { from: null, to: "EMP-0042" } } }))
+      .toBe("worker assigned BR-LT-0148 to EMP-0042 (approved request)");
+    expect(auditSentence({ ...base, action: "lifecycle.change-status executed", actorLabel: "worker", diff: { status: { from: "SPARE", to: "RETIRED" } } }))
+      .toBe("worker changed BR-LT-0148 to RETIRED (approved request)");
+    expect(auditSentence({ ...base, action: "lifecycle.transfer", diff: { assignee: { from: "EMP-0001", to: "EMP-0002" } } }))
+      .toBe("J. Sarmiento transferred BR-LT-0148 to EMP-0002");
+    expect(actionLabel("lifecycle.assign executed")).toBe("Assigned (approved request)");
+    expect(actionLabel("lifecycle.transfer")).toBe("Asset transferred");
+    expect(Object.keys(ACTION_LABELS).length).toBeGreaterThanOrEqual(42);
   });
 });

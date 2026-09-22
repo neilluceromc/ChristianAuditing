@@ -5,28 +5,63 @@ so it can be picked up later without re-deriving it. The long reference stays [`
 the short front door stays [`PICKUP.md`](PICKUP.md). This file only lists what is parked and where to
 start on each item.
 
-**Where the code stands at parking time.** `main` = `origin/main` at `93291f0`. Phases 1–19 are merged and
-pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.153` before) runs the **Phase 18** build (`4cf5697`, 19
-migrations); **Phase 19 (stock control D1, migration 20) is merged but NOT yet deployed.**
+**Where the code stands at parking time.** `main` = `origin/main` at `93291f0`. Phases 1–19 were merged
+and pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.153` before) ran the
+**Phase 18** build (`4cf5697`, 19 migrations); **Phase 19 (stock control D1, migration 20) was merged
+but NOT yet deployed.**
+
+**Where the code stands today (2026-09-22).** Staging runs the **Phase 26** merge (`e96fb2a`,
+**25 migrations**) since the 2026-09-22 forced redeploy. `main` carries Phases 1–26 plus two unpushed
+docs commits (`385b484`, `8c24c3b`) beyond `origin/main` `8dc21a1`. **Phase 27
+(`phase-27-leftovers-sweep`) is code-complete at final tree `66445ed`, UNMERGED and UNPUSHED, and adds
+migration 26** — see §1 below and `PICKUP.md` §4 item 1.
 
 ---
 
 ## 1. Operations — one command when the user says so
 
-- **Redeploy staging** to pick up Phase 19. Migration 20 `stock_control` is additive (six new tables, an
-  append-only trigger, sign checks, one sequence); it applies on start:
+- **Redeploy staging** when the user asks. Staging already runs the **Phase 26** merge (`e96fb2a`,
+  **25 migrations**) since the 2026-09-22 forced redeploy, so there is nothing pending on it today. The
+  one command, whenever a merge needs carrying over:
 
   ```bash
   powershell -ExecutionPolicy Bypass -File .\scripts\deploy-staging.ps1 -Force
   ```
 
-  `-Force` is needed because the merge happened on the laptop, so the plain run sees nothing new and
+  `-Force` is needed because the merge happens on the laptop, so the plain run sees nothing new and
   skips. Verify afterwards: `docker compose ps` (web healthy), `docker compose exec -T web npx prisma
-  migrate status` (20 found, up to date), HTTP 200 on `http://127.0.0.1:3000/login` and the LAN URL.
+  migrate status` (**25 found, up to date** as things stand), HTTP 200 on
+  `http://127.0.0.1:3000/login` and on the LAN URL `http://192.168.203.183:3000`.
   Never seed staging — the seed truncates every table.
-  Phase 20's migration 21 (`employee_transfers`) rode the 2026-09-10 `-Force` redeploy and Phase 21's
-  migration 22 the 2026-09-15 one; Phase 22's migration 23 (`stock_lots_and_allocations`, with an asserted
-  backfill) the 2026-09-17 one.
+  Migrations 20–25 rode earlier redeploys: 20 (`stock_control`) and 21 (`employee_transfers`) the
+  2026-09-10 `-Force`, 22 the 2026-09-15 one, 23 (`stock_lots_and_allocations`, with its asserted
+  backfill) the first 2026-09-17 one, 24 (`parkinson_deadlines`) the second, and 25
+  (`repair_end_and_holds`) the 2026-09-22 one.
+
+- **Phase 27's migration 26 is the next one to apply, and it needs a check run first.**
+  `phase-27-leftovers-sweep` is code-complete at `66445ed` but **UNMERGED and UNPUSHED** — merging,
+  pushing and the redeploy are all the user's decisions. Migration 26 `case_insensitive_names` applies
+  on the first `-Force` redeploy after that branch is merged, and `migrate status` should then read
+  **26 found, up to date**. It is additive — one ordinary index on `AuditEntry ("entityType",
+  "action")` plus seven `lower()` UNIQUE indexes on asset categories, asset types (scoped by
+  `"categoryId"`), departments, equipment policies, vendors, and stock categories by name and by prefix
+  — but it **FAILS LOUDLY** on a database that already holds two names differing only by case, leaving
+  the schema unchanged. **Run this on staging first, and expect zero rows from every statement:**
+
+  ```sql
+  select 'AssetCategory',   lower(name),               count(*) from "AssetCategory"   group by 2    having count(*) > 1;
+  select 'AssetType',       "categoryId", lower(name), count(*) from "AssetType"       group by 2, 3 having count(*) > 1;
+  select 'Department',      lower(name),               count(*) from "Department"      group by 2    having count(*) > 1;
+  select 'EquipmentPolicy', lower(name),               count(*) from "EquipmentPolicy" group by 2    having count(*) > 1;
+  select 'Vendor',          lower(name),               count(*) from "Vendor"          group by 2    having count(*) > 1;
+  select 'StockCategory',   lower(name),               count(*) from "StockCategory"   group by 2    having count(*) > 1;
+  select 'StockCategory',   lower(prefix),             count(*) from "StockCategory"   group by 2    having count(*) > 1;
+  ```
+
+  Staging was checked clean on 2026-09-22 (11 categories, 19 types, 5 departments, 1 policy, 2 vendors,
+  0 stock categories), but it is a live database that people are typing into — run the check again at
+  the redeploy rather than trusting this line. Full facts: `HANDOVER.md` (t), `PICKUP.md` §1 and §4
+  item 1.
 
 ## 2. Needs the user or Administrator rights on the laptop
 
@@ -88,26 +123,49 @@ Consumed what Phase 19 records. Scope agreed in the D1 brainstorm (spec
   Home, linking to `/stock?low=1`. One more landed as a bonus, not originally on this list: the import's
   unit cost is now honoured on CREATE rows (the "Unit cost is ignored" notice removed) — spec §8 item 6.
 
-### 5.2 Other candidates (PICKUP §4 item 5, unchanged order)
+### 5.2 Other candidates (PICKUP §4 item 13, unchanged order)
 
 - **Depreciation module** (Finance; own brainstorm — straight-line by category with a useful life and
   salvage, a monthly schedule report, and Finance's confirmation as the capitalisation date were the ideas
-  floated; nothing designed).
-- **Purchasing bulk import** of assets (the IT importer is admin/IT only).
-- The Replace dialog's headerless **"other spares" list** when no same-type spare exists.
+  floated; nothing designed). Still the first candidate; Phase 27's spec §2 names it a non-goal again.
+- **Purchasing bulk import** of assets (the IT importer is admin/IT only). Also re-recorded as a
+  non-goal by Phase 27's spec §2.
+- ~~The Replace dialog's headerless **"other spares" list** when no same-type spare exists.~~
+  **✅ SHIPPED in Phase 24 —** `ComboOption` gained `group?: string` and `EntityCombobox` renders a
+  heading wherever the group changes, so the picker reads SAME TYPE / OTHER SPARES, and only OTHER
+  SPARES when no same-type spare exists. This line should have come off the list at Phase 24's close;
+  §6 below has always carried the closure.
 
 ### 5.3 Small deferred items with a home in the plans' D-blocks
 
-Phase 17 D-11 (approvals double count, work-page note wording, `parsePage` duplication, a collation comment);
-Phase 18 D-19 (edit-save toast vs redirect wording) and its review minors; Phase 19 D-30 (export plain
-branch ordering done; audit sentences done; the rest cosmetic). None blocks anything.
+Phase 17 D-11 (approvals double count, work-page note wording, `parsePage` duplication, a collation comment)
+— **three of the four ✅ CLOSED in Phase 27:** the work-page note now reads
+`Showing the first {rows.length} — the oldest first.`, so it states what it literally renders;
+`parseIntParam` in `src/lib/paging.ts` is the one parser behind both `parsePage` and
+`parseTimelineCursor`; and `byWhenDesc` in `src/lib/timeline.ts` carries the comment explaining that
+cuids are ASCII and compare byte-wise, so the JS tiebreaker orders exactly as Postgres' `id desc` does.
+**The approvals double count stays open.**
+Phase 18 D-19 (edit-save toast vs redirect wording) and its review minors — **one ✅ CLOSED in Phase 27:**
+the supplier runner's two unused setters (`setError`/`setFieldErrors`) left the returned object, and
+supplier documents now order by created date **then id** so the list has a deterministic tiebreaker.
+Phase 19 D-30 (export plain branch ordering done; audit sentences done; the rest cosmetic). Phase 24 M-11
+— **✅ CLOSED in Phase 27:** the seed's `CM-0002` weekly-cleaning issue moved to day −11, before the
+stocktake snapshot it has to precede. None blocks anything.
 
-Phase 23 `D-15` (the final review's six deferred Minors, all cosmetic or one-line): the Purchasing Home
-tile "Stocktakes past close-by" stays `neutral` when the count is > 0 where the other overdue surfaces
-turn `accent`; the receive form's supplier combobox has no visible "No supplier" clear, so clearing a
-chosen supplier means emptying the field by hand; `EntityCombobox`'s `autoFocus` opens the dropdown on
-mount, which is what puts a second listbox on `/stock/issue` and `/stock/receive` and is why the e2e's
-combobox picks are scoped to their own listbox; **✅ CLOSED in Phase 25 —** the offboarding
+Phase 23 `D-15` (the final review's six deferred Minors, all cosmetic or one-line): **✅ CLOSED in
+Phase 27 —** the Purchasing Home tile "Stocktakes past close-by" stayed `neutral` when the count was
+> 0 where the other overdue surfaces turn `accent`; `Stat` gained `tone` (`text-accent` on the value
+span plus a `data-tone` attribute, plan P-3 — coloured text, not pill chrome, because a stat number is
+not a pill) and the tile passes `accent` when the count is over zero. **✅ CLOSED in Phase 27 —** the
+receive form's supplier combobox had no visible "No supplier" clear, so clearing a chosen supplier
+meant emptying the field by hand; its options now lead with "No supplier", which calls `onChange("")`.
+**✅ CLOSED in Phase 27 —** `EntityCombobox`'s `autoFocus` opened the dropdown on mount, which is what
+put a second listbox on `/stock/issue` and `/stock/receive`; `onFocus` now only resets the active
+option and the list opens on click, on typing or on ArrowDown, so `aria-expanded` is false until the
+user asks — the ARIA 1.2 combobox default. The trailing clause about the e2e's combobox picks being
+scoped to their own listbox is now historical: the scoping stays, but it is no longer working around a
+second listbox. (One test-only consequence, recorded in plan `D-6`: `e2e/quick-forms.spec.ts` case 2
+relied on focus opening the list and now clicks.) **✅ CLOSED in Phase 25 —** the offboarding
 `progress` and `due` facet counts did not narrow each other (exactly as `department` has always behaved,
 written down in the query's own comment at the time), and now do: the pure `narrowedFacetCounts` in
 `src/lib/offboarding-list.ts` tallies each facet over the candidate set with that facet's own selection
@@ -120,6 +178,22 @@ reconciliations between spec §5.4/§8 and what landed. Also parked, and named i
 rather than dropped: `revalidateStocktake` still does not revalidate `/` (final-review Minor 6's other
 half — inert today, since every `(app)` route is dynamically rendered), and `createEmployee`'s
 unconditional date floor keeps its position (Task 4 Minor 5). None blocks anything.
+
+**Two rulings recorded in Phase 27 instead of a change** (spec §5.6, plan `D-1`…`D-10`): the
+**lapsed-contract banner** on the supplier page keeps `tone="attention"` — the Phase 18 plan
+prescribed it and a lapsed contract is a heads-up, not a fault; and Phase 23 `D-15`'s remaining
+"§5.4/§8 wording" item **was** the "No supplier" clear, now shipped, so that line is closed rather
+than carried.
+
+**Phase 27's own deferred Minors**, each re-verified by its review and parked with a reason:
+**M-P27-1** the doc comment in `src/lib/activity-list.ts` still names the removed
+`financeActivityWhere` — kept as provenance, so a reader grepping the old name lands on the sentence
+that says where the predicate went; **M-P27-2** `renameRefRow`'s type-scoping `findUniqueOrThrow` can
+throw P2025 in a tiny window — a pre-existing exposure of the `update` that follows it, and closing it
+means a `conflict()` branch in every rename; **M-P27-3** the worklist note's `rows.length` is a no-op
+for today's one capped caller — kept because the note now states what it literally renders for any
+caller. Also parked by the final review: `Stat`'s `data-tone` in production markup (state attributes
+already ship in this codebase), and the six inline `P2002` checks of §6 below.
 
 ---
 
@@ -217,23 +291,65 @@ bullets below are closed — kept for the history, not as work:
   `downDays` closes the interval on it — the dash now survives only where no end was ever recorded,
   because the migration's backfill fills only rows whose audit history shows the transition.
 
-Still open, and named out of scope by Phase 24's spec §0 decision 1 and Phase 25's §2 — each stays
-recorded in PICKUP §5 / HANDOVER §8:
+**Shipped in Phase 27 — IT and quality leftovers sweep.** The three items below were named out of
+scope by Phase 24's spec §0 decision 1 and Phase 25's §2, carried by Phase 26, and closed together on
+`phase-27-leftovers-sweep` (final tree `66445ed`, code-complete 2026-09-22; **unmerged and unpushed**;
+it adds **migration 26** — see §1). Kept for the history, not as work:
 
-- `/audit` class scoping of approval, category and type rows (only `asset` rows of the other class are
-  excluded today).
-- Case-insensitive uniqueness for reference data (categories, types, departments, policy titles).
-- The activity page's action facet, and its import-update sentences.
-- **New, from Phase 24's final review (I-2, ruling R3):** the fuller ARIA shape for a grouped combobox —
-  `role="group"` with an `aria-label` per block wrapping that block's options. Phase 24 closed the
-  accessibility finding additively instead (a heading `id` plus `aria-describedby` on the options under a
-  *grouped* heading), because the group shape contradicts spec §6.1's flat-`li` instruction and would
-  change the DOM `e2e/it-gaps.spec.ts` cases 4 and 7 assert on. **Only if AT feedback asks for it.**
-- **New, from Phase 25 (spec §2, non-goals):** the Home **age histogram**'s buckets stay unlinked. The
-  fleet bar's segments and legend became links this phase, but an age bucket has no facet on `/inventory`
-  to point at, so linking it means inventing one — deliberately out of scope rather than forgotten.
-- **New, from Phase 25 (spec §2, non-goals):** **list keyboard shortcuts** beyond a focusable row's
-  Enter. The employees list got `tabIndex={0}` rows that open on Enter; arrow-key roving, type-ahead and
-  a shortcut layer across the lists were not attempted and would be a pattern decision, not a page edit.
+- **Shipped in Phase 27 —** `/audit` class scoping of approval, category and type rows (only `asset`
+  rows of the other class were excluded). `invisibleAuditRefs(role)` builds four id lists from the SEE
+  map (`canSeeClass`, not the manage map — spec §0 decision 8, so Purchasing and Finance staff keep
+  both classes' approvals) and `buildAuditWhere` emits one `NOT: { OR: […] }` branch per non-empty
+  list, in the log, the entity facet and the export; an approval with no asset carries no class and is
+  never hidden, and an all-class role runs no query at all. The Entity dropdown also gained Supplier,
+  Stock item, Stock category and Stocktake, and `entityLabels` now resolves `asset-category` and
+  `asset-type` to names instead of truncated cuids.
+- **Shipped in Phase 27 —** case-insensitive uniqueness for reference data. **Migration 26**
+  `case_insensitive_names` adds seven `lower()` UNIQUE indexes (asset categories, asset types scoped by
+  category, departments, equipment policy **names**, vendors, stock categories by name and by prefix),
+  and every create and rename checks case-insensitively inside its own transaction before the write,
+  naming the row it clashes with; a rename excludes its own row, so "Laptop" → "LAPTOP" is still a
+  rename. **Narrowed:** this line used to read "categories, types, departments, policy titles" — what
+  shipped is policy **names**. `EquipmentPolicy.appliesToTitle` is untouched and **stays open**:
+  `resolvePolicy` case-folds titles when it matches but they are stored raw, so `Accountant` and
+  `accountant` still collide invisibly at resolve time (`HANDOVER.md` §8, Phase 7 Task 14).
+- **Shipped in Phase 27 —** the activity feeds' action facet and their import-update sentences. One
+  shared module (`src/lib/activity-list.ts`) and one server component (`ActivityListPage`, behind four
+  five-line pages) give all four feeds an **Action** facet whose counts come from the same snapshot as
+  the rows, a Clear link, a live entry count and a filtered empty state; every action that can reach a
+  feed has a sentence and a facet label, and `update`/`import-update` print human field names sorted on
+  the label ("updated department, join date on Nina Robles by import") instead of raw column keys.
+  `/audit` itself still has no action facet — that half was never in scope.
 
-The brainstorm for the next IT phase decides which of these, and what else, goes in.
+Still open, each recorded in PICKUP §5 / HANDOVER §8:
+- **DECIDED in Phase 27 (spec §0 decision 5), from Phase 24's final review (I-2, ruling R3):** the
+  fuller ARIA shape for a grouped combobox — `role="group"` with an `aria-label` per block wrapping
+  that block's options — **will not be built.** Phase 24 closed the accessibility finding additively
+  (a heading `id` plus `aria-describedby` on the options under a *grouped* heading), which already gives
+  assistive technology the group name; a `group` wrapper would only change the DOM
+  `e2e/it-gaps.spec.ts` cases 4 and 7 assert on. **Revisit only on AT feedback.**
+- **DECIDED in Phase 27 (spec §0 decision 6), from Phase 25 (spec §2, non-goals):** the Home **age
+  histogram**'s buckets **stay unlinked.** Its buckets are rolling years since purchase; `/inventory`
+  knows only calendar purchase years, so an honest link needs a new rolling-age facet, which is a
+  feature and not a link. Recorded rather than left hanging.
+- **DECIDED in Phase 27 (spec §0 decision 7), from Phase 25 (spec §2, non-goals):** **keyboard support
+  stays at Enter on a focused row.** `/inventory` — the app's largest list and the one with no keyboard
+  path — got it this phase through one shared helper (`rowOpenProps` in `components/ui/table.tsx`, now
+  spread by the inventory, employees and holds tables), so the pattern is written once rather than a
+  third time. Arrow-key roving, type-ahead and a shortcut layer across the lists stay out: they are a
+  pattern decision, not a page edit.
+- **New, from Phase 27's final review (M-2):** `/audit`'s **entity pill still renders the raw
+  `vendor`** while the entity facet and the row chip both say "Supplier" (the facet gets it from a
+  one-entry override map before `humanize`, plan P-10). The fix is a one-line `humanize` on the pill,
+  but the pill is CSS-uppercased and an existing e2e asserts `ASSET` on it, so it needs its own e2e
+  pass — which is why the wave recorded it instead of taking it.
+- **New, from Phase 27 (ruling R5):** **six inline `P2002` checks live outside the five consolidated
+  modules** — `suppliers/bank-actions`, `admin/webhook-actions`, `approvals`, `employees`,
+  `offboarding`, and `receiving`/`reservations` actions. Phase 27 replaced the five hand-rolled helpers
+  the spec named with the shared `isUniqueViolation`/`uniqueTarget` pair in `src/server/prisma-errors.ts`
+  and stopped there. Each of the six is correct, carries its own module's message, and touches no
+  `lower()` index, so swapping them onto the shared pair is a mechanical widening for whoever next opens
+  those files — not a defect.
+
+The brainstorm for the next IT phase decides which of these, and what else, goes in. The named
+candidates on record are the **depreciation module** and the **Purchasing bulk import** (§5.2).

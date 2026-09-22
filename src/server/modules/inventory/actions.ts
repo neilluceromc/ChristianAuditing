@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
+import { isUniqueViolation, uniqueTarget } from "@/server/prisma-errors";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { emitWebhook } from "@/server/webhooks/emit";
@@ -164,7 +165,7 @@ export async function bulkRequestStatusChange(
   } catch (err) {
     // The partial unique index (one OPEN approval per asset) turns a
     // concurrent-request race into a constraint violation.
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+    if (isUniqueViolation(err)) {
       return conflict("Someone else just requested a change on one of these assets — refresh and retry.");
     }
     throw err;
@@ -195,17 +196,6 @@ const createSchema = z.object({
   // must fall through to the "assigned at registration" default below.
   assignReason: reasonOptional(),
 });
-
-/**
- * P2002 meta.target is either a column array (["serial"]) or an index-name
- * string ("Asset_serial_key") depending on constraint kind — .includes()
- * happens to match correctly under BOTH shapes; keep it that way.
- */
-function uniqueTarget(err: unknown): string[] {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
-    ? ((err.meta?.target as string[] | undefined) ?? [])
-    : [];
-}
 
 const toDate = (s: string | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
 const toCost = (c: number | "" | undefined) => (c === "" || c === undefined ? null : c);
@@ -510,7 +500,7 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
   } catch (err) {
     // The partial unique index (one OPEN approval per asset) turns a
     // concurrent-request race into a constraint violation.
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+    if (isUniqueViolation(err)) {
       return conflict("Someone else just requested a change on this asset — refresh and retry.");
     }
     throw err;

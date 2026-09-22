@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { AssetClass } from "@prisma/client";
-import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+import { Table, TBody, Td, Th, THead, Tr, rowOpenProps } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -188,7 +188,7 @@ export function InventoryTable({
             key={row.id}
             className="cursor-pointer"
             selected={selected.has(row.id)}
-            onClick={() => router.push(`/inventory/${row.id}`)}
+            {...rowOpenProps(() => router.push(`/inventory/${row.id}`))}
           >
             {canMutate && (
               <Td className="pr-0" onClick={(e: React.MouseEvent) => e.stopPropagation()}>

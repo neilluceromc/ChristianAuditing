@@ -5,6 +5,7 @@ export const AUDIT_ENTITY_TYPES = [
   "asset", "employee", "approval", "purchase-request", "user",
   "asset-category", "asset-type", "department", "equipment-policy",
   "feature-flag", "webhook-endpoint",
+  "vendor", "stock-item", "stock-category", "stocktake", // Phase 27 (spec §3.3): rows the page already renders and links
 ] as const;
 
 export const AUDIT_LIST_CONFIG: ListConfig = {
@@ -13,7 +14,11 @@ export const AUDIT_LIST_CONFIG: ListConfig = {
   defaultSort: [],
 };
 
-export function buildAuditWhere(state: ListState, hiddenAssetIds: string[] = []): Prisma.AuditEntryWhereInput {
+/** Ids of the class-bearing rows a role may NOT see — one list per audit entityType that has a class (spec §3.3). */
+export interface HiddenAuditRefs { assetIds: string[]; approvalIds: string[]; categoryIds: string[]; typeIds: string[] }
+export const NO_HIDDEN_REFS: HiddenAuditRefs = { assetIds: [], approvalIds: [], categoryIds: [], typeIds: [] };
+
+export function buildAuditWhere(state: ListState, hidden: HiddenAuditRefs = NO_HIDDEN_REFS): Prisma.AuditEntryWhereInput {
   const where: Prisma.AuditEntryWhereInput = {};
   if (state.q) {
     where.OR = [
@@ -23,8 +28,14 @@ export function buildAuditWhere(state: ListState, hiddenAssetIds: string[] = [])
     ];
   }
   if (state.filters.entity?.length) where.entityType = { in: state.filters.entity };
-  // Phase 14 (spec §3.1): rows about assets this role cannot see are not its
-  // audit trail either. Empty for an all-class role — no clause at all.
-  if (hiddenAssetIds.length) where.NOT = { entityType: "asset", entityId: { in: hiddenAssetIds } };
+  // Phase 14 (spec §3.1), generalised in Phase 27 (spec §3.3): rows about class-bearing things this
+  // role cannot see are not its audit trail either. No clause at all for an all-class role.
+  const branches = ([
+    ["asset", hidden.assetIds], ["approval", hidden.approvalIds],
+    ["asset-category", hidden.categoryIds], ["asset-type", hidden.typeIds],
+  ] as const)
+    .filter(([, ids]) => ids.length > 0)
+    .map(([entityType, ids]) => ({ entityType, entityId: { in: [...ids] } }));
+  if (branches.length) where.NOT = { OR: branches };
   return where;
 }

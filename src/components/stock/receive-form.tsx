@@ -184,7 +184,8 @@ export function ReceiveForm({
             {(p) => (
               <EntityCombobox
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                options={suppliers.map((s) => ({ value: s.id, label: s.name }))} recent={recentVendors}
+                // value "" is the clear sentinel — one per combobox, EntityCombobox keys it as "none"
+                options={[{ value: "", label: "No supplier" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]} recent={recentVendors}
                 value={form.supplierId || null} onChange={(id) => set("supplierId", id ?? "")}
                 placeholder="Type a supplier name…"
               />

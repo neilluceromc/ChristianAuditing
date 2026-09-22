@@ -1,9 +1,16 @@
+import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { buildAuditWhere } from "@/lib/audit-list";
+import { NO_HIDDEN_REFS, buildAuditWhere, type HiddenAuditRefs } from "@/lib/audit-list";
+import { buildActivityWhere, type ActivityFeed } from "@/lib/activity-list";
+import { actionLabel, auditSentence } from "@/lib/activity";
+import { ASSET_CLASSES, canSeeClass } from "@/lib/asset-class";
 import { fmtDateTime } from "@/lib/format";
 import type { ListState } from "@/lib/url-state";
 import { LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
+import { invisibleAssetIds } from "@/server/modules/inventory/queries";
+import { actionDot, type ActivityItem } from "@/components/patterns/activity-feed";
+import type { FacetOptionLike } from "@/components/patterns/facet-dropdown";
 
 export interface AuditRow {
   id: string;
@@ -26,7 +33,7 @@ export async function entityLabels(
     byType.get(e.entityType)!.add(e.entityId);
   }
   const map = new Map<string, { label: string; href: string | null }>();
-  const [assets, employees, approvals, purchases, policies, users, flags, endpoints, vendors, stockItems, stocktakes, stockCategories, departments] = await Promise.all([
+  const [assets, employees, approvals, purchases, policies, users, flags, endpoints, vendors, stockItems, stocktakes, stockCategories, departments, assetCategories, assetTypes] = await Promise.all([
     byType.has("asset")
       ? prisma.asset.findMany({ where: { id: { in: [...byType.get("asset")!] } }, select: { id: true, tag: true } })
       : [],
@@ -81,6 +88,17 @@ export async function entityLabels(
     byType.has("department")
       ? prisma.department.findMany({ where: { id: { in: [...byType.get("department")!] } }, select: { id: true, name: true } })
       : [],
+    // Phase 27 fix wave (I-2): the two types this phase class-scopes on /audit
+    // had no branch, so the filter it made meaningful printed truncated cuids.
+    byType.has("asset-category")
+      ? prisma.assetCategory.findMany({ where: { id: { in: [...byType.get("asset-category")!] } }, select: { id: true, name: true } })
+      : [],
+    byType.has("asset-type")
+      ? prisma.assetType.findMany({
+          where: { id: { in: [...byType.get("asset-type")!] } },
+          select: { id: true, name: true, category: { select: { name: true } } },
+        })
+      : [],
   ]);
   for (const a of assets) map.set(`asset:${a.id}`, { label: a.tag, href: `/inventory/${a.id}` });
   for (const e of employees) map.set(`employee:${e.id}`, { label: e.name, href: `/employees/${e.id}` });
@@ -103,6 +121,12 @@ export async function entityLabels(
   // Departments have no detail page — reference-actions.ts writes entityType
   // "department" on create/rename/delete.
   for (const d of departments) map.set(`department:${d.id}`, { label: d.name, href: null });
+  // Phase 27 fix wave (I-2): the admin reference lists, the same shape
+  // `equipment-policy`/`feature-flag`/`webhook-endpoint` already use.
+  for (const c of assetCategories) map.set(`asset-category:${c.id}`, { label: c.name, href: "/admin/asset-categories" });
+  // `AssetType.name` is unique only WITHIN its category (@@unique([categoryId, name])),
+  // so the label names the category too — the same reason `user` carries its email.
+  for (const t of assetTypes) map.set(`asset-type:${t.id}`, { label: `${t.category.name} · ${t.name}`, href: "/admin/asset-types" });
   for (const e of entries) {
     const key = `${e.entityType}:${e.entityId}`;
     if (!map.has(key)) map.set(key, { label: e.entityId.slice(0, 10) + "…", href: null });
@@ -110,11 +134,32 @@ export async function entityLabels(
   return map;
 }
 
+/**
+ * Phase 27 (spec §3.3/§4.1): every class-bearing row this role may NOT see — assets, the approvals
+ * on them, categories of the class, types under those categories. Built from the SEE map
+ * (`canSeeClass`), never the manage map: Purchasing and Finance staff see both classes but manage
+ * one. Four empty lists and no query for an all-class role. An approval with no asset has no class
+ * and is never hidden (the approvals queue's own rule).
+ */
+export async function invisibleAuditRefs(role: Role): Promise<HiddenAuditRefs> {
+  const hidden = ASSET_CLASSES.filter((c) => !canSeeClass(role, c));
+  if (hidden.length === 0) return NO_HIDDEN_REFS;
+  const cls = { in: [...hidden] };
+  const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
+  const [assetIds, approvals, categories, types] = await Promise.all([
+    invisibleAssetIds(role),
+    prisma.approval.findMany({ where: { asset: { cls } }, select: { id: true } }),
+    prisma.assetCategory.findMany({ where: { cls }, select: { id: true } }),
+    prisma.assetType.findMany({ where: { category: { cls } }, select: { id: true } }),
+  ]);
+  return { assetIds, approvalIds: ids(approvals), categoryIds: ids(categories), typeIds: ids(types) };
+}
+
 export async function listAudit(
   state: ListState,
-  hiddenAssetIds: string[] = [],
+  hidden: HiddenAuditRefs = NO_HIDDEN_REFS,
 ): Promise<{ rows: AuditRow[]; total: number; page: number; pageCount: number }> {
-  const where = buildAuditWhere(state, hiddenAssetIds);
+  const where = buildAuditWhere(state, hidden);
   const { rows: entries, total, page, pageCount } = await pagedSnapshot(
     LOG_PAGE_SIZE,
     state.page,
@@ -146,4 +191,51 @@ export async function listAudit(
       };
     }),
   };
+}
+
+/**
+ * Phase 27 (spec §4.1): one query for the four activity feeds. Rows, the total and the Action facet's
+ * counts come from ONE RepeatableRead snapshot (the count closure runs the groupBy first — the
+ * listReservations pattern); the facet counts drop the facet's own selection so unchecking one
+ * option never zeroes the others (/audit's rule). Items carry the entity chip on the inventory and
+ * employees feeds and the domain pill on finance, exactly as the four pages did by hand.
+ */
+export async function listActivity(
+  feed: ActivityFeed,
+  state: ListState,
+  hidden: HiddenAuditRefs,
+): Promise<{ items: ActivityItem[]; total: number; page: number; pageCount: number; actionOptions: FacetOptionLike[] }> {
+  const where = buildActivityWhere(feed, state, hidden);
+  const withoutAction = buildActivityWhere(feed, { ...state, filters: { ...state.filters, action: [] } }, hidden);
+  let grouped: Array<{ action: string; _count: number }> = [];
+  const { rows: entries, total, page, pageCount } = await pagedSnapshot(
+    LOG_PAGE_SIZE,
+    state.page,
+    async (tx) => {
+      const groupByResult = await tx.auditEntry.groupBy({ by: ["action"], where: withoutAction, _count: true });
+      grouped = groupByResult;
+      return tx.auditEntry.count({ where });
+    },
+    (tx, pg) => tx.auditEntry.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: pg.skip, take: pg.take }),
+  );
+  const labels = await entityLabels(entries);
+  const DOMAIN: Record<string, string> = { "purchase-request": "PURCHASE", asset: "ASSET" };
+  const withEntityChip = feed === "inventory" || feed === "employees";
+  const items: ActivityItem[] = entries.map((e) => {
+    const entity = labels.get(`${e.entityType}:${e.entityId}`)!;
+    return {
+      id: e.id,
+      sentence: auditSentence({ actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: entity.label }),
+      when: fmtDateTime(e.createdAt),
+      actor: e.actorLabel,
+      dotValue: actionDot(e.action),
+      ...(withEntityChip ? { entity } : {}),
+      // the pill renders ONLY on cross-domain feeds — finance is the one
+      ...(feed === "finance" ? { domain: DOMAIN[e.entityType] } : {}),
+    };
+  });
+  const actionOptions: FacetOptionLike[] = grouped
+    .map((g) => ({ value: g.action, label: actionLabel(g.action), count: g._count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  return { items, total, page, pageCount, actionOptions };
 }
