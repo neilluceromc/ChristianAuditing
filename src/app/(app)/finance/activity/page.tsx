@@ -1,76 +1,14 @@
-import { requireUser } from "@/server/auth/guards";
-import { pagedSnapshot } from "@/server/paged";
-import { entityLabels } from "@/server/modules/audit/queries";
-import { feedWhere } from "@/lib/activity-list";
-import { NO_HIDDEN_REFS } from "@/lib/audit-list";
-import { auditSentence } from "@/lib/activity";
-import { fmtDateTime } from "@/lib/format";
-import { toSearchParams } from "@/lib/url-state";
-import { LOG_PAGE_SIZE, parsePage } from "@/lib/paging";
-import { EmptyState } from "@/components/ui/empty-state";
-import { PageHeader } from "@/components/ui/page-header";
-import { Pagination } from "@/components/ui/pagination";
-import { ActivityFeed, actionDot, type ActivityItem } from "@/components/patterns/activity-feed";
+import { ActivityListPage } from "@/components/patterns/activity-list-page";
 
-const DOMAIN: Record<string, string> = { "purchase-request": "PURCHASE", asset: "ASSET" };
-
-export default async function FinanceActivityPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  await requireUser();
-  const sp = toSearchParams(await searchParams);
-
-  const where = feedWhere("finance", NO_HIDDEN_REFS);
-  const { rows: entries, ...pg } = await pagedSnapshot(
-    LOG_PAGE_SIZE,
-    parsePage(sp),
-    (tx) => tx.auditEntry.count({ where }),
-    (tx, pg) =>
-      tx.auditEntry.findMany({
-        where,
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        skip: pg.skip,
-        take: pg.take,
-      }),
-  );
-  const labels = await entityLabels(entries);
-
-  const items: ActivityItem[] = entries.map((e) => ({
-    id: e.id,
-    sentence: auditSentence({
-      actorLabel: e.actorLabel,
-      action: e.action,
-      diff: e.diff,
-      entityLabel: labels.get(`${e.entityType}:${e.entityId}`)!.label,
-    }),
-    when: fmtDateTime(e.createdAt),
-    actor: e.actorLabel,
-    dotValue: actionDot(e.action),
-    // the pill renders ONLY on cross-domain feeds — this is the one
-    domain: DOMAIN[e.entityType],
-  }));
-
+export default async function FinanceActivityPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   return (
-    <>
-      <PageHeader title="Finance activity" />
-      <div className="flex flex-col gap-2">
-        {items.length > 0 ? (
-          <>
-            <ActivityFeed items={items} />
-            <div className="flex items-center justify-between pt-1">
-              <span className="font-mono text-[11px] text-fg-muted">page {pg.page} of {pg.pageCount}</span>
-              <Pagination page={pg.page} pageCount={pg.pageCount} hrefFor={(p) => `?page=${p}`} />
-            </div>
-          </>
-        ) : (
-          <EmptyState
-            title="No money has moved yet"
-            description="Purchase decisions and changes to an asset's cost both land here."
-          />
-        )}
-      </div>
-    </>
+    <ActivityListPage
+      feed="finance"
+      title="Finance activity"
+      base="/finance/activity"
+      emptyTitle="No money has moved yet"
+      emptyDescription="Purchase decisions and changes to an asset's cost both land here."
+      searchParams={searchParams}
+    />
   );
 }
