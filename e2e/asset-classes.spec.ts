@@ -371,10 +371,13 @@ test.describe("the inventory view", () => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/inventory?cls=PURCHASING");
     await page.getByRole("row", { name: /BR-FN-0003/ }).getByRole("checkbox").check();
-    await page.getByRole("button", { name: /Bulk/ }).click();
+    // Phase 30 (spec §6.4, plan P-6): the selection bar's Change status… opens the drawer; the picker
+    // reads friendly words (values stay the enum) and never offers a holder status.
+    await page.getByRole("button", { name: "Change status…", exact: true }).click();
     const options = await page.getByLabel("Target status").locator("option").allTextContents();
-    expect(options).toContain("RETIRED");
-    expect(options).not.toContain("DISPOSE");
+    expect(options).toContain("Retired");
+    expect(options).not.toContain("Dispose");
+    expect(options).not.toContain("Operational");
   });
 });
 

@@ -303,10 +303,12 @@ test.describe.serial("custody", () => {
     await page.getByLabel(/Select BR-MN-0910/).check();
     await page.getByLabel(/Select BR-MN-0911/).check();
     await page.getByLabel(/Select BR-PH-0301/).check();
-    await page.getByRole("button", { name: "Bulk actions…" }).click();
+    // Phase 30 (spec §6.4): the selection bar's Assign… opens the drawer already in assign mode.
+    await page.getByRole("button", { name: "Assign…", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "Bulk actions" });
-    // Same sr-only-radio-input caveat as case 9 — click the visible label text.
-    await drawer.getByRole("radiogroup", { name: "Bulk action" }).getByText("Assign to a person", { exact: true }).click();
+    await expect(drawer.getByRole("radiogroup", { name: "Bulk action" }).getByRole("radio", { name: "Assign to a person" })).toBeChecked();
+    // The drawer names what it will touch, in page order.
+    await expect(drawer.getByText("BR-MN-0910, BR-MN-0911, BR-PH-0301", { exact: true })).toBeVisible();
     // getByRole("combobox", ...), not getByLabel: "Assign to" is otherwise a
     // substring match of the "Assign to a person" radio's own accessible name.
     await drawer.getByRole("combobox", { name: "Assign to" }).fill("EMP-0071");

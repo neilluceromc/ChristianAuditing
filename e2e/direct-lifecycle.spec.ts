@@ -206,7 +206,8 @@ test.describe.serial("direct changes", () => {
     await page.goto("/inventory?status=SPARE");
     await page.getByLabel(/Select BR-HS-0502/).check();
     await page.getByLabel(/Select BR-MN-0911/).check();
-    await page.getByRole("button", { name: "Bulk actions…" }).click();
+    // Phase 30 (spec §6.4): the selection bar's Change status… opens the drawer in status mode.
+    await page.getByRole("button", { name: "Change status…", exact: true }).click();
     await page.getByLabel(/Target status/).selectOption("DISPOSE");
     await page.getByRole("button", { name: "Confirm" }).click();
     await expect(page.getByText("2 assets now DISPOSE")).toBeVisible();

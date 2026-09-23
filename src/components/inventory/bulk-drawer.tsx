@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { AssetClass } from "@prisma/client";
+import type { AssetClass, AssetStatus } from "@prisma/client";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -15,18 +15,34 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS } from "@/lib/reason-chips";
-import { DEFAULT_STATUS, statusesFor } from "@/lib/asset-class";
+import { DEFAULT_STATUS, HOLDER_STATUSES, STATUS_LABEL, statusesFor } from "@/lib/asset-class";
 import { DEFAULT_LOAN_DAYS, defaultLoanDue, minLoanDue } from "@/lib/lifecycle";
 import { bulkRequestStatusChange } from "@/server/modules/inventory/actions";
 import { bulkAssign, bulkChangeStatus } from "@/server/modules/lifecycle/actions";
 import type { ActionResult } from "@/server/action-result";
 
-type Mode = "status" | "assign";
+export type BulkMode = "status" | "assign";
+type Mode = BulkMode;
+
+/** How many selected tags the drawer names before it says `and {k} more`. */
+const TAGS_SHOWN = 5;
+
+/**
+ * Phase 30 (spec §6.4, plan P-6): a bulk status target is any status of the class except a holder
+ * status — the bulk action never assigns, so it offers `statusTargets` of an unheld device whatever
+ * each selected device reads now (the server skips the ones it cannot change).
+ */
+function bulkTargets(cls: AssetClass): readonly string[] {
+  const holder = HOLDER_STATUSES[cls] as readonly string[];
+  return statusesFor(cls).filter((s) => !holder.includes(s));
+}
 
 export function BulkDrawer({
   open,
+  initialMode = "status",
   onClose,
   selectedIds,
+  selectedTags,
   allMatching,
   filtersQS,
   total,
@@ -37,8 +53,12 @@ export function BulkDrawer({
   onDone,
 }: {
   open: boolean;
+  /** the mode the selection bar opened the drawer in — `Change status…` or `Assign…` (plan P-14) */
+  initialMode?: BulkMode;
   onClose: () => void;
   selectedIds: string[];
+  /** the selected rows' tags, in page order — the drawer names what it will touch */
+  selectedTags: string[];
   allMatching: boolean;
   filtersQS: string; // serialized current list state, no leading "?"
   total: number;
@@ -56,7 +76,8 @@ export function BulkDrawer({
   // list island is not remounted, and then `to` would be an IT status against
   // Purchasing options — a controlled select showing one thing and submitting
   // another. Same-class or the class default, always.
-  const effectiveTo = (statusesFor(cls) as readonly string[]).includes(to) ? to : DEFAULT_STATUS[cls];
+  const targets = bulkTargets(cls);
+  const effectiveTo = targets.includes(to) ? to : DEFAULT_STATUS[cls];
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -67,14 +88,23 @@ export function BulkDrawer({
   // A drawer that outlived a class switch would otherwise keep "assign" mode
   // selected against Purchasing, which has no such target.
   const canAssignMode = direct && cls === "IT";
-  const [mode, setMode] = useState<Mode>("status");
+  const [mode, setMode] = useState<Mode>(initialMode);
   const effectiveMode: Mode = canAssignMode ? mode : "status";
+  // The drawer stays mounted between openings; each opening starts in the mode its button named.
+  useEffect(() => {
+    if (open) setMode(initialMode);
+  }, [open, initialMode]);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [assignKind, setAssignKind] = useState<"DEPLOYED" | "TEMPORARY">("DEPLOYED");
   const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
   const [skippedList, setSkippedList] = useState<Array<{ tag: string; reason: string }>>([]);
 
   const scope = allMatching ? `all ${total} matching assets` : `${selectedIds.length} selected asset${selectedIds.length === 1 ? "" : "s"}`;
+  // spec §6.4: the drawer names what it will touch — the first few tags, then a count.
+  const named = allMatching
+    ? `all ${total} matching`
+    : selectedTags.slice(0, TAGS_SHOWN).join(", ") +
+      (selectedTags.length > TAGS_SHOWN ? ` and ${selectedTags.length - TAGS_SHOWN} more` : "");
 
   /** Failure handling shared by every bulk call — they share every ActionResult failure shape. */
   function applyFailure(res: Extract<ActionResult<unknown>, { ok: false }>) {
@@ -196,7 +226,7 @@ export function BulkDrawer({
             <>Assigns <b>{scope}</b> to one person now. Devices that are not spares, are untriaged, reserved for
             someone else or held by an open request are skipped and listed.</>
           ) : direct ? (
-            <>Changes the status of <b>{scope}</b> now. Held devices and off-the-books stock are
+            <>Changes the status of <b>{scope}</b> now. Held devices and stock that is not assigned to anyone are
             skipped and listed — return or handle those one at a time.</>
           ) : (
             <>Acting on <span className="font-medium text-fg-secondary">{scope}</span>. Each asset gets its
@@ -204,42 +234,7 @@ export function BulkDrawer({
             it&apos;s approved and executed.</>
           )}
         </p>
-        <a
-          href={allMatching || selectedIds.length === 0
-            ? `/inventory/export${filtersQS ? `?${filtersQS}` : ""}`
-            : `/inventory/export?ids=${selectedIds.join(",")}`}
-          className="text-xs text-accent hover:underline"
-        >
-          Export this selection as a spreadsheet
-        </a>
-        {/* Labels come from an explicit selection only: "all matching" would
-            make one click a 17-sheet print job, and labelling a whole filtered
-            fleet is not a real intent. `selectedIds.length > 0` is
-            belt-and-braces rather than a live branch today — the drawer only
-            opens via "Bulk actions…" in inventory-table.tsx, which itself
-            requires selected.size > 0, so this component can't currently be
-            rendered with an empty, non-allMatching selection. Kept anyway so
-            the link stays ABSENT, not disabled, if that caller ever changes —
-            the house rule for affordances that cannot act. */}
-        {/* /inventory/labels admits both departments (and prints what the role
-            manages). Labels need an explicit selection, so the affordance is
-            absent when "all matching" mode is on. */}
-        {!allMatching && selectedIds.length > 0 && (
-          <a
-            href={`/inventory/labels?ids=${selectedIds.join(",")}`}
-            className="text-xs text-accent hover:underline"
-          >
-            Print labels for {selectedIds.length} selected
-          </a>
-        )}
-        {/* The branch that actually matters: "all matching" has no id list to
-            build a ?ids= from, and printing a whole filtered fleet was never
-            a real intent (see above) — so under this state the affordance is
-            silently absent rather than merely disabled. That silence needs a
-            sentence, the same way every other unreachable-affordance case in
-            this app gets one, because the alternative is an operator staring
-            at a drawer with no explanation for why Print labels isn't there. */}
-        {allMatching && <p className="text-xs text-fg-faint">Labels need an explicit selection.</p>}
+        {named && <p className="font-mono text-[11px] text-fg-secondary">{named}</p>}
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title={error} />}
         {skippedList.length > 0 && (
@@ -313,8 +308,8 @@ export function BulkDrawer({
                       value={effectiveTo}
                       onChange={(e) => setTo(e.target.value)}
                     >
-                      {statusesFor(cls).map((s) => (
-                        <option key={s} value={s}>{s}</option>
+                      {targets.map((s) => (
+                        <option key={s} value={s}>{STATUS_LABEL[s as AssetStatus]}</option>
                       ))}
                     </Select>
                   )}

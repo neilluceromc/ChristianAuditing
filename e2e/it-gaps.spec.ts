@@ -155,7 +155,8 @@ test.describe("it gaps", () => {
       await waitForHydration(page.getByLabel(/Select BR-HS-0502/));
       await page.getByLabel(/Select BR-HS-0502/).check();
       await page.getByLabel(/Select BR-LT-0075/).check();
-      await page.getByRole("button", { name: "Bulk actions…" }).click();
+      // Phase 30 (spec §6.4): the selection bar's Change status… opens the drawer in status mode.
+      await page.getByRole("button", { name: "Change status…", exact: true }).click();
       const drawer = page.getByRole("dialog", { name: "Bulk actions" });
       await waitForHydration(drawer);
       await expectNoSeriousAxe(page);

@@ -74,7 +74,7 @@ export default async function InventoryPage({
     if (hit) redirect(`/inventory/${hit.id}`);
   }
 
-  // Task 9: the bulk drawer's assign mode needs a name to assign to. Loaded
+  // Task 9: the bulk drawer's assign mode (and, Phase 30, the row menu's Assign) needs a name to assign to. Loaded
   // only for a role that can mutate this class at all — the same condition
   // InventoryTable already uses to decide whether the drawer exists.
   const employees = canMutate ? await activeEmployeeOptions() : [];
@@ -214,6 +214,7 @@ export default async function InventoryPage({
                   filtersQS={exportQS.replace(/^\?/, "")}
                   total={total}
                   cls={cls}
+                  role={user.role}
                   direct={direct}
                   employees={employees}
                   recentEmployees={recentEmployees}

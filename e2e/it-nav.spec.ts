@@ -394,7 +394,9 @@ test.describe("it navigation sweep (Phase 25)", () => {
     await expect(rows.first()).toBeVisible();
     const rowCount = await rows.count();
     expect(rowCount).toBeGreaterThan(0);
-    await expect(rows.locator("td").filter({ hasText: /^DEPLOYED$/ })).toHaveCount(rowCount);
+    // Phase 30 (spec §6.3): the Status cell may carry the row's attention reason under the word
+    // ("queued APR-…", "awaiting IT check"), so the cell starts with the status rather than equalling it.
+    await expect(rows.locator("td").filter({ hasText: /^DEPLOYED/ })).toHaveCount(rowCount);
     // A dropdown read, not `toContainText("1")` on the facet trigger — that
     // would also pass on a badge reading "11" or "21" (M-P25-5). The Status
     // facet counts WITHOUT its own selection (`facetOptions`' `without(facet)`),
