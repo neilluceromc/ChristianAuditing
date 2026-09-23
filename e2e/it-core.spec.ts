@@ -86,6 +86,34 @@ test.describe("inventory list", () => {
     await expectNoSeriousAxe(page);
   });
 
+  test("the last row's menu opens fully inside the table and the viewport", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory");
+    // Phase 30 review (R13): the table wrapper is overflow-x-auto, which clips vertically too, so a
+    // menu that always drops below its trigger is cut off on the bottom rows. Playwright's click
+    // auto-scrolls, so only a box comparison catches it.
+    const table = page.getByRole("table");
+    const wrapper = table.locator("xpath=..");
+    const trigger = table.getByRole("button", { name: /^Actions for / }).last();
+    await waitForHydration(trigger);
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    // boxes read while the open animation runs: retry until the placement has settled
+    await expect(async () => {
+      const [m, w] = [await menu.boundingBox(), await wrapper.boundingBox()];
+      const viewport = page.viewportSize()!;
+      expect(m && w).toBeTruthy();
+      expect(m!.y).toBeGreaterThanOrEqual(w!.y);
+      expect(m!.y + m!.height).toBeLessThanOrEqual(w!.y + w!.height);
+      expect(m!.x).toBeGreaterThanOrEqual(w!.x);
+      expect(m!.x + m!.width).toBeLessThanOrEqual(w!.x + w!.width);
+      expect(m!.y).toBeGreaterThanOrEqual(0);
+      expect(m!.y + m!.height).toBeLessThanOrEqual(viewport.height);
+    }).toPass({ timeout: 5_000 });
+  });
+
   test("sort clicks rewrite the URL contract", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
