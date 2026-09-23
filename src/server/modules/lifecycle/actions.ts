@@ -19,7 +19,7 @@ import { parseListState, type ListState } from "@/lib/url-state";
 import { ASSET_STATUSES, BULK_MAX, INVENTORY_LIST_CONFIG, buildAssetWhere, parsePurchaseYear } from "@/lib/inventory-list";
 import { statusFamily } from "@/lib/status";
 import {
-  ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, isAssignable, isDirectLifecycle, isStatusOf, parseCls,
+  ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, defaultClassFor, isAssignable, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
 import {
   RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
@@ -372,12 +372,13 @@ export async function triageAsset(input: unknown): Promise<ActionResult<{ tag: s
  * same as the list page itself). Shared by `bulkChangeStatus` and `bulkAssign`
  * so the two never drift.
  */
-async function resolveBulkWhere(ids: string[] | undefined, filters: string | undefined): Promise<Prisma.AssetWhereInput> {
+async function resolveBulkWhere(ids: string[] | undefined, filters: string | undefined, role: Role): Promise<Prisma.AssetWhereInput> {
   if (ids?.length) return { id: { in: ids } };
   const fp = new URLSearchParams(filters);
   const state: ListState = parseListState(fp, INVENTORY_LIST_CONFIG);
   const purchaseYear = parsePurchaseYear(fp.get("purchaseYear"));
-  const cls = parseCls(fp.get("cls")) ?? "IT";
+  // Phase 30 (plan P-7): no `cls=` means the viewer's own default class — the list the drawer sits on.
+  const cls = parseCls(fp.get("cls")) ?? defaultClassFor(role);
   const cutIds = await repairStageIds(state, purchaseYear, cls);
   return cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear, cls);
 }
@@ -412,7 +413,7 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { ids, filters, to, reason } = parsed.data;
 
-  const where = await resolveBulkWhere(ids, filters);
+  const where = await resolveBulkWhere(ids, filters, user.role);
 
   const now = new Date();
   let changed = 0;
@@ -489,7 +490,7 @@ export async function bulkAssign(input: unknown): Promise<ActionResult<{ assigne
   const due = loanDueFor(d.status, d.loanDueAt, now);
   if (!due.ok) return validationError({ loanDueAt: due.error });
 
-  const where = await resolveBulkWhere(d.ids, d.filters);
+  const where = await resolveBulkWhere(d.ids, d.filters, user.role);
 
   let assigned = 0;
   const skipped: Array<{ tag: string; reason: string }> = [];

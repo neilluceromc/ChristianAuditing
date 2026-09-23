@@ -147,20 +147,22 @@ export function RegisterForm({
       // R9: normalise both sides the way the server does — tags via
       // `tagKey`, serials trimmed — so a lower-case typed tag or a
       // padded serial still matches a normalised server hit.
-      const takenTags = new Set(res.data.tags.map(tagKey));
-      const takenSerials = new Set(res.data.serials.map((s) => s.trim()));
+      const tagHits = res.data.tags.map((t) => t.tag);
+      const serialHits = res.data.serials.map((s) => s.serial);
+      const takenTags = new Set(tagHits.map(tagKey));
+      const takenSerials = new Set(serialHits.map((s) => s.trim()));
       setRegisteredTags(takenTags);
       setRegisteredSerials(takenSerials);
       setErrors((e) => {
         const next = { ...e };
-        if (takenTags.size) next.tags = `Already registered: ${[...new Set(res.data.tags)].join(", ")}`;
+        if (takenTags.size) next.tags = `Already registered: ${[...new Set(tagHits)].join(", ")}`;
         else delete next.tags;
         // The in-batch duplicate found above keeps the one text slot for
         // `errors.serials` — same precedence `registerAssets` uses server
         // side (it refuses the in-batch dupe before it ever queries for an
         // existing one).
         if (!dupValue) {
-          if (takenSerials.size) next.serials = `Already registered: ${[...new Set(res.data.serials)].join(", ")}`;
+          if (takenSerials.size) next.serials = `Already registered: ${[...new Set(serialHits)].join(", ")}`;
           else delete next.serials;
         }
         return next;

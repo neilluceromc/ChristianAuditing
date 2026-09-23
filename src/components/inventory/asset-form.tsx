@@ -163,7 +163,9 @@ export function AssetForm({
         // the server normalises it before matching — otherwise a lower-case
         // typed tag, or a serial carrying incidental padding, never matches
         // a normalised server hit even though the server would refuse it.
-        const hit = kind === "tag" ? res.data.tags.includes(tagKey(value)) : res.data.serials.includes(value.trim());
+        const hit = kind === "tag"
+          ? res.data.tags.map((t) => t.tag).includes(tagKey(value))
+          : res.data.serials.map((s) => s.serial).includes(value.trim());
         setErrors((e) => {
           if (hit) return { ...e, [kind]: "Already registered" };
           if (!(kind in e)) return e;

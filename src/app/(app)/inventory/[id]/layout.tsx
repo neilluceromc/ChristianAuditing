@@ -61,7 +61,7 @@ export default async function AssetRecordLayout({
   const canReleaseHold = direct && !!hold;
   const employees = canAssign || canReserve ? await activeEmployeeOptions() : [];
   const recentEmployees = canAssign || canReserve ? await recentPicks(user.id, "employee") : [];
-  const spares = canReplace ? await spareOptions(asset.typeId) : [];
+  const spares = canReplace ? await spareOptions(asset.typeId) : { options: [], hidden: 0 };
   // Phase 20 (spec §6.5, gap 5): while an approval is queued, the record
   // still reads the pre-approval status everywhere (see the Banner below) —
   // showing "Last change" from before that queued change would read as
@@ -129,7 +129,7 @@ export default async function AssetRecordLayout({
                 <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} direct={direct} />
               )}
               {canReplace && asset.assignee && (
-                <ReplaceControl assetId={asset.id} tag={asset.tag} employeeId={asset.assignee.id} employeeName={asset.assignee.name} spares={spares} />
+                <ReplaceControl assetId={asset.id} tag={asset.tag} employeeId={asset.assignee.id} employeeName={asset.assignee.name} spares={spares.options} />
               )}
               {canMutate && <StatusControl assetId={asset.id} tag={asset.tag} currentStatus={asset.status} cls={asset.cls} direct={direct} />}
               {canEdit && <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>}

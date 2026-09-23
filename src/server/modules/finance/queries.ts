@@ -1,4 +1,5 @@
 import { Prisma, type AssetClass, type AssetStatus } from "@prisma/client";
+import { prisma } from "@/server/db/client";
 import { pagedSnapshot } from "@/server/paged";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { isStatusOf } from "@/lib/asset-class";
@@ -88,4 +89,20 @@ export async function financeAssets(
       provenance: PROVENANCE_LABEL[provenanceOf(a)],
     })),
   };
+}
+
+/**
+ * Phase 30 (spec §4.6): the next record waiting on Finance, in the queue's own order — the
+ * `financeAssets` where (costed; an IT asset only once IT has checked it) narrowed to the rows
+ * still undecided, cost desc then tag then id, never the record just decided.
+ */
+export async function nextToReview(currentId: string, cls: AssetClass): Promise<{ id: string; tag: string } | null> {
+  return prisma.asset.findFirst({
+    where: {
+      cls, cost: { not: null }, ...(cls === "IT" ? { itVerifiedAt: { not: null } } : {}),
+      financeConfirmedAt: null, financeReturnedAt: null, id: { not: currentId },
+    },
+    orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
+    select: { id: true, tag: true },
+  });
 }
