@@ -138,7 +138,8 @@ export function InventoryToolbar({
             <button
               type="button"
               aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg"
+              // Fitts / WCAG 2.5.8: a 24 × 24 px target, centred, inside the input's pr-7 gutter
+              className="absolute right-0.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-(--radius-ctl) text-fg-muted hover:bg-surface-subtle hover:text-fg"
               onClick={() => navigate(hrefFor(withSearch(state, "")))}
             >
               ×

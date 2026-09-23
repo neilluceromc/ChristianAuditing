@@ -229,6 +229,11 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
     if (plan.error === "assignee_required") errors.assigneeId = "Pick who this deploys to";
     else errors.requestedStatus = `${d.requestedStatus} is not an initial state for ${CLASS_PHRASE[category.cls]} asset.`;
   }
+  // A loan's due date rides only on the direct path; the approval path's payload carries none, so a
+  // registrant who does not manage the class cannot register a loan (the form already hides it, R4).
+  if (category && !errors.requestedStatus && d.requestedStatus === "TEMPORARY" && !isDirectLifecycle(user.role, category.cls)) {
+    errors.requestedStatus = "A loan can only be registered by the team that manages this class.";
+  }
   const loan = loanDueFor(d.requestedStatus, d.loanDueAt || undefined, new Date());
   if (!loan.ok) errors.loanDueAt = "Pick the date the loan ends";
   if (d.typeId) {
@@ -837,6 +842,9 @@ export async function checkIdentifiers(
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = identifiersSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  // Each hit now names a record (its id, a serial's tag): a class the caller cannot register into is
+  // refused outright, so a hand-crafted call cannot read another class's tags or ids.
+  if (!canRegisterClass(user.role, parsed.data.cls)) return forbidden();
   const tags = [...new Set((parsed.data.tags ?? []).map(tagKey).filter(Boolean))];
   const serials = [...new Set((parsed.data.serials ?? []).filter(Boolean))];
   const where = identifierWhere(parsed.data.cls, tags, serials);

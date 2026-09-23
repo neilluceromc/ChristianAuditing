@@ -235,7 +235,9 @@ export async function listAssets(
 
   // Attention is derived, not a column: the candidate pass runs in memory (like the Loadout sort on
   // the people list) — the whole view in the default order, ranked by attentionOf, then paged.
-  const attentionSort = state.sort.find((s) => s.key === "attention");
+  // Only as the PRIMARY key: a secondary `attention` (left behind by a header click) is dropped, as
+  // buildAssetOrderBy already drops it in SQL, so the clicked column really orders the rows.
+  const attentionSort = state.sort[0]?.key === "attention" ? state.sort[0] : undefined;
   if (attentionSort) {
     const all = await prisma.asset.findMany({ where, orderBy, include: LIST_INCLUDE });
     const ordered = orderByAttention(all.map((a) => toRow(a, now)), attentionSort.dir);
@@ -470,7 +472,7 @@ export async function spareOptions(preferTypeId: string | null): Promise<{ optio
   const rank = (t: string | null) => (isSameType(t) ? 0 : 1);
   const options = rows.sort((a, b) => rank(a.typeId) - rank(b.typeId) || a.tag.localeCompare(b.tag))
     .map((a) => ({ value: a.id, label: a.tag, sub: a.model, group: isSameType(a.typeId) ? "Same type" : "Other spares" }));
-  return { options, hidden: all - rows.length };
+  return { options, hidden: Math.max(0, all - rows.length) };
 }
 
 /**

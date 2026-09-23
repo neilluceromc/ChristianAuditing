@@ -28,7 +28,7 @@ import { InventoryTable } from "@/components/inventory/inventory-table";
 import { ColumnChooser } from "@/components/inventory/column-chooser";
 import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
 import { InventoryMoreMenu } from "@/components/inventory/inventory-more-menu";
-import { ListNavigationProvider, ListPendingRegion } from "@/components/inventory/list-navigation";
+import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/inventory/list-navigation";
 import { REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
 import { RepairChips } from "@/components/inventory/repair-chips";
 
@@ -115,11 +115,13 @@ export default async function InventoryPage({
   const importHref = canMutate && cls === "IT" ? "/inventory/import" : null;
   // One href per sortable key — the result of clicking that column's header —
   // plain serializable data, unlike `href` above, so it can cross into the
-  // InventoryTable Client Component.
+  // InventoryTable Client Component. The Attention sort is dropped first: a header click leaves the
+  // Attention view cleanly instead of keeping `attention` as a secondary key (the list only runs its
+  // attention pass as the primary key, so a leftover would be inert but still shown in the URL).
   const sortHrefs: Record<string, string> = Object.fromEntries(
     INVENTORY_LIST_CONFIG.sortable.map((key) => [
       key,
-      href({ ...state, sort: toggleSort(state.sort, key), page: 1 }),
+      href({ ...state, sort: toggleSort(state.sort.filter((s) => s.key !== "attention"), key), page: 1 }),
     ]),
   );
   const repairMode = isRepairView(state);
@@ -229,7 +231,8 @@ export default async function InventoryPage({
                       page {page} of {pageCount}
                     </span>
                   )}
-                  <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
+                  {/* NavLink: a page change runs through the shared transition and marks the list busy */}
+                  <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} linkComponent={NavLink} />
                 </div>
               </>
             ) : hasFilters ? (

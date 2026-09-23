@@ -33,8 +33,10 @@ export type NextToReview = { id: string; tag: string } | null;
 function copyFor(cls: AssetClass): Record<FinanceReviewMode, { title: string; cta: string; done: string; blurb: string }> {
   return {
     confirm: {
-      title: "Confirm",
-      cta: "Confirm",
+      // spec §3: a dialog confirms with a verb, never a bare "Confirm" — the title reads
+      // "Confirm details of BR-LT-0148?", matching the record header's primary.
+      title: "Confirm details of",
+      cta: "Confirm details",
       done: "confirmed",
       blurb: "Marks the details reviewed and accurate. Recorded in the audit trail with your name.",
     },
@@ -107,7 +109,12 @@ export function FinanceReviewDialog({
         if (current === "confirm") onConfirmed?.(res.data.next ?? null);
         onClose();
         router.refresh();
-      } else if (res.kind === "validation") setFieldErrors(res.fieldErrors ?? {});
+      } else if (res.kind === "validation") {
+        const fe = res.fieldErrors ?? {};
+        setFieldErrors(fe);
+        // only `reason` has a field here; anything else (e.g. "Unknown asset") shows as the banner
+        setError(fe._form ?? fe.id ?? null);
+      }
       else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else setError(res.message);
     });

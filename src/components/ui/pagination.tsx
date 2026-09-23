@@ -1,18 +1,30 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 
+/** The props Pagination hands each page link â€” `next/link`'s by default. */
+export type PaginationLinkProps = {
+  href: string;
+  className?: string;
+  children?: React.ReactNode;
+  "aria-disabled"?: boolean;
+  "aria-current"?: "page";
+};
+
 export function Pagination({
   page,
   pageCount,
   hrefFor,
+  linkComponent: PageLink = Link,
 }: {
   page: number;
   pageCount: number;
   hrefFor: (page: number) => string;
+  /** renders each page link; the inventory list passes its `NavLink` so a page change marks it busy */
+  linkComponent?: React.ComponentType<PaginationLinkProps>;
 }) {
   if (pageCount <= 1) return null;
   const item = (p: number, label?: string, disabled?: boolean) => (
-    <Link
+    <PageLink
       key={label ?? p}
       href={hrefFor(p)}
       aria-disabled={disabled || undefined}
@@ -26,7 +38,7 @@ export function Pagination({
       )}
     >
       {label ?? p}
-    </Link>
+    </PageLink>
   );
   const pages = Array.from({ length: pageCount }, (_, i) => i + 1).filter(
     (p) => p === 1 || p === pageCount || Math.abs(p - page) <= 1,

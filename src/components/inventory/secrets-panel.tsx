@@ -118,6 +118,9 @@ export function SecretsPanel({
         }));
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else setError(res.message);
+    } catch {
+      // a thrown server action (network drop, server error) must not become an unhandled rejection
+      setError("Could not reveal the secret — try again.");
     } finally {
       // a later click on another row owns the spinner now — leave it be
       setRevealing((current) => (current === secretId ? null : current));

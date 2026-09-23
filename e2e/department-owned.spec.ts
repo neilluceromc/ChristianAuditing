@@ -453,7 +453,7 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     // exact: Finance's sidebar carries its own "Awaiting finance" link.
     await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Confirm details" }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await page.getByRole("dialog", { name: `Confirm details of ${tag}?` }).getByRole("button", { name: "Confirm details", exact: true }).click();
     // Phase 30 (spec §4.6): the finance-state pill left the header; Finance's next step shows instead.
     await expect(page.getByRole("link", { name: "Next to review →" }).or(page.getByText("Queue clear"))).toBeVisible();
     await expect(page.getByText("AWAITING FINANCE", { exact: true })).toHaveCount(0);

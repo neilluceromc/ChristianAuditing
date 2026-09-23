@@ -294,6 +294,27 @@ test.describe("inventory list", () => {
 
     const queued = page.getByRole("row", { name: /BR-LT-0181/ });
     await expect(await cellOf(page, queued, "Status")).toContainText("queued APR-2041");
+
+    // A header click leaves the Attention view cleanly: `attention` is not kept as a secondary key
+    // (which used to leave the rows in attention order under a Model indicator).
+    const modelHeader = page.getByRole("button", { name: "Model" });
+    await waitForHydration(modelHeader);
+    await modelHeader.click();
+    await expect(page).toHaveURL(/[?&]sort=model(&|$)/);
+    expect(page.url()).not.toContain("attention");
+    const rows = page.locator("tbody tr");
+    await expect(rows.first()).toBeVisible();
+    const modelIdx = await page
+      .locator("thead th")
+      .evaluateAll((ths) => ths.findIndex((th) => (th.textContent ?? "").trim().startsWith("Model")));
+    const models = await rows.evaluateAll(
+      (trs, i) => trs.map((tr) => (tr.querySelectorAll("td")[i]?.textContent ?? "").trim()),
+      modelIdx,
+    );
+    expect(models.length).toBeGreaterThan(1);
+    // Postgres sorts what the page shows, under the collation the list itself sorts with.
+    const sorted = await db.$queryRaw<Array<{ m: string }>>`SELECT m FROM unnest(${models}::text[]) AS m ORDER BY m ASC`;
+    expect(models).toEqual(sorted.map((r) => r.m));
   });
 
   test("8. a holder's name finds their device; Clear search empties the box and drops q", async ({ page }) => {

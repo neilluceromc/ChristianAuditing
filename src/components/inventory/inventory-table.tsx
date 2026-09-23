@@ -348,6 +348,8 @@ export function InventoryTable({
                           <StatusDot value={row.status} />
                           {row.status}
                         </span>
+                        {/* the reason sits on its own line visually; a screen reader hears a pause, not "DEPLOYEDoverdue" */}
+                        {row.attention && <span className="sr-only"> · </span>}
                         {row.attention && (
                           <span
                             className={cn(

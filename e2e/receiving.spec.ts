@@ -258,9 +258,9 @@ test.describe("Finance review — confirm", () => {
     await page.goto(`/inventory/${asset.id}`);
 
     await page.getByRole("button", { name: "Confirm details" }).click();
-    const dialog = page.getByRole("dialog", { name: `Confirm ${tag1}?` });
+    const dialog = page.getByRole("dialog", { name: `Confirm details of ${tag1}?` });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Confirm details", exact: true }).click();
 
     // Phase 30 (spec §4.1, §4.6): the finance-state pill left the header; what
     // the record says now is Finance's next step — the next record in the
@@ -295,7 +295,7 @@ test.describe("Finance review — confirm", () => {
     await page.goto(`/inventory/${asset.id}`);
 
     await page.getByRole("button", { name: "Confirm details" }).click();
-    const dialog = page.getByRole("dialog", { name: `Confirm ${tag2}?` });
+    const dialog = page.getByRole("dialog", { name: `Confirm details of ${tag2}?` });
     await expect(dialog).toBeVisible();
 
     const raceTime = new Date();
@@ -304,7 +304,7 @@ test.describe("Finance review — confirm", () => {
       data: { financeConfirmedAt: raceTime, financeConfirmedById: financeUserId },
     });
 
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Confirm details", exact: true }).click();
     // Phase 30 (F-RECORD-14): every refusal renders inside the dialog, which
     // stays open on failure — never in the header's action row.
     await expect(dialog.getByText(`${tag2} was already confirmed.`)).toBeVisible();
@@ -454,8 +454,8 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/inventory/${assetReturn.id}`);
     await page.getByRole("button", { name: "Confirm details" }).click();
-    const confirmDialog = page.getByRole("dialog", { name: `Confirm ${assetReturn.tag}?` });
-    await confirmDialog.getByRole("button", { name: "Confirm" }).click();
+    const confirmDialog = page.getByRole("dialog", { name: `Confirm details of ${assetReturn.tag}?` });
+    await confirmDialog.getByRole("button", { name: "Confirm details", exact: true }).click();
 
     // Phase 30 (spec §4.6): the finance-state pill left the header; Finance's next step shows instead.
     await expect(page.getByRole("link", { name: "Next to review →" }).or(page.getByText("Queue clear"))).toBeVisible();
