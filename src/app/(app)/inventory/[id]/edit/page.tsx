@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { AssetForm } from "@/components/inventory/asset-form";
 import { updateAsset } from "@/server/modules/inventory/actions";
 import { recentPicks } from "@/server/recent-picks";
-import { canEditAsset, canSeeClass } from "@/lib/asset-class";
+import { canEditAsset, canSeeClass, defaultClassFor, withViewClsQS } from "@/lib/asset-class";
 
 export default async function EditAssetPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireRole("admin", "it_staff", "purchasing_staff");
@@ -13,7 +13,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
   const asset = await prisma.asset.findUnique({ where: { id } });
   if (!asset || !canSeeClass(user.role, asset.cls)) notFound();
   // Spec §5.4: the managing department, or the registrant while IT has not
-  // checked it. The Edit button is hidden by the same predicate (layout.tsx).
+  // checked it. The Edit button is hidden by the same predicate (recordActions).
   if (!canEditAsset(user.role, asset)) redirect(`/inventory/${id}`);
 
   const [categories, types, vendors] = await Promise.all([
@@ -38,16 +38,25 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
 
   return (
     <>
-      {/* No breadcrumb prop here: this route lives under AssetRecordLayout
-          (asset-classes.spec.ts test 17), whose own PageHeader already
-          renders a "Breadcrumb" nav for the record — a second one with the
-          same accessible name is what axe's landmark-unique flagged. */}
-      <PageHeader title={`Edit ${asset.tag}`} />
+      {/* Phase 30 (spec §4.5, plan P-15): this route sits outside the record's
+          (record) route group, so no record header or tabs wrap it — the
+          breadcrumb is its own, and its last linked crumb (the record) is
+          where Back returns. */}
+      <PageHeader
+        title={`Edit ${asset.tag}`}
+        breadcrumb={[
+          {
+            label: asset.cls === "IT" ? "Inventory" : "Purchasing assets",
+            href: "/inventory" + withViewClsQS("", asset.cls, defaultClassFor(user.role)),
+          },
+          { label: asset.tag, href: `/inventory/${asset.id}` },
+          { label: "Edit" },
+        ]}
+      />
       <AssetForm
-        mode="edit"
+        assetId={asset.id}
         categories={categories.map((c) => ({ id: c.id, name: c.name, cls: c.cls }))}
         types={types.map((t) => ({ id: t.id, name: t.name, categoryId: t.categoryId }))}
-        employees={[]}
         vendors={vendors.map((v) => ({ id: v.id, name: v.name }))}
         recentVendors={recentVendors}
         initial={{

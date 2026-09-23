@@ -1,13 +1,16 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset, stageOf } from "@/server/modules/inventory/queries";
 import { warrantyProgress } from "@/lib/asset-rules";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { CLASS_LABEL, canRegisterClass, isAwaitingItCheck } from "@/lib/asset-class";
+import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
+import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
 import { ProgressBar } from "@/components/ui/progress-bar";
-import { StatusPill } from "@/components/ui/status";
+import { DuePill } from "@/components/ui/due-pill";
 import { Banner } from "@/components/ui/banner";
 import { Pill } from "@/components/ui/pill";
 import { CreatedNotice } from "@/components/inventory/created-notice";
@@ -34,34 +37,47 @@ export default async function AssetOverviewPage({
   const stage = stageOf(asset);
   const warning = quoteWarning(quote, cost);
   const down = downDays(asset);
+  const provenance = provenanceOf(asset);
+  // Spec §4.4: what the header used to say in three pills — the class, where
+  // the record came from, and where Finance stands — now one Record row.
+  const financeState = asset.financeConfirmedAt
+    ? `Finance confirmed · ${fmtDate(asset.financeConfirmedAt)}`
+    : asset.financeReturnedAt
+      ? "Returned by Finance"
+      : isAwaitingItCheck(asset)
+        ? "Awaiting IT check"
+        : "Awaiting Finance";
 
   return (
     <div className="grid max-w-[860px] grid-cols-1 gap-4 lg:grid-cols-2">
       {sp.get("created") === "1" && (
         <div className="lg:col-span-2">
-          <CreatedNotice tag={asset.tag} id={asset.id} />
+          <CreatedNotice tag={asset.tag} id={asset.id} cls={asset.cls} canRegister={canRegisterClass(user.role, asset.cls)} />
         </div>
       )}
       <Card>
         <CardHeader title="Identity" />
         <CardBody>
+          {/* Spec §4.4: tag, status, model and holder live in the header only. */}
           <DescriptionList
             items={[
-              { label: "Tag", value: asset.tag, mono: true },
-              { label: "Model", value: asset.model },
               { label: "Brand", value: asset.brand ?? "—" },
               { label: "Serial", value: asset.serial ?? "—", mono: true },
               { label: "Category", value: asset.category.name },
               { label: "Type", value: asset.type?.name ?? "—" },
-              { label: "Status", value: <StatusPill value={asset.status} /> },
-              {
-                label: "Assigned",
-                value: asset.assignee ? (
-                  <a href={`/employees/${asset.assignee.id}`} className="text-accent hover:underline">
-                    {asset.assignee.name} · {asset.assignee.employeeNo}
-                  </a>
-                ) : ("—"),
-              },
+              ...(asset.status === "TEMPORARY"
+                ? [{
+                    label: "Loan until",
+                    // the same day the header's loan line reads (LoanLine)
+                    value: asset.loanDueAt ? (
+                      <DuePill
+                        dueAt={new Date(asset.loanDueAt.toISOString().slice(0, 10) + "T00:00:00Z")}
+                        today={localDateISO(new Date())}
+                        withDate
+                      />
+                    ) : "No due date",
+                  }]
+                : []),
             ]}
           />
         </CardBody>
@@ -71,6 +87,29 @@ export default async function AssetOverviewPage({
         <CardBody>
           <DescriptionList
             items={[
+              {
+                label: "Record",
+                value: (
+                  <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <span>{CLASS_LABEL[asset.cls]}</span>
+                    <span aria-hidden className="text-fg-muted">·</span>
+                    {asset.purchaseRequest ? (
+                      <Link href={`/purchases/${asset.purchaseRequest.id}`} className="text-accent hover:underline">
+                        From {asset.purchaseRequest.refNo}
+                      </Link>
+                    ) : (
+                      // The label map stays "Historical import" (facet, export,
+                      // Finance use it); only the record spells out the gap.
+                      <span>
+                        {PROVENANCE_LABEL[provenance]}
+                        {provenance === "HISTORICAL" && " · no purchase request"}
+                      </span>
+                    )}
+                    <span aria-hidden className="text-fg-muted">·</span>
+                    <span>{financeState}</span>
+                  </span>
+                ),
+              },
               { label: "Purchased", value: fmtDate(asset.purchasedAt), mono: true },
               { label: "Cost", value: fmtMoney(asset.cost === null ? null : Number(asset.cost)), mono: true },
               { label: "Vendor", value: asset.vendor?.name ?? "—" },

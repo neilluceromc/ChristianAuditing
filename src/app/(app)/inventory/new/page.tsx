@@ -1,7 +1,7 @@
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
-import { AssetForm } from "@/components/inventory/asset-form";
+import { NewAssetForm } from "./new-asset-form";
 import { createAsset } from "@/server/modules/inventory/actions";
 import { tagSuggestions } from "@/server/modules/inventory/tag-suggest";
 import { recentPicks } from "@/server/recent-picks";
@@ -52,8 +52,7 @@ export default async function NewAssetPage({
         title="New asset"
         breadcrumb={[{ label: "Inventory", href: "/inventory" + withClsQS("", cls ?? "IT") }, { label: "New" }]}
       />
-      <AssetForm
-        mode="new"
+      <NewAssetForm
         categories={categories.map((c) => ({ id: c.id, name: c.name, cls: c.cls }))}
         types={types.map((t) => ({ id: t.id, name: t.name, categoryId: t.categoryId }))}
         employees={employees.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }))}

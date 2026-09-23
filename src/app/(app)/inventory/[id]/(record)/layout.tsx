@@ -159,9 +159,11 @@ export default async function AssetRecordLayout({
       )}
       {/* The tab route is IT-workspace-only (workspaces.ts PATH_RULES) and the
           Purchasing class has no credentials — viewer keeps the tab because
-          secrets/page.tsx shows labels without values for that role. */}
+          secrets/page.tsx shows labels without values for that role. Holds
+          are IT-only too, so RecordTabs drops Reservations by class. */}
       <RecordTabs
         assetId={asset.id}
+        cls={asset.cls}
         showSecrets={asset.cls === "IT" && (user.role === "admin" || user.role === "it_staff" || user.role === "viewer")}
       />
       <div className="pt-4">{children}</div>

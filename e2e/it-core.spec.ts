@@ -244,17 +244,17 @@ test.describe("asset record", () => {
     // failure here instead of a cheerful pass over a no-op save downstream.
     await expect(model).toHaveValue("LG 27UL500-W");
     await page.getByRole("button", { name: "Save changes" }).click();
-    // The save confirmation is a 3-second self-clearing flash (setSaved(true)
-    // plus a 3000ms timer, src/components/inventory/asset-form.tsx:96), so the
-    // default 5s budget has to cover the WHOLE server-action round trip before
-    // the flash even starts — while the round trip runs, this button reads
-    // "Loading" and disabled. A dev server several minutes into the full suite
-    // occasionally spends longer than 5s on it, which failed this line once in
-    // three full runs with the button still mid-flight and no error banner.
-    // Reproduced exactly by delaying updateAsset 7s. Same headroom as the cold
-    // compile above; the flash lasts 3s, which no polling interval can miss.
-    await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible({ timeout: 20_000 });
-    await page.goto(page.url().replace(/\/edit$/, "/history"));
+    // Phase 30 (spec §4.5): a save toasts "{tag} saved" and returns to the
+    // record (it used to stay on /edit and flash "✓ Saved"). The default 5s
+    // budget would have to cover the WHOLE server-action round trip before the
+    // toast even starts — a dev server several minutes into the full suite
+    // occasionally spends longer than that (reproduced by delaying updateAsset
+    // 7s) — so it keeps the old flash's headroom; the toast lasts 4s, which no
+    // polling interval can miss. The toast is asserted before the URL because
+    // the push back to the record can outlast it on a cold compile.
+    await expect(page.getByText("BR-MN-0910 saved")).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
+    await page.goto(`${page.url()}/history`);
     // First hit of /inventory/[id]/history in this file — the default 5s had
     // to cover a cold compile of that route and did not, in the same batch
     // that surfaced the hydration race above.
@@ -291,6 +291,9 @@ test.describe("asset record", () => {
     await secretRow.getByRole("button", { name: "Reveal" }).click();
     await expect(page.getByText("hunter2-e2e")).toBeVisible();
     await expect(page.getByText(/hides in \d+s/)).toBeVisible();
+    // Phase 30 (spec §4.4): a revealed value can be copied; the button says so for 2 s.
+    await secretRow.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect(secretRow.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
     await page.goto(`${recordUrl}/history`);
     await expect(page.getByRole("row", { name: /SECRET_READ/ }).first()).toBeVisible();
 
@@ -313,12 +316,18 @@ test.describe("asset record", () => {
     // Same hydration race `waitForHydration` exists for above: setInputFiles
     // dispatches a native change event the instant the (server-rendered)
     // input exists in the DOM, which can land before React's delegated
-    // onChange is wired up — the upload() handler never runs, and the panel
-    // just sits in its untouched default state (no error, no rate-limit
-    // banner, no leftover doc link either — which is why this was easy to
-    // mistake for a rate-limit collision from the tests ahead of this one).
-    await waitForHydration(page.getByLabel("Upload document"));
-    await page.getByLabel("Upload document").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hi") });
+    // onChange is wired up — the handler never runs, and the panel just sits
+    // in its untouched default state (no staged file, no error, no leftover
+    // doc link either — which is why this was easy to mistake for a
+    // rate-limit collision from the tests ahead of this one).
+    // Phase 30 (spec §4.4): choosing a file only stages it — its name, a kind
+    // (an image starts on Photo) and Upload; nothing is stored until Upload.
+    const fileInput = page.getByLabel("Document file");
+    const upload = page.getByRole("button", { name: "Upload", exact: true });
+    await waitForHydration(fileInput);
+    await fileInput.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hi") });
+    await expect(page.getByLabel("Document kind")).toHaveValue("receipt");
+    await upload.click();
     await expect(page.getByText(/Accepted: PDF, PNG, JPG/)).toBeVisible();
     // A fixed "photo.png" name means a rerun's assertion below is satisfied
     // trivially by a PREVIOUS run's leftover document link — the test would
@@ -328,7 +337,10 @@ test.describe("asset record", () => {
     // before the write lands). A unique name makes the assertion prove THIS
     // run's upload actually landed.
     const fileName = `photo-${Date.now()}.png`;
-    await page.getByLabel("Upload document").setInputFiles({ name: fileName, mimeType: "image/png", buffer: png });
+    await fileInput.setInputFiles({ name: fileName, mimeType: "image/png", buffer: png });
+    await expect(page.getByLabel("Document kind")).toHaveValue("photo");
+    await expect(page.getByRole("link", { name: fileName })).toHaveCount(0);
+    await upload.click();
     await expect(page.getByRole("link", { name: fileName })).toBeVisible();
   });
 });

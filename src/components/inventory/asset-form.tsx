@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
-import { tagKey } from "@/lib/tag-key";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -11,18 +10,11 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import { useToast } from "@/components/ui/toast";
+import { EntityCombobox } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { ReasonField } from "@/components/patterns/reason-field";
-import { REASON_CHIPS } from "@/lib/reason-chips";
-import { CREATABLE_BY_CLASS, type CreatableStatus } from "@/lib/asset-rules";
-import { CLASS_EXAMPLE, DEFAULT_STATUS } from "@/lib/asset-class";
-import { nextTags, preferredPrefix, RUN_REFUSAL } from "@/lib/receiving";
-import { DOCUMENT_KINDS } from "@/lib/documents";
-import { checkIdentifiers } from "@/server/modules/inventory/actions";
-import { uploadDocument } from "@/server/modules/inventory/document-actions";
-import type { CategorySuggestion } from "@/server/modules/inventory/tag-suggest";
+import { CLASS_EXAMPLE } from "@/lib/asset-class";
+import { normaliseCost } from "@/lib/register-input";
 import type { ActionResult } from "@/server/action-result";
 
 export interface AssetFormInitial {
@@ -42,143 +34,67 @@ export interface AssetFormInitial {
   repairQuote: string;
 }
 
+/** Phase 30 (spec §5.4, §8): money is typed the way receipts print it, and refused in these words. */
+const MONEY_ERROR = "Enter an amount like 12500 or 12,500.50";
+type MoneyKey = "cost" | "repairQuote";
+type TextKey = "model" | "brand" | "serial" | "invoiceRef" | "rmaRef" | "notes";
+
+/**
+ * Phase 30 (spec §4.5): the record's Edit form — edit-only; registering goes
+ * through the Register flow. A sticky bar carries Cancel · Save changes, and a
+ * save toasts `{tag} saved` and returns to the record.
+ */
 export function AssetForm({
-  mode,
+  assetId,
   categories,
   types,
-  employees,
   vendors = [],
   recentVendors,
-  suggestions,
   initial,
   action,
-  directClasses = [],
 }: {
-  mode: "new" | "edit";
+  assetId: string;
   categories: Array<{ id: string; name: string; cls: AssetClass }>;
   types: Array<{ id: string; name: string; categoryId: string }>;
-  employees: ComboOption[];
   vendors?: Array<{ id: string; name: string }>;
   recentVendors?: string[];
-  /** Per-category next-tag suggestion data (Task 11's `tagSuggestions`) — new mode only. */
-  suggestions?: Record<string, CategorySuggestion>;
-  initial?: AssetFormInitial;
+  initial: AssetFormInitial;
   action: (payload: Record<string, unknown>) => Promise<ActionResult<{ id: string }>>;
-  /** Classes `role` is direct-lifecycle for — passed as a set, not a single
-   * boolean, because the category control (and so the class) can change
-   * client-side without a page reload; a static boolean would go stale the
-   * moment an admin switches from a Laptop to a Vehicle category. */
-  directClasses?: readonly AssetClass[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, startTransition] = useTransition();
-  const [form, setForm] = useState<AssetFormInitial>(
-    initial ?? {
-      tag: "", model: "", brand: "", serial: "", categoryId: "", typeId: "", purchasedAt: "",
-      cost: "", warrantyUntil: "", notes: "", vendorId: "", invoiceRef: "", rmaRef: "", repairQuote: "",
-    },
-  );
-  // A sentinel only: `effectiveStatus` below normalizes it to the chosen
-  // category's class, so this never reaches the control or the payload raw.
-  const [requestedStatus, setRequestedStatus] = useState<CreatableStatus>(DEFAULT_STATUS.IT);
-  const [assigneeId, setAssigneeId] = useState<string | null>(null);
-  const [assignReason, setAssignReason] = useState("");
+  const [form, setForm] = useState<AssetFormInitial>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  const [saved, setSaved] = useState(false);
+  // Bumped once per refused submit. The focus effect below is keyed on this,
+  // not on `errors` itself: the money fields also set and clear their error on
+  // blur, and an effect keyed on `errors` would pull focus straight back into
+  // the field the operator just tabbed out of.
+  const [refusals, setRefusals] = useState(0);
+  const rootRef = useRef<HTMLFormElement>(null);
 
-  // Task 12: next-tag suggestion (new mode). `tagTouched` freezes the
-  // suggestion the moment the tag field is hand-edited — a later category
-  // change must not clobber a number the user already chose.
-  const [tagTouched, setTagTouched] = useState(false);
-  const [tagHint, setTagHint] = useState<string | null>(null);
-
-  // Task 12: documents attached at registration (new mode) — uploaded one by
-  // one, after createAsset, once the asset id exists to attach them to.
-  const [files, setFiles] = useState<Array<{ file: File; kind: string }>>([]);
-  const filesInputId = useId();
-
-  // Task 12: live duplicate check, debounced so every keystroke-then-blur
-  // does not fire a request. Two independent timers — checking Tag must not
-  // cancel an in-flight check for Serial, or vice versa.
-  const tagCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const serialCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Staleness guard for the two checks above: a 300 ms response can land
-  // after the user has already changed the field again (edit without an
-  // intervening blur, or Enter to submit) — `latestRef` always holds
-  // whatever the fields currently say, kept fresh every render (a plain
-  // assignment, not an effect, so it is current before the timer's .then
-  // ever runs), so a response for an old value can be told apart from one
-  // for the value that's still on screen.
-  const latestRef = useRef({ tag: form.tag, serial: form.serial });
-  latestRef.current = { tag: form.tag, serial: form.serial };
-  const mountedRef = useRef(true);
+  // Every field error renders in one pass; focus and scroll to the first
+  // invalid field after a refused submit. An effect (not a microtask beside
+  // the setState) because the refusal lands inside a transition, whose commit
+  // comes after the microtask queue has already run.
   useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-      // Both timer refs hold a live setTimeout id (never a DOM node) that
-      // `scheduleIdentifierCheck` keeps reassigning outside this effect —
-      // reading `.current` at unmount time is exactly the point.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      if (tagCheckTimer.current) clearTimeout(tagCheckTimer.current);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      if (serialCheckTimer.current) clearTimeout(serialCheckTimer.current);
-    };
-  }, []);
+    if (refusals === 0) return;
+    const first = rootRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    first?.focus();
+    first?.scrollIntoView({ block: "center" });
+  }, [refusals]);
 
-  function scheduleIdentifierCheck(
-    kind: "tag" | "serial",
-    value: string,
-    timer: MutableRefObject<ReturnType<typeof setTimeout> | null>,
-  ) {
-    if (timer.current) clearTimeout(timer.current);
-    if (!value) return;
-    // Phase 20 (spec §6.2): checkIdentifiers is now class-scoped. Guessing a
-    // class before a category is chosen would risk flagging a same-tag/
-    // serial collision that only exists in the OTHER class, so the live
-    // check is skipped entirely until the category names one — the server's
-    // own unique constraint (and the neutral post-submit conflict copy) is
-    // still the authority regardless.
-    const categoryCls = categories.find((c) => c.id === form.categoryId)?.cls;
-    if (!categoryCls) return;
-    timer.current = setTimeout(() => {
-      // Never blocks submit — this only ever paints an early hint; the
-      // server's unique constraint remains the authority at submit time.
-      void checkIdentifiers(
-        kind === "tag" ? { tags: [value], cls: categoryCls } : { serials: [value], cls: categoryCls },
-      ).then((res) => {
-        if (!mountedRef.current || !res.ok) return;
-        // The field this response is about may no longer hold the value we
-        // checked — ignore it rather than label whatever is there now.
-        // Tag is compared the same way `checkIdentifiers` itself normalises
-        // it (trim + upper-case, `tagKey`); serial is compared as typed —
-        // the server trims a serial (`createSchema`, `identifiersSchema`)
-        // but does not case-fold it, so raw equality is the right test for
-        // "has this field changed since we scheduled the check".
-        const latest = latestRef.current[kind];
-        const stale = kind === "tag" ? tagKey(value) !== tagKey(latest) : value !== latest;
-        if (stale) return;
-        // R9: a value only counts as "taken" once normalised the same way
-        // the server normalises it before matching — otherwise a lower-case
-        // typed tag, or a serial carrying incidental padding, never matches
-        // a normalised server hit even though the server would refuse it.
-        const hit = kind === "tag"
-          ? res.data.tags.map((t) => t.tag).includes(tagKey(value))
-          : res.data.serials.map((s) => s.serial).includes(value.trim());
-        setErrors((e) => {
-          if (hit) return { ...e, [kind]: "Already registered" };
-          if (!(kind in e)) return e;
-          const next = { ...e };
-          delete next[kind];
-          return next;
-        });
-      });
-    }, 300);
-  }
+  const clearError = (key: string) =>
+    setErrors((e) => {
+      if (!(key in e)) return e;
+      const next = { ...e };
+      delete next[key];
+      return next;
+    });
 
   const set = (key: keyof AssetFormInitial) => (value: string) => {
-    if (key === "tag") setTagTouched(true);
     setForm((f) => {
       const next = { ...f, [key]: value };
       // Derived, pre-filled, never blank: purchase date suggests +12 mo warranty.
@@ -191,62 +107,57 @@ export function AssetForm({
     });
   };
 
-  const typesForCategory = types.filter((t) => t.categoryId === form.categoryId);
+  const trim = (key: TextKey) => () => setForm((f) => ({ ...f, [key]: f[key].trim() }));
 
-  // The category decides the class; the class decides which initial states
-  // exist. Before a category is picked, follow the first category offered —
-  // a purchasing_staff user sees only Purchasing categories, so IT's states
-  // would be wrong for them (D-14b, D-15).
+  // "₱12,500.50" becomes "12500.50" on blur; anything that is not an amount
+  // keeps what was typed and says why, rather than being silently blanked.
+  const normaliseMoney = (key: MoneyKey) => () => {
+    const r = normaliseCost(form[key]);
+    if (r.ok) {
+      setForm((f) => ({ ...f, [key]: r.value }));
+      clearError(key);
+    } else setErrors((e) => ({ ...e, [key]: MONEY_ERROR }));
+  };
+
+  const typesForCategory = types.filter((t) => t.categoryId === form.categoryId);
   const cls: AssetClass = categories.find((c) => c.id === form.categoryId)?.cls ?? categories[0]?.cls ?? "IT";
-  const creatable = CREATABLE_BY_CLASS[cls];
-  const direct = directClasses.includes(cls);
-  // Derived, not reset by an effect: what the control shows and what the
-  // payload carries are the same expression, so they cannot disagree, and a
-  // class switch never paints an out-of-class selection for a frame.
-  const effectiveStatus: CreatableStatus = (creatable as readonly string[]).includes(requestedStatus)
-    ? requestedStatus
-    : DEFAULT_STATUS[cls];
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    setErrors({});
     setConflictMsg(null);
     setRetryAfter(null);
+    // Client checks set every error at once; the server's own refusals merge
+    // in the same way below.
+    const cost = normaliseCost(form.cost);
+    const repairQuote = normaliseCost(form.repairQuote);
+    const found: Record<string, string> = {};
+    if (form.model.trim().length < 2) found.model = "Name the model";
+    if (!form.categoryId) found.categoryId = "Pick a category";
+    if (!cost.ok) found.cost = MONEY_ERROR;
+    if (!repairQuote.ok) found.repairQuote = MONEY_ERROR;
+    if (Object.keys(found).length > 0) {
+      setErrors(found);
+      setRefusals((n) => n + 1);
+      return;
+    }
+    setErrors({});
+    const payload = {
+      ...form,
+      cost: cost.ok ? cost.value : form.cost,
+      repairQuote: repairQuote.ok ? repairQuote.value : form.repairQuote,
+    };
     startTransition(async () => {
-      const res = await action({
-        ...form,
-        requestedStatus: mode === "new" ? effectiveStatus : undefined,
-        assigneeId: mode === "new" ? (assigneeId ?? "") : undefined,
-        assignReason: mode === "new" ? assignReason : undefined,
-      });
+      const res = await action(payload);
       if (res.ok) {
-        if (mode === "new") {
-          // Parallel, not sequential: storeUpload can throw (disk I/O) — a
-          // thrown upload counts as a failure exactly like `!up.ok`; it must
-          // never abort the batch or strand the user on the form after the
-          // asset was already created.
-          const results = await Promise.all(files.map(async ({ file, kind }) => {
-            const fd = new FormData();
-            fd.set("assetId", res.data.id); fd.set("kind", kind); fd.set("file", file);
-            try { return (await uploadDocument(fd)).ok; } catch { return false; }
-          }));
-          const failed = results.filter((ok) => !ok).length;
-          router.push(
-            failed
-              ? `/inventory/${res.data.id}/documents?failed=${failed}&of=${files.length}`
-              : `/inventory/${res.data.id}?created=1`,
-          );
-        } else {
-          setSaved(true);
-          setTimeout(() => setSaved(false), 3000);
-          router.refresh();
-        }
+        toast(`${initial.tag} saved`, "settled");
+        router.push(`/inventory/${res.data.id}`);
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
         const fe = res.fieldErrors ?? {};
         setErrors(fe);
-        // errors no FormField claims (_form/id/requestedStatus) must not dead-end silently
-        const unclaimed = fe._form ?? fe.id ?? fe.requestedStatus;
+        setRefusals((n) => n + 1);
+        // errors no FormField claims (_form/id) must not dead-end silently
+        const unclaimed = fe._form ?? fe.id;
         if (unclaimed) setConflictMsg(unclaimed);
       }
       else setConflictMsg(res.message);
@@ -260,6 +171,7 @@ export function AssetForm({
       required?: boolean;
       hint?: string;
       type?: string;
+      inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
       disabled?: boolean;
       placeholder?: string;
       onBlur?: () => void;
@@ -273,10 +185,7 @@ export function AssetForm({
           aria-describedby={p["aria-describedby"]}
           invalid={p.invalid}
           type={opts.type ?? "text"}
-          // every number field on this form is money — centavos must not stepMismatch
-          step={opts.type === "number" ? "0.01" : undefined}
-          min={opts.type === "number" ? "0" : undefined}
-          inputMode={opts.type === "number" ? "decimal" : undefined}
+          inputMode={opts.inputMode}
           disabled={opts.disabled}
           placeholder={opts.placeholder}
           autoFocus={opts.autoFocus}
@@ -289,7 +198,7 @@ export function AssetForm({
   );
 
   return (
-    <form onSubmit={submit} className="flex max-w-[720px] flex-col gap-4">
+    <form ref={rootRef} onSubmit={submit} className="flex max-w-[720px] flex-col gap-4">
       {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
       {conflictMsg && <Banner tone="fault" title={conflictMsg} />}
 
@@ -298,19 +207,14 @@ export function AssetForm({
         <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {field("Asset tag", "tag", {
             required: true,
-            hint: mode === "edit"
-              ? "Tags are permanent — they're printed labels."
-              : (tagHint ?? "Format BR-XX-0000, as printed on the label."),
-            disabled: mode === "edit",
-            placeholder: CLASS_EXAMPLE[cls].tag,
-            onBlur: mode === "new" ? () => scheduleIdentifierCheck("tag", form.tag, tagCheckTimer) : undefined,
-            autoFocus: mode === "new",
+            hint: "Tags are permanent — they're printed labels.",
+            disabled: true,
           })}
-          {field("Model", "model", { required: true, placeholder: CLASS_EXAMPLE[cls].model, autoFocus: mode === "edit" })}
-          {field("Brand", "brand")}
-          {field("Serial", "serial", {
-            onBlur: mode === "new" ? () => scheduleIdentifierCheck("serial", form.serial, serialCheckTimer) : undefined,
+          {field("Model", "model", {
+            required: true, placeholder: CLASS_EXAMPLE[cls].model, autoFocus: true, onBlur: trim("model"),
           })}
+          {field("Brand", "brand", { onBlur: trim("brand") })}
+          {field("Serial", "serial", { onBlur: trim("serial") })}
           <FormField label="Category" required error={errors.categoryId}>
             {(p) => (
               <Select
@@ -318,26 +222,7 @@ export function AssetForm({
                 value={form.categoryId}
                 onChange={(e) => {
                   const categoryId = e.target.value;
-                  const s = suggestions?.[categoryId];
-                  const prefix = s ? preferredPrefix(s.prefixes) : null;
-                  const run = prefix ? nextTags(prefix, s!.highest[prefix] ?? null, 1) : null;
-                  setForm((f) => ({
-                    ...f,
-                    categoryId,
-                    typeId: "",
-                    tag: mode === "new" && !tagTouched && run?.ok ? run.tags[0] : f.tag,
-                  }));
-                  if (mode === "new") {
-                    setTagHint(
-                      !categoryId
-                        ? null
-                        : !prefix
-                          ? "No tags yet for this category — type BR-XX-0000."
-                          : run?.ok
-                            ? `Suggested — next free number for BR-${prefix}. Edit if you need another.`
-                            : RUN_REFUSAL[run!.reason],
-                    );
-                  }
+                  setForm((f) => ({ ...f, categoryId, typeId: "" }));
                 }}
               >
                 <option value="">Pick a category…</option>
@@ -365,7 +250,7 @@ export function AssetForm({
         <CardHeader title="Procurement" />
         <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {field("Purchased", "purchasedAt", { type: "date" })}
-          {field("Cost (₱)", "cost", { type: "number" })}
+          {field("Cost (₱)", "cost", { inputMode: "decimal", onBlur: normaliseMoney("cost") })}
           <FormField label="Vendor" error={errors.vendorId}>
             {(p) => (
               <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
@@ -374,7 +259,7 @@ export function AssetForm({
                 placeholder="Type a vendor name…" />
             )}
           </FormField>
-          {field("Invoice / receipt no.", "invoiceRef")}
+          {field("Invoice / receipt no.", "invoiceRef", { onBlur: trim("invoiceRef") })}
           {field("Warranty until", "warrantyUntil", { type: "date", hint: "Pre-filled at purchase + 12 months — adjust if the quote says otherwise." })}
           <FormField label="Notes" error={errors.notes} className="sm:col-span-2">
             {(p) => (
@@ -382,121 +267,26 @@ export function AssetForm({
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 value={form.notes}
                 onChange={(e) => set("notes")(e.target.value)}
+                onBlur={trim("notes")}
               />
             )}
           </FormField>
         </CardBody>
       </Card>
 
-      {mode === "edit" && (
-        <Card>
-          <CardHeader title="Repair / RMA" />
-          <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {field("RMA reference", "rmaRef")}
-            {field("Repair quote (₱)", "repairQuote", { type: "number" })}
-          </CardBody>
-        </Card>
-      )}
+      <Card>
+        <CardHeader title="Repair / RMA" />
+        <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {field("RMA reference", "rmaRef", { onBlur: trim("rmaRef") })}
+          {field("Repair quote (₱)", "repairQuote", { inputMode: "decimal", onBlur: normaliseMoney("repairQuote") })}
+        </CardBody>
+      </Card>
 
-      {mode === "new" && (
-        <Card>
-          <CardHeader title="Documents" />
-          <CardBody className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={filesInputId} className="text-xs font-medium text-fg">Documents</label>
-              <input
-                id={filesInputId}
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                multiple
-                className="text-xs text-fg-secondary"
-                onChange={(e) => {
-                  const chosen = Array.from(e.target.files ?? []);
-                  setFiles((prev) => [...prev, ...chosen.map((file) => ({ file, kind: "receipt" }))]);
-                  e.target.value = "";
-                }}
-              />
-              <p className="text-[11px] text-fg-muted">PDF · PNG · JPG — max 10 MB each.</p>
-            </div>
-            {files.length > 0 && (
-              <ul className="flex flex-col gap-2">
-                {files.map((f, i) => (
-                  <li key={i} className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-xs text-fg-secondary">{f.file.name}</span>
-                    <Select
-                      aria-label={`Kind for ${f.file.name}`}
-                      value={f.kind}
-                      onChange={(e) =>
-                        setFiles((prev) => prev.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))
-                      }
-                      className="w-auto"
-                    >
-                      {DOCUMENT_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
-                    >
-                      Remove
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
-      )}
-
-      {mode === "new" && (
-        <Card>
-          <CardHeader title="Initial state" />
-          <CardBody className="flex flex-col gap-4">
-            <SegmentedControl
-              aria-label="Initial status"
-              options={creatable.map((s) => ({ value: s, label: s }))}
-              value={effectiveStatus}
-              onChange={(v) => setRequestedStatus(v as CreatableStatus)}
-            />
-            {effectiveStatus !== DEFAULT_STATUS[cls] && (
-              <>
-                <p className="text-xs text-fg-muted">
-                  {direct ? (
-                    "Deployed to the chosen person at registration — recorded in the audit trail."
-                  ) : (
-                    <>Assignment routes through a <span className="font-mono">lifecycle.assign</span> approval —
-                    the asset is registered as {DEFAULT_STATUS[cls]} and flips once the request executes.</>
-                  )}
-                </p>
-                <FormField label="Assign to" required error={errors.assigneeId}>
-                  {(p) => (
-                    <EntityCombobox
-                      id={p.id}
-                      aria-describedby={p["aria-describedby"]}
-                      invalid={p.invalid}
-                      options={employees}
-                      value={assigneeId}
-                      onChange={setAssigneeId}
-                      placeholder="Type a name or EMP number…"
-                    />
-                  )}
-                </FormField>
-                <ReasonField
-                  error={errors.assignReason} value={assignReason} onChange={setAssignReason}
-                  chips={REASON_CHIPS["asset.assign"]} disabled={pending}
-                />
-              </>
-            )}
-          </CardBody>
-        </Card>
-      )}
-
-      <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" loading={pending}>
-          {mode === "new" ? "Register asset" : saved ? "✓ Saved" : "Save changes"}
+      <div className="sticky bottom-0 z-10 -mx-1 flex items-center gap-3 border-t border-border bg-surface px-1 py-3">
+        <Button type="button" variant="ghost" disabled={pending} onClick={() => router.push(`/inventory/${assetId}`)}>
+          Cancel
         </Button>
-        {saved && <span className="text-xs text-fg-muted">audit entry written</span>}
+        <Button type="submit" variant="primary" loading={pending}>Save changes</Button>
       </div>
     </form>
   );

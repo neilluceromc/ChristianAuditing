@@ -1,30 +1,20 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
 import { Tabs } from "@/components/ui/tabs";
-import { Pill } from "@/components/ui/pill";
 
-export function RecordTabs({ assetId, showSecrets }: { assetId: string; showSecrets: boolean }) {
+/** Phase 30 (spec §4.4): Secrets reads plainly (its page says reads are audited); holds exist for IT only. */
+export function RecordTabs({ assetId, cls, showSecrets }: { assetId: string; cls: AssetClass; showSecrets: boolean }) {
   const pathname = usePathname();
   const base = `/inventory/${assetId}`;
   const items = [
-    { label: "Overview" as React.ReactNode, href: base },
-    { label: "History" as React.ReactNode, href: `${base}/history` },
-    { label: "Timeline" as React.ReactNode, href: `${base}/timeline` },
-    { label: "Documents" as React.ReactNode, href: `${base}/documents` },
-    ...(showSecrets
-      ? [
-          {
-            label: (
-              <span className="inline-flex items-center gap-1.5">
-                Secrets <Pill>AUDITED</Pill>
-              </span>
-            ) as React.ReactNode,
-            href: `${base}/secrets`,
-          },
-        ]
-      : []),
-    { label: "Reservations" as React.ReactNode, href: `${base}/reservations` },
+    { label: "Overview", href: base },
+    { label: "History", href: `${base}/history` },
+    { label: "Timeline", href: `${base}/timeline` },
+    { label: "Documents", href: `${base}/documents` },
+    ...(showSecrets ? [{ label: "Secrets", href: `${base}/secrets` }] : []),
+    ...(cls === "IT" ? [{ label: "Reservations", href: `${base}/reservations` }] : []),
   ].map((t) => ({ ...t, active: t.href === base ? pathname === base : pathname.startsWith(t.href) }));
   return <Tabs items={items} label="Record sections" />;
 }

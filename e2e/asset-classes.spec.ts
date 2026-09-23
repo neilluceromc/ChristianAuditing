@@ -400,15 +400,15 @@ test.describe("Finance send-back and resubmit speak the class", () => {
     // even see this record: BR-FN-0003 is Purchasing-class furniture, and IT
     // only sees the IT class now (VISIBLE_CLASSES, src/lib/asset-class.ts).
     // getVisibleAsset returns null for it_staff here, so AssetRecordLayout's
-    // OWN notFound() fires. D-: this is NOT the scoped "Asset not found"
-    // EmptyState case 5 uses — that page (inventory/[id]/not-found.tsx) is a
-    // SIBLING of the layout, and per Next.js's not-found convention a
-    // segment's own not-found.tsx cannot catch a notFound() thrown by that
-    // same segment's layout; it bubbles to the app's root not-found.tsx
-    // instead ("This page doesn't exist").
+    // OWN notFound() fires. Phase 30 (plan P-15): that layout now lives in the
+    // (record) route group, one segment BELOW inventory/[id]/not-found.tsx, so
+    // the scoped "Asset not found" EmptyState catches it — the same page case
+    // 5 shows for a child route's own notFound(). (While the layout sat beside
+    // not-found.tsx in [id]/, its notFound() bubbled past to the app's root
+    // "This page doesn't exist".)
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await expect(page.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    await expect(page.getByText("Asset not found", { exact: true })).toBeVisible();
 
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
@@ -428,13 +428,12 @@ test.describe("page gates speak the class", () => {
     const carId = await idOf("BR-VH-0001");
     await login(page, "it@thebackroomop.com");
     // Phase 14: IT cannot see a Purchasing asset at all (not just its Edit
-    // link) — the edit URL is under the same AssetRecordLayout as the record
-    // itself, so it 404s via the layout's own notFound(). D-: that lands on
-    // the app's root not-found page ("This page doesn't exist"), not the
-    // scoped "Asset not found" EmptyState case 5 uses for a child route's own
-    // notFound() — see the D- note on case 16 for why the two differ.
+    // link). Phase 30 (plan P-15): the edit route left the record layout, so
+    // it is the edit page's own notFound() that fires, and
+    // inventory/[id]/not-found.tsx — its parent segment's boundary — shows the
+    // scoped "Asset not found", as for the record itself (case 16).
     await page.goto(`/inventory/${carId}/edit`);
-    await expect(page.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    await expect(page.getByText("Asset not found", { exact: true })).toBeVisible();
 
     const laptopId = await idOf("BR-LT-0148");
     await login(page, "purchasing@thebackroomop.com");

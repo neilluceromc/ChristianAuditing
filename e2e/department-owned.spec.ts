@@ -189,9 +189,18 @@ test.describe("documents by class", () => {
     // D-: documents-panel.tsx only renders "Mark signed" for kind
     // "accountability-form" (`doc.kind === "accountability-form"`) — "other"
     // (the plan's draft) never gets a sign control.
+    // Phase 30 (spec §4.4): choosing the file stages it first — the kind is
+    // picked beside its name, and nothing is stored until Upload. A file set
+    // before hydration never reaches React's onChange, so choose again until
+    // the staged row (and its kind select) shows up; re-choosing only
+    // replaces the staged file.
+    await expect(async () => {
+      await page.locator('input[type="file"]').setInputFiles(pdf);
+      await expect(page.getByLabel("Document kind")).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
     await page.getByLabel("Document kind").selectOption("accountability-form");
-    await page.locator('input[type="file"]').setInputFiles(pdf);
-    await expect(page.getByText("orcr.pdf")).toBeVisible();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+    await expect(page.getByRole("link", { name: "orcr.pdf" })).toBeVisible();
     await page.getByRole("button", { name: "Mark signed" }).click();
     // D-: getByText("SIGNED") without exact:true also matches the "Mark
     // signed" button's OWN label (substring match, case-insensitive) —
@@ -339,11 +348,11 @@ test.describe("visibility", () => {
     await expect(page).toHaveURL(/\/inventory$/);
     await expect(page.getByRole("navigation", { name: "Asset class" })).toHaveCount(0);
     await page.goto(`/inventory/${car}`);
-    // D-: AssetRecordLayout's own notFound() (a wrong-class id) bubbles past
-    // the scoped inventory/[id]/not-found.tsx (a sibling of the layout, which
-    // per Next.js cannot catch a notFound() the layout itself throws) to the
-    // app's root not-found page — "This page doesn't exist", not "not found".
-    await expect(page.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    // Phase 30 (plan P-15): AssetRecordLayout (a wrong-class id calls its own
+    // notFound()) moved into the (record) route group, one segment below the
+    // scoped inventory/[id]/not-found.tsx, which now catches it — "Asset not
+    // found", where it used to bubble to the app's root "This page doesn't exist".
+    await expect(page.getByText("Asset not found", { exact: true })).toBeVisible();
     await page.goto("/inventory/scan/BR-VH-0001");
     await expect(page.getByText("BR-VH-0001 is not in your register.")).toBeVisible();
     await login(page, P);
