@@ -164,10 +164,14 @@ test.describe("registration — the primary path", () => {
     const dupeTag = await page.getByLabel("Tag 1").inputValue();
     await page.getByLabel("Tag 2").fill(dupeTag);
 
+    // Phase 30 (spec §5.5): said as soon as the row repeats, naming the row in
+    // registerAssets' own words — and the submit is refused right here, so it
+    // hands focus back to the repeated cell and the server is never asked.
+    const repeat = page.getByText(`Row 2 · ${dupeTag} appears twice in this batch`);
+    await expect(repeat).toBeVisible();
     await page.getByRole("button", { name: "Register 2 assets" }).click();
-    // The conflict names the tag — this is the assertion the report's
-    // mutation proof (Step 5) checks is not inert.
-    await expect(page.getByText(`${dupeTag} appears twice in this batch.`)).toBeVisible();
+    await expect(page.getByLabel("Tag 2")).toBeFocused();
+    await expect(repeat).toHaveCount(1);
 
     // The absence of a success message proves nothing — only the count does.
     expect(await db.asset.count()).toBe(before);
@@ -183,8 +187,12 @@ test.describe("registration — the primary path", () => {
     await page.getByLabel("Quantity").fill("1");
     await page.getByLabel("Tag 1").fill("BR-LT-0148"); // seeded, already exists
 
-    await page.getByRole("button", { name: "Register asset" }).click();
-    await expect(page.getByText("One of those tags was just taken. Reload and try again.")).toBeVisible();
+    // Phase 30 (plan P-13, ruling R3): quantity 1 goes through createAsset,
+    // whose one-pass refusal names the tag on row 1 — the same words the live
+    // check shows, so one line, not two.
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page.getByLabel("Tag 1")).toBeFocused({ timeout: 10_000 });
+    await expect(page.getByText("Row 1 · BR-LT-0148 is already registered")).toHaveCount(1);
 
     // This guard is a database uniqueness constraint, not application logic —
     // no mutation proof is needed for it (Step 5).

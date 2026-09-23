@@ -203,16 +203,18 @@ test.describe("inventory list", () => {
 test.describe("asset record", () => {
   test("create → duplicate tag is an inline error, valid create lands on the record", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto("/inventory/new");
-    await page.getByLabel(/Asset tag/).fill("BR-LT-0148");
-    await page.getByLabel(/Model/).fill("e2e duplicate probe");
+    // Phase 30 (spec §5.1–§5.2): one Register flow; the category comes first
+    // (it decides the tag's prefix), and at quantity 1 row 1 is the tag.
+    await page.goto("/inventory/register");
     await page.getByLabel(/Category/).selectOption({ label: "Laptop" });
-    await page.getByRole("button", { name: "Register asset" }).click();
-    await expect(page.getByText("That tag is already registered")).toBeVisible();
+    await page.getByLabel("Tag 1").fill("BR-LT-0148");
+    await page.getByLabel(/Model/).fill("e2e duplicate probe");
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page.getByText("Row 1 · BR-LT-0148 is already registered")).toBeVisible();
 
     const tag = `BR-ZZ-${String(Date.now() % 10000).padStart(4, "0")}`;
-    await page.getByLabel(/Asset tag/).fill(tag);
-    await page.getByRole("button", { name: "Register asset" }).click();
+    await page.getByLabel("Tag 1").fill(tag);
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
     await expect(page.getByRole("heading", { name: tag })).toBeVisible();
   });
 

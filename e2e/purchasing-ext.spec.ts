@@ -297,8 +297,10 @@ test.describe.serial("purchasing extensions", () => {
     await page.getByLabel("Model").fill("e2e provenance -- direct");
     await expect(page.getByLabel("Tag 1")).not.toHaveValue("");
     const directTag = await page.getByLabel("Tag 1").inputValue();
-    await page.getByRole("button", { name: "Register asset" }).click();
-    await expect(page.getByText(/1 asset registered/)).toBeVisible({ timeout: 30_000 });
+    // Phase 30 (spec §5.6, plan P-13): quantity 1 is one asset and ends on its record.
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
+    await expect(page.getByText(`${directTag} registered`)).toBeVisible();
 
     await page.goto(`/inventory?q=${directTag}`);
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
@@ -308,11 +310,13 @@ test.describe.serial("purchasing extensions", () => {
     await page.goto("/inventory/register");
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
     await page.getByLabel("Model").fill("e2e provenance -- from PR-0188");
-    await page.getByLabel("Purchase request").selectOption({ label: "PR-0188" });
+    // Phase 30 (spec §5.2): a request option reads `{refNo} · {vendor} · {date}`, so pick it by id.
+    await page.getByLabel("Purchase request").selectOption((await reqByRef("PR-0188")).id);
     await expect(page.getByLabel("Tag 1")).not.toHaveValue("");
     const fromPrTag = await page.getByLabel("Tag 1").inputValue();
-    await page.getByRole("button", { name: "Register asset" }).click();
-    await expect(page.getByText(/1 asset registered/)).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
+    await expect(page.getByText(`${fromPrTag} registered`)).toBeVisible();
 
     await page.goto(`/inventory?q=${fromPrTag}`);
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
@@ -338,18 +342,24 @@ test.describe.serial("purchasing extensions", () => {
     const techServe = await vendorByName("TechServe PH");
     const octagon = await vendorByName("Octagon Repairs");
 
+    const pr0188 = await reqByRef("PR-0188");
     await page.goto("/inventory/register");
     const requestSelect = page.getByLabel("Purchase request");
     await waitForHydration(requestSelect);
-    await requestSelect.selectOption({ label: "PR-0188" });
-    await expect(page.getByLabel("Vendor")).toHaveValue(techServe.id);
+    // Phase 30 (spec §5.2): the option names the request's supplier and date,
+    // and Vendor is the searchable picker (it shows the supplier's name).
+    await expect(requestSelect.locator(`option[value="${pr0188.id}"]`)).toHaveText(/^PR-0188 · TechServe PH · \d{2} \w{3} \d{4}$/);
+    await requestSelect.selectOption(pr0188.id);
+    await expect(page.getByLabel("Vendor")).toHaveValue(techServe.name);
 
     await page.goto("/inventory/register");
-    const vendorSelect = page.getByLabel("Vendor");
-    await waitForHydration(vendorSelect);
-    await vendorSelect.selectOption({ label: "Octagon Repairs" });
-    await page.getByLabel("Purchase request").selectOption({ label: "PR-0188" });
-    await expect(page.getByLabel("Vendor")).toHaveValue(octagon.id);
+    const vendorPicker = page.getByLabel("Vendor");
+    await waitForHydration(vendorPicker);
+    await vendorPicker.fill("Octagon");
+    await vendorPicker.locator("xpath=following-sibling::ul").getByRole("option", { name: /Octagon Repairs/ }).first().click();
+    await expect(vendorPicker).toHaveValue(octagon.name);
+    await page.getByLabel("Purchase request").selectOption(pr0188.id);
+    await expect(page.getByLabel("Vendor")).toHaveValue(octagon.name);
   });
 
   test("8. no serious or critical axe violations on PR-0198's detail (Supplier + Attachments) or the historical-provenance inventory view", async ({ page }) => {

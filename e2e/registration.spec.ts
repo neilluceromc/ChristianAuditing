@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
@@ -67,6 +67,19 @@ async function expectNoSeriousAxe(page: Page) {
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
 }
 
+// Copied from e2e/purchasing-ext.spec.ts (house rule: never import across spec
+// files). A control is live once React has attached its fiber; a selectOption
+// that lands before that is thrown away by hydration.
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(
+      true,
+    );
+  }).toPass({ timeout: 20_000 });
+}
+
 /** Highest number in use under a prefix — never hardcode a literal; an earlier test may have registered more. */
 async function highestNumber(prefix: string): Promise<number> {
   const rows = await db.asset.findMany({ where: { tag: { startsWith: `BR-${prefix}-` } }, select: { tag: true } });
@@ -81,19 +94,25 @@ test.describe.serial("registration", () => {
   test("1. picking a category prefills the next free tag for its most-used prefix", async ({ page }) => {
     const next = tagOf("LT", (await highestNumber("LT")) + 1);
     await login(page, IT);
+    // Phase 30 (spec §5.1): /inventory/new is a redirect to the one Register
+    // flow, whose quantity-1 row IS the single tag field (plan P-12).
     await page.goto("/inventory/new");
+    await expect(page).toHaveURL(/\/inventory\/register$/);
+    // The redirect streams (inventory/loading.tsx), so the form can still be
+    // hydrating when the URL has already changed.
+    await waitForHydration(page.getByLabel("Category"));
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await expect(page.getByLabel("Asset tag")).toHaveValue(next);
-    await expect(page.getByText("Suggested — next free number for BR-LT. Edit if you need another.")).toBeVisible();
+    await expect(page.getByLabel("Tag 1")).toHaveValue(next);
+    await expect(page.getByText("The label is printed after you register.")).toBeVisible();
     // Still editable — a hand-typed tag survives the suggestion.
-    await page.getByLabel("Asset tag").fill(tagOf("LT", 9000));
-    await expect(page.getByLabel("Asset tag")).toHaveValue("BR-LT-9000");
+    await page.getByLabel("Tag 1").fill(tagOf("LT", 9000));
+    await expect(page.getByLabel("Tag 1")).toHaveValue("BR-LT-9000");
   });
 
   test("2. vendor, brand and a document chosen at creation land on the record", async ({ page }) => {
     const tag = tagOf("LT", (await highestNumber("LT")) + 1);
     await login(page, IT);
-    await page.goto("/inventory/new");
+    await page.goto("/inventory/register");
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
     await page.getByLabel("Model").fill("ThinkPad E14 (e2e reg)");
     await page.getByLabel("Brand").fill("Lenovo");
@@ -107,10 +126,12 @@ test.describe.serial("registration", () => {
     await vendor.fill("TechServe");
     await vendor.locator("xpath=following-sibling::ul").getByRole("option", { name: /TechServe PH/ }).first().click();
     await expect(vendor).toHaveValue("TechServe PH");
+    // Phase 30 (spec §5.4): quantity 1 takes several documents, each with a kind, in the styled drop zone.
     await page.getByLabel(/Documents/).setInputFiles({
       name: "quote.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 e2e"),
     });
-    await page.getByRole("button", { name: "Register asset" }).click();
+    await expect(page.getByLabel("Kind for quote.pdf")).toHaveValue("receipt");
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
     await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
     await expect(page.getByText(`${tag} registered`)).toBeVisible();
     await expect(page.getByRole("link", { name: "Print label" })).toHaveAttribute("href", /\/inventory\/labels\?ids=/);
@@ -132,15 +153,18 @@ test.describe.serial("registration", () => {
     await db.asset.update({ where: { id: target.id }, data: { serial } });
 
     await login(page, IT);
-    await page.goto("/inventory/new");
+    await page.goto("/inventory/register");
     // Phase 20 (spec §6.2): checkIdentifiers is class-scoped now, and the
     // live check is skipped entirely until a category names the class — a
     // category-less guess could flag a collision that only exists in the
     // OTHER class. BR-LT-0201 is a Laptop, so choose that class first.
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Serial").fill(serial);
-    await page.getByLabel("Model").click(); // blur
-    await expect(page.getByText("Already registered")).toBeVisible({ timeout: 10_000 });
+    // Phase 30 (spec §5.5): checked while typing, and the message names the
+    // record the serial is already on, linked to it.
+    await page.getByLabel("Serial 1").fill(serial);
+    const hint = page.getByText(`Serial ${serial} is already on BR-LT-0201`);
+    await expect(hint).toBeVisible({ timeout: 10_000 });
+    await expect(hint.getByRole("link", { name: "BR-LT-0201" })).toHaveAttribute("href", `/inventory/${target.id}`);
   });
 
   test("4. the batch page registers 3 units with the Purchasing fields and one invoice on each", async ({ page }) => {
@@ -199,14 +223,21 @@ test.describe.serial("registration", () => {
     await page.getByLabel("Serial 1").fill("SAME-1");
     await page.getByLabel("Serial 2").fill("SAME-1");
     await page.getByLabel("Model").click(); // blur
-    await expect(page.getByText("Serial SAME-1 appears twice in this batch.")).toBeVisible();
+    // Phase 30 (spec §5.5): the row is named, in registerAssets' own words.
+    await expect(page.getByText("Row 2 · serial SAME-1 appears twice in this batch")).toBeVisible();
 
     await page.getByLabel("Serial 2").fill(seededSerial);
     await page.getByLabel("Model").click(); // blur
-    await expect(page.getByText(`Already registered: ${seededSerial}`)).toBeVisible({ timeout: 10_000 });
+    const onRecord = page.getByText(`Serial ${seededSerial} is already on BR-VH-0002`);
+    await expect(onRecord).toBeVisible({ timeout: 10_000 });
 
+    // The server refuses with the same words (one line, not two); the refused
+    // submit hands focus back to the invalid cell, and nothing is written.
+    const before = await db.asset.count();
     await page.getByRole("button", { name: "Register 2 assets" }).click();
-    await expect(page.getByText(`Serial ${seededSerial} is already registered`)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByLabel("Serial 2")).toBeFocused({ timeout: 10_000 });
+    await expect(onRecord).toHaveCount(1);
+    expect(await db.asset.count()).toBe(before);
   });
 
   test("6. IT's navigation reaches the batch page", async ({ page }) => {

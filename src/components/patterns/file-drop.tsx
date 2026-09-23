@@ -63,6 +63,8 @@ export function FileDrop(props: FileDropProps) {
         multiple={props.multiple}
         disabled={disabled}
         className="sr-only"
+        // The Choose button opens it; a second, invisible tab stop would only lose the focus ring.
+        tabIndex={-1}
         aria-label={label}
         onChange={(e) => {
           take(e.target.files);

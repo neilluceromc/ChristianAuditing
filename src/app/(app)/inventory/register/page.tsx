@@ -2,25 +2,46 @@ import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { RegisterForm } from "@/components/inventory/register-form";
-import { registerAssets } from "@/server/modules/purchases/receiving";
 import { tagSuggestions } from "@/server/modules/inventory/tag-suggest";
-import { REGISTRABLE_CLASSES } from "@/lib/asset-class";
+import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { recentPicks } from "@/server/recent-picks";
+import { toSearchParams } from "@/lib/url-state";
+import { fmtDate } from "@/lib/format";
+import {
+  ASSET_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, defaultClassFor, isDirectLifecycle, parseCls, withViewClsQS,
+} from "@/lib/asset-class";
 
-export default async function RegisterAssetsPage() {
-  // Phase 14: Purchasing registers assets of BOTH classes, IT registers IT
-  // only — registering is not managing. The class check itself lives
-  // server-side in `registerAssets`; this just scopes what the form offers
-  // to pick from.
+/**
+ * Phase 30 (spec §5): the one Register flow — quantity 1 creates one asset
+ * (with its initial state, holder, loan date and documents), more creates a
+ * batch. Purchasing registers both classes, IT its own (Phase 14); the class
+ * checks themselves live in `createAsset` / `registerAssets`, this only scopes
+ * what the form offers.
+ */
+export default async function RegisterAssetsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireRole("admin", "it_staff", "purchasing_staff");
+  const cls = parseCls(toSearchParams(await searchParams).get("cls"));
+  // `?cls=` narrows the categories only to a class this role may register —
+  // admin arriving from the Purchasing view gets Purchasing's categories, not
+  // whichever class's names sort first (D-14). Anything else is ignored.
+  const scopedCls = cls !== null && canRegisterClass(user.role, cls) ? cls : null;
+  const classes = scopedCls ? [scopedCls] : [...REGISTRABLE_CLASSES[user.role]];
+  // The category (and so the class) can change client-side, so the form gets
+  // every class this role applies lifecycle changes to directly, not one flag.
+  const directClasses = ASSET_CLASSES.filter((c) => isDirectLifecycle(user.role, c));
 
-  const [categories, types, vendors, requests] = await Promise.all([
+  const [categories, types, vendors, requests, employees, recentEmployees, recentVendors] = await Promise.all([
     prisma.assetCategory.findMany({
-      where: { cls: { in: [...REGISTRABLE_CLASSES[user.role]] } },
+      where: { cls: { in: classes } },
       select: { id: true, name: true, cls: true },
       orderBy: { name: "asc" },
     }),
     prisma.assetType.findMany({
-      where: { category: { cls: { in: [...REGISTRABLE_CLASSES[user.role]] } } },
+      where: { category: { cls: { in: classes } } },
       select: { id: true, name: true, categoryId: true },
       orderBy: { name: "asc" },
     }),
@@ -31,36 +52,56 @@ export default async function RegisterAssetsPage() {
     }),
     prisma.purchaseRequest.findMany({
       where: { state: "COMPLETED" },
-      select: { id: true, refNo: true, vendorId: true },
-      orderBy: { refNo: "asc" },
+      select: { id: true, refNo: true, vendorId: true, completedAt: true, updatedAt: true, vendor: { select: { name: true } } },
+      orderBy: [{ completedAt: "desc" }, { refNo: "desc" }],
     }),
+    activeEmployeeOptions(),
+    recentPicks(user.id, "employee"),
+    recentPicks(user.id, "vendor"),
   ]);
 
-  // The client must not guess either of these — both come from the same
-  // grouped reads (`tagSuggestions`, Task 11). Counts are per-category (a
-  // form field the user picks); the highest-number map is keyed by prefix,
-  // not category, because a tag prefix is unique across the whole fleet
-  // regardless of which category a caller happens to be viewing — every
-  // entry `tagSuggestions` returns carries that same fleet-wide map.
+  // Both come from the same grouped reads (`tagSuggestions`): counts are per
+  // category (the field the operator picks); the highest number is per
+  // prefix, fleet-wide, because a tag is unique across the whole register.
   const suggestions = await tagSuggestions(categories.map((c) => c.id));
   const prefixCountsByCategory: Record<string, Array<{ prefix: string; n: number }>> =
     Object.fromEntries(Object.entries(suggestions).map(([id, s]) => [id, s.prefixes]));
   const highestByPrefix: Record<string, number> = Object.values(suggestions)[0]?.highest ?? {};
 
+  // The breadcrumb names the list it opens: the class `?cls=` scoped to, else the viewer's own default.
+  const defaultCls = defaultClassFor(user.role);
+  const listCls = scopedCls ?? defaultCls;
+  const listHref = "/inventory" + withViewClsQS("", listCls, defaultCls);
+
   return (
     <>
       <PageHeader
         title="Register assets"
-        breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Register" }]}
+        breadcrumb={[
+          {
+            label: listCls === "PURCHASING" ? "Purchasing assets" : "Inventory",
+            href: listHref,
+          },
+          { label: "Register assets" },
+        ]}
       />
       <RegisterForm
         categories={categories}
         types={types}
         vendors={vendors}
-        requests={requests}
+        recentVendors={recentVendors}
+        employees={employees}
+        recentEmployees={recentEmployees}
+        requests={requests.map((r) => ({
+          id: r.id,
+          vendorId: r.vendorId,
+          label: [r.refNo, r.vendor?.name, fmtDate(r.completedAt ?? r.updatedAt)].filter(Boolean).join(" · "),
+        }))}
         prefixCountsByCategory={prefixCountsByCategory}
         highestByPrefix={highestByPrefix}
-        action={registerAssets}
+        directClasses={directClasses}
+        defaultCls={defaultCls}
+        listHref={listHref}
       />
     </>
   );

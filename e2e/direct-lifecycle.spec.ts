@@ -225,17 +225,21 @@ test.describe.serial("direct changes", () => {
     const paolo = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0071" } }); // Paolo Santos, IT Support
 
     await login(page, IT);
-    await page.goto("/inventory/new");
-    await page.getByLabel(/Asset tag/).fill(tag);
-    await page.getByLabel(/Model/).fill("ThinkPad X1 (e2e deploy)");
+    // Phase 30 (spec §5.1–§5.3): the one Register flow — the category first,
+    // which suggests the next free tag on row 1; the initial state in the
+    // friendly words (plan P-6).
+    await page.goto("/inventory/register");
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    const initialStatus = page.getByRole("radiogroup", { name: "Initial status" });
-    await initialStatus.getByText("DEPLOYED").click();
-    // Phase 15 copy: direct registration never mentions an approval.
-    await expect(page.getByText("Deployed to the chosen person at registration — recorded in the audit trail.")).toBeVisible();
+    await expect(page.getByLabel("Tag 1")).toHaveValue(tag);
+    await page.getByLabel(/Model/).fill("ThinkPad X1 (e2e deploy)");
+    const initialState = page.getByRole("radiogroup", { name: "Initial state" });
+    await initialState.getByText("Deployed").click();
+    // Direct registration never mentions an approval.
+    await expect(page.getByText("Deployed to the chosen person.")).toBeVisible();
+    await expect(page.getByText("This files a request for approval.")).toHaveCount(0);
     await page.getByLabel("Assign to").fill("EMP-0071");
     await page.getByRole("option", { name: /EMP-0071/ }).click();
-    await page.getByRole("button", { name: "Register asset" }).click();
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
     await expect(page.getByRole("heading", { name: tag })).toBeVisible({ timeout: 20_000 });
 
     const asset = await db.asset.findUniqueOrThrow({ where: { tag } });

@@ -47,10 +47,10 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       heading: "Tracking",
       items: [
         { label: "Inventory", href: "/inventory" },
-        // Task 13: the batch register page — same roles as the
+        // The one Register flow (Phase 30, spec §5.1) — same roles as the
         // `/inventory/register` PATH_RULE below (admin, it_staff; purchasing
         // reaches it through the Purchasing workspace's own nav instead).
-        { label: "Register several", href: "/inventory/register", roles: ["admin", "it_staff"] },
+        { label: "Register assets", href: "/inventory/register", roles: ["admin", "it_staff"] },
         { label: "Employees", href: "/employees" },
         { label: "Worklist", href: "/inventory/work" },
         { label: "Approvals", href: "/approvals", badge: "approvals" },
@@ -137,7 +137,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         { label: "Asset types", href: "/admin/asset-types" },
       ],
     },
-    { heading: "Reference", items: [{ label: "IT inventory", href: "/inventory" }] },
+    // Phase 30 (plan P-7): Purchasing's list opens on its own class, so the IT list names its class.
+    { heading: "Reference", items: [{ label: "IT inventory", href: "/inventory?cls=IT" }] },
   ],
   finance: [
     { heading: "Overview", items: [{ label: "Home", href: "/" }] },

@@ -87,16 +87,12 @@ test.describe("registration — each class is its own department's", () => {
     await expect(page.getByLabel("Prefix")).toHaveValue("VH");
     await expect(page.getByLabel("Tag 1")).toHaveValue(registeredTag);
 
-    // Selector fixed from the plan's draft: quantity 1 renders the button
-    // "Register asset" (no leading count) — register-form.tsx's ternary only
-    // prepends the number when quantity > 1.
-    await page.getByRole("button", { name: "Register asset" }).click();
-    // Phase 16 Task 13: the register page no longer redirects to /inventory
-    // on success — it swaps the form for a RegisterSuccess panel in place
-    // ("1 asset registered — <tag>"). Wait for that panel instead of a
-    // navigation that no longer happens (the plan-draft note above about
-    // /\/inventory/ matching the current URL no longer applies either way).
-    await expect(page.getByText(`1 asset registered — ${registeredTag}`)).toBeVisible();
+    // Phase 30 (spec §5.6, plan P-13): quantity 1 is one asset — it goes
+    // through createAsset and ends on its record with the created notice,
+    // not on the batch card.
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
+    await expect(page.getByText(`${registeredTag} registered`)).toBeVisible();
 
     const a = await db.asset.findUniqueOrThrow({ where: { tag: registeredTag } });
     expect(a.cls).toBe("PURCHASING");
@@ -448,17 +444,29 @@ test.describe("page gates speak the class", () => {
   });
 
   test("18. /inventory/new offers each role its own categories", async ({ page }) => {
+    // Phase 30 (spec §5.1): /inventory/new redirects to the one Register flow,
+    // keeping ?cls=. The redirect can land after page.goto resolves (the page
+    // streams under inventory/loading.tsx), so each read waits for the form's
+    // own heading first — allTextContents() does not wait for anything.
+    const categoryOptions = async (url: RegExp) => {
+      await expect(page).toHaveURL(url);
+      await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
+      return page.getByLabel("Category").locator("option").allTextContents();
+    };
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory/new");
-    let options = await page.getByLabel("Category").locator("option").allTextContents();
+    let options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Vehicle");
     expect(options).toContain("Laptop");
+    // Both classes offered → one optgroup per class (spec §5.2).
+    await expect(page.getByLabel("Category").locator("optgroup")).toHaveCount(2);
 
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/new");
-    options = await page.getByLabel("Category").locator("option").allTextContents();
+    options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Laptop");
     expect(options).not.toContain("Vehicle");
+    await expect(page.getByLabel("Category").locator("optgroup")).toHaveCount(0);
 
     await login(page, "finance@thebackroomop.com");
     await page.goto("/inventory/new");
@@ -466,12 +474,15 @@ test.describe("page gates speak the class", () => {
 
     await login(page, "admin@thebackroomop.com");
     await page.goto("/inventory/new?cls=PURCHASING");
-    options = await page.getByLabel("Category").locator("option").allTextContents();
+    options = await categoryOptions(/\/inventory\/register\?cls=PURCHASING$/);
     expect(options).toContain("Vehicle");
     expect(options).not.toContain("Laptop");
+    // The breadcrumb names the list it came from.
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Purchasing assets", exact: true }))
+      .toHaveAttribute("href", "/inventory?cls=PURCHASING");
 
     await page.goto("/inventory/new");
-    options = await page.getByLabel("Category").locator("option").allTextContents();
+    options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Vehicle");
     expect(options).toContain("Laptop");
 
@@ -505,37 +516,42 @@ test.describe("the leaver-kit policy picker", () => {
 });
 
 test.describe("the create form's initial-state control follows the class", () => {
-  test("20. Vehicle offers 2 (STORED default), Laptop offers 3 (SPARE default), and the disclosure text tracks the choice", async ({ page }) => {
+  test("20. Vehicle offers 2 (Stored default), Laptop offers 3 (Spare default), and the disclosure text tracks the choice", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
-    await page.goto("/inventory/new");
+    // Phase 30 (spec §5.3): the Register form at quantity 1 carries the initial
+    // state, in the friendly status words (plan P-6).
+    await page.goto("/inventory/register");
 
     await page.getByLabel("Category").selectOption({ label: "Vehicle" });
-    const initialStatus = page.getByRole("radiogroup", { name: "Initial status" });
-    await expect(initialStatus.getByRole("radio")).toHaveCount(2);
-    await expect(initialStatus.getByRole("radio", { name: "STORED" })).toBeChecked();
-    await expect(initialStatus.getByRole("radio", { name: "OPERATIONAL" })).toBeVisible();
-    await expect(initialStatus.getByRole("radio", { name: "DEPLOYED" })).toHaveCount(0);
+    const initialState = page.getByRole("radiogroup", { name: "Initial state" });
+    await expect(initialState.getByRole("radio")).toHaveCount(2);
+    await expect(initialState.getByRole("radio", { name: "Stored" })).toBeChecked();
+    await expect(initialState.getByRole("radio", { name: "Operational" })).toBeVisible();
+    await expect(initialState.getByRole("radio", { name: "Deployed" })).toHaveCount(0);
+    await expect(page.getByText("Registered as a spare, ready to assign.")).toBeVisible();
 
-    await initialStatus.getByText("OPERATIONAL").click();
+    await initialState.getByText("Operational").click();
 
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await expect(initialStatus.getByRole("radio")).toHaveCount(3);
-    await expect(initialStatus.getByRole("radio", { name: "SPARE" })).toBeChecked();
-    await expect(initialStatus.getByRole("radio", { name: "OPERATIONAL" })).toHaveCount(0);
+    // Admin applies IT's lifecycle directly, so Loan is offered (ruling R4).
+    await expect(initialState.getByRole("radio")).toHaveCount(3);
+    await expect(initialState.getByRole("radio", { name: "Spare" })).toBeChecked();
+    await expect(initialState.getByRole("radio", { name: "Loan" })).toBeVisible();
+    await expect(initialState.getByRole("radio", { name: "Operational" })).toHaveCount(0);
 
-    // Phase 15: admin is direct-lifecycle for IT (DIRECT_LIFECYCLE_CLASSES),
-    // so picking DEPLOYED for a Laptop now shows the direct-apply disclosure
-    // instead of the old "routes through a lifecycle.assign approval" copy —
-    // asset-form.tsx's `direct` branch never mentions "registered as SPARE"
-    // at all, so that old assertion would now fail outright rather than pass
-    // on the wrong text. Purchasing (Vehicle, below) is still queue-only, so
-    // its copy is untouched.
-    await initialStatus.getByText("DEPLOYED").click();
-    await expect(page.getByText("Deployed to the chosen person at registration — recorded in the audit trail.")).toBeVisible();
+    // Direct for IT: the line says what happens, with no approval.
+    await initialState.getByText("Deployed").click();
+    await expect(page.getByText("Deployed to the chosen person.")).toBeVisible();
+    await expect(page.getByText("This files a request for approval.")).toHaveCount(0);
+    await initialState.getByText("Loan").click();
+    await expect(page.getByText("Lent to the chosen person until the date below.")).toBeVisible();
+    await expect(page.getByLabel("Loan until")).not.toHaveValue("");
 
+    // Purchasing keeps its queue: a holder state files a request.
     await page.getByLabel("Category").selectOption({ label: "Vehicle" });
-    await initialStatus.getByText("OPERATIONAL").click();
-    await expect(page.getByText(/registered as STORED/)).toBeVisible();
+    await initialState.getByText("Operational").click();
+    await expect(page.getByText("This files a request for approval.")).toBeVisible();
+    await expect(page.getByLabel("Loan until")).toHaveCount(0);
   });
 });
 

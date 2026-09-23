@@ -125,8 +125,10 @@ async function scanRoute(page: Page, path: string) {
 const ADMIN_ROUTES = ["/admin/users", "/admin/flags", "/admin/webhooks", "/admin/webhooks/deliveries"];
 
 // ── it_staff: PATH_RULES roles:[admin,it_staff], or page-level requireRole ─
+// Phase 30 (spec §5.1): /inventory/new is a redirect to /inventory/register now — scanning it would
+// scan the Register form twice (and scanRoute's landing check would, rightly, refuse the redirect).
 const IT_STAFF_ROUTES = [
-  "/inventory/new", "/inventory/import", "/inventory/register", "/inventory/work",
+  "/inventory/import", "/inventory/register", "/inventory/work",
   "/admin/asset-categories", "/admin/asset-types", "/admin/departments",
   "/employees/import", "/employees/new",
 ];

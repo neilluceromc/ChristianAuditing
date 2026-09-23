@@ -14,7 +14,7 @@ import { useLeaveTo } from "@/components/ui/back-link";
 import { EntityCombobox } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { CLASS_EXAMPLE } from "@/lib/asset-class";
-import { normaliseCost } from "@/lib/register-input";
+import { MONEY_ERROR, normaliseCost } from "@/lib/register-input";
 import type { ActionResult } from "@/server/action-result";
 
 export interface AssetFormInitial {
@@ -34,8 +34,6 @@ export interface AssetFormInitial {
   repairQuote: string;
 }
 
-/** Phase 30 (spec §5.4, §8): money is typed the way receipts print it, and refused in these words. */
-const MONEY_ERROR = "Enter an amount like 12500 or 12,500.50";
 type MoneyKey = "cost" | "repairQuote";
 type TextKey = "model" | "brand" | "serial" | "invoiceRef" | "rmaRef" | "notes";
 

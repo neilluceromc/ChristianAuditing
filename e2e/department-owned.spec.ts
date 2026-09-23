@@ -380,12 +380,16 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await page.getByLabel("Cost (₱)").fill("45000");
     await page.getByLabel("Quantity").fill("1");
     await expect(page.getByLabel("Tag 1")).toHaveValue(tag);
-    await page.getByRole("button", { name: "Register asset" }).click();
-    // Phase 16 Task 13: the register page no longer redirects to /inventory
-    // on success — it swaps the form for a RegisterSuccess panel in place
-    // ("1 asset registered — <tag>", Print labels / Open the list / Register
-    // another batch). Wait for that panel instead of a navigation.
-    await expect(page.getByText(`1 asset registered — ${tag}`)).toBeVisible();
+    // Purchasing does not manage IT, so Loan is not offered (ruling R4) — the
+    // approval path would create a loan with no due date.
+    const initialState = page.getByRole("radiogroup", { name: "Initial state" });
+    await expect(initialState.getByRole("radio", { name: "Spare" })).toBeChecked();
+    await expect(initialState.getByRole("radio", { name: "Loan" })).toHaveCount(0);
+    // Phase 30 (spec §5.6, plan P-13): quantity 1 is one asset — it ends on
+    // its record with the created notice rather than on the batch card.
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
+    await expect(page.getByText(`${tag} registered`)).toBeVisible();
     const a = await db.asset.findUniqueOrThrow({ where: { tag } });
     id = a.id;
     expect(a.cls).toBe("IT");

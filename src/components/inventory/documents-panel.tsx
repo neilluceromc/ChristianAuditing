@@ -10,7 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { FileDrop } from "@/components/patterns/file-drop";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { markDocumentSigned, uploadDocument } from "@/server/modules/inventory/document-actions";
-import { DOCUMENT_KINDS } from "@/lib/documents";
+import { DOCUMENT_KINDS, DOCUMENT_KIND_LABEL as KIND_LABELS, type DocumentKind } from "@/lib/documents";
 
 export interface DocumentRow {
   id: string;
@@ -22,15 +22,6 @@ export interface DocumentRow {
   downloadHref: string;
 }
 
-type DocumentKind = (typeof DOCUMENT_KINDS)[number];
-
-const KIND_LABELS: Record<DocumentKind, string> = {
-  receipt: "Receipt",
-  "accountability-form": "Accountability form",
-  photo: "Photo",
-  other: "Other",
-  invoice: "Invoice",
-};
 const KIND_OPTIONS = DOCUMENT_KINDS.map((value) => ({ value, label: KIND_LABELS[value] }));
 
 export function DocumentsPanel({

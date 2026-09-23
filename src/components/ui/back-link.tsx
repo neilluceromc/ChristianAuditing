@@ -10,16 +10,7 @@ import { leaveFor, popForBack, readStack, writeStack } from "@/lib/nav-stack";
  * otherwise the breadcrumb's parent — a deep link, a fresh tab, a scanned QR.
  */
 export function BackLink({ fallbackHref }: { fallbackHref: string }) {
-  const router = useRouter();
-  function go() {
-    const { stack, canGoBack } = popForBack(readStack(window.sessionStorage));
-    if (canGoBack) {
-      writeStack(window.sessionStorage, stack);
-      router.back();
-    } else {
-      router.push(fallbackHref);
-    }
-  }
+  const go = useBack(fallbackHref);
   return (
     <button
       type="button"
@@ -30,6 +21,23 @@ export function BackLink({ fallbackHref }: { fallbackHref: string }) {
       Back
     </button>
   );
+}
+
+/**
+ * The Back control's own step, for a form's Cancel (Phase 30, spec §5.6): the previous in-app page
+ * when this tab has one, else `fallbackHref` — a bare router.back() on a fresh tab leaves the app.
+ */
+export function useBack(fallbackHref: string): () => void {
+  const router = useRouter();
+  return useCallback(() => {
+    const { stack, canGoBack } = popForBack(readStack(window.sessionStorage));
+    if (canGoBack) {
+      writeStack(window.sessionStorage, stack);
+      router.back();
+    } else {
+      router.push(fallbackHref);
+    }
+  }, [router, fallbackHref]);
 }
 
 /**

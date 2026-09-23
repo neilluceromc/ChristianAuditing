@@ -191,33 +191,38 @@ test.describe("it gaps", () => {
     await page.getByLabel("Model").fill("e2e class-scoped check");
     await expect(page.getByLabel("Tag 1")).not.toHaveValue("");
     const tag1 = page.getByLabel("Tag 1");
+    // Phase 30 (spec §5.5): the check runs while typing (400 ms). A positive
+    // control first, so the negative below is not inert: an IT tag that is
+    // already registered IS named, and linked to its record.
+    await tag1.fill("BR-LT-0148");
+    const itHit = page.getByText("Row 1 · BR-LT-0148 is already registered");
+    await expect(itHit).toBeVisible({ timeout: 10_000 });
+    await expect(itHit.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
+
     // BR-VH-0001 is a real, already-registered tag — but it belongs to the
     // Vehicle category (Purchasing class), not this Laptop (IT) run.
     await tag1.fill("BR-VH-0001");
     await tag1.blur();
 
-    // register-form.tsx:173 debounces the live identifier check
-    // (`setTimeout(runIdentifierCheck, 300)`) on blur; `checkIdentifiers` is
-    // class-scoped (spec §6.2), so a cross-class match must never surface as
-    // "already registered" here. NEGATIVE assertion (absence of a hint), so
-    // per e2e/purchasing-ext.spec.ts case 1's precedent the settle is sized
-    // to the 300ms debounce plus round-trip headroom, not a weaker wait.
+    // `checkIdentifiers` is class-scoped (spec §6.2), so a cross-class match
+    // must never surface as "already registered" here. NEGATIVE assertion
+    // (absence of a hint), so per e2e/purchasing-ext.spec.ts case 1's
+    // precedent the settle is sized to the 400 ms debounce plus round-trip
+    // headroom, not a weaker wait.
     await page.waitForTimeout(3_000);
-    await expect(page.getByText(/Already registered/)).toHaveCount(0);
+    await expect(page.getByText(/is already registered/)).toHaveCount(0);
 
     // The server's own `tag String @unique` (schema.prisma:372) is global,
-    // not class-scoped — submitting anyway is still refused, just with a
-    // plain banner rather than a field-level error (registerAssets,
-    // src/server/modules/purchases/receiving.ts, catches the P2002 on
-    // `tag` with a generic conflict — NOT the field-scoped "That tag is
-    // already registered" that a *different* action, createAsset in
-    // src/server/modules/inventory/actions.ts:347, returns for the
-    // single-asset /inventory/new form. That message does not apply to this
-    // page, verified against source).
-    await page.getByRole("button", { name: "Register asset" }).click();
-    await expect(page.getByText("One of those tags was just taken. Reload and try again.")).toBeVisible({
-      timeout: 10_000,
-    });
+    // not class-scoped — submitting anyway is still refused. Quantity 1 goes
+    // through createAsset (plan P-13), whose tag pre-check names the typed tag
+    // on row 1 (ruling R3) — as text, never a link to the other class's record.
+    const before = await db.asset.count();
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    const refused = page.getByText("Row 1 · BR-VH-0001 is already registered");
+    await expect(refused).toBeVisible({ timeout: 10_000 });
+    await expect(refused.getByRole("link")).toHaveCount(0);
+    await expect(tag1).toBeFocused();
+    expect(await db.asset.count()).toBe(before);
   });
 
   test("3. a title policy's loan-covered required slot reads \"on loan\", not a policy gap, and the employees list agrees", async ({ page }) => {
