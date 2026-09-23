@@ -54,6 +54,21 @@ async function login(page: Page, email: string) {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
+}
+
 const IT = "it@thebackroomop.com";
 const ADMIN = "admin@thebackroomop.com";
 
@@ -71,10 +86,11 @@ test.describe("rate limits", () => {
 
     await login(page, IT);
     await page.goto(`/inventory/${asset.id}`);
-    await page.getByRole("button", { name: "Change status" }).click();
-    const dialog = page.getByRole("dialog", { name: "Change status" });
+    // Phase 30: Change status sits in the record's More menu.
+    await (await openMore(page)).getByRole("menuitem", { name: "Change status…", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Change status of BR-MN-0910 · LG 27UL500" });
     await dialog.getByLabel("New status").selectOption("DEFECTIVE");
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Change status", exact: true }).click();
 
     await expect(dialog.getByText("You've made 60 changes this minute — the cap", { exact: true })).toBeVisible();
     await expect(dialog.getByText(/you can retry in \d+s/)).toBeVisible();
@@ -82,10 +98,10 @@ test.describe("rate limits", () => {
 
     // Clean the rows this case created before its second attempt (house
     // rule) — the dialog stays open and its selection survives a
-    // rate-limited refusal (StatusControl only resets on success), so the
-    // same Confirm click re-submits the same DEFECTIVE selection.
+    // rate-limited refusal (ChangeStatusDialog resets only when it opens), so
+    // the same Change status click re-submits the same DEFECTIVE selection.
     await db.rateEvent.deleteMany({ where: { userId: itUser.id, kind: "mutation" } });
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Change status", exact: true }).click();
 
     // "Success: " is the toast's own sr-only prefix (TONE_LABEL.settled,
     // src/components/ui/toast.tsx) — part of the element's text content, so

@@ -454,14 +454,15 @@ test.describe.serial("quick forms", () => {
 
     // IT returning an IT laptop is a `direct` return, so the outcome select
     // is offered and the chips follow it (spec §8, chipsForOutcome).
-    const laptop = await db.asset.findFirstOrThrow({ where: { tag: "BR-LT-0166" } });
+    const laptop = await db.asset.findFirstOrThrow({ where: { tag: "BR-LT-0166" }, include: { assignee: true } });
     await login(page, IT);
     await page.goto(`/inventory/${laptop.id}`);
-    const returnBtn = page.getByRole("button", { name: "Return" });
+    const returnBtn = page.getByRole("button", { name: "Return", exact: true });
     await waitForHydration(returnBtn);
     await returnBtn.click();
 
-    const returnDialog = page.getByRole("dialog", { name: `Return ${laptop.tag}` });
+    // Phase 30 (spec §4.3): the direct title names the device and the person.
+    const returnDialog = page.getByRole("dialog", { name: `Return ${laptop.tag} · ${laptop.model} from ${laptop.assignee!.name}?` });
     await expect(returnDialog).toBeVisible({ timeout: 10_000 });
     const outcome = returnDialog.getByLabel(/^What happens to it\b/);
     // TRIAGE is the default and chipsForOutcome("TRIAGE") is empty.

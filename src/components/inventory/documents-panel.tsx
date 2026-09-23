@@ -1,17 +1,16 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { Pill } from "@/components/ui/pill";
 import { Select } from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
+import { FileDrop } from "@/components/patterns/file-drop";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { markDocumentSigned, uploadDocument } from "@/server/modules/inventory/document-actions";
-import { DOCUMENT_KINDS } from "@/lib/documents";
+import { DOCUMENT_KINDS, DOCUMENT_KIND_LABEL as KIND_LABELS, type DocumentKind } from "@/lib/documents";
 
 export interface DocumentRow {
   id: string;
@@ -23,13 +22,6 @@ export interface DocumentRow {
   downloadHref: string;
 }
 
-const KIND_LABELS: Record<(typeof DOCUMENT_KINDS)[number], string> = {
-  receipt: "Receipt",
-  "accountability-form": "Accountability form",
-  photo: "Photo",
-  other: "Other",
-  invoice: "Invoice",
-};
 const KIND_OPTIONS = DOCUMENT_KINDS.map((value) => ({ value, label: KIND_LABELS[value] }));
 
 export function DocumentsPanel({
@@ -48,26 +40,34 @@ export function DocumentsPanel({
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [pending, startTransition] = useTransition();
-  const [kind, setKind] = useState("receipt");
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [uploading, startUpload] = useTransition();
+  const [, startSign] = useTransition();
+  // Phase 30 (spec §4.4): a chosen or dropped file waits here, with its kind,
+  // until Upload — nothing is stored on drop. `lastKind` is the kind the
+  // operator last picked, which a non-image file starts on.
+  const [staged, setStaged] = useState<{ file: File; kind: DocumentKind } | null>(null);
+  const [lastKind, setLastKind] = useState<DocumentKind>("receipt");
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  function upload(file: File) {
+  function choose(file: File) {
     setError(null);
     setRetryAfter(null);
-    setFileName(file.name);
+    setStaged({ file, kind: file.type.startsWith("image/") ? "photo" : lastKind });
+  }
+
+  function upload() {
+    if (!staged) return;
+    setError(null);
+    setRetryAfter(null);
     const fd = new FormData();
     fd.set("assetId", assetId);
-    fd.set("kind", kind);
-    fd.set("file", file);
-    startTransition(async () => {
+    fd.set("kind", staged.kind);
+    fd.set("file", staged.file);
+    startUpload(async () => {
       const res = await uploadDocument(fd);
-      setFileName(null);
       if (res.ok) {
+        setStaged(null);
         toast("Document uploaded — audit entry written", "settled");
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
@@ -76,7 +76,7 @@ export function DocumentsPanel({
   }
 
   function sign(docId: string) {
-    startTransition(async () => {
+    startSign(async () => {
       const res = await markDocumentSigned({ docId });
       if (res.ok) {
         toast("Marked signed", "settled");
@@ -98,7 +98,7 @@ export function DocumentsPanel({
         <ul className="flex flex-col rounded-(--radius-card) border border-border bg-surface shadow-card">
           {docs.map((doc) => (
             <li key={doc.id} className="flex items-center gap-3 border-b border-border-faint px-3 py-2.5 last:border-b-0">
-              <Pill>{doc.kind}</Pill>
+              <Pill>{KIND_LABELS[doc.kind as DocumentKind] ?? doc.kind}</Pill>
               <a href={doc.downloadHref} className="min-w-0 flex-1 truncate text-[12.5px] text-accent hover:underline">
                 {doc.fileName}
               </a>
@@ -118,48 +118,30 @@ export function DocumentsPanel({
       )}
 
       {canUpload && (
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            const file = e.dataTransfer.files[0];
-            if (file) upload(file);
-          }}
-          className={cn(
-            "flex flex-col items-center gap-2 rounded-(--radius-card) border border-dashed p-6 text-center",
-            dragging ? "border-accent bg-accent-tint" : "border-border-strong",
+        <div className="flex flex-col gap-2">
+          <FileDrop label="Document file" onFile={choose} disabled={uploading} />
+          {staged && (
+            <div className="flex flex-wrap items-center gap-2 rounded-(--radius-card) border border-border bg-surface px-3 py-2.5 shadow-card">
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-fg">{staged.file.name}</span>
+              <Select
+                aria-label="Document kind"
+                value={staged.kind}
+                disabled={uploading}
+                onChange={(e) => {
+                  const kind = e.target.value as DocumentKind;
+                  setStaged((s) => (s ? { ...s, kind } : s));
+                  setLastKind(kind);
+                }}
+                className="w-auto py-1.5 text-xs"
+              >
+                {KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select>
+              <Button size="sm" variant="primary" loading={uploading} onClick={upload}>Upload</Button>
+              <Button size="sm" variant="ghost" disabled={uploading} onClick={() => { setStaged(null); setError(null); }}>
+                Cancel
+              </Button>
+            </div>
           )}
-        >
-          {pending && fileName ? (
-            <span className="inline-flex items-center gap-2 text-xs text-fg-secondary">
-              <Spinner size={12} /> uploading {fileName}…
-            </span>
-          ) : (
-            <>
-              <p className="text-xs text-fg-secondary">Drop a file here, or</p>
-              <div className="flex items-center gap-2">
-                <Select aria-label="Document kind" value={kind} onChange={(e) => setKind(e.target.value)} className="w-auto py-1.5 text-xs">
-                  {KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </Select>
-                <Button size="sm" onClick={() => inputRef.current?.click()}>Choose file</Button>
-              </div>
-              <p className="font-mono text-[10px] text-fg-faint">PDF · PNG · JPG — max 10 MB</p>
-            </>
-          )}
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".pdf,.png,.jpg,.jpeg"
-            className="sr-only"
-            aria-label="Upload document"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) upload(file);
-              e.target.value = "";
-            }}
-          />
         </div>
       )}
     </div>

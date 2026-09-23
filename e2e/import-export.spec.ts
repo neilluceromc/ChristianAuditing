@@ -459,6 +459,11 @@ test.describe("import — the role gate is on the route, not the button", () => 
     await page.goto("/inventory/import");
     await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
     await expect(page.getByRole("link", { name: "Import" })).toHaveCount(0);
+    // Phase 30 (spec §6.1): Import moved behind the header's More actions menu — absent there too.
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(page.getByRole("menuitem", { name: "Export" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /^Import/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
 
     await page.goto("/employees/import");
     await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
@@ -592,9 +597,11 @@ test.describe("export", () => {
   test("the assets export downloads a dated .xlsx", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/inventory");
+    // Phase 30 (spec §6.1): Export lives in the header's More actions menu.
+    await page.getByRole("button", { name: "More actions" }).click();
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByRole("link", { name: "Export" }).click(),
+      page.getByRole("menuitem", { name: "Export" }).click(),
     ]);
     // `exportFilename` strips the prefix to [A-Za-z0-9_-] and appends the
     // date — sortable, and unambiguous in a downloads folder.
@@ -620,15 +627,13 @@ test.describe("export", () => {
     // The chips exist so an operator can escape the export cap refusal, which
     // points at them by name — a chip that doesn't say how many rows it leaves
     // is not an answer to that refusal.
-    // Located by href rather than by accessible name: the label and the count
-    // are adjacent INLINE nodes, so `innerText` may or may not put whitespace
-    // between them ("2026 5" vs "20265") and a name-based regex would be a
-    // coin flip. The count lives in its own span, which is unambiguous. The
-    // `\d{4}` filter skips the "No date" chip, which the imports above bring
-    // into existence.
-    const chip = page.locator('a[href*="purchaseYear="]').filter({ hasText: /^\d{4}/ }).first();
+    // Phase 30 (plan P-8): the year chips folded into one Purchased menu whose items read
+    // "{year} · {count}". The `\d{4}` filter skips "Any year" and the "No date" item, which the
+    // imports above bring into existence.
+    await page.locator('button[aria-haspopup="menu"]').filter({ hasText: /^Purchased/ }).click();
+    const chip = page.getByRole("menuitem", { name: /^\d{4} · \d+$/ }).first();
     await expect(chip).toBeVisible({ timeout: 30_000 });
-    const chipCount = Number((await chip.locator("span").innerText()).trim());
+    const chipCount = Number((await chip.innerText()).split("·")[1].trim());
     expect(chipCount).toBeGreaterThan(0);
 
     await chip.click();

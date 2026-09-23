@@ -19,6 +19,8 @@ describe("buildAssetWhere", () => {
         { tag: { contains: "latitude", mode: "insensitive" } },
         { model: { contains: "latitude", mode: "insensitive" } },
         { serial: { contains: "latitude", mode: "insensitive" } },
+        { assignee: { name: { contains: "latitude", mode: "insensitive" } } },
+        { assignee: { employeeNo: { contains: "latitude", mode: "insensitive" } } },
       ],
     });
   });
@@ -73,7 +75,7 @@ describe("the stage facet narrows to the repair candidate set", () => {
 
   it("stage rides alongside q without eating its OR", () => {
     const where = buildAssetWhere(parse("q=dell&stage=at-vendor"));
-    expect(where.OR).toHaveLength(3);
+    expect(where.OR).toHaveLength(5);
     expect(where.AND).toHaveLength(1);
   });
 
@@ -116,7 +118,7 @@ describe("purchaseYear filter on buildAssetWhere", () => {
 
   it("rides alongside other facets and q without disturbing them", () => {
     const where = buildAssetWhere(parse("q=dell&status=SPARE"), 2025);
-    expect(where.OR).toHaveLength(3);
+    expect(where.OR).toHaveLength(5);
     expect(where.status).toEqual({ in: ["SPARE"] });
     expect(where.purchasedAt).toEqual({
       gte: new Date(Date.UTC(2025, 0, 1)),
@@ -233,5 +235,16 @@ describe("identifierWhere", () => {
       tags: { cls: "PURCHASING", tag: { in: [] } },
       serials: { cls: "PURCHASING", serial: { in: [] } },
     });
+  });
+});
+
+describe("the Attention sort key (spec §6.3, plan P-10)", () => {
+  it("is sortable and parses from the URL", () => {
+    expect(INVENTORY_LIST_CONFIG.sortable).toContain("attention");
+    expect(parse("sort=attention").sort).toEqual([{ key: "attention", dir: "asc" }]);
+  });
+  it("never reaches the SQL order, and alone falls back to the default order", () => {
+    expect(buildAssetOrderBy([{ key: "attention", dir: "asc" }])).toEqual(buildAssetOrderBy([]));
+    expect(buildAssetOrderBy([{ key: "attention", dir: "asc" }, { key: "model", dir: "desc" }])).toEqual([{ model: "desc" }, { id: "asc" }]);
   });
 });

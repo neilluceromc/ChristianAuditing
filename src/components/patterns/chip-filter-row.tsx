@@ -11,7 +11,7 @@ export function ChipFilterRow({ chips, clearHref }: { chips: FilterChip[]; clear
     <div className="flex flex-wrap items-center gap-1.5 py-2">
       {chips.map((chip) => (
         <Link
-          key={chip.label}
+          key={chip.removeHref}
           href={chip.removeHref}
           className="inline-flex items-center gap-1 rounded-(--radius-ctl) border border-accent-soft-border bg-accent-soft px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.06em] text-accent-soft-text hover:opacity-80"
         >

@@ -30,6 +30,8 @@ export const INVENTORY_LIST_CONFIG: ListConfig = {
     "tag", "model", "category", "status", "purchasedAt", "warrantyUntil",
     // the repairs view's Down column
     "defectiveSince",
+    // Phase 30 (spec §6.3, plan P-10): derived, not a column — buildAssetOrderBy never emits it.
+    "attention",
   ],
   defaultSort: [{ key: "tag", dir: "asc" }],
 };
@@ -112,6 +114,8 @@ export function buildAssetWhere(
       { tag: { contains: state.q, mode: "insensitive" } },
       { model: { contains: state.q, mode: "insensitive" } },
       { serial: { contains: state.q, mode: "insensitive" } },
+      { assignee: { name: { contains: state.q, mode: "insensitive" } } },
+      { assignee: { employeeNo: { contains: state.q, mode: "insensitive" } } },
     ];
   }
   const f = state.filters;
@@ -163,7 +167,9 @@ export function buildAssetWhere(
 }
 
 export function buildAssetOrderBy(sort: SortKey[]): Prisma.AssetOrderByWithRelationInput[] {
-  const order = sort.length ? sort : INVENTORY_LIST_CONFIG.defaultSort;
+  // "attention" is derived, not a column — listAssets orders it in memory (plan P-10). Filter first, then fall back.
+  const kept = sort.filter((s) => s.key !== "attention");
+  const order = kept.length ? kept : INVENTORY_LIST_CONFIG.defaultSort;
   return [
     ...order.map(({ key, dir }): Prisma.AssetOrderByWithRelationInput =>
       key === "category" ? { category: { name: dir } } : { [key]: dir }),

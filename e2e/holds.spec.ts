@@ -97,6 +97,21 @@ async function waitForHydration(target: Locator) {
   }).toPass({ timeout: 20_000 });
 }
 
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
+}
+
 const IT = "it@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
@@ -139,8 +154,9 @@ test.describe("holds", () => {
     try {
       await login(page, IT);
       await page.goto(`/inventory/${headset.id}`);
-      await page.getByRole("button", { name: "Reserve", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Reserve BR-HS-0502" });
+      // Phase 30: an unheld spare's primary is Assign — Reserve sits in More.
+      await (await openMore(page)).getByRole("menuitem", { name: "Reserve…", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Reserve BR-HS-0502 · Jabra Evolve2 40" });
       await waitForHydration(dialog);
 
       // Spec §0 decision 1: seven calendar days unless IT picks another date.
@@ -149,16 +165,15 @@ test.describe("holds", () => {
       await dialog.getByRole("option", { name: /EMP-0097/ }).click();
       await dialog.getByRole("group", { name: "Quick picks" })
         .getByRole("button", { name: "New hire setup", exact: true }).click();
-      // "Reserve" names both the opener (outside the dialog) and the primary
-      // inside it — scoping to the dialog is what keeps this unambiguous.
+      // Scoped to the dialog: its confirm verb is the same word as the menu item.
       await dialog.getByRole("button", { name: "Reserve", exact: true }).click();
       await expect(page.getByText(`BR-HS-0502 reserved for ${nina.name}`)).toBeVisible({ timeout: 15_000 });
 
-      // The record: the banner, its expiry pill, and no Reserve button left.
+      // The record: the banner, its expiry pill, and no Reserve left in More.
       const banner = page.getByRole("status").filter({ hasText: "Held for" });
       await expect(banner).toContainText(`Held for ${nina.name}`);
       await expect(banner).toContainText("expires in 7 d");
-      await expect(page.getByRole("button", { name: "Reserve", exact: true })).toHaveCount(0);
+      await expect((await openMore(page)).getByRole("menuitem", { name: "Reserve…", exact: true })).toHaveCount(0);
 
       const hold = await db.reservation.findFirstOrThrow({ where: { assetId: headset.id, state: "ACTIVE" } });
       holdId = hold.id;
@@ -186,9 +201,11 @@ test.describe("holds", () => {
       // spareOptions filters `reservations: { none: { state: "ACTIVE" } }` —
       // a promised spare must not be offered as somebody else's replacement.
       await page.goto(`/inventory/${laptop.id}`);
-      await page.getByRole("button", { name: "Replace" }).click();
-      const replace = page.getByRole("dialog", { name: "Replace BR-LT-0201" });
+      await (await openMore(page)).getByRole("menuitem", { name: "Replace…", exact: true }).click();
+      const replace = page.getByRole("dialog", { name: "Replace BR-LT-0201 · MacBook Air M3 for Carlo Dizon" });
       await waitForHydration(replace);
+      // Phase 30 (spec §4.3): the picker says how many spares it leaves out — the new hold among them.
+      await expect(replace.getByText(/^\d+ more spares? (is|are) held or queued for someone else$/)).toBeVisible();
       await replace.getByRole("combobox", { name: "Replacement" }).click();
       await expect(replace.getByRole("option", { name: /BR-HS-0502/ })).toHaveCount(0);
       await expect(replace.getByRole("option", { name: /BR-MN-0911/ })).toHaveCount(1);
@@ -247,22 +264,27 @@ test.describe("holds", () => {
 
     await login(page, IT);
     await page.goto(`/inventory/${monitor.id}`);
-    await expect(page.getByRole("button", { name: "Reserve", exact: true })).toHaveCount(0);
     const banner = page.getByRole("status").filter({ hasText: "Held for" });
     await expect(banner).toContainText(`Held for ${nina.name}`);
     await expect(banner).toContainText("EMP-0097");
+    // Phase 30: Reserve would live in More — a held record's More leaves it out.
+    const menu = await openMore(page);
+    await expect(menu.getByRole("menuitem", { name: "Change status…", exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Reserve…", exact: true })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
 
     // Global constraint: canAssign is UNCHANGED — e2e/custody.spec.ts case 9
     // assigns this very asset to its holder, so Assign must stay reachable.
     await page.getByRole("button", { name: "Assign", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Assign BR-MN-0910" });
+    const dialog = page.getByRole("dialog", { name: "Assign BR-MN-0910 · LG 27UL500" });
     await waitForHydration(dialog);
     await expect(dialog.getByLabel("Assign to")).toHaveValue(/Nina/);
     await expect(dialog.getByText(/Held for Nina Robles — assigning to anyone else is refused/)).toBeVisible();
 
     await dialog.getByLabel("Assign to").fill("EMP-0071");
     await dialog.getByRole("option", { name: /EMP-0071/ }).click();
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Assign", exact: true }).click();
     // The execution guard, humanised: it names the employee NUMBER the hold is for.
     await expect(dialog.getByText(/EMP-0097/)).toBeVisible({ timeout: 15_000 });
 
@@ -284,8 +306,8 @@ test.describe("holds", () => {
     try {
       await login(page, IT);
       await page.goto(`/inventory/${headset.id}`);
-      await page.getByRole("button", { name: "Reserve", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Reserve BR-HS-0502" });
+      await (await openMore(page)).getByRole("menuitem", { name: "Reserve…", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Reserve BR-HS-0502 · Jabra Evolve2 40" });
       await waitForHydration(dialog);
 
       // Person first, date second — the order case 1 and e2e/custody.spec.ts
@@ -417,12 +439,12 @@ test.describe("holds", () => {
       await login(page, IT);
       await page.goto(`/inventory/${monitor.id}`);
       await page.getByRole("button", { name: "Assign", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Assign BR-MN-0910" });
+      const dialog = page.getByRole("dialog", { name: "Assign BR-MN-0910 · LG 27UL500" });
       await waitForHydration(dialog);
-      // The holder comes preselected (spec §5.1), so Confirm alone is the
+      // The holder comes preselected (spec §5.1), so Assign alone is the
       // whole gesture — no retyping the person the hold already names.
       await expect(dialog.getByLabel("Assign to")).toHaveValue(/Nina/);
-      await dialog.getByRole("button", { name: "Confirm" }).click();
+      await dialog.getByRole("button", { name: "Assign", exact: true }).click();
       await expect(page.getByText(`BR-MN-0910 assigned to ${nina.name}`)).toBeVisible({ timeout: 15_000 });
 
       const settled = await db.reservation.findUniqueOrThrow({ where: { id: hold.id } });
@@ -482,8 +504,8 @@ test.describe("holds", () => {
 
       // Expired means free: the spare is offerable again.
       await page.goto(`/inventory/${laptop.id}`);
-      await page.getByRole("button", { name: "Replace" }).click();
-      const replace = page.getByRole("dialog", { name: "Replace BR-LT-0201" });
+      await (await openMore(page)).getByRole("menuitem", { name: "Replace…", exact: true }).click();
+      const replace = page.getByRole("dialog", { name: "Replace BR-LT-0201 · MacBook Air M3 for Carlo Dizon" });
       await waitForHydration(replace);
       await replace.getByRole("combobox", { name: "Replacement" }).click();
       await expect(replace.getByRole("option", { name: /BR-HS-0502/ })).toHaveCount(1);
@@ -583,12 +605,13 @@ test.describe("holds", () => {
     const today = localDateISO(new Date());
 
     const changeStatusTo = async (to: string, chip: string) => {
-      await page.getByRole("button", { name: "Change status" }).click();
-      const dialog = page.getByRole("dialog", { name: "Change status" });
+      // Phase 30: Change status sits in More; nothing is preselected, so every call picks.
+      await (await openMore(page)).getByRole("menuitem", { name: "Change status…", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Change status of BR-MN-0911 · LG 27UL500" });
       await waitForHydration(dialog);
       await dialog.getByLabel("New status").selectOption(to);
       await dialog.getByRole("group", { name: "Quick picks" }).getByRole("button", { name: chip, exact: true }).click();
-      await dialog.getByRole("button", { name: "Confirm" }).click();
+      await dialog.getByRole("button", { name: "Change status", exact: true }).click();
       await expect(page.getByText(`BR-MN-0911 is now ${to}`)).toBeVisible({ timeout: 15_000 });
     };
 

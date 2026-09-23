@@ -83,8 +83,10 @@ function handleKeydown(e: KeyboardEvent) {
   }
 
   if (e.key !== "Tab") return;
-  // Tab is constrained by the topmost MODAL layer (a non-modal menu above a
-  // drawer still tabs within the drawer — the menu renders inside it).
+  // Tab is constrained by the topmost MODAL layer. A non-modal menu above a
+  // drawer portals its popup into the drawer's overlay root, outside this
+  // trapped panel; Menu's own Tab handling hands focus back to its trigger,
+  // which is inside the panel, so tabbing still stays within the drawer.
   const modal = [...layers].reverse().find((l) => l.modal);
   if (!modal?.container) return;
   const container = modal.container;

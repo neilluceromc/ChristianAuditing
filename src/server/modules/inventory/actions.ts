@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
+import { Prisma, type AssetClass } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { isUniqueViolation, uniqueTarget } from "@/server/prisma-errors";
@@ -17,7 +17,7 @@ import {
   ASSET_STATUSES, BULK_MAX, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
 import {
-  ASSET_CLASSES, CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
+  ASSET_CLASSES, CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, defaultClassFor, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
 } from "@/lib/asset-class";
 import { reasonOptional, reasonRequired } from "@/lib/reason";
 import { parseListState, type ListState } from "@/lib/url-state";
@@ -26,9 +26,10 @@ import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
 import { assetDiff } from "@/lib/asset-diff";
 import { TAG_SHAPE, tagKey } from "@/lib/tag-key";
-import { humanizeGuard } from "@/lib/lifecycle";
+import { humanizeGuard, loanDueFor } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
 import { rememberPicks } from "@/server/recent-picks";
+import { nextToReview } from "@/server/modules/finance/queries";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -90,7 +91,7 @@ export async function bulkRequestStatusChange(
     // which no Prisma filter can express). Acting on that candidate set
     // directly would mean the drawer's "all N matching" acts on more rows
     // than the screen shows. Resolve to the exact cut ids first.
-    const cls = parseCls(filterParams.get("cls")) ?? "IT";
+    const cls = parseCls(filterParams.get("cls")) ?? defaultClassFor(user.role);
     const cutIds = await repairStageIds(state, purchaseYear, cls);
     where = cutIds !== null ? { id: { in: cutIds } } : buildAssetWhere(state, purchaseYear, cls);
   }
@@ -195,6 +196,10 @@ const createSchema = z.object({
   // Phase 21 (spec §6): cleaned like every other reason — a zero-width string
   // must fall through to the "assigned at registration" default below.
   assignReason: reasonOptional(),
+  // Phase 30 (spec §5.3, plan P-13): Register at quantity 1 submits here — a loan's due date and the
+  // purchase request the unit came from ride along, so no loan is created without a due date.
+  loanDueAt: dateStr.optional(),
+  requestId: z.string().optional(),
 });
 
 const toDate = (s: string | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
@@ -209,37 +214,59 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
 
+  // Phase 30 (spec §5.4): every post-schema refusal in ONE pass — a refused submit shows every
+  // error at once instead of one per round trip.
+  const errors: Record<string, string> = {};
   const category = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
-  if (!category) return validationError({ categoryId: "Unknown category" });
+  if (!category) errors.categoryId = "Unknown category";
   // Spec §4: Purchasing registers both classes, IT its own. Registering is not
   // managing — an IT asset Purchasing registers is IT's from this moment.
-  if (!canRegisterClass(user.role, category.cls)) {
-    return validationError({
-      categoryId: `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not create ${CLASS_LABEL[category.cls]} assets.`,
-    });
+  else if (!canRegisterClass(user.role, category.cls)) {
+    errors.categoryId = `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not create ${CLASS_LABEL[category.cls]} assets.`;
+  }
+  const plan = category ? creationPlan(d.requestedStatus, d.assigneeId || null, category.cls) : null;
+  if (category && plan && !plan.ok) {
+    if (plan.error === "assignee_required") errors.assigneeId = "Pick who this deploys to";
+    else errors.requestedStatus = `${d.requestedStatus} is not an initial state for ${CLASS_PHRASE[category.cls]} asset.`;
+  }
+  // A loan's due date rides only on the direct path; the approval path's payload carries none, so a
+  // registrant who does not manage the class cannot register a loan (the form already hides it, R4).
+  if (category && !errors.requestedStatus && d.requestedStatus === "TEMPORARY" && !isDirectLifecycle(user.role, category.cls)) {
+    errors.requestedStatus = "A loan can only be registered by the team that manages this class.";
+  }
+  const loan = loanDueFor(d.requestedStatus, d.loanDueAt || undefined, new Date());
+  if (!loan.ok) errors.loanDueAt = "Pick the date the loan ends";
+  if (d.typeId) {
+    const type = await prisma.assetType.findUnique({ where: { id: d.typeId } });
+    if (!type || type.categoryId !== d.categoryId) errors.typeId = "That type doesn't belong to the chosen category";
+  }
+  if (d.requestId) {
+    const req = await prisma.purchaseRequest.findUnique({ where: { id: d.requestId }, select: { refNo: true, state: true } });
+    if (!req) errors.requestId = "Unknown request";
+    else if (req.state !== "COMPLETED") errors.requestId = `${req.refNo} is ${req.state.toLowerCase()} — only a completed request can be linked.`;
+  }
+  const tagTaken = await prisma.asset.findUnique({ where: { tag: d.tag }, select: { id: true } });
+  if (tagTaken) errors.tag = `${d.tag} is already registered`;
+  // Scoped to the class being registered into, like checkIdentifiers (identifierWhere): the message
+  // names the record the serial is on, and a record of the OTHER class must not be named. A
+  // cross-class collision still lands on the unique constraint below, as its neutral copy. Skipped
+  // when the category itself is refused — a class the role cannot register into is never probed
+  // (the same skip registerAssets makes).
+  if (d.serial && category && canRegisterClass(user.role, category.cls)) {
+    const serialTaken = await prisma.asset.findFirst({ where: { serial: d.serial, cls: category.cls }, select: { tag: true } });
+    if (serialTaken) errors.serial = `Serial ${d.serial} is already on ${serialTaken.tag}`;
+  }
+  let employee: { name: string; employment: string } | null = null;
+  if (plan?.ok && plan.approval) {
+    employee = await prisma.employee.findUnique({ where: { id: plan.approval.assigneeId }, select: { name: true, employment: true } });
+    if (!employee) errors.assigneeId = "Unknown employee";
+  }
+  if (Object.keys(errors).length || !category || !plan?.ok) return validationError(errors);
+  if (employee && employee.employment !== "ACTIVE") {
+    return conflict(`${employee.name} is ${employee.employment.toLowerCase()} — assignments are frozen.`);
   }
   // Spec §4 stamping: born checked when the registrant manages the class.
   const selfChecked = category.cls === "IT" && canManageClass(user.role, "IT");
-  const plan = creationPlan(d.requestedStatus, d.assigneeId || null, category.cls);
-  if (!plan.ok) {
-    return plan.error === "assignee_required"
-      ? validationError({ assigneeId: "Pick who this deploys to" })
-      : validationError({ requestedStatus: `${d.requestedStatus} is not an initial state for ${CLASS_PHRASE[category.cls]} asset.` });
-  }
-
-  if (d.typeId) {
-    const type = await prisma.assetType.findUnique({ where: { id: d.typeId } });
-    if (!type || type.categoryId !== d.categoryId) {
-      return validationError({ typeId: "That type doesn't belong to the chosen category" });
-    }
-  }
-  if (plan.approval) {
-    const employee = await prisma.employee.findUnique({ where: { id: plan.approval.assigneeId } });
-    if (!employee) return validationError({ assigneeId: "Unknown employee" });
-    if (employee.employment !== "ACTIVE") {
-      return conflict(`${employee.name} is ${employee.employment.toLowerCase()} — assignments are frozen.`);
-    }
-  }
 
   try {
     const asset = await prisma.$transaction(async (tx) => {
@@ -259,6 +286,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           vendorId: d.vendorId || null,
           brand: d.brand || null,
           invoiceRef: d.invoiceRef || null,
+          purchaseRequestId: d.requestId || null,
           itVerifiedAt: selfChecked ? new Date() : null,
           itVerifiedById: selfChecked ? user.id : null,
         },
@@ -281,15 +309,20 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
         // other direct lifecycle change — instead of waiting in the queue.
         if (isDirectLifecycle(user.role, category.cls)) {
           const asset: LifecycleAsset = created;
+          const loanDueAt = loan.ok ? loan.value : null;
           const prepared = await prepareLifecycle(tx, asset, {
-            kind: "assign", employeeId: plan.approval.assigneeId, status: plan.approval.toStatus, loanDueAt: null,
+            kind: "assign", employeeId: plan.approval.assigneeId, status: plan.approval.toStatus, loanDueAt,
           });
           if (!prepared.ok) throw new DirectRefusal(humanizeGuard(prepared.error));
           await commitLifecycle(tx, created.id, prepared.prepared);
           const approval = await createApproval(tx, {
             type: "lifecycle_assign",
             payload: {
-              to: { assigneeId: plan.approval.assigneeId, status: plan.approval.toStatus },
+              // the same payload shape a direct Assign records (lifecycle/actions.ts assignAsset)
+              to: {
+                assigneeId: plan.approval.assigneeId, status: plan.approval.toStatus,
+                ...(loanDueAt ? { loanDueAt: loanDueAt.toISOString() } : {}),
+              },
               reason: d.assignReason || "assigned at registration",
             },
             requestedById: user.id,
@@ -338,8 +371,10 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
       return conflict("A referenced record vanished mid-request — refresh and retry.");
     }
+    // The last line of defence — the pre-checks above name a collision the moment it is visible;
+    // this catches the race, and a serial held by the other class (never named, see above).
     const target = uniqueTarget(err);
-    if (target.includes("tag")) return validationError({ tag: "That tag is already registered" });
+    if (target.includes("tag")) return validationError({ tag: `${d.tag} is already registered` });
     if (target.includes("serial")) return validationError({ serial: "That serial is already registered" });
     // The direct path's prepareLifecycle guard throws DirectRefusal inside the
     // transaction (e.g. the assignee went inactive mid-request) — surface it
@@ -520,8 +555,13 @@ const confirmSchema = z.object({ id: z.string().min(1) });
  * Idempotent by refusal rather than by silence: confirming twice is a
  * conflict, so a double-submit cannot quietly overwrite who confirmed it and
  * when.
+ *
+ * Phase 30 (spec §4.6): the result names the next record waiting on Finance
+ * (`nextToReview`, read after the commit) so the dialog can move straight on.
  */
-export async function confirmAssetDetails(input: unknown): Promise<ActionResult<{ tag: string }>> {
+export async function confirmAssetDetails(
+  input: unknown,
+): Promise<ActionResult<{ tag: string; next: { id: string; tag: string } | null }>> {
   const user = await actionRole("admin", "finance_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -530,8 +570,8 @@ export async function confirmAssetDetails(input: unknown): Promise<ActionResult<
   const parsed = confirmSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
 
-  let out: { tag: string } | null = null;
-  let failure: ActionResult<{ tag: string }> | null = null;
+  let out: { id: string; tag: string; cls: AssetClass } | null = null;
+  let failure: ActionResult<{ tag: string; next: { id: string; tag: string } | null }> | null = null;
 
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
@@ -576,13 +616,14 @@ export async function confirmAssetDetails(input: unknown): Promise<ActionResult<
       action: "finance.confirm",
       diff: { financeConfirmed: { from: null, to: user.name } },
     });
-    out = { tag: asset.tag };
+    out = { id: asset.id, tag: asset.tag, cls: asset.cls };
   });
 
   if (failure) return failure;
+  const done = out!;
   revalidatePath(`/inventory/${parsed.data.id}`);
   revalidatePath("/inventory");
-  return ok(out!);
+  return ok({ tag: done.tag, next: await nextToReview(done.id, done.cls) });
 }
 
 const returnSchema = z.object({
@@ -786,18 +827,30 @@ const identifiersSchema = z.object({
   cls: z.enum(ASSET_CLASSES),
 });
 
-/** Spec §2.4/§6.2: which of these tags/serials already exist, scoped to ONE class. Echoes identifiers only. */
-export async function checkIdentifiers(input: unknown): Promise<ActionResult<{ tags: string[]; serials: string[] }>> {
+/**
+ * Spec §2.4/§6.2: which of these tags/serials already exist, scoped to ONE class. Phase 30 (spec §5.3):
+ * each hit carries the record it lives on (its id, and a serial's tag) so the form can link to it —
+ * still only identifiers, never anything else about the asset. Metered on the `check` kind: it fires
+ * on every blur.
+ */
+export async function checkIdentifiers(
+  input: unknown,
+): Promise<ActionResult<{ tags: Array<{ tag: string; id: string }>; serials: Array<{ serial: string; id: string; tag: string }> }>> {
   const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
+  const rate = await checkRate(user.id, "check");
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = identifiersSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  // Each hit now names a record (its id, a serial's tag): a class the caller cannot register into is
+  // refused outright, so a hand-crafted call cannot read another class's tags or ids.
+  if (!canRegisterClass(user.role, parsed.data.cls)) return forbidden();
   const tags = [...new Set((parsed.data.tags ?? []).map(tagKey).filter(Boolean))];
   const serials = [...new Set((parsed.data.serials ?? []).filter(Boolean))];
   const where = identifierWhere(parsed.data.cls, tags, serials);
   const [byTag, bySerial] = await Promise.all([
-    tags.length ? prisma.asset.findMany({ where: where.tags, select: { tag: true } }) : [],
-    serials.length ? prisma.asset.findMany({ where: where.serials, select: { serial: true } }) : [],
+    tags.length ? prisma.asset.findMany({ where: where.tags, select: { tag: true, id: true } }) : [],
+    serials.length ? prisma.asset.findMany({ where: where.serials, select: { serial: true, id: true, tag: true } }) : [],
   ]);
-  return ok({ tags: byTag.map((a) => a.tag), serials: bySerial.map((a) => a.serial as string) });
+  return ok({ tags: byTag, serials: bySerial.map((a) => ({ serial: a.serial as string, id: a.id, tag: a.tag })) });
 }

@@ -86,6 +86,87 @@ test.describe("inventory list", () => {
     await expectNoSeriousAxe(page);
   });
 
+  // Phase 30 review (R13, R14): a row menu inside the table's overflow-x-auto wrapper was clipped
+  // (it clips vertically too). Menus now render in a portal with position: fixed, so the viewport is
+  // the only boundary. Playwright's click auto-scrolls, so only a box comparison catches a clip.
+  async function expectInViewport(page: Page, menu: Locator) {
+    await expect(async () => {
+      const m = await menu.boundingBox();
+      const viewport = page.viewportSize()!;
+      expect(m).toBeTruthy();
+      expect(m!.x).toBeGreaterThanOrEqual(0);
+      expect(m!.y).toBeGreaterThanOrEqual(0);
+      expect(m!.x + m!.width).toBeLessThanOrEqual(viewport.width);
+      expect(m!.y + m!.height).toBeLessThanOrEqual(viewport.height);
+    }).toPass({ timeout: 5_000 });
+  }
+
+  test("the last row's menu opens fully inside the viewport", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory");
+    const trigger = page.getByRole("table").getByRole("button", { name: /^Actions for / }).last();
+    await waitForHydration(trigger);
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expectInViewport(page, menu);
+  });
+
+  test("a short list's row menu is not clipped by the table: its items open their dialogs", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    // Two rows: the menu fits neither above nor below inside the table box. An exact tag would
+    // jump to the record, so narrow by the model instead.
+    await page.goto("/inventory?q=WD19S");
+    const trigger = page.getByRole("button", { name: "Actions for BR-DK-0071", exact: true });
+    await waitForHydration(trigger);
+    await trigger.click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expectInViewport(page, menu);
+    // A real click at the item's centre — it must land on the item, not on what the table box would
+    // have shown there (the filter chips above it).
+    await menu.getByRole("menuitem", { name: "Return…", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: /^Return BR-DK-0071 · / });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page).toHaveURL(/\/inventory\?q=WD19S$/);
+  });
+
+  test("the portalled row menu is reachable by keyboard and tied to its trigger", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory?q=WD19S");
+    const trigger = page.getByRole("button", { name: "Actions for BR-DK-0071", exact: true });
+    await waitForHydration(trigger);
+    const menu = page.getByRole("menu");
+    const first = menu.getByRole("menuitem").first();
+
+    // A keyboard open lands on the first item; the trigger names the popup it controls.
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await expect(menu).toBeVisible();
+    await expect(first).toBeFocused();
+    const menuId = await menu.getAttribute("id");
+    expect(menuId).toBeTruthy();
+    await expect(trigger).toHaveAttribute("aria-controls", menuId!);
+
+    // Escape closes and hands focus back to the trigger.
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+
+    // A mouse open keeps focus on the trigger; Tab from it goes into the menu, not past it.
+    await trigger.click();
+    await expect(menu).toBeVisible();
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(first).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+
   test("sort clicks rewrite the URL contract", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
@@ -126,7 +207,9 @@ test.describe("inventory list", () => {
     await expect(page).not.toHaveURL(/status=/);
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page).toHaveURL(/status=DEFECTIVE/);
-    await expect(page.getByRole("link", { name: /status: DEFECTIVE/i })).toBeVisible();
+    // Phase 30 (spec §6.2): a chip reads as the value alone; its link name carries the
+    // sr-only " — remove filter" suffix, which scopes it to the chip row.
+    await expect(page.getByRole("link", { name: "DEFECTIVE — remove filter" })).toBeVisible();
   });
 
   test("an exact tag search opens the record (scanner contract)", async ({ page }) => {
@@ -145,12 +228,33 @@ test.describe("inventory list", () => {
     await expect(page.getByRole("heading", { name: "BR-LT-0148" })).toBeVisible({ timeout: 20_000 });
   });
 
-  test("viewer is read-only: no checkboxes, no New asset, badge shown", async ({ page }) => {
+  test("viewer is read-only: no checkboxes, no Register assets, badge shown", async ({ page }) => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/inventory");
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
-    await expect(page.getByRole("link", { name: "New asset" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Register assets" })).toHaveCount(0);
     await expect(page.getByRole("checkbox")).toHaveCount(0);
+  });
+
+  test("the nav reaches the list's views: IT's Register assets, Purchasing's IT inventory", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory");
+    const itNav = page.getByRole("navigation", { name: "Workspace" });
+    await expect(itNav.getByRole("link", { name: "Register assets" })).toHaveAttribute("href", "/inventory/register");
+    await itNav.getByRole("link", { name: "Register assets" }).click();
+    await expect(page).toHaveURL(/\/inventory\/register$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
+
+    // purchasing_staff's list opens on Purchasing (plan P-7), so the Reference link names IT.
+    await login(page, "purchasing@thebackroomop.com");
+    await page.goto("/purchases");
+    const purchasingNav = page.getByRole("navigation", { name: "Workspace" });
+    await expect(purchasingNav.getByRole("link", { name: "IT inventory" })).toHaveAttribute("href", "/inventory?cls=IT");
+    await purchasingNav.getByRole("link", { name: "IT inventory" }).click();
+    await expect(page).toHaveURL(/\/inventory\?cls=IT$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Inventory", level: 1 })).toBeVisible();
+    await expect(page.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
   });
 
   test("bulk selection changes status on every selected asset at once", async ({ page }) => {
@@ -167,7 +271,8 @@ test.describe("inventory list", () => {
     await page.goto("/inventory?status=SPARE");
     await page.getByLabel(/Select BR-MN-0911/).check();
     await page.getByLabel(/Select BR-PH-0301/).check();
-    await page.getByRole("button", { name: "Bulk actions…" }).click();
+    // Phase 30 (spec §6.4): the selection bar's Change status… opens the drawer in status mode.
+    await page.getByRole("button", { name: "Change status…", exact: true }).click();
     await page.getByLabel(/Target status/).selectOption("DISPOSE");
     await page.getByRole("button", { name: "Confirm" }).click();
     await expect(page.getByText("2 assets now DISPOSE")).toBeVisible();
@@ -203,16 +308,18 @@ test.describe("inventory list", () => {
 test.describe("asset record", () => {
   test("create → duplicate tag is an inline error, valid create lands on the record", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto("/inventory/new");
-    await page.getByLabel(/Asset tag/).fill("BR-LT-0148");
-    await page.getByLabel(/Model/).fill("e2e duplicate probe");
+    // Phase 30 (spec §5.1–§5.2): one Register flow; the category comes first
+    // (it decides the tag's prefix), and at quantity 1 row 1 is the tag.
+    await page.goto("/inventory/register");
     await page.getByLabel(/Category/).selectOption({ label: "Laptop" });
-    await page.getByRole("button", { name: "Register asset" }).click();
-    await expect(page.getByText("That tag is already registered")).toBeVisible();
+    await page.getByLabel("Tag 1").fill("BR-LT-0148");
+    await page.getByLabel(/Model/).fill("e2e duplicate probe");
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page.getByText("Row 1 · BR-LT-0148 is already registered")).toBeVisible();
 
     const tag = `BR-ZZ-${String(Date.now() % 10000).padStart(4, "0")}`;
-    await page.getByLabel(/Asset tag/).fill(tag);
-    await page.getByRole("button", { name: "Register asset" }).click();
+    await page.getByLabel("Tag 1").fill(tag);
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
     await expect(page.getByRole("heading", { name: tag })).toBeVisible();
   });
 
@@ -244,17 +351,17 @@ test.describe("asset record", () => {
     // failure here instead of a cheerful pass over a no-op save downstream.
     await expect(model).toHaveValue("LG 27UL500-W");
     await page.getByRole("button", { name: "Save changes" }).click();
-    // The save confirmation is a 3-second self-clearing flash (setSaved(true)
-    // plus a 3000ms timer, src/components/inventory/asset-form.tsx:96), so the
-    // default 5s budget has to cover the WHOLE server-action round trip before
-    // the flash even starts — while the round trip runs, this button reads
-    // "Loading" and disabled. A dev server several minutes into the full suite
-    // occasionally spends longer than 5s on it, which failed this line once in
-    // three full runs with the button still mid-flight and no error banner.
-    // Reproduced exactly by delaying updateAsset 7s. Same headroom as the cold
-    // compile above; the flash lasts 3s, which no polling interval can miss.
-    await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible({ timeout: 20_000 });
-    await page.goto(page.url().replace(/\/edit$/, "/history"));
+    // Phase 30 (spec §4.5): a save toasts "{tag} saved" and returns to the
+    // record (it used to stay on /edit and flash "✓ Saved"). The default 5s
+    // budget would have to cover the WHOLE server-action round trip before the
+    // toast even starts — a dev server several minutes into the full suite
+    // occasionally spends longer than that (reproduced by delaying updateAsset
+    // 7s) — so it keeps the old flash's headroom; the toast lasts 4s, which no
+    // polling interval can miss. The toast is asserted before the URL because
+    // the push back to the record can outlast it on a cold compile.
+    await expect(page.getByText("BR-MN-0910 saved")).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
+    await page.goto(`${page.url()}/history`);
     // First hit of /inventory/[id]/history in this file — the default 5s had
     // to cover a cold compile of that route and did not, in the same batch
     // that surfaced the hydration race above.
@@ -291,6 +398,9 @@ test.describe("asset record", () => {
     await secretRow.getByRole("button", { name: "Reveal" }).click();
     await expect(page.getByText("hunter2-e2e")).toBeVisible();
     await expect(page.getByText(/hides in \d+s/)).toBeVisible();
+    // Phase 30 (spec §4.4): a revealed value can be copied; the button says so for 2 s.
+    await secretRow.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect(secretRow.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
     await page.goto(`${recordUrl}/history`);
     await expect(page.getByRole("row", { name: /SECRET_READ/ }).first()).toBeVisible();
 
@@ -313,12 +423,18 @@ test.describe("asset record", () => {
     // Same hydration race `waitForHydration` exists for above: setInputFiles
     // dispatches a native change event the instant the (server-rendered)
     // input exists in the DOM, which can land before React's delegated
-    // onChange is wired up — the upload() handler never runs, and the panel
-    // just sits in its untouched default state (no error, no rate-limit
-    // banner, no leftover doc link either — which is why this was easy to
-    // mistake for a rate-limit collision from the tests ahead of this one).
-    await waitForHydration(page.getByLabel("Upload document"));
-    await page.getByLabel("Upload document").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hi") });
+    // onChange is wired up — the handler never runs, and the panel just sits
+    // in its untouched default state (no staged file, no error, no leftover
+    // doc link either — which is why this was easy to mistake for a
+    // rate-limit collision from the tests ahead of this one).
+    // Phase 30 (spec §4.4): choosing a file only stages it — its name, a kind
+    // (an image starts on Photo) and Upload; nothing is stored until Upload.
+    const fileInput = page.getByLabel("Document file");
+    const upload = page.getByRole("button", { name: "Upload", exact: true });
+    await waitForHydration(fileInput);
+    await fileInput.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hi") });
+    await expect(page.getByLabel("Document kind")).toHaveValue("receipt");
+    await upload.click();
     await expect(page.getByText(/Accepted: PDF, PNG, JPG/)).toBeVisible();
     // A fixed "photo.png" name means a rerun's assertion below is satisfied
     // trivially by a PREVIOUS run's leftover document link — the test would
@@ -328,7 +444,10 @@ test.describe("asset record", () => {
     // before the write lands). A unique name makes the assertion prove THIS
     // run's upload actually landed.
     const fileName = `photo-${Date.now()}.png`;
-    await page.getByLabel("Upload document").setInputFiles({ name: fileName, mimeType: "image/png", buffer: png });
+    await fileInput.setInputFiles({ name: fileName, mimeType: "image/png", buffer: png });
+    await expect(page.getByLabel("Document kind")).toHaveValue("photo");
+    await expect(page.getByRole("link", { name: fileName })).toHaveCount(0);
+    await upload.click();
     await expect(page.getByRole("link", { name: fileName })).toBeVisible();
   });
 });

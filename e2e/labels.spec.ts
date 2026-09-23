@@ -199,29 +199,29 @@ test.describe("label sheet", () => {
     }
   });
 
-  test("the bulk drawer offers Print labels for an explicit, non-empty selection", async ({ page }) => {
+  test("the selection bar offers Print labels for an explicit, non-empty selection", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
     // A named anchor, not a position: page.getByRole("row").nth(1) would
     // silently retarget if a header or filter row were ever added above the
     // body.
-    await page.getByRole("row", { name: /BR-LT-0148/ }).getByRole("checkbox").check();
-    await page.getByRole("button", { name: /^Bulk actions/ }).click();
-    await expect(page.getByRole("link", { name: /^Print labels for 1 selected$/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Export this selection as a spreadsheet" })).toBeVisible();
-    // The route has served xlsx since Phase 9 — the drawer must not still
-    // call it CSV.
-    await expect(page.getByRole("link", { name: /Export this selection as CSV/ })).toHaveCount(0);
-    // NOT covered here, and worth saying rather than leaving silent: neither
-    // of BulkDrawer's two negative branches is reachable through this UI in
-    // the seeded environment. "Bulk actions…" only renders once
-    // selected.size > 0 (inventory-table.tsx:123), so the drawer can't be
-    // open with an empty, non-allMatching selection; and "Select all N
-    // matching" needs total > rows.length (:130), which the seed's 25 assets
-    // on a single 25-row page never satisfies. The allMatching branch ("Labels
-    // need an explicit selection") is the one that actually matters — it's
-    // the guard against turning one click into a 17-sheet print job — and it
-    // has no e2e coverage right now for exactly that reason.
+    const row = page.getByRole("row", { name: /BR-LT-0148/ });
+    await row.getByRole("checkbox").check();
+    const ids = new URL((await row.getByRole("link", { name: "BR-LT-0148", exact: true }).getAttribute("href"))!, "http://x").pathname.split("/").pop();
+    // Phase 30 (spec §6.4): the selection bar acts directly — Print labels and Export are its own links.
+    await expect(page.getByRole("link", { name: "Print labels", exact: true })).toHaveAttribute("href", `/inventory/labels?ids=${ids}`);
+    await expect(page.getByRole("link", { name: "Export", exact: true })).toHaveAttribute("href", `/inventory/export?ids=${ids}`);
+    // The drawer no longer carries either link; it names what it will touch instead.
+    await page.getByRole("button", { name: "Change status…", exact: true }).click();
+    const drawer = page.getByRole("dialog", { name: "Bulk actions" });
+    await expect(drawer.getByRole("link")).toHaveCount(0);
+    await expect(drawer.getByText("BR-LT-0148", { exact: true })).toBeVisible();
+    // NOT covered here, and worth saying rather than leaving silent: the
+    // selection bar's allMatching branch (Print labels absent, "Labels need an
+    // explicit selection.") needs "Select all N matching", which needs
+    // total > rows.length — the seed's assets on a single page never satisfy
+    // it. That branch is the guard against turning one click into a many-sheet
+    // print job, and it has no e2e coverage right now for exactly that reason.
   });
 
   test("each label carries a QR whose encoded URL is the scan card for its tag", async ({ page }) => {

@@ -19,6 +19,19 @@ export function popForBack(stack: readonly string[]): { stack: string[]; canGoBa
   return { stack: stack.slice(0, -1), canGoBack: true };
 }
 
+/**
+ * Phase 30 (review R9): leave the current page (a sub-page such as an Edit form) for `target`. When
+ * the previous in-app page IS the target, step back to it (`back: true` → router.back()), so the
+ * target's own Back still reaches whatever came before it; otherwise replace the current page with
+ * the target (`back: false` → router.replace()), so the sub-page never sits under it in history.
+ * Either way the current page leaves the stack.
+ */
+export function leaveFor(stack: readonly string[], target: string): { stack: string[]; back: boolean } {
+  const { stack: rest, canGoBack } = popForBack(stack);
+  if (canGoBack && rest[rest.length - 1] === target) return { stack: rest, back: true };
+  return { stack: stack.slice(0, -1), back: false };
+}
+
 export function readStack(storage: Pick<Storage, "getItem">): string[] {
   try {
     const parsed: unknown = JSON.parse(storage.getItem(NAV_STACK_KEY) ?? "[]");

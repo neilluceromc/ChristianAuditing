@@ -1,6 +1,6 @@
 # Phase 30 — Laws of UX applied to the inventory area
 
-**Status:** design approved in conversation 2026-09-23 (decisions 1–10 below). Not yet planned or implemented.
+**Status:** implemented on `phase-30-inventory-uiux` (plan `docs/superpowers/plans/2026-09-23-phase-30-inventory-ux.md`, final tree `4e6fc7f`, 2026-09-23); code-complete, UNMERGED and UNPUSHED; no migration. Amendments made during execution are marked *Amended (P-n / R-n)* below and listed in the plan's D-block.
 
 **Predecessor:** a read-only audit of the inventory screens (worktree `phase-30-inventory-uiux` at `c563600`): 57 findings — 19 on `/inventory`, 19 on the create flows, 19 on `/inventory/[id]`. The audit read every in-scope file whole and measured target sizes and seed facts; it could not walk a signed-in session (an agent may not type a password into the login form), so four findings were marked "needs walk" — F-LIST-16, F-CREATE-8 (timing), F-CREATE-17, F-RECORD-9. The design fixes each of them regardless and the e2e proves the result. The audit's finding ids are cited below as `F-…`.
 
@@ -73,7 +73,7 @@ Make the inventory area obey the laws its operators feel daily: one loudest thin
 - **Admin sees exactly one primary**: when two rows apply (e.g. a Finance-returned IT spare), the lower-numbered one is primary and the other's action is the first More item.
 - **Print label** → `/inventory/labels?ids={id}`, for roles that may print labels.
 - **An empty action area** (Purchasing staff on a checked IT record, Finance on a confirmed record) shows a muted line: `Managed by {CLASS_LABEL} — view only`.
-- Finance's errors render inside the Confirm / Send back dialogs (kept open on failure), never inside the header's action row (F-RECORD-14).
+- Finance's errors render inside the Confirm / Send back dialogs (kept open on failure), never inside the header's action row (F-RECORD-14). *Amended (P-4 / R6): a pending approval suppresses only the lifecycle actions — Finance's Confirm / Send back and IT's Mark checked / Mark corrected stay available — and Change status offers only `statusTargets` on the approval path too.*
 
 ### 4.2 Change status (F-RECORD-2, F-LIST-14)
 
@@ -86,7 +86,7 @@ Make the inventory area obey the laws its operators feel daily: one loudest thin
 - **Assign** puts "Assign to" first with `autoFocus`, then Deployed / Loan, then "Loan until".
 - **Replace** is autofocused and excludes spares held for someone else or queued by an open approval, with the muted line `{n} more spare(s) is/are held or queued for someone else` (the Phase 29 wording).
 - **Loans:** the header's loan line becomes a `DuePill` with the date (accent when overdue); both loan toasts print `fmtDate`.
-- The dialogs used by the record become shared controls (`src/components/inventory/*-control.tsx` taking an asset summary), so the list's row menu opens the same ones (§6.3).
+- The dialogs used by the record become shared controls (`src/components/inventory/*-control.tsx` taking an asset summary), so the list's row menu opens the same ones (§6.3). *Amended (P-5 / R15): the non-direct (approval-path) dialogs keep today's titles and labels and add `This files a request for approval.`; Finance confirms with `Confirm details` (title `Confirm details of {tag}?`), never a bare Confirm.*
 
 ### 4.4 Overview and tabs (F-RECORD-4, 6, 16, 17, 19)
 
@@ -122,20 +122,20 @@ Card **Asset**:
 3. **Model**, then **Brand**.
 4. **Quantity** — a text field holding what was typed; on blur it clamps to 1–200 and says so inline (`Between 1 and 200`).
 5. **Tags:** at quantity 1, one **Tag** field suggested from the category prefix and editable, re-checked when the category changes; at quantity > 1, the prefix and start number as today.
-6. **Rows** (quantity > 1): numbered, with "Tag" and "Serial" column headers, and `{k} of {n} serials entered` above the sticky bar. At quantity 1 a single **Serial** field.
+6. **Rows** (quantity > 1): numbered, with "Tag" and "Serial" column headers, and `{k} of {n} serials entered` above the sticky bar. At quantity 1 a single **Serial** field. *Amended (P-12): at quantity 1 the form keeps its one-row table (`Tag 1` / `Serial 1`, the tag suggested and editable) as this list's one Tag and Serial field, with the quantity-1 extras below it.*
 
 Card **Procurement (optional)**: Purchase request (options `{refNo} · {vendor} · {date}`; choosing one fills an empty Vendor) → Vendor (`EntityCombobox` with recents) → Purchased → Warranty until → Cost → Invoice no. → Documents (§5.4).
 
 ### 5.3 Quantity 1 only (F-CREATE-14)
 
-**Initial state** — a segmented control **Spare · Deployed · Loan** (Purchasing class: its own default and holder statuses, same labels rule). Deployed and Loan reveal **Assign to** (`EntityCombobox` with recents); Loan also reveals **Loan until** (default today + `DEFAULT_LOAN_DAYS`, min tomorrow), passed to `createAsset` and on to `prepareLifecycle`, so no loan is created without a due date. The explanatory line is state-specific: Spare `Registered as a spare, ready to assign.`, Deployed `Deployed to the chosen person.`, Loan `Lent to the chosen person until the date below.`
+**Initial state** — a segmented control **Spare · Deployed · Loan** (Purchasing class: its own default and holder statuses, same labels rule). Deployed and Loan reveal **Assign to** (`EntityCombobox` with recents); Loan also reveals **Loan until** (default today + `DEFAULT_LOAN_DAYS`, min tomorrow), passed to `createAsset` and on to `prepareLifecycle`, so no loan is created without a due date. The explanatory line is state-specific: Spare `Registered as a spare, ready to assign.`, Deployed `Deployed to the chosen person.`, Loan `Lent to the chosen person until the date below.` *Amended (R4 / R10): Loan is offered only on the direct path (`isDirectLifecycle(role, cls)`), because the approval executor never applies a loan date; a single registration audits `create`, and the record's Last change line reads it (`created · {date} · {actor}`).*
 
 ### 5.4 Input tolerance (F-CREATE-2, 3, 17, 19)
 
 - **Enter** in a tag or serial row never submits: it moves focus to the next row's serial; in the last row it focuses the submit button. The form submits only from its buttons.
 - **Paste a column:** pasting multi-line or tab-separated text into a serial cell splits it with `parseSerialPaste` (trim, drop empty lines) and fills that row and the ones below, growing Quantity if needed (up to 200); a line under the rows says `Pasted {n} serials`.
 - **Cost** is a text field with `inputMode="decimal"`; on blur `normaliseCost` strips ₱, commas and spaces and shows the normalised value; an unparseable value is a field error `Enter an amount like 12500 or 12,500.50`, not a silent blank.
-- **Documents** use one styled `FileDrop` (extracted from the Documents tab into `src/components/patterns/file-drop.tsx`): at quantity > 1 one invoice file applied to every unit (as today); at quantity 1 several files each with a kind.
+- **Documents** use one styled `FileDrop` (extracted from the Documents tab into `src/components/patterns/file-drop.tsx`): at quantity > 1 one invoice file applied to every unit (as today); at quantity 1 several files each with a kind. *Amended (R11): staged files carry across the quantity switch — 1 → N the first becomes the batch invoice and the rest stay listed with a warning; N → 1 the invoice returns as kind Invoice.*
 
 ### 5.5 Checks and errors (F-CREATE-4, 8, 16)
 
@@ -156,7 +156,7 @@ Card **Procurement (optional)**: Purchase request (options `{refNo} · {vendor} 
 
 ### 6.1 Header and default class (F-LIST-1, 15)
 
-- One primary **Register assets** (roles that can register the viewed class), then `IconButton` ⋯ `More actions` with `Import…` (IT view, roles that can mutate IT) and `Export` (the current filters, `window.location.assign`).
+- One primary **Register assets** (roles that can register the viewed class), then `IconButton` ⋯ `More actions` with `Import…` (IT view, roles that can mutate IT) and `Export` (the current filters, `window.location.assign`). *Amended (R12): the Register assets link carries the viewed class explicitly (`/inventory/register?cls={cls}`), since the Register page narrows categories only when `?cls=` is present.*
 - `defaultClassFor(role)` = the first class in `MANAGEABLE_CLASSES[role]` that the role can see, else the first visible class; used when `?cls=` is absent.
 
 ### 6.2 Toolbar (F-LIST-2, 3, 4, 5, 10, 11, 17)
@@ -176,7 +176,7 @@ Chips show the value alone, including `Search: {q}` and `Purchased: {year}`, so 
 - **Attention sort key** (`?sort=attention`): rows with a reason first, ordered by the reason's severity (the worklist's) then tag; rows without a reason after them by tag. Computed in memory over the class-visible filtered set, like the Loadout sort; `buildAssetOrderBy` never sees the key.
 - **Tag** is a `Link` (no hard reload); **holder** is a `Link` to `/employees/{id}` with the employee number; both stop propagation.
 - The **checkbox cell** is the whole hit target; the **whole header cell** sorts (a shared `Th` change the employees table inherits).
-- Each row ends with a ⋯ `Actions for {tag}` menu: the items `recordPrimary`'s table allows for that row's state (Assign…, Return…, Change status…, Print label), then `Open record`. They open the shared controls of §4.3.
+- Each row ends with a ⋯ `Actions for {tag}` menu: the items `recordPrimary`'s table allows for that row's state (Assign…, Return…, Change status…, Print label), then `Open record`. They open the shared controls of §4.3. *Amended (P-11 / R13→R14): the row menu renders only when it has an action beyond Open record; the shared Menu renders its popup in a portal, fixed-positioned and flipping against the viewport, so a short or scrolling table never clips it.*
 - An exact tag match in the search still jumps to the record (decision 4).
 
 ### 6.4 Selection bar (F-LIST-13, 14)
@@ -185,7 +185,7 @@ Direct actions replace "Bulk actions…": **Print labels** · Export · Change s
 
 ### 6.5 Paging and feedback (F-LIST-12, 16)
 
-`page {n} of {m}` renders only when `pageCount > 1`. Search, facet, sort and page navigations run in `useTransition` and mark the table `data-pending` + `aria-busy` until the new rows arrive.
+`page {n} of {m}` renders only when `pageCount > 1`. Search, facet, sort and page navigations run in `useTransition` and mark the table `data-pending` + `aria-busy` until the new rows arrive. *Amended (R15): pagination links go through the same transition (`NavLink`), so they mark the list busy too.*
 
 ---
 

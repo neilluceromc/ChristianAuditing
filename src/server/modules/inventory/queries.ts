@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { Prisma, type AssetClass, type Role } from "@prisma/client";
+import { Prisma, type AssetClass, type AssetStatus, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
@@ -12,11 +12,12 @@ import {
   REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
 } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
-import { ENTITY_PAGE_SIZE } from "@/lib/paging";
+import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
-import { auditSentence } from "@/lib/activity";
+import { auditPhrase, auditSentence } from "@/lib/activity";
+import { attentionOf, attentionWhere, orderByAttention, type Attention } from "@/lib/inventory-attention";
 
 /** Serializable DTO for the client table island — strings only, preformatted. */
 export interface AssetRow {
@@ -35,6 +36,23 @@ export interface AssetRow {
   stageLabel: string | null;
   /** days out of service: to now while DEFECTIVE, closed on repairEndedAt otherwise; null when never defective or the end was never recorded (Phase 26) */
   down: number | null;
+  /** Phase 30 (spec §6.3): the holder's ids, for the row's holder link and the holder search. */
+  assigneeId: string | null;
+  assigneeNo: string | null;
+  cls: AssetClass;
+  /** the raw enum — `status` above stays the display string */
+  statusValue: AssetStatus;
+  /** back, not checked (returnedAt set) */
+  returned: boolean;
+  /** the open approval's ref (PENDING / CLAIMED / APPROVED), newest first */
+  pendingRef: string | null;
+  /** YYYY-MM-DD */
+  loanDueAt: string | null;
+  awaitingItCheck: boolean;
+  financeConfirmed: boolean;
+  financeReturned: boolean;
+  /** the one reason this row still owes someone something, worst first (attentionOf) */
+  attention: Attention | null;
 }
 
 /**
@@ -68,15 +86,29 @@ export function stageOf(a: {
 
 const LIST_INCLUDE = {
   category: true,
+  // the whole Employee row — id and employeeNo ride along with the name (Phase 30)
   assignee: true,
   reservations: { where: { state: "ACTIVE" }, include: { employee: true } },
+  // the open approval that queues this row (Phase 30, spec §6.3) — the same states as OPEN_APPROVAL_STATES
+  approvals: {
+    where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
+    select: { refNo: true },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+  },
 } satisfies Prisma.AssetInclude;
 
 function toRow(a: {
   id: string;
   tag: string;
   model: string;
-  status: string;
+  cls: AssetClass;
+  status: AssetStatus;
+  returnedAt: Date | null;
+  loanDueAt: Date | null;
+  itVerifiedAt: Date | null;
+  financeConfirmedAt: Date | null;
+  financeReturnedAt: Date | null;
   purchasedAt: Date | null;
   warrantyUntil: Date | null;
   defectiveSince: Date | null;
@@ -86,10 +118,12 @@ function toRow(a: {
   cost: Prisma.Decimal | null;
   repairQuote: Prisma.Decimal | null;
   category: { name: string };
-  assignee: { name: string } | null;
+  assignee: { id: string; name: string; employeeNo: string } | null;
   reservations: Array<{ expiresAt: Date | null; employee: { id: string; name: string } }>;
-}): AssetRow {
+  approvals: Array<{ refNo: string }>;
+}, now: Date): AssetRow {
   const stage = stageOf(a);
+  const pendingRef = a.approvals[0]?.refNo ?? null;
   return {
     id: a.id,
     tag: a.tag,
@@ -103,6 +137,20 @@ function toRow(a: {
     stage,
     stageLabel: stage ? REPAIR_STAGE_LABEL[stage] : null,
     down: downDays(a),
+    assigneeId: a.assignee?.id ?? null,
+    assigneeNo: a.assignee?.employeeNo ?? null,
+    cls: a.cls,
+    statusValue: a.status,
+    returned: a.returnedAt !== null,
+    pendingRef,
+    loanDueAt: a.loanDueAt ? a.loanDueAt.toISOString().slice(0, 10) : null,
+    awaitingItCheck: a.cls === "IT" && a.itVerifiedAt === null,
+    financeConfirmed: a.financeConfirmedAt !== null,
+    financeReturned: a.financeReturnedAt !== null,
+    attention: attentionOf({
+      cls: a.cls, status: a.status, returnedAt: a.returnedAt, loanDueAt: a.loanDueAt,
+      pendingRef, itVerifiedAt: a.itVerifiedAt,
+    }, now),
   };
 }
 
@@ -161,11 +209,14 @@ export async function listAssets(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
   cls: AssetClass,
+  now: Date = new Date(),
 ): Promise<{
   rows: AssetRow[];
   total: number;
   page: number;
   pageCount: number;
+  /** rows in this view (every filter applied, every page) that carry an attention reason — the count line */
+  attentionCount: number;
 }> {
   const orderBy = buildAssetOrderBy(state.sort);
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
@@ -174,19 +225,32 @@ export async function listAssets(
   // REPAIR_STAGE_CASE_SQL and intersects every other active filter and purchaseYear — so the list
   // pages that id set through the same count/skip/take snapshot as every other view. Until this
   // phase it loaded every candidate row with its includes and paged the array in memory.
-  if (stages.length > 0) {
-    const ids = (await repairStageIds(state, purchaseYear, cls)) ?? [];
-    const idWhere: Prisma.AssetWhereInput = { id: { in: ids } };
-    const { rows: cut, total, page, pageCount } = await pagedSnapshot(
-      ENTITY_PAGE_SIZE,
-      state.page,
-      (tx) => tx.asset.count({ where: idWhere }),
-      (tx, pg) => tx.asset.findMany({ where: idWhere, orderBy, skip: pg.skip, take: pg.take, include: LIST_INCLUDE }),
-    );
-    return { total, page, pageCount, rows: cut.map(toRow) };
+  const where: Prisma.AssetWhereInput = stages.length > 0
+    ? { id: { in: (await repairStageIds(state, purchaseYear, cls)) ?? [] } }
+    : buildAssetWhere(state, purchaseYear, cls);
+
+  // Phase 30 (plan P-10): attentionWhere agrees with attentionOf boundary for boundary, so this
+  // count and the markers on the rows cannot disagree.
+  const attentionCount = await prisma.asset.count({ where: { AND: [where, attentionWhere(now)] } });
+
+  // Attention is derived, not a column: the candidate pass runs in memory (like the Loadout sort on
+  // the people list) — the whole view in the default order, ranked by attentionOf, then paged.
+  // Only as the PRIMARY key: a secondary `attention` (left behind by a header click) is dropped, as
+  // buildAssetOrderBy already drops it in SQL, so the clicked column really orders the rows.
+  const attentionSort = state.sort[0]?.key === "attention" ? state.sort[0] : undefined;
+  if (attentionSort) {
+    const all = await prisma.asset.findMany({ where, orderBy, include: LIST_INCLUDE });
+    const ordered = orderByAttention(all.map((a) => toRow(a, now)), attentionSort.dir);
+    const pg = pageOf(ordered.length, state.page, ENTITY_PAGE_SIZE);
+    return {
+      rows: ordered.slice(pg.skip, pg.skip + pg.take),
+      total: pg.total,
+      page: pg.page,
+      pageCount: pg.pageCount,
+      attentionCount,
+    };
   }
 
-  const where = buildAssetWhere(state, purchaseYear, cls);
   const { rows: assets, total, page, pageCount } = await pagedSnapshot(
     ENTITY_PAGE_SIZE,
     state.page,
@@ -204,7 +268,8 @@ export async function listAssets(
     total,
     page,
     pageCount,
-    rows: assets.map(toRow),
+    attentionCount,
+    rows: assets.map((a) => toRow(a, now)),
   };
 }
 
@@ -383,17 +448,31 @@ export async function invisibleAssetIds(role: Role): Promise<string[]> {
  * in — the two groups render as combobox headings (Phase 24) instead of the
  * per-row note Phase 15/20 shipped with — true for every row whether or not
  * `preferTypeId` ever matches anything.
+ *
+ * Phase 30 (spec §4.4): a spare an open approval already queues is excluded
+ * beside a reserved one — picking it would only be refused at submit — and
+ * `hidden` counts both, so the dialog can say how many spares are spoken for
+ * instead of silently offering fewer.
  */
-export async function spareOptions(preferTypeId: string | null): Promise<ComboOption[]> {
-  const rows = await prisma.asset.findMany({
-    where: { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null, reservations: { none: { state: "ACTIVE" } } },
-    select: { id: true, tag: true, model: true, typeId: true },
-    orderBy: { tag: "asc" },
-  });
+export async function spareOptions(preferTypeId: string | null): Promise<{ options: ComboOption[]; hidden: number }> {
+  const pool = { cls: "IT" as const, status: ASSIGNABLE_FROM.IT, returnedAt: null };
+  const [rows, all] = await Promise.all([
+    prisma.asset.findMany({
+      where: {
+        ...pool,
+        reservations: { none: { state: "ACTIVE" } },
+        approvals: { none: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } } },
+      },
+      select: { id: true, tag: true, model: true, typeId: true },
+      orderBy: { tag: "asc" },
+    }),
+    prisma.asset.count({ where: pool }),
+  ]);
   const isSameType = (t: string | null) => preferTypeId !== null && t === preferTypeId;
   const rank = (t: string | null) => (isSameType(t) ? 0 : 1);
-  return rows.sort((a, b) => rank(a.typeId) - rank(b.typeId) || a.tag.localeCompare(b.tag))
+  const options = rows.sort((a, b) => rank(a.typeId) - rank(b.typeId) || a.tag.localeCompare(b.tag))
     .map((a) => ({ value: a.id, label: a.tag, sub: a.model, group: isSameType(a.typeId) ? "Same type" : "Other spares" }));
+  return { options, hidden: Math.max(0, all - rows.length) };
 }
 
 /**
@@ -411,12 +490,13 @@ export async function spareOptions(preferTypeId: string | null): Promise<ComboOp
  */
 export async function lastLifecycleChange(
   assetId: string,
-): Promise<{ sentence: string; at: Date; actor: string } | null> {
+): Promise<{ sentence: string; phrase: string; at: Date; actor: string } | null> {
   const entry = await prisma.auditEntry.findFirst({
     where: {
       entityType: "asset",
       entityId: assetId,
-      OR: [{ action: { startsWith: "lifecycle." } }, { action: "register" }],
+      // Phase 30 (review R10): Register at quantity 1 goes through createAsset, which audits `create`.
+      OR: [{ action: { startsWith: "lifecycle." } }, { action: "register" }, { action: "create" }],
     },
     orderBy: { createdAt: "desc" },
   });
@@ -426,6 +506,8 @@ export async function lastLifecycleChange(
     sentence: auditSentence({
       actorLabel: entry.actorLabel, action: entry.action, diff: entry.diff, entityLabel: asset?.tag ?? assetId,
     }),
+    // Phase 30 (spec §4.4): the header's line without the tag or the actor — `assigned to Carlo Dizon`.
+    phrase: auditPhrase({ action: entry.action, diff: entry.diff }),
     at: entry.createdAt,
     actor: entry.actorLabel,
   };

@@ -3,14 +3,15 @@ import type { AssetClass } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
 import { localDateISO } from "@/lib/format";
 import {
-  clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter,
+  clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter, withSearch,
 } from "@/lib/url-state";
 import {
   INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
   type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import {
-  CLASS_LABEL, VISIBLE_CLASSES, canManageClass, canRegisterClass, canSeeClass, isDirectLifecycle, isStatusOf, parseCls, withClsQS,
+  CLASS_LABEL, VISIBLE_CLASSES, canManageClass, canRegisterClass, canSeeClass, defaultClassFor, isDirectLifecycle, isStatusOf,
+  parseCls, withViewClsQS,
 } from "@/lib/asset-class";
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
@@ -26,7 +27,9 @@ import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filte
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { ColumnChooser } from "@/components/inventory/column-chooser";
 import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
-import { REPAIRS_SAVED_VIEW, REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
+import { InventoryMoreMenu } from "@/components/inventory/inventory-more-menu";
+import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/inventory/list-navigation";
+import { REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
 import { RepairChips } from "@/components/inventory/repair-chips";
 
 export default async function InventoryPage({
@@ -44,7 +47,10 @@ export default async function InventoryPage({
   // ask for. Redirect to the bare list rather than render an empty table under
   // a heading that names the other department's assets.
   if (requested && !canSeeClass(user.role, requested)) redirect("/inventory");
-  const cls: AssetClass = requested ?? visible[0];
+  // Phase 30 (plan P-7): the list opens on the class the role manages — Purchasing for
+  // purchasing_staff — and a URL names its class only when it is not that default.
+  const defaultCls = defaultClassFor(user.role);
+  const cls: AssetClass = requested ?? defaultCls;
   const canMutate = canManageClass(user.role, cls);
   const canRegister = canRegisterClass(user.role, cls);
   const direct = isDirectLifecycle(user.role, cls);
@@ -68,14 +74,14 @@ export default async function InventoryPage({
     if (hit) redirect(`/inventory/${hit.id}`);
   }
 
-  // Task 9: the bulk drawer's assign mode needs a name to assign to. Loaded
+  // Task 9: the bulk drawer's assign mode (and, Phase 30, the row menu's Assign) needs a name to assign to. Loaded
   // only for a role that can mutate this class at all — the same condition
   // InventoryTable already uses to decide whether the drawer exists.
   const employees = canMutate ? await activeEmployeeOptions() : [];
   const recentEmployees = canMutate ? await recentPicks(user.id, "employee") : [];
   const today = localDateISO(new Date());
 
-  const [{ rows, total, page, pageCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
+  const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
     listAssets(state, purchaseYear, cls),
     facetOptions(state, purchaseYear, cls),
     getInventoryColumns(user.id),
@@ -99,20 +105,32 @@ export default async function InventoryPage({
   // imports `serializeListState` or `INVENTORY_LIST_CONFIG` any more, so
   // neither can reconstruct that bug.
   const href = (s: typeof state, py: PurchaseYearValue | null = purchaseYear) =>
-    "/inventory" + withClsQS(withPurchaseYearQS(serializeListState(s, INVENTORY_LIST_CONFIG), py), cls);
-  const exportQS = withClsQS(withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear), cls);
+    "/inventory" + withViewClsQS(withPurchaseYearQS(serializeListState(s, INVENTORY_LIST_CONFIG), py), cls, defaultCls);
+  // The export route and the bulk filters default the class to the viewer's own (Task 2's
+  // defaultClassFor), so omitting `cls` exactly when it is that default names the same view.
+  const exportQS = withViewClsQS(withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear), cls, defaultCls);
+  // Not withViewClsQS: the Register page narrows its categories on the parameter itself, so the
+  // link always names the class being viewed — even the viewer's default.
+  const registerHref = `/inventory/register?cls=${cls}`;
+  const importHref = canMutate && cls === "IT" ? "/inventory/import" : null;
   // One href per sortable key — the result of clicking that column's header —
   // plain serializable data, unlike `href` above, so it can cross into the
-  // InventoryTable Client Component.
+  // InventoryTable Client Component. The Attention sort is dropped first: a header click leaves the
+  // Attention view cleanly instead of keeping `attention` as a secondary key (the list only runs its
+  // attention pass as the primary key, so a leftover would be inert but still shown in the URL).
   const sortHrefs: Record<string, string> = Object.fromEntries(
     INVENTORY_LIST_CONFIG.sortable.map((key) => [
       key,
-      href({ ...state, sort: toggleSort(state.sort, key), page: 1 }),
+      href({ ...state, sort: toggleSort(state.sort.filter((s) => s.key !== "attention"), key), page: 1 }),
     ]),
   );
   const repairMode = isRepairView(state);
 
+  // Phase 30 (spec §6.2): a chip reads as the value alone — the facet it belongs to is the
+  // dropdown it came from. The search and the purchase year are chips too, so every narrowing
+  // on screen can be removed in the same place (and the filtered-empty count below is honest).
   const chips: FilterChip[] = [];
+  if (state.q) chips.push({ label: `Search: ${state.q}`, removeHref: href(withSearch(state, "")) });
   for (const [facet, values] of Object.entries(state.filters)) {
     // In repair mode the RepairChips row above already renders the stage, and
     // renders it with the right semantics. Emitting it here too would show the
@@ -129,10 +147,16 @@ export default async function InventoryPage({
           ? REPAIR_STAGE_LABEL[value]
           : facets[facet]?.find((o) => o.value === value)?.label ?? value;
       chips.push({
-        label: `${facet}: ${label}`,
+        label,
         removeHref: href(withFilter(state, facet, values.filter((v) => v !== value))),
       });
     }
+  }
+  if (purchaseYear !== null) {
+    chips.push({
+      label: `Purchased: ${purchaseYear === "none" ? "No date" : purchaseYear}`,
+      removeHref: href({ ...state, page: 1 }, null),
+    });
   }
 
   return (
@@ -142,97 +166,99 @@ export default async function InventoryPage({
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
         actions={
           <>
-            <ButtonLink href={"/inventory/export" + exportQS}>
-              Export
-            </ButtonLink>
-            {/* Affordance absent, not disabled, for a role that can't reach the
-                page — canMutate is exactly admin/it_staff, matching the
-                PATH_RULES entry that gates /inventory/import itself. Import
-                stays IT-only regardless of the view: there is no Purchasing
-                import wizard yet (Task 10). */}
-            {canMutate && cls === "IT" && <ButtonLink href="/inventory/import">Import</ButtonLink>}
-            {canRegister && <ButtonLink href="/inventory/register">Register several</ButtonLink>}
-            {canRegister && <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>}
+            {canRegister && <ButtonLink variant="primary" href={registerHref}>Register assets</ButtonLink>}
+            {/* Import stays IT-only regardless of the view (there is no Purchasing
+                import wizard), and absent — not disabled — for a role that can't
+                reach /inventory/import (canMutate is exactly admin/it_staff, the
+                PATH_RULES entry that gates it). */}
+            <InventoryMoreMenu importHref={importHref} exportHref={"/inventory/export" + exportQS} />
           </>
         }
       />
-      <div className="flex flex-col gap-2">
-        <InventoryToolbar
-          state={state}
-          total={total}
-          facets={facets}
-          yearChips={yearChips}
-          purchaseYear={purchaseYear}
-          cls={cls}
-          classes={visible}
-        >
-          <ColumnChooser visible={visibleColumns} />
-          {/* Saved views are named URLs (README): Repairs is one of them. */}
-          {/* Repairs is an IT saved view — its URL pins status=DEFECTIVE, an IT
-              status, and carries no cls. Absent, not a link that ejects (D-14). */}
-          {cls === "IT" && <ButtonLink size="sm" href={REPAIRS_SAVED_VIEW}>Repairs</ButtonLink>}
-        </InventoryToolbar>
-        {repairMode && <RepairChips state={state} href={href} />}
-        {/* Clearing filters resets purchaseYear too — it is the same
-            "start over" gesture as clearing every other facet. */}
-        <ChipFilterRow chips={chips} clearHref={href(clearFilters(state), null)} />
-        {rows.length > 0 ? (
-          <>
-            {/* key: any URL-state change remounts the island — selection must
-                never silently survive a page/filter/sort change (it would act
-                on rows the user can no longer see). purchaseYear is part of
-                that key via exportQS even though it isn't part of `state`.
-                The class must stay part of this key too — Task 9 threads
-                `cls` into exportQS via withClsQS — because the drawer's `to`
-                and the selection Set both belong to one class view. */}
-            <InventoryTable
-              key={exportQS}
-              rows={rows}
-              state={state}
-              visible={visibleColumns}
-              canMutate={canMutate}
-              filtersQS={exportQS.replace(/^\?/, "")}
-              total={total}
-              cls={cls}
-              direct={direct}
-              employees={employees}
-              recentEmployees={recentEmployees}
-              repairMode={repairMode}
-              sortHrefs={sortHrefs}
-              today={today}
-            />
-            <div className="flex items-center justify-between pt-1">
-              <span className="font-mono text-[11px] text-fg-muted">
-                page {page} of {pageCount}
-              </span>
-              <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
-            </div>
-          </>
-        ) : hasFilters ? (
-          <EmptyState
-            title="Your filters matched nothing"
-            description={`${chips.length + (state.q ? 1 : 0)} active filter${chips.length + (state.q ? 1 : 0) === 1 ? "" : "s"} — loosen or clear them.`}
-            actions={<ButtonLink href={href(clearFilters(state), null)}>Clear filters</ButtonLink>}
-          />
-        ) : (
-          <EmptyState
-            title="No assets yet"
-            description={
-              cls === "IT"
-                ? "Register the first asset, or use Import to bring in a spreadsheet."
-                : "Register the first asset — Purchasing assets are registered one batch at a time; there is no spreadsheet import for them yet."
-            }
-            actions={
-              canRegister ? (
-                <>
-                  <ButtonLink href="/inventory/register">Register several</ButtonLink>
-                  <ButtonLink variant="primary" href={"/inventory/new" + withClsQS("", cls)}>New asset</ButtonLink>
-                </>
-              ) : undefined
-            }
-          />
-        )}
-      </div>
+      <ListNavigationProvider>
+        <div className="flex flex-col gap-2">
+          <InventoryToolbar
+            state={state}
+            total={total}
+            attentionCount={attentionCount}
+            facets={facets}
+            yearChips={yearChips}
+            purchaseYear={purchaseYear}
+            cls={cls}
+            defaultCls={defaultCls}
+            classes={visible}
+          >
+            <ColumnChooser visible={visibleColumns} />
+          </InventoryToolbar>
+          {/* Search, facet, Purchased and sort navigations share one transition; this region
+              dims (data-pending, aria-busy) while the next view renders. */}
+          <ListPendingRegion className="flex flex-col gap-2">
+            {repairMode && <RepairChips state={state} href={href} />}
+            {/* Clearing filters resets purchaseYear too — it is the same
+                "start over" gesture as clearing every other facet. */}
+            <ChipFilterRow chips={chips} clearHref={href(clearFilters(state), null)} />
+            {rows.length > 0 ? (
+              <>
+                {/* key: any URL-state change remounts the island — selection must
+                    never silently survive a page/filter/sort change (it would act
+                    on rows the user can no longer see). purchaseYear is part of
+                    that key via exportQS even though it isn't part of `state`.
+                    The class must stay part of this key too — withViewClsQS
+                    names it whenever it is not the viewer's default — because
+                    the drawer's `to` and the selection Set both belong to one
+                    class view. */}
+                <InventoryTable
+                  key={exportQS}
+                  rows={rows}
+                  state={state}
+                  visible={visibleColumns}
+                  canMutate={canMutate}
+                  filtersQS={exportQS.replace(/^\?/, "")}
+                  total={total}
+                  cls={cls}
+                  role={user.role}
+                  direct={direct}
+                  employees={employees}
+                  recentEmployees={recentEmployees}
+                  repairMode={repairMode}
+                  sortHrefs={sortHrefs}
+                  today={today}
+                />
+                <div className="flex items-center justify-between pt-1">
+                  {/* spec §6.5: "page 1 of 1" says nothing */}
+                  {pageCount > 1 && (
+                    <span className="font-mono text-[11px] text-fg-muted">
+                      page {page} of {pageCount}
+                    </span>
+                  )}
+                  {/* NavLink: a page change runs through the shared transition and marks the list busy */}
+                  <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} linkComponent={NavLink} />
+                </div>
+              </>
+            ) : hasFilters ? (
+              <EmptyState
+                title="Your filters matched nothing"
+                description={`${chips.length} active filter${chips.length === 1 ? "" : "s"} — loosen or clear them.`}
+                actions={<ButtonLink href={href(clearFilters(state), null)}>Clear filters</ButtonLink>}
+              />
+            ) : (
+              <EmptyState
+                title="No assets yet"
+                description={
+                  !canRegister
+                    ? "No assets in this view."
+                    : importHref
+                      ? "Register the first asset, or import a spreadsheet."
+                      : "Register the first asset."
+                }
+                actions={
+                  canRegister ? <ButtonLink variant="primary" href={registerHref}>Register assets</ButtonLink> : undefined
+                }
+              />
+            )}
+          </ListPendingRegion>
+        </div>
+      </ListNavigationProvider>
     </>
   );
 }

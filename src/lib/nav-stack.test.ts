@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NAV_STACK_MAX, popForBack, pushPath, readStack, writeStack } from "./nav-stack";
+import { NAV_STACK_MAX, leaveFor, popForBack, pushPath, readStack, writeStack } from "./nav-stack";
 
 const mem = () => {
   const m = new Map<string, string>();
@@ -21,6 +21,19 @@ describe("nav-stack — whether Back has somewhere in-app to go", () => {
     expect(popForBack([])).toEqual({ stack: [], canGoBack: false });
     expect(popForBack(["/inventory/abc"])).toEqual({ stack: ["/inventory/abc"], canGoBack: false });
     expect(popForBack(["/inventory?status=SPARE", "/inventory/abc"])).toEqual({ stack: ["/inventory?status=SPARE"], canGoBack: true });
+  });
+  it("leaving an edit form for its record steps back when the record is the previous page (Phase 30, R9)", () => {
+    const list = "/inventory?status=SPARE", rec = "/inventory/abc", edit = "/inventory/abc/edit";
+    // list → record → edit: back to the record, whose own Back then reaches the list
+    expect(leaveFor([list, rec, edit], rec)).toEqual({ stack: [list, rec], back: true });
+    expect(popForBack(leaveFor([list, rec, edit], rec).stack)).toEqual({ stack: [list], canGoBack: true });
+    // reached from somewhere else (a deep link's history, the list's row menu): replace, never stack
+    expect(leaveFor([list, edit], rec)).toEqual({ stack: [list], back: false });
+    // the previous page is the record with a query (?created=1): not the same page, so replace
+    expect(leaveFor(["/inventory/abc?created=1", edit], rec)).toEqual({ stack: ["/inventory/abc?created=1"], back: false });
+    // a deep link straight to the form: replace, and the record's Back falls back to its parent
+    expect(leaveFor([edit], rec)).toEqual({ stack: [], back: false });
+    expect(leaveFor([], rec)).toEqual({ stack: [], back: false });
   });
   it("reads garbage as empty and swallows a storage that throws", () => {
     const s = mem();

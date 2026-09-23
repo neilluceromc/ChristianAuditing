@@ -76,7 +76,14 @@ export interface ActivityEntryLike {
   entityLabel: string;
 }
 
-export function auditSentence(entry: ActivityEntryLike): string {
+/**
+ * Phase 30 (T1): `omitActor`/`omitEntity` let a caller ask for the phrase without the leading actor
+ * and/or the entity label — the same verb map below, not a second one and not string surgery on the
+ * rendered sentence. `auditPhrase` is the public shorthand for omitting both.
+ */
+export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boolean; omitEntity?: boolean }): string {
+  const omitEntity = opts?.omitEntity ?? false;
+  const actor = opts?.omitActor ? "" : `${entry.actorLabel} `;
   const diff = (entry.diff ?? null) as Record<string, { from: unknown; to: unknown }> | null;
   // Phase 27 fix wave (I-1): the approvals worker writes "<lifecycle.*> executed" on the asset with the
   // same prepared diff a direct action writes — one sentence body serves both, with a suffix saying
@@ -87,46 +94,48 @@ export function auditSentence(entry: ActivityEntryLike): string {
   const suffix = viaApproval ? " (approved request)" : "";
   switch (action) {
     case "create":
-      return `${entry.actorLabel} created ${entry.entityLabel}`;
+      return omitEntity ? `${actor}created` : `${actor}created ${entry.entityLabel}`;
     case "update":
-      return `${entry.actorLabel} updated ${fieldList(diff)} on ${entry.entityLabel}`;
+      return omitEntity ? `${actor}updated ${fieldList(diff)}` : `${actor}updated ${fieldList(diff)} on ${entry.entityLabel}`;
     case "SECRET_READ": {
       const label = diff?.label?.to;
-      return `${entry.actorLabel} revealed the secret "${String(label ?? "?")}" on ${entry.entityLabel}`;
+      const phrase = `revealed the secret "${String(label ?? "?")}"`;
+      return omitEntity ? `${actor}${phrase}` : `${actor}${phrase} on ${entry.entityLabel}`;
     }
     case "approval.requested": {
-      const ref = diff?.approval?.to;
-      return `${entry.actorLabel} requested ${String(ref ?? "an approval")} on ${entry.entityLabel}`;
+      const phrase = `requested ${String(diff?.approval?.to ?? "an approval")}`;
+      return omitEntity ? `${actor}${phrase}` : `${actor}${phrase} on ${entry.entityLabel}`;
     }
     case "submit":
-      return `${entry.actorLabel} submitted ${entry.entityLabel} for IT review`;
+      return omitEntity ? `${actor}submitted for IT review` : `${actor}submitted ${entry.entityLabel} for IT review`;
     case "it-review":
-      return `${entry.actorLabel} marked ${entry.entityLabel} IT-reviewed`;
+      return omitEntity ? `${actor}marked IT-reviewed` : `${actor}marked ${entry.entityLabel} IT-reviewed`;
     case "it-reject":
-      return `${entry.actorLabel} sent ${entry.entityLabel} back to purchasing`;
+      return omitEntity ? `${actor}sent back to purchasing` : `${actor}sent ${entry.entityLabel} back to purchasing`;
     case "request-info":
-      return `${entry.actorLabel} sent ${entry.entityLabel} back for more information`;
+      return omitEntity ? `${actor}sent back for more information` : `${actor}sent ${entry.entityLabel} back for more information`;
     case "cancel":
-      return `${entry.actorLabel} cancelled ${entry.entityLabel}`;
+      return omitEntity ? `${actor}cancelled` : `${actor}cancelled ${entry.entityLabel}`;
     case "complete":
-      return `${entry.actorLabel} completed ${entry.entityLabel}`;
+      return omitEntity ? `${actor}completed` : `${actor}completed ${entry.entityLabel}`;
     // Phase 12's asset actions. Left to the default they rendered the
     // raw verb — "J. Sarmiento finance.return BR-LT-0148" — which is not a
     // sentence and buries the one thing a reader of the feed wants.
     case "register":
-      return `${entry.actorLabel} registered ${entry.entityLabel}`;
+      return omitEntity ? `${actor}registered` : `${actor}registered ${entry.entityLabel}`;
     case "finance.confirm":
-      return `${entry.actorLabel} confirmed ${entry.entityLabel}'s details`;
+      return omitEntity ? `${actor}confirmed details` : `${actor}confirmed ${entry.entityLabel}'s details`;
     case "it.verify":
-      return `${entry.actorLabel} checked ${entry.entityLabel}`;
+      return omitEntity ? `${actor}checked` : `${actor}checked ${entry.entityLabel}`;
     case "finance.return": {
       // The reason is the entire point of a return, so it belongs in the
       // sentence rather than one click away in the diff.
       const why = diff?.financeReturn?.to;
-      return `${entry.actorLabel} sent ${entry.entityLabel} back to IT${why ? ` \u00b7 ${String(why)}` : ""}`;
+      const tail = why ? ` \u00b7 ${String(why)}` : "";
+      return omitEntity ? `${actor}sent back to IT${tail}` : `${actor}sent ${entry.entityLabel} back to IT${tail}`;
     }
     case "finance.resubmit":
-      return `${entry.actorLabel} marked ${entry.entityLabel} corrected for Finance`;
+      return omitEntity ? `${actor}marked corrected for Finance` : `${actor}marked ${entry.entityLabel} corrected for Finance`;
     // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
     // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {
     // from: null, to } }` (transfer-actions.ts) — without this case the raw
@@ -143,46 +152,60 @@ export function auditSentence(entry: ActivityEntryLike): string {
       const retitled = titleChange && titleChange.from !== titleChange.to
         ? ` · retitled ${String(titleChange.to)}`
         : "";
-      return `${entry.actorLabel} moved ${entry.entityLabel} from ${from} to ${to}${retitled}`;
+      return omitEntity
+        ? `${actor}moved from ${from} to ${to}${retitled}`
+        : `${actor}moved ${entry.entityLabel} from ${from} to ${to}${retitled}`;
     }
     case "offboarding.completed": {
       const items = diff?.decisions?.to;
       const n = Array.isArray(items) ? items.length : 0;
-      return `${entry.actorLabel} completed offboarding for ${entry.entityLabel}${n ? ` · ${n} item${n === 1 ? "" : "s"} settled` : ""}`;
+      const tail = n ? ` · ${n} item${n === 1 ? "" : "s"} settled` : "";
+      return omitEntity ? `${actor}completed offboarding${tail}` : `${actor}completed offboarding for ${entry.entityLabel}${tail}`;
     }
     // Phase 15: direct IT lifecycle changes. Subject-first, no refNo — the
     // approval row exists (already EXECUTED) but the sentence is about the asset.
-    case "lifecycle.assign":
-      return `${entry.actorLabel} assigned ${entry.entityLabel} to ${String(diff?.assignee?.to ?? "someone")}${suffix}`;
+    case "lifecycle.assign": {
+      const phrase = `assigned to ${String(diff?.assignee?.to ?? "someone")}${suffix}`;
+      return omitEntity ? `${actor}${phrase}` : `${actor}assigned ${entry.entityLabel} to ${String(diff?.assignee?.to ?? "someone")}${suffix}`;
+    }
     case "lifecycle.transfer": {
       const to = diff?.assignee?.to;
-      return `${entry.actorLabel} transferred ${entry.entityLabel}${to ? ` to ${String(to)}` : ""}${suffix}`;
+      const tail = `${to ? ` to ${String(to)}` : ""}${suffix}`;
+      return omitEntity ? `${actor}transferred${tail}` : `${actor}transferred ${entry.entityLabel}${tail}`;
     }
     case "lifecycle.return": {
       const to = diff?.status?.to;
-      return diff?.returnedAt?.to
-        ? `${entry.actorLabel} returned ${entry.entityLabel} for triage${suffix}`
-        : `${entry.actorLabel} returned ${entry.entityLabel} as ${String(to ?? "?")}${suffix}`;
+      const tail = diff?.returnedAt?.to ? `for triage${suffix}` : `as ${String(to ?? "?")}${suffix}`;
+      return omitEntity ? `${actor}returned ${tail}` : `${actor}returned ${entry.entityLabel} ${tail}`;
     }
     case "lifecycle.change-status":
-      return `${entry.actorLabel} changed ${entry.entityLabel} to ${String(diff?.status?.to ?? "?")}${suffix}`;
-    case "lifecycle.replace":
-      return diff?.replacedBy
-        ? `${entry.actorLabel} replaced ${entry.entityLabel} with ${String(diff.replacedBy.to)}${suffix}`
-        : `${entry.actorLabel} put ${entry.entityLabel} in place of ${String(diff?.replaces?.to ?? "?")} for ${String(diff?.assignee?.to ?? "someone")}${suffix}`;
+      return omitEntity
+        ? `${actor}changed to ${String(diff?.status?.to ?? "?")}${suffix}`
+        : `${actor}changed ${entry.entityLabel} to ${String(diff?.status?.to ?? "?")}${suffix}`;
+    case "lifecycle.replace": {
+      if (diff?.replacedBy) {
+        const tail = `with ${String(diff.replacedBy.to)}${suffix}`;
+        return omitEntity ? `${actor}replaced ${tail}` : `${actor}replaced ${entry.entityLabel} ${tail}`;
+      }
+      const tail = `in place of ${String(diff?.replaces?.to ?? "?")} for ${String(diff?.assignee?.to ?? "someone")}${suffix}`;
+      return omitEntity ? `${actor}put ${tail}` : `${actor}put ${entry.entityLabel} ${tail}`;
+    }
     case "lifecycle.triage":
-      return `${entry.actorLabel} triaged ${entry.entityLabel}: ${String(diff?.triage?.to ?? "?")}${suffix}`;
+      return omitEntity
+        ? `${actor}triaged: ${String(diff?.triage?.to ?? "?")}${suffix}`
+        : `${actor}triaged ${entry.entityLabel}: ${String(diff?.triage?.to ?? "?")}${suffix}`;
     // Phase 26 (spec §4.1): holds are placed and released on the asset.
     case "reservation.placed": {
       const until = diff?.expiresAt?.to;
-      return `${entry.actorLabel} reserved ${entry.entityLabel} for ${String(diff?.hold?.to ?? "someone")}${typeof until === "string" ? ` until ${fmtDate(new Date(until))}` : ""}`;
+      const tail = `for ${String(diff?.hold?.to ?? "someone")}${typeof until === "string" ? ` until ${fmtDate(new Date(until))}` : ""}`;
+      return omitEntity ? `${actor}reserved ${tail}` : `${actor}reserved ${entry.entityLabel} ${tail}`;
     }
     case "reservation.released":
-      return `${entry.actorLabel} released the hold on ${entry.entityLabel}`;
+      return omitEntity ? `${actor}released the hold` : `${actor}released the hold on ${entry.entityLabel}`;
     case "comment":
-      return `${entry.actorLabel} commented on ${entry.entityLabel}`;
+      return omitEntity ? `${actor}commented` : `${actor}commented on ${entry.entityLabel}`;
     case "unit-update":
-      return `${entry.actorLabel} updated a unit on ${entry.entityLabel}`;
+      return omitEntity ? `${actor}updated a unit` : `${actor}updated a unit on ${entry.entityLabel}`;
     case "import-create": {
       // I-6 (Task 10 round two): A-5's whole point was that the diff can
       // answer "how did this asset reach DEPLOYED without an approval?" —
@@ -211,10 +234,10 @@ export function auditSentence(entry: ActivityEntryLike): string {
         typeof status === "string" && status !== "SPARE" ? ` as ${status}`
         : typeof employment === "string" && employment !== "ACTIVE" ? ` as ${employment}`
         : "";
-      return `${entry.actorLabel} imported ${entry.entityLabel}${suffix}`;
+      return omitEntity ? `${actor}imported${suffix}` : `${actor}imported ${entry.entityLabel}${suffix}`;
     }
     case "import-update":
-      return `${entry.actorLabel} updated ${fieldList(diff)} on ${entry.entityLabel} by import`;
+      return omitEntity ? `${actor}updated ${fieldList(diff)} by import` : `${actor}updated ${fieldList(diff)} on ${entry.entityLabel} by import`;
     // Phase 19 (M-3): the fourteen stock/stocktake actions this module writes
     // (`item-actions.ts`, `movement-actions.ts`, `stocktake-actions.ts`) all
     // fell to the `default` branch and rendered as a raw verb — exactly the
@@ -225,28 +248,29 @@ export function auditSentence(entry: ActivityEntryLike): string {
     // one, the quantity/department/reason that makes the row worth reading
     // without opening the diff.
     case "stock.item.created":
-      return `${entry.actorLabel} created ${entry.entityLabel}`;
+      return omitEntity ? `${actor}created` : `${actor}created ${entry.entityLabel}`;
     case "stock.item.updated": {
       const fields = diff ? Object.keys(diff).join(", ") : "fields";
-      return `${entry.actorLabel} updated ${fields} on ${entry.entityLabel}`;
+      return omitEntity ? `${actor}updated ${fields}` : `${actor}updated ${fields} on ${entry.entityLabel}`;
     }
     case "stock.item.archived":
-      return `${entry.actorLabel} archived ${entry.entityLabel}`;
+      return omitEntity ? `${actor}archived` : `${actor}archived ${entry.entityLabel}`;
     case "stock.item.restored":
-      return `${entry.actorLabel} restored ${entry.entityLabel}`;
+      return omitEntity ? `${actor}restored` : `${actor}restored ${entry.entityLabel}`;
     case "stock.category.created":
-      return `${entry.actorLabel} created the category ${entry.entityLabel}`;
+      return omitEntity ? `${actor}created the category` : `${actor}created the category ${entry.entityLabel}`;
     case "stock.category.updated": {
       const fields = diff ? Object.keys(diff).join(", ") : "fields";
-      return `${entry.actorLabel} updated ${fields} on the category ${entry.entityLabel}`;
+      return omitEntity ? `${actor}updated ${fields} on the category` : `${actor}updated ${fields} on the category ${entry.entityLabel}`;
     }
     case "stock.category.archived":
-      return `${entry.actorLabel} archived the category ${entry.entityLabel}`;
+      return omitEntity ? `${actor}archived the category` : `${actor}archived the category ${entry.entityLabel}`;
     case "stock.category.restored":
-      return `${entry.actorLabel} restored the category ${entry.entityLabel}`;
+      return omitEntity ? `${actor}restored the category` : `${actor}restored the category ${entry.entityLabel}`;
     case "stock.received": {
       const qty = diff?.quantity?.to;
-      return `${entry.actorLabel} received ${typeof qty === "number" ? qty : "stock"} of ${entry.entityLabel}`;
+      const qtyStr = typeof qty === "number" ? qty : "stock";
+      return omitEntity ? `${actor}received ${qtyStr}` : `${actor}received ${qtyStr} of ${entry.entityLabel}`;
     }
     case "stock.issued": {
       // `movement-actions.ts` records the balance before/after, not the
@@ -257,7 +281,8 @@ export function auditSentence(entry: ActivityEntryLike): string {
       const to = diff?.quantity?.to;
       const qty = typeof from === "number" && typeof to === "number" ? from - to : null;
       const dept = diff?.department?.to;
-      return `${entry.actorLabel} issued ${qty ?? "stock"} of ${entry.entityLabel}${typeof dept === "string" ? ` to ${dept}` : ""}`;
+      const tail = typeof dept === "string" ? ` to ${dept}` : "";
+      return omitEntity ? `${actor}issued ${qty ?? "stock"}${tail}` : `${actor}issued ${qty ?? "stock"} of ${entry.entityLabel}${tail}`;
     }
     case "stock.adjusted": {
       const from = diff?.balance?.from;
@@ -267,21 +292,24 @@ export function auditSentence(entry: ActivityEntryLike): string {
       // `stocktake-review.tsx`'s `fmtVariance` uses for a negative.
       const deltaStr = delta === null ? "an amount" : delta >= 0 ? `+${delta}` : `−${Math.abs(delta)}`;
       const reason = diff?.reason?.to;
-      return `${entry.actorLabel} adjusted ${entry.entityLabel} by ${deltaStr}${typeof reason === "string" ? ` · ${reason}` : ""}`;
+      const tail = `by ${deltaStr}${typeof reason === "string" ? ` · ${reason}` : ""}`;
+      return omitEntity ? `${actor}adjusted ${tail}` : `${actor}adjusted ${entry.entityLabel} ${tail}`;
     }
     case "stocktake.opened": {
       const scope = diff?.scope?.to;
       const lines = diff?.lines?.to;
       const lineSuffix = typeof lines === "number" ? ` · ${lines} item${lines === 1 ? "" : "s"}` : "";
-      return `${entry.actorLabel} opened ${entry.entityLabel} for ${typeof scope === "string" ? scope : "all categories"}${lineSuffix}`;
+      const tail = `for ${typeof scope === "string" ? scope : "all categories"}${lineSuffix}`;
+      return omitEntity ? `${actor}opened ${tail}` : `${actor}opened ${entry.entityLabel} ${tail}`;
     }
     case "stocktake.posted": {
       const adjusted = diff?.adjusted?.to;
       const skipped = diff?.skipped?.to;
-      return `${entry.actorLabel} posted ${entry.entityLabel} · ${typeof adjusted === "number" ? adjusted : 0} adjusted, ${typeof skipped === "number" ? skipped : 0} not counted`;
+      const tail = `${typeof adjusted === "number" ? adjusted : 0} adjusted, ${typeof skipped === "number" ? skipped : 0} not counted`;
+      return omitEntity ? `${actor}posted · ${tail}` : `${actor}posted ${entry.entityLabel} · ${tail}`;
     }
     case "stocktake.cancelled":
-      return `${entry.actorLabel} cancelled the stocktake ${entry.entityLabel}`;
+      return omitEntity ? `${actor}cancelled the stocktake` : `${actor}cancelled the stocktake ${entry.entityLabel}`;
     // Phase 22 Task 2 (spec §4.1/§5.4): writeOffLot/setLotCost/
     // uploadLotDocument's own audit rows. `entityLabel` here is the lot's
     // item (resolved server-side, `stock-lot` entities labelled by item code
@@ -296,53 +324,81 @@ export function auditSentence(entry: ActivityEntryLike): string {
       // subtraction above.
       const qty = diff?.quantity?.to;
       const reason = diff?.reason?.to;
-      return `${entry.actorLabel} wrote off ${qty ?? "stock"} of ${entry.entityLabel}${typeof reason === "string" && reason ? ` — ${reason}` : ""}`;
+      const tail = typeof reason === "string" && reason ? ` — ${reason}` : "";
+      return omitEntity ? `${actor}wrote off ${qty ?? "stock"}${tail}` : `${actor}wrote off ${qty ?? "stock"} of ${entry.entityLabel}${tail}`;
     }
     case "stock.lot-cost-set": {
       const cost = diff?.unitCost?.to;
       const costStr = typeof cost === "number" ? `₱${cost.toFixed(2)}` : "a cost";
-      return `${entry.actorLabel} priced a lot of ${entry.entityLabel} at ${costStr}`;
+      return omitEntity ? `${actor}priced a lot at ${costStr}` : `${actor}priced a lot of ${entry.entityLabel} at ${costStr}`;
     }
     case "stock.document-added": {
       const kind = diff?.kind?.to;
       const label = typeof kind === "string" ? (LOT_DOCUMENT_ARTICLE_LABEL[kind] ?? "a document") : "a document";
-      return `${entry.actorLabel} attached ${label} to ${entry.entityLabel}`;
+      return omitEntity ? `${actor}attached ${label}` : `${actor}attached ${label} to ${entry.entityLabel}`;
     }
     // Phase 27 (spec §3.5): every action that can reach a feed reads as a sentence.
-    case "document.uploaded":
-      return `${entry.actorLabel} attached ${String(diff?.document?.to ?? "a document")} to ${entry.entityLabel}`;
+    case "document.uploaded": {
+      const doc = String(diff?.document?.to ?? "a document");
+      return omitEntity ? `${actor}attached ${doc}` : `${actor}attached ${doc} to ${entry.entityLabel}`;
+    }
     case "document.signed": {
       // the writer (inventory/document-actions.ts) keys this diff by the file name alone
       const fileName = diff ? Object.keys(diff)[0] ?? "a document" : "a document";
-      return `${entry.actorLabel} marked ${fileName} signed on ${entry.entityLabel}`;
+      return omitEntity ? `${actor}marked ${fileName} signed` : `${actor}marked ${fileName} signed on ${entry.entityLabel}`;
     }
     case "loan.due-changed": {
       const to = diff?.loanDueAt?.to;
-      return to
-        ? `${entry.actorLabel} moved the loan due date of ${entry.entityLabel} to ${fmtDate(String(to))}`
-        : `${entry.actorLabel} cleared the loan due date of ${entry.entityLabel}`;
+      if (to) {
+        return omitEntity
+          ? `${actor}moved the loan due date to ${fmtDate(String(to))}`
+          : `${actor}moved the loan due date of ${entry.entityLabel} to ${fmtDate(String(to))}`;
+      }
+      return omitEntity ? `${actor}cleared the loan due date` : `${actor}cleared the loan due date of ${entry.entityLabel}`;
     }
-    case "secret.created":
-      return `${entry.actorLabel} added the secret "${String(diff?.label?.to ?? "")}" to ${entry.entityLabel}`;
-    case "acknowledgement.recorded":
-      return `${entry.actorLabel} recorded ${entry.entityLabel}'s signed acknowledgement of ${plural(Number(diff?.items?.to ?? 0), "item")}`;
+    case "secret.created": {
+      const phrase = `added the secret "${String(diff?.label?.to ?? "")}"`;
+      return omitEntity ? `${actor}${phrase}` : `${actor}${phrase} to ${entry.entityLabel}`;
+    }
+    case "acknowledgement.recorded": {
+      const items = plural(Number(diff?.items?.to ?? 0), "item");
+      return omitEntity ? `${actor}recorded a signed acknowledgement of ${items}` : `${actor}recorded ${entry.entityLabel}'s signed acknowledgement of ${items}`;
+    }
     case "policy.exception.added": {
       const reason = diff?.reason?.to;
-      return `${entry.actorLabel} added the exception slot ${String(diff?.slot?.to ?? "")} for ${entry.entityLabel}${reason ? ` — ${String(reason)}` : ""}`;
+      const tail = reason ? ` — ${String(reason)}` : "";
+      return omitEntity
+        ? `${actor}added the exception slot ${String(diff?.slot?.to ?? "")}${tail}`
+        : `${actor}added the exception slot ${String(diff?.slot?.to ?? "")} for ${entry.entityLabel}${tail}`;
     }
     case "policy.exception.waived": {
       const reason = diff?.reason?.to;
-      return `${entry.actorLabel} waived ${String(diff?.slot?.from ?? "")} for ${entry.entityLabel}${reason ? ` — ${String(reason)}` : ""}`;
+      const tail = reason ? ` — ${String(reason)}` : "";
+      return omitEntity
+        ? `${actor}waived ${String(diff?.slot?.from ?? "")}${tail}`
+        : `${actor}waived ${String(diff?.slot?.from ?? "")} for ${entry.entityLabel}${tail}`;
     }
     case "policy.exception.removed":
-      return `${entry.actorLabel} removed the exception slot ${String(diff?.slot?.from ?? "")} for ${entry.entityLabel}`;
+      return omitEntity
+        ? `${actor}removed the exception slot ${String(diff?.slot?.from ?? "")}`
+        : `${actor}removed the exception slot ${String(diff?.slot?.from ?? "")} for ${entry.entityLabel}`;
     case "supplier-set": {
       const to = diff?.supplier?.to;
-      return to
-        ? `${entry.actorLabel} set ${String(to)} as the supplier on ${entry.entityLabel}`
-        : `${entry.actorLabel} cleared the supplier on ${entry.entityLabel}`;
+      if (to) {
+        return omitEntity ? `${actor}set ${String(to)} as the supplier` : `${actor}set ${String(to)} as the supplier on ${entry.entityLabel}`;
+      }
+      return omitEntity ? `${actor}cleared the supplier` : `${actor}cleared the supplier on ${entry.entityLabel}`;
     }
     default:
-      return `${entry.actorLabel} ${entry.action} ${entry.entityLabel}`;
+      return omitEntity ? `${actor}${entry.action}` : `${actor}${entry.action} ${entry.entityLabel}`;
   }
+}
+
+/**
+ * Phase 30 (T1, spec §4.1 line via task-3-brief): the "Last change" line's phrase — the same sentence
+ * `auditSentence` builds, minus the leading actor and the entity label, so the caller can show
+ * `{phrase} · {date} · {actor}` without the actor or the tag appearing twice.
+ */
+export function auditPhrase(entry: { action: string; diff: unknown }): string {
+  return auditSentence({ actorLabel: "", action: entry.action, diff: entry.diff, entityLabel: "" }, { omitActor: true, omitEntity: true });
 }

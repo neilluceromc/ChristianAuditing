@@ -7,7 +7,7 @@ import { capRefusal, exportFilename, idsRefusal, xlsxResponse } from "@/server/e
 import {
   buildAssetOrderBy, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
-import { parseCls, visibleClassWhere } from "@/lib/asset-class";
+import { defaultClassFor, parseCls, visibleClassWhere } from "@/lib/asset-class";
 import { parseListState, withFilter } from "@/lib/url-state";
 import { repairStageIds } from "@/server/modules/inventory/queries";
 import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
@@ -27,7 +27,7 @@ export async function GET(req: Request) {
   // directly, same as `ids` above, so this route and the page it serves
   // cannot disagree about which year is active.
   const purchaseYear = parsePurchaseYear(url.searchParams.get("purchaseYear"));
-  const cls = parseCls(url.searchParams.get("cls")) ?? "IT";
+  const cls = parseCls(url.searchParams.get("cls")) ?? defaultClassFor(user.role);
   // Repair stages are IT's (inventory/page.tsx, D-16): a hand-built
   // ?cls=PURCHASING&stage=… would otherwise narrow to the repair candidate
   // set regardless of class and return rows the list would never show.

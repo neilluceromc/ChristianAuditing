@@ -49,6 +49,22 @@ async function highestNumber(prefix: string): Promise<number> {
 }
 const tagOf = (prefix: string, n: number) => `BR-${prefix}-${String(n).padStart(4, "0")}`;
 
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated, since a click on the
+ * server-rendered trigger before then does nothing.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
+}
+
 const IT = "it@thebackroomop.com";
 const P = "purchasing@thebackroomop.com";
 
@@ -59,9 +75,13 @@ test.describe.serial("direct changes", () => {
     const id = await idOf("BR-MN-0910"); // SPARE
     await login(page, IT);
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Change status" }).click();
-    await page.getByLabel("New status").selectOption("DEFECTIVE");
-    await page.getByRole("dialog", { name: "Change status" }).getByRole("button", { name: "Confirm" }).click();
+    // Phase 30: an unheld spare's primary is Assign — Change status sits in More.
+    await (await openMore(page)).getByRole("menuitem", { name: "Change status…", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Change status of BR-MN-0910 · LG 27UL500" });
+    // Nothing is preselected (spec §4.2): the placeholder is the value until IT picks.
+    await expect(dialog.getByLabel("New status")).toHaveValue("");
+    await dialog.getByLabel("New status").selectOption("DEFECTIVE");
+    await dialog.getByRole("button", { name: "Change status", exact: true }).click();
     await expect(page.getByText("BR-MN-0910 is now DEFECTIVE")).toBeVisible();
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).status).toBe("DEFECTIVE");
     expect(await db.approval.count({ where: { assetId: id, state: { in: [...OPEN_STATES] } } })).toBe(0);
@@ -79,11 +99,11 @@ test.describe.serial("direct changes", () => {
     const nina = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0097" } }); // Nina Robles
     await login(page, IT);
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Assign" }).click();
-    const dialog = page.getByRole("dialog", { name: "Assign BR-PH-0301" });
+    await page.getByRole("button", { name: "Assign", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Assign BR-PH-0301 · Samsung A54" });
     await dialog.getByRole("combobox").fill("EMP-0097");
     await dialog.getByRole("option", { name: /EMP-0097/ }).click();
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Assign", exact: true }).click();
     await expect(page.getByText("BR-PH-0301 assigned to Nina Robles")).toBeVisible();
 
     const asset = await db.asset.findUniqueOrThrow({ where: { id } });
@@ -111,10 +131,10 @@ test.describe.serial("direct changes", () => {
 
     await login(page, IT);
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Return" }).click();
-    const dialog = page.getByRole("dialog", { name: "Return BR-LT-0210" });
+    await page.getByRole("button", { name: "Return", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Return BR-LT-0210 · ThinkPad T14 Gen 4 from Leo Tan?" });
     await expect(dialog.getByLabel("What happens to it")).toHaveValue("TRIAGE"); // default: Back for triage
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Return", exact: true }).click();
     await expect(page.getByText("BR-LT-0210 returned · now SPARE")).toBeVisible();
 
     let asset = await db.asset.findUniqueOrThrow({ where: { id } });
@@ -127,10 +147,10 @@ test.describe.serial("direct changes", () => {
     let spareIds = (await db.asset.findMany({ where: spareWhere, select: { id: true } })).map((a) => a.id);
     expect(spareIds).not.toContain(id);
 
-    await page.getByRole("button", { name: "Triage" }).click();
-    const triageDialog = page.getByRole("dialog", { name: "Triage BR-LT-0210" });
+    await page.getByRole("button", { name: "Triage", exact: true }).click();
+    const triageDialog = page.getByRole("dialog", { name: "Triage BR-LT-0210 · ThinkPad T14 Gen 4" });
     await expect(triageDialog.getByLabel("Decision")).toHaveValue("SPARE"); // default: Keep as spare
-    await triageDialog.getByRole("button", { name: "Confirm" }).click();
+    await triageDialog.getByRole("button", { name: "Save decision", exact: true }).click();
     await expect(page.getByText("BR-LT-0210 triaged · Keep as spare")).toBeVisible();
 
     asset = await db.asset.findUniqueOrThrow({ where: { id } });
@@ -152,14 +172,15 @@ test.describe.serial("direct changes", () => {
 
     await login(page, IT);
     await page.goto(`/inventory/${oldId}`);
-    await page.getByRole("button", { name: "Replace" }).click();
-    const dialog = page.getByRole("dialog", { name: "Replace BR-LT-0201" });
+    // Phase 30: a held device's primary is Return — Replace sits in More.
+    await (await openMore(page)).getByRole("menuitem", { name: "Replace…", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Replace BR-LT-0201 · MacBook Air M3 for Carlo Dizon" });
     // Scoped by name: the dialog also carries a plain <select> ("What happens
     // to BR-LT-0201") that is not a combobox by role name but IS matched by a
     // bare getByRole("combobox") once labelled — "Replacement" disambiguates.
     await dialog.getByRole("combobox", { name: "Replacement" }).fill("BR-LT-0210");
     await dialog.getByRole("option", { name: /BR-LT-0210/ }).click();
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Replace", exact: true }).click();
     await expect(page.getByText("BR-LT-0201 replaced by BR-LT-0210 for Carlo Dizon")).toBeVisible();
 
     const [oldAsset, newAsset] = await Promise.all([
@@ -185,7 +206,8 @@ test.describe.serial("direct changes", () => {
     await page.goto("/inventory?status=SPARE");
     await page.getByLabel(/Select BR-HS-0502/).check();
     await page.getByLabel(/Select BR-MN-0911/).check();
-    await page.getByRole("button", { name: "Bulk actions…" }).click();
+    // Phase 30 (spec §6.4): the selection bar's Change status… opens the drawer in status mode.
+    await page.getByRole("button", { name: "Change status…", exact: true }).click();
     await page.getByLabel(/Target status/).selectOption("DISPOSE");
     await page.getByRole("button", { name: "Confirm" }).click();
     await expect(page.getByText("2 assets now DISPOSE")).toBeVisible();
@@ -204,17 +226,21 @@ test.describe.serial("direct changes", () => {
     const paolo = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0071" } }); // Paolo Santos, IT Support
 
     await login(page, IT);
-    await page.goto("/inventory/new");
-    await page.getByLabel(/Asset tag/).fill(tag);
-    await page.getByLabel(/Model/).fill("ThinkPad X1 (e2e deploy)");
+    // Phase 30 (spec §5.1–§5.3): the one Register flow — the category first,
+    // which suggests the next free tag on row 1; the initial state in the
+    // friendly words (plan P-6).
+    await page.goto("/inventory/register");
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    const initialStatus = page.getByRole("radiogroup", { name: "Initial status" });
-    await initialStatus.getByText("DEPLOYED").click();
-    // Phase 15 copy: direct registration never mentions an approval.
-    await expect(page.getByText("Deployed to the chosen person at registration — recorded in the audit trail.")).toBeVisible();
+    await expect(page.getByLabel("Tag 1")).toHaveValue(tag);
+    await page.getByLabel(/Model/).fill("ThinkPad X1 (e2e deploy)");
+    const initialState = page.getByRole("radiogroup", { name: "Initial state" });
+    await initialState.getByText("Deployed").click();
+    // Direct registration never mentions an approval.
+    await expect(page.getByText("Deployed to the chosen person.")).toBeVisible();
+    await expect(page.getByText("This files a request for approval.")).toHaveCount(0);
     await page.getByLabel("Assign to").fill("EMP-0071");
     await page.getByRole("option", { name: /EMP-0071/ }).click();
-    await page.getByRole("button", { name: "Register asset" }).click();
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
     await expect(page.getByRole("heading", { name: tag })).toBeVisible({ timeout: 20_000 });
 
     const asset = await db.asset.findUniqueOrThrow({ where: { tag } });
@@ -339,15 +365,19 @@ test.describe("boundaries", () => {
     await login(page, P);
     await page.goto(`/inventory/${id}`);
 
-    await expect(page.getByRole("button", { name: "Request status change" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Change status" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Assign holder" })).toBeVisible();
+    // Phase 30 (plan P-5): the approval path keeps today's words — the primary
+    // is "Assign holder", and More offers "Request status change…", never
+    // IT's direct Change status, Replace, Triage or Reserve.
+    await expect(page.getByRole("button", { name: "Assign holder", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Assign", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Replace" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Triage" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^(Change status|Replace|Triage|Reserve)$/ })).toHaveCount(0);
+    const menu = await openMore(page);
+    await expect(menu.getByRole("menuitem", { name: "Request status change…", exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: /^(Change status|Replace|Triage|Reserve)…$/ })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Request status change" }).click();
-    await page.getByLabel("New status").selectOption("OPERATIONAL");
+    await menu.getByRole("menuitem", { name: "Request status change…", exact: true }).click();
+    // Spec §4.2: an unheld car's targets exclude OPERATIONAL (a holder status — Assign holder does that).
+    await page.getByLabel("New status").selectOption("REPAIRING");
     await page.getByLabel("Reason").fill("e2e — boundary check");
     await page.getByRole("dialog", { name: "Request a status change" })
       .getByRole("button", { name: "Request", exact: true }).click();
@@ -363,12 +393,32 @@ test.describe("boundaries", () => {
     // no fixture to manufacture, and this asset is deliberately untouched by
     // every earlier case in this file for exactly this reason.
     const id = await idOf("BR-LT-0148");
+    const apr = await db.approval.findUniqueOrThrow({ where: { refNo: "APR-2039" } });
     await login(page, IT);
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Change status" }).click();
-    await page.getByLabel("New status").selectOption("SPARE");
-    await page.getByRole("dialog", { name: "Change status" }).getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByText("BR-LT-0148 is held by APR-2039 — resolve it in Approvals first.")).toBeVisible();
+
+    // (a) Phase 30 (spec §4.1 row 1, §7): while the approval is open the header
+    // offers no lifecycle action at all — the pending banner explains, and More
+    // holds only Print label.
+    await expect(page.getByRole("status").filter({ hasText: "APR-2039" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Return|Change status|Replace)$/ })).toHaveCount(0);
+    await expect((await openMore(page)).getByRole("menuitem")).toHaveText(["Print label"]);
+
+    // (b) The server's own guard, which the header can no longer reach by
+    // itself: open the dialog while APR-2039 is briefly closed, reopen it
+    // underneath the dialog (the receiving.spec.ts race technique), submit.
+    await db.approval.update({ where: { id: apr.id }, data: { state: "REJECTED" } });
+    try {
+      await page.reload();
+      await (await openMore(page)).getByRole("menuitem", { name: "Change status…", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Change status of BR-LT-0148 · Dell Latitude 5420" });
+      await dialog.getByLabel("New status").selectOption("TEMPORARY"); // held: the other holder status is the one target
+      await db.approval.update({ where: { id: apr.id }, data: { state: apr.state } });
+      await dialog.getByRole("button", { name: "Change status", exact: true }).click();
+      await expect(dialog.getByText("BR-LT-0148 is held by APR-2039 — resolve it in Approvals first.")).toBeVisible();
+    } finally {
+      await db.approval.update({ where: { id: apr.id }, data: { state: apr.state } });
+    }
 
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).status).toBe("DEPLOYED");
   });

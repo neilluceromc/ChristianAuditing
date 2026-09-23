@@ -26,7 +26,11 @@ duplicate check comes first. **Phase 29 (`phase-29-employee-uiux`, Laws of UX ap
 employee area; final tree `9660e6e`) is MERGED TO `main` via `--no-ff` `d76903b` and PUSHED (2026-09-23), and
 it adds no migration either** — it rode the 2026-09-23 redeploy. The push also carried the two
 docs-only commits `401b838` (the Phase 29 spec) and `1acd928` (the plan) that had sat on local
-`main`; `main` = `origin/main` again. See `PICKUP.md` §4 item 1.
+`main`; `main` = `origin/main` again after that push. **Phase 30 (`phase-30-inventory-uiux`, Laws of UX
+applied to the inventory area) is CODE-COMPLETE at final tree `4e6fc7f`, UNMERGED and UNPUSHED, and
+adds no migration** — local `main` now carries two unpushed docs-only commits beyond `origin/main`
+`c563600`: `a94f47a` (the Phase 30 spec) and `b582535` (the plan). Merging, pushing and the
+code-only redeploy are the user's decisions. See `PICKUP.md` §4 item 1 and `HANDOVER.md` (w).
 
 ---
 
@@ -206,6 +210,19 @@ means a `conflict()` branch in every rename; **M-P27-3** the worklist note's `ro
 for today's one capped caller — kept because the note now states what it literally renders for any
 caller. Also parked by the final review: `Stat`'s `data-tone` in production markup (state attributes
 already ship in this codebase), and the six inline `P2002` checks of §6 below.
+
+**Phase 30's parked items** (spec §2), each with where to start: **merging the History and Timeline
+tabs** (F-RECORD-5) into one audit-and-approvals stream with expandable field diffs — its own phase;
+start at `mergeTimeline` in `src/lib/timeline.ts` and the record's `(record)/history` and
+`(record)/timeline` pages, and expect two e2e files to pin the tabs; **Record RMA… / Record quote…
+dialogs on the Repair card** (F-RECORD-13) — start at the Repair card in
+`src/app/(app)/inventory/[id]/(record)/page.tsx` and `src/lib/repairs.ts`; it needs its own server
+action in `src/server/modules/inventory/actions.ts` and repair-stage tests; **a record-shaped list
+loading skeleton** (the second half of F-LIST-16; the list-navigation pending state shipped) — start
+at `src/app/(app)/inventory/loading.tsx`; **Serial and Loan due as optional columns** (the second
+half of F-LIST-17; the `Saved for you` caption shipped) — start at `INVENTORY_COLUMNS` in
+`src/components/inventory/inventory-table.tsx` and `COLUMN_PREF_KEYS` in `src/lib/column-prefs.ts`.
+What Phase 30 ships knowingly is listed in `HANDOVER.md` (w).
 
 ---
 

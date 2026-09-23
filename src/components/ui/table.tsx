@@ -67,13 +67,23 @@ export function Th({
       style={{ width }}
       aria-sort={sort ? (sort === "asc" ? "ascending" : "descending") : undefined}
       className={cn(
-        "border-b border-border px-3 py-2 font-mono text-[10px] font-medium uppercase tracking-[0.06em] text-fg-muted",
+        "border-b border-border font-mono text-[10px] font-medium uppercase tracking-[0.06em] text-fg-muted",
+        // Phase 30 (spec §6.3, Fitts): a sortable header's button fills the cell, so the cell's
+        // padding lives on the button and the whole cell is the target.
+        onSort ? "p-0" : "px-3 py-2",
         align === "right" ? "text-right" : "text-left",
         className,
       )}
     >
       {onSort ? (
-        <button type="button" onClick={onSort} className="hover:text-fg-secondary">
+        <button
+          type="button"
+          onClick={onSort}
+          className={cn(
+            "w-full px-3 py-2 uppercase hover:text-fg-secondary",
+            align === "right" ? "text-right" : "text-left",
+          )}
+        >
           {content}
         </button>
       ) : (

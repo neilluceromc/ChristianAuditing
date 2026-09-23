@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
@@ -17,6 +17,41 @@ export interface SecretRowDto {
 }
 
 const HIDE_AFTER_S = 30;
+const COPIED_FOR_MS = 2000;
+
+/**
+ * `navigator.clipboard` exists only in a secure context, and the office
+ * deployment is plain HTTP on a LAN address — so a hidden textarea and
+ * `execCommand("copy")` stand in there. Resolves false when neither works.
+ */
+async function copyText(value: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // fall through to the textarea route
+  }
+  // The Copy button keeps focus once the stand-in textarea is gone.
+  const back = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const area = document.createElement("textarea");
+  area.value = value;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+    back?.focus();
+  }
+}
 
 interface Revealed {
   value: string;
@@ -35,7 +70,12 @@ export function SecretsPanel({
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [pending, startTransition] = useTransition();
+  // Phase 30 (spec §4.4): storing and revealing no longer share one pending
+  // flag — only the clicked row's Reveal spins, and Store keeps its own.
+  const [storing, startStore] = useTransition();
+  const [revealing, setRevealing] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [revealed, setRevealed] = useState<Record<string, Revealed>>({});
   const [now, setNow] = useState(() => Date.now());
   const [label, setLabel] = useState("");
@@ -58,9 +98,14 @@ export function SecretsPanel({
     return () => clearInterval(timer);
   }, [revealed]);
 
-  function reveal(secretId: string) {
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
+
+  async function reveal(secretId: string) {
     setError(null);
-    startTransition(async () => {
+    setRevealing(secretId);
+    try {
       const res = await revealSecret({ assetId, secretId });
       if (res.ok) {
         setRevealed((prev) => ({
@@ -73,14 +118,30 @@ export function SecretsPanel({
         }));
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else setError(res.message);
-    });
+    } catch {
+      // a thrown server action (network drop, server error) must not become an unhandled rejection
+      setError("Could not reveal the secret — try again.");
+    } finally {
+      // a later click on another row owns the spinner now — leave it be
+      setRevealing((current) => (current === secretId ? null : current));
+    }
+  }
+
+  async function copy(secretId: string, value: string) {
+    if (!(await copyText(value))) {
+      toast("Could not copy — select the value and copy it instead", "fault");
+      return;
+    }
+    setCopied(secretId);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(null), COPIED_FOR_MS);
   }
 
   function add(e: React.FormEvent) {
     e.preventDefault();
     setFieldErrors({});
     setError(null);
-    startTransition(async () => {
+    startStore(async () => {
       const res = await addSecret({ assetId, label, value });
       if (res.ok) {
         toast("Secret stored encrypted — audit entry written", "settled");
@@ -124,8 +185,13 @@ export function SecretsPanel({
                     ••••••••••••
                   </span>
                 )}
+                {r && (
+                  <Button size="sm" variant="ghost" onClick={() => void copy(secret.id, r.value)}>
+                    {copied === secret.id ? "Copied" : "Copy"}
+                  </Button>
+                )}
                 {canReveal && !r && (
-                  <Button size="sm" loading={pending} onClick={() => reveal(secret.id)}>Reveal</Button>
+                  <Button size="sm" loading={revealing === secret.id} onClick={() => void reveal(secret.id)}>Reveal</Button>
                 )}
                 <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">{secret.createdAt}</span>
               </li>
@@ -153,7 +219,7 @@ export function SecretsPanel({
             </FormField>
           </div>
           <div>
-            <Button type="submit" variant="primary" loading={pending}>Store encrypted</Button>
+            <Button type="submit" variant="primary" loading={storing}>Store encrypted</Button>
           </div>
         </form>
       )}

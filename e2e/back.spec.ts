@@ -13,16 +13,19 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  * to the breadcrumb's nearest linked crumb otherwise — a deep link, a fresh
  * tab, a scanned QR.
  *
- * Three cases:
+ * Four cases:
  *   1 the record's Back returns to the list exactly as it was left (filters);
  *   2 a deep link (fresh context, no in-app history) falls back to the parent;
  *   3 top-level lists and Home carry no Back at all, and a profile carries
- *     exactly one, reading "Back".
+ *     exactly one, reading "Back";
+ *   4 Phase 30 (review R9): the Edit form's Cancel and Save leave it the way
+ *     Back does, so the record's Back still returns to that same list.
  *
  * Seeded fixtures (prisma/seed.ts), read off the seed:
  *   BR-HS-0502 — a SPARE headset, so it is on `/inventory?status=SPARE`.
  *   Nina Robles EMP-0097 — an ACTIVE employee with a profile page.
- * No case mutates anything; `beforeAll` reseeds all the same, in house style.
+ * Only case 4 mutates anything (BR-HS-0502's model, via Edit → Save);
+ * `beforeAll` reseeds, in house style.
  */
 
 const db = new PrismaClient();
@@ -116,5 +119,49 @@ test.describe("Phase 28 — the Back control", () => {
     await expectNoSeriousAxe(page);
     await back.click();
     await expect(page).toHaveURL(/\/approvals$/); // where we came from — the last list visited above
+  });
+
+  test("4. Cancel and Save on the Edit form leave it the way Back does, so the record's Back still reaches the list", async ({ page }) => {
+    const headset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-HS-0502" } });
+    const recordUrl = new RegExp(`/inventory/${headset.id}$`);
+    await login(page, IT);
+    await page.goto("/inventory?status=SPARE");
+    const row = page.getByRole("row", { name: /BR-HS-0502/ });
+
+    // list → record → Edit → Cancel → the record → Back → the list, filters intact
+    await waitForHydration(row);
+    await row.click();
+    await expect(page).toHaveURL(recordUrl);
+    await page.getByRole("link", { name: "Edit", exact: true }).click();
+    await expect(page).toHaveURL(/\/edit$/, { timeout: 20_000 });
+    const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+    await waitForHydration(cancel);
+    await cancel.click();
+    await expect(page).toHaveURL(recordUrl, { timeout: 20_000 });
+    let back = page.getByRole("button", { name: "Back" });
+    await waitForHydration(back);
+    await back.click();
+    await expect(page).toHaveURL(/\/inventory\?status=SPARE$/);
+
+    // list → record → Edit → Save → the record, rendered fresh → Back → the list
+    await waitForHydration(row);
+    await row.click();
+    await expect(page).toHaveURL(recordUrl);
+    await page.getByRole("link", { name: "Edit", exact: true }).click();
+    await expect(page).toHaveURL(/\/edit$/, { timeout: 20_000 });
+    const model = page.getByLabel(/Model/);
+    await waitForHydration(model);
+    const renamed = `${headset.model} (e2e back)`;
+    await model.fill(renamed);
+    await expect(model).toHaveValue(renamed);
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("BR-HS-0502 saved")).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(recordUrl, { timeout: 20_000 });
+    // the header's model line — the record must show the saved value, not a cached one
+    await expect(page.getByText(renamed, { exact: true })).toBeVisible();
+    back = page.getByRole("button", { name: "Back" });
+    await waitForHydration(back);
+    await back.click();
+    await expect(page).toHaveURL(/\/inventory\?status=SPARE$/);
   });
 });

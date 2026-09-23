@@ -223,3 +223,33 @@ export function isDirectLifecycle(role: Role, cls: AssetClass): boolean {
 export function isAssignable(a: { cls: AssetClass; status: AssetStatus; returnedAt: Date | null }): boolean {
   return a.status === ASSIGNABLE_FROM[a.cls] && a.returnedAt === null;
 }
+
+/** Phase 30 (spec §3, plan P-6): the word an operator reads when choosing a status. Option values stay the enum. */
+export const STATUS_LABEL: Record<AssetStatus, string> = {
+  DEPLOYED: "Deployed", SPARE: "Spare", DEFECTIVE: "Defective", DONATED: "Donated", TEMPORARY: "Loan",
+  BUYOUT: "Buyout", DISPOSE: "Dispose", MISSING: "Missing",
+  OPERATIONAL: "Operational", STORED: "Stored", REPAIRING: "Repairing", RETIRED: "Retired", SOLD: "Sold", LOST: "Lost",
+};
+
+/**
+ * Phase 30 (spec §4.2): the statuses a direct Change status may pick — never the current one; no holder
+ * status without a holder (Assign does that); while held, only the other holder statuses (Return does the rest).
+ */
+export function statusTargets(a: { cls: AssetClass; status: AssetStatus; hasHolder: boolean }): AssetStatus[] {
+  const holder = HOLDER_STATUSES[a.cls] as readonly AssetStatus[];
+  return statusesFor(a.cls).filter((s) => s !== a.status && (a.hasHolder ? holder.includes(s) : !holder.includes(s)));
+}
+
+/** Phase 30 (spec decision 6): the class /inventory opens on — the first the role manages, else the first it sees. */
+export function defaultClassFor(role: Role): AssetClass {
+  return MANAGEABLE_CLASSES[role].find((c) => canSeeClass(role, c)) ?? VISIBLE_CLASSES[role][0];
+}
+
+/**
+ * Phase 30 (plan P-7): a list URL names its class only when it is not the viewer's default — so every
+ * IT-default role keeps today's URLs, and a Purchasing-default viewer's IT view says `cls=IT`.
+ */
+export function withViewClsQS(qs: string, cls: AssetClass, defaultCls: AssetClass): string {
+  if (cls === defaultCls) return qs;
+  return qs ? `${qs}&cls=${cls}` : `?cls=${cls}`;
+}

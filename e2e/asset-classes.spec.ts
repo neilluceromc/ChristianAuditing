@@ -47,6 +47,21 @@ async function highestNumber(prefix: string): Promise<number> {
 }
 const tagOf = (prefix: string, n: number) => `BR-${prefix}-${String(n).padStart(4, "0")}`;
 
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
+}
+
 let vehicleCategoryId: string;
 let sedanTypeId: string;
 let registeredTag: string;
@@ -72,16 +87,12 @@ test.describe("registration — each class is its own department's", () => {
     await expect(page.getByLabel("Prefix")).toHaveValue("VH");
     await expect(page.getByLabel("Tag 1")).toHaveValue(registeredTag);
 
-    // Selector fixed from the plan's draft: quantity 1 renders the button
-    // "Register asset" (no leading count) — register-form.tsx's ternary only
-    // prepends the number when quantity > 1.
-    await page.getByRole("button", { name: "Register asset" }).click();
-    // Phase 16 Task 13: the register page no longer redirects to /inventory
-    // on success — it swaps the form for a RegisterSuccess panel in place
-    // ("1 asset registered — <tag>"). Wait for that panel instead of a
-    // navigation that no longer happens (the plan-draft note above about
-    // /\/inventory/ matching the current URL no longer applies either way).
-    await expect(page.getByText(`1 asset registered — ${registeredTag}`)).toBeVisible();
+    // Phase 30 (spec §5.6, plan P-13): quantity 1 is one asset — it goes
+    // through createAsset and ends on its record with the created notice,
+    // not on the batch card.
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
+    await expect(page.getByText(`${registeredTag} registered`)).toBeVisible();
 
     const a = await db.asset.findUniqueOrThrow({ where: { tag: registeredTag } });
     expect(a.cls).toBe("PURCHASING");
@@ -133,7 +144,10 @@ test.describe("IT-only surfaces close to a Purchasing asset", () => {
     await login(page, "admin@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
     await expect(page.getByRole("link", { name: /Secrets/ })).toHaveCount(0);
-    await expect(page.getByText("PURCHASING", { exact: true })).toBeVisible();
+    // Phase 30 (spec §4.1): the class pill left the header; the breadcrumb now
+    // names the class's own list (admin's default list is IT, so it says cls=).
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Purchasing assets", exact: true }))
+      .toHaveAttribute("href", "/inventory?cls=PURCHASING");
     await page.goto(`/inventory/${id}/secrets`);
     // A page-level notFound() under inventory/loading.tsx streams the shell with
     // 200 before the guard runs, so the HTTP status cannot be 404 here — the
@@ -152,22 +166,30 @@ test.describe("IT-only surfaces close to a Purchasing asset", () => {
 test.describe("status controls and approvals speak the class's language", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("6. the picker on a car offers exactly the six, minus its current status", async ({ page }) => {
+  test("6. the picker on a car offers only its class's legal targets, in friendly words, with nothing preselected", async ({ page }) => {
     const id = await idOf("BR-VH-0002"); // STORED, unassigned
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
-    const options = await page.getByLabel("New status").locator("option").allTextContents();
-    expect(options.sort()).toEqual(["LOST", "OPERATIONAL", "REPAIRING", "RETIRED", "SOLD"]);
-    expect(options).not.toContain("DEPLOYED");
+    // Phase 30: the approval path keeps its words; the item sits in More.
+    await (await openMore(page)).getByRole("menuitem", { name: "Request status change…", exact: true }).click();
+    const status = page.getByLabel("New status");
+    // Spec §4.2 (statusTargets): never the current STORED, never the holder
+    // status OPERATIONAL (Assign holder does that), never an IT status.
+    // Plan P-6: friendly labels, option values still the enum.
+    await expect(status).toHaveValue("");
+    expect(await status.locator("option").allTextContents()).toEqual(["Pick a status…", "Repairing", "Retired", "Sold", "Lost"]);
+    expect(await status.locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value)))
+      .toEqual(["", "REPAIRING", "RETIRED", "SOLD", "LOST"]);
   });
 
-  test("7. an approval executes the car to OPERATIONAL", async ({ page }) => {
+  test("7. an approval executes the car's requested status", async ({ page }) => {
     const id = await idOf("BR-VH-0002");
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
-    await page.getByLabel("New status").selectOption("OPERATIONAL");
+    await (await openMore(page)).getByRole("menuitem", { name: "Request status change…", exact: true }).click();
+    // Phase 30: OPERATIONAL is a holder status and no longer a target for an
+    // unassigned car (case 6) — REPAIRING is the round trip's other half.
+    await page.getByLabel("New status").selectOption("REPAIRING");
     await page.getByLabel("Reason").fill("e2e — car back in service");
     // Fixed from the plan's draft: an unscoped getByRole("button", {name:
     // "Request"}) is a strict-mode violation — Playwright's substring, case-
@@ -188,23 +210,33 @@ test.describe("status controls and approvals speak the class's language", () => 
     execSync("npm run worker:once", { timeout: 60_000, stdio: "inherit" });
 
     const after = await db.asset.findUniqueOrThrow({ where: { id } });
-    expect(after.status).toBe("OPERATIONAL");
+    expect(after.status).toBe("REPAIRING");
     expect((await db.approval.findUniqueOrThrow({ where: { id: approval.id } })).state).toBe("EXECUTED");
   });
 
   test("14. a held car cannot be status-changed out from under its driver (D-8)", async ({ page }) => {
     // The only test that reaches the worker's HOLDER_STATUSES guard. BR-VH-0001 is OPERATIONAL and assigned.
     const id = await idOf("BR-VH-0001");
+    const purchasing = await db.user.findUniqueOrThrow({ where: { email: "purchasing@thebackroomop.com" } });
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
-    await page.getByLabel("New status").selectOption("STORED");
-    await page.getByLabel("Reason").fill("e2e — should be refused by the worker");
-    await page.getByRole("dialog", { name: "Request a status change" })
-      .getByRole("button", { name: "Request", exact: true }).click();
-    await expect(page.getByText(/created — waiting in the approval queue/)).toBeVisible();
-    const approval = await db.approval.findFirstOrThrow({ where: { assetId: id, state: "PENDING" } });
-    await db.approval.update({ where: { id: approval.id }, data: { state: "APPROVED" } });
+    // Phase 30 (spec §4.2): a held car has no status target at all — Return
+    // (the primary) is the only way out — so the header never offers the
+    // request the worker would refuse.
+    await expect(page.getByRole("button", { name: "Return", exact: true })).toBeVisible();
+    await expect((await openMore(page)).getByRole("menuitem")).toHaveText(["Print label"]);
+
+    // The worker's guard still has to hold for a request filed some other way
+    // (an older client, a race): file it exactly as requestStatusChange does —
+    // the next APR number, the same payload — already APPROVED, then run it.
+    const [{ nextval }] = await db.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('approval_ref_seq')`;
+    const approval = await db.approval.create({
+      data: {
+        refNo: `APR-${nextval}`, type: "lifecycle_change_status", state: "APPROVED",
+        payload: { from: { status: "OPERATIONAL" }, to: { status: "STORED" }, reason: "e2e — should be refused by the worker" },
+        requestedById: purchasing.id, assetId: id, slaAt: new Date(Date.now() + 86_400_000),
+      },
+    });
     // Same enqueue-by-hand as case 7 — this shortcut bypasses actions.ts, which
     // is the only place that normally creates the EXECUTE_APPROVAL job.
     await db.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: approval.id } } });
@@ -268,7 +300,7 @@ test.describe("the database is the guarantee", () => {
 });
 
 test.describe("the inventory view", () => {
-  test("10. ?cls=PURCHASING lists Purchasing assets and scopes the Filters panel; the plain URL is unchanged", async ({ page }) => {
+  test("10. ?cls=PURCHASING lists Purchasing assets and scopes the Filters panel; the plain URL opens the role's own class", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory?cls=PURCHASING");
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
@@ -289,9 +321,32 @@ test.describe("the inventory view", () => {
     await expect(categoryDialog.getByText("Vehicle")).toBeVisible();
     await expect(categoryDialog.getByText("Laptop")).toHaveCount(0);
     await page.keyboard.press("Escape");
+    // Phase 30 (plan P-7): the plain URL opens the class the role manages — Purchasing for
+    // purchasing_staff — and the IT view names itself with cls=IT.
     await page.goto("/inventory");
+    await expect(page.getByRole("heading", { name: "Purchasing assets", level: 1 })).toBeVisible();
+    await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "BR-LT-0148" })).toHaveCount(0);
+    // Register assets names the viewed class even on the default view, so the form opens narrowed.
+    const registerLink = page.getByRole("main").getByRole("link", { name: "Register assets" });
+    await expect(registerLink).toHaveAttribute("href", "/inventory/register?cls=PURCHASING");
+    await registerLink.click();
+    await expect(page).toHaveURL(/\/inventory\/register\?cls=PURCHASING$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
+    const purchasingOptions = await page.getByLabel("Category").locator("option").allTextContents();
+    expect(purchasingOptions).toContain("Vehicle");
+    expect(purchasingOptions).not.toContain("Laptop");
+    await page.goto("/inventory?cls=IT");
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
+
+    // A Purchasing record's breadcrumb names the Purchasing list, which is this role's plain URL.
+    await page.goto(`/inventory/${await idOf("BR-FN-0003")}`);
+    const crumb = page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Purchasing assets", exact: true });
+    await expect(crumb).toHaveAttribute("href", "/inventory");
+    await crumb.click();
+    await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Purchasing assets", level: 1 })).toBeVisible();
 
     // Phase 14: IT cannot ask for the Purchasing view at all.
     await login(page, "it@thebackroomop.com");
@@ -302,22 +357,27 @@ test.describe("the inventory view", () => {
     await login(page, "purchasing@thebackroomop.com");
 
     // Switching class clears the facet filters — none of them can apply to the other class (D-12).
-    await page.goto("/inventory?status=SPARE");
-    await expect(page.getByText("status: SPARE")).toBeVisible();
+    // Phase 30: chips read as the value alone, and Purchasing is this role's default (no cls=).
+    await page.goto("/inventory?cls=IT&status=SPARE");
+    const spareChip = page.getByRole("link", { name: "SPARE — remove filter" });
+    await expect(spareChip).toBeVisible();
     await page.getByRole("navigation", { name: "Asset class" }).getByRole("link", { name: "Purchasing" }).click();
-    await expect(page).toHaveURL(/cls=PURCHASING/);
-    await expect(page).not.toHaveURL(/status=/);
-    await expect(page.getByText("status: SPARE")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Purchasing assets", level: 1 })).toBeVisible();
+    await expect(spareChip).toHaveCount(0);
   });
 
   test("11. the bulk drawer on the Purchasing view offers Purchasing statuses", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/inventory?cls=PURCHASING");
     await page.getByRole("row", { name: /BR-FN-0003/ }).getByRole("checkbox").check();
-    await page.getByRole("button", { name: /Bulk/ }).click();
+    // Phase 30 (spec §6.4, plan P-6): the selection bar's Change status… opens the drawer; the picker
+    // reads friendly words (values stay the enum) and never offers a holder status.
+    await page.getByRole("button", { name: "Change status…", exact: true }).click();
     const options = await page.getByLabel("Target status").locator("option").allTextContents();
-    expect(options).toContain("RETIRED");
-    expect(options).not.toContain("DISPOSE");
+    expect(options).toContain("Retired");
+    expect(options).not.toContain("Dispose");
+    expect(options).not.toContain("Operational");
   });
 });
 
@@ -343,37 +403,46 @@ test.describe("Finance send-back and resubmit speak the class", () => {
 
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Send back to Purchasing" }).click();
+    // Phase 30 (spec §4.1 row 5): Confirm details is Finance's primary; Send back sits in More.
+    await (await openMore(page)).getByRole("menuitem", { name: "Send back to Purchasing…", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Send back BR-FN-0003?" });
     await dialog.getByLabel("What is wrong?").fill("e2e — wrong cost recorded");
     await dialog.getByRole("button", { name: "Send back" }).click();
+    await expect(page.getByText("BR-FN-0003 sent back to Purchasing")).toBeVisible();
     // exact: true — Playwright's getByText is substring AND case-insensitive
     // by default, and the Purchasing sidebar nav carries its own "Awaiting
     // finance" link at all times, which would otherwise satisfy a loose match
     // on "AWAITING FINANCE" below regardless of whether the pill ever changed.
-    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
+    // Phase 30 (spec §4.1): the header's one pill asks something of THIS
+    // viewer — Finance still owes a confirmation; RETURNED BY FINANCE is the
+    // pill Purchasing sees below.
+    await expect(page.getByRole("alert").filter({ hasText: "Finance sent this back" })).toContainText("e2e — wrong cost recorded");
+    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toHaveCount(0);
 
     // IT cannot resubmit — and, as of Phase 14's asymmetric visibility, cannot
     // even see this record: BR-FN-0003 is Purchasing-class furniture, and IT
     // only sees the IT class now (VISIBLE_CLASSES, src/lib/asset-class.ts).
     // getVisibleAsset returns null for it_staff here, so AssetRecordLayout's
-    // OWN notFound() fires. D-: this is NOT the scoped "Asset not found"
-    // EmptyState case 5 uses — that page (inventory/[id]/not-found.tsx) is a
-    // SIBLING of the layout, and per Next.js's not-found convention a
-    // segment's own not-found.tsx cannot catch a notFound() thrown by that
-    // same segment's layout; it bubbles to the app's root not-found.tsx
-    // instead ("This page doesn't exist").
+    // OWN notFound() fires. Phase 30 (plan P-15): that layout now lives in the
+    // (record) route group, one segment BELOW inventory/[id]/not-found.tsx, so
+    // the scoped "Asset not found" EmptyState catches it — the same page case
+    // 5 shows for a child route's own notFound(). (While the layout sat beside
+    // not-found.tsx in [id]/, its notFound() bubbled past to the app's root
+    // "This page doesn't exist".)
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await expect(page.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    await expect(page.getByText("Asset not found", { exact: true })).toBeVisible();
 
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Mark corrected" })).toBeVisible();
     await page.getByRole("button", { name: "Mark corrected" }).click();
     const resubmitDialog = page.getByRole("dialog", { name: "Mark corrected BR-FN-0003?" });
     await resubmitDialog.getByRole("button", { name: "Mark corrected" }).click();
-    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
+    await expect(page.getByText("BR-FN-0003 resubmitted to Finance")).toBeVisible();
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toHaveCount(0);
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).financeReturnedAt).toBeNull();
   });
 });
@@ -383,13 +452,12 @@ test.describe("page gates speak the class", () => {
     const carId = await idOf("BR-VH-0001");
     await login(page, "it@thebackroomop.com");
     // Phase 14: IT cannot see a Purchasing asset at all (not just its Edit
-    // link) — the edit URL is under the same AssetRecordLayout as the record
-    // itself, so it 404s via the layout's own notFound(). D-: that lands on
-    // the app's root not-found page ("This page doesn't exist"), not the
-    // scoped "Asset not found" EmptyState case 5 uses for a child route's own
-    // notFound() — see the D- note on case 16 for why the two differ.
+    // link). Phase 30 (plan P-15): the edit route left the record layout, so
+    // it is the edit page's own notFound() that fires, and
+    // inventory/[id]/not-found.tsx — its parent segment's boundary — shows the
+    // scoped "Asset not found", as for the record itself (case 16).
     await page.goto(`/inventory/${carId}/edit`);
-    await expect(page.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    await expect(page.getByText("Asset not found", { exact: true })).toBeVisible();
 
     const laptopId = await idOf("BR-LT-0148");
     await login(page, "purchasing@thebackroomop.com");
@@ -404,17 +472,29 @@ test.describe("page gates speak the class", () => {
   });
 
   test("18. /inventory/new offers each role its own categories", async ({ page }) => {
+    // Phase 30 (spec §5.1): /inventory/new redirects to the one Register flow,
+    // keeping ?cls=. The redirect can land after page.goto resolves (the page
+    // streams under inventory/loading.tsx), so each read waits for the form's
+    // own heading first — allTextContents() does not wait for anything.
+    const categoryOptions = async (url: RegExp) => {
+      await expect(page).toHaveURL(url);
+      await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
+      return page.getByLabel("Category").locator("option").allTextContents();
+    };
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory/new");
-    let options = await page.getByLabel("Category").locator("option").allTextContents();
+    let options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Vehicle");
     expect(options).toContain("Laptop");
+    // Both classes offered → one optgroup per class (spec §5.2).
+    await expect(page.getByLabel("Category").locator("optgroup")).toHaveCount(2);
 
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/new");
-    options = await page.getByLabel("Category").locator("option").allTextContents();
+    options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Laptop");
     expect(options).not.toContain("Vehicle");
+    await expect(page.getByLabel("Category").locator("optgroup")).toHaveCount(0);
 
     await login(page, "finance@thebackroomop.com");
     await page.goto("/inventory/new");
@@ -422,18 +502,22 @@ test.describe("page gates speak the class", () => {
 
     await login(page, "admin@thebackroomop.com");
     await page.goto("/inventory/new?cls=PURCHASING");
-    options = await page.getByLabel("Category").locator("option").allTextContents();
+    options = await categoryOptions(/\/inventory\/register\?cls=PURCHASING$/);
     expect(options).toContain("Vehicle");
     expect(options).not.toContain("Laptop");
+    // The breadcrumb names the list it came from.
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Purchasing assets", exact: true }))
+      .toHaveAttribute("href", "/inventory?cls=PURCHASING");
 
     await page.goto("/inventory/new");
-    options = await page.getByLabel("Category").locator("option").allTextContents();
+    options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Vehicle");
     expect(options).toContain("Laptop");
 
     await page.goto("/inventory?cls=PURCHASING");
-    const newAssetLink = page.getByRole("link", { name: "New asset" });
-    await expect(newAssetLink).toHaveAttribute("href", /\?cls=PURCHASING$/);
+    // Phase 30 (spec §6.1): the header's one primary; scoped to main — the nav has an entry of the same name.
+    const registerLink = page.getByRole("main").getByRole("link", { name: "Register assets" });
+    await expect(registerLink).toHaveAttribute("href", /^\/inventory\/register\?cls=PURCHASING$/);
     await expect(page.getByRole("link", { name: "Repairs" })).toHaveCount(0);
 
     await page.goto("/inventory");
@@ -461,37 +545,42 @@ test.describe("the leaver-kit policy picker", () => {
 });
 
 test.describe("the create form's initial-state control follows the class", () => {
-  test("20. Vehicle offers 2 (STORED default), Laptop offers 3 (SPARE default), and the disclosure text tracks the choice", async ({ page }) => {
+  test("20. Vehicle offers 2 (Stored default), Laptop offers 3 (Spare default), and the disclosure text tracks the choice", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
-    await page.goto("/inventory/new");
+    // Phase 30 (spec §5.3): the Register form at quantity 1 carries the initial
+    // state, in the friendly status words (plan P-6).
+    await page.goto("/inventory/register");
 
     await page.getByLabel("Category").selectOption({ label: "Vehicle" });
-    const initialStatus = page.getByRole("radiogroup", { name: "Initial status" });
-    await expect(initialStatus.getByRole("radio")).toHaveCount(2);
-    await expect(initialStatus.getByRole("radio", { name: "STORED" })).toBeChecked();
-    await expect(initialStatus.getByRole("radio", { name: "OPERATIONAL" })).toBeVisible();
-    await expect(initialStatus.getByRole("radio", { name: "DEPLOYED" })).toHaveCount(0);
+    const initialState = page.getByRole("radiogroup", { name: "Initial state" });
+    await expect(initialState.getByRole("radio")).toHaveCount(2);
+    await expect(initialState.getByRole("radio", { name: "Stored" })).toBeChecked();
+    await expect(initialState.getByRole("radio", { name: "Operational" })).toBeVisible();
+    await expect(initialState.getByRole("radio", { name: "Deployed" })).toHaveCount(0);
+    await expect(page.getByText("Registered as a spare, ready to assign.")).toBeVisible();
 
-    await initialStatus.getByText("OPERATIONAL").click();
+    await initialState.getByText("Operational").click();
 
     await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await expect(initialStatus.getByRole("radio")).toHaveCount(3);
-    await expect(initialStatus.getByRole("radio", { name: "SPARE" })).toBeChecked();
-    await expect(initialStatus.getByRole("radio", { name: "OPERATIONAL" })).toHaveCount(0);
+    // Admin applies IT's lifecycle directly, so Loan is offered (ruling R4).
+    await expect(initialState.getByRole("radio")).toHaveCount(3);
+    await expect(initialState.getByRole("radio", { name: "Spare" })).toBeChecked();
+    await expect(initialState.getByRole("radio", { name: "Loan" })).toBeVisible();
+    await expect(initialState.getByRole("radio", { name: "Operational" })).toHaveCount(0);
 
-    // Phase 15: admin is direct-lifecycle for IT (DIRECT_LIFECYCLE_CLASSES),
-    // so picking DEPLOYED for a Laptop now shows the direct-apply disclosure
-    // instead of the old "routes through a lifecycle.assign approval" copy —
-    // asset-form.tsx's `direct` branch never mentions "registered as SPARE"
-    // at all, so that old assertion would now fail outright rather than pass
-    // on the wrong text. Purchasing (Vehicle, below) is still queue-only, so
-    // its copy is untouched.
-    await initialStatus.getByText("DEPLOYED").click();
-    await expect(page.getByText("Deployed to the chosen person at registration — recorded in the audit trail.")).toBeVisible();
+    // Direct for IT: the line says what happens, with no approval.
+    await initialState.getByText("Deployed").click();
+    await expect(page.getByText("Deployed to the chosen person.")).toBeVisible();
+    await expect(page.getByText("This files a request for approval.")).toHaveCount(0);
+    await initialState.getByText("Loan").click();
+    await expect(page.getByText("Lent to the chosen person until the date below.")).toBeVisible();
+    await expect(page.getByLabel("Loan until")).not.toHaveValue("");
 
+    // Purchasing keeps its queue: a holder state files a request.
     await page.getByLabel("Category").selectOption({ label: "Vehicle" });
-    await initialStatus.getByText("OPERATIONAL").click();
-    await expect(page.getByText(/registered as STORED/)).toBeVisible();
+    await initialState.getByText("Operational").click();
+    await expect(page.getByText("This files a request for approval.")).toBeVisible();
+    await expect(page.getByLabel("Loan until")).toHaveCount(0);
   });
 });
 

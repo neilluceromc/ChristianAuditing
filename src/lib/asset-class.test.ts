@@ -10,6 +10,7 @@ import {
   MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, VISIBLE_CLASSES,
   canManageClass, canEditAsset, canRegisterClass, canSeeClass, isAwaitingItCheck, isStatusOf, parseCls, statusesFor, visibleClassWhere, withClsQS,
   DIRECT_LIFECYCLE_CLASSES, isDirectLifecycle, isAssignable, canAttachDocuments,
+  STATUS_LABEL, defaultClassFor, statusTargets, withViewClsQS,
 } from "./asset-class";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
@@ -287,5 +288,53 @@ describe("canAttachDocuments — ruling R14: a registrant may attach documents u
   });
   it("purchasing_staff on its own PURCHASING class asset may always attach", () => {
     expect(canAttachDocuments("purchasing_staff", { cls: "PURCHASING", itVerifiedAt: null })).toBe(true);
+  });
+});
+
+describe("STATUS_LABEL — the friendly word for every status of both classes", () => {
+  it("covers all fourteen statuses, and a loan reads Loan", () => {
+    for (const s of [...STATUSES_BY_CLASS.IT, ...STATUSES_BY_CLASS.PURCHASING]) expect(STATUS_LABEL[s]).toBeTruthy();
+    expect(STATUS_LABEL.TEMPORARY).toBe("Loan");
+    expect(STATUS_LABEL.SPARE).toBe("Spare");
+    expect(STATUS_LABEL.OPERATIONAL).toBe("Operational");
+  });
+});
+
+describe("statusTargets — only the statuses a direct change may pick", () => {
+  it("an unheld IT spare: no holder statuses, never the current one", () => {
+    expect(statusTargets({ cls: "IT", status: "SPARE", hasHolder: false })).toEqual(["DEFECTIVE", "DONATED", "BUYOUT", "DISPOSE", "MISSING"]);
+  });
+  it("a held IT device: only the other holder status", () => {
+    expect(statusTargets({ cls: "IT", status: "DEPLOYED", hasHolder: true })).toEqual(["TEMPORARY"]);
+    expect(statusTargets({ cls: "IT", status: "TEMPORARY", hasHolder: true })).toEqual(["DEPLOYED"]);
+  });
+  it("a held Purchasing asset has nothing to change to", () => {
+    expect(statusTargets({ cls: "PURCHASING", status: "OPERATIONAL", hasHolder: true })).toEqual([]);
+  });
+  it("an unheld Purchasing asset: every non-holder status but its own", () => {
+    expect(statusTargets({ cls: "PURCHASING", status: "STORED", hasHolder: false })).toEqual(["REPAIRING", "RETIRED", "SOLD", "LOST"]);
+  });
+});
+
+describe("defaultClassFor — the class /inventory opens on", () => {
+  it("is the first class the role manages", () => {
+    expect(defaultClassFor("purchasing_staff")).toBe("PURCHASING");
+    expect(defaultClassFor("it_staff")).toBe("IT");
+    expect(defaultClassFor("admin")).toBe("IT");
+  });
+  it("falls back to the first visible class for roles that manage none", () => {
+    expect(defaultClassFor("finance_staff")).toBe("IT");
+    expect(defaultClassFor("viewer")).toBe("IT");
+  });
+});
+
+describe("withViewClsQS — cls only when it is not the viewer's default", () => {
+  it("IT-default viewers get exactly today's URLs", () => {
+    expect(withViewClsQS("", "IT", "IT")).toBe("");
+    expect(withViewClsQS("?q=x", "PURCHASING", "IT")).toBe("?q=x&cls=PURCHASING");
+  });
+  it("a Purchasing-default viewer names IT explicitly and omits its own class", () => {
+    expect(withViewClsQS("", "IT", "PURCHASING")).toBe("?cls=IT");
+    expect(withViewClsQS("?q=x", "PURCHASING", "PURCHASING")).toBe("?q=x");
   });
 });
