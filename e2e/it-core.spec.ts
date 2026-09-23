@@ -126,7 +126,9 @@ test.describe("inventory list", () => {
     await expect(page).not.toHaveURL(/status=/);
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page).toHaveURL(/status=DEFECTIVE/);
-    await expect(page.getByRole("link", { name: /status: DEFECTIVE/i })).toBeVisible();
+    // Phase 30 (spec §6.2): a chip reads as the value alone; its link name carries the
+    // sr-only " — remove filter" suffix, which scopes it to the chip row.
+    await expect(page.getByRole("link", { name: "DEFECTIVE — remove filter" })).toBeVisible();
   });
 
   test("an exact tag search opens the record (scanner contract)", async ({ page }) => {
@@ -145,12 +147,33 @@ test.describe("inventory list", () => {
     await expect(page.getByRole("heading", { name: "BR-LT-0148" })).toBeVisible({ timeout: 20_000 });
   });
 
-  test("viewer is read-only: no checkboxes, no New asset, badge shown", async ({ page }) => {
+  test("viewer is read-only: no checkboxes, no Register assets, badge shown", async ({ page }) => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/inventory");
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
-    await expect(page.getByRole("link", { name: "New asset" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Register assets" })).toHaveCount(0);
     await expect(page.getByRole("checkbox")).toHaveCount(0);
+  });
+
+  test("the nav reaches the list's views: IT's Register assets, Purchasing's IT inventory", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory");
+    const itNav = page.getByRole("navigation", { name: "Workspace" });
+    await expect(itNav.getByRole("link", { name: "Register assets" })).toHaveAttribute("href", "/inventory/register");
+    await itNav.getByRole("link", { name: "Register assets" }).click();
+    await expect(page).toHaveURL(/\/inventory\/register$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
+
+    // purchasing_staff's list opens on Purchasing (plan P-7), so the Reference link names IT.
+    await login(page, "purchasing@thebackroomop.com");
+    await page.goto("/purchases");
+    const purchasingNav = page.getByRole("navigation", { name: "Workspace" });
+    await expect(purchasingNav.getByRole("link", { name: "IT inventory" })).toHaveAttribute("href", "/inventory?cls=IT");
+    await purchasingNav.getByRole("link", { name: "IT inventory" }).click();
+    await expect(page).toHaveURL(/\/inventory\?cls=IT$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Inventory", level: 1 })).toBeVisible();
+    await expect(page.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
   });
 
   test("bulk selection changes status on every selected asset at once", async ({ page }) => {

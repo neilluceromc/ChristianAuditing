@@ -243,7 +243,8 @@ test.describe.serial("registration", () => {
   test("6. IT's navigation reaches the batch page", async ({ page }) => {
     await login(page, IT);
     await page.goto("/inventory");
-    await page.getByRole("link", { name: "Register several" }).first().click();
+    // Phase 30 (spec §6.1): one Register assets primary in the list header (the nav's entry of the same name is scoped out).
+    await page.getByRole("main").getByRole("link", { name: "Register assets" }).click();
     await expect(page).toHaveURL(/\/inventory\/register$/);
     await expect(page.getByRole("heading", { name: "Register assets" })).toBeVisible();
   });

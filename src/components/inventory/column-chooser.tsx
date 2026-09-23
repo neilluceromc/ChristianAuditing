@@ -62,7 +62,7 @@ export function ColumnChooser({ visible }: { visible: string[] }) {
           style={{ animation: "fade var(--dur-2) var(--ease-std)" }}
         >
           <p className="px-1 pb-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-fg-faint">
-            Yours only — not in the URL
+            Saved for you
           </p>
           {COLUMN_PREF_KEYS["columns:inventory"].map((col) => (
             <label key={col} className="flex cursor-pointer items-center gap-2 rounded-[5px] px-1.5 py-1 text-xs text-fg-secondary hover:bg-surface-subtle">

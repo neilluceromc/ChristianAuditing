@@ -300,7 +300,7 @@ test.describe("the database is the guarantee", () => {
 });
 
 test.describe("the inventory view", () => {
-  test("10. ?cls=PURCHASING lists Purchasing assets and scopes the Filters panel; the plain URL is unchanged", async ({ page }) => {
+  test("10. ?cls=PURCHASING lists Purchasing assets and scopes the Filters panel; the plain URL opens the role's own class", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory?cls=PURCHASING");
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
@@ -321,9 +321,23 @@ test.describe("the inventory view", () => {
     await expect(categoryDialog.getByText("Vehicle")).toBeVisible();
     await expect(categoryDialog.getByText("Laptop")).toHaveCount(0);
     await page.keyboard.press("Escape");
+    // Phase 30 (plan P-7): the plain URL opens the class the role manages — Purchasing for
+    // purchasing_staff — and the IT view names itself with cls=IT.
     await page.goto("/inventory");
+    await expect(page.getByRole("heading", { name: "Purchasing assets", level: 1 })).toBeVisible();
+    await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "BR-LT-0148" })).toHaveCount(0);
+    await page.goto("/inventory?cls=IT");
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
+
+    // A Purchasing record's breadcrumb names the Purchasing list, which is this role's plain URL.
+    await page.goto(`/inventory/${await idOf("BR-FN-0003")}`);
+    const crumb = page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Purchasing assets", exact: true });
+    await expect(crumb).toHaveAttribute("href", "/inventory");
+    await crumb.click();
+    await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Purchasing assets", level: 1 })).toBeVisible();
 
     // Phase 14: IT cannot ask for the Purchasing view at all.
     await login(page, "it@thebackroomop.com");
@@ -334,12 +348,14 @@ test.describe("the inventory view", () => {
     await login(page, "purchasing@thebackroomop.com");
 
     // Switching class clears the facet filters — none of them can apply to the other class (D-12).
-    await page.goto("/inventory?status=SPARE");
-    await expect(page.getByText("status: SPARE")).toBeVisible();
+    // Phase 30: chips read as the value alone, and Purchasing is this role's default (no cls=).
+    await page.goto("/inventory?cls=IT&status=SPARE");
+    const spareChip = page.getByRole("link", { name: "SPARE — remove filter" });
+    await expect(spareChip).toBeVisible();
     await page.getByRole("navigation", { name: "Asset class" }).getByRole("link", { name: "Purchasing" }).click();
-    await expect(page).toHaveURL(/cls=PURCHASING/);
-    await expect(page).not.toHaveURL(/status=/);
-    await expect(page.getByText("status: SPARE")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Purchasing assets", level: 1 })).toBeVisible();
+    await expect(spareChip).toHaveCount(0);
   });
 
   test("11. the bulk drawer on the Purchasing view offers Purchasing statuses", async ({ page }) => {
@@ -487,8 +503,9 @@ test.describe("page gates speak the class", () => {
     expect(options).toContain("Laptop");
 
     await page.goto("/inventory?cls=PURCHASING");
-    const newAssetLink = page.getByRole("link", { name: "New asset" });
-    await expect(newAssetLink).toHaveAttribute("href", /\?cls=PURCHASING$/);
+    // Phase 30 (spec §6.1): the header's one primary; scoped to main — the nav has an entry of the same name.
+    const registerLink = page.getByRole("main").getByRole("link", { name: "Register assets" });
+    await expect(registerLink).toHaveAttribute("href", /^\/inventory\/register\?cls=PURCHASING$/);
     await expect(page.getByRole("link", { name: "Repairs" })).toHaveCount(0);
 
     await page.goto("/inventory");
