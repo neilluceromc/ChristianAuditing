@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTION_LABELS, actionLabel, auditSentence, fieldLabel } from "./activity";
+import { ACTION_LABELS, actionLabel, auditPhrase, auditSentence, fieldLabel } from "./activity";
 import { actionDot } from "@/components/patterns/activity-feed";
 
 const base = { actorLabel: "J. Sarmiento", action: "update", diff: null as unknown, entityLabel: "BR-LT-0148" };
@@ -305,6 +305,32 @@ describe("actionDot — Phase 12's asset actions are explicit, not left to the n
   it("Phase 26 holds get their own dots", () => {
     expect(actionDot("reservation.placed")).toBe("ACTIVE");
     expect(actionDot("reservation.released")).toBe("CANCELLED");
+  });
+});
+
+describe("auditPhrase — the Last change line's phrase: no actor, no entity (Phase 30 T1)", () => {
+  it("register, an assignment and a Finance return: auditSentence is the actor plus a sentence carrying auditPhrase's words", () => {
+    const cases = [
+      { actorLabel: "J. Sarmiento", action: "register", diff: null as unknown, entityLabel: "BR-LT-0148" },
+      { actorLabel: "J. Sarmiento", action: "lifecycle.assign", diff: { assignee: { from: null, to: "Carlo Dizon" } }, entityLabel: "BR-LT-0148" },
+      { actorLabel: "J. Sarmiento", action: "finance.return", diff: { financeReturn: { from: null, to: "Serial does not match the box" } }, entityLabel: "BR-LT-0148" },
+    ];
+    for (const entry of cases) {
+      const sentence = auditSentence(entry);
+      const phrase = auditPhrase(entry);
+      expect(sentence.startsWith(`${entry.actorLabel} `)).toBe(true);
+      const rest = sentence.slice(entry.actorLabel.length + 1);
+      for (const word of phrase.split(" ")) expect(rest).toContain(word);
+      expect(phrase).not.toContain(entry.actorLabel);
+      expect(phrase).not.toContain(entry.entityLabel);
+    }
+  });
+
+  it("pins the three phrases", () => {
+    expect(auditPhrase({ action: "register", diff: null })).toBe("registered");
+    expect(auditPhrase({ action: "lifecycle.assign", diff: { assignee: { from: null, to: "Carlo Dizon" } } })).toBe("assigned to Carlo Dizon");
+    expect(auditPhrase({ action: "finance.return", diff: { financeReturn: { from: null, to: "Serial does not match the box" } } }))
+      .toBe("sent back to IT · Serial does not match the box");
   });
 });
 
