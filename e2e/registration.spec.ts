@@ -245,7 +245,8 @@ test.describe.serial("registration", () => {
     await page.goto("/inventory");
     // Phase 30 (spec §6.1): one Register assets primary in the list header (the nav's entry of the same name is scoped out).
     await page.getByRole("main").getByRole("link", { name: "Register assets" }).click();
-    await expect(page).toHaveURL(/\/inventory\/register$/);
+    // The header's Register assets names the viewed class, so the form opens narrowed to it.
+    await expect(page).toHaveURL(/\/inventory\/register\?cls=IT$/);
     await expect(page.getByRole("heading", { name: "Register assets" })).toBeVisible();
   });
 

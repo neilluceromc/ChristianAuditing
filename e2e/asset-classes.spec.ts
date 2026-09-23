@@ -327,6 +327,15 @@ test.describe("the inventory view", () => {
     await expect(page.getByRole("heading", { name: "Purchasing assets", level: 1 })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toHaveCount(0);
+    // Register assets names the viewed class even on the default view, so the form opens narrowed.
+    const registerLink = page.getByRole("main").getByRole("link", { name: "Register assets" });
+    await expect(registerLink).toHaveAttribute("href", "/inventory/register?cls=PURCHASING");
+    await registerLink.click();
+    await expect(page).toHaveURL(/\/inventory\/register\?cls=PURCHASING$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
+    const purchasingOptions = await page.getByLabel("Category").locator("option").allTextContents();
+    expect(purchasingOptions).toContain("Vehicle");
+    expect(purchasingOptions).not.toContain("Laptop");
     await page.goto("/inventory?cls=IT");
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);

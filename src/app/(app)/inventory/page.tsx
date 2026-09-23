@@ -109,7 +109,9 @@ export default async function InventoryPage({
   // The export route and the bulk filters default the class to the viewer's own (Task 2's
   // defaultClassFor), so omitting `cls` exactly when it is that default names the same view.
   const exportQS = withViewClsQS(withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear), cls, defaultCls);
-  const registerHref = "/inventory/register" + withViewClsQS("", cls, defaultCls);
+  // Not withViewClsQS: the Register page narrows its categories on the parameter itself, so the
+  // link always names the class being viewed — even the viewer's default.
+  const registerHref = `/inventory/register?cls=${cls}`;
   const importHref = canMutate && cls === "IT" ? "/inventory/import" : null;
   // One href per sortable key — the result of clicking that column's header —
   // plain serializable data, unlike `href` above, so it can cross into the
