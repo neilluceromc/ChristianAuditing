@@ -493,7 +493,8 @@ export async function lastLifecycleChange(
     where: {
       entityType: "asset",
       entityId: assetId,
-      OR: [{ action: { startsWith: "lifecycle." } }, { action: "register" }],
+      // Phase 30 (review R10): Register at quantity 1 goes through createAsset, which audits `create`.
+      OR: [{ action: { startsWith: "lifecycle." } }, { action: "register" }, { action: "create" }],
     },
     orderBy: { createdAt: "desc" },
   });

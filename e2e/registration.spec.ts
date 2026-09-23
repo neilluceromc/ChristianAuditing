@@ -278,4 +278,52 @@ test.describe.serial("registration", () => {
       expect(r.documents.map((d) => d.kind)).toEqual(["invoice"]);
     }
   });
+
+  // Phase 30 review R11: a file staged at quantity 1 is not lost when the
+  // quantity grows — it becomes the batch's invoice, on every unit.
+  test("8. a document staged at quantity 1 becomes the invoice of the batch it grows into", async ({ page }) => {
+    await login(page, IT);
+    await page.goto("/inventory/register");
+    await waitForHydration(page.getByLabel("Category"));
+    await page.getByLabel("Category").selectOption({ label: "Laptop" });
+    await page.getByLabel("Model").fill("ThinkPad E14 (e2e carry)");
+    await page.getByLabel(/Documents/).setInputFiles({
+      name: "carry.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 carry"),
+    });
+    await expect(page.getByLabel("Kind for carry.pdf")).toBeVisible();
+    await page.getByLabel("Quantity").fill("3");
+    await expect(page.getByText("carry.pdf will be attached to every unit as the invoice.")).toBeVisible();
+    const tags = await Promise.all([1, 2, 3].map((i) => page.getByLabel(`Tag ${i}`).inputValue()));
+    await page.getByRole("button", { name: "Register 3 assets" }).click();
+    await expect(page.getByText(/3 assets registered/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/did not attach/)).toHaveCount(0);
+
+    const rows = await db.asset.findMany({ where: { tag: { in: tags } }, include: { documents: true } });
+    expect(rows).toHaveLength(3);
+    for (const r of rows) expect(r.documents.map((d) => [d.fileName, d.kind])).toEqual([["carry.pdf", "invoice"]]);
+  });
+
+  // Review R11 the other way, and R10: a batch's invoice comes back as the one
+  // asset's Invoice document, and a single registration (audited `create`)
+  // shows the record's Last change line.
+  test("9. a batch invoice returns to quantity 1 as an Invoice, and the record says what last happened", async ({ page }) => {
+    await login(page, IT);
+    await page.goto("/inventory/register");
+    await waitForHydration(page.getByLabel("Category"));
+    await page.getByLabel("Category").selectOption({ label: "Laptop" });
+    await page.getByLabel("Model").fill("ThinkPad E14 (e2e return)");
+    await page.getByLabel("Quantity").fill("3");
+    await page.getByLabel("Invoice document").setInputFiles({
+      name: "back.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 back"),
+    });
+    await page.getByLabel("Quantity").fill("1");
+    await expect(page.getByLabel("Kind for back.pdf")).toHaveValue("invoice");
+    const tag = await page.getByLabel("Tag 1").inputValue();
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
+    await expect(page.locator("p", { hasText: "Last change:" })).toContainText("Last change: created");
+
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag }, include: { documents: true } });
+    expect(asset.documents.map((d) => [d.fileName, d.kind])).toEqual([["back.pdf", "invoice"]]);
+  });
 });

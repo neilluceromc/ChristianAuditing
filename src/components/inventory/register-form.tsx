@@ -22,6 +22,7 @@ import { MONEY_ERROR, normaliseCost } from "@/lib/register-input";
 import {
   clampQuantity, liveQuantity, pasteSerials, resizeRows, retagRows, serialsEntered, singleRowErrors, type RegisterRow,
 } from "@/lib/register-rows";
+import { carryDocuments } from "@/lib/register-documents";
 import { TAG_SHAPE, tagKey } from "@/lib/tag-key";
 import { createAsset } from "@/server/modules/inventory/actions";
 import { registerAssets } from "@/server/modules/purchases/receiving";
@@ -217,7 +218,18 @@ export function RegisterForm({
     });
   }
 
-  const resize = (count: number) => setRows((rs) => (count === rs.length ? rs : resizeRows(rs, count, runFor(prefix, count))));
+  // Review R11: the documents staged for one quantity carry across to the other.
+  function carryTo(count: number) {
+    const next = carryDocuments({ files, invoice: invoiceFile }, quantity, count);
+    setFiles(next.files);
+    setInvoiceFile(next.invoice);
+  }
+
+  function resize(count: number) {
+    if (count === quantity) return;
+    carryTo(count);
+    setRows((rs) => resizeRows(rs, count, runFor(prefix, count)));
+  }
 
   function changeQuantity(text: string) {
     setQuantityText(text);
@@ -236,6 +248,7 @@ export function RegisterForm({
 
   function pasteColumn(at: number, values: string[]) {
     const out = pasteSerials(rows, at, values, (count) => runFor(prefix, count));
+    carryTo(out.rows.length);
     setRows(out.rows);
     setQuantityText(String(out.rows.length));
     setPasteNote(
