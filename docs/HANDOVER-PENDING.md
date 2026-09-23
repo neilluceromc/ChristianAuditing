@@ -27,17 +27,17 @@ employee area; final tree `9660e6e`) is MERGED TO `main` via `--no-ff` `d76903b`
 it adds no migration either** — it rode the 2026-09-23 redeploy. The push also carried the two
 docs-only commits `401b838` (the Phase 29 spec) and `1acd928` (the plan) that had sat on local
 `main`; `main` = `origin/main` again after that push. **Phase 30 (`phase-30-inventory-uiux`, Laws of UX
-applied to the inventory area) is CODE-COMPLETE at final tree `4e6fc7f`, UNMERGED and UNPUSHED, and
-adds no migration** — local `main` now carries two unpushed docs-only commits beyond `origin/main`
-`c563600`: `a94f47a` (the Phase 30 spec) and `b582535` (the plan). Merging, pushing and the
-code-only redeploy are the user's decisions. See `PICKUP.md` §4 item 1 and `HANDOVER.md` (w).
+applied to the inventory area; final tree `4e6fc7f`) is MERGED TO `main` via `--no-ff` `69f8545` and
+PUSHED (2026-09-24), and adds no migration** — the push also carried `a94f47a` (the Phase 30 spec) and
+`b582535` (the plan); `main` = `origin/main` again. Staging is NOT yet redeployed for it; the
+code-only redeploy is the user's decision. See `PICKUP.md` §4 item 1 and `HANDOVER.md` (w).
 
 ---
 
 ## 1. Operations — one command when the user says so
 
-- **Redeploy staging** when the user asks. Staging already runs the **Phase 26** merge (`e96fb2a`,
-  **25 migrations**) since the 2026-09-22 forced redeploy, so there is nothing pending on it today. The
+- **Redeploy staging** when the user asks. Staging runs the **Phase 29** merge (`ccb0432`,
+  **26 migrations**) since the 2026-09-23 forced redeploy; Phase 30 (no migration) waits for the next one. The
   one command, whenever a merge needs carrying over:
 
   ```bash
