@@ -47,6 +47,21 @@ async function highestNumber(prefix: string): Promise<number> {
 }
 const tagOf = (prefix: string, n: number) => `BR-${prefix}-${String(n).padStart(4, "0")}`;
 
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
+}
+
 let vehicleCategoryId: string;
 let sedanTypeId: string;
 let registeredTag: string;
@@ -133,7 +148,10 @@ test.describe("IT-only surfaces close to a Purchasing asset", () => {
     await login(page, "admin@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
     await expect(page.getByRole("link", { name: /Secrets/ })).toHaveCount(0);
-    await expect(page.getByText("PURCHASING", { exact: true })).toBeVisible();
+    // Phase 30 (spec §4.1): the class pill left the header; the breadcrumb now
+    // names the class's own list (admin's default list is IT, so it says cls=).
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Purchasing assets", exact: true }))
+      .toHaveAttribute("href", "/inventory?cls=PURCHASING");
     await page.goto(`/inventory/${id}/secrets`);
     // A page-level notFound() under inventory/loading.tsx streams the shell with
     // 200 before the guard runs, so the HTTP status cannot be 404 here — the
@@ -152,22 +170,30 @@ test.describe("IT-only surfaces close to a Purchasing asset", () => {
 test.describe("status controls and approvals speak the class's language", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("6. the picker on a car offers exactly the six, minus its current status", async ({ page }) => {
+  test("6. the picker on a car offers only its class's legal targets, in friendly words, with nothing preselected", async ({ page }) => {
     const id = await idOf("BR-VH-0002"); // STORED, unassigned
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
-    const options = await page.getByLabel("New status").locator("option").allTextContents();
-    expect(options.sort()).toEqual(["LOST", "OPERATIONAL", "REPAIRING", "RETIRED", "SOLD"]);
-    expect(options).not.toContain("DEPLOYED");
+    // Phase 30: the approval path keeps its words; the item sits in More.
+    await (await openMore(page)).getByRole("menuitem", { name: "Request status change…", exact: true }).click();
+    const status = page.getByLabel("New status");
+    // Spec §4.2 (statusTargets): never the current STORED, never the holder
+    // status OPERATIONAL (Assign holder does that), never an IT status.
+    // Plan P-6: friendly labels, option values still the enum.
+    await expect(status).toHaveValue("");
+    expect(await status.locator("option").allTextContents()).toEqual(["Pick a status…", "Repairing", "Retired", "Sold", "Lost"]);
+    expect(await status.locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value)))
+      .toEqual(["", "REPAIRING", "RETIRED", "SOLD", "LOST"]);
   });
 
-  test("7. an approval executes the car to OPERATIONAL", async ({ page }) => {
+  test("7. an approval executes the car's requested status", async ({ page }) => {
     const id = await idOf("BR-VH-0002");
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
-    await page.getByLabel("New status").selectOption("OPERATIONAL");
+    await (await openMore(page)).getByRole("menuitem", { name: "Request status change…", exact: true }).click();
+    // Phase 30: OPERATIONAL is a holder status and no longer a target for an
+    // unassigned car (case 6) — REPAIRING is the round trip's other half.
+    await page.getByLabel("New status").selectOption("REPAIRING");
     await page.getByLabel("Reason").fill("e2e — car back in service");
     // Fixed from the plan's draft: an unscoped getByRole("button", {name:
     // "Request"}) is a strict-mode violation — Playwright's substring, case-
@@ -188,23 +214,33 @@ test.describe("status controls and approvals speak the class's language", () => 
     execSync("npm run worker:once", { timeout: 60_000, stdio: "inherit" });
 
     const after = await db.asset.findUniqueOrThrow({ where: { id } });
-    expect(after.status).toBe("OPERATIONAL");
+    expect(after.status).toBe("REPAIRING");
     expect((await db.approval.findUniqueOrThrow({ where: { id: approval.id } })).state).toBe("EXECUTED");
   });
 
   test("14. a held car cannot be status-changed out from under its driver (D-8)", async ({ page }) => {
     // The only test that reaches the worker's HOLDER_STATUSES guard. BR-VH-0001 is OPERATIONAL and assigned.
     const id = await idOf("BR-VH-0001");
+    const purchasing = await db.user.findUniqueOrThrow({ where: { email: "purchasing@thebackroomop.com" } });
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
-    await page.getByLabel("New status").selectOption("STORED");
-    await page.getByLabel("Reason").fill("e2e — should be refused by the worker");
-    await page.getByRole("dialog", { name: "Request a status change" })
-      .getByRole("button", { name: "Request", exact: true }).click();
-    await expect(page.getByText(/created — waiting in the approval queue/)).toBeVisible();
-    const approval = await db.approval.findFirstOrThrow({ where: { assetId: id, state: "PENDING" } });
-    await db.approval.update({ where: { id: approval.id }, data: { state: "APPROVED" } });
+    // Phase 30 (spec §4.2): a held car has no status target at all — Return
+    // (the primary) is the only way out — so the header never offers the
+    // request the worker would refuse.
+    await expect(page.getByRole("button", { name: "Return", exact: true })).toBeVisible();
+    await expect((await openMore(page)).getByRole("menuitem")).toHaveText(["Print label"]);
+
+    // The worker's guard still has to hold for a request filed some other way
+    // (an older client, a race): file it exactly as requestStatusChange does —
+    // the next APR number, the same payload — already APPROVED, then run it.
+    const [{ nextval }] = await db.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('approval_ref_seq')`;
+    const approval = await db.approval.create({
+      data: {
+        refNo: `APR-${nextval}`, type: "lifecycle_change_status", state: "APPROVED",
+        payload: { from: { status: "OPERATIONAL" }, to: { status: "STORED" }, reason: "e2e — should be refused by the worker" },
+        requestedById: purchasing.id, assetId: id, slaAt: new Date(Date.now() + 86_400_000),
+      },
+    });
     // Same enqueue-by-hand as case 7 — this shortcut bypasses actions.ts, which
     // is the only place that normally creates the EXECUTE_APPROVAL job.
     await db.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: approval.id } } });
@@ -343,15 +379,22 @@ test.describe("Finance send-back and resubmit speak the class", () => {
 
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Send back to Purchasing" }).click();
+    // Phase 30 (spec §4.1 row 5): Confirm details is Finance's primary; Send back sits in More.
+    await (await openMore(page)).getByRole("menuitem", { name: "Send back to Purchasing…", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Send back BR-FN-0003?" });
     await dialog.getByLabel("What is wrong?").fill("e2e — wrong cost recorded");
     await dialog.getByRole("button", { name: "Send back" }).click();
+    await expect(page.getByText("BR-FN-0003 sent back to Purchasing")).toBeVisible();
     // exact: true — Playwright's getByText is substring AND case-insensitive
     // by default, and the Purchasing sidebar nav carries its own "Awaiting
     // finance" link at all times, which would otherwise satisfy a loose match
     // on "AWAITING FINANCE" below regardless of whether the pill ever changed.
-    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
+    // Phase 30 (spec §4.1): the header's one pill asks something of THIS
+    // viewer — Finance still owes a confirmation; RETURNED BY FINANCE is the
+    // pill Purchasing sees below.
+    await expect(page.getByRole("alert").filter({ hasText: "Finance sent this back" })).toContainText("e2e — wrong cost recorded");
+    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toHaveCount(0);
 
     // IT cannot resubmit — and, as of Phase 14's asymmetric visibility, cannot
     // even see this record: BR-FN-0003 is Purchasing-class furniture, and IT
@@ -369,11 +412,13 @@ test.describe("Finance send-back and resubmit speak the class", () => {
 
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/inventory/${id}`);
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Mark corrected" })).toBeVisible();
     await page.getByRole("button", { name: "Mark corrected" }).click();
     const resubmitDialog = page.getByRole("dialog", { name: "Mark corrected BR-FN-0003?" });
     await resubmitDialog.getByRole("button", { name: "Mark corrected" }).click();
-    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
+    await expect(page.getByText("BR-FN-0003 resubmitted to Finance")).toBeVisible();
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toHaveCount(0);
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).financeReturnedAt).toBeNull();
   });
 });

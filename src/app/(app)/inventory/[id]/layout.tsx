@@ -5,24 +5,18 @@ import { getVisibleAsset, lastLifecycleChange, spareOptions } from "@/server/mod
 import { activeHoldFor } from "@/server/modules/reservations/queries";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
 import { fmtDate, localDateISO } from "@/lib/format";
-import { CLASS_LABEL, canEditAsset, canManageClass, isAssignable, isAwaitingItCheck, isDirectLifecycle } from "@/lib/asset-class";
+import { canManageClass, defaultClassFor, isAwaitingItCheck, isDirectLifecycle, withViewClsQS } from "@/lib/asset-class";
+import { recordActions, type RecordAction, type RecordState } from "@/lib/record-actions";
 import { defaultHoldExpiry, minHoldExpiry } from "@/lib/holds";
-import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
 import { Banner } from "@/components/ui/banner";
-import { ButtonLink } from "@/components/ui/button-link";
 import { HoldPill } from "@/components/ui/hold-pill";
 import { RecordTabs } from "@/components/inventory/record-tabs";
-import { StatusControl } from "@/components/inventory/status-control";
-import { FinanceReview } from "@/components/inventory/finance-review";
-import { ItCheck } from "@/components/inventory/it-check";
-import { HolderControl } from "@/components/inventory/holder-control";
-import { LoanDueControl } from "@/components/inventory/loan-due-control";
+import { RecordActions } from "@/components/inventory/record-actions";
+import { LoanLine } from "@/components/inventory/loan-due-control";
 import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
-import { ReplaceControl } from "@/components/inventory/replace-control";
-import { TriageControl } from "@/components/inventory/triage-control";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 import { recentPicks } from "@/server/recent-picks";
 
@@ -38,30 +32,36 @@ export default async function AssetRecordLayout({
   const asset = await getVisibleAsset(id, user.role);
   if (!asset) notFound();
   const awaitingIt = isAwaitingItCheck(asset);
-  const canMutate = canManageClass(user.role, asset.cls);          // status, holder
-  const canEdit = canEditAsset(user.role, asset);                  // spec §5.4
-  const canCheck = awaitingIt && canManageClass(user.role, "IT");
   const returned = asset.financeReturnedAt !== null;
-  // Finance confirms after IT (spec §5.3) — absent while awaiting, not disabled.
-  const canConfirm = (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt && !awaitingIt;
-  // Purchasing marks its own registrations corrected. The server action
-  // already enforces this — b521e14.
-  const canResubmit = canManageClass(user.role, asset.cls) && returned;
   const pending = asset.approvals[0];
   const direct = isDirectLifecycle(user.role, asset.cls);
   const hold = asset.cls === "IT" ? await activeHoldFor(asset.id) : null;
   const today = localDateISO(new Date());
-  // Spec §7.1: offered only when the action would be legal; a pending approval
-  // freezes both (the server would answer "already has an open request").
-  const canAssign = canMutate && !pending && !asset.assignee && isAssignable(asset);
-  const canReturn = canMutate && !pending && asset.assignee !== null;
-  const canReplace = direct && canReturn;
-  const canTriage = direct && !pending && asset.returnedAt !== null;
-  const canReserve = direct && !pending && !asset.assignee && isAssignable(asset) && !hold;
+  const loanDueAt = asset.loanDueAt?.toISOString().slice(0, 10) ?? null;
+
+  // Phase 30 (spec §4.1, plan P-4): one rule decides the primary, the More items and Edit.
+  const state: RecordState = {
+    cls: asset.cls, status: asset.status, hasHolder: !!asset.assignee,
+    returnedAt: asset.returnedAt, itVerifiedAt: asset.itVerifiedAt,
+    financeConfirmedAt: asset.financeConfirmedAt, financeReturnedAt: asset.financeReturnedAt,
+    pending: !!pending, held: !!hold,
+  };
+  const plan = recordActions(state, user.role);
+  const offers = (a: RecordAction) => plan.primary === a || plan.more.includes(a);
+  const needsPeople = offers("assign") || offers("reserve");
+  const employees = needsPeople ? await activeEmployeeOptions() : [];
+  const recentEmployees = needsPeople ? await recentPicks(user.id, "employee") : [];
+  const spares = offers("replace") ? await spareOptions(asset.typeId) : { options: [], hidden: 0 };
   const canReleaseHold = direct && !!hold;
-  const employees = canAssign || canReserve ? await activeEmployeeOptions() : [];
-  const recentEmployees = canAssign || canReserve ? await recentPicks(user.id, "employee") : [];
-  const spares = canReplace ? await spareOptions(asset.typeId) : { options: [], hidden: 0 };
+
+  // Spec §4.1: at most one pill that asks something of this viewer, first match wins.
+  const ask =
+    asset.returnedAt ? "BACK · NOT CHECKED"
+    : awaitingIt && canManageClass(user.role, "IT") ? "AWAITING IT CHECK"
+    : (user.role === "admin" || user.role === "finance_staff") && !asset.financeConfirmedAt && !awaitingIt ? "AWAITING FINANCE"
+    : returned && canManageClass(user.role, asset.cls) ? "RETURNED BY FINANCE"
+    : null;
+
   // Phase 20 (spec §6.5, gap 5): while an approval is queued, the record
   // still reads the pre-approval status everywhere (see the Banner below) —
   // showing "Last change" from before that queued change would read as
@@ -73,77 +73,35 @@ export default async function AssetRecordLayout({
     <>
       <PageHeader
         title={asset.tag}
-        breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: asset.tag }]}
+        breadcrumb={[
+          {
+            label: asset.cls === "IT" ? "Inventory" : "Purchasing assets",
+            href: "/inventory" + withViewClsQS("", asset.cls, defaultClassFor(user.role)),
+          },
+          { label: asset.tag },
+        ]}
         badge={
           <span className="inline-flex items-center gap-2">
             <StatusPill value={asset.status} />
-            <Pill>{CLASS_LABEL[asset.cls].toUpperCase()}</Pill>
-            {asset.purchaseRequest ? (
-              <Link href={`/purchases/${asset.purchaseRequest.id}`}>
-                <Pill tone="accent">From {asset.purchaseRequest.refNo}</Pill>
-              </Link>
-            ) : (
-              // Spec §6 badge: the HISTORICAL pill reads "Historical import · no
-              // purchase request"; the label map itself stays "Historical
-              // import" (used elsewhere — facet, export, finance) and this
-              // badge appends the suffix only here.
-              <Pill>
-                {PROVENANCE_LABEL[provenanceOf(asset)]}
-                {provenanceOf(asset) === "HISTORICAL" && " · no purchase request"}
-              </Pill>
-            )}
-            {asset.financeConfirmedAt ? (
-              <Pill>FINANCE CONFIRMED · {fmtDate(asset.financeConfirmedAt)}</Pill>
-            ) : returned ? (
-              <Pill tone="accent">RETURNED BY FINANCE</Pill>
-            ) : awaitingIt ? (
-              <Pill tone="accent">AWAITING IT CHECK</Pill>
-            ) : (
-              // Accent, not neutral: the same shape as the repair-stage pill on
-              // page.tsx, where settled reads neutral and in-flight reads accent.
-              // Rendered neutral, "awaiting" is indistinguishable from "done".
-              <Pill tone="accent">AWAITING FINANCE</Pill>
-            )}
-            {asset.returnedAt && <Pill tone="accent">BACK · NOT CHECKED</Pill>}
+            {ask && <Pill tone="accent">{ask}</Pill>}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
         }
         actions={
-          canMutate || canEdit || canCheck || canConfirm || canResubmit || canAssign || canReturn || canReplace || canTriage || canReserve ? (
-            <>
-              {canCheck && <ItCheck assetId={asset.id} tag={asset.tag} />}
-              {canTriage && <TriageControl assetId={asset.id} tag={asset.tag} />}
-              {canAssign && (
-                <HolderControl
-                  mode="assign" assetId={asset.id} tag={asset.tag} employees={employees} direct={direct} recentEmployees={recentEmployees}
-                  heldFor={hold ? { id: hold.employee.id, name: hold.employee.name } : undefined}
-                />
-              )}
-              {canReserve && (
-                <HolderControl
-                  mode="reserve" assetId={asset.id} tag={asset.tag} employees={employees} recentEmployees={recentEmployees}
-                  defaultExpiry={defaultHoldExpiry(today)} minExpiry={minHoldExpiry(today)}
-                />
-              )}
-              {canReturn && asset.assignee && (
-                <HolderControl mode="return" assetId={asset.id} tag={asset.tag} holder={{ id: asset.assignee.id, name: asset.assignee.name }} direct={direct} />
-              )}
-              {canReplace && asset.assignee && (
-                <ReplaceControl assetId={asset.id} tag={asset.tag} employeeId={asset.assignee.id} employeeName={asset.assignee.name} spares={spares.options} />
-              )}
-              {canMutate && <StatusControl assetId={asset.id} tag={asset.tag} currentStatus={asset.status} cls={asset.cls} direct={direct} />}
-              {canEdit && <ButtonLink href={`/inventory/${asset.id}/edit`}>Edit</ButtonLink>}
-              {(canConfirm || canResubmit) && (
-                <FinanceReview
-                  assetId={asset.id}
-                  tag={asset.tag}
-                  cls={asset.cls}
-                  canConfirm={canConfirm}
-                  canResubmit={canResubmit}
-                />
-              )}
-            </>
-          ) : undefined
+          <RecordActions
+            plan={plan}
+            asset={{
+              id: asset.id, tag: asset.tag, model: asset.model, cls: asset.cls, status: asset.status,
+              hasHolder: !!asset.assignee, loanDueAt,
+            }}
+            holder={asset.assignee ? { id: asset.assignee.id, name: asset.assignee.name } : null}
+            direct={direct}
+            employees={employees}
+            recentEmployees={recentEmployees}
+            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name } : undefined}
+            spares={spares}
+            holdExpiry={{ defaultExpiry: defaultHoldExpiry(today), minExpiry: minHoldExpiry(today) }}
+          />
         }
       />
       {returned && asset.financeReturnReason && (
@@ -159,20 +117,18 @@ export default async function AssetRecordLayout({
           {asset.assignee && (
             <>
               {" · held by "}
-              <a href={`/employees/${asset.assignee.id}`} className="text-accent underline hover:text-accent-hover">
+              <Link href={`/employees/${asset.assignee.id}`} className="text-accent underline hover:text-accent-hover">
                 {asset.assignee.name}
-              </a>
+              </Link>
             </>
           )}
         </p>
         {last && (
           <p className="font-mono text-[11px] text-fg-muted">
-            Last change: {last.sentence} · {fmtDate(last.at)} · by {last.actor}
+            Last change: {last.phrase} · {fmtDate(last.at)} · {last.actor}
           </p>
         )}
-        {asset.status === "TEMPORARY" && canMutate && direct && (
-          <LoanDueControl assetId={asset.id} tag={asset.tag} loanDueAt={asset.loanDueAt?.toISOString().slice(0, 10) ?? null} />
-        )}
+        {asset.status === "TEMPORARY" && <LoanLine loanDueAt={loanDueAt} today={today} />}
       </div>
       {hold && (
         <div className="pb-3">

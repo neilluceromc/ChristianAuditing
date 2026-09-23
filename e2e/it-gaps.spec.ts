@@ -17,7 +17,8 @@ import { fmtDate } from "@/lib/format";
  *   2 (§6.2) the register form's live identifier check is class-scoped.
  *   3 (§6.3) a loan-covered required slot reads "on loan", not a policy gap.
  *   4 (P24 §4.1) the Replace picker groups spares under "Same type" and
- *     "Other spares" headings, with no per-row note left behind.
+ *     "Other spares" headings, with no per-row note left behind; since
+ *     Phase 30 it also says how many spares it leaves out.
  *   5 (§6.5) a direct return updates the record's "Last change" line.
  *   6 (§6.6) the repair-stage cut (`repairStage`) matches the DB one row at a time.
  *   7 (P24 §4.1) with no same-type spare in reach, only "Other spares" renders.
@@ -33,11 +34,12 @@ import { fmtDate } from "@/lib/format";
  *   family), BR-LT-0181 (Laptop, SPARE, same type as every other seeded
  *   Laptop — `mk()` always uses the category's first AssetType regardless of
  *   model text), BR-MN-0911 (Monitor, SPARE). BR-LT-0148 carries the seeded
- *   APR-2039 (CLAIMED) — an OPEN approval — so its record's Replace/Return
- *   controls are absent (layout.tsx: `canReturn = canMutate && !pending &&
- *   …`); case 4 uses BR-LT-0201 (MacBook Air M3, DEPLOYED, held by EMP-0099
- *   Carlo Dizon) instead, which carries no open approval. BR-DK-0071 (Dock,
- *   DEPLOYED, held by EMP-0042) carries none either. EMP-0095 Leo Tan,
+ *   APR-2039 (CLAIMED) — an OPEN approval — so its record offers no Replace
+ *   or Return at all (`recordActions`: a pending approval suppresses every
+ *   lifecycle action); case 7 uses BR-LT-0201 (MacBook Air M3, DEPLOYED, held
+ *   by EMP-0099 Carlo Dizon) instead, which carries no open approval, and
+ *   case 4 uses BR-MN-0902 (Monitor, DEPLOYED, held by EMP-0042). BR-DK-0071
+ *   (Dock, DEPLOYED, held by EMP-0042) carries none either. EMP-0095 Leo Tan,
  *   title "Contractor", Operations (no department policy), holds BR-LT-0210
  *   as a TEMPORARY loan. BR-VH-0001 is the seeded Vehicle (Purchasing class)
  *   tag. `it@thebackroomop.com` is seeded as User.name "J. Sarmiento"
@@ -47,20 +49,23 @@ import { fmtDate } from "@/lib/format";
  *
  * Phase 24 fixture facts, likewise read off the seeded database rather than
  * assumed:
- *   The IT spares `spareOptions` offers are BR-LT-0181 (Laptop), BR-MN-0911
- *   (Monitor), BR-PH-0301 (Phone) and BR-HS-0502 (Headset) — four, not five:
- *   BR-MN-0910 is a SPARE Monitor too, but it carries an ACTIVE reservation
- *   and `spareOptions`' `reservations: { none: { state: "ACTIVE" } }`
- *   (queries.ts) excludes it.
- *   Against BR-LT-0201's own type exactly ONE of them is same-type
- *   (BR-LT-0181), which is what makes cases 4 and 7 a pair: case 7 stamps
- *   `returnedAt` on that single same-type spare (plan P-3 — `spareOptions`
- *   filters `returnedAt: null`) and restores it in a `finally`, leaving the
- *   "Other spares" block untouched. Case 1 moves BR-HS-0502 to DISPOSE, so
- *   cases 4 and 7 assert on BR-MN-0911 and on heading ORDER, never on the
- *   whole option list — still true now that Phase 27 (M-11) gave case 1 a
- *   `finally` that puts BR-HS-0502 back to SPARE: whether that one spare is in
- *   the "Other spares" block or out of it, neither case reads the list whole.
+ *   The seed's assignable IT spares are BR-LT-0181 (Laptop), BR-MN-0910 and
+ *   BR-MN-0911 (Monitors), BR-PH-0301 (Phone) and BR-HS-0502 (Headset).
+ *   `spareOptions` offers three of the five: BR-MN-0910 carries an ACTIVE
+ *   reservation and, since Phase 30 (spec §4.3), BR-LT-0181 is queued by the
+ *   seeded APR-2041 — both are left out and counted in the dialog's
+ *   "2 more spares are held or queued for someone else" line.
+ *   Phase 30 made BR-LT-0201 useless for the "Same type" heading (its one
+ *   same-type spare, BR-LT-0181, is the queued one), so case 4 replaces
+ *   BR-MN-0902 instead, whose one free same-type spare is BR-MN-0911. Case 7
+ *   keeps BR-LT-0201 and still stamps `returnedAt` on BR-LT-0181 (plan P-3 —
+ *   `spareOptions` filters `returnedAt: null`), restoring it in a `finally`:
+ *   a returned spare is neither offered nor counted, so its line reads "1 more
+ *   spare is held or queued". Case 1 moves BR-HS-0502 to DISPOSE (and, since
+ *   Phase 27 M-11, back in a `finally`), so cases 4 and 7 assert on heading
+ *   ORDER and on named rows, never on the whole option list. The counted line
+ *   is immune to that round trip: BR-HS-0502 is never held or queued, so it
+ *   leaves the pool and the offered rows together.
  *   The seeded repair cut is small: its four stages hold 2/3/1/1 IT assets,
  *   well under one page, so case 8's `?page=2` exercises `pageOf`'s clamp
  *   inside `pagedSnapshot` (it asserts a real second page the moment a cut
@@ -107,6 +112,21 @@ async function waitForHydration(target: Locator) {
       true,
     );
   }).toPass({ timeout: 20_000 });
+}
+
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
 }
 
 const IT = "it@thebackroomop.com";
@@ -252,16 +272,22 @@ test.describe("it gaps", () => {
 
   test("4. the Replace picker groups spares under \"Same type\" and \"Other spares\" headings", async ({ page }) => {
     // BR-LT-0148 (the brief's own suggestion) carries the seeded APR-2039
-    // (CLAIMED) — an OPEN approval — so `canReturn`/`canReplace`
-    // (layout.tsx: `!pending`) are both false there and no Replace button
-    // renders at all. BR-LT-0201 is a held IT laptop with no open approval.
-    const laptop = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0201" } });
+    // (CLAIMED) — an OPEN approval — so its record offers no Replace at all.
+    // Ruling R5 (Phase 30): BR-LT-0201's only same-type spare, BR-LT-0181, is
+    // queued by APR-2041 and so no longer offered; BR-MN-0902 is a held IT
+    // monitor with no open approval whose same-type spare BR-MN-0911 is free.
+    const monitor = await db.asset.findUniqueOrThrow({ where: { tag: "BR-MN-0902" }, include: { assignee: true } });
 
     await login(page, IT);
-    await page.goto(`/inventory/${laptop.id}`);
-    await page.getByRole("button", { name: "Replace" }).click();
-    const dialog = page.getByRole("dialog", { name: "Replace BR-LT-0201" });
+    await page.goto(`/inventory/${monitor.id}`);
+    // Phase 30: a held device's primary is Return — Replace sits in More.
+    await (await openMore(page)).getByRole("menuitem", { name: "Replace…", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: `Replace BR-MN-0902 · Dell P2422H for ${monitor.assignee!.name}` });
     await waitForHydration(dialog);
+
+    // Phase 30 (spec §4.3): the two spares left out — BR-MN-0910 (held for
+    // Nina Robles) and BR-LT-0181 (queued by APR-2041) — are counted, not hidden.
+    await expect(dialog.getByText("2 more spares are held or queued for someone else", { exact: true })).toBeVisible();
 
     const combo = dialog.getByRole("combobox", { name: "Replacement" });
     await combo.click();
@@ -276,16 +302,19 @@ test.describe("it gaps", () => {
     const headings = list.locator('li[role="presentation"]');
     await expect(headings).toHaveText(["Same type", "Other spares"]);
 
-    // DOM order, which is the whole point of a heading: heading, BR-LT-0181
-    // (the only same-type spare), heading, then the rest by tag.
+    // DOM order, which is the whole point of a heading: heading, BR-MN-0911
+    // (the only offered same-type spare), heading, then the rest by tag.
     const texts = await list.locator("li").allTextContents();
     const sameAt = texts.indexOf("Same type");
     const otherAt = texts.indexOf("Other spares");
-    const lt0181 = texts.findIndex((t) => t.startsWith("BR-LT-0181"));
     const mn0911 = texts.findIndex((t) => t.startsWith("BR-MN-0911"));
-    expect(sameAt).toBeLessThan(lt0181);
-    expect(lt0181).toBeLessThan(otherAt);
-    expect(otherAt).toBeLessThan(mn0911);
+    const ph0301 = texts.findIndex((t) => t.startsWith("BR-PH-0301"));
+    expect(sameAt).toBeGreaterThanOrEqual(0);
+    expect(sameAt).toBeLessThan(mn0911);
+    expect(mn0911).toBeLessThan(otherAt);
+    expect(otherAt).toBeLessThan(ph0301);
+    // Neither spare the line counts is offered.
+    await expect(dialog.getByRole("option", { name: /BR-MN-0910|BR-LT-0181/ })).toHaveCount(0);
 
     // The per-row note that carried this before the headings is gone (spec
     // decision 4) — the grouping is said once per block, never once per row.
@@ -307,11 +336,12 @@ test.describe("it gaps", () => {
 
     await login(page, IT);
     await page.goto(`/inventory/${dock.id}`);
-    await page.getByRole("button", { name: "Return" }).click();
-    const dialog = page.getByRole("dialog", { name: "Return BR-DK-0071" });
+    await page.getByRole("button", { name: "Return", exact: true }).click();
+    const holder = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    const dialog = page.getByRole("dialog", { name: `Return BR-DK-0071 · WD19S Dock from ${holder.name}?` });
     await waitForHydration(dialog);
     // Default outcome is "Back for triage" (TRIAGE -> SPARE), reason optional.
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Return", exact: true }).click();
     // "Success: " is toast.tsx's own tone label for "settled" (TONE_LABEL).
     await expect(page.getByText("Success: BR-DK-0071 returned · now SPARE", { exact: true })).toBeVisible({
       timeout: 10_000,
@@ -321,10 +351,11 @@ test.describe("it gaps", () => {
     // layout.tsx's "Last change" line (R9): the AUDIT ENTRY'S actorLabel —
     // the seeded IT user's name "J. Sarmiento" — not a role label like
     // "IT Staff". Rendered only once nothing is pending, which holds here.
+    // Phase 30 (spec §4.4): `{verb phrase} · {date} · {actor}` — the phrase
+    // (auditPhrase) repeats neither the tag nor the actor.
     const lastChange = page.locator("p", { hasText: "Last change:" });
     await expect(lastChange).toBeVisible({ timeout: 10_000 });
-    await expect(lastChange).toContainText(fmtDate(new Date()));
-    await expect(lastChange).toContainText("by J. Sarmiento");
+    await expect(lastChange).toHaveText(`Last change: returned for triage · ${fmtDate(new Date())} · J. Sarmiento`);
     await expectNoSeriousAxe(page);
 
     const asset = await db.asset.findUniqueOrThrow({ where: { id: dock.id } });
@@ -411,15 +442,21 @@ test.describe("it gaps", () => {
     // (a returned-untriaged spare is not offerable yet) — and it changes no
     // status, so the `finally` puts the seed back exactly as it was for the
     // cases after this one, and for a second run of the whole file.
+    // (Since Phase 30 BR-LT-0181's queue by APR-2041 already keeps it out of
+    // the picker; the lever still decides whether the hidden line counts it.)
     const spare = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0181" } });
     await db.asset.update({ where: { id: spare.id }, data: { returnedAt: new Date() } });
     try {
       const laptop = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0201" } });
       await login(page, IT);
       await page.goto(`/inventory/${laptop.id}`);
-      await page.getByRole("button", { name: "Replace" }).click();
-      const dialog = page.getByRole("dialog", { name: "Replace BR-LT-0201" });
+      await (await openMore(page)).getByRole("menuitem", { name: "Replace…", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Replace BR-LT-0201 · MacBook Air M3 for Carlo Dizon" });
       await waitForHydration(dialog);
+
+      // A returned, untriaged spare is neither offered nor counted: only
+      // BR-MN-0910's hold is left for the line to name.
+      await expect(dialog.getByText("1 more spare is held or queued for someone else", { exact: true })).toBeVisible();
 
       await dialog.getByRole("combobox", { name: "Replacement" }).click();
       // One heading, not an empty "Same type" block above it: headingBefore

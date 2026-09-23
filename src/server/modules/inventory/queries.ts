@@ -16,7 +16,7 @@ import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
-import { auditSentence } from "@/lib/activity";
+import { auditPhrase, auditSentence } from "@/lib/activity";
 import { attentionOf, attentionWhere, orderByAttention, type Attention } from "@/lib/inventory-attention";
 
 /** Serializable DTO for the client table island — strings only, preformatted. */
@@ -488,7 +488,7 @@ export async function spareOptions(preferTypeId: string | null): Promise<{ optio
  */
 export async function lastLifecycleChange(
   assetId: string,
-): Promise<{ sentence: string; at: Date; actor: string } | null> {
+): Promise<{ sentence: string; phrase: string; at: Date; actor: string } | null> {
   const entry = await prisma.auditEntry.findFirst({
     where: {
       entityType: "asset",
@@ -503,6 +503,8 @@ export async function lastLifecycleChange(
     sentence: auditSentence({
       actorLabel: entry.actorLabel, action: entry.action, diff: entry.diff, entityLabel: asset?.tag ?? assetId,
     }),
+    // Phase 30 (spec §4.4): the header's line without the tag or the actor — `assigned to Carlo Dizon`.
+    phrase: auditPhrase({ action: entry.action, diff: entry.diff }),
     at: entry.createdAt,
     actor: entry.actorLabel,
   };

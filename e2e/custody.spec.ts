@@ -3,7 +3,8 @@ import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { fmtDate } from "../src/lib/format";
+import { fmtDate, localDateISO } from "../src/lib/format";
+import { dueStatus } from "../src/lib/deadlines";
 
 /**
  * Phase 16 — custody. Six cases per spec §9.2 rows 7–12: a loaner slot fills
@@ -223,8 +224,8 @@ test.describe.serial("custody", () => {
 
     await login(page, IT);
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Assign" }).click();
-    const dialog = page.getByRole("dialog", { name: "Assign BR-MN-0910" });
+    await page.getByRole("button", { name: "Assign", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Assign BR-MN-0910 · LG 27UL500" });
     // The SegmentedControl's radio inputs are visually sr-only — clicking the
     // visible label text is what direct-lifecycle.spec.ts's own "Initial
     // status" case does, and is what an operator actually clicks.
@@ -234,17 +235,21 @@ test.describe.serial("custody", () => {
     const loanDueAt = await dialog.getByLabel("Loan until").inputValue();
     await dialog.getByLabel("Assign to").fill("EMP-0097");
     await dialog.getByRole("option", { name: /EMP-0097/ }).click();
-    await dialog.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByText(`BR-MN-0910 on loan to ${nina.name} until ${loanDueAt}`)).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(`On loan until ${fmtDate(loanDueAt)}`)).toBeVisible();
+    await dialog.getByRole("button", { name: "Assign", exact: true }).click();
+    // Phase 30 (spec §4.3): the toast prints the date through fmtDate, and the
+    // header's loan line is "On loan until" beside a DuePill (date + tone text).
+    await expect(page.getByText(`BR-MN-0910 on loan to ${nina.name} until ${fmtDate(loanDueAt)}`)).toBeVisible({ timeout: 15_000 });
+    const loanLine = page.locator("p", { hasText: "On loan until" });
+    await expect(loanLine).toContainText(fmtDate(loanDueAt));
+    await expect(loanLine).toContainText(dueStatus(new Date(`${loanDueAt}T00:00:00Z`), localDateISO(new Date())).text);
 
     let asset = await db.asset.findUniqueOrThrow({ where: { id } });
     expect(asset.status).toBe("TEMPORARY");
     expect(asset.loanDueAt?.toISOString().slice(0, 10)).toBe(loanDueAt);
 
-    await page.getByRole("button", { name: "Return" }).click();
-    const returnDialog = page.getByRole("dialog", { name: "Return BR-MN-0910" });
-    await returnDialog.getByRole("button", { name: "Confirm" }).click();
+    await page.getByRole("button", { name: "Return", exact: true }).click();
+    const returnDialog = page.getByRole("dialog", { name: `Return BR-MN-0910 · LG 27UL500 from ${nina.name}?` });
+    await returnDialog.getByRole("button", { name: "Return", exact: true }).click();
     await expect(page.getByText("BR-MN-0910 returned · now SPARE")).toBeVisible({ timeout: 15_000 });
 
     asset = await db.asset.findUniqueOrThrow({ where: { id } });
@@ -255,10 +260,10 @@ test.describe.serial("custody", () => {
     // not one "back but not yet triaged" (the default TRIAGE return outcome
     // sets returnedAt, same as direct-lifecycle.spec.ts's own case 3) — the
     // round trip an operator would actually complete.
-    await page.getByRole("button", { name: "Triage" }).click();
-    const triageDialog = page.getByRole("dialog", { name: "Triage BR-MN-0910" });
+    await page.getByRole("button", { name: "Triage", exact: true }).click();
+    const triageDialog = page.getByRole("dialog", { name: "Triage BR-MN-0910 · LG 27UL500" });
     await expect(triageDialog.getByLabel("Decision")).toHaveValue("SPARE");
-    await triageDialog.getByRole("button", { name: "Confirm" }).click();
+    await triageDialog.getByRole("button", { name: "Save decision", exact: true }).click();
     await expect(page.getByText("BR-MN-0910 triaged · Keep as spare")).toBeVisible({ timeout: 15_000 });
 
     asset = await db.asset.findUniqueOrThrow({ where: { id } });
@@ -378,11 +383,11 @@ test.describe.serial("custody", () => {
     // so it must surface as uncovered.
     const spareId = await idOf("BR-HS-0502");
     await page.goto(`/inventory/${spareId}`);
-    await page.getByRole("button", { name: "Assign" }).click();
-    const assignDialog = page.getByRole("dialog", { name: "Assign BR-HS-0502" });
+    await page.getByRole("button", { name: "Assign", exact: true }).click();
+    const assignDialog = page.getByRole("dialog", { name: "Assign BR-HS-0502 · Jabra Evolve2 40" });
     await assignDialog.getByLabel("Assign to").fill(finance.employeeNo);
     await assignDialog.getByRole("option", { name: new RegExp(finance.employeeNo) }).click();
-    await assignDialog.getByRole("button", { name: "Confirm" }).click();
+    await assignDialog.getByRole("button", { name: "Assign", exact: true }).click();
     await expect(page.getByText(`BR-HS-0502 assigned to ${finance.name}`)).toBeVisible({ timeout: 15_000 });
 
     await page.goto(`/employees/${finance.id}`);

@@ -37,6 +37,21 @@ async function login(page: Page, email: string) {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
+}
+
 const idOf = async (tag: string) => (await db.asset.findUniqueOrThrow({ where: { tag }, select: { id: true } })).id;
 
 /** Highest number in use under a prefix — never hardcode 0003; an earlier test may have registered more. */
@@ -56,7 +71,8 @@ test.describe.serial("Purchasing owns its approvals", () => {
     const id = await idOf("BR-VH-0002");
     await login(page, P);
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
+    // Phase 30: the approval path keeps its words; the item sits in the record's More menu.
+    await (await openMore(page)).getByRole("menuitem", { name: "Request status change…", exact: true }).click();
     await page.getByLabel("New status").selectOption("REPAIRING");
     await page.getByLabel("Reason").fill("e2e — brake pads");
     await page.getByRole("dialog", { name: "Request a status change" }).getByRole("button", { name: "Request", exact: true }).click();
@@ -84,7 +100,7 @@ test.describe.serial("Purchasing owns its approvals", () => {
     const id = await idOf("BR-FN-0003"); // STORED furniture
     await login(page, P);
     await page.goto(`/inventory/${id}`);
-    await page.getByRole("button", { name: "Request status change" }).click();
+    await (await openMore(page)).getByRole("menuitem", { name: "Request status change…", exact: true }).click();
     await page.getByLabel("New status").selectOption("RETIRED");
     await page.getByLabel("Reason").fill("e2e — broken leg");
     await page.getByRole("dialog", { name: "Request a status change" }).getByRole("button", { name: "Request", exact: true }).click();
@@ -366,7 +382,10 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     expect(a.cls).toBe("IT");
     expect(a.itVerifiedAt).toBeNull();
     await page.goto(`/inventory/${id}`);
-    await expect(page.getByText("AWAITING IT CHECK")).toBeVisible();
+    // Phase 30 (spec §4.1): the header's one pill asks something of THIS
+    // viewer — AWAITING IT CHECK is IT's (13c); Purchasing's move is Edit.
+    await expect(page.getByRole("link", { name: "Edit" })).toBeVisible();
+    await expect(page.getByText("AWAITING IT CHECK", { exact: true })).toHaveCount(0);
     await page.getByRole("link", { name: "Edit" }).click();
     await page.getByLabel("Model").fill("ThinkPad T14 Gen 5 (e2e, corrected)");
     await page.getByRole("button", { name: /Save/ }).click();
@@ -402,10 +421,12 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     }
     await expect(page.getByText(new RegExp(tag))).toBeVisible();
     await page.goto(`/inventory/${id}`);
+    await expect(page.getByText("AWAITING IT CHECK", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Mark checked" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Mark checked" }).click();
     await expect(page.getByText(/checked — Finance can see it now/)).toBeVisible();
-    await expect(page.getByText("AWAITING FINANCE")).toBeVisible();
+    // Phase 30: AWAITING FINANCE is Finance's pill (13d) — IT's own is simply gone.
+    await expect(page.getByText("AWAITING IT CHECK", { exact: true })).toHaveCount(0);
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).itVerifiedAt).not.toBeNull();
     await login(page, P);
     await page.goto(`/inventory/${id}`);
@@ -416,8 +437,13 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await page.goto("/finance/assets");
     await expect(page.getByRole("link", { name: tag })).toBeVisible();
     await page.goto(`/inventory/${id}`);
+    // exact: Finance's sidebar carries its own "Awaiting finance" link.
+    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Confirm details" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
-    await expect(page.getByText(/FINANCE CONFIRMED/)).toBeVisible();
+    // Phase 30 (spec §4.6): the finance-state pill left the header; Finance's next step shows instead.
+    await expect(page.getByRole("link", { name: "Next to review →" }).or(page.getByText("Queue clear"))).toBeVisible();
+    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toHaveCount(0);
+    expect((await db.asset.findUniqueOrThrow({ where: { id } })).financeConfirmedAt).not.toBeNull();
   });
 });

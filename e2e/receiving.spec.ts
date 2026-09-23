@@ -225,6 +225,22 @@ test.describe("registration — the primary path", () => {
   });
 });
 
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated. Declared here because
+ * only the Finance-review blocks below open a record.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
+}
+
 test.describe("Finance review — confirm", () => {
   test.describe.configure({ mode: "serial" });
 
@@ -238,7 +254,11 @@ test.describe("Finance review — confirm", () => {
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Confirm" }).click();
 
-    await expect(page.getByText(/FINANCE CONFIRMED/)).toBeVisible();
+    // Phase 30 (spec §4.1, §4.6): the finance-state pill left the header; what
+    // the record says now is Finance's next step — the next record in the
+    // queue, or that the queue is clear — and no Confirm details is left.
+    await expect(page.getByRole("link", { name: "Next to review →" }).or(page.getByText("Queue clear"))).toBeVisible();
+    await expect(page.getByRole("button", { name: "Confirm details" })).toHaveCount(0);
 
     const updated = await db.asset.findUniqueOrThrow({ where: { id: asset.id } });
     expect(updated.financeConfirmedAt).not.toBeNull();
@@ -277,10 +297,10 @@ test.describe("Finance review — confirm", () => {
     });
 
     await dialog.getByRole("button", { name: "Confirm" }).click();
-    // A conflict closes the dialog and surfaces a page-level fault banner
-    // (FinanceReview's submit() only keeps the dialog open for a
-    // *validation* kind of failure — this is a conflict).
-    await expect(page.getByText(`${tag2} was already confirmed.`)).toBeVisible();
+    // Phase 30 (F-RECORD-14): every refusal renders inside the dialog, which
+    // stays open on failure — never in the header's action row.
+    await expect(dialog.getByText(`${tag2} was already confirmed.`)).toBeVisible();
+    await expect(dialog).toBeVisible();
 
     // A second write that merely overwrote the same field with a new
     // timestamp would pass a naive "still confirmed" assertion — compare the
@@ -296,9 +316,12 @@ test.describe("Finance review — confirm", () => {
 
     // it_staff registered this very asset (Step 1) and it remains unconfirmed
     // and unreturned — the split is that IT never sees these controls at all,
-    // not merely that clicking them fails.
+    // not merely that clicking them fails. Phase 30: neither as a header
+    // button nor as a More item.
     await expect(page.getByRole("button", { name: "Confirm details" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Send back to IT" })).toHaveCount(0);
+    const menu = await openMore(page);
+    await expect(menu.getByRole("menuitem", { name: "Change status…", exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: /^(Confirm details|Send back to IT)…$/ })).toHaveCount(0);
   });
 });
 
@@ -310,17 +333,23 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/inventory/${assetReturn.id}`);
 
-    await page.getByRole("button", { name: "Send back to IT" }).click();
+    // Phase 30 (spec §4.1 row 5): Confirm details is Finance's primary; Send back sits in More.
+    await (await openMore(page)).getByRole("menuitem", { name: "Send back to IT…", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: `Send back ${assetReturn.tag}?` });
     await expect(dialog).toBeVisible();
     await dialog.getByLabel("What is wrong?").fill(reason);
     await dialog.getByRole("button", { name: "Send back" }).click();
+    await expect(page.getByText(`${assetReturn.tag} sent back to IT`)).toBeVisible();
 
-    await expect(page.getByText("RETURNED BY FINANCE")).toBeVisible();
     // Visible on the record itself, not only in the audit tab — IT reading
     // it without opening the audit tab is the whole point.
     const banner = page.getByRole("alert").filter({ hasText: "Finance sent this back" });
     await expect(banner).toContainText(reason);
+    // Phase 30 (spec §4.1): the header's one pill asks something of THIS
+    // viewer — Finance still owes a confirmation; RETURNED BY FINANCE is the
+    // pill for the department that must correct it (the last test below).
+    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toHaveCount(0);
 
     const updated = await db.asset.findUniqueOrThrow({ where: { id: assetReturn.id } });
     expect(updated.financeReturnedAt).not.toBeNull();
@@ -336,7 +365,7 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/inventory/${assetShortReason.id}`);
 
-    await page.getByRole("button", { name: "Send back to IT" }).click();
+    await (await openMore(page)).getByRole("menuitem", { name: "Send back to IT…", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: `Send back ${assetShortReason.tag}?` });
     await dialog.getByLabel("What is wrong?").fill("x");
     await dialog.getByRole("button", { name: "Send back" }).click();
@@ -355,8 +384,11 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/${assetShortReason.id}`); // still unreturned — prior test wrote nothing
 
-    await expect(page.getByRole("button", { name: "Send back to IT" })).toHaveCount(0);
+    // Phase 30: neither as a header button nor as a More item.
     await expect(page.getByRole("button", { name: "Confirm details" })).toHaveCount(0);
+    const menu = await openMore(page);
+    await expect(menu.getByRole("menuitem", { name: "Change status…", exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: /^(Confirm details|Send back to IT)…$/ })).toHaveCount(0);
   });
 
   // Same UI-unreachability as "Confirming twice", and the same fix: canConfirm
@@ -370,7 +402,7 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/inventory/${assetConfirmed.id}`);
 
-    await page.getByRole("button", { name: "Send back to IT" }).click();
+    await (await openMore(page)).getByRole("menuitem", { name: "Send back to IT…", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: `Send back ${assetConfirmed.tag}?` });
     await expect(dialog).toBeVisible();
     await dialog.getByLabel("What is wrong?").fill(reason);
@@ -381,8 +413,9 @@ test.describe("Finance review — send back and correct", () => {
     });
 
     await dialog.getByRole("button", { name: "Send back" }).click();
+    // Phase 30 (F-RECORD-14): the refusal renders inside the dialog, which stays open.
     await expect(
-      page.getByText(`${assetConfirmed.tag} is already confirmed and cannot be sent back.`),
+      dialog.getByText(`${assetConfirmed.tag} is already confirmed and cannot be sent back.`),
     ).toBeVisible();
 
     const updated = await db.asset.findUniqueOrThrow({ where: { id: assetConfirmed.id } });
@@ -394,12 +427,16 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/${assetReturn.id}`); // returned by the first test in this block
 
+    // Phase 30 (spec §4.1): IT is the department that must act, so the header's pill is its.
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Mark corrected" }).click();
     const resubmitDialog = page.getByRole("dialog", { name: `Mark corrected ${assetReturn.tag}?` });
     await expect(resubmitDialog).toBeVisible();
     await resubmitDialog.getByRole("button", { name: "Mark corrected" }).click();
 
-    await expect(page.getByText("AWAITING FINANCE")).toBeVisible();
+    await expect(page.getByText(`${assetReturn.tag} resubmitted to Finance`)).toBeVisible();
+    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("alert").filter({ hasText: "Finance sent this back" })).toHaveCount(0);
     let updated = await db.asset.findUniqueOrThrow({ where: { id: assetReturn.id } });
     // null, not merely hidden.
     expect(updated.financeReturnReason).toBeNull();
@@ -412,7 +449,8 @@ test.describe("Finance review — send back and correct", () => {
     const confirmDialog = page.getByRole("dialog", { name: `Confirm ${assetReturn.tag}?` });
     await confirmDialog.getByRole("button", { name: "Confirm" }).click();
 
-    await expect(page.getByText(/FINANCE CONFIRMED/)).toBeVisible();
+    // Phase 30 (spec §4.6): the finance-state pill left the header; Finance's next step shows instead.
+    await expect(page.getByRole("link", { name: "Next to review →" }).or(page.getByText("Queue clear"))).toBeVisible();
     updated = await db.asset.findUniqueOrThrow({ where: { id: assetReturn.id } });
     expect(updated.financeConfirmedAt).not.toBeNull();
     // Task 7a's amendment to confirmAssetDetails clears the return columns on

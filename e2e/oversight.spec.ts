@@ -88,6 +88,21 @@ async function waitForHydration(target: Locator) {
   }).toPass({ timeout: 20_000 });
 }
 
+/**
+ * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
+ * puts every other action in its ⋯ "More actions" menu. Opens that menu and
+ * returns it — retried until the island has hydrated.
+ */
+async function openMore(page: Page) {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("menu");
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return menu;
+}
+
 const ADMIN = "admin@thebackroomop.com";
 const IT = "it@thebackroomop.com";
 
@@ -142,11 +157,12 @@ test.describe.serial("oversight", () => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-MN-0910" } });
     await login(page, IT);
     await page.goto(`/inventory/${asset.id}`);
-    await page.getByRole("button", { name: "Change status" }).click();
-    const dialog = page.getByRole("dialog", { name: "Change status" });
+    // Phase 30: Change status sits in the record's More menu.
+    await (await openMore(page)).getByRole("menuitem", { name: "Change status…", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Change status of BR-MN-0910 · LG 27UL500" });
     await waitForHydration(dialog);
     await dialog.getByLabel("New status").selectOption("DEFECTIVE");
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("button", { name: "Change status", exact: true }).click();
     // "Success: " is the toast's own sr-only prefix (TONE_LABEL.settled,
     // src/components/ui/toast.tsx) — part of the element's text content, so
     // the exact:true match needs it too (mirrors transfers.spec.ts's own
