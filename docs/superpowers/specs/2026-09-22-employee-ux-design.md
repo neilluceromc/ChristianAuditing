@@ -1,6 +1,6 @@
 # Phase 29 — Laws of UX applied to the employee area
 
-**Status:** implemented on `phase-29-employee-uiux` (plan `docs/superpowers/plans/2026-09-22-phase-29-employee-ux.md`, final tree `9660e6e`, 2026-09-22); merged to `main` via `--no-ff` `d76903b` and pushed 2026-09-23 (the merged tree is byte-identical to the tested tip `e01923a`); the staging redeploy is the user's decision; no migration. Amendments made during execution are marked *Amended (R-n)* below and listed in the plan's D-block.
+**Status:** implemented on `phase-29-employee-uiux` (plan `docs/superpowers/plans/2026-09-22-phase-29-employee-ux.md`, final tree `9660e6e`, 2026-09-22); merged to `main` via `--no-ff` `d76903b` and pushed 2026-09-23 (the merged tree is byte-identical to the tested tip `e01923a`); deployed to staging by the 2026-09-23 `-Force` redeploy (`ccb0432`); no migration. Amendments made during execution are marked *Amended (R-n)* below and listed in the plan's D-block.
 
 **Predecessor:** a read-only audit of the three screens as they render and as their code reads (worktree `phase-29-employee-uiux` at `67f4e9e`, walked as IT and as a viewer): 43 findings — 11 on `/employees`, 12 on `/employees/new`, 20 on `/employees/[id]` — each tied to the law it breaks, with the code line, the cost to the operator and a fix. This design takes about 35 of them; §2 records the rest. Nothing here needs a migration.
 

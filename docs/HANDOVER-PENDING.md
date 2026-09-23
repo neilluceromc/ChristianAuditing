@@ -10,12 +10,13 @@ and pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.15
 **Phase 18** build (`4cf5697`, 19 migrations); **Phase 19 (stock control D1, migration 20) was merged
 but NOT yet deployed.**
 
-**Where the code stands today (2026-09-22).** Staging runs the **Phase 26** merge (`e96fb2a`,
-**25 migrations**) since the 2026-09-22 forced redeploy. `main` = `origin/main` since the
+**Where the code stands today (2026-09-23).** Staging runs the **Phase 29** merge (`ccb0432`,
+**26 migrations**) since the 2026-09-23 forced redeploy, at the laptop's new DHCP address
+`http://192.168.203.56:3000` (`.183` before; the user changed location on 2026-09-23). `main` = `origin/main` since the
 Phase 28 push (Phase 27 merged via `--no-ff` `5dd3372`, Phase 28 via `--no-ff` `7214066`, both pushed
 2026-09-22), with no unpushed commits on it. **Phase 27 (`phase-27-leftovers-sweep`,
-final tree `66445ed`) is on `main`; staging is NOT yet redeployed and its migration 26 is pending
-there** — see §1 below and `PICKUP.md` §4 item 2. **Phase 28
+final tree `66445ed`) is on `main` and on staging since the 2026-09-23 redeploy, which applied its
+migration 26** — see §1 below and `PICKUP.md` §4 item 2. **Phase 28
 (`phase-28-back-control`, a Back control on every page that has a parent; final tree `5a8bbcf`) is on
 `main` too (merged `7214066`, pushed 2026-09-22)** — a bounded change with no
 spec and no plan document (the record is `HANDOVER.md` (u)); the redeploy is the
@@ -23,7 +24,7 @@ user's decision. **It adds no migration** (26 stays), so the redeploy that would
 — but it would ride the same `-Force` that finally applies Phase 27's migration 26, so the
 duplicate check comes first. **Phase 29 (`phase-29-employee-uiux`, Laws of UX applied to the
 employee area; final tree `9660e6e`) is MERGED TO `main` via `--no-ff` `d76903b` and PUSHED (2026-09-23), and
-it adds no migration either** — the redeploy is the user's decision. The push also carried the two
+it adds no migration either** — it rode the 2026-09-23 redeploy. The push also carried the two
 docs-only commits `401b838` (the Phase 29 spec) and `1acd928` (the plan) that had sat on local
 `main`; `main` = `origin/main` again. See `PICKUP.md` §4 item 1.
 
@@ -41,8 +42,8 @@ docs-only commits `401b838` (the Phase 29 spec) and `1acd928` (the plan) that ha
 
   `-Force` is needed because the merge happens on the laptop, so the plain run sees nothing new and
   skips. Verify afterwards: `docker compose ps` (web healthy), `docker compose exec -T web npx prisma
-  migrate status` (**25 found, up to date** as things stand), HTTP 200 on
-  `http://127.0.0.1:3000/login` and on the LAN URL `http://192.168.203.183:3000`.
+  migrate status` (**26 found, up to date** since 2026-09-23), HTTP 200 on
+  `http://127.0.0.1:3000/login` and on the LAN URL `http://192.168.203.56:3000` (DHCP since 2026-09-23; `.183` before).
   Never seed staging — the seed truncates every table.
   Migrations 20–25 rode earlier redeploys: 20 (`stock_control`) and 21 (`employee_transfers`) the
   2026-09-10 `-Force`, 22 the 2026-09-15 one, 23 (`stock_lots_and_allocations`, with its asserted
@@ -79,7 +80,7 @@ docs-only commits `401b838` (the Phase 29 spec) and `1acd928` (the plan) that ha
 From [`staging-run-sheet.md`](staging-run-sheet.md); none of these can be done by an agent (UAC elevation
 is blocked in auto mode):
 
-- Decide **which machine owns `192.168.203.183`** (renumbered from `.153` on 2026-09-21), or use a DNS name — the value is printed on every label, so any label printed before 2026-09-21 encodes the dead `.153` address and needs reprinting.
+- Decide **which machine owns the app's address** — `192.168.203.56` since 2026-09-23, a DHCP lease after a change of location (`.183` static 2026-09-21 → 2026-09-23; `.153` before) — or use a DNS name; the value is printed on every label, so every label printed before 2026-09-23 encodes a dead address and needs reprinting, and a DHCP lease can move again without a reservation.
 - Network profile → **Private**; add the inbound firewall rule for TCP 3000 (inert while Public).
 - UniFi **DHCP reservation** for the address.
 - Reach the app from **another PC and a phone**.
