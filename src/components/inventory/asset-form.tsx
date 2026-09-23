@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
@@ -11,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { useLeaveTo } from "@/components/ui/back-link";
 import { EntityCombobox } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { CLASS_EXAMPLE } from "@/lib/asset-class";
@@ -61,8 +61,10 @@ export function AssetForm({
   initial: AssetFormInitial;
   action: (payload: Record<string, unknown>) => Promise<ActionResult<{ id: string }>>;
 }) {
-  const router = useRouter();
   const toast = useToast();
+  // Save and Cancel leave the way Back does (review R9): a plain push would stack
+  // record → edit → record, and the record's Back would land on this form.
+  const leave = useLeaveTo();
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState<AssetFormInitial>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -150,7 +152,7 @@ export function AssetForm({
       const res = await action(payload);
       if (res.ok) {
         toast(`${initial.tag} saved`, "settled");
-        router.push(`/inventory/${res.data.id}`);
+        leave(`/inventory/${res.data.id}`);
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
         const fe = res.fieldErrors ?? {};
@@ -283,7 +285,7 @@ export function AssetForm({
       </Card>
 
       <div className="sticky bottom-0 z-10 -mx-1 flex items-center gap-3 border-t border-border bg-surface px-1 py-3">
-        <Button type="button" variant="ghost" disabled={pending} onClick={() => router.push(`/inventory/${assetId}`)}>
+        <Button type="button" variant="ghost" disabled={pending} onClick={() => leave(`/inventory/${assetId}`)}>
           Cancel
         </Button>
         <Button type="submit" variant="primary" loading={pending}>Save changes</Button>

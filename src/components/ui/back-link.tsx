@@ -1,7 +1,8 @@
 "use client";
 
+import { useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { popForBack, readStack, writeStack } from "@/lib/nav-stack";
+import { leaveFor, popForBack, readStack, writeStack } from "@/lib/nav-stack";
 
 /**
  * Phase 28: one Back control for every page with a parent. Where the operator came from when this tab
@@ -28,5 +29,23 @@ export function BackLink({ fallbackHref }: { fallbackHref: string }) {
       <span aria-hidden>←</span>
       Back
     </button>
+  );
+}
+
+/**
+ * Phase 30 (review R9): leave this page for `target` the way Back would — step back when the previous
+ * in-app page is the target, else replace — so a form's Save or Cancel never leaves itself under the
+ * page it returns to, and that page's own Back still goes where it went before (`leaveFor`).
+ */
+export function useLeaveTo(): (target: string) => void {
+  const router = useRouter();
+  return useCallback(
+    (target: string) => {
+      const { stack, back } = leaveFor(readStack(window.sessionStorage), target);
+      writeStack(window.sessionStorage, stack);
+      if (back) router.back();
+      else router.replace(target);
+    },
+    [router],
   );
 }
