@@ -244,8 +244,10 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   if (tagTaken) errors.tag = `${d.tag} is already registered`;
   // Scoped to the class being registered into, like checkIdentifiers (identifierWhere): the message
   // names the record the serial is on, and a record of the OTHER class must not be named. A
-  // cross-class collision still lands on the unique constraint below, as its neutral copy.
-  if (d.serial && category) {
+  // cross-class collision still lands on the unique constraint below, as its neutral copy. Skipped
+  // when the category itself is refused — a class the role cannot register into is never probed
+  // (the same skip registerAssets makes).
+  if (d.serial && category && canRegisterClass(user.role, category.cls)) {
     const serialTaken = await prisma.asset.findFirst({ where: { serial: d.serial, cls: category.cls }, select: { tag: true } });
     if (serialTaken) errors.serial = `Serial ${d.serial} is already on ${serialTaken.tag}`;
   }
