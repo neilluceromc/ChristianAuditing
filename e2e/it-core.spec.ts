@@ -134,6 +134,39 @@ test.describe("inventory list", () => {
     await expect(page).toHaveURL(/\/inventory\?q=WD19S$/);
   });
 
+  test("the portalled row menu is reachable by keyboard and tied to its trigger", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/inventory?q=WD19S");
+    const trigger = page.getByRole("button", { name: "Actions for BR-DK-0071", exact: true });
+    await waitForHydration(trigger);
+    const menu = page.getByRole("menu");
+    const first = menu.getByRole("menuitem").first();
+
+    // A keyboard open lands on the first item; the trigger names the popup it controls.
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await expect(menu).toBeVisible();
+    await expect(first).toBeFocused();
+    const menuId = await menu.getAttribute("id");
+    expect(menuId).toBeTruthy();
+    await expect(trigger).toHaveAttribute("aria-controls", menuId!);
+
+    // Escape closes and hands focus back to the trigger.
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+
+    // A mouse open keeps focus on the trigger; Tab from it goes into the menu, not past it.
+    await trigger.click();
+    await expect(menu).toBeVisible();
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(first).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+
   test("sort clicks rewrite the URL contract", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
