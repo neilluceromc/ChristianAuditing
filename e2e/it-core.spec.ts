@@ -86,32 +86,52 @@ test.describe("inventory list", () => {
     await expectNoSeriousAxe(page);
   });
 
-  test("the last row's menu opens fully inside the table and the viewport", async ({ page }) => {
+  // Phase 30 review (R13, R14): a row menu inside the table's overflow-x-auto wrapper was clipped
+  // (it clips vertically too). Menus now render in a portal with position: fixed, so the viewport is
+  // the only boundary. Playwright's click auto-scrolls, so only a box comparison catches a clip.
+  async function expectInViewport(page: Page, menu: Locator) {
+    await expect(async () => {
+      const m = await menu.boundingBox();
+      const viewport = page.viewportSize()!;
+      expect(m).toBeTruthy();
+      expect(m!.x).toBeGreaterThanOrEqual(0);
+      expect(m!.y).toBeGreaterThanOrEqual(0);
+      expect(m!.x + m!.width).toBeLessThanOrEqual(viewport.width);
+      expect(m!.y + m!.height).toBeLessThanOrEqual(viewport.height);
+    }).toPass({ timeout: 5_000 });
+  }
+
+  test("the last row's menu opens fully inside the viewport", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
-    // Phase 30 review (R13): the table wrapper is overflow-x-auto, which clips vertically too, so a
-    // menu that always drops below its trigger is cut off on the bottom rows. Playwright's click
-    // auto-scrolls, so only a box comparison catches it.
-    const table = page.getByRole("table");
-    const wrapper = table.locator("xpath=..");
-    const trigger = table.getByRole("button", { name: /^Actions for / }).last();
+    const trigger = page.getByRole("table").getByRole("button", { name: /^Actions for / }).last();
     await waitForHydration(trigger);
     await trigger.scrollIntoViewIfNeeded();
     await trigger.click();
     const menu = page.getByRole("menu");
     await expect(menu).toBeVisible();
-    // boxes read while the open animation runs: retry until the placement has settled
-    await expect(async () => {
-      const [m, w] = [await menu.boundingBox(), await wrapper.boundingBox()];
-      const viewport = page.viewportSize()!;
-      expect(m && w).toBeTruthy();
-      expect(m!.y).toBeGreaterThanOrEqual(w!.y);
-      expect(m!.y + m!.height).toBeLessThanOrEqual(w!.y + w!.height);
-      expect(m!.x).toBeGreaterThanOrEqual(w!.x);
-      expect(m!.x + m!.width).toBeLessThanOrEqual(w!.x + w!.width);
-      expect(m!.y).toBeGreaterThanOrEqual(0);
-      expect(m!.y + m!.height).toBeLessThanOrEqual(viewport.height);
-    }).toPass({ timeout: 5_000 });
+    await expectInViewport(page, menu);
+  });
+
+  test("a short list's row menu is not clipped by the table: its items open their dialogs", async ({ page }) => {
+    await login(page, "it@thebackroomop.com");
+    // Two rows: the menu fits neither above nor below inside the table box. An exact tag would
+    // jump to the record, so narrow by the model instead.
+    await page.goto("/inventory?q=WD19S");
+    const trigger = page.getByRole("button", { name: "Actions for BR-DK-0071", exact: true });
+    await waitForHydration(trigger);
+    await trigger.click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expectInViewport(page, menu);
+    // A real click at the item's centre — it must land on the item, not on what the table box would
+    // have shown there (the filter chips above it).
+    await menu.getByRole("menuitem", { name: "Return…", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: /^Return BR-DK-0071 · / });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page).toHaveURL(/\/inventory\?q=WD19S$/);
   });
 
   test("sort clicks rewrite the URL contract", async ({ page }) => {

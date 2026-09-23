@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { useOverlayLayer } from "./use-focus-trap";
 
@@ -11,13 +12,24 @@ export interface MenuItem {
   disabled?: boolean;
 }
 
-/** The nearest ancestor that clips its overflow (a scrolling table wrapper), or null for the page itself. */
-function clippingAncestor(el: HTMLElement): HTMLElement | null {
-  for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
-    const { overflowX, overflowY } = getComputedStyle(node);
-    if ([overflowX, overflowY].some((o) => o !== "visible")) return node;
-  }
-  return null;
+/** The gap between the trigger and the popup, in px (the old mt-1 / mb-1). */
+const GAP = 4;
+
+/** Fixed-position coordinates for the popup: one vertical edge and one horizontal edge. */
+type Placement = { top?: number; bottom?: number; left?: number; right?: number };
+
+/**
+ * Where the popup is portalled. Normally `document.body`. Inside an open Dialog or Drawer it is that
+ * overlay's own portal root (the body child holding the `aria-modal` panel): the overlay stack marks
+ * every other body child `inert` while a modal is up, and the overlay root sits at z-50, so a popup
+ * under `document.body` would be unclickable and behind the modal.
+ */
+function portalHost(trigger: HTMLElement): HTMLElement {
+  const modal = trigger.closest<HTMLElement>('[aria-modal="true"]');
+  if (!modal) return document.body;
+  let node: HTMLElement = modal;
+  while (node.parentElement && node.parentElement !== document.body) node = node.parentElement;
+  return node.parentElement === document.body ? node : document.body;
 }
 
 export function Menu({
@@ -34,9 +46,10 @@ export function Menu({
   align?: "start" | "end";
 }) {
   const [open, setOpen] = useState(false);
-  // Phase 30 review (R13): true when the popup would overflow below — the viewport or a clipping
-  // ancestor such as the table wrapper — and fits better above the trigger.
-  const [up, setUp] = useState(false);
+  // Phase 30 review (R14): the popup renders in a portal with position: fixed, placed from the
+  // trigger's box, so no scrolling or overflow-clipped ancestor (a table wrapper) can cut it off.
+  const [placement, setPlacement] = useState<Placement | null>(null);
+  const [host, setHost] = useState<HTMLElement | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -44,22 +57,44 @@ export function Menu({
     rootRef.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
   };
 
-  // Measured before paint, so a flipped menu never flashes in its default place first.
-  useLayoutEffect(() => {
-    if (!open) { setUp(false); return; }
+  /**
+   * Below the trigger, edge-aligned per `align`; above it only when it would overflow the viewport
+   * below and there is more room above. The viewport is the only boundary now.
+   */
+  const place = useCallback(() => {
     const root = rootRef.current;
-    const list = listRef.current;
-    if (!root || !list) return;
-    const trigger = root.getBoundingClientRect();
-    const height = list.getBoundingClientRect().height;
-    const clip = clippingAncestor(root)?.getBoundingClientRect();
-    const floor = Math.min(window.innerHeight, clip?.bottom ?? Infinity);
-    const ceiling = Math.max(0, clip?.top ?? -Infinity);
-    const below = floor - trigger.bottom;
-    const above = trigger.top - ceiling;
-    // 4px = the mt-1 / mb-1 gap. Default placement wherever it fits; flip only into more room.
-    setUp(height + 4 > below && above > below);
-  }, [open]);
+    if (!root) return;
+    const t = root.getBoundingClientRect();
+    const height = listRef.current?.getBoundingClientRect().height ?? 0;
+    const below = window.innerHeight - t.bottom;
+    const above = t.top;
+    const up = height + GAP > below && above > below;
+    const horizontal = align === "end" ? { right: document.documentElement.clientWidth - t.right } : { left: t.left };
+    setPlacement(up ? { bottom: window.innerHeight - t.top + GAP, ...horizontal } : { top: t.bottom + GAP, ...horizontal });
+  }, [align]);
+
+  // Portal host first (the popup mounts into it), then the placement, both before paint; the second
+  // pass re-places with the popup's measured height, so a flipped menu never flashes below first.
+  useLayoutEffect(() => {
+    if (!open) { setPlacement(null); setHost(null); return; }
+    if (rootRef.current) setHost(portalHost(rootRef.current));
+    place();
+  }, [open, place]);
+  useLayoutEffect(() => {
+    if (open && host) place();
+  }, [open, host, place]);
+
+  // While open, a page or container scroll or a resize moves the trigger: follow it (reposition,
+  // not close — a small scroll should not throw away the menu the operator just opened).
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, place]);
 
   // ESC (top overlay layer only) closes the menu and returns focus to the
   // trigger. Click-outside closes WITHOUT refocusing — focus follows the click.
@@ -71,9 +106,18 @@ export function Menu({
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      // The popup is portalled out of the root, so "inside" is either subtree.
+      const target = e.target as Node;
+      if (!rootRef.current?.contains(target) && !listRef.current?.contains(target)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
+      // The popup sits at the end of its portal host, not after the trigger: Tab from inside it
+      // closes the menu and continues from the trigger, as it did before the portal.
+      if (e.key === "Tab" && listRef.current?.contains(document.activeElement)) {
+        focusTrigger();
+        setOpen(false);
+        return;
+      }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const nodes = Array.from(
@@ -99,16 +143,13 @@ export function Menu({
   return (
     <div ref={rootRef} className="relative inline-flex">
       {trigger({ onClick: () => setOpen((v) => !v), "aria-expanded": open, "aria-haspopup": "menu" })}
-      {open && (
+      {open && host && createPortal(
         <div
           ref={listRef}
           role="menu"
-          className={cn(
-            "absolute z-40 min-w-[160px] rounded-(--radius-btn) border border-border bg-surface-raised p-1 shadow-pop",
-            up ? "bottom-full mb-1" : "top-full mt-1",
-            align === "end" ? "right-0" : "left-0",
-          )}
-          style={{ animation: "fade var(--dur-2) var(--ease-std)" }}
+          className="fixed z-40 min-w-[160px] rounded-(--radius-btn) border border-border bg-surface-raised p-1 shadow-pop"
+          // hidden until placed, so the first frame never shows it at the page's corner
+          style={{ ...placement, visibility: placement ? undefined : "hidden", animation: "fade var(--dur-2) var(--ease-std)" }}
         >
           {items.map((item) => (
             <button
@@ -133,7 +174,8 @@ export function Menu({
               {item.label}
             </button>
           ))}
-        </div>
+        </div>,
+        host,
       )}
     </div>
   );
