@@ -104,8 +104,8 @@ These were made with the user and would be invisible to anyone reading only the 
 
 ## 4. What is next, in order
 1. **Phase 32 — Laws of UX on the IT screens where the work gets done (offboarding end to end, the
-   worklist and Home, the scan card, the reservations hand-over) IS CODE-COMPLETE on
-   `phase-32-it-work-uiux` IS MERGED TO `main` via `--no-ff` `853d13d` AND PUSHED (2026-09-24) — final tree
+   worklist and Home, the scan card, the reservations hand-over; branch `phase-32-it-work-uiux`)
+   IS MERGED TO `main` via `--no-ff` `853d13d` AND PUSHED (2026-09-24) — final tree
    `e29e879`, docs `c5afaf0`, tree hashes matched, branch and worktree removed; no migration.** Spec
    `docs/superpowers/specs/2026-09-24-it-work-ux-design.md` (`7b878ed`), plan
    `docs/superpowers/plans/2026-09-24-phase-32-it-work-ux.md` (`4b77f59`) — 14 tasks, D-1…D-10; battery
