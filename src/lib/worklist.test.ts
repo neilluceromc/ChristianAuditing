@@ -182,9 +182,9 @@ describe("groupWork — hidden rows are kept, not dropped", () => {
 describe("capLine / SEE_ALL_HREF / summaryChips / pastSlaCount", () => {
   const section = WORK_SECTIONS.find((s) => s.id === "repairs")!;
   it("a capped section says how many of how many", () => {
-    expect(capLine({ section, rows: new Array(50).fill(null) as WorkRow[], total: 50, capped: true, hidden: [] }))
+    expect(capLine({ section, rows: new Array(50).fill(null) as WorkRow[], total: 50, capped: true, hidden: [], pastSla: 0 }))
       .toBe("Showing 50 of 50+ · See all");
-    expect(capLine({ section, rows: [], total: 0, capped: false, hidden: [] })).toBeNull();
+    expect(capLine({ section, rows: [], total: 0, capped: false, hidden: [], pastSla: 0 })).toBeNull();
   });
   it("every section has a list that holds the rest", () => {
     expect(SEE_ALL_HREF).toEqual({
@@ -205,5 +205,15 @@ describe("capLine / SEE_ALL_HREF / summaryChips / pastSlaCount", () => {
       { id: "queue", label: "Approvals & leavers 2", href: "#queue" },
     ]);
     expect(pastSlaCount(groups)).toBe(1);
+    expect(groups.map((g) => g.pastSla)).toEqual([0, 1]);
+  });
+  it("past SLA counts every live breach, not only the rows a limit keeps; hidden breaches do not count", () => {
+    const breach = (id: string, severity: number): WorkRow =>
+      ({ key: `queue:${id}`, section: "queue", title: "", meta: "", href: "/", action: "Open", severity, rank: 0 });
+    const rows = [breach("a", 3), breach("b", 2), breach("c", 1), breach("d", 0)];
+    const groups = groupWork(rows, new Set(["queue:d"]), { limit: 2 });
+    expect(groups[0].rows).toHaveLength(2);
+    expect(pastSlaCount(groups)).toBe(3);
+    expect(workHeadline(groups)).toBe("3 waiting · 3 past SLA");
   });
 });

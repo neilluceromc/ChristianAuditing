@@ -23,7 +23,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const [approvals, worklist] = await Promise.all([
     getApprovalsBadge(user.role),
     user.role === "admin" || user.role === "it_staff"
-      ? worklistCount(user.id, user.role).catch(() => 0)
+      ? worklistCount(user.id, user.role).catch((err: unknown) => {
+          console.error("[worklist badge] count failed:", err);
+          return 0;
+        })
       : Promise.resolve(0),
   ]);
   const badges = { approvals, worklist };

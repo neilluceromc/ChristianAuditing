@@ -56,7 +56,15 @@ export type WorkControl =
   | { kind: "loan-due"; asset: { id: string; tag: string }; loanDueAt: Date | null }
   | { kind: "assign"; asset: { id: string; tag: string; model: string } };
 
-export interface WorkGroup { section: WorkSection; rows: WorkRow[]; total: number; capped: boolean; hidden: WorkRow[] }
+export interface WorkGroup {
+  section: WorkSection;
+  rows: WorkRow[];
+  total: number;
+  capped: boolean;
+  hidden: WorkRow[];
+  /** live SLA breaches (rank-0 queue rows) counted BEFORE Home's per-section limit; 0 for other sections */
+  pastSla: number;
+}
 
 export interface LoanLike { id: string; tag: string; model: string; loanDueAt: Date | null; holder: string | null }
 
@@ -136,6 +144,7 @@ export function groupWork(
       section,
       rows: opts.limit ? live.slice(0, opts.limit) : live,
       total: live.length,
+      pastSla: section.id === "queue" ? live.filter((r) => (r.rank ?? 0) === 0).length : 0,
       capped: saturated.has(section.id),
       hidden,
     }];
@@ -162,9 +171,9 @@ export function summaryChips(groups: WorkGroup[]): { id: WorkSectionId; label: s
     .map((g) => ({ id: g.section.id, label: `${g.section.title} ${g.capped ? `${g.total}+` : g.total}`, href: `#${g.section.id}` }));
 }
 
-/** Rank-0 queue rows are SLA breaches (worklist()'s own ranking). */
+/** Rank-0 queue rows are SLA breaches (worklist()'s own ranking), counted before any row limit. */
 export function pastSlaCount(groups: WorkGroup[]): number {
-  return groups.find((g) => g.section.id === "queue")?.rows.filter((r) => (r.rank ?? 0) === 0).length ?? 0;
+  return groups.reduce((s, g) => s + g.pastSla, 0);
 }
 
 /** Home's Worklist headline (spec §5.4): parts omitted when zero. */
