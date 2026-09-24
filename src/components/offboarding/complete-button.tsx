@@ -36,7 +36,7 @@ export function CompleteButton({
       if (res.ok) {
         setOpen(false);
         toast(`${name} is now OFFBOARDED`, "settled");
-        router.refresh();
+        router.push(`/offboarding/${employeeId}?step=report&done=1`);
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else setError(res.message);
     });

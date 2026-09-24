@@ -210,6 +210,12 @@ test.describe.serial("the 4-step wizard", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Complete" }).click();
     await expect(page.getByText("Dennis Ong is now OFFBOARDED")).toBeVisible();
 
+    // Peak-End (spec §4.4): completing lands on the success card, not a silent
+    // refresh — Dennis is the only seeded leaver, so there is no next leaver.
+    await expect(page.getByRole("heading", { name: /Dennis Ong offboarded · 3 decisions · / })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Print farewell report" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Queue clear" })).toBeVisible();
+
     // The queue is empty and the wizard still reads as the record of what happened.
     await page.goto("/offboarding");
     await expect(page.getByText("No one is leaving")).toBeVisible();

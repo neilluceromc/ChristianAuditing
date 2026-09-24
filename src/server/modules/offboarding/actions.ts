@@ -8,7 +8,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
-import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, reasonRequired, type Outcome } from "@/lib/offboarding";
+import { OUTCOMES, OUTCOME_LABEL, decisionOf, m365Live, outcomeStatus, reasonRequired, type Outcome } from "@/lib/offboarding";
 import { CLASS_PHRASE, isDirectLifecycle } from "@/lib/asset-class";
 import { cleanReason, reasonOptional } from "@/lib/reason";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
@@ -243,6 +243,8 @@ const accountsSchema = z.object({
   employeeId: z.string().min(1),
   /** canonical four plus client-defined values stored as-is (README 4f); "" = never synced */
   m365Status: z.string().trim().max(60),
+  /** plan P-5: required to clear a LIVE status to null — the dialog's own confirmation */
+  confirmClear: z.boolean().optional(),
 });
 
 /**
@@ -281,12 +283,11 @@ export async function closeAccounts(
     // blanking a live `active` here would complete the offboarding on an open
     // mailbox, and would leave the immutable completion audit stamping
     // `m365Status: { from: null, to: null }` over a status that did exist.
-    // Correcting a genuinely wrong value back to unknown stays available on
-    // the employee record, which is not the surface that closes accounts.
-    if (next === null && employee.m365Status !== null) {
-      return conflict(
-        `"No sync yet" describes someone who never had an account — it can't be used to clear the ${employee.m365Status} already recorded against ${employee.name}.`,
-      );
+    // Plan P-5: the panel's own dialog lets the operator say "they never had
+    // an account" and clear a live status anyway, but only with confirmClear
+    // set — the checkbox for "I did in fact mean the erasure, not a correction".
+    if (next === null && m365Live(employee.m365Status) && parsed.data.confirmClear !== true) {
+      return conflict(`Confirm that ${employee.name} never had an account before clearing ${employee.m365Status}.`);
     }
     if (employee.m365Status === next) {
       noop = true;

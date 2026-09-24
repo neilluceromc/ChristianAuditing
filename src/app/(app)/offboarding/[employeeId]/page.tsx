@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
-import { getWizard } from "@/server/modules/offboarding/queries";
-import { canContinue, decisionStateLabel, defaultStep, offboardingNext, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
+import { getWizard, nextLeaver } from "@/server/modules/offboarding/queries";
+import { canContinue, completionBlockers, decisionStateLabel, defaultStep, offboardingNext, OUTCOME_LABEL, parseStep, readiness } from "@/lib/offboarding";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { APPROVAL_TYPE_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
@@ -24,6 +24,8 @@ import { AccountsPanel } from "@/components/offboarding/accounts-panel";
 import { CompleteButton } from "@/components/offboarding/complete-button";
 import { ItemDecision } from "@/components/offboarding/item-decision";
 import { MarkRestButton } from "@/components/offboarding/mark-rest-button";
+import { OffboardedCard } from "@/components/offboarding/offboarded-card";
+import { ReadinessChecklist } from "@/components/offboarding/readiness-checklist";
 import { ScanProvider } from "@/components/offboarding/scan-provider";
 import { WizardMoreMenu } from "@/components/offboarding/wizard-more-menu";
 import { WizardSteps } from "@/components/offboarding/wizard-steps";
@@ -38,7 +40,9 @@ export default async function OffboardingWizardPage({
 }) {
   const user = await requireUser();
   const { employeeId } = await params;
-  const rawStep = toSearchParams(await searchParams).get("step");
+  const sp = toSearchParams(await searchParams);
+  const rawStep = sp.get("step");
+  const done = sp.get("done") === "1";
   const data = await getWizard(employeeId);
   if (!data) notFound();
 
@@ -61,6 +65,7 @@ export default async function OffboardingWizardPage({
     m365Status: employee.m365Status,
   };
   const next = canMutate ? offboardingNext(state) : null;
+  const readinessInput = { id: employee.id, total: data.items.length, undecided: data.undecided, failed: data.failed, m365Status: employee.m365Status };
   // flatMap rather than filter so `decision` is structurally non-null on the
   // rows the report renders — the same reason decisionOf carries the outcome on
   // the surviving row instead of asserting it later
@@ -118,7 +123,17 @@ export default async function OffboardingWizardPage({
 
       <WizardSteps employeeId={employeeId} current={step} />
 
-      {!active && (
+      {!active && employee.employment === "OFFBOARDED" && done ? (
+        <div className="pb-4">
+          <OffboardedCard
+            name={employee.name}
+            decisions={decided.length}
+            completedAt={data.completedAt}
+            reportHref={`/offboarding/${employeeId}/report`}
+            next={await nextLeaver(employee.id)}
+          />
+        </div>
+      ) : !active && (
         <div className="pb-4">
           <Banner
             tone={employee.employment === "OFFBOARDED" ? "closed" : "attention"}
@@ -488,7 +503,7 @@ export default async function OffboardingWizardPage({
                 )}
               </p>
               {canDecide ? (
-                <AccountsPanel employeeId={employeeId} m365Status={employee.m365Status} />
+                <AccountsPanel employeeId={employeeId} employeeName={employee.name} m365Status={employee.m365Status} />
               ) : (
                 <p className="font-mono text-[11px] text-fg-muted">
                   current status: {employee.m365Status ?? "no sync yet"}
@@ -504,6 +519,7 @@ export default async function OffboardingWizardPage({
 
       {step === "report" && (
         <div className="flex flex-col gap-4">
+          {active && <ReadinessChecklist lines={readiness(readinessInput)} />}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {/* these total DECISIONS, not movements: decisionOf counts PENDING
                 and EXECUTION_FAILED alongside EXECUTED, and the collect step's
@@ -572,7 +588,7 @@ export default async function OffboardingWizardPage({
             )}
           </Card>
 
-          {active && canMutate && (
+          {active && canMutate && completionBlockers(readinessInput).length === 0 && (
             <div className="flex items-center justify-end gap-3">
               <span className="font-mono text-[10.5px] text-fg-muted">
                 completing flips {employee.name} to OFFBOARDED — it does not touch equipment
