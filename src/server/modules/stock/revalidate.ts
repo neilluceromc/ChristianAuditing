@@ -10,12 +10,13 @@ import { revalidatePath } from "next/cache";
  *
  * `itemId` given → that item's page; omitted (a stocktake posting, an import
  * apply — many items at once) → the dynamic-segment form, which revalidates
- * every `/stock/items/[id]` page in one call.
+ * every `/stock/items/[id]` page in one call. The pattern is the route's FILE
+ * path, route group included (Phase 31: the URL shape matched nothing).
  */
 export function revalidateStockReads(itemId?: string) {
   revalidatePath("/stock");
   if (itemId) revalidatePath(`/stock/items/${itemId}`);
-  else revalidatePath("/stock/items/[id]", "page");
+  else revalidatePath("/(app)/stock/items/[id]", "page");
   revalidatePath("/audit");
   revalidatePath("/stock/reports/on-hand");
   revalidatePath("/stock/reports/consumption");

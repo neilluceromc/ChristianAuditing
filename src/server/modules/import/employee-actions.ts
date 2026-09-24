@@ -229,9 +229,9 @@ export async function applyEmployeeImport(
   revalidatePath("/audit");
   // The same I-2 lesson: the first thing anyone does after an import is open
   // one row to check it landed. Next 15's dynamic-segment form revalidates
-  // every matching page in one call.
-  revalidatePath("/employees/[id]", "page");
-  revalidatePath("/employees/[id]/timeline", "page");
+  // every matching page in one call — on the FILE path, route group included
+  // (Phase 31); "layout" covers the profile and its Timeline tab.
+  revalidatePath("/(app)/employees/[id]", "layout");
   return ok({
     created,
     updated,

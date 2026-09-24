@@ -307,11 +307,11 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   // That date is rendered on four further surfaces — the offboarding list's
   // Due column and facet, the wizard header's pill, the farewell report's
   // completion line and the IT worklist's leaver row (Home and
-  // /inventory/work). The dynamic segments take the `"page"` form, the same
-  // shape `revalidateStockReads` uses (`src/server/modules/stock/revalidate.ts`).
+  // /inventory/work). The dynamic segments take the `"layout"` form on the
+  // route's FILE path, route group included (Phase 31) — it covers the wizard
+  // and its `/report`; the URL-shaped pattern matched nothing.
   revalidatePath("/offboarding");
-  revalidatePath("/offboarding/[employeeId]", "page");
-  revalidatePath("/offboarding/[employeeId]/report", "page");
+  revalidatePath("/(app)/offboarding/[employeeId]", "layout");
   revalidatePath("/inventory/work");
   revalidatePath("/");
   return ok({ id: employee.id });
@@ -367,12 +367,11 @@ export async function startOffboarding(input: unknown): Promise<ActionResult<{ i
       },
     });
   });
-  // The same seven revalidations as updateEmployee (see its Phase 23/25 note) — keep the two lists identical.
+  // The same six revalidations as updateEmployee (see its Phase 23/25 note) — keep the two lists identical.
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
   revalidatePath("/offboarding");
-  revalidatePath("/offboarding/[employeeId]", "page");
-  revalidatePath("/offboarding/[employeeId]/report", "page");
+  revalidatePath("/(app)/offboarding/[employeeId]", "layout");
   revalidatePath("/inventory/work");
   revalidatePath("/");
   return ok({ id: employee.id });

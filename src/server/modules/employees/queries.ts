@@ -7,7 +7,7 @@ import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 import { EXPORT_CAP, type HoldingsExportRow } from "@/lib/export-columns";
 import { sameNameKey } from "@/lib/same-name";
-import type { ListState } from "@/lib/url-state";
+import { primarySortOf, type ListState, type SortKey } from "@/lib/url-state";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 
 export interface EmployeeListRow {
@@ -50,25 +50,39 @@ async function resolveMissing(employees: Array<{
 }
 
 /**
- * "Policy gaps only" can't be expressed in SQL (it needs per-employee policy
- * resolution + slot fill): cut a NARROW candidate pass, resolve loadouts, and
- * keep the ids with a gap. Shared by the list's gaps branch and the export's
- * gaps branch so both agree on which rows that means.
+ * The derived cut and order, in one place so the list and the export agree row for row:
+ * "Policy gaps only" keeps the candidates with a required gap, and the Loadout sort (only as the
+ * primary key) orders them by completeness — neither can be expressed in SQL, since both need
+ * per-employee policy resolution + slot fill. `orderByLoadout` breaks its own ties by name then
+ * id, so the SQL order only matters when Loadout is not the primary key.
  */
-async function gapKeptIds(where: Prisma.EmployeeWhereInput, orderBy: Prisma.EmployeeOrderByWithRelationInput[]): Promise<string[]> {
+function derivedCut<T extends { id: string; name: string }>(
+  candidates: T[], missingAll: Map<string, number | null>, gapsOnly: boolean, loadoutSort: SortKey | undefined,
+): T[] {
+  const kept = gapsOnly ? candidates.filter((c) => (missingAll.get(c.id) ?? 0) > 0) : candidates;
+  if (!loadoutSort) return kept;
+  return orderByLoadout(kept.map((c) => ({ c, id: c.id, name: c.name, missingRequired: missingAll.get(c.id) ?? null })), loadoutSort.dir).map((x) => x.c);
+}
+
+/** The export's candidate pass: NARROW (no department row), resolved once, cut and ordered by `derivedCut`. */
+async function derivedIds(
+  where: Prisma.EmployeeWhereInput, orderBy: Prisma.EmployeeOrderByWithRelationInput[], gapsOnly: boolean, loadoutSort: SortKey | undefined,
+): Promise<string[]> {
   const candidates = await prisma.employee.findMany({
     where, orderBy,
-    select: { id: true, title: true, departmentId: true, assets: { select: { id: true, tag: true, model: true, typeId: true, status: true } } },
+    select: { id: true, name: true, title: true, departmentId: true, assets: { select: { id: true, tag: true, model: true, typeId: true, status: true } } },
   });
   const missingAll = await resolveMissing(candidates);
-  return candidates.filter((c) => (missingAll.get(c.id) ?? 0) > 0).map((c) => c.id);
+  return derivedCut(candidates, missingAll, gapsOnly, loadoutSort).map((c) => c.id);
 }
 
 /** Spec §4: the plain list pages in SQL; the gaps filter and the Loadout sort (Phase 29, plan P-4) cut a NARROW candidate pass first, then page in memory. */
 async function pageEmployees(state: ListState, gapsOnly: boolean) {
   const where = buildEmployeeWhere(state);
   const orderBy = buildEmployeeOrderBy(state.sort);
-  const loadoutSort = state.sort.find((s) => s.key === "loadout");
+  // Only as the PRIMARY key (Phase 31): a secondary `loadout` left behind by a header click is dropped,
+  // as buildEmployeeOrderBy already drops it in SQL, so the clicked column really orders the rows.
+  const loadoutSort = primarySortOf(state.sort, "loadout");
   if (!gapsOnly && !loadoutSort) {
     const { rows: employees, ...pg } = await pagedSnapshot(
       ENTITY_PAGE_SIZE,
@@ -82,10 +96,7 @@ async function pageEmployees(state: ListState, gapsOnly: boolean) {
   // Candidate pass: everything the where admits, resolved once; then the gaps cut and/or the derived order.
   const candidates = await prisma.employee.findMany({ where, orderBy, include: rowInclude });
   const missingAll = await resolveMissing(candidates);
-  let kept = gapsOnly ? candidates.filter((c) => (missingAll.get(c.id) ?? 0) > 0) : candidates;
-  if (loadoutSort) {
-    kept = orderByLoadout(kept.map((c) => ({ ...c, missingRequired: missingAll.get(c.id) ?? null })), loadoutSort.dir);
-  }
+  const kept = derivedCut(candidates, missingAll, gapsOnly, loadoutSort);
   const pg = pageOf(kept.length, state.page, ENTITY_PAGE_SIZE);
   const employees = kept.slice(pg.skip, pg.skip + pg.take);
   return { pg, employees, missing: missingAll };
@@ -154,23 +165,27 @@ function toExportRow(e: {
 }
 
 /**
- * The export's row source. Same cut `listEmployees` applies for "Policy gaps
- * only" — a narrow candidate pass, `resolveMissing`, keep `missingRequired >
- * 0` — so the sheet and the screen agree on which rows that means. Refuses
- * BEFORE loading rows, same as the assets export: a plain-path refusal reads
- * the count directly off `where`; a gaps-path refusal reads it off the kept
- * id set, since that filter only resolves after the candidate pass.
+ * The export's row source. Same cut and order `listEmployees` applies for
+ * "Policy gaps only" and the Loadout sort (`derivedCut`), so the sheet and the
+ * screen agree on which rows and in what order (Phase 31: the Loadout order
+ * used to be ignored here). Refuses BEFORE loading rows, same as the assets
+ * export: without the gaps cut the refusal reads the count directly off
+ * `where`; with it, off the kept id set, since that filter only resolves after
+ * the candidate pass.
  */
 export async function employeeExportRows(state: ListState, gapsOnly: boolean): Promise<{ rows: EmployeeExportRow[] } | { over: number }> {
   const where = buildEmployeeWhere(state);
   const orderBy = buildEmployeeOrderBy(state.sort);
+  const loadoutSort = primarySortOf(state.sort, "loadout");
   if (!gapsOnly) {
     const total = await prisma.employee.count({ where });
     if (total > EXPORT_CAP) return { over: total };
-    const employees = await prisma.employee.findMany({ where, orderBy, include: rowInclude });
-    return { rows: employees.map(toExportRow) };
+    if (!loadoutSort) {
+      const employees = await prisma.employee.findMany({ where, orderBy, include: rowInclude });
+      return { rows: employees.map(toExportRow) };
+    }
   }
-  const keptIds = await gapKeptIds(where, orderBy);
+  const keptIds = await derivedIds(where, orderBy, gapsOnly, loadoutSort);
   if (keptIds.length > EXPORT_CAP) return { over: keptIds.length };
   const rows = await prisma.employee.findMany({ where: { id: { in: keptIds } }, include: rowInclude });
   const byId = new Map(rows.map((r) => [r.id, r]));
