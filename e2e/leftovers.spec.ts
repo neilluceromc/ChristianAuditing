@@ -118,7 +118,8 @@ test.describe("Phase 31 — leftovers sweep", () => {
     await login(page, IT);
     await page.goto("/employees?sort=loadout");
     const listed = await employeeNos(page);
-    expect(await sheetFirstColumn(page, "/employees/export?sort=name")).not.toEqual(listed);
+    // Compare the same window the assertion below compares, or a length mismatch passes it for free.
+    expect((await sheetFirstColumn(page, "/employees/export?sort=name")).slice(0, listed.length)).not.toEqual(listed);
     const sheet = await sheetFirstColumn(page, "/employees/export?sort=loadout");
     expect(sheet.slice(0, listed.length)).toEqual(listed);
   });
@@ -128,7 +129,7 @@ test.describe("Phase 31 — leftovers sweep", () => {
     await page.goto("/inventory?sort=attention");
     const listed = await assetTags(page);
     const sheet = await sheetFirstColumn(page, "/inventory/export?sort=attention");
-    expect(await sheetFirstColumn(page, "/inventory/export")).not.toEqual(sheet);
+    expect((await sheetFirstColumn(page, "/inventory/export")).slice(0, listed.length)).not.toEqual(listed);
     expect(sheet.slice(0, listed.length)).toEqual(listed);
   });
 

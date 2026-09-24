@@ -367,7 +367,7 @@ export async function startOffboarding(input: unknown): Promise<ActionResult<{ i
       },
     });
   });
-  // The same seven revalidations as updateEmployee (see its Phase 23/25 note) — keep the two lists identical.
+  // The same six revalidations as updateEmployee (see its Phase 23/25 note) — keep the two lists identical.
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
   revalidatePath("/offboarding");

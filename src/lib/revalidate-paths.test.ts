@@ -11,7 +11,8 @@ import path from "node:path";
  */
 const SRC = path.resolve(__dirname, "..");
 const APP = path.join(SRC, "app");
-const CALL = /revalidatePath\(\s*"([^"]+)"\s*,\s*"(page|layout)"\s*\)/g;
+// Any quote style for the pattern ("…", '…' or a static `…`); a template with ${} is not a pattern.
+const CALL = /revalidatePath\(\s*(["'`])([^"'`$]+)\1\s*,\s*["'`](page|layout)["'`]\s*\)/g;
 
 function sources(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -22,7 +23,7 @@ function sources(dir: string): string[] {
 }
 
 const calls = sources(SRC).flatMap((file) =>
-  [...fs.readFileSync(file, "utf8").matchAll(CALL)].map((m) => ({ file: path.relative(SRC, file), pattern: m[1], type: m[2] })),
+  [...fs.readFileSync(file, "utf8").matchAll(CALL)].map((m) => ({ file: path.relative(SRC, file), pattern: m[2], type: m[3] })),
 );
 
 describe("typed revalidatePath patterns (Phase 31)", () => {
