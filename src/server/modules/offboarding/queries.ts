@@ -347,6 +347,16 @@ export function decidedItems(items: WizardItem[]): DecidedItem[] {
   return items.flatMap((i) => (i.decision ? [{ ...i, decision: i.decision }] : []));
 }
 
+/**
+ * Phase 32 (spec §4.5): the held items still awaiting a decision — what the
+ * report's draft state and its "Still to decide" section list, and the rows
+ * the export sheet appends after the decided ones so print and sheet stay in
+ * step. Mirrors `decidedItems`'s split of the same `WizardData.items`.
+ */
+export function undecidedHeldItems(items: WizardItem[]): WizardItem[] {
+  return items.filter((i) => i.held && !i.decision);
+}
+
 export interface WizardData {
   employee: {
     id: string;

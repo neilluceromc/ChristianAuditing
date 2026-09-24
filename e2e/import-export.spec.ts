@@ -727,7 +727,8 @@ test.describe.serial("the farewell sheet matches the printed report", () => {
 
     const dennis = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
     await page.goto(`/offboarding/${dennis.id}/report`);
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible({ timeout: 30_000 });
+    // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
+    await expect(page.getByText("Farewell report").first()).toBeVisible({ timeout: 30_000 });
 
     // What the PAGE prints — `decidedItems(data.items)`, one <tr> each.
     const printed = await page.locator("tbody tr").count();

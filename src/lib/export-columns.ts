@@ -281,8 +281,8 @@ export const EXPIRY_EXPORT_COLUMNS: XlsxColumn<ExpiryExportRow>[] = [
 ];
 
 export const FAREWELL_EXPORT_COLUMNS: XlsxColumn<{
-  tag: string; model: string; outcome: string; reason: string | null;
-  cost: number | null; refNo: string; state: string;
+  tag: string; model: string; outcome: string | null; reason: string | null;
+  cost: number | null; refNo: string | null; state: string | null;
   decidedBy: string | null; decidedAt: Date | null;
 }>[] = [
   { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },

@@ -349,7 +349,8 @@ test.describe.serial("deadlines", () => {
 
     await login(page, IT);
     await page.goto(`/offboarding/${d.id}/report`);
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible({ timeout: 20_000 });
+    // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
+    await expect(page.getByText("Farewell report").first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(`Still open · 2 d overdue (due ${fmtDate(d.offboardingDueAt)})`, { exact: true }))
       .toBeVisible();
   });
