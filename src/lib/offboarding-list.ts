@@ -13,8 +13,8 @@ import type { ListConfig, ListState, SortKey } from "./url-state";
  */
 export const OFFBOARDING_LIST_CONFIG: ListConfig = {
   facets: ["department", "progress", "due"],
-  sortable: ["name", "started", "undecided", "due"],
-  defaultSort: [{ key: "name", dir: "asc" }],
+  sortable: ["name", "started", "undecided", "due", "attention"],
+  defaultSort: [{ key: "attention", dir: "desc" }],
 };
 
 export type Progress = "open" | "complete";
@@ -38,18 +38,16 @@ export function buildOffboardingWhere(state: ListState): Prisma.EmployeeWhereInp
 }
 
 /**
- * `null` when the sort key is `undecided` — that ordering is DERIVED (plan
- * P-5) and applied in memory over the candidate set with `sortByUndecided`,
- * never a SQL `ORDER BY`. Every real ordering ends `{ employeeNo: "asc" },
- * { id: "asc" }` — the same "id tiebreaker" discipline every list in this
- * app follows, with `employeeNo` added first because it is the human-legible
- * tiebreak an operator would actually recognise on a list this short.
+ * `null` = order in memory: Attention as the PRIMARY key (the default, spec §4.1) or any
+ * `undecided` key (plan P-5 of Phase 20). A secondary Attention left behind by a header click is
+ * dropped, so the clicked column really orders the rows (the Phase 31 rule).
  */
 export function buildOffboardingOrderBy(sort: SortKey[]): Prisma.EmployeeOrderByWithRelationInput[] | null {
   const order = sort.length ? sort : OFFBOARDING_LIST_CONFIG.defaultSort;
-  if (order.some((s) => s.key === "undecided")) return null;
+  if (order[0]?.key === "attention" || order.some((s) => s.key === "undecided")) return null;
+  const kept = order.filter((s) => s.key !== "attention");
   return [
-    ...order.map(({ key, dir }): Prisma.EmployeeOrderByWithRelationInput => {
+    ...kept.map(({ key, dir }): Prisma.EmployeeOrderByWithRelationInput => {
       if (key === "started") return { offboardingAt: dir };
       if (key === "due") return { offboardingDueAt: { sort: dir, nulls: "last" } };
       return { [key]: dir };

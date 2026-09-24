@@ -5,6 +5,8 @@ import {
   outcomeOfStatus, outcomeStatus, outcomesFor,
   parseStep, reasonRequired, reportTotals, returnTargetStatus,
   type DecisionCandidate, type Outcome,
+  completionBlockers, decisionStateLabel, defaultStep, m365Live, offboardingAttention, offboardingNext,
+  orderByOffboardingAttention, readiness, type LeaverState,
 } from "./offboarding";
 
 describe("outcomes — Missing is first-class", () => {
@@ -38,7 +40,7 @@ describe("outcomes — Missing is first-class", () => {
 describe("the four steps", () => {
   it("names them in order", () => {
     expect(WIZARD_STEPS.map((s) => s.id)).toEqual(["review", "collect", "accounts", "report"]);
-    expect(WIZARD_STEPS[3].label).toBe("Farewell report");
+    expect(WIZARD_STEPS[3].label).toBe("Finish");
   });
 
   it("parses ?step= and falls back to the first step", () => {
@@ -278,5 +280,134 @@ describe("outcomes by class (Phase 13)", () => {
     expect(outcomeOfStatus("LOST")).toBe("MISSING");
     expect(outcomeOfStatus("REPAIRING")).toBe("DEFECTIVE"); // the one Purchasing status whose outcome name differs
     expect(outcomeOfStatus("DEPLOYED")).toBeNull();
+  });
+});
+
+const leaver = (over: Partial<LeaverState> = {}): LeaverState => ({
+  id: "e1", employment: "OFFBOARDING", dueAt: new Date("2026-09-30T00:00:00+08:00"),
+  undecided: 0, failed: null, m365Status: "inactive", ...over,
+});
+
+describe("m365Live — mirrors completeOffboarding's M365 gate", () => {
+  it("null and any-case inactive are not live; everything else is", () => {
+    expect(m365Live(null)).toBe(false);
+    expect(m365Live("inactive")).toBe(false);
+    expect(m365Live(" Inactive ")).toBe(false);
+    expect(m365Live("active")).toBe(true);
+    expect(m365Live("offboarding")).toBe(true);
+    expect(m365Live("")).toBe(true);
+  });
+});
+
+describe("offboardingNext — the one next step", () => {
+  it("nothing once offboarded", () => {
+    expect(offboardingNext(leaver({ employment: "OFFBOARDED" }))).toBeNull();
+  });
+  it("a failed return wins over everything", () => {
+    expect(offboardingNext(leaver({ failed: { refNo: "APR-9", approvalId: "a9" }, dueAt: null, undecided: 2 })))
+      .toEqual({ step: null, label: "Resolve APR-9", href: "/approvals/a9" });
+  });
+  it("no date comes next, pointing at the employee form", () => {
+    expect(offboardingNext(leaver({ dueAt: null, undecided: 2 })))
+      .toEqual({ step: null, label: "Set a date", href: "/employees/e1/edit" });
+  });
+  it("undecided items: Collect, singular and plural", () => {
+    expect(offboardingNext(leaver({ undecided: 3 })))
+      .toEqual({ step: "collect", label: "Collect 3 items", href: "/offboarding/e1?step=collect" });
+    expect(offboardingNext(leaver({ undecided: 1 }))?.label).toBe("Collect 1 item");
+  });
+  it("a live account: Close account", () => {
+    expect(offboardingNext(leaver({ m365Status: "active" })))
+      .toEqual({ step: "accounts", label: "Close account", href: "/offboarding/e1?step=accounts" });
+  });
+  it("otherwise Complete, on the Finish step", () => {
+    expect(offboardingNext(leaver()))
+      .toEqual({ step: "report", label: "Complete", href: "/offboarding/e1?step=report" });
+  });
+});
+
+describe("readiness / completionBlockers — the three server gates, shown first", () => {
+  const input = { id: "e1", total: 5, undecided: 0, failed: [], m365Status: "inactive" };
+  it("all clear: three ok lines, no blockers", () => {
+    expect(readiness(input)).toEqual([
+      { kind: "equipment", label: "Equipment · 5 of 5 decided", ok: true, href: null },
+      { kind: "m365", label: "Microsoft 365 · inactive", ok: true, href: null },
+    ]);
+    expect(completionBlockers(input)).toEqual([]);
+  });
+  it("undecided items block and link Collect", () => {
+    expect(completionBlockers({ ...input, undecided: 2 })).toEqual([
+      { kind: "equipment", label: "Equipment · 3 of 5 decided", ok: false, href: "/offboarding/e1?step=collect" },
+    ]);
+  });
+  it("each failed return is its own line linking the approval", () => {
+    const failed = [{ refNo: "APR-1", approvalId: "a1" }, { refNo: "APR-2", approvalId: "a2" }];
+    expect(completionBlockers({ ...input, failed }).map((l) => [l.label, l.href])).toEqual([
+      ["Requests · APR-1 failed to execute", "/approvals/a1"],
+      ["Requests · APR-2 failed to execute", "/approvals/a2"],
+    ]);
+  });
+  it("no account at all is fine; a live one blocks and links Accounts", () => {
+    expect(readiness({ ...input, m365Status: null })[1])
+      .toEqual({ kind: "m365", label: "Microsoft 365 · never had an account", ok: true, href: null });
+    expect(completionBlockers({ ...input, m365Status: "active" })).toEqual([
+      { kind: "m365", label: "Microsoft 365 · active", ok: false, href: "/offboarding/e1?step=accounts" },
+    ]);
+  });
+});
+
+describe("offboardingAttention — worst reason first", () => {
+  const today = "2026-09-24";
+  it("each kind, in precedence", () => {
+    expect(offboardingAttention(leaver({ failed: { refNo: "APR-1", approvalId: "a1" } }), today))
+      .toEqual({ kind: "failed", label: "return failed · APR-1", severity: 6000 });
+    expect(offboardingAttention(leaver({ dueAt: new Date("2026-09-21T00:00:00+08:00"), undecided: 2 }), today))
+      .toEqual({ kind: "overdue", label: "overdue by 3 d", severity: 5003 });
+    expect(offboardingAttention(leaver({ dueAt: null }), today))
+      .toEqual({ kind: "no-date", label: "no completion date", severity: 4000 });
+    expect(offboardingAttention(leaver({ undecided: 2 }), today))
+      .toEqual({ kind: "undecided", label: "2 to decide", severity: 3002 });
+    expect(offboardingAttention(leaver({ m365Status: "active" }), today))
+      .toEqual({ kind: "m365", label: "account still active", severity: 2000 });
+    expect(offboardingAttention(leaver(), today))
+      .toEqual({ kind: "ready", label: "ready to complete", severity: 1000 });
+  });
+  it("due today is not overdue", () => {
+    expect(offboardingAttention(leaver({ dueAt: new Date("2026-09-24T09:00:00+08:00") }), today)?.kind).toBe("ready");
+  });
+  it("nothing for someone already offboarded", () => {
+    expect(offboardingAttention(leaver({ employment: "OFFBOARDED" }), today)).toBeNull();
+  });
+  it("orders desc worst first, ties by name then id, null last", () => {
+    const at = (severity: number) => ({ kind: "ready" as const, label: "", severity });
+    const rows = [
+      { id: "3", name: "Cy", attention: at(1000) },
+      { id: "1", name: "Ana", attention: null },
+      { id: "2", name: "Ben", attention: at(6000) },
+      { id: "5", name: "Ana", attention: at(1000) },
+      { id: "4", name: "Ana", attention: at(1000) },
+    ];
+    expect(orderByOffboardingAttention(rows, "desc").map((r) => r.id)).toEqual(["2", "4", "5", "3", "1"]);
+    expect(orderByOffboardingAttention(rows, "asc").map((r) => r.id)).toEqual(["4", "5", "3", "2", "1"]);
+  });
+});
+
+describe("defaultStep — open where the work is", () => {
+  it("review once offboarded; collect, accounts, report otherwise", () => {
+    expect(defaultStep({ employment: "OFFBOARDED", undecided: 0, m365Status: null })).toBe("review");
+    expect(defaultStep({ employment: "OFFBOARDING", undecided: 2, m365Status: "active" })).toBe("collect");
+    expect(defaultStep({ employment: "OFFBOARDING", undecided: 0, m365Status: "active" })).toBe("accounts");
+    expect(defaultStep({ employment: "OFFBOARDING", undecided: 0, m365Status: "inactive" })).toBe("report");
+  });
+});
+
+describe("decisionStateLabel", () => {
+  it("friendly words for the decision states", () => {
+    expect(decisionStateLabel("PENDING")).toBe("awaiting approval");
+    expect(decisionStateLabel("CLAIMED")).toBe("awaiting approval");
+    expect(decisionStateLabel("APPROVED")).toBe("approved");
+    expect(decisionStateLabel("EXECUTED")).toBe("done");
+    expect(decisionStateLabel("EXECUTION_FAILED")).toBe("failed to execute");
+    expect(decisionStateLabel("SOMETHING_NEW")).toBe("something new");
   });
 });
