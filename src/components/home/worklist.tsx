@@ -1,16 +1,24 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { WorkGroup } from "@/lib/worklist";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { DismissButton } from "./dismiss-button";
+import { WorkRowActions } from "./work-row-actions";
 
 export function Worklist({
   groups,
   canAct,
+  direct,
+  employees,
   seeAllBase,
   headingLevel = "h3",
 }: {
   groups: WorkGroup[];
   canAct: boolean;
+  /** Spec §5.1: the Assign dialog applies at once (isDirectLifecycle) instead of opening an approval. */
+  direct: boolean;
+  /** the Assign dialog's people; empty when no row offers Assign… */
+  employees: ComboOption[];
   seeAllBase?: string;
   /**
    * Home nests each group under SectionCard's `h2` ("Worklist"), so `h3` is
@@ -49,7 +57,7 @@ export function Worklist({
                   <span className="block truncate text-[12.5px] font-medium text-fg">{row.title}</span>
                   <span className="block truncate font-mono text-[10.5px] text-fg-muted">{row.meta}</span>
                 </span>
-                <Link href={row.href} className="shrink-0 text-[12px] font-medium text-accent hover:underline">{row.action}</Link>
+                <WorkRowActions row={row} canAct={canAct} direct={direct} employees={employees} />
                 {canAct && <DismissButton shiftKey={row.key} title={row.title} />}
               </li>
             ))}

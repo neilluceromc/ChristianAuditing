@@ -7,6 +7,8 @@ import {
   ageHistogram, claimedByYou, directChanges, financeHome, fleet, purchasingHome, warrantyRunway, worklist,
 } from "@/server/modules/home/queries";
 import { adminHome } from "@/server/modules/admin/queries";
+import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { isDirectLifecycle } from "@/lib/asset-class";
 import { AdminHomeBody } from "@/components/home/admin-home";
 import { DirectChangesBody } from "@/components/home/direct-changes";
 import { PageHeader } from "@/components/ui/page-header";
@@ -193,6 +195,9 @@ export default async function Home() {
     safeSection("Warranty runway", () => warrantyRunway()),
     user.role === "admin" ? safeSection("Applied directly", () => directChanges()) : Promise.resolve(null),
   ]);
+  // Only Assign… needs the people list (spec §5.1); skip the read otherwise.
+  const assignOffered = shift.ok && shift.data.some((g) => g.rows.some((r) => r.control?.kind === "assign"));
+  const employees = assignOffered ? await activeEmployeeOptions() : [];
 
   return (
     <>
@@ -201,7 +206,15 @@ export default async function Home() {
         {/* Viewer has no action queue, so it doesn't get one (entry criterion #3). */}
         {!isViewer && (
           <SectionCard title="Worklist" result={shift}>
-            {(groups) => <Worklist groups={groups} canAct seeAllBase="/inventory/work" />}
+            {(groups) => (
+              <Worklist
+                groups={groups}
+                canAct
+                direct={isDirectLifecycle(user.role, "IT")}
+                employees={employees}
+                seeAllBase="/inventory/work"
+              />
+            )}
           </SectionCard>
         )}
 

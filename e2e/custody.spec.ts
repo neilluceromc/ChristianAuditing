@@ -284,7 +284,8 @@ test.describe.serial("custody", () => {
     const rows = loansSection.locator("li");
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText("BR-LT-0210 on loan with no due date");
-    await expect(rows.nth(0).getByRole("link", { name: "Set date" })).toBeVisible();
+    // Phase 32 (spec §5.1): the loan row opens the record's own Set loan date dialog in place.
+    await expect(rows.nth(0).getByRole("button", { name: "Set loan date…" })).toBeVisible();
     await expect(rows.nth(1)).toContainText("BR-PH-0287 overdue by 1 d");
   });
 
