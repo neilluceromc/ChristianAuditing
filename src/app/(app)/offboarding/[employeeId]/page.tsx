@@ -2,11 +2,11 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { getWizard } from "@/server/modules/offboarding/queries";
-import { canContinue, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
+import { canContinue, decisionStateLabel, defaultStep, offboardingNext, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
-import { canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
+import { APPROVAL_TYPE_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
+import { canSeeClass, isDirectLifecycle, STATUS_LABEL } from "@/lib/asset-class";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -23,7 +23,9 @@ import { AccountsPanel } from "@/components/offboarding/accounts-panel";
 import { CompleteButton } from "@/components/offboarding/complete-button";
 import { ItemDecision } from "@/components/offboarding/item-decision";
 import { ScanProvider } from "@/components/offboarding/scan-provider";
+import { WizardMoreMenu } from "@/components/offboarding/wizard-more-menu";
 import { WizardSteps } from "@/components/offboarding/wizard-steps";
+import type { AssetStatus } from "@prisma/client";
 
 export default async function OffboardingWizardPage({
   params,
@@ -34,17 +36,29 @@ export default async function OffboardingWizardPage({
 }) {
   const user = await requireUser();
   const { employeeId } = await params;
-  const step = parseStep(toSearchParams(await searchParams).get("step"));
+  const rawStep = toSearchParams(await searchParams).get("step");
   const data = await getWizard(employeeId);
   if (!data) notFound();
 
   const { employee, items, totals, undecided } = data;
+  const step = rawStep
+    ? parseStep(rawStep)
+    : defaultStep({ employment: employee.employment, undecided, m365Status: employee.m365Status });
   const today = localDateISO(new Date());
   const canMutate = user.role === "admin" || user.role === "it_staff";
   const active = employee.employment === "OFFBOARDING";
   const canDecide = canMutate && active;
   const unlocked = canContinue("collect", { undecided });
   const href = (s: string) => `/offboarding/${employeeId}?step=${s}`;
+  const state = {
+    id: employee.id,
+    employment: employee.employment,
+    dueAt: employee.dueAt,
+    undecided: data.undecided,
+    failed: data.failed[0] ?? null,
+    m365Status: employee.m365Status,
+  };
+  const next = canMutate ? offboardingNext(state) : null;
   // flatMap rather than filter so `decision` is structurally non-null on the
   // rows the report renders — the same reason decisionOf carries the outcome on
   // the surviving row instead of asserting it later
@@ -63,7 +77,7 @@ export default async function OffboardingWizardPage({
         badge={
           <span className="inline-flex items-center gap-1.5">
             <StatusDot value={employee.employment} ns="employment" />
-            <span className="font-mono text-[10.5px] text-fg-muted">{employee.employment}</span>
+            <span className="text-[10.5px] text-fg-muted">{EMPLOYMENT_LABEL[employee.employment as keyof typeof EMPLOYMENT_LABEL] ?? employee.employment}</span>
             {employee.dueAt
               ? (
                 <DuePill
@@ -79,13 +93,19 @@ export default async function OffboardingWizardPage({
         }
         actions={
           <>
-            <ButtonLink href={`/employees/${employeeId}`}>Employee record</ButtonLink>
-            <ButtonLink href={`/offboarding/${employeeId}/report`}>Farewell report</ButtonLink>
+            {next && next.step !== step && (
+              <ButtonLink variant="primary" href={next.href}>{next.step === "report" ? "Complete offboarding" : next.label}</ButtonLink>
+            )}
+            <WizardMoreMenu
+              recordHref={`/employees/${employee.id}`}
+              reportHref={`/offboarding/${employee.id}/report`}
+              exportHref={`/offboarding/${employee.id}/report/export`}
+            />
           </>
         }
       />
 
-      <WizardSteps employeeId={employeeId} current={step} unlocked={unlocked} />
+      <WizardSteps employeeId={employeeId} current={step} />
 
       {!active && (
         <div className="pb-4">
@@ -208,9 +228,7 @@ export default async function OffboardingWizardPage({
                     <Th width={96}>Category</Th>
                     <Th width={96}>Status</Th>
                     <Th width={112} align="right">Cost</Th>
-                    <Th width={124}>Decision</Th>
-                    <Th width={112}>Decided by</Th>
-                    <Th width={104}>Decided on</Th>
+                    {items.some((i) => i.decision) && <Th width={220}>Decision</Th>}
                   </Tr>
                 </THead>
                 <TBody>
@@ -222,13 +240,13 @@ export default async function OffboardingWizardPage({
                       </Td>
                       <Td>{i.model}</Td>
                       <Td mono className="text-[10.5px]">{i.category}</Td>
-                      <Td mono className="text-[10.5px]">{i.status}</Td>
+                      <Td className="text-[10.5px]">{STATUS_LABEL[i.status as AssetStatus] ?? i.status}</Td>
                       <Td align="right" mono>{i.costLabel}</Td>
-                      <Td mono className="text-[10.5px]">
-                        {i.decision ? OUTCOME_LABEL[i.decision.outcome] : "—"}
-                      </Td>
-                      <Td mono className="text-[10.5px]">{i.decision?.decidedBy ?? "—"}</Td>
-                      <Td mono className="text-[10.5px]">{fmtDate(i.decision?.decidedAt)}</Td>
+                      {items.some((it) => it.decision) && (
+                        <Td className="text-[10.5px]">
+                          {i.decision ? `${OUTCOME_LABEL[i.decision.outcome]} · ${i.decision.decidedBy ?? "—"} · ${fmtDate(i.decision.decidedAt)}` : "—"}
+                        </Td>
+                      )}
                     </Tr>
                   ))}
                 </TBody>
@@ -313,7 +331,7 @@ export default async function OffboardingWizardPage({
                             value={i.decision.toStatus ?? "?"}
                             label={OUTCOME_LABEL[i.decision.outcome]}
                           />
-                          <StatusPill value={i.decision.state} />
+                          <StatusPill value={i.decision.state} label={decisionStateLabel(i.decision.state)} />
                         </span>
                       ) : (
                         <Pill>UNDECIDED</Pill>
@@ -490,7 +508,7 @@ export default async function OffboardingWizardPage({
                       <Td mono className="text-[10.5px]">
                         <Link href={`/approvals/${i.decision.id}`} className="text-accent hover:underline">{i.decision.refNo}</Link>
                         {" · "}
-                        {i.decision.state}
+                        {decisionStateLabel(i.decision.state)}
                       </Td>
                       <Td mono className="text-[10.5px]">{i.decision.decidedBy ?? "—"}</Td>
                       <Td mono className="text-[10.5px]">{fmtDate(i.decision.decidedAt)}</Td>

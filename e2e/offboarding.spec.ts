@@ -96,7 +96,7 @@ test.describe("offboarding queue", () => {
 
 // The wizard is a lifecycle: these run in order and depend on each other.
 test.describe.serial("the 4-step wizard", () => {
-  test("step 1 reviews holdings; steps 3 and 4 are not reachable while items are undecided", async ({ page }) => {
+  test("step 1 reviews holdings; every step stays reachable while items are undecided", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await openWizard(page);
     // Phase 32: the queue's row action now reads offboardingNext and lands on
@@ -111,9 +111,9 @@ test.describe.serial("the 4-step wizard", () => {
       await expect(page.getByRole("row", { name: new RegExp(tag) })).toBeVisible();
     }
 
-    // Only Review and Collect are links; Accounts and Finish are inert.
+    // Phase 32: every step is a link, reachable regardless of undecided items.
     const steps = page.getByRole("list", { name: "Offboarding steps" });
-    await expect(steps.getByRole("link")).toHaveCount(2);
+    await expect(steps.getByRole("link")).toHaveCount(4);
     await expect(steps).toContainText("Accounts & M365");
   });
 

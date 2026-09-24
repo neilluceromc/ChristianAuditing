@@ -703,9 +703,11 @@ test.describe.serial("the farewell sheet matches the printed report", () => {
     await login(page, "it@thebackroomop.com");
 
     await page.goto("/offboarding");
-    await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Open wizard" }).click();
-    await expect(page).toHaveURL(/\/offboarding\/[^/]+$/, { timeout: 30_000 });
-    await page.getByRole("list", { name: "Offboarding steps" }).getByRole("link", { name: /Collect items/ }).click();
+    // Phase 32: the row's action now reads offboardingNext's label and
+    // already lands on ?step=collect (Dennis has undecided items) — no
+    // second, redundant click on the step bar's own "Collect items" link.
+    await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: /^Collect \d+ items?$/ }).click();
+    await expect(page).toHaveURL(/\/offboarding\/[^/]+\?step=collect$/, { timeout: 30_000 });
 
     // The same steps `e2e/offboarding.spec.ts` drives — one decision per
     // interesting outcome, so the sheet has to carry three distinct ones.
