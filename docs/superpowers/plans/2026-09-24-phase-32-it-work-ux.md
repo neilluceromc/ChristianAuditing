@@ -1956,4 +1956,13 @@ git commit -m "test(e2e)+docs: Phase 32 -- it-work-ux (15 cases, chunk E1); batt
 
 ## D-block (decisions made during execution)
 
-(Filled in during execution: each ruling as `D-n — what — why — cost if wrong`.)
+- **D-1 (R1)** — e2e pins broken by T1/T2's pure changes (the step label "Finish"; the worklist leaver link "Collect N items" with `?step=collect`) were adapted in T3, the first task that runs e2e — cost if wrong: two pin edits move between tasks.
+- **D-2 (R2)** — `MarkRestDialog` resets its state only when it opens, so a partial refusal's inline messages survive `router.refresh()`; `MarkRestButton` also stays mounted while its dialog is open (T6 fix round) — cost if wrong: one effect dependency.
+- **D-3 (R3)** — `decideRemaining` does not re-read the wizard to refuse an item whose live decision is EXECUTION_FAILED, exactly like `decideItem` — cost if wrong: an "already decided" refusal in `decideOne`.
+- **D-4 (R4)** — the last two stale "Open wizard" queue pins were adapted in T5 — cost if wrong: none.
+- **D-5 (R5)** — clearing a stored `inactive` to "Never had an account" needs no confirmation (not live, unlocks no gate) — cost if wrong: widen the predicate to `status !== null`.
+- **D-6 (R6)** — plan P-7 corrected: the "reads DEPLOYED with no holder" worklist row keeps its Fix record link; `assignAsset` refuses non-SPARE assets — cost if wrong: a Change status control on that row later.
+- **D-7 (R7)** — the badge's loan edge is `loanSoonEdge(now)` (Manila midnight, today + 8), the only edge that agrees with `loanRow` hour by hour — cost if wrong: one helper.
+- **D-8 (R8)** — Purchasing staff see the scan card's action on their own class's records (it follows `recordPrimary`) — cost if wrong: gate on `cls === "IT"`.
+- **D-9 (R9)** — Task 14 split: the e2e file first; `--list`, the battery and the docs after the final review's fix wave, on the final tree `e29e879` — cost if wrong: none.
+- **D-10 (R10)** — battery chunk B re-run as-is after asset-classes case 21 timed out waiting for Validate (the same known flake as Phase 29's battery; this phase does not touch the import wizard) — cost if wrong: an intermittent import-wizard bug stays unfixed.
