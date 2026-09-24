@@ -1,18 +1,21 @@
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
-import { parseListState, serializeListState, toggleSort, toSearchParams, type ListState } from "@/lib/url-state";
+import { parseListState, serializeListState, toggleSort, toSearchParams, withFilter, type ListState } from "@/lib/url-state";
 import { OFFBOARDING_LIST_CONFIG } from "@/lib/offboarding-list";
 import { listOffboarding } from "@/server/modules/offboarding/queries";
+import { offboardingNext } from "@/lib/offboarding";
 import { fmtDate, localDateISO } from "@/lib/format";
 import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
+import { ProgressBar } from "@/components/ui/progress-bar";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { DuePill } from "@/components/ui/due-pill";
 import { OffboardingToolbar } from "@/components/offboarding/offboarding-toolbar";
+import { OffboardingMoreMenu } from "@/components/offboarding/offboarding-more-menu";
 
 export default async function OffboardingPage({
   searchParams,
@@ -43,23 +46,24 @@ export default async function OffboardingPage({
   // and stock/page.tsx use to pick their empty-state copy.
   const filtered = Boolean(state.q) || Object.keys(state.filters).length > 0;
   const today = localDateISO(new Date());
+  const overdueCount = Number(facets.due.find((o) => o.value === "overdue")?.count ?? 0);
 
   return (
     <>
       <PageHeader
         title="Offboarding"
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
-        actions={<ButtonLink href={"/offboarding/export" + serializeListState(state, OFFBOARDING_LIST_CONFIG)}>Export</ButtonLink>}
+        actions={<OffboardingMoreMenu exportHref={"/offboarding/export" + serializeListState(state, OFFBOARDING_LIST_CONFIG)} />}
       />
       <div className="flex flex-col gap-2">
         <OffboardingToolbar state={state} facets={facets} />
         {rows.length === 0 ? (
           <EmptyState
-            title={filtered ? "No one matches these filters" : "Nobody is offboarding"}
+            title={filtered ? "No one matches these filters" : "No one is leaving"}
             description={
               filtered
                 ? undefined
-                : "Set someone's employment to OFFBOARDING on their employee record and they appear here with whatever they still hold."
+                : "Start offboarding from a person's profile — More › Start offboarding…"
             }
             actions={
               filtered
@@ -69,8 +73,11 @@ export default async function OffboardingPage({
           />
         ) : (
           <>
-            <p className="font-mono text-[11px] text-fg-muted">
-              {total} {total === 1 ? "person" : "people"} leaving · every item is collected as its own request
+            <p aria-live="polite" className="text-[12px] text-fg-muted">
+              {total} {total === 1 ? "person" : "people"} leaving
+              {overdueCount > 0 && (
+                <> · <Link href={"/offboarding" + serializeListState(withFilter(state, "due", ["overdue"]), OFFBOARDING_LIST_CONFIG)} className="text-accent underline hover:text-accent-hover">{overdueCount} overdue</Link></>
+              )}
             </p>
             <Table>
               <THead>
@@ -86,12 +93,9 @@ export default async function OffboardingPage({
                   <Th width={168} sort={sortDir("due")} sortIndex={sortIndex("due")}>
                     <Link href={sortHref("due")}>Due</Link>
                   </Th>
-                  <Th width={84}>Items out</Th>
                   <Th width={150} sort={sortDir("undecided")} sortIndex={sortIndex("undecided")}>
-                    <Link href={sortHref("undecided")}>Undecided</Link>
+                    <Link href={sortHref("undecided")}>Progress</Link>
                   </Th>
-                  <Th width={104}>M365</Th>
-                  <Th width={112}>Joined</Th>
                   <Th width={124} aria-label="Row actions" />
                 </Tr>
               </THead>
@@ -106,36 +110,45 @@ export default async function OffboardingPage({
                           <span className="font-mono text-[10px] text-fg-faint">
                             {r.employeeNo} · {r.title}
                           </span>
+                          {r.attention?.label && (
+                            <span
+                              className={
+                                "text-[10.5px] " +
+                                (r.attention.kind === "failed" || r.attention.kind === "overdue"
+                                  ? "font-medium"
+                                  : "text-fg-muted")
+                              }
+                              style={
+                                r.attention.kind === "failed" || r.attention.kind === "overdue"
+                                  ? { color: "var(--st-attention-text)" }
+                                  : undefined
+                              }
+                            >
+                              {r.attention.label}
+                            </span>
+                          )}
                         </span>
                       </Link>
                     </Td>
                     <Td>{r.department}</Td>
                     <Td mono>{fmtDate(r.started)}</Td>
                     <Td>{r.dueAt ? <DuePill dueAt={r.dueAt} today={today} withDate /> : <span className="text-fg-faint">—</span>}</Td>
-                    <Td mono>{r.itemsOut}</Td>
-                    <Td mono className="text-[10.5px]">
-                      {r.total === 0 ? (
-                        "nothing to collect"
-                      ) : (
-                        <>
-                          {/* of the WHOLE offboarding, including items whose return
-                              already executed — counting only what is still out made
-                              this numerator run backwards as work progressed */}
-                          {r.decided} of {r.total}
-                          {r.undecided > 0 && (
-                            <span className="pl-1 font-medium" style={{ color: "var(--st-attention-text)" }}>
-                              · {r.undecided} to go
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </Td>
-                    <Td mono className="text-[10.5px]">{r.m365 ?? "no sync yet"}</Td>
-                    <Td mono>{r.joined}</Td>
                     <Td>
-                      <ButtonLink size="sm" variant={canMutate ? "primary" : "secondary"} href={`/offboarding/${r.id}`}>
-                        {canMutate ? "Open wizard" : "View"}
-                      </ButtonLink>
+                      <span className="font-mono text-[11px] text-fg">{r.decided} of {r.total} decided</span>
+                      <ProgressBar value={r.decided} max={r.total} label={`${r.name}: ${r.decided} of ${r.total} decided`} />
+                    </Td>
+                    <Td className="text-right">
+                      {(() => {
+                        const next = canMutate
+                          ? offboardingNext({
+                              id: r.id, employment: r.employment, dueAt: r.dueAt, undecided: r.undecided,
+                              failed: r.failed, m365Status: r.m365,
+                            })
+                          : null;
+                        return next
+                          ? <ButtonLink size="sm" variant="secondary" href={next.href}>{next.label}</ButtonLink>
+                          : <ButtonLink size="sm" variant="ghost" href={`/offboarding/${r.id}`}>View</ButtonLink>;
+                      })()}
                     </Td>
                   </Tr>
                 ))}
