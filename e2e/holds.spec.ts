@@ -406,12 +406,14 @@ test.describe("holds", () => {
       await expect(page.getByText("Hold on BR-PH-0301 released")).toBeVisible({ timeout: 15_000 });
       await expect(page.getByRole("link", { name: "BR-PH-0301", exact: true })).toHaveCount(0);
 
-      // (b) the /reservations ACTIVE row.
+      // (b) the /reservations ACTIVE row: Release lives in the row menu, and its
+      // title names the device and the person the hold was for (plan P-12).
       await page.goto("/reservations?state=ACTIVE");
       const listRow = page.getByRole("row", { name: /BR-MN-0911/ });
       await waitForHydration(listRow);
-      await listRow.getByRole("button", { name: "Release", exact: true }).click();
-      const listDialog = page.getByRole("dialog", { name: "Release the hold on BR-MN-0911?" });
+      await listRow.getByRole("button", { name: "Actions for BR-MN-0911" }).click();
+      await page.getByRole("menuitem", { name: "Release…" }).click();
+      const listDialog = page.getByRole("dialog", { name: `Release the hold on BR-MN-0911 · ${monitor.model} for ${paolo.name}?` });
       await waitForHydration(listDialog);
       await listDialog.getByRole("button", { name: "Release", exact: true }).click();
       await expect(page.getByText("Hold on BR-MN-0911 released")).toBeVisible({ timeout: 15_000 });
@@ -569,6 +571,14 @@ test.describe("holds", () => {
       await page.goto("/reservations?state=ACTIVE");
       await expect(page.getByRole("row", { name: /BR-MN-0910/ })).toBeVisible();
       await expect(page.getByRole("button", { name: "Release", exact: true })).toHaveCount(0);
+      // The row menu a viewer opens offers only Open items: no Release, no Assign.
+      const viewerMenu = page.getByRole("button", { name: "Actions for BR-MN-0910" });
+      await waitForHydration(viewerMenu);
+      await viewerMenu.click();
+      await expect(page.getByRole("menuitem", { name: "Open record" })).toBeVisible();
+      await expect(page.getByRole("menuitem", { name: "Release…" })).toHaveCount(0);
+      await expect(page.getByRole("menuitem", { name: /^Assign to/ })).toHaveCount(0);
+      await page.keyboard.press("Escape");
 
       await expectNoSeriousAxe(page);
     } finally {
