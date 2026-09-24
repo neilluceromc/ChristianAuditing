@@ -4,15 +4,15 @@ import { useState } from "react";
 import { Drawer } from "@/components/ui/drawer";
 import { Icon } from "@/components/ui/icon";
 import type { NavSection } from "@/lib/workspaces";
-import { NavList, type ApprovalsBadge } from "./nav-list";
+import { NavList, type NavBadges } from "./nav-list";
 
 export function MobileNav({
   sections,
-  badge,
+  badges,
   workspaceLabel,
 }: {
   sections: NavSection[];
-  badge: ApprovalsBadge;
+  badges: NavBadges;
   workspaceLabel: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -28,7 +28,7 @@ export function MobileNav({
       </button>
       {open && (
         <Drawer open onClose={() => setOpen(false)} title={workspaceLabel} side="left" width={280}>
-          <NavList sections={sections} badge={badge} onNavigate={() => setOpen(false)} />
+          <NavList sections={sections} badges={badges} onNavigate={() => setOpen(false)} />
         </Drawer>
       )}
     </div>

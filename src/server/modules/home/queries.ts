@@ -13,7 +13,7 @@ import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
-import { loanRow, leaverRow, groupWork, type WorkGroup, type WorkRow, type WorkSectionId } from "@/lib/worklist";
+import { loanRow, loanSoonEdge, leaverRow, groupWork, type WorkGroup, type WorkRow, type WorkSectionId } from "@/lib/worklist";
 import { orderByOffboardingAttention } from "@/lib/offboarding";
 import { leaverStates } from "@/server/modules/offboarding/queries";
 
@@ -135,6 +135,7 @@ export async function worklist(
       action: "Open",
       severity: daysSince(a.slaAt, now),
       rank: 0,
+      ageDays: daysSince(a.slaAt, now),
     });
   }
 
@@ -149,6 +150,7 @@ export async function worklist(
       action: "Open",
       severity: daysSince(a.updatedAt, now),
       rank: 1,
+      ageDays: daysSince(a.updatedAt, now),
     });
   }
 
@@ -173,6 +175,7 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Investigate",
       severity: daysSince(a.updatedAt, now),
+      ageDays: daysSince(a.updatedAt, now),
       entity: { kind: "asset", id: a.id, label: a.tag },
     });
   }
@@ -186,6 +189,7 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Fix record",
       severity: daysSince(a.updatedAt, now),
+      ageDays: daysSince(a.updatedAt, now),
       // Ruling R6: no in-place control — assignAsset refuses anything but SPARE,
       // so the fix lives on the record (Change status…).
       entity: { kind: "asset", id: a.id, label: a.tag },
@@ -201,6 +205,7 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Check",
       severity: daysSince(a.createdAt, now),
+      ageDays: daysSince(a.createdAt, now),
       control: { kind: "it-check", asset: { id: a.id, tag: a.tag } },
       entity: { kind: "asset", id: a.id, label: a.tag },
     });
@@ -216,6 +221,7 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Triage",
       severity: n,
+      ageDays: n,
       control: { kind: "triage", asset: { id: a.id, tag: a.tag, model: a.model } },
       entity: { kind: "asset", id: a.id, label: a.tag },
     });
@@ -238,6 +244,7 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Chase",
       severity: down,
+      ageDays: down,
       entity: { kind: "asset", id: a.id, label: a.tag },
     });
   }
@@ -306,10 +313,47 @@ export async function hireWorkRows(now: Date): Promise<{ rows: WorkRow[]; satura
       href: `/employees/${e.id}#loadout`,
       action: "Fill loadout",
       severity: daysSince(e.joinedAt, now),
+      ageDays: daysSince(e.joinedAt, now),
       entity: { kind: "employee", id: e.id, label: e.name },
     });
   }
   return { rows, saturated: hires.length === CAP.small };
+}
+
+/**
+ * The Worklist nav badge (spec §5.3, plan P-9): every row the worklist shows,
+ * minus today's hidden ones, uncapped. It runs in the app layout on every
+ * navigation, so each section is one indexed count (leavers included — not
+ * leaverStates(), which reads every leaver in full); new hires reuse the
+ * worklist's own capped helper. Each where mirrors worklist()'s read.
+ */
+export async function worklistCount(userId: string, role: Role, now: Date = new Date()): Promise<number> {
+  const pref = await prisma.userPreference.findUnique({
+    where: { userId_key: { userId, key: DISMISS_PREF_KEY } },
+    select: { value: true },
+  });
+  const hidden = activeDismissals(pref?.value, todayStamp(now));
+  const hiddenIds = (section: WorkSectionId) =>
+    [...hidden].filter((k) => k.startsWith(`${section}:`)).map((k) => k.slice(section.length + 1));
+  const scope = approvalClassWhere(role);
+  // loanRow's edge, on the Manila calendar (see loanSoonEdge).
+  const soonEdge = loanSoonEdge(now);
+  const [triage, repairs, check, loans, missing, orphaned, breached, failed, leavers, hires] = await Promise.all([
+    prisma.asset.count({ where: { cls: "IT", returnedAt: { not: null }, id: { notIn: hiddenIds("triage") } } }),
+    prisma.asset.count({ where: { cls: "IT", status: "DEFECTIVE", id: { notIn: hiddenIds("repairs") } } }),
+    prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null, id: { notIn: hiddenIds("check") } } }),
+    prisma.asset.count({
+      where: { cls: "IT", status: "TEMPORARY", id: { notIn: hiddenIds("loans") }, OR: [{ loanDueAt: null }, { loanDueAt: { lt: soonEdge } }] },
+    }),
+    prisma.asset.count({ where: { cls: "IT", status: "MISSING", id: { notIn: hiddenIds("missing") } } }),
+    prisma.asset.count({ where: { cls: "IT", status: "DEPLOYED", assigneeId: null, id: { notIn: hiddenIds("missing") } } }),
+    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now }, id: { notIn: hiddenIds("queue") } }, scope] } }),
+    prisma.approval.count({ where: { AND: [{ state: "EXECUTION_FAILED" }, { id: { notIn: hiddenIds("queue") } }, scope] } }),
+    prisma.employee.count({ where: { employment: "OFFBOARDING", id: { notIn: hiddenIds("queue") } } }),
+    hireWorkRows(now),
+  ]);
+  const hireCount = hires.rows.filter((r) => !hidden.has(r.key)).length;
+  return triage + repairs + check + loans + missing + orphaned + breached + failed + leavers + hireCount;
 }
 
 export interface ClaimRow {

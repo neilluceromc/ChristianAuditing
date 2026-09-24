@@ -3,7 +3,7 @@ import { dayFromISO } from "./deadlines";
 import { fmtDate } from "./format";
 import {
   DEFAULT_LOAN_DAYS, LOAN_DUE_SOON_DAYS, SEE_ALL_HREF, WORK_SECTIONS, capLine, groupWork, leaverRow, loanRow,
-  pastSlaCount, summaryChips, workActionLabel, type LeaverLike, type WorkGroup, type WorkRow,
+  loanSoonEdge, pastSlaCount, summaryChips, workActionLabel, workHeadline, type LeaverLike, type WorkGroup, type WorkRow,
 } from "./worklist";
 
 const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>
@@ -79,6 +79,48 @@ describe("loanRow — Manila-day words, a Set loan date… control on every loan
   });
   it("section blurb names the three cases", () => {
     expect(WORK_SECTIONS.find((s) => s.id === "loans")?.blurb).toBe("Loans overdue, due this week, or with no due date.");
+  });
+});
+
+describe("loanSoonEdge — the badge's loan count agrees with loanRow", () => {
+  const base = { id: "a1", tag: "BR-LT-0210", model: "ThinkPad", holder: null };
+  it("a loan due 7 Manila days out is counted, one due 8 days out is not", () => {
+    const NOW = new Date("2026-09-24T10:00:00+08:00");
+    const edge = loanSoonEdge(NOW);
+    expect(edge.toISOString()).toBe("2026-10-01T16:00:00.000Z"); // 2026-10-02 00:00 Manila
+    const day7 = new Date("2026-10-01T23:59:00+08:00");
+    const day8 = new Date("2026-10-02T00:00:00+08:00");
+    expect(loanRow({ ...base, loanDueAt: day7 }, NOW)).not.toBeNull();
+    expect(day7 < edge).toBe(true);
+    expect(loanRow({ ...base, loanDueAt: day8 }, NOW)).toBeNull();
+    expect(day8 < edge).toBe(false);
+  });
+  it("matches loanRow at every hour around the edge, from either end of the Manila day, UTC-midnight dates included", () => {
+    for (const nowText of ["2026-09-24T00:30:00+08:00", "2026-09-24T23:30:00+08:00"]) {
+      const now = new Date(nowText);
+      const edge = loanSoonEdge(now);
+      for (let h = -48; h <= 48; h++) {
+        const due = new Date(edge.getTime() + h * 3_600_000);
+        expect(due < edge).toBe(loanRow({ ...base, loanDueAt: due }, now) !== null);
+      }
+      for (const iso of ["2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03"]) {
+        const due = dayFromISO(iso);
+        expect(due < edge).toBe(loanRow({ ...base, loanDueAt: due }, now) !== null);
+      }
+    }
+  });
+});
+
+describe("workHeadline", () => {
+  const row = (over: Partial<WorkRow>): WorkRow => ({ key: "k", section: "triage", title: "", meta: "", href: "/", action: "Open", severity: 0, ...over });
+  it("counts, the oldest age and past-SLA rows, dropping zero parts", () => {
+    const groups = groupWork([
+      row({ key: "triage:1", ageDays: 4 }),
+      row({ key: "queue:2", section: "queue", rank: 0, ageDays: 9 }),
+    ], new Set(), {});
+    expect(workHeadline(groups)).toBe("2 waiting · oldest 9 d · 1 past SLA");
+    expect(workHeadline(groupWork([row({ key: "triage:1" })], new Set(), {}))).toBe("1 waiting");
+    expect(workHeadline([])).toBe("");
   });
 });
 

@@ -3,7 +3,7 @@
  * user chose, each row with the one action that clears it. Pure; the queries
  * live in home/queries.ts.
  */
-import { daysUntil, dueStatus } from "./deadlines";
+import { addDays, daysUntil, dueStatus } from "./deadlines";
 import { fmtDate, localDateISO } from "./format";
 import { offboardingNext, type LeaverState } from "./offboarding";
 
@@ -46,6 +46,8 @@ export interface WorkRow {
   control?: WorkControl;
   /** what the row menu's Open record / Open profile opens */
   entity?: { kind: "asset" | "employee"; id: string; label: string };
+  /** how long the row has waited, in days — Home's "oldest {d} d" (spec §5.4); absent = not an age */
+  ageDays?: number;
 }
 
 export type WorkControl =
@@ -75,6 +77,16 @@ export function loanRow(a: LoanLike, now: Date): WorkRow | null {
   if (days > LOAN_DUE_SOON_DAYS) return null;
   const when = days === 0 ? "due today" : days === 1 ? "due tomorrow" : `due in ${days} d`;
   return { ...base, title: `${a.tag} ${when}`, meta, severity: LOAN_DUE_SOON_DAYS - days };
+}
+
+/**
+ * The Worklist badge's loan edge (spec §5.3): a loan is on the list exactly
+ * when loanRow returns a row — due on or before the Manila day
+ * LOAN_DUE_SOON_DAYS from today — i.e. due before Manila midnight starting the
+ * day after that. `dayFromISO` is UTC midnight, so the +08:00 is spelled out.
+ */
+export function loanSoonEdge(now: Date): Date {
+  return new Date(`${addDays(localDateISO(now), LOAN_DUE_SOON_DAYS + 1)}T00:00:00+08:00`);
 }
 
 export interface LeaverLike extends LeaverState { name: string; employeeNo: string; itemsOut: number }
@@ -153,4 +165,13 @@ export function summaryChips(groups: WorkGroup[]): { id: WorkSectionId; label: s
 /** Rank-0 queue rows are SLA breaches (worklist()'s own ranking). */
 export function pastSlaCount(groups: WorkGroup[]): number {
   return groups.find((g) => g.section.id === "queue")?.rows.filter((r) => (r.rank ?? 0) === 0).length ?? 0;
+}
+
+/** Home's Worklist headline (spec §5.4): parts omitted when zero. */
+export function workHeadline(groups: WorkGroup[]): string {
+  const n = groups.reduce((s, g) => s + g.total, 0);
+  if (n === 0) return "";
+  const oldest = Math.max(0, ...groups.flatMap((g) => g.rows.map((r) => r.ageDays ?? 0)));
+  const late = pastSlaCount(groups);
+  return [`${n} waiting`, oldest > 0 ? `oldest ${oldest} d` : null, late > 0 ? `${late} past SLA` : null].filter(Boolean).join(" · ");
 }

@@ -47,16 +47,24 @@ test.afterAll(async () => {
 });
 
 test.describe("home — IT dashboard leads with work, not KPIs", () => {
-  test("the six card headings render in the documented order; no KPI row sits above the Worklist", async ({ page }) => {
+  test("the card headings render in the documented order; no KPI row sits above the Worklist", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
     // Scoped to <main> — the sidebar's nav groups are h3s too ("Overview",
     // "Tracking", …) and would otherwise pollute this list.
     const headings = page.locator("main").getByRole("heading", { level: 2 });
+    // Phase 32 (spec §5.4): no Jump to on IT's Home, and it@ holds no claim in
+    // the seed — "Claimed by you" is then one muted line under the Worklist,
+    // not a card of its own.
     await expect(headings).toHaveText([
-      "Worklist", "Claimed by you", "Fleet", "Age", "Warranty runway", "Jump to",
+      "Worklist", "Fleet", "Age", "Warranty runway",
     ]);
+    await expect(page.locator("main").getByText("You hold no claims.", { exact: true })).toBeVisible();
+    // Spec §5.3/§5.4: the nav's Worklist count, the card's headline and its header link.
+    await expect(page.getByRole("complementary", { name: "Primary" }).getByLabel(/^\d+ waiting on the worklist$/)).toBeVisible();
+    await expect(page.locator("main").getByText(/^\d+ waiting( · oldest \d+ d)?( · \d+ past SLA)?$/)).toBeVisible();
+    await expect(page.locator("main").getByRole("link", { name: "Open worklist" })).toHaveAttribute("href", "/inventory/work");
 
     // Structural proof there's no KPI-tile row above it: the Worklist card
     // is literally the first child of the page's content column (the h1
@@ -124,13 +132,16 @@ test.describe("home — claims sit above the pool", () => {
 });
 
 test.describe("home — viewer is read-only", () => {
-  test("no Worklist, no row menus, READ-ONLY badge shows, Fleet still renders", async ({ page }) => {
+  test("the Worklist reads read-only, no row menus, READ-ONLY badge shows, Fleet still renders", async ({ page }) => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/");
 
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Worklist", level: 2 })).toHaveCount(0);
+    // Phase 32 (plan P-10): the viewer sees the worklist, with Open links and no controls.
+    await expect(page.getByRole("heading", { name: "Worklist", level: 2 })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(0);
+    await expect(page.getByLabel(/waiting on the worklist$/)).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Claimed by you", level: 2 })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toBeVisible();
   });
 });
@@ -340,11 +351,11 @@ test.describe("home — dismissal and focus mode (mutating, serial)", () => {
     await expect(page.getByRole("button", { name: "Show everything" })).toBeVisible({ timeout: 15_000 });
 
     await expect(page.getByRole("heading", { name: "Worklist", level: 2 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Claimed by you", level: 2 })).toBeVisible();
+    // it@ holds no claim: "Claimed by you" survives Focus as its one muted line.
+    await expect(page.locator("main").getByText("You hold no claims.", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Age", level: 2 })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Warranty runway", level: 2 })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Jump to", level: 2 })).toHaveCount(0);
     expect(page.url()).not.toContain("focus");
 
     await expectNoSeriousAxe(page);

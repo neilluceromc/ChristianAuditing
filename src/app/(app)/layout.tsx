@@ -11,13 +11,22 @@ import { filterSectionsForRole, getApprovalsBadge, Sidebar } from "@/components/
 import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
+import { worklistCount } from "@/server/modules/home/queries";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   const jar = await cookies();
   const ws = resolveWorkspace(user.role, jar.get("br.dept")?.value);
   const sections = filterSectionsForRole(WORKSPACE_NAV[ws], user.role);
-  const badge = await getApprovalsBadge(user.role);
+  // Spec §5.3: the Worklist count is admin's and IT's only. A failed count
+  // hides the badge rather than failing every page's shell.
+  const [approvals, worklist] = await Promise.all([
+    getApprovalsBadge(user.role),
+    user.role === "admin" || user.role === "it_staff"
+      ? worklistCount(user.id, user.role).catch(() => 0)
+      : Promise.resolve(0),
+  ]);
+  const badges = { approvals, worklist };
 
   return (
     <div className="flex min-h-screen">
@@ -32,13 +41,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           user={user}
           ws={ws}
           sections={sections}
-          badge={badge}
+          badges={badges}
           allowed={ROLE_WORKSPACES[user.role]}
         />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="contents print:hidden">
-          <Topbar sections={sections} badge={badge} workspaceLabel={WORKSPACE_META[ws].label} />
+          <Topbar sections={sections} badges={badges} workspaceLabel={WORKSPACE_META[ws].label} />
         </div>
         <main id="main" tabIndex={-1} className="flex-1 p-6 print:p-0">
           {children}

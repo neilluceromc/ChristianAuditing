@@ -9,6 +9,8 @@ import {
 import { adminHome } from "@/server/modules/admin/queries";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 import { isDirectLifecycle } from "@/lib/asset-class";
+import { isApprover } from "@/lib/approval-access";
+import { workHeadline } from "@/lib/worklist";
 import { AdminHomeBody } from "@/components/home/admin-home";
 import { DirectChangesBody } from "@/components/home/direct-changes";
 import { PageHeader } from "@/components/ui/page-header";
@@ -26,8 +28,8 @@ import Link from "next/link";
 import type { TodoRow } from "@/server/modules/home/queries";
 
 /**
- * Focus's only job is hiding SECONDARY sections (fleet/age/warranty/Jump-to
- * on IT, Jump-to on purchasing and finance, "Applied directly · last 7 days"
+ * Focus's only job is hiding SECONDARY sections (fleet/age/warranty on IT,
+ * Jump-to on purchasing and finance, "Applied directly · last 7 days"
  * on admin — see the `!focus` blocks below). Admin's Home used to have no
  * secondary section: its three lists (users, flags, webhooks) were the whole
  * page, so showing the toggle there would have rendered a control that flips
@@ -185,11 +187,12 @@ export default async function Home() {
   }
 
   // ── IT (and admin, and viewer read-only): no KPI row, work first ───────
+  // Plan P-10: a viewer reads the worklist too (read-only, every verb Open);
+  // "Claimed by you" is only for roles that can hold a claim.
+  const approver = isApprover(user.role);
   const [shift, claims, fleetData, age, warranty, direct] = await Promise.all([
-    isViewer
-      ? Promise.resolve({ ok: true as const, data: [] })
-      : safeSection("Worklist", () => worklist(user.id, user.role, { limit: 2, excludeOwnClaims: true })),
-    safeSection("Claimed by you", () => claimedByYou(user.id, user.role)),
+    safeSection("Worklist", () => worklist(user.id, user.role, { limit: 2, excludeOwnClaims: !isViewer })),
+    approver ? safeSection("Claimed by you", () => claimedByYou(user.id, user.role)) : Promise.resolve(null),
     safeSection("Fleet", () => fleet()),
     safeSection("Age", () => ageHistogram()),
     safeSection("Warranty runway", () => warrantyRunway()),
@@ -206,27 +209,41 @@ export default async function Home() {
     <>
       {header}
       <div className="flex max-w-[980px] flex-col gap-4">
-        {/* Viewer has no action queue, so it doesn't get one (entry criterion #3). */}
-        {!isViewer && (
-          <SectionCard title="Worklist" result={shift}>
-            {(groups) => (
-              <Worklist
-                groups={groups}
-                canAct
-                direct={isDirectLifecycle(user.role, "IT")}
-                employees={employees}
-                seeAllBase="/inventory/work"
-              />
-            )}
-          </SectionCard>
-        )}
+        {/* Spec §5.4: a headline, then the groups; a viewer reads them with Open links (canAct false). */}
+        <SectionCard
+          title="Worklist"
+          result={shift}
+          actions={
+            <Link href="/inventory/work" className="text-[12px] font-medium text-accent hover:underline">
+              Open worklist
+            </Link>
+          }
+        >
+          {(groups) => {
+            const headline = workHeadline(groups);
+            return (
+              <div className="flex flex-col gap-4">
+                {headline && <p className="text-[15px] font-semibold leading-tight text-fg">{headline}</p>}
+                <Worklist
+                  groups={groups}
+                  canAct={!isViewer}
+                  direct={isDirectLifecycle(user.role, "IT")}
+                  employees={employees}
+                  seeAllBase="/inventory/work"
+                />
+              </div>
+            );
+          }}
+        </SectionCard>
 
-        {/* Claims sit ABOVE the pool — a forgotten claim is worse than an unclaimed item. */}
-        <SectionCard title="Claimed by you" result={claims}>
-          {(rows) =>
-            rows.length === 0 ? (
-              <p className="text-xs text-fg-muted">You hold no claims.</p>
-            ) : (
+        {/* Claims sit ABOVE the pool — a forgotten claim is worse than an unclaimed item.
+            Spec §5.4: none held is one muted line under the Worklist, not a card. */}
+        {claims && claims.ok && claims.data.length === 0 && (
+          <p className="-mt-2 text-xs text-fg-muted">You hold no claims.</p>
+        )}
+        {claims && !(claims.ok && claims.data.length === 0) && (
+          <SectionCard title="Claimed by you" result={claims}>
+            {(rows) => (
               <ol className="flex flex-col">
                 {rows.map((c) => (
                   <li key={c.id} className="flex items-center gap-3 border-b border-border-faint py-2 last:border-b-0">
@@ -241,9 +258,9 @@ export default async function Home() {
                   </li>
                 ))}
               </ol>
-            )
-          }
-        </SectionCard>
+            )}
+          </SectionCard>
+        )}
 
         {!focus && (
           <>
@@ -266,15 +283,12 @@ export default async function Home() {
               </SectionCard>
             </div>
 
-            <SectionCard title="Jump to" result={{ ok: true, data: sections }}>
-              {(s) => <JumpTo sections={s} />}
-            </SectionCard>
           </>
         )}
 
         {focus && (
           <p className="font-mono text-[10.5px] text-fg-muted">
-            Focus mode — fleet, age, warranty and quick links are hidden. Everything else is still there.
+            Focus mode — fleet, age and warranty are hidden. Everything else is still there.
           </p>
         )}
       </div>
