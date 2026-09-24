@@ -191,7 +191,8 @@ export async function applySupplierImport(
   // page in one call — the same I-2 lesson the employee importer's own
   // `applyEmployeeImport` applies for `/employees/[id]`, and the right shape
   // here since a single apply can touch many different supplier ids.
-  revalidatePath("/purchases/suppliers/[id]", "page");
+  // On the FILE path, route group included (Phase 31) — the URL shape matched nothing.
+  revalidatePath("/(app)/purchases/suppliers/[id]", "page");
   revalidatePath("/audit");
   return ok({
     created,

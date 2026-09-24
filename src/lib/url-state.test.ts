@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  parseListState, serializeListState, toggleSort, withFilter, withSearch,
+  parseListState, primarySortOf, serializeListState, toggleSort, withFilter, withSearch,
   clearFilters, toSearchParams, type ListConfig,
 } from "./url-state";
 
@@ -66,6 +66,20 @@ describe("toggleSort", () => {
   it("never exceeds two keys", () => {
     expect(toggleSort([{ key: "tag", dir: "asc" }, { key: "model", dir: "asc" }], "purchasedAt"))
       .toEqual([{ key: "purchasedAt", dir: "asc" }, { key: "tag", dir: "asc" }]);
+  });
+});
+
+describe("primarySortOf (Phase 31: a derived sort key orders only as the primary)", () => {
+  it("returns the key when it is the primary", () => {
+    expect(primarySortOf([{ key: "loadout", dir: "desc" }, { key: "name", dir: "asc" }], "loadout")).toEqual({ key: "loadout", dir: "desc" });
+  });
+  it("ignores the key once a header click demotes it to secondary", () => {
+    const sort = toggleSort([{ key: "loadout", dir: "asc" }], "name");
+    expect(sort).toEqual([{ key: "name", dir: "asc" }, { key: "loadout", dir: "asc" }]);
+    expect(primarySortOf(sort, "loadout")).toBeUndefined();
+  });
+  it("returns undefined for an empty sort", () => {
+    expect(primarySortOf([], "attention")).toBeUndefined();
   });
 });
 

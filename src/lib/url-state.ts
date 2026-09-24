@@ -89,6 +89,16 @@ export function toggleSort(sort: SortKey[], key: string): SortKey[] {
   return [{ key, dir: "asc" as const }, ...(primary ? [primary] : [])].slice(0, MAX_SORT_KEYS);
 }
 
+/**
+ * A derived sort key (Loadout on people, Attention on inventory) is ordered in
+ * memory, and only when it is the PRIMARY key: once a header click demotes it
+ * to secondary, the clicked column must really order the rows (Phase 30 I-2,
+ * Phase 31 for the Loadout twin). The SQL order builders drop it either way.
+ */
+export function primarySortOf(sort: SortKey[], key: string): SortKey | undefined {
+  return sort[0]?.key === key ? sort[0] : undefined;
+}
+
 export function withFilter(state: ListState, facet: string, values: string[]): ListState {
   const filters = { ...state.filters };
   if (values.length) filters[facet] = values;

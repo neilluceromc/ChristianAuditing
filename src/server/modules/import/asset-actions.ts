@@ -315,9 +315,10 @@ export async function applyAssetImport(
   // neither revalidated before (unlike `updateAsset` and
   // `completeOffboarding`, which do this per asset). Per-asset
   // `revalidatePath` calls are wrong at up to 2,000 rows; Next 15's
-  // dynamic-segment form revalidates every matching page in one call.
-  revalidatePath("/inventory/[id]", "page");
-  revalidatePath("/inventory/[id]/history", "page");
+  // dynamic-segment form revalidates every matching page in one call. It is
+  // matched against the FILE path, route groups included (Phase 31: the
+  // URL-shaped `/inventory/[id]` matched nothing); "layout" covers every tab.
+  revalidatePath("/(app)/inventory/[id]", "layout");
   return ok({
     created,
     updated,

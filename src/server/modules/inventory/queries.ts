@@ -6,7 +6,7 @@ import {
   buildAssetOrderBy, buildAssetWhere, type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import { ASSET_CLASSES, ASSIGNABLE_FROM, canSeeClass, statusesFor } from "@/lib/asset-class";
-import type { ListState } from "@/lib/url-state";
+import { primarySortOf, type ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import {
   REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
@@ -205,6 +205,20 @@ export async function repairStageIds(
   return kept.filter((id) => candidateIds.has(id));
 }
 
+/**
+ * The Attention order: the whole view in its SQL order, ranked by attentionOf, in memory (Attention
+ * is derived, not a column). One helper so the list and the export (Phase 31) order identically.
+ */
+export async function attentionOrdered(
+  where: Prisma.AssetWhereInput,
+  orderBy: Prisma.AssetOrderByWithRelationInput[],
+  dir: "asc" | "desc",
+  now: Date,
+): Promise<AssetRow[]> {
+  const all = await prisma.asset.findMany({ where, orderBy, include: LIST_INCLUDE });
+  return orderByAttention(all.map((a) => toRow(a, now)), dir);
+}
+
 export async function listAssets(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
@@ -237,10 +251,9 @@ export async function listAssets(
   // the people list) — the whole view in the default order, ranked by attentionOf, then paged.
   // Only as the PRIMARY key: a secondary `attention` (left behind by a header click) is dropped, as
   // buildAssetOrderBy already drops it in SQL, so the clicked column really orders the rows.
-  const attentionSort = state.sort[0]?.key === "attention" ? state.sort[0] : undefined;
+  const attentionSort = primarySortOf(state.sort, "attention");
   if (attentionSort) {
-    const all = await prisma.asset.findMany({ where, orderBy, include: LIST_INCLUDE });
-    const ordered = orderByAttention(all.map((a) => toRow(a, now)), attentionSort.dir);
+    const ordered = await attentionOrdered(where, orderBy, attentionSort.dir, now);
     const pg = pageOf(ordered.length, state.page, ENTITY_PAGE_SIZE);
     return {
       rows: ordered.slice(pg.skip, pg.skip + pg.take),

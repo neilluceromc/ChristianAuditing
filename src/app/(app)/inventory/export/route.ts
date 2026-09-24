@@ -8,8 +8,8 @@ import {
   buildAssetOrderBy, buildAssetWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
 import { defaultClassFor, parseCls, visibleClassWhere } from "@/lib/asset-class";
-import { parseListState, withFilter } from "@/lib/url-state";
-import { repairStageIds } from "@/server/modules/inventory/queries";
+import { parseListState, primarySortOf, withFilter } from "@/lib/url-state";
+import { attentionOrdered, repairStageIds } from "@/server/modules/inventory/queries";
 import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
 
 export async function GET(req: Request) {
@@ -46,12 +46,23 @@ export async function GET(req: Request) {
   const count = await prisma.asset.count({ where });
   if (count > EXPORT_CAP) return capRefusal(count);
 
-  const assets = await prisma.asset.findMany({
+  const orderBy = buildAssetOrderBy(state.sort);
+  const fetched = await prisma.asset.findMany({
     where,
-    orderBy: ids ? { tag: "asc" } : buildAssetOrderBy(state.sort),
+    orderBy: ids ? { tag: "asc" } : orderBy,
     // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
     include: { category: true, type: true, assignee: true, vendor: true },
   });
+  // Phase 31: the Attention sort (primary key only, as on the list) is derived, so the sheet takes
+  // its order from the same helper the list pages from — same rows, same order as the screen. The
+  // count above already capped the set, so this second pass is bounded by EXPORT_CAP.
+  const attentionSort = ids ? undefined : primarySortOf(state.sort, "attention");
+  let assets = fetched;
+  if (attentionSort) {
+    const rank = new Map((await attentionOrdered(where, orderBy, attentionSort.dir, new Date())).map((r, i) => [r.id, i]));
+    // a row created between the two passes has no rank: it goes last (a stable sort keeps its SQL place among any others)
+    assets = [...fetched].sort((a, b) => (rank.get(a.id) ?? rank.size) - (rank.get(b.id) ?? rank.size));
+  }
 
   const buffer = await toXlsxBuffer(
     ASSET_EXPORT_COLUMNS,
