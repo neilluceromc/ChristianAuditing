@@ -74,6 +74,13 @@ export function withDismissal(value: unknown, today: string, key: string): Dismi
   return pref.keys.includes(key) ? pref : { date: today, keys: [...pref.keys, key] };
 }
 
+/** Undo for one hidden row (spec §5.2): today's set without that key. */
+export function withoutDismissal(value: unknown, today: string, key: string): DismissPref {
+  const pref = asPref(value);
+  if (!pref || pref.date !== today) return { date: today, keys: [] };
+  return { date: today, keys: pref.keys.filter((k) => k !== key) };
+}
+
 /** Asia/Manila day stamp — the business's day, so "the rest of the day" means theirs. */
 export function todayStamp(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(now);

@@ -181,7 +181,14 @@ export async function worklist(
 
   const todayISO = localDateISO(now);
   for (const e of leavers) {
-    rows.push(leaverRow({ id: e.id, name: e.name, employeeNo: e.employeeNo, itemsOut: e._count.assets, offboardingDueAt: e.offboardingDueAt }, todayISO));
+    // Stop-gap (Phase 32 T2): every leaver here is already filtered to
+    // employment: "OFFBOARDING"; failed/m365Status aren't queried yet, so
+    // leaverRow falls through to the Collect/Set-a-date/Close-account steps
+    // it always could. T9 replaces this with the real per-leaver snapshot.
+    rows.push(leaverRow({
+      id: e.id, name: e.name, employeeNo: e.employeeNo, itemsOut: e._count.assets,
+      employment: "OFFBOARDING", dueAt: e.offboardingDueAt, undecided: e._count.assets, failed: null, m365Status: null,
+    }, todayISO));
   }
 
   for (const e of hires) {
