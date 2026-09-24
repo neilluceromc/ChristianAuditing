@@ -1,4 +1,5 @@
 import type { AssetClass, AssetStatus } from "@prisma/client";
+import { daysUntil, isPastDue } from "./deadlines";
 
 /**
  * The outcome VOCABULARY, in README 3e's order. It is no longer the control:
@@ -44,7 +45,7 @@ export const WIZARD_STEPS = [
   { id: "review", label: "Review holdings" },
   { id: "collect", label: "Collect items" },
   { id: "accounts", label: "Accounts & M365" },
-  { id: "report", label: "Farewell report" },
+  { id: "report", label: "Finish" },
 ] as const;
 
 export type StepId = (typeof WIZARD_STEPS)[number]["id"];
@@ -61,6 +62,116 @@ export function parseStep(raw: string | null | undefined): StepId {
  */
 export function canContinue(step: StepId, state: { undecided: number }): boolean {
   return step !== "collect" || state.undecided === 0;
+}
+
+export interface FailedReturn { refNo: string; approvalId: string }
+
+/** One leaver as the queue, the wizard, the worklist and Home all read them (spec §3). */
+export interface LeaverState {
+  id: string;
+  employment: string;
+  dueAt: Date | null;
+  undecided: number;
+  /** the first held item whose return failed to execute */
+  failed: FailedReturn | null;
+  m365Status: string | null;
+}
+
+/** Exactly completeOffboarding's M365 gate: trimmed, case-folded, anything but null or "inactive" is live. */
+export function m365Live(status: string | null): boolean {
+  const s = status?.trim().toLowerCase() ?? null;
+  return s !== null && s !== "inactive";
+}
+
+export interface NextStep { step: StepId | null; label: string; href: string }
+
+/** The next step for one leaver, worst blocker first (spec §3). Null once offboarded. */
+export function offboardingNext(s: LeaverState): NextStep | null {
+  if (s.employment !== "OFFBOARDING") return null;
+  if (s.failed) return { step: null, label: `Resolve ${s.failed.refNo}`, href: `/approvals/${s.failed.approvalId}` };
+  if (s.dueAt === null) return { step: null, label: "Set a date", href: `/employees/${s.id}/edit` };
+  if (s.undecided > 0) {
+    return { step: "collect", label: `Collect ${s.undecided} item${s.undecided === 1 ? "" : "s"}`, href: `/offboarding/${s.id}?step=collect` };
+  }
+  if (m365Live(s.m365Status)) return { step: "accounts", label: "Close account", href: `/offboarding/${s.id}?step=accounts` };
+  return { step: "report", label: "Complete", href: `/offboarding/${s.id}?step=report` };
+}
+
+export interface ReadinessInput { id: string; total: number; undecided: number; failed: FailedReturn[]; m365Status: string | null }
+export interface ReadinessLine { kind: "equipment" | "requests" | "m365"; label: string; ok: boolean; href: string | null }
+
+/** The Finish step's checklist: one line per server gate, in completeOffboarding's order. */
+export function readiness(d: ReadinessInput): ReadinessLine[] {
+  const lines: ReadinessLine[] = [{
+    kind: "equipment",
+    label: `Equipment · ${d.total - d.undecided} of ${d.total} decided`,
+    ok: d.undecided === 0,
+    href: d.undecided === 0 ? null : `/offboarding/${d.id}?step=collect`,
+  }];
+  for (const f of d.failed) {
+    lines.push({ kind: "requests", label: `Requests · ${f.refNo} failed to execute`, ok: false, href: `/approvals/${f.approvalId}` });
+  }
+  const live = m365Live(d.m365Status);
+  lines.push({
+    kind: "m365",
+    label: `Microsoft 365 · ${d.m365Status ?? "never had an account"}`,
+    ok: !live,
+    href: live ? `/offboarding/${d.id}?step=accounts` : null,
+  });
+  return lines;
+}
+
+/** Empty means Complete may be offered; the server gate stays the backstop. */
+export function completionBlockers(d: ReadinessInput): ReadinessLine[] {
+  return readiness(d).filter((l) => !l.ok);
+}
+
+export type OffboardingAttentionKind = "failed" | "overdue" | "no-date" | "undecided" | "m365" | "ready";
+export interface OffboardingAttention { kind: OffboardingAttentionKind; label: string; severity: number }
+
+/** The one worst reason a leaver needs attention (spec §3), the Phase 30 severity shape. */
+export function offboardingAttention(s: LeaverState, todayISO: string): OffboardingAttention | null {
+  if (s.employment !== "OFFBOARDING") return null;
+  if (s.failed) return { kind: "failed", label: `return failed · ${s.failed.refNo}`, severity: 6000 };
+  if (s.dueAt !== null && isPastDue(s.dueAt, todayISO)) {
+    const days = -daysUntil(s.dueAt, todayISO);
+    return { kind: "overdue", label: `overdue by ${days} d`, severity: 5000 + days };
+  }
+  if (s.dueAt === null) return { kind: "no-date", label: "no completion date", severity: 4000 };
+  if (s.undecided > 0) return { kind: "undecided", label: `${s.undecided} to decide`, severity: 3000 + s.undecided };
+  if (m365Live(s.m365Status)) return { kind: "m365", label: `account still ${s.m365Status}`, severity: 2000 };
+  return { kind: "ready", label: "ready to complete", severity: 1000 };
+}
+
+/** desc = worst first. Ties by name then id; rows without a reason last either way. */
+export function orderByOffboardingAttention<T extends { attention: OffboardingAttention | null; name: string; id: string }>(
+  rows: T[], dir: "asc" | "desc",
+): T[] {
+  const sign = dir === "desc" ? -1 : 1;
+  const tie = (x: T, y: T) => x.name.localeCompare(y.name) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+  return [...rows].sort((x, y) => {
+    if (!x.attention || !y.attention) {
+      if (!x.attention && !y.attention) return tie(x, y);
+      return x.attention ? -1 : 1;
+    }
+    return sign * (x.attention.severity - y.attention.severity) || tie(x, y);
+  });
+}
+
+/** Without ?step=, open where the work is (spec §3). */
+export function defaultStep(s: { employment: string; undecided: number; m365Status: string | null }): StepId {
+  if (s.employment !== "OFFBOARDING") return "review";
+  if (s.undecided > 0) return "collect";
+  if (m365Live(s.m365Status)) return "accounts";
+  return "report";
+}
+
+const DECISION_STATE_WORD: Record<string, string> = {
+  PENDING: "awaiting approval", CLAIMED: "awaiting approval", APPROVED: "approved",
+  EXECUTED: "done", EXECUTION_FAILED: "failed to execute",
+};
+export function decisionStateLabel(state: string): string {
+  return DECISION_STATE_WORD[state] ?? state.toLowerCase().replaceAll("_", " ");
 }
 
 export interface ReportItem {

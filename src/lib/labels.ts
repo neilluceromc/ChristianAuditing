@@ -1,4 +1,4 @@
-import type { ApprovalType } from "@prisma/client";
+import type { ApprovalType, EmploymentStatus } from "@prisma/client";
 
 /** Canonical M365 sync states; a `"use server"` file can't export a const, so it lives here. */
 export const M365_CANONICAL = ["pending", "active", "offboarding", "inactive"] as const;
@@ -10,4 +10,9 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   lifecycle_transfer: "lifecycle.transfer",
   lifecycle_return: "lifecycle.return",
   lifecycle_change_status: "lifecycle.change-status",
+};
+
+/** Friendly employment words (Phase 32); the enum stays only as a mono label where the house prints it. */
+export const EMPLOYMENT_LABEL: Record<EmploymentStatus, string> = {
+  ACTIVE: "Active", OFFBOARDING: "Leaving", OFFBOARDED: "Offboarded",
 };

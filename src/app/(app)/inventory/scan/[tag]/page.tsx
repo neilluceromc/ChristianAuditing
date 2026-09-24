@@ -1,11 +1,22 @@
+import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
-import { fmtDate } from "@/lib/format";
-import { CLASS_PHRASE, canSeeClass } from "@/lib/asset-class";
+import { activeHoldFor } from "@/server/modules/reservations/queries";
+import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { fmtDate, localDateISO } from "@/lib/format";
+import { CLASS_PHRASE, STATUS_LABEL, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
+import { APPROVAL_TYPE_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
+import { recordPrimary, type RecordState } from "@/lib/record-actions";
+import { attentionOf } from "@/lib/inventory-attention";
+import { pathAllowedForRole } from "@/lib/workspaces";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
 import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
+import { HoldPill } from "@/components/ui/hold-pill";
+import { DuePill } from "@/components/ui/due-pill";
+import { ScanAction, type ScanActionKind } from "@/components/inventory/scan-action";
+import { ScanRetype } from "@/components/inventory/scan-retype";
 
 /**
  * Where a scanned label QR lands. Deliberately NOT the full record: a phone
@@ -44,7 +55,19 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
       cls: true,
       purchasedAt: true,
       warrantyUntil: true,
+      returnedAt: true,
+      loanDueAt: true,
+      itVerifiedAt: true,
+      financeConfirmedAt: true,
+      financeReturnedAt: true,
       category: { select: { name: true } },
+      // The record layout's `pending`: the newest open approval (getVisibleAsset's filter and order).
+      approvals: {
+        where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
+        select: { id: true, refNo: true, type: true, state: true },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
       assignee: {
         select: {
           id: true,
@@ -68,6 +91,7 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
         <Banner tone="attention" title={`No asset is registered as ${tag}.`}>
           The label may belong to an asset that has been disposed, or the code may have been misread.
         </Banner>
+        <ScanRetype tag={tag} />
         <div className="pt-3"><ButtonLink href="/inventory">Back to inventory</ButtonLink></div>
       </>
     );
@@ -87,10 +111,53 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
     );
   }
 
-  const rows: Array<[string, string]> = [
-    ["Held by", asset.assignee ? `${asset.assignee.name} · ${asset.assignee.employeeNo}` : "Unassigned"],
+  // Phase 32 (spec §6): the same state the record header reads, so the scan
+  // card offers exactly the record's primary — and only the four that make
+  // sense next to the device (plan P-14).
+  const pending = asset.approvals[0];
+  const hold = asset.cls === "IT" ? await activeHoldFor(asset.id) : null;
+  const today = localDateISO(new Date());
+  const state: RecordState = {
+    cls: asset.cls, status: asset.status, hasHolder: !!asset.assignee,
+    returnedAt: asset.returnedAt, itVerifiedAt: asset.itVerifiedAt,
+    financeConfirmedAt: asset.financeConfirmedAt, financeReturnedAt: asset.financeReturnedAt,
+    pending: !!pending, held: !!hold,
+  };
+  const primary = recordPrimary(state, user.role);
+  const SCAN_ACTIONS: readonly ScanActionKind[] = ["triage", "mark-checked", "return", "assign"];
+  const action = SCAN_ACTIONS.find((a) => a === primary) ?? null;
+  const attention = attentionOf({
+    cls: asset.cls, status: asset.status, returnedAt: asset.returnedAt, loanDueAt: asset.loanDueAt,
+    pendingRef: pending?.refNo ?? null, itVerifiedAt: asset.itVerifiedAt,
+  }, new Date());
+  const direct = isDirectLifecycle(user.role, asset.cls);
+  const employees = action === "assign" ? await activeEmployeeOptions() : [];
+  const holder = asset.assignee ? { id: asset.assignee.id, name: asset.assignee.name } : null;
+  // The leaver line links to /offboarding (IT workspace only): shown only where it would open.
+  const leaver = asset.assignee?.employment === "OFFBOARDING" && pathAllowedForRole(`/offboarding/${asset.assignee.id}`, user.role) ? asset.assignee : null;
+  // The app's own gate for the profile route: a holder link only where it would open.
+  const canOpenPeople = asset.assignee ? pathAllowedForRole(`/employees/${asset.assignee.id}`, user.role) : false;
+  const loanDue = asset.status === "TEMPORARY" ? asset.loanDueAt : null;
+
+  const rows: Array<[string, React.ReactNode]> = [
+    ["Status", STATUS_LABEL[asset.status]],
+    [
+      "Held by",
+      asset.assignee ? (
+        <>
+          {canOpenPeople ? (
+            <Link href={`/employees/${asset.assignee.id}`} className="text-accent underline hover:text-accent-hover">
+              {asset.assignee.name}
+            </Link>
+          ) : (
+            asset.assignee.name
+          )}
+          {` · ${asset.assignee.employeeNo}`}
+        </>
+      ) : "Unassigned",
+    ],
     ["Department", asset.assignee ? asset.assignee.department.name : "—"],
-    ["Employment", asset.assignee ? asset.assignee.employment : "—"],
+    ["Employment", asset.assignee ? EMPLOYMENT_LABEL[asset.assignee.employment] : "—"],
     ["Category", asset.category.name],
     ["Purchased", fmtDate(asset.purchasedAt)],
     ["Warranty", fmtDate(asset.warrantyUntil)],
@@ -124,8 +191,52 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
         ))}
       </dl>
 
-      <div className="pt-4">
-        <ButtonLink href={`/inventory/${asset.id}`}>Open full record</ButtonLink>
+      {leaver && (
+        <p className="pt-3 text-[13px]">
+          <Link href={`/offboarding/${leaver.id}?step=collect`} className="text-accent underline hover:text-accent-hover">
+            {leaver.name} is leaving · collect it in the offboarding wizard →
+          </Link>
+        </p>
+      )}
+
+      {(attention || hold?.expiresAt || loanDue) && (
+        <div className="flex flex-wrap items-center gap-2 pt-3 text-[13px]">
+          {attention && <span className="font-medium text-fg">{attention.label}</span>}
+          {hold?.expiresAt && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-fg-secondary">Held for {hold.employee.name}</span>
+              <HoldPill expiresAt={hold.expiresAt} today={today} />
+            </span>
+          )}
+          {loanDue && <DuePill dueAt={loanDue} today={today} withDate />}
+        </div>
+      )}
+
+      {pending && (
+        <div className="pt-3">
+          <Banner
+            tone="inflight"
+            title={`${pending.refNo} · ${APPROVAL_TYPE_LABEL[pending.type]} is ${pending.state.toLowerCase()}`}
+          >
+            Queued in the approval pipeline — until it executes, this asset still reads{" "}
+            {STATUS_LABEL[asset.status]} everywhere.{" "}
+            <Link href={`/approvals/${pending.id}`} className="text-accent underline hover:text-accent-hover">Open request</Link>
+          </Banner>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2 pt-4">
+        {action && (
+          <ScanAction
+            action={action}
+            asset={{ id: asset.id, tag: asset.tag, model: asset.model }}
+            holder={holder}
+            direct={direct}
+            employees={employees}
+            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name } : undefined}
+          />
+        )}
+        <ButtonLink href={`/inventory/${asset.id}`} className="min-h-11 w-full">Open full record</ButtonLink>
       </div>
     </>
   );

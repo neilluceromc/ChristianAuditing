@@ -1,13 +1,12 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
-import { decidedItems, getWizard } from "@/server/modules/offboarding/queries";
+import { decidedItems, getWizard, undecidedHeldItems } from "@/server/modules/offboarding/queries";
 import { OUTCOME_LABEL } from "@/lib/offboarding";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { offboardingCompletionText } from "@/lib/deadlines";
 import { PrintButton } from "@/components/ui/print-button";
 import { ButtonLink } from "@/components/ui/button-link";
-
-const STRIPES = "repeating-linear-gradient(135deg, #EEF1F5 0 6px, #F7F9FB 6px 12px)";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function FarewellReportPage({ params }: { params: Promise<{ employeeId: string }> }) {
   await requireUser();
@@ -18,33 +17,47 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
   // `decidedItems` is shared with the .xlsx export route so the sheet and the
   // printed page can never disagree about which rows belong (§6a rule 47).
   const decided = decidedItems(data.items);
+  // Phase 32 (spec §4.5): held items with no live decision yet — the draft
+  // banner's count and the "Still to decide" section below the table.
+  const undecided = undecidedHeldItems(data.items);
 
   return (
     <div className="mx-auto max-w-[760px]">
-      <div className="flex justify-end gap-2 pb-3 print:hidden">
-        <ButtonLink href={`/offboarding/${employeeId}/report/export`} variant="secondary">
-          Export sheet
-        </ButtonLink>
-        <PrintButton />
+      <div className="print:hidden">
+        <PageHeader
+          title="Farewell report"
+          breadcrumb={[
+            { label: "Offboarding", href: "/offboarding" },
+            { label: employee.employeeNo, href: `/offboarding/${employee.id}` },
+            { label: "Farewell report" },
+          ]}
+          actions={
+            <>
+              <ButtonLink href={`/offboarding/${employeeId}/report/export`} variant="secondary" native>
+                Export sheet
+              </ButtonLink>
+              <PrintButton />
+            </>
+          }
+        />
       </div>
       {/* Light-theme-only on purpose: this is a printed artifact. */}
       <div className="flex flex-col gap-6 rounded-(--radius-card) border border-border bg-white p-8 text-[#101828] shadow-card print:rounded-none print:border-0 print:p-0 print:shadow-none">
+        {undecided.length > 0 && (
+          <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[#B54708]">
+            DRAFT — {undecided.length} {undecided.length === 1 ? "item" : "items"} undecided
+          </p>
+        )}
         <header className="flex items-center justify-between border-b-2 border-[#101828] pb-4">
           <div className="flex items-center gap-3">
             <span aria-hidden className="grid size-6 place-items-center bg-[#101828] font-mono text-[11px] font-bold text-white">BR</span>
             <div>
-              <h1 className="text-[15px] font-semibold">Backroom IT — Offboarding farewell report</h1>
+              <h1 className="text-[15px] font-semibold">Backroom IT — Farewell report</h1>
               <p className="font-mono text-[10px] text-[#667085]">
                 generated {fmtDate(new Date())} · from live records · {employee.employment}
               </p>
             </div>
           </div>
-          {/* aria-label on a bare <span> (no role) is prohibited — SERIOUS
-              under axe, caught on a route no spec scanned before this sweep.
-              role="img" is what actually makes the label legal here, and it
-              matches what this element visually is: a graphic placeholder,
-              not text. */}
-          <span role="img" aria-label="scan code placeholder" className="h-10 w-24" style={{ background: STRIPES }} />
         </header>
 
         <dl className="grid grid-cols-2 gap-x-8 gap-y-1 text-[13px]">
@@ -102,6 +115,19 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
             )}
           </tbody>
         </table>
+
+        {undecided.length > 0 && (
+          <div className="flex flex-col gap-1.5 border-t border-[#D0D5DD] pt-4">
+            <p className="font-mono text-[9.5px] uppercase tracking-[0.09em] text-[#667085]">Still to decide</p>
+            <ul className="flex flex-col gap-0.5 text-[12px]">
+              {undecided.map((i) => (
+                <li key={i.assetId} className="font-mono text-[11px]">
+                  {i.tag} · {i.model} · {i.category}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* These three totals count DECIDED items, not completed movements —
             a PENDING or EXECUTION_FAILED return is already in `recovered`
@@ -173,7 +199,7 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
             on this printed sheet (dt labels, table header, empty state) —
             there is no lighter shade of it that still clears 4.5:1. */}
         <p className="font-mono text-[8.5px] text-[#667085]">
-          {employee.employeeNo} · {decided.length} decision(s) · the HR email is a future handoff, not yet built
+          {employee.employeeNo} · {decided.length} decision{decided.length === 1 ? "" : "s"}
         </p>
       </div>
     </div>

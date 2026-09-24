@@ -9,7 +9,7 @@ import {
   type WorkspaceId,
 } from "@/lib/workspaces";
 import { AccountMenu } from "./account-menu";
-import { NavList, type ApprovalsBadge } from "./nav-list";
+import { NavList, type ApprovalsBadge, type NavBadges } from "./nav-list";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
 export async function getApprovalsBadge(role: Role): Promise<ApprovalsBadge> {
@@ -36,13 +36,13 @@ export function Sidebar({
   user,
   ws,
   sections,
-  badge,
+  badges,
   allowed,
 }: {
   user: User;
   ws: WorkspaceId;
   sections: NavSection[];
-  badge: ApprovalsBadge;
+  badges: NavBadges;
   allowed: WorkspaceId[];
 }) {
   return (
@@ -57,7 +57,7 @@ export function Sidebar({
         <span className="text-[13px] font-semibold text-fg">Backroom IT</span>
       </div>
       <WorkspaceSwitcher current={ws} allowed={allowed} meta={WORKSPACE_META} />
-      <NavList sections={sections} badge={badge} />
+      <NavList sections={sections} badges={badges} />
       <div className="flex items-center gap-2.5 border-t border-border-faint px-4 py-3">
         <Avatar name={user.name} size="lg" />
         <div className="min-w-0 flex-1">

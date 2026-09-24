@@ -5,20 +5,20 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import type { NavSection } from "@/lib/workspaces";
 import { CommandPaletteTrigger } from "./command-palette";
 import { MobileNav } from "./mobile-nav";
-import type { ApprovalsBadge } from "./nav-list";
+import type { NavBadges } from "./nav-list";
 
 export function Topbar({
   sections,
-  badge,
+  badges,
   workspaceLabel,
 }: {
   sections: NavSection[];
-  badge: ApprovalsBadge;
+  badges: NavBadges;
   workspaceLabel: string;
 }) {
   return (
     <header className="flex h-[52px] shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
-      <MobileNav sections={sections} badge={badge} workspaceLabel={workspaceLabel} />
+      <MobileNav sections={sections} badges={badges} workspaceLabel={workspaceLabel} />
       <CommandPaletteTrigger />
       <div className="ml-auto flex items-center gap-2">
         <DensityToggle />

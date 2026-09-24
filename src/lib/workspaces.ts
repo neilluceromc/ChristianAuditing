@@ -29,7 +29,7 @@ export const WORKSPACE_META: Record<WorkspaceId, { label: string; landing: strin
 export interface NavItem {
   label: string;
   href: string;
-  badge?: "approvals";
+  badge?: "approvals" | "worklist";
   /** restrict the item to these roles, within an already-allowed workspace */
   roles?: Role[];
 }
@@ -52,7 +52,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         // reaches it through the Purchasing workspace's own nav instead).
         { label: "Register assets", href: "/inventory/register", roles: ["admin", "it_staff"] },
         { label: "Employees", href: "/employees" },
-        { label: "Worklist", href: "/inventory/work" },
+        { label: "Worklist", href: "/inventory/work", badge: "worklist" },
         { label: "Approvals", href: "/approvals", badge: "approvals" },
         { label: "Purchase reviews", href: "/purchases?state=SUBMITTED", roles: ["admin", "it_staff"] },
         { label: "Audit log", href: "/audit" },

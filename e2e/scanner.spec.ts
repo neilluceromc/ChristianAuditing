@@ -104,10 +104,16 @@ async function scanKeepingFocus(page: Page, tag: string) {
 
 async function openCollect(page: Page) {
   await page.goto("/offboarding");
-  await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Open wizard" }).click();
-  await expect(page).toHaveURL(/\/offboarding\/[^/]+$/, { timeout: 30_000 });
-  await page.getByRole("list", { name: "Offboarding steps" }).getByRole("link", { name: /Collect items/ }).click();
-  await expect(page.getByText("Scanning works here")).toBeVisible({ timeout: 30_000 });
+  // Phase 32: the row's action now reads offboardingNext's label and already
+  // lands on ?step=collect (Dennis has undecided items) — no second,
+  // redundant click on the step bar's own "Collect items" link needed (that
+  // extra same-URL click used to race a soft re-navigation against the
+  // scanner's first keystrokes and could clip them out of the buffer).
+  await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: /^Collect \d+ items?$/ }).click();
+  await expect(page).toHaveURL(/\/offboarding\/[^/]+\?step=collect$/, { timeout: 30_000 });
+  // Phase 32 (spec §4.3): the "Scanning works here" banner is gone — the
+  // Collect step's own muted hint line says so once now.
+  await expect(page.getByText("scan a tag to jump to it")).toBeVisible({ timeout: 30_000 });
 }
 
 // These tests share database state (a decision confirmed by hand in one test

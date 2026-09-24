@@ -95,9 +95,11 @@ test.describe.serial("offboarding v2 — attribution, facets and sort", () => {
     await expect(page.getByRole("heading", { name: "Dennis Ong", level: 1 })).toBeVisible({ timeout: 20_000 });
     await decideItem(page, "BR-HS-0510", "Returned", "");
 
-    // Step "review" (the default) is where the Holdings table's "Decided
-    // by"/"Decided on" columns live (offboarding/[employeeId]/page.tsx).
-    await page.goto(`/offboarding/${dennis.id}`);
+    // Phase 32: the bare URL now opens where the work is (defaultStep), not
+    // always Review — Dennis still has undecided items, so it would land on
+    // Collect. The Holdings table with the single Decision cell (outcome ·
+    // decided by · decided on) lives on Review, so ask for it explicitly.
+    await page.goto(`/offboarding/${dennis.id}?step=review`);
     const row = page.getByRole("row", { name: /BR-HS-0510/ });
     await expect(row).toContainText("J. Sarmiento");
     await expect(row).toContainText(fmtDate(new Date()));
@@ -108,7 +110,8 @@ test.describe.serial("offboarding v2 — attribution, facets and sort", () => {
 
     await login(page, IT);
     await page.goto(`/offboarding/${dennis.id}/report`);
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible({ timeout: 15_000 });
+    // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
+    await expect(page.getByRole("heading", { name: "Backroom IT — Farewell report", exact: true })).toBeVisible({ timeout: 15_000 });
     const row = page.getByRole("row", { name: /BR-HS-0510/ });
     await expect(row).toContainText("J. Sarmiento");
     await expect(row).toContainText(fmtDate(new Date()));
@@ -189,7 +192,9 @@ test.describe.serial("offboarding v2 — attribution, facets and sort", () => {
     // re-sort: Dennis (2 undecided) first, Aida (0 undecided, all decided in
     // case 4) last.
     await page.goto("/offboarding?sort=-undecided");
-    await expect(page.getByRole("columnheader", { name: /Undecided/ })).toHaveAttribute("aria-sort", "descending");
+    // The Items-out/Undecided columns collapsed into one "Progress" column
+    // (Phase 32) — the header text changed, the sort key (`undecided`) did not.
+    await expect(page.getByRole("columnheader", { name: /Progress/ })).toHaveAttribute("aria-sort", "descending");
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText("Dennis Ong");
@@ -199,7 +204,8 @@ test.describe.serial("offboarding v2 — attribution, facets and sort", () => {
 
     const dennis = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
     await page.goto(`/offboarding/${dennis.id}/report`);
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible({ timeout: 15_000 });
+    // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
+    await expect(page.getByRole("heading", { name: "Backroom IT — Farewell report", exact: true })).toBeVisible({ timeout: 15_000 });
     await expectNoSeriousAxe(page);
   });
 });

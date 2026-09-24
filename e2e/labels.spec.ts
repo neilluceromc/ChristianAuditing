@@ -289,7 +289,9 @@ test.describe("label sheet", () => {
     await page.goto("/inventory/scan/BR-LT-0148");
     await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Marites Bautista", { exact: false })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Open full record" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Open full record" }).or(page.getByRole("button", { name: "Open full record" })),
+    ).toBeVisible();
   });
 
   // The withholding IS the security decision (spec §0 decision 8), so it gets

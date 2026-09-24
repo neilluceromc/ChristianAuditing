@@ -303,7 +303,8 @@ test.describe.serial("offboarding", () => {
     await expect(page.getByText("BACK · NOT CHECKED")).toBeVisible();
 
     await page.goto(`/offboarding/${dennis.id}/report`);
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible();
+    // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
+    await expect(page.getByRole("heading", { name: "Backroom IT — Farewell report", exact: true })).toBeVisible();
     for (const tag of ["BR-LT-0166", "BR-PH-0312", "BR-HS-0510"]) {
       await expect(page.getByText(tag)).toBeVisible();
     }
@@ -311,7 +312,7 @@ test.describe.serial("offboarding", () => {
 });
 
 test.describe("worklist", () => {
-  test("8. Home sections and /inventory/work; clearing a row hides it", async ({ page }) => {
+  test("8. Home sections and /inventory/work; hiding a row until tomorrow removes it", async ({ page }) => {
     await login(page, IT);
 
     // Worklist.tsx renders each section as `<h3>{title} <span>{total}</span></h3>`
@@ -354,8 +355,11 @@ test.describe("worklist", () => {
 
     const row = page.locator("li").filter({ hasText: "BR-MN-0910" });
     await expect(row).toHaveCount(1);
-    await row.getByRole("button", { name: /^Clear "/ }).click();
+    // Phase 32 (spec §5.2): the ✓ became the row menu's Hide until tomorrow.
+    await row.getByRole("button", { name: /^Actions for / }).click();
+    await page.getByRole("menuitem", { name: "Hide until tomorrow" }).click();
     await expect(page.locator("li").filter({ hasText: "BR-MN-0910" })).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: /^Repairs to chase/ })).toContainText("· 1 hidden today");
   });
 });
 

@@ -34,6 +34,10 @@ redeploy. See `PICKUP.md` §4 item 1 and `HANDOVER.md` (w).
 **Phase 31 (`phase-31-leftovers-sweep`, the leftovers sweep; final tree `7599d9e`) is MERGED TO `main`
 via `--no-ff` `bcc7b16` and PUSHED (2026-09-24), and adds no migration** — `main` = `origin/main`; staging
 carries it since the second 2026-09-24 code-only redeploy (`7a479e1`). See `HANDOVER.md` (x).
+**Phase 32 (`phase-32-it-work-uiux`, Laws of UX on the IT screens where the work gets done; final tree
+`e29e879`) is CODE-COMPLETE, UNMERGED and UNPUSHED, and adds no migration** — local `main` carries the
+unpushed docs-only commits `7b878ed` (spec) and `4b77f59` (plan). Merging, pushing and the code-only
+redeploy are the user's decisions. See `HANDOVER.md` (y).
 
 ---
 
@@ -156,6 +160,20 @@ Consumed what Phase 19 records. Scope agreed in the D1 brainstorm (spec
   §6 below has always carried the closure.
 
 ### 5.3 Small deferred items with a home in the plans' D-blocks
+
+**Phase 33 — "queues and records" (the second half of the 2026-09-24 IT-screens audit; own brainstorm).**
+The audit file's findings not taken by Phase 32 (spec `2026-09-24-it-work-ux-design.md` §2): the
+old-toolbar sweep on `/offboarding`, `/reservations`, `/approvals` and `/audit` (house search shape,
+busy transition, value-only chips, `page 1 of 1` hidden); the rest of `/reservations` (the permanent
+banner, per-tab columns, an expiry count; a Reserve dialog was declined); `/inventory/labels` (stale
+empty-state copy, a tags box for pasted or scanned tags, `Start at label N`, skipped tags named, a
+class-aware crumb, operator wording); `/approvals` and its detail (a header with one primary, one-step
+approve, Next in queue, card order, error text, a link back to the offboarding, a queue row menu, search
+and a Type facet, friendly states); `/audit` and the feeds searchable by what the Entity column shows.
+Open product questions carried over: one-step approve (Q4), the labels tags box (Q8) and `Start at label
+N` (Q8b). Also Phase 32's display wording "no sync yet" on the employee profile and the farewell
+report. The audit itself is not committed; its findings are summarised here and in the spec.
+
 
 Phase 17 D-11 (approvals double count, work-page note wording, `parsePage` duplication, a collation comment)
 — **three of the four ✅ CLOSED in Phase 27:** the work-page note now reads

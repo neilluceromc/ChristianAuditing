@@ -494,9 +494,11 @@ test.describe("it navigation sweep (Phase 25)", () => {
     expect(await facetCounts(page, "Due")).toEqual({ Overdue: "0", "On track": "0" });
 
     await page.goto("/offboarding");
+    // Phase 32 (spec §4.1): Export lives in the header's More actions menu.
+    await page.getByRole("button", { name: "More actions" }).click();
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByRole("link", { name: "Export" }).click(),
+      page.getByRole("menuitem", { name: "Export" }).click(),
     ]);
     expect(download.suggestedFilename()).toMatch(/^offboarding-\d{4}-\d{2}-\d{2}\.xlsx$/);
 

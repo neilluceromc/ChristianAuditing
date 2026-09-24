@@ -1,12 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { IconButton } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr, rowOpenProps } from "@/components/ui/table";
 import { HoldPill } from "@/components/ui/hold-pill";
-import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
+import { Menu, type MenuItem } from "@/components/ui/menu";
+import { ReleaseHoldDialog } from "@/components/inventory/release-hold-button";
+import { AssignDialog } from "@/components/inventory/holder-control";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 import type { ListState } from "@/lib/url-state";
 import type { ReservationRow } from "@/server/modules/reservations/queries";
 
@@ -16,13 +21,19 @@ import type { ReservationRow } from "@/server/modules/reservations/queries";
  * whole-row click with Enter support). A row opens the ASSET record (spec
  * §5.4: "a hold never changes an asset's status" is the whole point of this
  * list, so the row's destination is the asset, not the person).
+ *
+ * Phase 32 (spec §7): each row's menu hands the spare to the person it was
+ * held for (Assign, preselected) or releases it; viewers get Open items only.
  */
 export function HoldsTable({
-  rows, state, sortHrefs, today, canRelease,
+  rows, state, sortHrefs, today, canAct, direct, employees,
 }: {
-  rows: ReservationRow[]; state: ListState; sortHrefs: Record<string, string>; today: string; canRelease: boolean;
+  rows: ReservationRow[]; state: ListState; sortHrefs: Record<string, string>; today: string;
+  canAct: boolean; direct: boolean; employees: ComboOption[];
 }) {
   const router = useRouter();
+  // The row menu's open dialog: which action, on which hold.
+  const [dialog, setDialog] = useState<{ kind: "assign" | "release"; row: ReservationRow } | null>(null);
 
   function sortProps(key: string) {
     const idx = state.sort.findIndex((s) => s.key === key);
@@ -37,7 +48,19 @@ export function HoldsTable({
     router.push(`/inventory/${assetId}`);
   }
 
+  function menuItems(r: ReservationRow): MenuItem[] {
+    const items: MenuItem[] = [];
+    if (canAct && r.state === "ACTIVE") {
+      items.push({ label: `Assign to ${r.employeeName}…`, onSelect: () => setDialog({ kind: "assign", row: r }) });
+      items.push({ label: "Release…", onSelect: () => setDialog({ kind: "release", row: r }) });
+    }
+    items.push({ label: "Open record", onSelect: () => router.push(`/inventory/${r.assetId}`) });
+    items.push({ label: `Open ${r.employeeName}'s profile`, onSelect: () => router.push(`/employees/${r.employeeId}`) });
+    return items;
+  }
+
   return (
+    <>
     <Table>
       <THead>
         <Tr>
@@ -51,7 +74,7 @@ export function HoldsTable({
           <Th width={104} {...sortProps("expiresAt")}>Expires</Th>
           <Th width={110} {...sortProps("createdAt")}>Created</Th>
           <Th width={160}>Closed</Th>
-          {canRelease && <Th width={90} aria-label="Actions" />}
+          <Th width={44} aria-label="Row actions" />
         </Tr>
       </THead>
       <TBody>
@@ -92,12 +115,41 @@ export function HoldsTable({
                 </span>
               )}
             </Td>
-            {canRelease && (
-              <Td>{r.state === "ACTIVE" ? <ReleaseHoldButton reservationId={r.id} tag={r.tag} size="sm" /> : null}</Td>
-            )}
+            {/* Not part of the row click: the menu, and everything it opens, stays out of the row's handler. */}
+            <Td className="cursor-default px-1 text-right" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+              <Menu
+                align="end"
+                items={menuItems(r)}
+                trigger={(p) => <IconButton {...p} aria-label={`Actions for ${r.tag}`}>⋯</IconButton>}
+              />
+            </Td>
           </Tr>
         ))}
       </TBody>
     </Table>
+    {/* Dialogs render outside the table, so no click inside one bubbles to a row; mounted only while open. */}
+    {dialog?.kind === "assign" && (
+      <AssignDialog
+        key={dialog.row.id}
+        open
+        onClose={() => setDialog(null)}
+        asset={{ id: dialog.row.assetId, tag: dialog.row.tag, model: dialog.row.model }}
+        direct={direct}
+        employees={employees}
+        heldFor={{ id: dialog.row.employeeId, name: dialog.row.employeeName }}
+      />
+    )}
+    {dialog?.kind === "release" && (
+      <ReleaseHoldDialog
+        key={dialog.row.id}
+        open
+        onClose={() => setDialog(null)}
+        reservationId={dialog.row.id}
+        tag={dialog.row.tag}
+        model={dialog.row.model}
+        holderName={dialog.row.employeeName}
+      />
+    )}
+    </>
   );
 }

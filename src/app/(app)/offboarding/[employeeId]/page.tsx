@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
-import { getWizard } from "@/server/modules/offboarding/queries";
-import { canContinue, OUTCOME_LABEL, parseStep } from "@/lib/offboarding";
+import { getWizard, nextLeaver } from "@/server/modules/offboarding/queries";
+import { canContinue, completionBlockers, decisionStateLabel, defaultStep, offboardingNext, OUTCOME_LABEL, parseStep, readiness } from "@/lib/offboarding";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
-import { canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
+import { APPROVAL_TYPE_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
+import { canSeeClass, isDirectLifecycle, STATUS_LABEL } from "@/lib/asset-class";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -15,6 +15,7 @@ import { DuePill } from "@/components/ui/due-pill";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
+import { ProgressBar } from "@/components/ui/progress-bar";
 import { Stat } from "@/components/ui/stat";
 import { StatusDot, StatusPill } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
@@ -22,8 +23,13 @@ import { TagRef } from "@/components/inventory/tag-ref";
 import { AccountsPanel } from "@/components/offboarding/accounts-panel";
 import { CompleteButton } from "@/components/offboarding/complete-button";
 import { ItemDecision } from "@/components/offboarding/item-decision";
+import { MarkRestButton } from "@/components/offboarding/mark-rest-button";
+import { OffboardedCard } from "@/components/offboarding/offboarded-card";
+import { ReadinessChecklist } from "@/components/offboarding/readiness-checklist";
 import { ScanProvider } from "@/components/offboarding/scan-provider";
+import { WizardMoreMenu } from "@/components/offboarding/wizard-more-menu";
 import { WizardSteps } from "@/components/offboarding/wizard-steps";
+import type { AssetStatus } from "@prisma/client";
 
 export default async function OffboardingWizardPage({
   params,
@@ -34,26 +40,50 @@ export default async function OffboardingWizardPage({
 }) {
   const user = await requireUser();
   const { employeeId } = await params;
-  const step = parseStep(toSearchParams(await searchParams).get("step"));
+  const sp = toSearchParams(await searchParams);
+  const rawStep = sp.get("step");
+  const done = sp.get("done") === "1";
   const data = await getWizard(employeeId);
   if (!data) notFound();
 
   const { employee, items, totals, undecided } = data;
+  const step = rawStep
+    ? parseStep(rawStep)
+    : defaultStep({ employment: employee.employment, undecided, m365Status: employee.m365Status });
   const today = localDateISO(new Date());
   const canMutate = user.role === "admin" || user.role === "it_staff";
   const active = employee.employment === "OFFBOARDING";
   const canDecide = canMutate && active;
   const unlocked = canContinue("collect", { undecided });
   const href = (s: string) => `/offboarding/${employeeId}?step=${s}`;
+  const state = {
+    id: employee.id,
+    employment: employee.employment,
+    dueAt: employee.dueAt,
+    undecided: data.undecided,
+    failed: data.failed[0] ?? null,
+    m365Status: employee.m365Status,
+  };
+  const next = canMutate ? offboardingNext(state) : null;
+  const readinessInput = { id: employee.id, total: data.items.length, undecided: data.undecided, failed: data.failed, m365Status: employee.m365Status };
   // flatMap rather than filter so `decision` is structurally non-null on the
   // rows the report renders — the same reason decisionOf carries the outcome on
   // the surviving row instead of asserting it later
   const decided = items.flatMap((i) => (i.decision ? [{ ...i, decision: i.decision }] : []));
   const heldItems = items.filter((i) => i.held);
-  // how many of the still-held items this viewer would decide directly vs
-  // by request — the collect banner describes whichever paths are in play
-  const directHeld = heldItems.filter((i) => isDirectLifecycle(user.role, i.cls)).length;
-  const queuedHeld = heldItems.length - directHeld;
+  const decidedCount = data.items.length - undecided;
+  // spec §4.3: the hint line names the queued path only when the STILL-
+  // UNDECIDED items themselves mix direct and queued — not "any held item",
+  // which would keep naming a path that has nothing left to decide.
+  const undecidedHeld = heldItems.filter((i) => !i.decision);
+  const mixedPaths =
+    undecidedHeld.some((i) => isDirectLifecycle(user.role, i.cls)) &&
+    undecidedHeld.some((i) => !isDirectLifecycle(user.role, i.cls));
+  const readOnlyLine = active
+    ? "Read-only — collecting equipment is an IT action."
+    : employee.employment === "OFFBOARDED"
+      ? "This offboarding is closed."
+      : "Not offboarding yet — set their employment first, then decisions can be recorded.";
 
   return (
     <>
@@ -63,7 +93,7 @@ export default async function OffboardingWizardPage({
         badge={
           <span className="inline-flex items-center gap-1.5">
             <StatusDot value={employee.employment} ns="employment" />
-            <span className="font-mono text-[10.5px] text-fg-muted">{employee.employment}</span>
+            <span className="text-[10.5px] text-fg-muted">{EMPLOYMENT_LABEL[employee.employment as keyof typeof EMPLOYMENT_LABEL] ?? employee.employment}</span>
             {employee.dueAt
               ? (
                 <DuePill
@@ -79,15 +109,31 @@ export default async function OffboardingWizardPage({
         }
         actions={
           <>
-            <ButtonLink href={`/employees/${employeeId}`}>Employee record</ButtonLink>
-            <ButtonLink href={`/offboarding/${employeeId}/report`}>Farewell report</ButtonLink>
+            {next && next.step !== step && (
+              <ButtonLink variant="primary" href={next.href}>{next.step === "report" ? "Complete offboarding" : next.label}</ButtonLink>
+            )}
+            <WizardMoreMenu
+              recordHref={`/employees/${employee.id}`}
+              reportHref={`/offboarding/${employee.id}/report`}
+              exportHref={`/offboarding/${employee.id}/report/export`}
+            />
           </>
         }
       />
 
-      <WizardSteps employeeId={employeeId} current={step} unlocked={unlocked} />
+      <WizardSteps employeeId={employeeId} current={step} />
 
-      {!active && (
+      {!active && employee.employment === "OFFBOARDED" && done ? (
+        <div className="pb-4">
+          <OffboardedCard
+            name={employee.name}
+            decisions={decided.length}
+            completedAt={data.completedAt}
+            reportHref={`/offboarding/${employeeId}/report`}
+            next={await nextLeaver(employee.id)}
+          />
+        </div>
+      ) : !active && (
         <div className="pb-4">
           <Banner
             tone={employee.employment === "OFFBOARDED" ? "closed" : "attention"}
@@ -124,7 +170,7 @@ export default async function OffboardingWizardPage({
                 already-returned, so reducing over all of it bills equipment the
                 worker has already put back to the money still in their hands */}
             <Stat label="Book value out" value={fmtMoney(heldItems.reduce((s, i) => s + (i.cost ?? 0), 0))} />
-            <Stat label="M365" value={employee.m365Status ?? "no sync yet"} />
+            <Stat label="M365" value={employee.m365Status ?? "never had an account"} />
           </div>
           {/* keyed on the SLOT COUNT, not the policy: a person with no policy
               can still carry ADD exceptions of their own (Phase 16, ruling
@@ -208,9 +254,7 @@ export default async function OffboardingWizardPage({
                     <Th width={96}>Category</Th>
                     <Th width={96}>Status</Th>
                     <Th width={112} align="right">Cost</Th>
-                    <Th width={124}>Decision</Th>
-                    <Th width={112}>Decided by</Th>
-                    <Th width={104}>Decided on</Th>
+                    {items.some((i) => i.decision) && <Th width={220}>Decision</Th>}
                   </Tr>
                 </THead>
                 <TBody>
@@ -222,13 +266,13 @@ export default async function OffboardingWizardPage({
                       </Td>
                       <Td>{i.model}</Td>
                       <Td mono className="text-[10.5px]">{i.category}</Td>
-                      <Td mono className="text-[10.5px]">{i.status}</Td>
+                      <Td className="text-[10.5px]">{STATUS_LABEL[i.status as AssetStatus] ?? i.status}</Td>
                       <Td align="right" mono>{i.costLabel}</Td>
-                      <Td mono className="text-[10.5px]">
-                        {i.decision ? OUTCOME_LABEL[i.decision.outcome] : "—"}
-                      </Td>
-                      <Td mono className="text-[10.5px]">{i.decision?.decidedBy ?? "—"}</Td>
-                      <Td mono className="text-[10.5px]">{fmtDate(i.decision?.decidedAt)}</Td>
+                      {items.some((it) => it.decision) && (
+                        <Td className="text-[10.5px]">
+                          {i.decision ? `${OUTCOME_LABEL[i.decision.outcome]} · ${i.decision.decidedBy ?? "—"} · ${fmtDate(i.decision.decidedAt)}` : "—"}
+                        </Td>
+                      )}
                     </Tr>
                   ))}
                 </TBody>
@@ -260,119 +304,161 @@ export default async function OffboardingWizardPage({
             blockedBy: i.blockedBy?.refNo ?? null,
           }))}
         >
-          <Banner tone="neutral" title="Each decision is recorded the moment you confirm it">
-            Every item becomes its own <span className="font-mono">lifecycle.return</span> record, so a
-            half-finished offboarding is still N correct records.
-            {/* Which mechanism applies is per item — isDirectLifecycle(role, cls),
-                the same predicate that picks each card's mode — so the sentence
-                is only rendered for the person whose confirm it describes, and
-                names both paths when their items mix. */}
-            {canDecide && directHeld > 0 && queuedHeld > 0 && (
-              <>
-                {" "}Items that say “applies now” move the moment you confirm and leave this list; the
-                others file a request and keep their current status until the approval executes.
-              </>
-            )}
-            {canDecide && directHeld > 0 && queuedHeld === 0 && (
-              <>
-                {" "}Each one applies the moment you confirm — the record is filed as already executed,
-                and the item leaves this list.
-              </>
-            )}
-            {canDecide && directHeld === 0 && queuedHeld > 0 && (
-              <>
-                {" "}Nothing moves until the approval executes — the asset keeps reading its current
-                status meanwhile.
-              </>
-            )}
-          </Banner>
+          {/* spec §4.3: one muted hint line replaces the stacked banners; the
+              scan verdict slot (inside ScanProvider itself) stays the only
+              banner-tone element on this step. */}
+          {canDecide ? (
+            <p className="text-[11.5px] text-fg-muted">
+              Each confirm is saved at once · scan a tag to jump to it
+              {mixedPaths && <> · Some items file a request for approval.</>}
+            </p>
+          ) : (
+            <p className="text-[11.5px] text-fg-muted">{readOnlyLine}</p>
+          )}
 
-          {items.filter((i) => i.held).length === 0 ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-[12px] text-fg">{decidedCount} of {data.items.length} decided</span>
+            <ProgressBar value={decidedCount} max={data.items.length} label={`${decidedCount} of ${data.items.length} decided`} />
+          </div>
+
+          {canDecide && (
+            <MarkRestButton
+              employeeId={employeeId}
+              name={employee.name}
+              items={heldItems
+                .filter((i) => !i.decision && !i.blockedBy)
+                .map(({ assetId, tag, model, cls }) => ({ assetId, tag, model, cls }))}
+            />
+          )}
+
+          {heldItems.length === 0 ? (
             <EmptyState
               title="Nothing left to collect"
               description="No equipment is still in their name."
               actions={<ButtonLink variant="primary" href={href("accounts")}>Continue to Accounts &amp; M365</ButtonLink>}
             />
           ) : (
-            items
-              .filter((i) => i.held)
-              .map((i) => (
-                <Card key={i.assetId}>
-                  <CardHeader
-                    title={
-                      <span className="inline-flex items-baseline gap-2">
-                        <span className="font-mono text-[13px] text-accent">{i.tag}</span>
-                        <span>{i.model}</span>
-                        <span className="font-mono text-[10.5px] text-fg-muted">{i.category} · {i.costLabel}</span>
-                      </span>
-                    }
-                    actions={
-                      i.decision ? (
-                        <span className="inline-flex items-center gap-2">
-                          <StatusPill
-                            value={i.decision.toStatus ?? "?"}
-                            label={OUTCOME_LABEL[i.decision.outcome]}
-                          />
-                          <StatusPill value={i.decision.state} />
+            <>
+              {/* spec §4.3 order: undecided-and-unblocked first, then blocked,
+                  then decided-awaiting-approval as compact rows — within each
+                  group the original (tag) order is kept. */}
+              {heldItems
+                .filter((i) => !i.decision && !i.blockedBy)
+                .map((i) => (
+                  <Card key={i.assetId}>
+                    <CardHeader
+                      title={
+                        <span className="inline-flex items-baseline gap-2">
+                          <span className="font-mono text-[13px] text-accent">{i.tag}</span>
+                          <span>{i.model}</span>
+                          <span className="font-mono text-[10.5px] text-fg-muted">{i.category} · {i.costLabel}</span>
                         </span>
-                      ) : (
-                        <Pill>UNDECIDED</Pill>
-                      )
-                    }
-                  />
-                  <CardBody>
-                    {i.decision ? (
-                      <div className="flex flex-col gap-1 text-xs text-fg-secondary">
-                        <span className="font-mono text-[11px]">
-                          <Link href={`/approvals/${i.decision.id}`} className="text-accent hover:underline">{i.decision.refNo}</Link>
-                          {" · "}
-                          {i.status} → {i.decision.toStatus ?? "?"}
+                      }
+                      actions={<Pill>UNDECIDED</Pill>}
+                    />
+                    <CardBody>
+                      {canDecide ? (
+                        <ItemDecision
+                          employeeId={employeeId}
+                          assetId={i.assetId}
+                          tag={i.tag}
+                          cls={i.cls}
+                          direct={isDirectLifecycle(user.role, i.cls)}
+                        />
+                      ) : null}
+                    </CardBody>
+                  </Card>
+                ))}
+
+              {heldItems
+                .filter((i) => !i.decision && i.blockedBy)
+                .map((i) => (
+                  <Card key={i.assetId}>
+                    <CardHeader
+                      title={
+                        <span className="inline-flex items-baseline gap-2">
+                          <span className="font-mono text-[13px] text-accent">{i.tag}</span>
+                          <span>{i.model}</span>
+                          <span className="font-mono text-[10.5px] text-fg-muted">{i.category} · {i.costLabel}</span>
                         </span>
-                        {i.decision.reason && <span>{i.decision.reason}</span>}
-                        {i.decision.state === "EXECUTION_FAILED" && (
-                          <span className="font-mono text-[10.5px]" style={{ color: "var(--st-fault-text)" }}>
-                            execution failed — open the request to retry; the decision itself stands
-                          </span>
-                        )}
-                      </div>
-                    ) : i.blockedBy ? (
-                      // one asset, one open request: a pending change-status would
-                      // otherwise refuse the decision with no way to see why
+                      }
+                      actions={<Pill>UNDECIDED</Pill>}
+                    />
+                    <CardBody>
+                      {/* one asset, one open request: a pending change-status would
+                          otherwise refuse the decision with no way to see why */}
                       <p className="text-xs" style={{ color: "var(--st-attention-text)" }}>
                         {i.tag} is held by{" "}
-                        <Link href={`/approvals/${i.blockedBy.id}`} className="font-mono text-accent hover:underline">
-                          {i.blockedBy.refNo}
+                        <Link href={`/approvals/${i.blockedBy!.id}`} className="font-mono text-accent underline hover:text-accent-hover">
+                          {i.blockedBy!.refNo}
                         </Link>{" "}
                         {/* the same label decideItem's refusal uses — one block
                             explained two different ways is two bugs waiting */}
-                        ({APPROVAL_TYPE_LABEL[i.blockedBy.type]}) — resolve that request
+                        ({APPROVAL_TYPE_LABEL[i.blockedBy!.type]}) — resolve that request
                         first, then decide this item.
                       </p>
-                    ) : canDecide ? (
-                      <ItemDecision
-                        employeeId={employeeId}
-                        assetId={i.assetId}
-                        tag={i.tag}
-                        cls={i.cls}
-                        direct={isDirectLifecycle(user.role, i.cls)}
-                      />
-                    ) : (
-                      <p className="text-xs text-fg-muted">
-                        {/* `active` is OFFBOARDING only, so its else covers
-                            ACTIVE too — and telling someone the offboarding is
-                            "closed" for a person who never started one points
-                            the opposite way from the banner at the top of this
-                            same page, which tells them to set the employment */}
-                        {active
-                          ? "Read-only — collecting equipment is an IT action."
-                          : employee.employment === "OFFBOARDED"
-                            ? "This offboarding is closed."
-                            : "Not offboarding yet — set their employment first, then decisions can be recorded."}
+                    </CardBody>
+                  </Card>
+                ))}
+
+              {heldItems
+                .filter((i) => i.decision)
+                .map((i) =>
+                  decisionStateLabel(i.decision!.state) === "awaiting approval" ? (
+                    // spec §4.3: a compact one-line row for a decision still
+                    // awaiting approval — the full card gave a decided item
+                    // the same weight as an undecided one, which is exactly
+                    // the ordering this step exists to fix. A `div`, not a
+                    // `li`: it sits among the `Card`s above, not inside a
+                    // `<ul>`, and a bare `<li>` outside a list fails axe.
+                    <div key={i.assetId}>
+                      <p className="text-[11.5px] text-fg-secondary">
+                        Decided ·{" "}
+                        <Link href={`/approvals/${i.decision!.id}`} className="font-mono text-accent underline hover:text-accent-hover">
+                          {i.decision!.refNo}
+                        </Link>{" "}
+                        · awaiting approval
                       </p>
-                    )}
-                  </CardBody>
-                </Card>
-              ))
+                    </div>
+                  ) : (
+                    <Card key={i.assetId}>
+                      <CardHeader
+                        title={
+                          <span className="inline-flex items-baseline gap-2">
+                            <span className="font-mono text-[13px] text-accent">{i.tag}</span>
+                            <span>{i.model}</span>
+                            <span className="font-mono text-[10.5px] text-fg-muted">{i.category} · {i.costLabel}</span>
+                          </span>
+                        }
+                        actions={
+                          <span className="inline-flex items-center gap-2">
+                            <StatusPill
+                              value={i.decision!.toStatus ?? "?"}
+                              label={OUTCOME_LABEL[i.decision!.outcome]}
+                            />
+                            <StatusPill value={i.decision!.state} label={decisionStateLabel(i.decision!.state)} />
+                          </span>
+                        }
+                      />
+                      <CardBody>
+                        <div className="flex flex-col gap-1 text-xs text-fg-secondary">
+                          <span className="font-mono text-[11px]">
+                            <Link href={`/approvals/${i.decision!.id}`} className="text-accent underline hover:text-accent-hover">{i.decision!.refNo}</Link>
+                            {" · "}
+                            {i.status} → {i.decision!.toStatus ?? "?"}
+                          </span>
+                          {i.decision!.reason && <span>{i.decision!.reason}</span>}
+                          {i.decision!.state === "EXECUTION_FAILED" && (
+                            <span className="font-mono text-[10.5px]" style={{ color: "var(--st-fault-text)" }}>
+                              execution failed — open the request to retry; the decision itself stands
+                            </span>
+                          )}
+                        </div>
+                      </CardBody>
+                    </Card>
+                  ),
+                )}
+            </>
           )}
 
           <div className="flex items-center justify-end gap-3">
@@ -417,22 +503,23 @@ export default async function OffboardingWizardPage({
                 )}
               </p>
               {canDecide ? (
-                <AccountsPanel employeeId={employeeId} m365Status={employee.m365Status} />
+                <AccountsPanel employeeId={employeeId} employeeName={employee.name} m365Status={employee.m365Status} />
               ) : (
                 <p className="font-mono text-[11px] text-fg-muted">
-                  current status: {employee.m365Status ?? "no sync yet"}
+                  current status: {employee.m365Status ?? "never had an account"}
                 </p>
               )}
             </CardBody>
           </Card>
           <div className="flex justify-end">
-            <ButtonLink variant="primary" href={href("report")}>Continue to Farewell report</ButtonLink>
+            <ButtonLink variant="primary" href={href("report")}>Continue to Finish</ButtonLink>
           </div>
         </div>
       )}
 
       {step === "report" && (
         <div className="flex flex-col gap-4">
+          {active && <ReadinessChecklist lines={readiness(readinessInput)} />}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {/* these total DECISIONS, not movements: decisionOf counts PENDING
                 and EXECUTION_FAILED alongside EXECUTED, and the collect step's
@@ -488,9 +575,9 @@ export default async function OffboardingWizardPage({
                       {/* linked like the collect step's copy of the same refNo —
                           the report is where you most want the jump */}
                       <Td mono className="text-[10.5px]">
-                        <Link href={`/approvals/${i.decision.id}`} className="text-accent hover:underline">{i.decision.refNo}</Link>
+                        <Link href={`/approvals/${i.decision.id}`} className="text-accent underline hover:text-accent-hover">{i.decision.refNo}</Link>
                         {" · "}
-                        {i.decision.state}
+                        {decisionStateLabel(i.decision.state)}
                       </Td>
                       <Td mono className="text-[10.5px]">{i.decision.decidedBy ?? "—"}</Td>
                       <Td mono className="text-[10.5px]">{fmtDate(i.decision.decidedAt)}</Td>
@@ -501,7 +588,7 @@ export default async function OffboardingWizardPage({
             )}
           </Card>
 
-          {active && canMutate && (
+          {active && canMutate && completionBlockers(readinessInput).length === 0 && (
             <div className="flex items-center justify-end gap-3">
               <span className="font-mono text-[10.5px] text-fg-muted">
                 completing flips {employee.name} to OFFBOARDED — it does not touch equipment

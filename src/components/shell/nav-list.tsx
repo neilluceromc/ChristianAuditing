@@ -10,18 +10,25 @@ export interface ApprovalsBadge {
   overdue: number;
 }
 
+/** Every nav count the shell carries (the Worklist count is 0 for roles without one). */
+export interface NavBadges {
+  approvals: ApprovalsBadge;
+  worklist: number;
+}
+
 export function NavList({
   sections,
-  badge,
+  badges,
   onNavigate,
 }: {
   sections: NavSection[];
-  badge: ApprovalsBadge;
+  badges: NavBadges;
   /** mobile drawer closes itself on navigation */
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   const search = useSearchParams();
+  const badge = badges.approvals;
   return (
     <nav aria-label="Workspace" className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4">
       {sections.map((section) => (
@@ -64,6 +71,14 @@ export function NavList({
                       />
                     )}
                     {badge.open}
+                  </span>
+                )}
+                {item.badge === "worklist" && badges.worklist > 0 && (
+                  <span
+                    className="inline-flex items-center rounded-(--radius-ctl) border border-border bg-border-faint px-1.5 font-mono text-[10px] text-fg-secondary"
+                    aria-label={`${badges.worklist} waiting on the worklist`}
+                  >
+                    {badges.worklist}
                   </span>
                 )}
               </Link>

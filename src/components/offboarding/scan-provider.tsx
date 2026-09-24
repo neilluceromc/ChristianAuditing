@@ -122,11 +122,11 @@ export function ScanProvider({
       <div className="flex flex-col gap-4">
         {active && (
           <>
-            <Banner tone="neutral" title="Scanning works here">
-              Point a USB scanner at an asset tag and this page will jump to that item and preselect
-              Returned. It does not confirm anything — you still click Confirm, so a mis-scan costs
-              nothing.
-            </Banner>
+            {/* spec §4.3: the "Scanning works here" banner is gone — the
+                Collect step's own muted hint line ("scan a tag to jump to
+                it") already says this once, above the step bar's content.
+                The verdict slot below is the only banner-tone element this
+                component still renders. */}
             {/* Rule 10: every verdict the rule can return is rendered, not
                 just the happy one. "ignored" is a deliberate silent no-op.
                 `aria-live` wraps ONLY this slot, not the card list below it —

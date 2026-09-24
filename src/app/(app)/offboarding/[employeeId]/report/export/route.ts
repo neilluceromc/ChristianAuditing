@@ -8,7 +8,7 @@ import { OUTCOME_LABEL } from "@/lib/offboarding";
 // filter the printable page applies — shared so the sheet and the page can
 // never disagree about which rows belong (§6a rule 47). Neither is
 // re-derived here.
-import { decidedItems, getWizard } from "@/server/modules/offboarding/queries";
+import { decidedItems, getWizard, undecidedHeldItems } from "@/server/modules/offboarding/queries";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ employeeId: string }> }) {
   await requireUser();
@@ -16,20 +16,37 @@ export async function GET(_req: Request, { params }: { params: Promise<{ employe
   const data = await getWizard(employeeId);
   if (!data) return new Response("Not found", { status: 404 });
 
-  const rows = decidedItems(data.items).map((i) => ({
-    tag: i.tag,
-    model: i.model,
-    outcome: OUTCOME_LABEL[i.decision.outcome],
-    reason: i.decision.reason,
-    cost: i.cost,
-    refNo: i.decision.refNo,
-    state: i.decision.state,
-    // Phase 20 (spec §4.1): decidedBy/decidedAt now ride on Decision itself
-    // (decisionOf defaults both to null), so the sheet's two new columns
-    // read straight off it — no re-derivation here.
-    decidedBy: i.decision.decidedBy,
-    decidedAt: i.decision.decidedAt,
-  }));
+  const rows = [
+    ...decidedItems(data.items).map((i) => ({
+      tag: i.tag,
+      model: i.model,
+      outcome: OUTCOME_LABEL[i.decision.outcome],
+      reason: i.decision.reason,
+      cost: i.cost,
+      refNo: i.decision.refNo,
+      state: i.decision.state,
+      // Phase 20 (spec §4.1): decidedBy/decidedAt now ride on Decision itself
+      // (decisionOf defaults both to null), so the sheet's two new columns
+      // read straight off it — no re-derivation here.
+      decidedBy: i.decision.decidedBy,
+      decidedAt: i.decision.decidedAt,
+    })),
+    // Phase 32 (spec §4.5): the still-undecided held items ride along with an
+    // empty decision cell, so a draft report's sheet lists the same rows the
+    // printed page's "Still to decide" section does — print and sheet stay
+    // in step even before everything is decided.
+    ...undecidedHeldItems(data.items).map((i) => ({
+      tag: i.tag,
+      model: i.model,
+      outcome: null,
+      reason: null,
+      cost: i.cost,
+      refNo: null,
+      state: null,
+      decidedBy: null,
+      decidedAt: null,
+    })),
+  ];
 
   // No cap check, deliberately: the shared EXPORT_CAP (10,000) guards the
   // LIST exports — a fleet-wide or roster-wide query that could genuinely

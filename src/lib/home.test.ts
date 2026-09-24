@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGE_BUCKETS, activeDismissals, ageBucket, coverageLine,
-  warrantyClusters, warrantyDaysLeft, withDismissal,
+  warrantyClusters, warrantyDaysLeft, withDismissal, withoutDismissal,
 } from "./home";
 
 const NOW = new Date("2026-08-17T09:00:00+08:00");
@@ -71,6 +71,17 @@ describe("dismissals — cleared items leave for the rest of the day", () => {
       .toEqual({ date: "2026-08-17", keys: ["SLA:a"] });
     expect(withDismissal({ date: "2026-08-16", keys: ["SLA:a"] }, "2026-08-17", "DATA:b"))
       .toEqual({ date: "2026-08-17", keys: ["DATA:b"] });
+  });
+});
+
+describe("withoutDismissal — Undo", () => {
+  it("removes one key from today's set and leaves the others", () => {
+    const pref = withDismissal(withDismissal(null, "2026-09-24", "triage:1"), "2026-09-24", "loans:2");
+    expect(withoutDismissal(pref, "2026-09-24", "triage:1")).toEqual({ date: "2026-09-24", keys: ["loans:2"] });
+  });
+  it("a stale or empty value yields an empty set for today", () => {
+    expect(withoutDismissal({ date: "2026-09-23", keys: ["triage:1"] }, "2026-09-24", "triage:1")).toEqual({ date: "2026-09-24", keys: [] });
+    expect(withoutDismissal(null, "2026-09-24", "x:1")).toEqual({ date: "2026-09-24", keys: [] });
   });
 });
 

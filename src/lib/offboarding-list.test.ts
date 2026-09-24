@@ -9,10 +9,10 @@ import { parseListState } from "./url-state";
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), OFFBOARDING_LIST_CONFIG);
 
 describe("OFFBOARDING_LIST_CONFIG", () => {
-  it("facets department, progress and due, sorts by name/started/undecided/due, defaults to name asc", () => {
+  it("facets department, progress and due, sorts by name/started/undecided/due/attention, defaults to Attention worst first", () => {
     expect(OFFBOARDING_LIST_CONFIG.facets).toEqual(["department", "progress", "due"]);
-    expect(OFFBOARDING_LIST_CONFIG.sortable).toEqual(["name", "started", "undecided", "due"]);
-    expect(OFFBOARDING_LIST_CONFIG.defaultSort).toEqual([{ key: "name", dir: "asc" }]);
+    expect(OFFBOARDING_LIST_CONFIG.sortable).toEqual(["name", "started", "undecided", "due", "attention"]);
+    expect(OFFBOARDING_LIST_CONFIG.defaultSort).toEqual([{ key: "attention", dir: "desc" }]);
   });
 });
 
@@ -45,14 +45,28 @@ describe("buildOffboardingOrderBy", () => {
     expect(buildOffboardingOrderBy([{ key: "undecided", dir: "asc" }])).toBeNull();
   });
 
-  it("falls back to the default sort", () => {
-    expect(buildOffboardingOrderBy([])).toEqual([{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }]);
+  it("falls back to the default sort, now null because Attention is the default", () => {
+    expect(buildOffboardingOrderBy([])).toBeNull();
   });
 
   it("maps 'due' to offboardingDueAt with nulls last", () => {
     expect(buildOffboardingOrderBy([{ key: "due", dir: "asc" }])).toEqual([
       { offboardingDueAt: { sort: "asc", nulls: "last" } }, { employeeNo: "asc" }, { id: "asc" },
     ]);
+  });
+});
+
+describe("buildOffboardingOrderBy — Attention only as the primary key (Phase 31 rule)", () => {
+  it("null (in memory) when Attention is primary, including the default", () => {
+    expect(buildOffboardingOrderBy([])).toBeNull();
+    expect(buildOffboardingOrderBy([{ key: "attention", dir: "desc" }])).toBeNull();
+  });
+  it("a secondary Attention left by a header click is dropped", () => {
+    expect(buildOffboardingOrderBy([{ key: "name", dir: "asc" }, { key: "attention", dir: "desc" }]))
+      .toEqual([{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }]);
+  });
+  it("undecided still orders in memory", () => {
+    expect(buildOffboardingOrderBy([{ key: "undecided", dir: "asc" }])).toBeNull();
   });
 });
 

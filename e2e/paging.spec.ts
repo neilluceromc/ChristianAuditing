@@ -449,7 +449,7 @@ test.describe.serial("paging", () => {
     await expect(page.getByText(/page 1 of 3 · 120 entries/)).toBeVisible();
   });
 
-  test("9. Worklist cap: Home shows Repairs 50+ / See all 50+; /inventory/work shows 50 rows and the first-50 note", async ({ page }) => {
+  test("9. Worklist cap: Home shows Repairs 50+ / See all 50+; /inventory/work shows 50 rows and the cap line to the rest", async ({ page }) => {
     const defectiveCount = await db.asset.count({ where: { cls: "IT", status: "DEFECTIVE" } });
     expect(defectiveCount).toBeGreaterThan(50);
 
@@ -461,7 +461,8 @@ test.describe.serial("paging", () => {
 
     await page.goto("/inventory/work");
     const workRepairsSection = page.locator("section", { has: page.getByRole("heading", { name: /Repairs to chase/ }) });
-    await expect(workRepairsSection.getByText(/Showing the first 50 — the oldest first\./)).toBeVisible();
+    await expect(workRepairsSection.getByText(/Showing 50 of 50\+ ·/)).toBeVisible();
+    await expect(workRepairsSection.getByRole("link", { name: "See all" })).toHaveAttribute("href", "/inventory?status=DEFECTIVE");
     await expect(workRepairsSection.locator("ol > li")).toHaveCount(50);
   });
 

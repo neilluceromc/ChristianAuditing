@@ -6,6 +6,7 @@ import { localDateISO } from "@/lib/format";
 import {
   RESERVATION_TABS, listReservations, parseReservationTab, type ReservationTab,
 } from "@/server/modules/reservations/queries";
+import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -27,7 +28,10 @@ export default async function ReservationsPage({
   const state = parseListState(sp, HOLDS_LIST_CONFIG);
   const { rows, counts, total, page, pageCount, facets } = await listReservations(tab, state);
   const today = localDateISO(new Date());
-  const canRelease = isDirectLifecycle(user.role, "IT");
+  // Phase 32 (spec §7): who may hand a held spare over or release it; the server actions guard again.
+  const canAct = isDirectLifecycle(user.role, "IT");
+  const direct = canAct;
+  const employees = canAct ? await activeEmployeeOptions() : [];
 
   const href = (s: ListState, t: ReservationTab = tab) => {
     const qs = serializeListState(s, HOLDS_LIST_CONFIG);
@@ -70,7 +74,8 @@ export default async function ReservationsPage({
 
         {rows.length > 0 ? (
           <>
-            <HoldsTable rows={rows} state={state} sortHrefs={sortHrefs} today={today} canRelease={canRelease} />
+            <HoldsTable rows={rows} state={state} sortHrefs={sortHrefs} today={today}
+              canAct={canAct} direct={direct} employees={employees} />
             <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
           </>
         ) : hasFilters ? (

@@ -13,7 +13,9 @@ import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
-import { loanRow, leaverRow, groupWork, type WorkGroup, type WorkRow, type WorkSectionId } from "@/lib/worklist";
+import { loanRow, loanSoonEdge, leaverRow, groupWork, type WorkGroup, type WorkRow, type WorkSectionId } from "@/lib/worklist";
+import { orderByOffboardingAttention } from "@/lib/offboarding";
+import { leaverStates } from "@/server/modules/offboarding/queries";
 
 const DAY_MS = 86_400_000;
 const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY_MS));
@@ -53,7 +55,7 @@ export async function worklist(
         ],
       }
     : { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] };
-  const [breached, failed, leavers, hires, missing, orphaned, awaiting, pref, triage, repairs, loans] = await Promise.all([
+  const [breached, failed, leavers, hireWork, missing, orphaned, awaiting, pref, triage, repairs, loans] = await Promise.all([
     prisma.approval.findMany({
       where: breachedWhere,
       orderBy: { slaAt: "asc" },
@@ -66,21 +68,9 @@ export async function worklist(
       take: CAP.small,
       include: { asset: true, employee: true },
     }),
-    prisma.employee.findMany({
-      where: { employment: "OFFBOARDING" },
-      orderBy: { updatedAt: "asc" },
-      take: CAP.small,
-      select: { id: true, name: true, employeeNo: true, offboardingDueAt: true, _count: { select: { assets: { where: { cls: "IT" } } } } },
-    }),
-    prisma.employee.findMany({
-      where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
-      orderBy: { joinedAt: "asc" },
-      take: CAP.small,
-      select: {
-        id: true, name: true, employeeNo: true, title: true, departmentId: true, joinedAt: true,
-        assets: { where: { cls: "IT" }, select: { id: true, tag: true, model: true, typeId: true, status: true } },
-      },
-    }),
+    // Phase 32 (spec §3): every leaver's real snapshot, worst first.
+    leaverStates(),
+    hireWorkRows(now),
     prisma.asset.findMany({
       where: { status: "MISSING", cls: "IT" },
       orderBy: { updatedAt: "asc" },
@@ -132,23 +122,6 @@ export async function worklist(
     }),
   ]);
 
-  const policies = hires.length
-    ? await prisma.equipmentPolicy.findMany({
-        select: {
-          id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
-          slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true } },
-        },
-        orderBy: [{ name: "asc" }],
-      })
-    : [];
-  const hireExceptions = hires.length
-    ? await prisma.employeeSlotException.findMany({
-        where: { employeeId: { in: hires.map((e) => e.id) } },
-        orderBy: [{ employeeId: "asc" }, { id: "asc" }],
-      })
-    : [];
-  const hireExceptionsByEmployee = groupExceptionsByEmployee(hireExceptions);
-
   const rows: WorkRow[] = [];
 
   for (const a of breached) {
@@ -159,9 +132,10 @@ export async function worklist(
       title: `${a.refNo} · ${s.line1}`,
       meta: `${slaLabel(a.slaAt, now).text} · ${a.priority.toLowerCase()}`,
       href: `/approvals/${a.id}`,
-      action: a.state === "PENDING" ? "Claim" : "Open",
+      action: "Open",
       severity: daysSince(a.slaAt, now),
       rank: 0,
+      ageDays: daysSince(a.slaAt, now),
     });
   }
 
@@ -173,33 +147,24 @@ export async function worklist(
       title: `${a.refNo} · ${s.line1}`,
       meta: `execution failed ${daysSince(a.updatedAt, now)} d ago`,
       href: `/approvals/${a.id}`,
-      action: "Retry",
+      action: "Open",
       severity: daysSince(a.updatedAt, now),
       rank: 1,
+      ageDays: daysSince(a.updatedAt, now),
     });
   }
 
   const todayISO = localDateISO(now);
-  for (const e of leavers) {
-    rows.push(leaverRow({ id: e.id, name: e.name, employeeNo: e.employeeNo, itemsOut: e._count.assets, offboardingDueAt: e.offboardingDueAt }, todayISO));
+  // Spec §3: each leaver's label and href come from offboardingNext over the
+  // real snapshot (failed returns, M365 status), worst first.
+  for (const e of orderByOffboardingAttention(leavers, "desc").slice(0, CAP.small)) {
+    rows.push(leaverRow({
+      id: e.id, name: e.name, employeeNo: e.employeeNo, itemsOut: e.itemsOut,
+      employment: e.employment, dueAt: e.dueAt, undecided: e.undecided, failed: e.failed, m365Status: e.m365,
+    }, todayISO));
   }
 
-  for (const e of hires) {
-    const policy = resolvePolicy({ title: e.title, departmentId: e.departmentId }, policies);
-    const exceptions = hireExceptionsByEmployee.get(e.id) ?? [];
-    if (!policy && !exceptions.some((x) => x.kind === "ADD")) continue;
-    const loadout = computeLoadout(effectiveSlots(policy?.slots ?? [], exceptions), e.assets);
-    if (loadout.missingRequired === 0) continue;
-    rows.push({
-      key: `hires:${e.id}`,
-      section: "hires",
-      title: `${e.name} started ${daysSince(e.joinedAt, now)} d ago`,
-      meta: `${e.employeeNo} · ${loadout.missingRequired} required slot${loadout.missingRequired === 1 ? "" : "s"} empty · ${policy?.name ?? "personal loadout"}`,
-      href: `/employees/${e.id}`,
-      action: "Fill loadout",
-      severity: daysSince(e.joinedAt, now),
-    });
-  }
+  rows.push(...hireWork.rows);
 
   for (const a of missing) {
     rows.push({
@@ -210,6 +175,8 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Investigate",
       severity: daysSince(a.updatedAt, now),
+      ageDays: daysSince(a.updatedAt, now),
+      entity: { kind: "asset", id: a.id, label: a.tag },
     });
   }
 
@@ -222,6 +189,10 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Fix record",
       severity: daysSince(a.updatedAt, now),
+      ageDays: daysSince(a.updatedAt, now),
+      // Ruling R6: no in-place control — assignAsset refuses anything but SPARE,
+      // so the fix lives on the record (Change status…).
+      entity: { kind: "asset", id: a.id, label: a.tag },
     });
   }
 
@@ -234,6 +205,9 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Check",
       severity: daysSince(a.createdAt, now),
+      ageDays: daysSince(a.createdAt, now),
+      control: { kind: "it-check", asset: { id: a.id, tag: a.tag } },
+      entity: { kind: "asset", id: a.id, label: a.tag },
     });
   }
 
@@ -247,6 +221,9 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Triage",
       severity: n,
+      ageDays: n,
+      control: { kind: "triage", asset: { id: a.id, tag: a.tag, model: a.model } },
+      entity: { kind: "asset", id: a.id, label: a.tag },
     });
   }
 
@@ -267,6 +244,8 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Chase",
       severity: down,
+      ageDays: down,
+      entity: { kind: "asset", id: a.id, label: a.tag },
     });
   }
 
@@ -281,10 +260,100 @@ export async function worklist(
   if (loans.length === CAP.large) saturated.add("loans");
   if (missing.length === CAP.small || orphaned.length === CAP.small) saturated.add("missing");
   if (awaiting.length === CAP.small) saturated.add("check");
-  if (hires.length === CAP.small) saturated.add("hires");
-  if (breached.length === CAP.small || failed.length === CAP.small || leavers.length === CAP.small) saturated.add("queue");
+  if (hireWork.saturated) saturated.add("hires");
+  if (breached.length === CAP.small || failed.length === CAP.small || leavers.length > CAP.small) saturated.add("queue");
 
   return groupWork(rows, activeDismissals(pref?.value, todayStamp(now)), opts, saturated);
+}
+
+/**
+ * The worklist's New hires rows (spec §5.1), shared with the Worklist badge:
+ * ACTIVE employees who started within HIRE_WINDOW_DAYS with a required slot
+ * still empty. `saturated` = the read hit its cap, so more may exist.
+ */
+export async function hireWorkRows(now: Date): Promise<{ rows: WorkRow[]; saturated: boolean }> {
+  const hires = await prisma.employee.findMany({
+    where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
+    orderBy: { joinedAt: "asc" },
+    take: CAP.small,
+    select: {
+      id: true, name: true, employeeNo: true, title: true, departmentId: true, joinedAt: true,
+      assets: { where: { cls: "IT" }, select: { id: true, tag: true, model: true, typeId: true, status: true } },
+    },
+  });
+  if (hires.length === 0) return { rows: [], saturated: false };
+
+  const [policies, hireExceptions] = await Promise.all([
+    prisma.equipmentPolicy.findMany({
+      select: {
+        id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
+        slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true } },
+      },
+      orderBy: [{ name: "asc" }],
+    }),
+    prisma.employeeSlotException.findMany({
+      where: { employeeId: { in: hires.map((e) => e.id) } },
+      orderBy: [{ employeeId: "asc" }, { id: "asc" }],
+    }),
+  ]);
+  const hireExceptionsByEmployee = groupExceptionsByEmployee(hireExceptions);
+
+  const rows: WorkRow[] = [];
+  for (const e of hires) {
+    const policy = resolvePolicy({ title: e.title, departmentId: e.departmentId }, policies);
+    const exceptions = hireExceptionsByEmployee.get(e.id) ?? [];
+    if (!policy && !exceptions.some((x) => x.kind === "ADD")) continue;
+    const loadout = computeLoadout(effectiveSlots(policy?.slots ?? [], exceptions), e.assets);
+    if (loadout.missingRequired === 0) continue;
+    rows.push({
+      key: `hires:${e.id}`,
+      section: "hires",
+      title: `${e.name} started ${daysSince(e.joinedAt, now)} d ago`,
+      meta: `${e.employeeNo} · ${loadout.missingRequired} required slot${loadout.missingRequired === 1 ? "" : "s"} empty · ${policy?.name ?? "personal loadout"}`,
+      href: `/employees/${e.id}#loadout`,
+      action: "Fill loadout",
+      severity: daysSince(e.joinedAt, now),
+      ageDays: daysSince(e.joinedAt, now),
+      entity: { kind: "employee", id: e.id, label: e.name },
+    });
+  }
+  return { rows, saturated: hires.length === CAP.small };
+}
+
+/**
+ * The Worklist nav badge (spec §5.3, plan P-9): every row the worklist shows,
+ * minus today's hidden ones, uncapped. It runs in the app layout on every
+ * navigation, so each section is one indexed count (leavers included — not
+ * leaverStates(), which reads every leaver in full); new hires reuse the
+ * worklist's own capped helper. Each where mirrors worklist()'s read.
+ */
+export async function worklistCount(userId: string, role: Role, now: Date = new Date()): Promise<number> {
+  const pref = await prisma.userPreference.findUnique({
+    where: { userId_key: { userId, key: DISMISS_PREF_KEY } },
+    select: { value: true },
+  });
+  const hidden = activeDismissals(pref?.value, todayStamp(now));
+  const hiddenIds = (section: WorkSectionId) =>
+    [...hidden].filter((k) => k.startsWith(`${section}:`)).map((k) => k.slice(section.length + 1));
+  const scope = approvalClassWhere(role);
+  // loanRow's edge, on the Manila calendar (see loanSoonEdge).
+  const soonEdge = loanSoonEdge(now);
+  const [triage, repairs, check, loans, missing, orphaned, breached, failed, leavers, hires] = await Promise.all([
+    prisma.asset.count({ where: { cls: "IT", returnedAt: { not: null }, id: { notIn: hiddenIds("triage") } } }),
+    prisma.asset.count({ where: { cls: "IT", status: "DEFECTIVE", id: { notIn: hiddenIds("repairs") } } }),
+    prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null, id: { notIn: hiddenIds("check") } } }),
+    prisma.asset.count({
+      where: { cls: "IT", status: "TEMPORARY", id: { notIn: hiddenIds("loans") }, OR: [{ loanDueAt: null }, { loanDueAt: { lt: soonEdge } }] },
+    }),
+    prisma.asset.count({ where: { cls: "IT", status: "MISSING", id: { notIn: hiddenIds("missing") } } }),
+    prisma.asset.count({ where: { cls: "IT", status: "DEPLOYED", assigneeId: null, id: { notIn: hiddenIds("missing") } } }),
+    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now }, id: { notIn: hiddenIds("queue") } }, scope] } }),
+    prisma.approval.count({ where: { AND: [{ state: "EXECUTION_FAILED" }, { id: { notIn: hiddenIds("queue") } }, scope] } }),
+    prisma.employee.count({ where: { employment: "OFFBOARDING", id: { notIn: hiddenIds("queue") } } }),
+    hireWorkRows(now),
+  ]);
+  const hireCount = hires.rows.filter((r) => !hidden.has(r.key)).length;
+  return triage + repairs + check + loans + missing + orphaned + breached + failed + leavers + hireCount;
 }
 
 export interface ClaimRow {

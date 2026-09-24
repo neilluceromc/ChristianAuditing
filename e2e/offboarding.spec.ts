@@ -46,7 +46,7 @@ test.afterAll(async () => {
 // scope there (each describe body is its own closure at collection time).
 async function openWizard(page: Page) {
   await page.goto("/offboarding");
-  await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Open wizard" }).click();
+  await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: /^Collect \d+ items?$/ }).click();
   // Headroom, not a weaker assertion (HANDOVER §7). This is the FIRST hit of
   // the dynamic /offboarding/[employeeId] route in the whole suite, and this
   // file runs seventh of eight — so the click has to cover a cold compile on a
@@ -76,8 +76,8 @@ test.describe("offboarding queue", () => {
     const row = page.getByRole("row", { name: /Dennis Ong/ });
     await expect(row).toContainText("EMP-0090");
     await expect(row).toContainText("Operations");
-    await expect(row).toContainText("0 of 3");
-    await expect(row).toContainText("3 to go");
+    await expect(row).toContainText("0 of 3 decided");
+    await expect(row).toContainText("overdue by 2 d");
 
     // Phase 15: Home's Worklist caps "Approvals & leavers" at 2 rows, and the
     // seed's breached SLA (APR-2040) plus the EXECUTION_FAILED retry
@@ -86,18 +86,23 @@ test.describe("offboarding queue", () => {
     await page.goto("/inventory/work");
     const leave = page.locator("li").filter({ hasText: "Dennis Ong is leaving" });
     await expect(leave).toContainText("3 items still out");
-    await expect(leave.getByRole("link", { name: "Collect equipment" })).toHaveAttribute(
+    // Phase 32: the leaver row's link reads offboardingNext's label and lands on that step.
+    await expect(leave.getByRole("link", { name: "Collect 3 items" })).toHaveAttribute(
       "href",
-      /\/offboarding\/[a-z0-9]+/i,
+      /\/offboarding\/[a-z0-9]+\?step=collect/i,
     );
   });
 });
 
 // The wizard is a lifecycle: these run in order and depend on each other.
 test.describe.serial("the 4-step wizard", () => {
-  test("step 1 reviews holdings; steps 3 and 4 are not reachable while items are undecided", async ({ page }) => {
+  test("step 1 reviews holdings; every step stays reachable while items are undecided", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await openWizard(page);
+    // Phase 32: the queue's row action now reads offboardingNext and lands on
+    // Collect (Dennis has undecided items) rather than the bare wizard root —
+    // this test is specifically about the Review step's own content.
+    await gotoStep(page, /Review holdings/);
     await expectNoSeriousAxe(page);
 
     // Operations has no equipment policy — the step must still be useful.
@@ -106,9 +111,9 @@ test.describe.serial("the 4-step wizard", () => {
       await expect(page.getByRole("row", { name: new RegExp(tag) })).toBeVisible();
     }
 
-    // Only Review and Collect are links; Accounts and Farewell report are inert.
+    // Phase 32: every step is a link, reachable regardless of undecided items.
     const steps = page.getByRole("list", { name: "Offboarding steps" });
-    await expect(steps.getByRole("link")).toHaveCount(2);
+    await expect(steps.getByRole("link")).toHaveCount(4);
     await expect(steps).toContainText("Accounts & M365");
   });
 
@@ -181,7 +186,7 @@ test.describe.serial("the 4-step wizard", () => {
   test("step 3 closes the account; completion is refused until it does", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/offboarding");
-    await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Open wizard" }).click();
+    await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Close account" }).click();
     await gotoStep(page, /Accounts & M365/);
 
     await page.getByLabel(/Microsoft 365 account status/).selectOption("inactive");
@@ -192,8 +197,9 @@ test.describe.serial("the 4-step wizard", () => {
   test("step 4 totals the outcomes and completing flips the person to OFFBOARDED", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/offboarding");
-    await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Open wizard" }).click();
-    await gotoStep(page, /Farewell report/);
+    await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Complete" }).click();
+    // Phase 32: the last step reads "Finish" (its id stays "report").
+    await gotoStep(page, /Finish/);
 
     // returned ₱5,500 + defective ₱48,000 back in the fleet; ₱18,000 lost.
     await expect(page.getByText("₱53,500")).toBeVisible();
@@ -204,9 +210,15 @@ test.describe.serial("the 4-step wizard", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Complete" }).click();
     await expect(page.getByText("Dennis Ong is now OFFBOARDED")).toBeVisible();
 
+    // Peak-End (spec §4.4): completing lands on the success card, not a silent
+    // refresh — Dennis is the only seeded leaver, so there is no next leaver.
+    await expect(page.getByRole("heading", { name: /Dennis Ong offboarded · 3 decisions · / })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Print farewell report" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Queue clear" })).toBeVisible();
+
     // The queue is empty and the wizard still reads as the record of what happened.
     await page.goto("/offboarding");
-    await expect(page.getByText("Nobody is offboarding")).toBeVisible();
+    await expect(page.getByText("No one is leaving")).toBeVisible();
   });
 
   test("the printable farewell report names every outcome and the value recovered", async ({ page }) => {
@@ -222,7 +234,9 @@ test.describe.serial("the 4-step wizard", () => {
     const url = page.url();
     await page.goto(`/offboarding/${url.split("/").pop()}/report`);
 
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible();
+    // Phase 32: the printed H1 drops "Offboarding" (the page's own breadcrumb
+    // already says that) and reads "Backroom IT — Farewell report".
+    await expect(page.getByRole("heading", { name: "Backroom IT — Farewell report", exact: true })).toBeVisible();
     // EMP-0090 also repeats in the sheet's footer line, so scope to the first match.
     await expect(page.getByText("EMP-0090").first()).toBeVisible();
     for (const tag of ["BR-LT-0166", "BR-PH-0312", "BR-HS-0510"]) {
@@ -302,7 +316,7 @@ test.describe("offboarding — the server gate does not trust the wizard", () =>
     await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible();
 
     await page.goto("/offboarding");
-    await page.getByRole("row", { name: /Marites Bautista/ }).getByRole("link", { name: "Open wizard" }).click();
+    await page.getByRole("row", { name: /Marites Bautista/ }).getByRole("link", { name: /^Collect \d+ items?$/ }).click();
     await gotoStep(page, /Collect items/);
 
     // the item names its blocker instead of offering a control or claiming a decision.
