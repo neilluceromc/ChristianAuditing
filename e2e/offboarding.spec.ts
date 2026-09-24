@@ -236,7 +236,7 @@ test.describe.serial("the 4-step wizard", () => {
 
     // Phase 32: the printed H1 drops "Offboarding" (the page's own breadcrumb
     // already says that) and reads "Backroom IT — Farewell report".
-    await expect(page.getByText("Farewell report").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Backroom IT — Farewell report", exact: true })).toBeVisible();
     // EMP-0090 also repeats in the sheet's footer line, so scope to the first match.
     await expect(page.getByText("EMP-0090").first()).toBeVisible();
     for (const tag of ["BR-LT-0166", "BR-PH-0312", "BR-HS-0510"]) {

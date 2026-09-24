@@ -3,7 +3,7 @@ import { dayFromISO } from "./deadlines";
 import { fmtDate } from "./format";
 import {
   DEFAULT_LOAN_DAYS, LOAN_DUE_SOON_DAYS, SEE_ALL_HREF, WORK_SECTIONS, capLine, groupWork, leaverRow, loanRow,
-  loanSoonEdge, pastSlaCount, summaryChips, workActionLabel, workHeadline, type LeaverLike, type WorkGroup, type WorkRow,
+  loanSoonEdge, pastSlaCount, summaryChips, workActionLabel, workHeadline, workRowHref, type LeaverLike, type WorkGroup, type WorkRow,
 } from "./worklist";
 
 const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>
@@ -164,6 +164,27 @@ describe("workActionLabel", () => {
     expect(workActionLabel(row({ control: { kind: "assign", asset: { id: "a", tag: "T", model: "M" } } }), true)).toBe("Assign…");
     expect(workActionLabel(row({}), true)).toBe("Chase");
     expect(workActionLabel(row({ control: { kind: "it-check", asset: { id: "a", tag: "T" } } }), false)).toBe("Open");
+  });
+});
+
+describe("workRowHref — a viewer's Open goes where a viewer may go", () => {
+  const TODAY = "2026-09-24";
+  const e = (over: Partial<LeaverLike> = {}): LeaverLike => ({
+    id: "e1", name: "Dennis Ong", employeeNo: "EMP-0090", itemsOut: 3,
+    employment: "OFFBOARDING", dueAt: new Date("2026-09-22T00:00:00+08:00"),
+    undecided: 3, failed: null, m365Status: "offboarding", ...over,
+  });
+  it("a viewer's leaver row with no completion date opens /offboarding/{id}, not the edit page", () => {
+    const r = leaverRow(e({ dueAt: null }), TODAY);
+    expect(r.href).toBe("/employees/e1/edit");
+    expect(workRowHref(r, true)).toBe("/employees/e1/edit");
+    expect(workRowHref(r, false)).toBe("/offboarding/e1");
+  });
+  it("a viewer's leaver row with a date opens the bare wizard; other rows keep their href", () => {
+    expect(workRowHref(leaverRow(e({}), TODAY), false)).toBe("/offboarding/e1");
+    const asset: WorkRow = { key: "k", section: "triage", title: "", meta: "", href: "/inventory/a", action: "Open", severity: 0,
+      entity: { kind: "asset", id: "a", label: "T" } };
+    expect(workRowHref(asset, false)).toBe("/inventory/a");
   });
 });
 

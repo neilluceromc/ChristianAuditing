@@ -350,7 +350,7 @@ test.describe.serial("deadlines", () => {
     await login(page, IT);
     await page.goto(`/offboarding/${d.id}/report`);
     // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
-    await expect(page.getByText("Farewell report").first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Backroom IT — Farewell report", exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(`Still open · 2 d overdue (due ${fmtDate(d.offboardingDueAt)})`, { exact: true }))
       .toBeVisible();
   });

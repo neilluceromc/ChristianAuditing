@@ -33,7 +33,7 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
           ]}
           actions={
             <>
-              <ButtonLink href={`/offboarding/${employeeId}/report/export`} variant="secondary">
+              <ButtonLink href={`/offboarding/${employeeId}/report/export`} variant="secondary" native>
                 Export sheet
               </ButtonLink>
               <PrintButton />

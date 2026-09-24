@@ -431,6 +431,20 @@ test.describe("it-work-ux — the worklist", () => {
     await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Claimed by you" })).toHaveCount(0);
     await expectNoSeriousAxe(page);
+
+    // I-1: a leaver with no completion date — IT's next step is the edit page,
+    // which a viewer is refused; a viewer's Open goes to the leaver's wizard page.
+    const dennis = await resetDennis();
+    try {
+      await db.employee.update({ where: { id: dennis.id }, data: { offboardingDueAt: null } });
+      await page.goto("/inventory/work");
+      const queue = page.locator("section#queue");
+      await expect(queue).toBeVisible({ timeout: 20_000 });
+      const row = queue.getByRole("listitem").filter({ hasText: "Dennis Ong is leaving — no completion date" });
+      await expect(row.getByRole("link", { name: "Open" })).toHaveAttribute("href", `/offboarding/${dennis.id}`);
+    } finally {
+      await resetDennis();
+    }
   });
 });
 

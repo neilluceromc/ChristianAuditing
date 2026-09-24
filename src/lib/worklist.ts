@@ -128,6 +128,16 @@ export function workActionLabel(row: WorkRow, canAct: boolean): string {
   return row.control ? CONTROL_LABEL[row.control.kind] : row.action;
 }
 
+/**
+ * A viewer's Open goes where a viewer may go: a leaver row's next step can be
+ * /employees/{id}/edit (no completion date), which viewers are refused, so a
+ * viewer's leaver row opens the leaver's wizard page instead.
+ */
+export function workRowHref(row: WorkRow, canAct: boolean): string {
+  if (!canAct && row.section === "queue" && row.entity?.kind === "employee") return `/offboarding/${row.entity.id}`;
+  return row.href;
+}
+
 export function groupWork(
   rows: WorkRow[],
   dismissed: Set<string>,

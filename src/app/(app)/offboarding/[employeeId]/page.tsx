@@ -170,7 +170,7 @@ export default async function OffboardingWizardPage({
                 already-returned, so reducing over all of it bills equipment the
                 worker has already put back to the money still in their hands */}
             <Stat label="Book value out" value={fmtMoney(heldItems.reduce((s, i) => s + (i.cost ?? 0), 0))} />
-            <Stat label="M365" value={employee.m365Status ?? "no sync yet"} />
+            <Stat label="M365" value={employee.m365Status ?? "never had an account"} />
           </div>
           {/* keyed on the SLOT COUNT, not the policy: a person with no policy
               can still carry ADD exceptions of their own (Phase 16, ruling
@@ -389,7 +389,7 @@ export default async function OffboardingWizardPage({
                           otherwise refuse the decision with no way to see why */}
                       <p className="text-xs" style={{ color: "var(--st-attention-text)" }}>
                         {i.tag} is held by{" "}
-                        <Link href={`/approvals/${i.blockedBy!.id}`} className="font-mono text-accent hover:underline">
+                        <Link href={`/approvals/${i.blockedBy!.id}`} className="font-mono text-accent underline hover:text-accent-hover">
                           {i.blockedBy!.refNo}
                         </Link>{" "}
                         {/* the same label decideItem's refusal uses — one block
@@ -506,13 +506,13 @@ export default async function OffboardingWizardPage({
                 <AccountsPanel employeeId={employeeId} employeeName={employee.name} m365Status={employee.m365Status} />
               ) : (
                 <p className="font-mono text-[11px] text-fg-muted">
-                  current status: {employee.m365Status ?? "no sync yet"}
+                  current status: {employee.m365Status ?? "never had an account"}
                 </p>
               )}
             </CardBody>
           </Card>
           <div className="flex justify-end">
-            <ButtonLink variant="primary" href={href("report")}>Continue to Farewell report</ButtonLink>
+            <ButtonLink variant="primary" href={href("report")}>Continue to Finish</ButtonLink>
           </div>
         </div>
       )}

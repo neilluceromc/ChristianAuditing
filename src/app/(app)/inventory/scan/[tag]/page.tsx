@@ -133,7 +133,8 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
   const direct = isDirectLifecycle(user.role, asset.cls);
   const employees = action === "assign" ? await activeEmployeeOptions() : [];
   const holder = asset.assignee ? { id: asset.assignee.id, name: asset.assignee.name } : null;
-  const leaver = asset.assignee?.employment === "OFFBOARDING" ? asset.assignee : null;
+  // The leaver line links to /offboarding (IT workspace only): shown only where it would open.
+  const leaver = asset.assignee?.employment === "OFFBOARDING" && pathAllowedForRole(`/offboarding/${asset.assignee.id}`, user.role) ? asset.assignee : null;
   // The app's own gate for the profile route: a holder link only where it would open.
   const canOpenPeople = asset.assignee ? pathAllowedForRole(`/employees/${asset.assignee.id}`, user.role) : false;
   const loanDue = asset.status === "TEMPORARY" ? asset.loanDueAt : null;

@@ -8,7 +8,7 @@ import { TriageDialog } from "@/components/inventory/triage-control";
 import { ItCheckDialog } from "@/components/inventory/it-check";
 import { LoanDueDialog } from "@/components/inventory/loan-due-control";
 import { AssignDialog } from "@/components/inventory/holder-control";
-import { workActionLabel, type WorkRow } from "@/lib/worklist";
+import { workActionLabel, workRowHref, type WorkRow } from "@/lib/worklist";
 
 /** The record page's own date-input shape (inventory/[id]/(record)/layout.tsx). */
 const isoDay = (d: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : null);
@@ -25,7 +25,7 @@ export function WorkRowActions({ row, canAct, direct, employees }: {
   const label = workActionLabel(row, canAct);
   const c = row.control;
   if (!canAct || !c) {
-    return <Link href={row.href} className="shrink-0 text-[12px] font-medium text-accent hover:underline">{label}</Link>;
+    return <Link href={workRowHref(row, canAct)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">{label}</Link>;
   }
   const close = () => setOpen(false);
   return (
