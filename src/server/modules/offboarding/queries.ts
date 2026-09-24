@@ -5,15 +5,15 @@ import { OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import {
-  decisionOf, reportTotals, returnTargetStatus,
-  type Decision, type DecisionCandidate, type ReportTotals,
+  decisionOf, offboardingAttention, orderByOffboardingAttention, reportTotals, returnTargetStatus,
+  type Decision, type DecisionCandidate, type FailedReturn, type OffboardingAttention, type ReportTotals,
 } from "@/lib/offboarding";
 import {
   buildOffboardingOrderBy, buildOffboardingWhere, derivedFilters, dueOf, narrowedFacetCounts, progressOf,
   sortByUndecided,
 } from "@/lib/offboarding-list";
 import { pageOf, ENTITY_PAGE_SIZE } from "@/lib/paging";
-import type { ListState } from "@/lib/url-state";
+import { primarySortOf, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import { EXPORT_CAP, type OffboardingExportRow } from "@/lib/export-columns";
 
@@ -39,6 +39,12 @@ export interface OffboardingRow {
   joined: string;
   /** Phase 23 (spec §4.6/§5.4): `employee.offboardingDueAt` — the Due facet/sort's own field. */
   dueAt: Date | null;
+  /** Phase 32 (spec §3): the employee's employment, raw — the LeaverState the pure rules read. */
+  employment: string;
+  /** Phase 32: the first held item whose live decision failed to execute, or null. */
+  failed: FailedReturn | null;
+  /** Phase 32 (spec §8): the Attention verdict — the queue's default order and its cue. */
+  attention: OffboardingAttention | null;
 }
 
 export interface ApprovalLike {
@@ -124,7 +130,7 @@ const OFFBOARDING_INCLUDE = {
 
 type OffboardingCandidate = Prisma.EmployeeGetPayload<{ include: typeof OFFBOARDING_INCLUDE }>;
 
-function toOffboardingRow(e: OffboardingCandidate): OffboardingRow {
+function toOffboardingRow(e: OffboardingCandidate, todayISO: string): OffboardingRow {
   const byAsset = candidatesFor(e, e.approvals);
   const heldIdSet = new Set(e.assets.map((a) => a.id));
   // every asset in e.assets is held by them right now, hence held: true —
@@ -140,6 +146,14 @@ function toOffboardingRow(e: OffboardingCandidate): OffboardingRow {
     ([assetId, candidates]) =>
       !heldIdSet.has(assetId) && decisionOf(candidates, { held: false }) !== null,
   ).length;
+  // the first held item whose live decision failed to execute — completeOffboarding's second gate
+  const failed = e.assets
+    .map((a) => decisionOf(byAsset.get(a.id) ?? [], { held: true }))
+    .find((d) => d?.state === "EXECUTION_FAILED");
+  const state = {
+    id: e.id, employment: e.employment, dueAt: e.offboardingDueAt, undecided: heldIdSet.size - decidedHeld,
+    failed: failed ? { refNo: failed.refNo, approvalId: failed.id } : null, m365Status: e.m365Status,
+  };
   return {
     id: e.id,
     name: e.name,
@@ -155,6 +169,9 @@ function toOffboardingRow(e: OffboardingCandidate): OffboardingRow {
     started: e.offboardingAt,
     joined: fmtDate(e.joinedAt),
     dueAt: e.offboardingDueAt,
+    employment: e.employment,
+    failed: state.failed,
+    attention: offboardingAttention(state, todayISO),
   };
 }
 
@@ -201,7 +218,7 @@ async function offboardingFacets(state: ListState): Promise<{ department: FacetO
   const { progressFilter, dueFilter } = derivedFilters(state);
   // Phase 25 (spec §6.4): each derived facet's counts are narrowed by the OTHER
   // derived facet's active filter (department is already in the SQL where).
-  const counts = narrowedFacetCounts(derivedCandidates.map(toOffboardingRow), progressFilter, dueFilter, today);
+  const counts = narrowedFacetCounts(derivedCandidates.map((e) => toOffboardingRow(e, today)), progressFilter, dueFilter, today);
 
   return {
     department: departments.map((d) => ({
@@ -235,6 +252,7 @@ export async function listOffboarding(state: ListState): Promise<{
   const where = buildOffboardingWhere(state);
   const orderBy = buildOffboardingOrderBy(state.sort);
   const { progressFilter, dueFilter } = derivedFilters(state);
+  const today = localDateISO(new Date());
 
   let rows: OffboardingRow[];
   let pg: ReturnType<typeof pageOf>;
@@ -243,15 +261,20 @@ export async function listOffboarding(state: ListState): Promise<{
     const stableOrder: Prisma.EmployeeOrderByWithRelationInput[] =
       orderBy ?? [{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }];
     const candidates = await prisma.employee.findMany({ where, orderBy: stableOrder, include: OFFBOARDING_INCLUDE });
-    let computed = candidates.map(toOffboardingRow);
+    let computed = candidates.map((e) => toOffboardingRow(e, today));
     if (progressFilter.length > 0) {
       computed = computed.filter((r) => progressFilter.includes(progressOf(r.undecided)));
     }
     if (dueFilter.length > 0) {
-      const today = localDateISO(new Date());
       computed = computed.filter((r) => dueFilter.includes(dueOf(r.dueAt, today)));
     }
-    if (orderBy === null) {
+    // Phase 32 (plan P-2): Attention as the primary key orders the whole cut
+    // in memory (buildOffboardingOrderBy returned null for it); otherwise the
+    // undecided pass keeps its Phase 20 meaning.
+    const attentionSort = primarySortOf(state.sort, "attention");
+    if (attentionSort) {
+      computed = orderByOffboardingAttention(computed, attentionSort.dir);
+    } else if (orderBy === null) {
       const undecidedSort = state.sort.find((s) => s.key === "undecided");
       computed = sortByUndecided(computed, undecidedSort?.dir ?? "asc");
     }
@@ -267,7 +290,7 @@ export async function listOffboarding(state: ListState): Promise<{
       }),
     );
     pg = snapshotPg;
-    rows = employees.map(toOffboardingRow);
+    rows = employees.map((e) => toOffboardingRow(e, today));
   }
 
   const facets = await offboardingFacets(state);
@@ -341,6 +364,8 @@ export interface WizardData {
   items: WizardItem[];
   /** held items with no live decision — Continue is blocked while this is > 0 */
   undecided: number;
+  /** held items whose live decision failed to execute — the Finish checklist's Requests lines */
+  failed: FailedReturn[];
   totals: ReportTotals;
   /** Phase 23 (spec §5.4): the newest `offboarding.completed` audit entry's `createdAt`, null while still open. */
   completedAt: Date | null;
@@ -509,6 +534,9 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     })),
     items: rows,
     undecided: rows.filter((i) => i.held && !i.decision).length,
+    failed: rows
+      .filter((i) => i.held && i.decision?.state === "EXECUTION_FAILED")
+      .map((i) => ({ refNo: i.decision!.refNo, approvalId: i.decision!.id })),
     totals: reportTotals(
       rows.filter((i) => i.decision).map((i) => ({ outcome: i.decision!.outcome, cost: i.cost })),
     ),
@@ -535,10 +563,13 @@ export async function offboardingExportRows(
   });
   const today = localDateISO(new Date());
   const { progressFilter, dueFilter } = derivedFilters(state);
-  let rows = candidates.map(toOffboardingRow);
+  let rows = candidates.map((e) => toOffboardingRow(e, today));
   if (progressFilter.length > 0) rows = rows.filter((r) => progressFilter.includes(progressOf(r.undecided)));
   if (dueFilter.length > 0) rows = rows.filter((r) => dueFilter.includes(dueOf(r.dueAt, today)));
-  if (orderBy === null) rows = sortByUndecided(rows, state.sort.find((s) => s.key === "undecided")?.dir ?? "asc");
+  // the same branch as listOffboarding — exports follow the derived sorts (Phase 31)
+  const attentionSort = primarySortOf(state.sort, "attention");
+  if (attentionSort) rows = orderByOffboardingAttention(rows, attentionSort.dir);
+  else if (orderBy === null) rows = sortByUndecided(rows, state.sort.find((s) => s.key === "undecided")?.dir ?? "asc");
   return {
     rows: rows.map((r) => ({
       employeeNo: r.employeeNo, name: r.name, department: r.department,
@@ -546,4 +577,22 @@ export async function offboardingExportRows(
       progress: progressOf(r.undecided) === "open" ? "Open" : "Complete",
     })),
   };
+}
+
+/** Every OFFBOARDING employee as a row — the worklist's leavers, Home and the wizard's Next leaver read this. */
+export async function leaverStates(): Promise<OffboardingRow[]> {
+  const today = localDateISO(new Date());
+  const candidates = await prisma.employee.findMany({
+    where: { employment: "OFFBOARDING" },
+    orderBy: [{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }],
+    include: OFFBOARDING_INCLUDE,
+  });
+  return candidates.map((e) => toOffboardingRow(e, today));
+}
+
+/** Spec §4.4: the next person in Attention order after the one just completed, or null (Queue clear). */
+export async function nextLeaver(currentId: string): Promise<{ id: string; name: string } | null> {
+  const rows = orderByOffboardingAttention(await leaverStates(), "desc");
+  const next = rows.find((r) => r.id !== currentId);
+  return next ? { id: next.id, name: next.name } : null;
 }

@@ -2,13 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
+import { Prisma, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
-import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, reasonRequired } from "@/lib/offboarding";
+import { OUTCOMES, OUTCOME_LABEL, decisionOf, outcomeStatus, reasonRequired, type Outcome } from "@/lib/offboarding";
 import { CLASS_PHRASE, isDirectLifecycle } from "@/lib/asset-class";
 import { cleanReason, reasonOptional } from "@/lib/reason";
 import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
@@ -73,6 +73,128 @@ const decideSchema = z.object({
   reason: reasonOptional(),
 });
 
+type DecideInput = { employeeId: string; assetId: string; outcome: Outcome; reason: string };
+type DecideOutcome = { failure: ActionResult<never> } | { refNo: string; applied: string | null };
+
+/** One item's decision inside the caller's transaction — decideItem and decideRemaining share it (plan P-6). */
+async function decideOne(
+  tx: Prisma.TransactionClient,
+  user: { id: string; name: string; role: Role },
+  d: DecideInput,
+  now: Date,
+): Promise<DecideOutcome> {
+  // decideItem cleans it before the call; decideRemaining does the same per item
+  const reason = d.reason;
+  const employee = await tx.employee.findUnique({ where: { id: d.employeeId } });
+  if (!employee) return { failure: conflict("That employee no longer exists.") };
+  if (employee.employment !== "OFFBOARDING") {
+    return { failure: conflict(
+      `${employee.name} reads ${employee.employment}, not OFFBOARDING — set their employment on the employee record before collecting equipment.`,
+    ) };
+  }
+  const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
+  if (!asset) return { failure: conflict("That asset no longer exists.") };
+  if (asset.assigneeId !== d.employeeId) {
+    return { failure: conflict(`${asset.tag} isn't held by ${employee.name} any more — refresh the wizard.`) };
+  }
+  // A car has no Buyout. Validated HERE, against the asset's class, not
+  // at parse time — the outcome is legal for the enum and illegal for
+  // this asset, and only the asset knows which it is.
+  // One lookup, narrowed: null means this class does not offer the outcome.
+  // No `!` -- this file's own rule (offboarding.ts, decisionOf) is that
+  // non-null-ness should be structural, not asserted several lines from the
+  // check that proves it.
+  const targetStatus = outcomeStatus(asset.cls, d.outcome);
+  if (targetStatus === null) {
+    return { failure: validationError({ outcome: `${OUTCOME_LABEL[d.outcome]} is not an outcome for ${CLASS_PHRASE[asset.cls]} asset.` }) };
+  }
+  // README 3e: a reason is required for anything other than a clean
+  // return. Inside the transaction, after the class check: it precedes
+  // every write, which the NOTE above relies on, and a Purchasing asset
+  // sent BUYOUT must be refused for being a Purchasing asset, not for
+  // "needing a reason" — a remedy that could never work.
+  if (reasonRequired(d.outcome) && reason.length < 3) {
+    return { failure: validationError({
+      reason: `${OUTCOME_LABEL[d.outcome]} needs a reason (at least 3 characters) — it lands in the approval and on the farewell report.`,
+    }) };
+  }
+  // The one-open-per-asset index is per ASSET, not per approval type: a
+  // pending lifecycle.change-status refuses this decision too, and
+  // "that decision is already recorded" would be a lie pointing nowhere.
+  const open = await openApprovalForAsset(tx, asset.id);
+  if (open) {
+    // A return created BEFORE this offboarding began owns the asset's one
+    // open slot but decides nothing here, so claiming "already recorded"
+    // would point the operator at a decision the wizard doesn't show —
+    // and leave the item permanently undecidable.
+    const inWindow =
+      employee.offboardingAt !== null && open.createdAt >= employee.offboardingAt;
+    return { failure: conflict(
+      open.type === "lifecycle_return" && inWindow
+        ? `${asset.tag} already has an open request — that decision is already recorded.`
+        : `${asset.tag} is held by ${open.refNo} (${APPROVAL_TYPE_LABEL[open.type]}) — resolve that in Approvals first, then decide this item.`,
+    ) };
+  }
+  // Phase 15 (spec §2.1): IT confirms and it's done — no queue. The asset
+  // is applied through the SAME executor the worker uses, in the same
+  // transaction as the approval that records it, and that approval is
+  // born EXECUTED rather than PENDING: the wizard's Continue gate and the
+  // farewell report only ever read approval rows, so a decision that
+  // skipped the queue must still leave one behind. Purchasing keeps the
+  // PENDING path below — its class is absent from DIRECT_LIFECYCLE_CLASSES.
+  if (isDirectLifecycle(user.role, asset.cls)) {
+    const prepared = await prepareLifecycle(tx, asset, { kind: "return", status: targetStatus }, now);
+    if (!prepared.ok) return { failure: conflict(prepared.error) };
+    await commitLifecycle(tx, asset.id, prepared.prepared, now);
+    const approval = await createApproval(tx, {
+      type: "lifecycle_return",
+      payload: {
+        from: { assigneeId: d.employeeId },
+        to: { assigneeId: null, status: targetStatus },
+        reason: d.outcome === "RETURNED" ? reason || "offboarding · returned" : reason,
+      },
+      requestedById: user.id,
+      assetId: asset.id,
+      employeeId: d.employeeId,
+      priority: d.outcome === "MISSING" ? "HIGH" : "NORMAL",
+      executed: { by: user.id, at: now },
+    });
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name,
+      entityType: "asset", entityId: asset.id,
+      action: "lifecycle.return",
+      diff: prepared.prepared.diff,
+    });
+    await emitWebhook(tx, "approval.executed", {
+      approvalId: approval.id, refNo: approval.refNo, type: approval.type, assetId: asset.id, assetTag: asset.tag,
+    });
+    return { refNo: approval.refNo, applied: targetStatus };
+  }
+  const approval = await createApproval(tx, {
+    type: "lifecycle_return",
+    payload: {
+      from: { assigneeId: d.employeeId },
+      to: { assigneeId: null, status: targetStatus },
+      // keyed on the outcome rather than on emptiness: reasonRequired
+      // guarantees a reason for the other three, and this sentinel would be
+      // a lie stamped on a MISSING item if that ever changed
+      reason: d.outcome === "RETURNED" ? reason || "offboarding · returned" : reason,
+    },
+    requestedById: user.id,
+    assetId: asset.id,
+    employeeId: d.employeeId,
+    // Custody lost is not a "fine for now" problem.
+    priority: d.outcome === "MISSING" ? "HIGH" : "NORMAL",
+  });
+  await writeAudit(tx, {
+    actorId: user.id, actorLabel: user.name,
+    entityType: "asset", entityId: asset.id,
+    action: "approval.requested",
+    diff: { approval: { from: null, to: approval.refNo } },
+  });
+  return { refNo: approval.refNo, applied: null };
+}
+
 /**
  * One decision → one approval, immediately (entry criterion #1). The payload's
  * to.status is what the worker will apply, and Task 1 taught executionPlan all
@@ -94,120 +216,10 @@ export async function decideItem(input: unknown): Promise<ActionResult<{ refNo: 
   let refNo = "";
   let applied: string | null = null;
   try {
-    const failure = await prisma.$transaction(async (tx) => {
-      const employee = await tx.employee.findUnique({ where: { id: d.employeeId } });
-      if (!employee) return conflict("That employee no longer exists.");
-      if (employee.employment !== "OFFBOARDING") {
-        return conflict(
-          `${employee.name} reads ${employee.employment}, not OFFBOARDING — set their employment on the employee record before collecting equipment.`,
-        );
-      }
-      const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
-      if (!asset) return conflict("That asset no longer exists.");
-      if (asset.assigneeId !== d.employeeId) {
-        return conflict(`${asset.tag} isn't held by ${employee.name} any more — refresh the wizard.`);
-      }
-      // A car has no Buyout. Validated HERE, against the asset's class, not
-      // at parse time — the outcome is legal for the enum and illegal for
-      // this asset, and only the asset knows which it is.
-      // One lookup, narrowed: null means this class does not offer the outcome.
-      // No `!` -- this file's own rule (offboarding.ts, decisionOf) is that
-      // non-null-ness should be structural, not asserted several lines from the
-      // check that proves it.
-      const targetStatus = outcomeStatus(asset.cls, d.outcome);
-      if (targetStatus === null) {
-        return validationError({ outcome: `${OUTCOME_LABEL[d.outcome]} is not an outcome for ${CLASS_PHRASE[asset.cls]} asset.` });
-      }
-      // README 3e: a reason is required for anything other than a clean
-      // return. Inside the transaction, after the class check: it precedes
-      // every write, which the NOTE above relies on, and a Purchasing asset
-      // sent BUYOUT must be refused for being a Purchasing asset, not for
-      // "needing a reason" — a remedy that could never work.
-      if (reasonRequired(d.outcome) && reason.length < 3) {
-        return validationError({
-          reason: `${OUTCOME_LABEL[d.outcome]} needs a reason (at least 3 characters) — it lands in the approval and on the farewell report.`,
-        });
-      }
-      // The one-open-per-asset index is per ASSET, not per approval type: a
-      // pending lifecycle.change-status refuses this decision too, and
-      // "that decision is already recorded" would be a lie pointing nowhere.
-      const open = await openApprovalForAsset(tx, asset.id);
-      if (open) {
-        // A return created BEFORE this offboarding began owns the asset's one
-        // open slot but decides nothing here, so claiming "already recorded"
-        // would point the operator at a decision the wizard doesn't show —
-        // and leave the item permanently undecidable.
-        const inWindow =
-          employee.offboardingAt !== null && open.createdAt >= employee.offboardingAt;
-        return conflict(
-          open.type === "lifecycle_return" && inWindow
-            ? `${asset.tag} already has an open request — that decision is already recorded.`
-            : `${asset.tag} is held by ${open.refNo} (${APPROVAL_TYPE_LABEL[open.type]}) — resolve that in Approvals first, then decide this item.`,
-        );
-      }
-      // Phase 15 (spec §2.1): IT confirms and it's done — no queue. The asset
-      // is applied through the SAME executor the worker uses, in the same
-      // transaction as the approval that records it, and that approval is
-      // born EXECUTED rather than PENDING: the wizard's Continue gate and the
-      // farewell report only ever read approval rows, so a decision that
-      // skipped the queue must still leave one behind. Purchasing keeps the
-      // PENDING path below — its class is absent from DIRECT_LIFECYCLE_CLASSES.
-      if (isDirectLifecycle(user.role, asset.cls)) {
-        const prepared = await prepareLifecycle(tx, asset, { kind: "return", status: targetStatus }, now);
-        if (!prepared.ok) return conflict(prepared.error);
-        await commitLifecycle(tx, asset.id, prepared.prepared, now);
-        const approval = await createApproval(tx, {
-          type: "lifecycle_return",
-          payload: {
-            from: { assigneeId: d.employeeId },
-            to: { assigneeId: null, status: targetStatus },
-            reason: d.outcome === "RETURNED" ? reason || "offboarding · returned" : reason,
-          },
-          requestedById: user.id,
-          assetId: asset.id,
-          employeeId: d.employeeId,
-          priority: d.outcome === "MISSING" ? "HIGH" : "NORMAL",
-          executed: { by: user.id, at: now },
-        });
-        await writeAudit(tx, {
-          actorId: user.id, actorLabel: user.name,
-          entityType: "asset", entityId: asset.id,
-          action: "lifecycle.return",
-          diff: prepared.prepared.diff,
-        });
-        await emitWebhook(tx, "approval.executed", {
-          approvalId: approval.id, refNo: approval.refNo, type: approval.type, assetId: asset.id, assetTag: asset.tag,
-        });
-        refNo = approval.refNo;
-        applied = targetStatus;
-        return null;
-      }
-      const approval = await createApproval(tx, {
-        type: "lifecycle_return",
-        payload: {
-          from: { assigneeId: d.employeeId },
-          to: { assigneeId: null, status: targetStatus },
-          // keyed on the outcome rather than on emptiness: reasonRequired
-          // guarantees a reason for the other three, and this sentinel would be
-          // a lie stamped on a MISSING item if that ever changed
-          reason: d.outcome === "RETURNED" ? reason || "offboarding · returned" : reason,
-        },
-        requestedById: user.id,
-        assetId: asset.id,
-        employeeId: d.employeeId,
-        // Custody lost is not a "fine for now" problem.
-        priority: d.outcome === "MISSING" ? "HIGH" : "NORMAL",
-      });
-      await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name,
-        entityType: "asset", entityId: asset.id,
-        action: "approval.requested",
-        diff: { approval: { from: null, to: approval.refNo } },
-      });
-      refNo = approval.refNo;
-      return null;
-    });
-    if (failure) return failure;
+    const result = await prisma.$transaction((tx) => decideOne(tx, user, { ...d, reason }, now));
+    if ("failure" in result) return result.failure;
+    refNo = result.refNo;
+    applied = result.applied;
   } catch (err) {
     // The partial unique index (one OPEN approval per asset) turns a
     // double-click — or a colleague on the same wizard — into a constraint
@@ -423,4 +435,63 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
   if (failure) return failure;
   revalidate(employeeId);
   return ok({ employment: "OFFBOARDED" });
+}
+
+const remainingSchema = z.object({
+  employeeId: z.string().min(1),
+  decisions: z.array(z.object({
+    assetId: z.string().min(1),
+    outcome: z.enum(OUTCOMES),
+    reason: reasonOptional(),
+  })).min(1).max(50),
+});
+
+/**
+ * Spec §4.3 / §8: "Mark the rest as Returned…" — one decision per item, each in its own
+ * transaction through decideOne, so every item is direct or queued exactly as decideItem would
+ * file it, with one audit row each. One rate event for the batch. Items decided or taken in the
+ * meantime come back in `refused` with decideOne's own copy; nothing is filed twice.
+ */
+export async function decideRemaining(input: unknown): Promise<ActionResult<{
+  filed: { assetId: string; refNo: string }[];
+  refused: { assetId: string; message: string }[];
+}>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = remainingSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { employeeId, decisions } = parsed.data;
+  const now = new Date();
+
+  const filed: { assetId: string; refNo: string }[] = [];
+  const refused: { assetId: string; message: string }[] = [];
+  for (const item of decisions) {
+    try {
+      const result = await prisma.$transaction((tx) =>
+        decideOne(tx, user, { employeeId, assetId: item.assetId, outcome: item.outcome, reason: cleanReason(item.reason) }, now));
+      if ("failure" in result) {
+        const f = result.failure;
+        const message = !f.ok ? (f.fieldErrors?.reason ?? f.fieldErrors?.outcome ?? f.message) : "Not filed.";
+        refused.push({ assetId: item.assetId, message });
+      } else {
+        filed.push({ assetId: item.assetId, refNo: result.refNo });
+      }
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && (err.code === "P2002" || err.code === "P2028")) {
+        refused.push({
+          assetId: item.assetId,
+          message: err.code === "P2002"
+            ? "Another request just took this asset's open slot — refresh the wizard."
+            : "The database is busy right now — nothing was written. Try that again.",
+        });
+        continue;
+      }
+      throw err;
+    }
+  }
+  for (const f of filed) revalidate(employeeId, f.assetId);
+  if (filed.length === 0) revalidate(employeeId);
+  return ok({ filed, refused });
 }

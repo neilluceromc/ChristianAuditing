@@ -86,9 +86,10 @@ test.describe("offboarding queue", () => {
     await page.goto("/inventory/work");
     const leave = page.locator("li").filter({ hasText: "Dennis Ong is leaving" });
     await expect(leave).toContainText("3 items still out");
-    await expect(leave.getByRole("link", { name: "Collect equipment" })).toHaveAttribute(
+    // Phase 32: the leaver row's link reads offboardingNext's label and lands on that step.
+    await expect(leave.getByRole("link", { name: "Collect 3 items" })).toHaveAttribute(
       "href",
-      /\/offboarding\/[a-z0-9]+/i,
+      /\/offboarding\/[a-z0-9]+\?step=collect/i,
     );
   });
 });
@@ -106,7 +107,7 @@ test.describe.serial("the 4-step wizard", () => {
       await expect(page.getByRole("row", { name: new RegExp(tag) })).toBeVisible();
     }
 
-    // Only Review and Collect are links; Accounts and Farewell report are inert.
+    // Only Review and Collect are links; Accounts and Finish are inert.
     const steps = page.getByRole("list", { name: "Offboarding steps" });
     await expect(steps.getByRole("link")).toHaveCount(2);
     await expect(steps).toContainText("Accounts & M365");
@@ -193,7 +194,8 @@ test.describe.serial("the 4-step wizard", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/offboarding");
     await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: "Open wizard" }).click();
-    await gotoStep(page, /Farewell report/);
+    // Phase 32: the last step reads "Finish" (its id stays "report").
+    await gotoStep(page, /Finish/);
 
     // returned ₱5,500 + defective ₱48,000 back in the fleet; ₱18,000 lost.
     await expect(page.getByText("₱53,500")).toBeVisible();
