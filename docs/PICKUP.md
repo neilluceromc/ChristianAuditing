@@ -109,8 +109,8 @@ These were made with the user and would be invisible to anyone reading only the 
    `e29e879`, docs `c5afaf0`, tree hashes matched, branch and worktree removed; no migration.** Spec
    `docs/superpowers/specs/2026-09-24-it-work-ux-design.md` (`7b878ed`), plan
    `docs/superpowers/plans/2026-09-24-phase-32-it-work-ux.md` (`4b77f59`) — 14 tasks, D-1…D-10; battery
-   in §1's table (428 e2e / 41 files, 1664 unit / 96 files). **Staging is NOT yet redeployed** — the
-   code-only `scripts/deploy-staging.ps1 -Force` that carries it is the user's decision.
+   in §1's table (428 e2e / 41 files, 1664 unit / 96 files). **Staging REDEPLOYED 2026-09-24** (code-only
+   `-Force`, runs `2e333ef`; web healthy; `/login` 200 locally and at `http://192.168.203.56:3000`).
    **Next after it: Phase 33 — "queues and records"** (approvals, the rest of reservations, labels,
    `/audit` and the feeds, the old-toolbar sweep) — its own brainstorm; scope in `HANDOVER-PENDING.md` §5.3.
 
