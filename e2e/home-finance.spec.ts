@@ -124,13 +124,13 @@ test.describe("home — claims sit above the pool", () => {
 });
 
 test.describe("home — viewer is read-only", () => {
-  test("no Worklist, no clear buttons, READ-ONLY badge shows, Fleet still renders", async ({ page }) => {
+  test("no Worklist, no row menus, READ-ONLY badge shows, Fleet still renders", async ({ page }) => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/");
 
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Worklist", level: 2 })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^Clear "/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toBeVisible();
   });
 });
@@ -313,16 +313,18 @@ test.describe("home — axe", () => {
 test.describe("home — dismissal and focus mode (mutating, serial)", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("clearing a worklist row removes it, and it stays gone after a reload", async ({ page }) => {
+  test("hiding a worklist row until tomorrow removes it, and it stays gone after a reload", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
     // Nina Robles' row lives in the "New hires" section — any section's row
-    // clears the same way (DismissButton, home/dismiss-button.tsx), this one
-    // is simply the one the seed already pins a stable assertion to.
+    // hides the same way (the row menu's Hide until tomorrow,
+    // home/work-row-menu.tsx), this one is simply the one the seed already
+    // pins a stable assertion to.
     const ninaRow = page.locator("li").filter({ hasText: "Nina Robles" });
     await expect(ninaRow).toHaveCount(1);
-    await ninaRow.getByRole("button", { name: /^Clear "Nina Robles/ }).click();
+    await ninaRow.getByRole("button", { name: /^Actions for Nina Robles/ }).click();
+    await page.getByRole("menuitem", { name: "Hide until tomorrow" }).click();
     await expect(page.locator("li").filter({ hasText: "Nina Robles" })).toHaveCount(0, { timeout: 15_000 });
 
     // Per-user, per-day preference, not component state — must survive a reload.

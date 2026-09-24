@@ -420,8 +420,8 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     // LEAVE, two recent HIREs, and one MISSING-asset DATA row that only
     // appears once the visible five make room) — one more than the window —
     // so the new CHECK row has no room to show until at least two are
-    // cleared. Clear them first — a real, supported action ("Clear … for
-    // today", dismiss-button.tsx) — the same way a shift worker would,
+    // cleared. Clear them first — a real, supported action (the row menu's
+    // "Hide until tomorrow", work-row-menu.tsx) — the same way a shift worker would,
     // rather than asserting on a list ordering this case doesn't own. Each
     // clear is a full server round trip (dismissShiftRow + router.refresh()),
     // so wait for the network to settle rather than for an exact row count —
@@ -429,7 +429,8 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     // candidate, so the total count does not reliably dip in between.
     for (let i = 0; i < 5; i++) {
       if (await page.getByText(new RegExp(tag)).count()) break;
-      await page.getByRole("button", { name: /^Clear "/ }).first().click();
+      await page.getByRole("button", { name: /^Actions for / }).first().click();
+      await page.getByRole("menuitem", { name: "Hide until tomorrow" }).click();
       await page.waitForLoadState("networkidle");
     }
     await expect(page.getByText(new RegExp(tag))).toBeVisible();

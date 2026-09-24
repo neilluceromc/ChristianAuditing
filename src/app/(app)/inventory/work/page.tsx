@@ -6,10 +6,11 @@ import { worklist } from "@/server/modules/home/queries";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Worklist } from "@/components/home/worklist";
+import { WorkSummary } from "@/components/home/work-summary";
 
 export default async function WorklistPage() {
   const user = await requireUser();
-  // Viewer reads the whole worklist (read-only, no Clear button); every
+  // Viewer reads the whole worklist (read-only, no row menu); every
   // other role needs to manage IT directly — same test spec-13's page-level
   // checks already use elsewhere in inventory/.
   if (!canManageClass(user.role, "IT") && user.role !== "viewer") redirect(ROLE_LANDING[user.role]);
@@ -25,6 +26,7 @@ export default async function WorklistPage() {
         breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Worklist" }]}
       />
       <div className="max-w-[980px]">
+        <WorkSummary groups={groups} />
         <Worklist
           groups={groups}
           canAct={user.role !== "viewer"}

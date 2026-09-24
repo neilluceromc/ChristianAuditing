@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
-import type { WorkGroup } from "@/lib/worklist";
+import { capLine, SEE_ALL_HREF, type WorkGroup } from "@/lib/worklist";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
-import { DismissButton } from "./dismiss-button";
+import { HiddenRows } from "./hidden-rows";
 import { WorkRowActions } from "./work-row-actions";
+import { WorkRowMenu } from "./work-row-menu";
+
+/** The trailing words capLine ends with — rendered as the link itself. */
+const SEE_ALL = "See all";
 
 export function Worklist({
   groups,
@@ -38,7 +42,11 @@ export function Worklist({
         <section key={g.section.id} id={g.section.id} aria-labelledby={`work-${g.section.id}`}>
           <div className="flex items-baseline justify-between">
             <Heading id={`work-${g.section.id}`} className="text-[13px] font-semibold text-fg">
-              {g.section.title} <span className="font-mono text-[10.5px] text-fg-muted">{g.capped ? `${g.total}+` : g.total}</span>
+              {g.section.title}{" "}
+              <span className="font-mono text-[10.5px] text-fg-muted">
+                {g.capped ? `${g.total}+` : g.total}
+                {g.hidden.length > 0 && ` · ${g.hidden.length} hidden today`}
+              </span>
             </Heading>
             {seeAllBase && (g.total > g.rows.length || g.capped) && (
               <Link href={`${seeAllBase}#${g.section.id}`} className="text-[12px] text-accent hover:underline">
@@ -47,9 +55,8 @@ export function Worklist({
             )}
           </div>
           <p className="text-[11px] text-fg-muted">{g.section.blurb}</p>
-          {!seeAllBase && g.capped && (
-            <p className="text-[11px] text-fg-muted">Showing the first {g.rows.length} — the oldest first.</p>
-          )}
+          {!seeAllBase && <CapLine g={g} />}
+          {canAct && <HiddenRows rows={g.hidden} />}
           <ol className="flex flex-col">
             {g.rows.map((row) => (
               <li key={row.key} className="flex items-center gap-3 border-b border-border-faint py-2.5 last:border-b-0">
@@ -58,12 +65,24 @@ export function Worklist({
                   <span className="block truncate font-mono text-[10.5px] text-fg-muted">{row.meta}</span>
                 </span>
                 <WorkRowActions row={row} canAct={canAct} direct={direct} employees={employees} />
-                {canAct && <DismissButton shiftKey={row.key} title={row.title} />}
+                {canAct && <WorkRowMenu row={row} />}
               </li>
             ))}
           </ol>
         </section>
       ))}
     </div>
+  );
+}
+
+/** Spec §5.2: the standalone page's `Showing {n} of {total}+ · See all`, the last words a link to the rest. */
+function CapLine({ g }: { g: WorkGroup }) {
+  const line = capLine(g);
+  if (!line) return null;
+  return (
+    <p className="text-[11px] text-fg-muted">
+      {line.slice(0, -SEE_ALL.length)}
+      <Link href={SEE_ALL_HREF[g.section.id]} className="text-accent hover:underline">{SEE_ALL}</Link>
+    </p>
   );
 }
