@@ -196,8 +196,11 @@ export default async function Home() {
     user.role === "admin" ? safeSection("Applied directly", () => directChanges()) : Promise.resolve(null),
   ]);
   // Only Assign… needs the people list (spec §5.1); skip the read otherwise.
+  // No worklist row offers Assign… today (ruling R6), so this never reads —
+  // and if it ever does and fails, the card still renders (its dialog just
+  // has nobody to pick) rather than erroring the whole page.
   const assignOffered = shift.ok && shift.data.some((g) => g.rows.some((r) => r.control?.kind === "assign"));
-  const employees = assignOffered ? await activeEmployeeOptions() : [];
+  const employees = assignOffered ? await activeEmployeeOptions().catch(() => []) : [];
 
   return (
     <>

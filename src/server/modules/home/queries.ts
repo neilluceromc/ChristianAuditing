@@ -186,7 +186,8 @@ export async function worklist(
       href: `/inventory/${a.id}`,
       action: "Fix record",
       severity: daysSince(a.updatedAt, now),
-      control: { kind: "assign", asset: { id: a.id, tag: a.tag, model: a.model } },
+      // Ruling R6: no in-place control — assignAsset refuses anything but SPARE,
+      // so the fix lives on the record (Change status…).
       entity: { kind: "asset", id: a.id, label: a.tag },
     });
   }
