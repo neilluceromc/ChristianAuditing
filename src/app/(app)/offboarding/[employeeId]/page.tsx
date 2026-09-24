@@ -414,7 +414,7 @@ export default async function OffboardingWizardPage({
                     <div key={i.assetId}>
                       <p className="text-[11.5px] text-fg-secondary">
                         Decided ·{" "}
-                        <Link href={`/approvals/${i.decision!.id}`} className="font-mono text-accent hover:underline">
+                        <Link href={`/approvals/${i.decision!.id}`} className="font-mono text-accent underline hover:text-accent-hover">
                           {i.decision!.refNo}
                         </Link>{" "}
                         · awaiting approval
@@ -443,7 +443,7 @@ export default async function OffboardingWizardPage({
                       <CardBody>
                         <div className="flex flex-col gap-1 text-xs text-fg-secondary">
                           <span className="font-mono text-[11px]">
-                            <Link href={`/approvals/${i.decision!.id}`} className="text-accent hover:underline">{i.decision!.refNo}</Link>
+                            <Link href={`/approvals/${i.decision!.id}`} className="text-accent underline hover:text-accent-hover">{i.decision!.refNo}</Link>
                             {" · "}
                             {i.status} → {i.decision!.toStatus ?? "?"}
                           </span>
@@ -575,7 +575,7 @@ export default async function OffboardingWizardPage({
                       {/* linked like the collect step's copy of the same refNo —
                           the report is where you most want the jump */}
                       <Td mono className="text-[10.5px]">
-                        <Link href={`/approvals/${i.decision.id}`} className="text-accent hover:underline">{i.decision.refNo}</Link>
+                        <Link href={`/approvals/${i.decision.id}`} className="text-accent underline hover:text-accent-hover">{i.decision.refNo}</Link>
                         {" · "}
                         {decisionStateLabel(i.decision.state)}
                       </Td>
