@@ -10,8 +10,8 @@ and pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.15
 **Phase 18** build (`4cf5697`, 19 migrations); **Phase 19 (stock control D1, migration 20) was merged
 but NOT yet deployed.**
 
-**Where the code stands today (2026-09-24).** Staging runs the **Phase 30** merge (`e07bef7`,
-**26 migrations**) since the 2026-09-24 forced redeploy, at the laptop's new DHCP address
+**Where the code stands today (2026-09-24).** Staging runs the **Phase 31** merge (`7a479e1`,
+**26 migrations**) since the second 2026-09-24 forced redeploy, at the laptop's new DHCP address
 `http://192.168.203.56:3000` (`.183` before; the user changed location on 2026-09-23). `main` = `origin/main` since the
 Phase 28 push (Phase 27 merged via `--no-ff` `5dd3372`, Phase 28 via `--no-ff` `7214066`, both pushed
 2026-09-22), with no unpushed commits on it. **Phase 27 (`phase-27-leftovers-sweep`,
@@ -32,15 +32,15 @@ PUSHED (2026-09-24), and adds no migration** — the push also carried `a94f47a`
 `b582535` (the plan); `main` = `origin/main` again. Staging carries it since the 2026-09-24 code-only
 redeploy. See `PICKUP.md` §4 item 1 and `HANDOVER.md` (w).
 **Phase 31 (`phase-31-leftovers-sweep`, the leftovers sweep; final tree `7599d9e`) is MERGED TO `main`
-via `--no-ff` `bcc7b16` and PUSHED (2026-09-24), and adds no migration** — `main` = `origin/main`; staging is
-NOT yet redeployed for it (code-only, the user's decision). See `HANDOVER.md` (x).
+via `--no-ff` `bcc7b16` and PUSHED (2026-09-24), and adds no migration** — `main` = `origin/main`; staging
+carries it since the second 2026-09-24 code-only redeploy (`7a479e1`). See `HANDOVER.md` (x).
 
 ---
 
 ## 1. Operations — one command when the user says so
 
-- **Redeploy staging** when the user asks. Staging runs the **Phase 30** merge (`e07bef7`,
-  **26 migrations**) since the 2026-09-24 forced redeploy, so nothing is pending on it today. The
+- **Redeploy staging** when the user asks. Staging runs the **Phase 31** merge (`7a479e1`,
+  **26 migrations**) since the second 2026-09-24 forced redeploy, so nothing is pending on it today. The
   one command, whenever a merge needs carrying over:
 
   ```bash
