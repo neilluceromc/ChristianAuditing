@@ -31,6 +31,9 @@ applied to the inventory area; final tree `4e6fc7f`) is MERGED TO `main` via `--
 PUSHED (2026-09-24), and adds no migration** — the push also carried `a94f47a` (the Phase 30 spec) and
 `b582535` (the plan); `main` = `origin/main` again. Staging carries it since the 2026-09-24 code-only
 redeploy. See `PICKUP.md` §4 item 1 and `HANDOVER.md` (w).
+**Phase 31 (`phase-31-leftovers-sweep`, the leftovers sweep; final tree `7599d9e`) is CODE-COMPLETE,
+UNMERGED and UNPUSHED, and adds no migration** — merging, pushing and the code-only redeploy are the
+user's decisions. See `HANDOVER.md` (x).
 
 ---
 
