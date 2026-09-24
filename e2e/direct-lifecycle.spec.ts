@@ -303,7 +303,8 @@ test.describe.serial("offboarding", () => {
     await expect(page.getByText("BACK · NOT CHECKED")).toBeVisible();
 
     await page.goto(`/offboarding/${dennis.id}/report`);
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible();
+    // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
+    await expect(page.getByText("Farewell report").first()).toBeVisible();
     for (const tag of ["BR-LT-0166", "BR-PH-0312", "BR-HS-0510"]) {
       await expect(page.getByText(tag)).toBeVisible();
     }

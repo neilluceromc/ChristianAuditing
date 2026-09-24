@@ -110,7 +110,8 @@ test.describe.serial("offboarding v2 — attribution, facets and sort", () => {
 
     await login(page, IT);
     await page.goto(`/offboarding/${dennis.id}/report`);
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible({ timeout: 15_000 });
+    // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
+    await expect(page.getByText("Farewell report").first()).toBeVisible({ timeout: 15_000 });
     const row = page.getByRole("row", { name: /BR-HS-0510/ });
     await expect(row).toContainText("J. Sarmiento");
     await expect(row).toContainText(fmtDate(new Date()));
@@ -203,7 +204,8 @@ test.describe.serial("offboarding v2 — attribution, facets and sort", () => {
 
     const dennis = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
     await page.goto(`/offboarding/${dennis.id}/report`);
-    await expect(page.getByText("Offboarding farewell report")).toBeVisible({ timeout: 15_000 });
+    // Phase 32: the printed H1 reads "Backroom IT — Farewell report" (no "Offboarding").
+    await expect(page.getByText("Farewell report").first()).toBeVisible({ timeout: 15_000 });
     await expectNoSeriousAxe(page);
   });
 });
