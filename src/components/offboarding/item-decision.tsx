@@ -49,7 +49,12 @@ export function ItemDecision({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
   const [scanned, setScanned] = useState(false);
+  // Phase 29 §4.7's attribute: marks this card as just-changed for 2s, the
+  // moment the decision is filed — the refreshed data hasn't landed yet, so
+  // this is the operator's only sign anything happened until it does.
+  const [changed, setChanged] = useState(false);
   const scan = useScan();
   const outcomeErrorId = "outcome-error-" + assetId;
   const outcomes = outcomesFor(cls);
@@ -92,6 +97,14 @@ export function ItemDecision({
       setFieldErrors({ outcome: "Pick an outcome — undecided is not the same as returned." });
       return;
     }
+    // spec §4.3: the same check the server runs, caught here in the same
+    // client pass instead of waiting on a round trip — Confirm stays
+    // enabled either way, this just gets the operator to the fix sooner.
+    if (picked && reasonRequired(picked) && reason.trim().length < 3) {
+      setFieldErrors({ reason: `${OUTCOME_LABEL[picked]} needs a reason (at least 3 characters) — it lands in the approval and on the farewell report.` });
+      reasonRef.current?.focus();
+      return;
+    }
     setError(null);
     setFieldErrors({});
     startTransition(async () => {
@@ -103,6 +116,20 @@ export function ItemDecision({
             : `${res.data.refNo} created — ${tag} → ${outcomeStatus(cls, picked)}`,
           "settled",
         );
+        setChanged(true);
+        setTimeout(() => setChanged(false), 2000);
+        // This card unmounts the moment the refresh lands (the item becomes
+        // decided, so the parent stops rendering ItemDecision for it) — an
+        // effect keyed on the refresh finishing would never fire on an
+        // already-unmounted instance. So the move happens NOW, against the
+        // still-current DOM, onto a sibling card's own group div; React
+        // reconciles that sibling's card in place (same key, same node), so
+        // the browser's focus survives the refresh that follows.
+        const groups = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-decision-group]:not([data-decided])"),
+        );
+        const selfIndex = rootRef.current ? groups.indexOf(rootRef.current) : -1;
+        if (selfIndex >= 0) groups[selfIndex + 1]?.focus();
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") {
@@ -124,6 +151,14 @@ export function ItemDecision({
       tabIndex={-1}
       role="group"
       aria-label={`Decide ${tag}`}
+      // spec §4.3: the same non-activatable group div the scanner already
+      // focuses is also the post-confirm focus target — `data-decision-group`
+      // marks it as one; only an undecided card renders this group at all
+      // (a decided one shows decision details instead), so `data-decided` is
+      // never actually set here, but the query in `submit()` checks for it
+      // defensively rather than assuming that will always stay true.
+      data-decision-group=""
+      data-changed={changed || undefined}
       className={
         "flex flex-col gap-2 rounded-(--radius-card) " +
         (scanned ? "outline-2 outline-offset-4 outline-accent" : "")
@@ -163,6 +198,7 @@ export function ItemDecision({
         }
         error={fieldErrors.reason} value={reason} onChange={setReason}
         chips={picked ? chipsForOutcome(picked) : []} rows={2} disabled={pending}
+        inputRef={reasonRef}
       />
     </div>
   );

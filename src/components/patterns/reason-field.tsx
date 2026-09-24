@@ -19,13 +19,16 @@ import { Textarea } from "@/components/ui/textarea";
  * name is its visible text, which `getByLabel` does not match.
  */
 export function ReasonField({
-  label = "Reason", required, hint, error, value, onChange, chips, rows = 3, disabled, className,
+  label = "Reason", required, hint, error, value, onChange, chips, rows = 3, disabled, className, inputRef,
 }: {
   label?: string; required?: boolean; hint?: string; error?: string;
   value: string; onChange: (value: string) => void;
   chips: readonly string[]; rows?: number; disabled?: boolean; className?: string;
+  /** Lets a caller (item-decision.tsx's client reason check) focus the textarea directly on a validation failure. */
+  inputRef?: React.RefObject<HTMLTextAreaElement | null>;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  const ref = inputRef ?? ownRef;
   return (
     <FormField label={label} required={required} hint={hint} error={error} className={className}>
       {(p) => (

@@ -111,7 +111,9 @@ async function openCollect(page: Page) {
   // scanner's first keystrokes and could clip them out of the buffer).
   await page.getByRole("row", { name: /Dennis Ong/ }).getByRole("link", { name: /^Collect \d+ items?$/ }).click();
   await expect(page).toHaveURL(/\/offboarding\/[^/]+\?step=collect$/, { timeout: 30_000 });
-  await expect(page.getByText("Scanning works here")).toBeVisible({ timeout: 30_000 });
+  // Phase 32 (spec §4.3): the "Scanning works here" banner is gone — the
+  // Collect step's own muted hint line says so once now.
+  await expect(page.getByText("scan a tag to jump to it")).toBeVisible({ timeout: 30_000 });
 }
 
 // These tests share database state (a decision confirmed by hand in one test
