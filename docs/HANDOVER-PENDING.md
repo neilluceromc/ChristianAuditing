@@ -35,9 +35,9 @@ redeploy. See `PICKUP.md` §4 item 1 and `HANDOVER.md` (w).
 via `--no-ff` `bcc7b16` and PUSHED (2026-09-24), and adds no migration** — `main` = `origin/main`; staging
 carries it since the second 2026-09-24 code-only redeploy (`7a479e1`). See `HANDOVER.md` (x).
 **Phase 32 (`phase-32-it-work-uiux`, Laws of UX on the IT screens where the work gets done; final tree
-`e29e879`) is CODE-COMPLETE, UNMERGED and UNPUSHED, and adds no migration** — local `main` carries the
-unpushed docs-only commits `7b878ed` (spec) and `4b77f59` (plan). Merging, pushing and the code-only
-redeploy are the user's decisions. See `HANDOVER.md` (y).
+`e29e879`) is MERGED TO `main` via `--no-ff` `853d13d` and PUSHED (2026-09-24), and adds no migration** — the
+push also carried `7b878ed` (spec) and `4b77f59` (plan); `main` = `origin/main`. Staging is NOT yet
+redeployed for it; the code-only redeploy is the user's decision. See `HANDOVER.md` (y).
 
 ---
 

@@ -1,6 +1,6 @@
 # Phase 32 — Laws of UX applied to the IT screens where the work gets done
 
-**Status:** implemented on `phase-32-it-work-uiux` (plan `docs/superpowers/plans/2026-09-24-phase-32-it-work-ux.md`, final tree `e29e879`, 2026-09-24); code-complete, UNMERGED and UNPUSHED; no migration. Amendments made during execution are listed in the plan's D-block (notably D-6: the "reads DEPLOYED with no holder" worklist row keeps its link).
+**Status:** implemented on `phase-32-it-work-uiux` (plan `docs/superpowers/plans/2026-09-24-phase-32-it-work-ux.md`, final tree `e29e879`, 2026-09-24); merged to `main` via `--no-ff` `853d13d` and pushed 2026-09-24 (the merged tree is byte-identical to the tested tip `c5afaf0`); the code-only staging redeploy is the user's decision; no migration. Amendments made during execution are listed in the plan's D-block (notably D-6: the "reads DEPLOYED with no holder" worklist row keeps its link).
 
 **Predecessor:** a read-only audit of the IT-side screens not yet covered by Phases 29–30 (`main` at `e33c5ff`): 73 findings — 23 on offboarding (queue, wizard, farewell report), 8 on `/reservations`, 9 on the worklist `/inventory/work`, 5 on Home, 6 on the scan landing, 6 on `/inventory/labels`, 11 on `/approvals`, 5 on `/audit` and the activity feeds. The audit read the code; it could not walk a signed-in session (an agent may not type a password into the login form), so one finding (F-SCAN-6, phone target sizes) is marked "needs walk" — the design fixes it regardless and the e2e proves the result. Finding ids are cited below as `F-…`.
 
