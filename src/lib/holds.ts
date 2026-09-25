@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { addDays, dayFromISO, isPastDue } from "./deadlines";
+import { addDays, dayFromISO, daysUntil, isPastDue } from "./deadlines";
 import { localDateISO } from "./format";
 import { pruneDue } from "./retention";
 import type { ListConfig, ListState, SortKey } from "./url-state";
@@ -72,4 +72,13 @@ export function buildHoldOrderBy(sort: SortKey[]): Prisma.ReservationOrderByWith
     }),
     { id: "asc" },
   ];
+}
+
+/** Spec §5.2: ACTIVE holds expiring today, tomorrow or within `days` Manila days — never an already-expired one. */
+export function expiringSoon(rows: { state: string; expiresAt: Date | null }[], todayISO: string, days = 2): number {
+  return rows.filter((r) => {
+    if (r.state !== "ACTIVE" || !r.expiresAt) return false;
+    const d = daysUntil(r.expiresAt, todayISO);
+    return d >= 0 && d <= days;
+  }).length;
 }
