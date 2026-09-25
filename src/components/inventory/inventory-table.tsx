@@ -22,7 +22,7 @@ import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { AssignDialog, ReturnDialog } from "./holder-control";
 import { ChangeStatusDialog } from "./status-control";
 import { BulkDrawer, type BulkMode } from "./bulk-drawer";
-import { useListNavigation } from "./list-navigation";
+import { useListNavigation } from "@/components/patterns/list-navigation";
 
 export interface ColumnDef {
   id: string;

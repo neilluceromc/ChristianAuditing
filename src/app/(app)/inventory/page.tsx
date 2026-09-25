@@ -28,7 +28,7 @@ import { InventoryTable } from "@/components/inventory/inventory-table";
 import { ColumnChooser } from "@/components/inventory/column-chooser";
 import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
 import { InventoryMoreMenu } from "@/components/inventory/inventory-more-menu";
-import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/inventory/list-navigation";
+import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/patterns/list-navigation";
 import { REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
 import { RepairChips } from "@/components/inventory/repair-chips";
 
