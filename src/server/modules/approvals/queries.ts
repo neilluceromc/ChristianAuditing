@@ -1,12 +1,13 @@
 import { cache } from "react";
-import type { Role } from "@prisma/client";
+import type { ApprovalType, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { RETURN_TARGETS, isAssignable } from "@/lib/asset-class";
-import { approvalClassWhere } from "@/lib/approval-access";
+import { approvalClassWhere, isApprover } from "@/lib/approval-access";
 import {
-  slaLabel, tabWhere, viaWhere, CLOSED_VIA, QUEUE_TABS, type QueueTab, type ClosedVia,
+  approvalsSearchWhere, slaLabel, tabWhere, viaWhere, CLOSED_VIA, QUEUE_TABS, type QueueTab, type ClosedVia,
 } from "@/lib/approvals-list";
+import { APPROVAL_KIND_LABEL } from "@/lib/labels";
 import { LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 
@@ -24,13 +25,25 @@ export interface ApprovalRow {
   direct: boolean;
 }
 
+/** Plan P-5: the queue's `q` and `?type=`; the default narrows nothing (today's callers). */
+export interface ApprovalsSearch {
+  q: string;
+  types: ApprovalType[];
+}
+
+const NO_SEARCH: ApprovalsSearch = { q: "", types: [] };
+
 export async function listApprovals(
   tab: QueueTab, via: ClosedVia, userId: string, role: Role, requestedPage: number,
+  search: ApprovalsSearch = NO_SEARCH,
 ): Promise<{
   rows: ApprovalRow[]; total: number; page: number; pageCount: number;
 }> {
   const where = {
-    AND: [tabWhere(tab, userId), tab === "closed" ? viaWhere(via) : {}, approvalClassWhere(role)],
+    AND: [
+      tabWhere(tab, userId), tab === "closed" ? viaWhere(via) : {}, approvalClassWhere(role),
+      approvalsSearchWhere(search.q, search.types),
+    ],
   };
   const { rows: approvals, total, page, pageCount } = await pagedSnapshot(
     LOG_PAGE_SIZE,
@@ -68,25 +81,63 @@ export async function listApprovals(
   return { rows, total, page, pageCount };
 }
 
-export async function tabCounts(userId: string, role: Role): Promise<Record<QueueTab, number>> {
+export async function tabCounts(
+  userId: string, role: Role, search: ApprovalsSearch = NO_SEARCH,
+): Promise<Record<QueueTab, number>> {
+  const searchWhere = approvalsSearchWhere(search.q, search.types);
   const counts = await Promise.all(
     QUEUE_TABS.map((t) =>
-      prisma.approval.count({ where: { AND: [tabWhere(t.id, userId), approvalClassWhere(role)] } }),
+      prisma.approval.count({ where: { AND: [tabWhere(t.id, userId), approvalClassWhere(role), searchWhere] } }),
     ),
   );
   return Object.fromEntries(QUEUE_TABS.map((t, i) => [t.id, counts[i]])) as Record<QueueTab, number>;
 }
 
-/** Closed tab's `?via=` chip counts (Phase 21) — same closed rule and class scope as `listApprovals`. */
-export async function closedViaCounts(userId: string, role: Role): Promise<Record<ClosedVia, number>> {
+/** Closed tab's `?via=` chip counts (Phase 21) — same closed rule, class scope and search as `listApprovals`. */
+export async function closedViaCounts(
+  userId: string, role: Role, search: ApprovalsSearch = NO_SEARCH,
+): Promise<Record<ClosedVia, number>> {
+  const searchWhere = approvalsSearchWhere(search.q, search.types);
   const counts = await Promise.all(
     CLOSED_VIA.map((v) =>
       prisma.approval.count({
-        where: { AND: [tabWhere("closed", userId), viaWhere(v), approvalClassWhere(role)] },
+        where: { AND: [tabWhere("closed", userId), viaWhere(v), approvalClassWhere(role), searchWhere] },
       }),
     ),
   );
   return Object.fromEntries(CLOSED_VIA.map((v, i) => [v, counts[i]])) as Record<ClosedVia, number>;
+}
+
+/** Type facet options for the current tab + q (the facet's own selection cleared), friendly labels. */
+export async function typeCounts(
+  tab: QueueTab, via: ClosedVia, userId: string, role: Role, q: string,
+): Promise<{ value: ApprovalType; label: string; count: number }[]> {
+  const where = {
+    AND: [tabWhere(tab, userId), tab === "closed" ? viaWhere(via) : {}, approvalClassWhere(role), approvalsSearchWhere(q, [])],
+  };
+  const groups = await prisma.approval.groupBy({ by: ["type"], where, _count: { _all: true } });
+  const by = new Map(groups.map((g) => [g.type, g._count._all]));
+  return (Object.keys(APPROVAL_KIND_LABEL) as ApprovalType[]).map((value) => ({
+    value, label: APPROVAL_KIND_LABEL[value], count: by.get(value) ?? 0,
+  }));
+}
+
+/** Spec §4.1 (plan P-4): the next request this user can act on, in the Open tab's SLA order. */
+export async function nextInQueue(
+  userId: string, role: Role, afterId: string,
+): Promise<{ id: string; refNo: string } | null> {
+  if (!isApprover(role)) return null;
+  return prisma.approval.findFirst({
+    where: {
+      AND: [
+        approvalClassWhere(role),
+        { OR: [{ state: "PENDING" }, { state: "CLAIMED", claimedById: userId }] },
+        { id: { not: afterId } },
+      ],
+    },
+    orderBy: [{ slaAt: "asc" }, { id: "asc" }],
+    select: { id: true, refNo: true },
+  });
 }
 
 export const getApproval = cache((id: string) =>
