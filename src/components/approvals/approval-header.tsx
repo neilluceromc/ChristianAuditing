@@ -64,6 +64,8 @@ export function ApprovalHeaderActions({
     if (res.ok) {
       toast(`${res.data.refNo} ${verb}`, "settled");
     } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
+    // The page refreshes itself after a conflict, so the banner doesn't ask the user to.
+    else if (res.kind === "conflict") setError(`${res.message.replace(/ — refresh and retry\.?$/, "").replace(/\.$/, "")} — the page now shows the latest state.`);
     else setError(res.message);
     // A conflict (someone else acted first) refreshes too, so the header follows the new state (spec §10).
     if (res.ok || res.kind === "conflict") router.refresh();

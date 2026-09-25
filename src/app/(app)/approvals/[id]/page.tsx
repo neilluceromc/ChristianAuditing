@@ -8,6 +8,7 @@ import { APPROVAL_TYPE_LABEL, PRIORITY_LABEL } from "@/lib/labels";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { canActOnApproval, isApprover } from "@/lib/approval-access";
 import { approvalHeader } from "@/lib/approval-header";
+import { failureCause } from "@/lib/approval-failure";
 import { canSeeClass } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
@@ -18,15 +19,6 @@ import { StatusDot, StatusPill } from "@/components/ui/status";
 import { ApprovalHeaderActions } from "@/components/approvals/approval-header";
 import { NextInQueue } from "@/components/approvals/next-in-queue";
 import { TagRef } from "@/components/inventory/tag-ref";
-
-/** Spec §4.1: one plain sentence for a worker error that names a known cause, else none. */
-function failureCause(workerError: string | null): string | null {
-  if (!workerError) return null;
-  if (/OFFBOARDED/.test(workerError)) return "The target person is no longer active.";
-  if (/status/i.test(workerError)) return "The asset's status changed since the request.";
-  if (/holder|assignee/i.test(workerError)) return "The asset's holder changed since the request.";
-  return null;
-}
 
 export default async function ApprovalPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
