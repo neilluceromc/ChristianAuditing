@@ -111,8 +111,12 @@ These were made with the user and would be invisible to anyone reading only the 
    `docs/superpowers/plans/2026-09-24-phase-32-it-work-ux.md` (`4b77f59`) — 14 tasks, D-1…D-10; battery
    in §1's table (428 e2e / 41 files, 1664 unit / 96 files). **Staging REDEPLOYED 2026-09-24** (code-only
    `-Force`, runs `2e333ef`; web healthy; `/login` 200 locally and at `http://192.168.203.56:3000`).
-   **Next after it: Phase 33 — "queues and records"** (approvals, the rest of reservations, labels,
-   `/audit` and the feeds, the old-toolbar sweep) — its own brainstorm; scope in `HANDOVER-PENDING.md` §5.3.
+   **Since 2026-09-25 staging runs `4a39db8` at the laptop's NEW DHCP address `http://192.168.203.79:3000`**
+   (`.56` before; labels printed for `.56` need reprinting; the admin@/it@/finance@/purchasing@ staging passwords
+   were changed at the user's request — value not recorded here).
+   **Next: Phase 33 — "queues and records"** (approvals, the rest of reservations, labels, `/audit` and the
+   feeds, the old-toolbar sweep) — spec `docs/superpowers/specs/2026-09-24-queues-records-ux-design.md`
+   (`4a39db8`) written, awaiting the user's review before the plan.
 
    **Already landed — Phase 31 — the leftovers sweep (a derived sort orders only as the primary key, both exports
    follow the derived sorts, typed `revalidatePath` patterns on real file paths, disabled pager arrows
@@ -307,7 +311,7 @@ These were made with the user and would be invisible to anyone reading only the 
 12. **Deploy the prototype to the staging laptop and let Purchasing and Finance use it.** Chosen by the user
    on 2026-09-07 as the next step before any more features. The ordered checklist is
    [`staging-run-sheet.md`](staging-run-sheet.md) (also delivered as a PDF). It hinges on one decision only
-   the user can make — **which machine owns the app's address — `192.168.203.56` since 2026-09-23, a DHCP lease after a change of location (`.183` static from 2026-09-21; `.153` before); `.env` and this file follow** — or whether to use a
+   the user can make — **which machine owns the app's address — `192.168.203.79` since 2026-09-25, a DHCP lease (`.56` DHCP 2026-09-23 → 2026-09-25; `.183` static from 2026-09-21; `.153` before); `.env` and this file follow** — or whether to use a
    DNS name instead — because that value is printed onto every label. Physical steps nobody else can do:
    the UniFi DHCP reservation, the phone reachability test, the printed sheet (tape-measure the 100 mm bar,
    scan one QR).

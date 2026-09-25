@@ -10,9 +10,9 @@ and pushed. Staging (the office laptop, `192.168.203.183` since 2026-09-21; `.15
 **Phase 18** build (`4cf5697`, 19 migrations); **Phase 19 (stock control D1, migration 20) was merged
 but NOT yet deployed.**
 
-**Where the code stands today (2026-09-24).** Staging runs the **Phase 32** merge (`2e333ef`,
-**26 migrations**) since the third 2026-09-24 forced redeploy, at the laptop's new DHCP address
-`http://192.168.203.56:3000` (`.183` before; the user changed location on 2026-09-23). `main` = `origin/main` since the
+**Where the code stands today (2026-09-25).** Staging runs `4a39db8` (the **Phase 32** merge plus the
+Phase 33 spec commit, **26 migrations**) since the 2026-09-25 forced redeploy, at the laptop's new DHCP address
+`http://192.168.203.79:3000` (`.56` 2026-09-23 → 2026-09-25; `.183` before). `main` = `origin/main` since the
 Phase 28 push (Phase 27 merged via `--no-ff` `5dd3372`, Phase 28 via `--no-ff` `7214066`, both pushed
 2026-09-22), with no unpushed commits on it. **Phase 27 (`phase-27-leftovers-sweep`,
 final tree `66445ed`) is on `main` and on staging since the 2026-09-23 redeploy, which applied its
@@ -43,8 +43,8 @@ since the third 2026-09-24 code-only redeploy (`2e333ef`). See `HANDOVER.md` (y)
 
 ## 1. Operations — one command when the user says so
 
-- **Redeploy staging** when the user asks. Staging runs the **Phase 32** merge (`2e333ef`,
-  **26 migrations**) since the third 2026-09-24 forced redeploy, so nothing is pending on it today. The
+- **Redeploy staging** when the user asks. Staging runs `4a39db8` (the **Phase 32** merge,
+  **26 migrations**) since the 2026-09-25 forced redeploy, so nothing is pending on it today. The
   one command, whenever a merge needs carrying over:
 
   ```bash
@@ -54,7 +54,7 @@ since the third 2026-09-24 code-only redeploy (`2e333ef`). See `HANDOVER.md` (y)
   `-Force` is needed because the merge happens on the laptop, so the plain run sees nothing new and
   skips. Verify afterwards: `docker compose ps` (web healthy), `docker compose exec -T web npx prisma
   migrate status` (**26 found, up to date** since 2026-09-23), HTTP 200 on
-  `http://127.0.0.1:3000/login` and on the LAN URL `http://192.168.203.56:3000` (DHCP since 2026-09-23; `.183` before).
+  `http://127.0.0.1:3000/login` and on the LAN URL `http://192.168.203.79:3000` (DHCP since 2026-09-25; `.56` 2026-09-23 → 25; `.183` before).
   Never seed staging — the seed truncates every table.
   Migrations 20–25 rode earlier redeploys: 20 (`stock_control`) and 21 (`employee_transfers`) the
   2026-09-10 `-Force`, 22 the 2026-09-15 one, 23 (`stock_lots_and_allocations`, with its asserted
@@ -91,7 +91,7 @@ since the third 2026-09-24 code-only redeploy (`2e333ef`). See `HANDOVER.md` (y)
 From [`staging-run-sheet.md`](staging-run-sheet.md); none of these can be done by an agent (UAC elevation
 is blocked in auto mode):
 
-- Decide **which machine owns the app's address** — `192.168.203.56` since 2026-09-23, a DHCP lease after a change of location (`.183` static 2026-09-21 → 2026-09-23; `.153` before) — or use a DNS name; the value is printed on every label, so every label printed before 2026-09-23 encodes a dead address and needs reprinting, and a DHCP lease can move again without a reservation.
+- Decide **which machine owns the app's address** — `192.168.203.79` since 2026-09-25, a DHCP lease (`.56` DHCP 2026-09-23 → 2026-09-25; `.183` static 2026-09-21 → 2026-09-23; `.153` before) — or use a DNS name; the value is printed on every label, so every label printed before 2026-09-25 encodes a dead address and needs reprinting, and a DHCP lease can move again without a reservation.
 - Network profile → **Private**; add the inbound firewall rule for TCP 3000 (inert while Public).
 - UniFi **DHCP reservation** for the address.
 - Reach the app from **another PC and a phone**.
