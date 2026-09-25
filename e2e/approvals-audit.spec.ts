@@ -131,7 +131,7 @@ test.describe.serial("approvals lifecycle — it@", () => {
     await expect(menu).toHaveCount(0);
   });
 
-  test("escalate APR-2041 from the queue keyboard — priority pill HIGH", async ({ page }) => {
+  test("escalate APR-2041 from the queue keyboard — priority pill High", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/approvals");
     // Open tab orders by slaAt ascending: APR-2040 (overdue) · APR-2039 (in
@@ -139,7 +139,7 @@ test.describe.serial("approvals lifecycle — it@", () => {
     // lands on APR-2041.
     await pressInQueue(page, "j", "j", "e");
     const row = page.getByRole("row", { name: /APR-2041/ });
-    await expect(row).toContainText("HIGH");
+    await expect(row).toContainText("High"); // Phase 33: the friendly priority word
     await expect(row).toContainText("PENDING");
   });
 

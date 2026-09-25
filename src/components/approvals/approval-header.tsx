@@ -18,7 +18,8 @@ import type { ActionResult } from "@/server/action-result";
 
 type Acted = { refNo: string; state: string };
 
-const RUN: Record<ApprovalVerb, (input: { id: string }) => Promise<ActionResult<Acted>>> = {
+/** Each verb's server action — shared by this header and the queue's row menu (spec §4.2). */
+export const RUN: Record<ApprovalVerb, (input: { id: string }) => Promise<ActionResult<Acted>>> = {
   "approve-now": approveNow,
   approve: approveApproval,
   claim: claimApproval,
@@ -27,9 +28,49 @@ const RUN: Record<ApprovalVerb, (input: { id: string }) => Promise<ActionResult<
   retry: retryApproval,
 };
 
-const DONE: Record<ApprovalVerb, string> = {
+/** The toast's past-tense word for each verb (`{refNo} {done}`). */
+export const DONE: Record<ApprovalVerb, string> = {
   "approve-now": "approved", approve: "approved", claim: "claimed", release: "released", escalate: "escalated", retry: "re-queued",
 };
+
+/**
+ * The reject dialog, shared by the request page's header and the queue (plan P-6: the
+ * trigger reads Reject…, the dialog keeps `Reject {refNo}?` and a danger `Reject`).
+ */
+export function RejectApprovalDialog({
+  refNo, open, onClose, onConfirm, pending, reason, onReasonChange, error,
+}: {
+  refNo: string;
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  pending: boolean;
+  reason: string;
+  onReasonChange: (v: string) => void;
+  error?: string;
+}) {
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={refNo ? `Reject ${refNo}?` : ""}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="danger" loading={pending} onClick={onConfirm}>Reject</Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-fg-muted">A rejection is a human decision — the reason is recorded on the approval and in the audit trail.</p>
+        <ReasonField
+          required error={error} value={reason} onChange={onReasonChange}
+          chips={REASON_CHIPS["approval.reject"]} disabled={pending}
+        />
+      </div>
+    </Dialog>
+  );
+}
 
 /**
  * Spec §4.1: the request page's house header — one primary, a visible Reject…,
@@ -127,25 +168,16 @@ export function ApprovalHeaderActions({
       )}
       {error && <Banner tone="fault" title={error} className="max-w-[420px]" />}
       {plan.reject && (
-        <Dialog
+        <RejectApprovalDialog
+          refNo={refNo}
           open={rejecting}
           onClose={() => setRejecting(false)}
-          title={`Reject ${refNo}?`}
-          footer={
-            <>
-              <Button variant="ghost" onClick={() => setRejecting(false)}>Cancel</Button>
-              <Button variant="danger" loading={pending} onClick={submitReject}>Reject</Button>
-            </>
-          }
-        >
-          <div className="flex flex-col gap-3">
-            <p className="text-xs text-fg-muted">A rejection is a human decision — the reason is recorded on the approval and in the audit trail.</p>
-            <ReasonField
-              required error={fieldErrors.reason} value={reason} onChange={setReason}
-              chips={REASON_CHIPS["approval.reject"]} disabled={pending}
-            />
-          </div>
-        </Dialog>
+          onConfirm={submitReject}
+          pending={pending}
+          reason={reason}
+          onReasonChange={setReason}
+          error={fieldErrors.reason}
+        />
       )}
     </div>
   );
