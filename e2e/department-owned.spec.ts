@@ -87,9 +87,11 @@ test.describe.serial("Purchasing owns its approvals", () => {
     await page.goto("/approvals");
     await page.getByRole("link", { name: refNo }).click();
     await expect(page.getByRole("heading", { name: refNo })).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("button", { name: "Claim" }).click();
+    // Phase 33: Claim sits in More; once claimed, the header's Approve is the claim holder's approve.
+    await (await openMore(page)).getByRole("menuitem", { name: "Claim", exact: true }).click();
     await expect(page.getByText(`${refNo} claimed`)).toBeVisible();
-    await page.getByRole("button", { name: "Approve" }).click();
+    await expect(page.locator("header").getByText("CLAIMED", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
     await expect(page.getByText(`${refNo} approved`)).toBeVisible();
     runWorkerOnce();
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).status).toBe("REPAIRING");
@@ -110,7 +112,11 @@ test.describe.serial("Purchasing owns its approvals", () => {
     await login(page, IT);
     await page.goto(`/approvals/${approval.id}`);
     await expect(page.getByRole("heading", { name: approval.refNo })).toBeVisible({ timeout: 20_000 });
+    // Phase 33: Claim now lives in More — a cross-class user gets no Approve, no Reject… and no More at all.
     await expect(page.getByRole("button", { name: "Claim" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Reject…", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "More actions", exact: true })).toHaveCount(0);
     expect((await db.approval.findUniqueOrThrow({ where: { id: approval.id } })).state).toBe("PENDING");
   });
 
@@ -143,10 +149,14 @@ test.describe.serial("Assign holder / Return", () => {
     await expect(page.getByRole("button", { name: "Assign holder" })).toHaveCount(0);
 
     await page.goto(`/approvals/${assign.id}`);
-    await page.getByRole("button", { name: "Claim" }).click();
-    await expect(page.getByText(`${assign.refNo} claimed`)).toBeVisible();
-    await page.getByRole("button", { name: "Approve" }).click();
+    // Phase 33: the one-step Approve from PENDING (claim + approve in one transaction, two audit rows).
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
     await expect(page.getByText(`${assign.refNo} approved`)).toBeVisible();
+    const trail = await db.auditEntry.findMany({
+      where: { entityType: "approval", entityId: assign.id, action: { in: ["claim", "approve"] } },
+    });
+    // One transaction, one createdAt — so the pair is compared as a set (T3's unit test proves the order).
+    expect(trail.map((a) => a.action).sort()).toEqual(["approve", "claim"]);
     runWorkerOnce();
     const held = await db.asset.findUniqueOrThrow({ where: { id }, include: { assignee: true } });
     expect(held.status).toBe("OPERATIONAL");

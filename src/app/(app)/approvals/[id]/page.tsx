@@ -1,20 +1,32 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
-import { getApproval, systemChecks } from "@/server/modules/approvals/queries";
+import { getApproval, nextInQueue, systemChecks } from "@/server/modules/approvals/queries";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { slaLabel } from "@/lib/approvals-list";
-import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { APPROVAL_TYPE_LABEL, PRIORITY_LABEL } from "@/lib/labels";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import { canActOnApproval } from "@/lib/approval-access";
+import { canActOnApproval, isApprover } from "@/lib/approval-access";
+import { approvalHeader } from "@/lib/approval-header";
 import { canSeeClass } from "@/lib/asset-class";
 import { PageHeader } from "@/components/ui/page-header";
+import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
 import { Pill } from "@/components/ui/pill";
 import { StatusDot, StatusPill } from "@/components/ui/status";
-import { ApprovalActions } from "@/components/approvals/approval-actions";
+import { ApprovalHeaderActions } from "@/components/approvals/approval-header";
+import { NextInQueue } from "@/components/approvals/next-in-queue";
 import { TagRef } from "@/components/inventory/tag-ref";
+
+/** Spec §4.1: one plain sentence for a worker error that names a known cause, else none. */
+function failureCause(workerError: string | null): string | null {
+  if (!workerError) return null;
+  if (/OFFBOARDED/.test(workerError)) return "The target person is no longer active.";
+  if (/status/i.test(workerError)) return "The asset's status changed since the request.";
+  if (/holder|assignee/i.test(workerError)) return "The asset's holder changed since the request.";
+  return null;
+}
 
 export default async function ApprovalPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -24,12 +36,20 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
   const checks = approval.appliedDirectly ? null : await systemChecks(approval);
   const canAct = canActOnApproval(user.role, approval.asset?.cls ?? null);
   const mine = approval.claimedById === user.id;
+  const plan = approvalHeader({ state: approval.state, canAct, mine, isAdmin: user.role === "admin" });
+  // P-8: once the header has no primary (decided, closed, or someone else's claim), point at the next request.
+  const next = isApprover(user.role) && plan.primary === null
+    ? { item: await nextInQueue(user.id, user.role, approval.id) }
+    : null;
   const sla = slaLabel(approval.slaAt);
   const s = summarizeApproval(approval.type, approval.payload, {
     assetTag: approval.asset?.tag,
     employeeName: approval.employee?.name,
     cls: approval.asset?.cls,
   });
+  const cause = approval.state === "EXECUTION_FAILED" ? failureCause(approval.workerError) : null;
+  const fromOffboarding =
+    approval.type === "lifecycle_return" && approval.employee?.employment === "OFFBOARDING" ? approval.employee : null;
 
   return (
     <>
@@ -39,8 +59,16 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
         badge={
           <span className="inline-flex items-center gap-2">
             <StatusPill value={approval.state} />
-            {approval.priority !== "NORMAL" && <Pill tone="accent">{approval.priority}</Pill>}
+            {approval.priority !== "NORMAL" && <Pill tone="accent">{PRIORITY_LABEL[approval.priority]}</Pill>}
           </span>
+        }
+        actions={
+          <ApprovalHeaderActions
+            id={approval.id}
+            refNo={approval.refNo}
+            plan={plan}
+            ownerName={approval.state === "CLAIMED" && !mine ? (approval.claimedBy?.name ?? "someone else") : null}
+          />
         }
       />
       {approval.appliedDirectly ? (
@@ -54,8 +82,71 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
           <span className={sla.overdue ? "font-semibold text-[color:var(--st-fault-text)]" : undefined}>{sla.text}</span>
         </p>
       )}
+      {next && (
+        <div className="-mt-2 pb-4">
+          <NextInQueue next={next.item} />
+        </div>
+      )}
+
+      {approval.state === "EXECUTION_FAILED" && (
+        <div className="max-w-[900px] pb-4">
+          <Banner tone="fault" title="The change could not be applied.">
+            {cause && <p>{cause}</p>}
+            {approval.workerError && (
+              <details className="mt-1.5">
+                <summary className="cursor-pointer text-fg-secondary">Worker error</summary>
+                <pre className="mt-1 whitespace-pre-wrap font-mono text-xs">{approval.workerError}</pre>
+              </details>
+            )}
+          </Banner>
+        </div>
+      )}
 
       <div className="grid max-w-[900px] grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader title="Before → after" />
+          <CardBody className="flex flex-col gap-2.5">
+            <DescriptionList
+              items={[
+                { label: "Change", value: s.line2 || s.line1 },
+                {
+                  label: "Asset",
+                  value: approval.asset ? (
+                    <TagRef
+                      id={approval.asset.id}
+                      tag={`${approval.asset.tag} · ${approval.asset.model}`}
+                      visible={canSeeClass(user.role, approval.asset.cls)}
+                      className="text-accent hover:underline"
+                    />
+                  ) : ("—"),
+                },
+                {
+                  label: "Employee",
+                  value: approval.employee ? (
+                    <Link href={`/employees/${approval.employee.id}`} className="text-accent hover:underline">
+                      {approval.employee.name} · {approval.employee.employeeNo}
+                    </Link>
+                  ) : ("—"),
+                },
+                ...(approval.resolutionReason
+                  ? [{ label: "Resolution", value: approval.resolutionReason }]
+                  : []),
+                ...(approval.resolvedAt
+                  ? [{ label: "Resolved", value: fmtDate(approval.resolvedAt), mono: true }]
+                  : []),
+              ]}
+            />
+            {fromOffboarding && (
+              <Link
+                href={`/offboarding/${fromOffboarding.id}?step=collect`}
+                className="text-xs text-accent hover:underline"
+              >
+                Open the offboarding wizard →
+              </Link>
+            )}
+          </CardBody>
+        </Card>
+
         {approval.appliedDirectly ? (
           <Card>
             <CardHeader title="How it was applied" />
@@ -93,56 +184,27 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
             </CardBody>
           </Card>
         )}
+      </div>
 
-        <Card>
-          <CardHeader title="Before → after" />
-          <CardBody>
-            <DescriptionList
-              items={[
-                { label: "Change", value: s.line2 || s.line1 },
-                {
-                  label: "Asset",
-                  value: approval.asset ? (
-                    <TagRef
-                      id={approval.asset.id}
-                      tag={`${approval.asset.tag} · ${approval.asset.model}`}
-                      visible={canSeeClass(user.role, approval.asset.cls)}
-                      className="text-accent hover:underline"
-                    />
-                  ) : ("—"),
-                },
-                {
-                  label: "Employee",
-                  value: approval.employee ? (
-                    <Link href={`/employees/${approval.employee.id}`} className="text-accent hover:underline">
-                      {approval.employee.name} · {approval.employee.employeeNo}
-                    </Link>
-                  ) : ("—"),
-                },
-                ...(approval.resolutionReason
-                  ? [{ label: "Resolution", value: approval.resolutionReason }]
-                  : []),
-                ...(approval.resolvedAt
-                  ? [{ label: "Resolved", value: fmtDate(approval.resolvedAt), mono: true }]
-                  : []),
-              ]}
+      {approval.state === "APPROVED" && (
+        <div className="max-w-[900px] pt-4">
+          <Card>
+            <CardHeader
+              title={
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-block size-[7px] rounded-full bg-[var(--st-inflight-dot)] animate-[pulse_1.9s_ease-in-out_infinite]" />
+                  Queued for execution
+                </span>
+              }
             />
-          </CardBody>
-        </Card>
-      </div>
-
-      <div className="max-w-[900px] pt-4">
-        <ApprovalActions
-          id={approval.id}
-          refNo={approval.refNo}
-          state={approval.state}
-          mine={mine}
-          ownerName={approval.claimedBy?.name ?? null}
-          canAct={canAct}
-          isAdmin={user.role === "admin"}
-          workerError={approval.workerError}
-        />
-      </div>
+            <CardBody>
+              <p className="text-xs text-fg-secondary">
+                The worker picks this up within seconds. Until it lands, the asset still reads its old status everywhere.
+              </p>
+            </CardBody>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

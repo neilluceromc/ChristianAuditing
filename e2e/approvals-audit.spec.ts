@@ -109,15 +109,26 @@ test.describe("approvals — finance read-only", () => {
 // The lifecycle thread: state mutations depend on the order these tests run
 // in, so this is ONE serial block (order-dependent state per the task brief).
 test.describe.serial("approvals lifecycle — it@", () => {
-  test("APR-2041 detail before claim: Claim/Reject/Escalate visible, Approve absent", async ({ page }) => {
+  // Phase 33 (spec §4.1): a PENDING request leads with the one-step Approve and a visible
+  // Reject…; Claim and Escalate move into More. Nothing is clicked — later cases need it PENDING.
+  test("APR-2041 detail before claim: Approve and Reject… visible, Claim and Escalate in More", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/approvals");
     await page.getByRole("link", { name: "APR-2041" }).click();
     await expect(page.getByRole("heading", { name: "APR-2041" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Claim" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Reject" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Escalate" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reject…", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Claim" })).toHaveCount(0);
+    const more = page.getByRole("button", { name: "More actions", exact: true });
+    const menu = page.getByRole("menu");
+    await expect(async () => {
+      if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+      await expect(menu).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
+    await expect(menu.getByRole("menuitem", { name: "Claim", exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Escalate", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
   });
 
   test("escalate APR-2041 from the queue keyboard — priority pill HIGH", async ({ page }) => {
@@ -175,16 +186,21 @@ test.describe.serial("approvals lifecycle — it@", () => {
     await expect(page.getByRole("row", { name: /APR-2035/ })).toContainText("EXECUTION_FAILED");
   });
 
+  // Phase 33 (spec §4.1): the plain sentence first, the named cause, then the verbatim
+  // worker error behind the `Worker error` disclosure; Retry and Reject… lead the header.
   test("APR-2025 failed card shows the verbatim worker error + Retry/Reject", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/approvals?tab=failed");
     await page.getByRole("link", { name: "APR-2025" }).click();
     await expect(page.getByRole("heading", { name: "APR-2025" })).toBeVisible();
-    await expect(
-      page.getByText("Execution guard: target employee EMP-0093 is OFFBOARDED — assignment refused"),
-    ).toBeVisible();
+    await expect(page.getByText("The change could not be applied.")).toBeVisible();
+    await expect(page.getByText("The target person is no longer active.")).toBeVisible();
+    const raw = page.getByText("Execution guard: target employee EMP-0093 is OFFBOARDED — assignment refused");
+    await expect(raw).toBeHidden();
+    await page.getByText("Worker error", { exact: true }).click();
+    await expect(raw).toBeVisible();
     await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Reject" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reject…", exact: true })).toBeVisible();
   });
 
   test("reject APR-2040 via the queue r dialog — lands in Closed as REJECTED", async ({ page }) => {
