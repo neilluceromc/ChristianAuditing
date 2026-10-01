@@ -414,12 +414,18 @@ test.describe("equipment policies", () => {
     await page.goto("/audit");
     // entityLabels resolves an equipment-policy id to the policy NAME with a
     // link back to this page — without that teaching, the row reads as a
-    // truncated cuid. The changed-field cell names `slots`, which is what
-    // carries both lists.
-    const auditRow = page.getByRole("row", { name: /equipment-policy/ }).first();
+    // truncated cuid. Phase 33 (R4): the pill reads in friendly words
+    // ("equipment policy"), and the table no longer has a field-name cell, so
+    // the `slots` key — what carries both lists — is checked on the stored row.
+    const auditRow = page.getByRole("row", { name: /equipment policy/i }).first();
     await expect(auditRow).toContainText("Finance standard");
     await expect(auditRow).toContainText("policy.slot.added");
-    await expect(auditRow).toContainText("slots");
+    const policy = await db.equipmentPolicy.findFirstOrThrow({ where: { name: "Finance standard" } });
+    const entry = await db.auditEntry.findFirstOrThrow({
+      where: { entityType: "equipment-policy", entityId: policy.id, action: "policy.slot.added" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    expect(entry.diff).toEqual(expect.objectContaining({ slots: expect.anything() }));
   });
 
   test("viewer sees the policies read-only — no chips to click, no add row", async ({ page }) => {
