@@ -861,4 +861,17 @@ git commit -m "feat(feeds): the four activity feeds gain search by tag, person a
 
 ## D-block (decisions made during execution)
 
-(Filled in during execution: each ruling as `D-n — what — why — cost if wrong`.)
+- **D-1 (R1)** — Task 10 split: the e2e file first; `--list`, the battery and the docs after the final review's fix wave — cost if wrong: none.
+- **D-2 (R2)** — `buildAuditWhere`'s new `todayISO` parameter defaults to `localDateISO()` — cost if wrong: one default.
+- **D-3 (R3)** — `failureCause` (now `src/lib/approval-failure.ts`, table-tested) keys on the worker's real phrases; the plan's `/status/i` and `/holder|assignee/i` matched none of the real errors and mislabelled others — cost if wrong: one more phrase.
+- **D-4 (R4)** — `offboarding.spec.ts` "equipment policies" asserts the `slots` diff key through the database (the `/audit` Fields column is gone by design) — cost if wrong: one assertion moves to the DB.
+- **D-5 (R5)** — every e2e check that read a raw field name off an `/audit` row asserts the sentence's friendly wording instead (`deadlines.spec.ts:207` → "updated complete-by date") — cost if wrong: a few assertions move.
+- **D-6 (R6)** — battery chunk D (56 + 14) ran as two foreground halves under the 540 s global timeout — cost if wrong: none.
+- **D-7 (R7)** — chunks E1 and F likewise ran as two halves (E1's first whole pass hit the timeout with 0 failures) — cost if wrong: none.
+- **D-8 (R8)** — `purchasing-ext.spec.ts:351` accepted only three-letter months; en-GB writes "Sept" — fixed test-only (`\w{3,4}`) — cost if wrong: none.
+- **D-9 (R9)** — chunk A re-run as-is after `purchases.spec.ts`'s PR-0198 heading missed 5 s on a slow first pass — cost if wrong: an intermittent slowness stays unexamined.
+- **D-10 (plan P-2, confirmed)** — no admin override on someone else's claim: `approvalHeader` offers Reject… and Release, never Approve — cost if wrong: a new privilege in `approvalTransition` plus the header row.
+- **D-11 (final I-1)** — every link into `/inventory/labels` carries the Purchasing class, and the page infers it when absent — cost if wrong: none.
+- **D-12 (final I-2)** — `approveNow` answers a no-longer-PENDING request with the house conflict copy, the notice survives the refresh, and any failure after the claim step throws so no claim commits without the approve — cost if wrong: none.
+- **D-13** — `department-owned.spec.ts:70` is `test.slow()`: it now claims through More and approves (two actions) and ran ~31 s on a cold server — cost if wrong: a slow case hides a real slowdown.
+- **D-14** — `registration.spec.ts:195` expects `&cls=PURCHASING` on a Purchasing batch's Print labels link (part of D-11) — cost if wrong: none.

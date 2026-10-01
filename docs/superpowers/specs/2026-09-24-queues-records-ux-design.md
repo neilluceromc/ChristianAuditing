@@ -1,6 +1,6 @@
 # Phase 33 — Laws of UX applied to the IT queues and records
 
-**Status:** designed 2026-09-24; not yet planned or implemented. No migration.
+**Status:** implemented on `phase-33-queues-records-uiux` (plan `docs/superpowers/plans/2026-09-25-phase-33-queues-records-ux.md`, final tree `fd2ee57`, 2026-10-01); code-complete, UNMERGED and UNPUSHED; no migration. Amendments made during execution are listed in the plan's D-block (notably D-10: no admin override on someone else's claim, per plan P-2).
 
 **Predecessor:** the same read-only audit of the IT-side screens that Phase 32 took its half from (`main` at `e33c5ff`, 73 findings). Phase 33 takes the other half (spec `2026-09-24-it-work-ux-design.md` §2): 11 findings on `/approvals` and its detail page, 6 on `/inventory/labels`, 5 on `/audit` and the activity feeds, the 4 `/reservations` findings Phase 32 left, and the old-toolbar sweep (F-OFF-4, F-RES-5, F-APR-6, F-MISC-2, F-MISC-3). The audit read the code; it did not walk a signed-in session. Finding ids are cited below as `F-…`.
 
