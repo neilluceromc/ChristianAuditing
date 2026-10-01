@@ -8,10 +8,11 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  * Phase 27, Task 6 (spec §7) — the activity feeds and the visible smalls, seven
  * cases:
  *   1 the Action facet narrows /inventory/activity, the URL and a page link
- *     keep the selection, the unselected options keep their counts, and Clear
- *     puts the feed back.
+ *     keep the selection, the unselected options keep their counts, the chip
+ *     names the value only, and Clear filters puts the feed back.
  *   2 class hygiene on a feed: IT's inventory activity carries no Purchasing
- *     row; admin's carries the same row.
+ *     row, and IT's search by that tag finds nothing; admin's carries the
+ *     same row, and admin's search by the tag narrows to it.
  *   3 `document.uploaded` reads as a sentence, not a raw verb.
  *   4 `import-update` prints human field names ("department, join date"), not
  *     raw diff keys.
@@ -145,7 +146,10 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     expect(Object.keys(narrowed).length).toBe(Object.keys(counts).length);
     const next = page.getByRole("navigation", { name: "Pagination" }).getByRole("link", { name: "2", exact: true });
     if (await next.count()) await expect(next).toHaveAttribute("href", /action=lifecycle\.assign/);
-    await page.getByRole("link", { name: "Clear", exact: true }).click();
+    // Phase 33 (spec §6.3): the bare Clear link became the house chip row — a value-only chip
+    // ("Assigned", not "action: Assigned") and Clear filters, which puts the feed back.
+    await expect(page.getByRole("link", { name: /^Assigned\s+—\s+remove filter$/ })).toBeVisible();
+    await page.getByRole("link", { name: "Clear filters", exact: true }).click();
     await expect(page).toHaveURL(/\/inventory\/activity$/);
     await expectNoSeriousAxe(page);
   });
@@ -161,9 +165,21 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     await login(page, IT);
     await page.goto("/inventory/activity");
     await expect(page.locator("ol")).not.toContainText(vehicle.tag);
+    // Phase 33 (spec §10): the feed's search respects the feed's own class scoping — IT
+    // searching the Purchasing tag finds nothing rather than the hidden row.
+    const search = page.getByLabel("Search activity");
+    await waitForHydration(search);
+    await search.fill(vehicle.tag);
+    await search.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`q=${vehicle.tag}`));
+    await expect(page.getByText("No entries match this filter")).toBeVisible();
     await login(page, ADMIN);
     await page.goto("/inventory/activity");
     await expect(page.locator("ol").getByText(`e2e phase 27 updated location on ${vehicle.tag}`)).toBeVisible();
+    // …and admin's search by the same tag narrows the feed to that asset's rows.
+    await page.goto(`/inventory/activity?q=${vehicle.tag}`);
+    await expect(page.locator("ol").getByText(`e2e phase 27 updated location on ${vehicle.tag}`)).toBeVisible();
+    for (const text of await page.locator("ol li").allInnerTexts()) expect(text).toContain(vehicle.tag);
   });
 
   test("3. an attached document reads as a sentence", async ({ page }) => {

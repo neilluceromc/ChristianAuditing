@@ -212,9 +212,12 @@ export async function listActivity(
   feed: ActivityFeed,
   state: ListState,
   hidden: HiddenAuditRefs,
+  /** ids `resolveEntitySearch` found for `state.q` (spec §6.1) — the caller resolves them once */
+  matchIds: string[] = [],
 ): Promise<{ items: ActivityItem[]; total: number; page: number; pageCount: number; actionOptions: FacetOptionLike[] }> {
-  const where = buildActivityWhere(feed, state, hidden);
-  const withoutAction = buildActivityWhere(feed, { ...state, filters: { ...state.filters, action: [] } }, hidden);
+  const where = buildActivityWhere(feed, state, hidden, matchIds);
+  // the Action counts read without the action filter, but search still narrows them (spec §10)
+  const withoutAction = buildActivityWhere(feed, { ...state, filters: { ...state.filters, action: [] } }, hidden, matchIds);
   let grouped: Array<{ action: string; _count: number }> = [];
   const { rows: entries, total, page, pageCount } = await pagedSnapshot(
     LOG_PAGE_SIZE,
