@@ -235,7 +235,8 @@ test.describe("audit log", () => {
     await page.getByRole("dialog", { name: "Filter by Entity" }).getByLabel("Approval").check();
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page).toHaveURL(/entity=approval/);
-    await expect(page.getByRole("link", { name: /entity: Approval/i })).toBeVisible();
+    // Phase 33 (spec §6.3): value-only chips — "Approval", not "entity: Approval".
+    await expect(page.getByRole("link", { name: /^Approval\s+—\s+remove filter$/i })).toBeVisible();
     await expect(table.getByText("ASSET", { exact: true })).toHaveCount(0);
 
     await page.goto("/audit");

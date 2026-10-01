@@ -21,6 +21,8 @@ export interface AuditRow {
   entityHref: string | null;
   action: string;
   fields: string;
+  /** Spec §6.2: the feeds' sentence without the entity — the row shows the entity beside it, linked */
+  sentence: string;
 }
 
 /** Batch-resolve entity ids into human labels + links. Unknown types stay as truncated ids. */
@@ -158,8 +160,10 @@ export async function invisibleAuditRefs(role: Role): Promise<HiddenAuditRefs> {
 export async function listAudit(
   state: ListState,
   hidden: HiddenAuditRefs = NO_HIDDEN_REFS,
+  /** ids `resolveEntitySearch` found for `state.q` (spec §6.1) — the caller resolves them once */
+  matchIds: string[] = [],
 ): Promise<{ rows: AuditRow[]; total: number; page: number; pageCount: number }> {
-  const where = buildAuditWhere(state, hidden);
+  const where = buildAuditWhere(state, hidden, matchIds);
   const { rows: entries, total, page, pageCount } = await pagedSnapshot(
     LOG_PAGE_SIZE,
     state.page,
@@ -188,6 +192,10 @@ export async function listAudit(
         entityHref: l.href,
         action: e.action,
         fields: e.diff ? Object.keys(e.diff as object).join(", ") : "—",
+        sentence: auditSentence(
+          { actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: l.label },
+          { omitEntity: true },
+        ),
       };
     }),
   };

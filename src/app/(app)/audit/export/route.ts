@@ -2,6 +2,7 @@ import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { buildAuditWhere, AUDIT_LIST_CONFIG } from "@/lib/audit-list";
 import { entityLabels, invisibleAuditRefs } from "@/server/modules/audit/queries";
+import { resolveEntitySearch } from "@/server/modules/audit/search";
 import { parseListState } from "@/lib/url-state";
 import { toXlsxBuffer } from "@/server/xlsx/write";
 import { AUDIT_EXPORT_COLUMNS, EXPORT_CAP } from "@/lib/export-columns";
@@ -13,8 +14,12 @@ export async function GET(req: Request) {
   // Same parse + filter as /audit's page, so the sheet and the screen can
   // never disagree about which rows a filtered export includes.
   const state = parseListState(url.searchParams, AUDIT_LIST_CONFIG);
-  const hidden = await invisibleAuditRefs(user.role);
-  const where = buildAuditWhere(state, hidden);
+  // Spec §6.1/§6.2: the export honours the same search (tags, people, ref nos) and When filter.
+  const [hidden, matchIds] = await Promise.all([
+    invisibleAuditRefs(user.role),
+    resolveEntitySearch(state.q, user.role),
+  ]);
+  const where = buildAuditWhere(state, hidden, matchIds);
 
   const count = await prisma.auditEntry.count({ where });
   if (count > EXPORT_CAP) return capRefusal(count);
