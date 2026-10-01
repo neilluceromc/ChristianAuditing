@@ -373,13 +373,15 @@ test.describe("reservations", () => {
 
     const active = page.getByRole("row", { name: /BR-MN-0910/ });
     await expect(active).toContainText("Nina Robles");
-    await expect(active).toContainText("SPARE"); // the point: the hold moved nothing
+    // The point: the hold moved nothing. The Active tab no longer carries a status
+    // column (spec §5.2, plan P-12); the hint under the tabs states the same fact.
+    await expect(page.getByText("Held spares still read SPARE · place holds from a record or a profile")).toBeVisible();
 
     await page.getByRole("link", { name: /Closed/ }).click();
     await expect(page).toHaveURL(/state=CLOSED/);
-    // Scoped to the table: the page's own explanatory banner ("Holds are
-    // placed and released on the asset record") also contains the word
-    // "released", so an unscoped getByText matches it too.
+    // Scoped to the table, so no page copy outside it can ever match. The
+    // Closed column keeps the lowercase "expired …" / "released …" beside the
+    // State column's "Expired" / "Released".
     const closedTable = page.getByRole("table");
     await expect(closedTable.getByText(/expired/)).toBeVisible();
     await expect(closedTable.getByText(/released/)).toBeVisible();

@@ -1,7 +1,7 @@
-import { fmtDate } from "@/lib/format";
+import { fmtDate, localDateISO } from "@/lib/format";
 // Phase 26: the tabs moved to @/lib/holds so they have a unit test; re-exported
 // here so every existing caller of this module still compiles unchanged.
-import { buildHoldOrderBy, buildHoldWhere, RESERVATION_TABS, type ReservationTab } from "@/lib/holds";
+import { buildHoldOrderBy, buildHoldWhere, expiringSoon, RESERVATION_TABS, type ReservationTab } from "@/lib/holds";
 import { ENTITY_PAGE_SIZE } from "@/lib/paging";
 import type { ListState } from "@/lib/url-state";
 import { prisma } from "@/server/db/client";
@@ -34,10 +34,13 @@ export interface HoldFacets { employee: FacetOption[]; department: FacetOption[]
 
 export async function listReservations(tab: ReservationTab, state: ListState): Promise<{
   rows: ReservationRow[]; counts: Record<ReservationTab, number>; total: number; page: number; pageCount: number; facets: HoldFacets;
+  /** spec §5.2: ACTIVE holds expiring within two Manila days, over the Active tab's filtered set */
+  soon: number;
 }> {
   const where = buildHoldWhere(tab, state);
   const orderBy = buildHoldOrderBy(state.sort);
   let counts!: Record<ReservationTab, number>;
+  let soon = 0;
   const { rows: reservations, total, page, pageCount } = await pagedSnapshot(
     ENTITY_PAGE_SIZE, state.page,
     async (tx) => {
@@ -47,6 +50,10 @@ export async function listReservations(tab: ReservationTab, state: ListState): P
         RESERVATION_TABS.map(async (t) => [t.id, await tx.reservation.count({ where: buildHoldWhere(t.id, state) })] as const),
       );
       counts = Object.fromEntries(entries) as Record<ReservationTab, number>;
+      // The count line's expiring-soon figure reads the Active tab's filtered set in the same
+      // snapshot, so it never disagrees with the Active badge beside it.
+      const active = await tx.reservation.findMany({ where: buildHoldWhere("ACTIVE", state), select: { state: true, expiresAt: true } });
+      soon = expiringSoon(active, localDateISO());
       return counts[tab];
     },
     (tx, pg) => tx.reservation.findMany({ where, include: { asset: true, employee: { include: { department: true } } }, orderBy, skip: pg.skip, take: pg.take }),
@@ -62,7 +69,7 @@ export async function listReservations(tab: ReservationTab, state: ListState): P
       resolved: fmtDate(r.resolvedAt ?? (r.state === "EXPIRED" ? r.expiresAt : null)),
       closedBy: r.state === "EXPIRED" ? "clock" : r.state === "RELEASED" ? "person" : null,
     })),
-    counts, total, page, pageCount, facets,
+    counts, total, page, pageCount, facets, soon,
   };
 }
 
