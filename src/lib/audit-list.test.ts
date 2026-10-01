@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUDIT_ENTITY_TYPES, AUDIT_LIST_CONFIG, NO_HIDDEN_REFS, buildAuditWhere } from "./audit-list";
+import { AUDIT_ENTITY_TYPES, AUDIT_LIST_CONFIG, NO_HIDDEN_REFS, buildAuditWhere, whenRange, WHEN_LABEL } from "./audit-list";
 import { parseListState } from "./url-state";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), AUDIT_LIST_CONFIG);
@@ -40,5 +40,29 @@ describe("buildAuditWhere", () => {
         { entityType: "asset-type", entityId: { in: ["t1"] } },
       ],
     });
+  });
+});
+
+describe("whenRange (Manila calendar)", () => {
+  it("today, 7d, 30d start at Manila midnight; anything else is no filter", () => {
+    expect(whenRange("today", "2026-09-25")).toEqual({ gte: new Date("2026-09-25T00:00:00+08:00") });
+    expect(whenRange("7d", "2026-09-25")).toEqual({ gte: new Date("2026-09-19T00:00:00+08:00") });
+    expect(whenRange("30d", "2026-09-25")).toEqual({ gte: new Date("2026-08-27T00:00:00+08:00") });
+    expect(whenRange(undefined, "2026-09-25")).toBeNull();
+    expect(whenRange("year", "2026-09-25")).toBeNull();
+    expect(WHEN_LABEL).toEqual({ today: "Today", "7d": "Last 7 days", "30d": "Last 30 days" });
+  });
+});
+
+describe("buildAuditWhere — resolved matches and When", () => {
+  const state = (q: string, when?: string) => ({ q, page: 1, sort: [], filters: (when ? { when: [when] } : {}) as Record<string, string[]> });
+  it("q matches action, entityId, actor, and the resolved entity ids", () => {
+    const w = buildAuditWhere(state("dennis"), NO_HIDDEN_REFS, ["e1", "a2"]);
+    expect(JSON.stringify(w)).toContain('"entityId":{"in":["e1","a2"]}');
+    expect(JSON.stringify(w)).toContain('"actorLabel"');
+  });
+  it("when narrows createdAt", () => {
+    const w = buildAuditWhere(state("", "today"), NO_HIDDEN_REFS, [], "2026-09-25");
+    expect(JSON.stringify(w)).toContain('"createdAt":{"gte":"2026-09-24T16:00:00.000Z"}');
   });
 });

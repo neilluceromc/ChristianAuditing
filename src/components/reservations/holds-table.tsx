@@ -12,8 +12,13 @@ import { Menu, type MenuItem } from "@/components/ui/menu";
 import { ReleaseHoldDialog } from "@/components/inventory/release-hold-button";
 import { AssignDialog } from "@/components/inventory/holder-control";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
+import { useListNavigation } from "@/components/patterns/list-navigation";
+import type { ReservationTab } from "@/lib/holds";
 import type { ListState } from "@/lib/url-state";
 import type { ReservationRow } from "@/server/modules/reservations/queries";
+
+/** The Closed tab's two endings in friendly words (spec §9). */
+const CLOSED_STATE_LABEL: Record<string, string> = { RELEASED: "Released", EXPIRED: "Expired" };
 
 /**
  * Phase 26 (spec §5.4): the reservations table as a Client Component — the
@@ -24,21 +29,28 @@ import type { ReservationRow } from "@/server/modules/reservations/queries";
  *
  * Phase 32 (spec §7): each row's menu hands the spare to the person it was
  * held for (Assign, preselected) or releases it; viewers get Open items only.
+ *
+ * Phase 33 (spec §5.2): each tab shows the columns that tell its rows apart —
+ * Active the expiry, Fulfilled the day it was handed over, Closed which ending
+ * and when. (The asset's own status lives in the hint under the tabs: a held
+ * spare still reads SPARE.)
  */
 export function HoldsTable({
-  rows, state, sortHrefs, today, canAct, direct, employees,
+  tab, rows, state, sortHrefs, today, canAct, direct, employees,
 }: {
-  rows: ReservationRow[]; state: ListState; sortHrefs: Record<string, string>; today: string;
+  tab: ReservationTab; rows: ReservationRow[]; state: ListState; sortHrefs: Record<string, string>; today: string;
   canAct: boolean; direct: boolean; employees: ComboOption[];
 }) {
   const router = useRouter();
+  // A header sort is a list navigation: it runs in the shared transition so the table reads busy.
+  const { navigate } = useListNavigation();
   // The row menu's open dialog: which action, on which hold.
   const [dialog, setDialog] = useState<{ kind: "assign" | "release"; row: ReservationRow } | null>(null);
 
   function sortProps(key: string) {
     const idx = state.sort.findIndex((s) => s.key === key);
     return {
-      onSort: () => router.push(sortHrefs[key]),
+      onSort: () => navigate(sortHrefs[key]),
       sort: idx >= 0 ? state.sort[idx].dir : undefined,
       sortIndex: idx >= 0 && state.sort.length > 1 ? idx + 1 : undefined,
     };
@@ -64,16 +76,14 @@ export function HoldsTable({
     <Table>
       <THead>
         <Tr>
-          <Th width={19} aria-label="Hold state colour" />
-          <Th width={104}>State</Th>
           <Th width={112} {...sortProps("tag")}>Asset</Th>
           <Th>Model</Th>
-          <Th width={96}>Reads</Th>
           <Th width={186} {...sortProps("employee")}>For</Th>
           <Th>Reason</Th>
-          <Th width={104} {...sortProps("expiresAt")}>Expires</Th>
-          <Th width={110} {...sortProps("createdAt")}>Created</Th>
-          <Th width={160}>Closed</Th>
+          {tab === "ACTIVE" && <Th width={150} {...sortProps("expiresAt")}>Expires</Th>}
+          {tab === "FULFILLED" && <Th width={120}>Fulfilled on</Th>}
+          {tab === "CLOSED" && <Th width={112}>State</Th>}
+          {tab === "CLOSED" && <Th width={160}>Closed</Th>}
           <Th width={44} aria-label="Row actions" />
         </Tr>
       </THead>
@@ -84,16 +94,12 @@ export function HoldsTable({
             className="cursor-pointer"
             {...rowOpenProps(() => open(r.assetId))}
           >
-            <Td className="pr-0"><StatusDot value={r.state} /></Td>
-            <Td mono className="text-[10.5px]">{r.state}</Td>
             <Td mono>
               <Link href={`/inventory/${r.assetId}`} onClick={(e) => e.stopPropagation()} className="text-accent hover:underline">
                 {r.tag}
               </Link>
             </Td>
             <Td>{r.model}</Td>
-            {/* the point of the column: the hold did not move the status */}
-            <Td mono className="text-[10.5px]">{r.assetStatus}</Td>
             <Td>
               <Link href={`/employees/${r.employeeId}`} onClick={(e) => e.stopPropagation()} className="text-accent hover:underline">
                 {r.employeeName}
@@ -101,20 +107,33 @@ export function HoldsTable({
               <span className="pl-1.5 font-mono text-[10.5px] text-fg-muted">{r.employeeNo}</span>
             </Td>
             <Td>{r.reason ?? "—"}</Td>
-            <Td mono>
-              {r.state === "ACTIVE" && r.expiresAt ? <HoldPill expiresAt={r.expiresAt} today={today} withDate /> : r.expires}
-            </Td>
-            <Td mono>{r.created}</Td>
-            <Td>
-              {r.closedBy === null ? (
-                <span className="text-fg-faint">—</span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-fg-muted">
-                  <Icon name={r.closedBy === "clock" ? "sla" : "employee"} size={13} />
-                  {r.closedBy === "clock" ? "expired" : "released"} {r.resolved}
+            {tab === "ACTIVE" && (
+              <Td mono>
+                {r.state === "ACTIVE" && r.expiresAt ? <HoldPill expiresAt={r.expiresAt} today={today} withDate /> : r.expires}
+              </Td>
+            )}
+            {tab === "FULFILLED" && <Td mono>{r.resolved}</Td>}
+            {tab === "CLOSED" && (
+              <Td>
+                <span className="inline-flex items-center gap-1.5">
+                  <StatusDot value={r.state} />
+                  {CLOSED_STATE_LABEL[r.state] ?? r.state}
                 </span>
-              )}
-            </Td>
+              </Td>
+            )}
+            {tab === "CLOSED" && (
+              <Td>
+                {/* the clock or a person, and when — the State column says which ending, this says how and when */}
+                {r.closedBy === null ? (
+                  <span className="text-fg-faint">—</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-fg-muted">
+                    <Icon name={r.closedBy === "clock" ? "sla" : "employee"} size={13} />
+                    {r.closedBy === "clock" ? "expired" : "released"} {r.resolved}
+                  </span>
+                )}
+              </Td>
+            )}
             {/* Not part of the row click: the menu, and everything it opens, stays out of the row's handler. */}
             <Td className="cursor-default px-1 text-right" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
               <Menu

@@ -44,6 +44,23 @@ export function labelPages(tags: readonly string[]): string[][] {
   return pages;
 }
 
+/** Spec §5.1: the first startAt−1 slots of page 1 stay blank so a half-used sheet can go back in. */
+export function labelSlots(tags: readonly string[], startAt: number, perPage: number = LABELS_PER_PAGE): (string | null)[][] {
+  if (tags.length === 0) return [];
+  const lead = Math.min(Math.max(1, Math.floor(startAt)), perPage) - 1;
+  const flat: (string | null)[] = [...Array<null>(lead).fill(null), ...tags];
+  const pages: (string | null)[][] = [];
+  for (let i = 0; i < flat.length; i += perPage) pages.push(flat.slice(i, i + perPage));
+  return pages;
+}
+
+/** `?start=` → 1…LABELS_PER_PAGE (plan P-11). */
+export function clampStart(raw: string | null | undefined): number {
+  const n = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(n, LABELS_PER_PAGE);
+}
+
 /**
  * A discriminated union rather than a flat shape with nullable-by-convention
  * fields: when `encodable` is false there is no width or module to read, and

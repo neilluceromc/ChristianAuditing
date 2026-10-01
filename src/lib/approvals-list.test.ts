@@ -11,6 +11,9 @@ import {
   slaLabel,
   tabWhere,
   viaWhere,
+  approvalsHref,
+  approvalsSearchWhere,
+  parseTypes,
 } from "./approvals-list";
 
 describe("queue tabs (README 1k: Open / Mine / Unclaimed / Failed / Closed)", () => {
@@ -70,5 +73,27 @@ describe("slaLabel", () => {
   it("same-day reads in hours", () => {
     expect(slaLabel(new Date("2026-08-17T15:00:00Z"), now)).toEqual({ text: "in 3 h", overdue: false });
     expect(slaLabel(new Date("2026-08-17T10:00:00Z"), now)).toEqual({ text: "2 h overdue", overdue: true });
+  });
+});
+
+describe("approvals search (plan P-5)", () => {
+  it("parseTypes keeps only real types", () => {
+    expect(parseTypes("lifecycle_return,nope,lifecycle_assign")).toEqual(["lifecycle_return", "lifecycle_assign"]);
+    expect(parseTypes(undefined)).toEqual([]);
+  });
+  it("where: q over refNo, tag, employee; types in", () => {
+    expect(approvalsSearchWhere("", [])).toEqual({});
+    const w = JSON.stringify(approvalsSearchWhere("br-lt", ["lifecycle_return"]));
+    expect(w).toContain('"refNo":{"contains":"br-lt","mode":"insensitive"}');
+    expect(w).toContain('"tag":{"contains":"br-lt","mode":"insensitive"}');
+    expect(w).toContain('"employeeNo"');
+    expect(w).toContain('"type":{"in":["lifecycle_return"]}');
+  });
+  it("hrefs are byte-identical to today without q/type", () => {
+    expect(approvalsHref({ tab: "open" })).toBe("/approvals");
+    expect(approvalsHref({ tab: "closed", via: "direct" })).toBe("/approvals?tab=closed&via=direct");
+    expect(approvalsHref({ tab: "open", page: 2 })).toBe("/approvals?page=2");
+    expect(approvalsHref({ tab: "mine", q: "dennis", types: ["lifecycle_return"] }))
+      .toBe("/approvals?tab=mine&q=dennis&type=lifecycle_return");
   });
 });

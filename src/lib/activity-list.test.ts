@@ -31,3 +31,16 @@ describe("the activity feeds' list rules (spec §3.4)", () => {
     });
   });
 });
+
+describe("buildActivityWhere — search (spec §6.1)", () => {
+  const st = (q: string) => ({ q, page: 1, sort: [], filters: {} });
+  it("no q, no search branch", () => {
+    expect(JSON.stringify(buildActivityWhere("inventory", st(""), NO_HIDDEN_REFS))).not.toContain("actorLabel");
+  });
+  it("q adds action / actor / resolved ids, ANDed with the feed's own scope", () => {
+    const w = JSON.stringify(buildActivityWhere("inventory", st("BR-LT"), NO_HIDDEN_REFS, ["a1"]));
+    expect(w).toContain('"entityId":{"in":["a1"]}');
+    expect(w).toContain('"actorLabel"');
+    expect(w).toContain('"entityType"');
+  });
+});

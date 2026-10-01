@@ -373,13 +373,15 @@ test.describe("reservations", () => {
 
     const active = page.getByRole("row", { name: /BR-MN-0910/ });
     await expect(active).toContainText("Nina Robles");
-    await expect(active).toContainText("SPARE"); // the point: the hold moved nothing
+    // The point: the hold moved nothing. The Active tab no longer carries a status
+    // column (spec §5.2, plan P-12); the hint under the tabs states the same fact.
+    await expect(page.getByText("Held spares still read SPARE · place holds from a record or a profile")).toBeVisible();
 
     await page.getByRole("link", { name: /Closed/ }).click();
     await expect(page).toHaveURL(/state=CLOSED/);
-    // Scoped to the table: the page's own explanatory banner ("Holds are
-    // placed and released on the asset record") also contains the word
-    // "released", so an unscoped getByText matches it too.
+    // Scoped to the table, so no page copy outside it can ever match. The
+    // Closed column keeps the lowercase "expired …" / "released …" beside the
+    // State column's "Expired" / "Released".
     const closedTable = page.getByRole("table");
     await expect(closedTable.getByText(/expired/)).toBeVisible();
     await expect(closedTable.getByText(/released/)).toBeVisible();
@@ -412,12 +414,18 @@ test.describe("equipment policies", () => {
     await page.goto("/audit");
     // entityLabels resolves an equipment-policy id to the policy NAME with a
     // link back to this page — without that teaching, the row reads as a
-    // truncated cuid. The changed-field cell names `slots`, which is what
-    // carries both lists.
-    const auditRow = page.getByRole("row", { name: /equipment-policy/ }).first();
+    // truncated cuid. Phase 33 (R4): the pill reads in friendly words
+    // ("equipment policy"), and the table no longer has a field-name cell, so
+    // the `slots` key — what carries both lists — is checked on the stored row.
+    const auditRow = page.getByRole("row", { name: /equipment policy/i }).first();
     await expect(auditRow).toContainText("Finance standard");
     await expect(auditRow).toContainText("policy.slot.added");
-    await expect(auditRow).toContainText("slots");
+    const policy = await db.equipmentPolicy.findFirstOrThrow({ where: { name: "Finance standard" } });
+    const entry = await db.auditEntry.findFirstOrThrow({
+      where: { entityType: "equipment-policy", entityId: policy.id, action: "policy.slot.added" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    expect(entry.diff).toEqual(expect.objectContaining({ slots: expect.anything() }));
   });
 
   test("viewer sees the policies read-only — no chips to click, no add row", async ({ page }) => {

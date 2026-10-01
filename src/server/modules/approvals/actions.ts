@@ -169,3 +169,95 @@ export async function retryApproval(input: unknown): Promise<ActionResult<Acted>
     enqueue: true,
   }));
 }
+
+/** The house conflict copy (spec §7, §10): someone else acted on this item first. */
+const CHANGED_FIRST = "Someone else changed this item first — refresh and retry.";
+
+/**
+ * Thrown inside approveNow's transaction once the claim is written, so any later
+ * refusal rolls the claim back instead of committing a claim without the approve.
+ */
+class ApproveNowAbort extends Error {
+  constructor(readonly result: ActionResult<never>) {
+    super("approveNow aborted");
+  }
+}
+
+/**
+ * Spec §4.1 decision 1 (plan P-3): on a PENDING request, claim and approve in one
+ * transaction — the same guards, the same two audit rows (claim, then approve) and
+ * the same execution job as the two separate actions. Anything else is a conflict.
+ */
+export async function approveNow(input: unknown): Promise<ActionResult<Acted>> {
+  const user = await actionUser();
+  if (!user || !isApprover(user.role)) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { id } = parsed.data;
+
+  let acted: Acted | null = null;
+  let failure;
+  try {
+    failure = await prisma.$transaction(async (tx) => {
+      const a = await tx.approval.findUnique({
+        where: { id },
+        select: { id: true, refNo: true, state: true, asset: { select: { cls: true } } },
+      });
+      if (!a) return conflict("That approval no longer exists.");
+      if (!canActOnApproval(user.role, a.asset?.cls ?? null)) return forbidden();
+      const isAdmin = user.role === "admin";
+
+      // No longer PENDING when this runs: another approver claimed, approved or
+      // rejected it first — the house conflict copy, not the claim wording.
+      const claim = approvalTransition(a.state, "claim", { isOwner: false, isAdmin });
+      if (!claim.ok) return conflict(CHANGED_FIRST);
+      const claimed = await tx.approval.updateMany({
+        where: { id, state: "PENDING" },
+        data: { state: "CLAIMED", claimedById: user.id, claimedAt: new Date() },
+      });
+      if (claimed.count === 0) return conflict(CHANGED_FIRST);
+      await writeAudit(tx, {
+        actorId: user.id,
+        actorLabel: user.name,
+        entityType: "approval",
+        entityId: id,
+        action: "claim",
+        diff: { state: { from: a.state, to: "CLAIMED" } },
+      });
+
+      const approve = approvalTransition("CLAIMED", "approve", { isOwner: true, isAdmin });
+      // From here on the claim is written: any failure throws, rolling it back.
+      if (!approve.ok) throw new ApproveNowAbort(conflict(approve.error));
+      const approved = await tx.approval.updateMany({
+        where: { id, state: "CLAIMED", claimedById: user.id },
+        data: { state: "APPROVED" },
+      });
+      if (approved.count === 0) throw new ApproveNowAbort(conflict(CHANGED_FIRST));
+      await tx.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: id } } });
+      await writeAudit(tx, {
+        actorId: user.id,
+        actorLabel: user.name,
+        entityType: "approval",
+        entityId: id,
+        action: "approve",
+        diff: { state: { from: "CLAIMED", to: "APPROVED" } },
+      });
+      acted = { refNo: a.refNo, state: "APPROVED" };
+      return null;
+    });
+  } catch (err) {
+    if (err instanceof ApproveNowAbort) return err.result;
+    // Same one-live-EXECUTE_APPROVAL-job index as transition() — a typed conflict, not a 500.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return conflict("Execution for this item is already queued or running — the worker settles it first, then retry becomes available.");
+    }
+    throw err;
+  }
+  if (failure) return failure;
+
+  revalidatePath("/approvals");
+  revalidatePath(`/approvals/${id}`);
+  return ok(acted!);
+}

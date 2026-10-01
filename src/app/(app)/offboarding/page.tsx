@@ -16,6 +16,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { DuePill } from "@/components/ui/due-pill";
 import { OffboardingToolbar } from "@/components/offboarding/offboarding-toolbar";
 import { OffboardingMoreMenu } from "@/components/offboarding/offboarding-more-menu";
+import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/patterns/list-navigation";
 
 export default async function OffboardingPage({
   searchParams,
@@ -55,109 +56,114 @@ export default async function OffboardingPage({
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
         actions={<OffboardingMoreMenu exportHref={"/offboarding/export" + serializeListState(state, OFFBOARDING_LIST_CONFIG)} />}
       />
-      <div className="flex flex-col gap-2">
-        <OffboardingToolbar state={state} facets={facets} />
-        {rows.length === 0 ? (
-          <EmptyState
-            title={filtered ? "No one matches these filters" : "No one is leaving"}
-            description={
-              filtered
-                ? undefined
-                : "Start offboarding from a person's profile — More › Start offboarding…"
-            }
-            actions={
-              filtered
-                ? <ButtonLink href="/offboarding">Clear filters</ButtonLink>
-                : <ButtonLink href="/employees">Open employees</ButtonLink>
-            }
-          />
-        ) : (
-          <>
-            <p aria-live="polite" className="text-[12px] text-fg-muted">
-              {total} {total === 1 ? "person" : "people"} leaving
-              {overdueCount > 0 && (
-                <> · <Link href={"/offboarding" + serializeListState(withFilter(state, "due", ["overdue"]), OFFBOARDING_LIST_CONFIG)} className="text-accent underline hover:text-accent-hover">{overdueCount} overdue</Link></>
-              )}
-            </p>
-            <Table>
-              <THead>
-                <Tr>
-                  <Th width={19}><span className="sr-only">Employment colour</span></Th>
-                  <Th sort={sortDir("name")} sortIndex={sortIndex("name")}>
-                    <Link href={sortHref("name")}>Name</Link>
-                  </Th>
-                  <Th width={132}>Department</Th>
-                  <Th width={104} sort={sortDir("started")} sortIndex={sortIndex("started")}>
-                    <Link href={sortHref("started")}>Started</Link>
-                  </Th>
-                  <Th width={168} sort={sortDir("due")} sortIndex={sortIndex("due")}>
-                    <Link href={sortHref("due")}>Due</Link>
-                  </Th>
-                  <Th width={150} sort={sortDir("undecided")} sortIndex={sortIndex("undecided")}>
-                    <Link href={sortHref("undecided")}>Progress</Link>
-                  </Th>
-                  <Th width={124} aria-label="Row actions" />
-                </Tr>
-              </THead>
-              <TBody>
-                {rows.map((r) => (
-                  <Tr key={r.id}>
-                    <Td className="pr-0"><StatusDot value="OFFBOARDING" ns="employment" /></Td>
-                    <Td>
-                      <Link href={`/offboarding/${r.id}`} className="flex items-center gap-2.5 hover:underline">
-                        <span className="flex flex-col leading-tight">
-                          <span className="text-[12.5px] font-medium text-fg">{r.name}</span>
-                          <span className="font-mono text-[10px] text-fg-faint">
-                            {r.employeeNo} · {r.title}
-                          </span>
-                          {r.attention?.label && (
-                            <span
-                              className={
-                                "text-[10.5px] " +
-                                (r.attention.kind === "failed" || r.attention.kind === "overdue"
-                                  ? "font-medium"
-                                  : "text-fg-muted")
-                              }
-                              style={
-                                r.attention.kind === "failed" || r.attention.kind === "overdue"
-                                  ? { color: "var(--st-attention-text)" }
-                                  : undefined
-                              }
-                            >
-                              {r.attention.label}
+      <ListNavigationProvider>
+        <div className="flex flex-col gap-2">
+          <OffboardingToolbar state={state} facets={facets} />
+          {/* Phase 33 (spec §6.3): a facet Apply or a page link marks the queue busy */}
+          <ListPendingRegion className="flex flex-col gap-2">
+            {rows.length === 0 ? (
+              <EmptyState
+                title={filtered ? "No one matches these filters" : "No one is leaving"}
+                description={
+                  filtered
+                    ? undefined
+                    : "Start offboarding from a person's profile — More › Start offboarding…"
+                }
+                actions={
+                  filtered
+                    ? <ButtonLink href="/offboarding">Clear filters</ButtonLink>
+                    : <ButtonLink href="/employees">Open employees</ButtonLink>
+                }
+              />
+            ) : (
+              <>
+                <p aria-live="polite" className="text-[12px] text-fg-muted">
+                  {total} {total === 1 ? "person" : "people"} leaving
+                  {overdueCount > 0 && (
+                    <> · <Link href={"/offboarding" + serializeListState(withFilter(state, "due", ["overdue"]), OFFBOARDING_LIST_CONFIG)} className="text-accent underline hover:text-accent-hover">{overdueCount} overdue</Link></>
+                  )}
+                </p>
+                <Table>
+                  <THead>
+                    <Tr>
+                      <Th width={19}><span className="sr-only">Employment colour</span></Th>
+                      <Th sort={sortDir("name")} sortIndex={sortIndex("name")}>
+                        <Link href={sortHref("name")}>Name</Link>
+                      </Th>
+                      <Th width={132}>Department</Th>
+                      <Th width={104} sort={sortDir("started")} sortIndex={sortIndex("started")}>
+                        <Link href={sortHref("started")}>Started</Link>
+                      </Th>
+                      <Th width={168} sort={sortDir("due")} sortIndex={sortIndex("due")}>
+                        <Link href={sortHref("due")}>Due</Link>
+                      </Th>
+                      <Th width={150} sort={sortDir("undecided")} sortIndex={sortIndex("undecided")}>
+                        <Link href={sortHref("undecided")}>Progress</Link>
+                      </Th>
+                      <Th width={124} aria-label="Row actions" />
+                    </Tr>
+                  </THead>
+                  <TBody>
+                    {rows.map((r) => (
+                      <Tr key={r.id}>
+                        <Td className="pr-0"><StatusDot value="OFFBOARDING" ns="employment" /></Td>
+                        <Td>
+                          <Link href={`/offboarding/${r.id}`} className="flex items-center gap-2.5 hover:underline">
+                            <span className="flex flex-col leading-tight">
+                              <span className="text-[12.5px] font-medium text-fg">{r.name}</span>
+                              <span className="font-mono text-[10px] text-fg-faint">
+                                {r.employeeNo} · {r.title}
+                              </span>
+                              {r.attention?.label && (
+                                <span
+                                  className={
+                                    "text-[10.5px] " +
+                                    (r.attention.kind === "failed" || r.attention.kind === "overdue"
+                                      ? "font-medium"
+                                      : "text-fg-muted")
+                                  }
+                                  style={
+                                    r.attention.kind === "failed" || r.attention.kind === "overdue"
+                                      ? { color: "var(--st-attention-text)" }
+                                      : undefined
+                                  }
+                                >
+                                  {r.attention.label}
+                                </span>
+                              )}
                             </span>
-                          )}
-                        </span>
-                      </Link>
-                    </Td>
-                    <Td>{r.department}</Td>
-                    <Td mono>{fmtDate(r.started)}</Td>
-                    <Td>{r.dueAt ? <DuePill dueAt={r.dueAt} today={today} withDate /> : <span className="text-fg-faint">—</span>}</Td>
-                    <Td>
-                      <span className="font-mono text-[11px] text-fg">{r.decided} of {r.total} decided</span>
-                      <ProgressBar value={r.decided} max={r.total} label={`${r.name}: ${r.decided} of ${r.total} decided`} />
-                    </Td>
-                    <Td className="text-right">
-                      {(() => {
-                        const next = canMutate
-                          ? offboardingNext({
-                              id: r.id, employment: r.employment, dueAt: r.dueAt, undecided: r.undecided,
-                              failed: r.failed, m365Status: r.m365,
-                            })
-                          : null;
-                        return next
-                          ? <ButtonLink size="sm" variant="secondary" href={next.href}>{next.label}</ButtonLink>
-                          : <ButtonLink size="sm" variant="ghost" href={`/offboarding/${r.id}`}>View</ButtonLink>;
-                      })()}
-                    </Td>
-                  </Tr>
-                ))}
-              </TBody>
-            </Table>
-            <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} />
-          </>
-        )}
-      </div>
+                          </Link>
+                        </Td>
+                        <Td>{r.department}</Td>
+                        <Td mono>{fmtDate(r.started)}</Td>
+                        <Td>{r.dueAt ? <DuePill dueAt={r.dueAt} today={today} withDate /> : <span className="text-fg-faint">—</span>}</Td>
+                        <Td>
+                          <span className="font-mono text-[11px] text-fg">{r.decided} of {r.total} decided</span>
+                          <ProgressBar value={r.decided} max={r.total} label={`${r.name}: ${r.decided} of ${r.total} decided`} />
+                        </Td>
+                        <Td className="text-right">
+                          {(() => {
+                            const next = canMutate
+                              ? offboardingNext({
+                                  id: r.id, employment: r.employment, dueAt: r.dueAt, undecided: r.undecided,
+                                  failed: r.failed, m365Status: r.m365,
+                                })
+                              : null;
+                            return next
+                              ? <ButtonLink size="sm" variant="secondary" href={next.href}>{next.label}</ButtonLink>
+                              : <ButtonLink size="sm" variant="ghost" href={`/offboarding/${r.id}`}>View</ButtonLink>;
+                          })()}
+                        </Td>
+                      </Tr>
+                    ))}
+                  </TBody>
+                </Table>
+                <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} linkComponent={NavLink} />
+              </>
+            )}
+          </ListPendingRegion>
+        </div>
+      </ListNavigationProvider>
     </>
   );
 }

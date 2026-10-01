@@ -4,7 +4,7 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { withViewClsQS } from "@/lib/asset-class";
+import { withClsQS, withViewClsQS } from "@/lib/asset-class";
 import { TagRef } from "./tag-ref";
 
 /** How many tags the card links before it counts the rest. */
@@ -55,7 +55,7 @@ export function RegisterSuccess({
           {rest > 0 && <span className="text-fg-muted">and {rest} more</span>}
         </p>
         <div className="flex flex-wrap gap-2">
-          <ButtonLink variant="primary" href={`/inventory/labels?ids=${ids.join(",")}`}>Print labels</ButtonLink>
+          <ButtonLink variant="primary" href={"/inventory/labels" + withClsQS(`?ids=${ids.join(",")}`, cls)}>Print labels</ButtonLink>
           <ButtonLink href={"/inventory" + withViewClsQS("", cls, defaultCls)}>Open the list</ButtonLink>
           <Button onClick={onAgain}>Register another batch</Button>
         </div>

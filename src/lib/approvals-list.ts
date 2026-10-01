@@ -1,4 +1,5 @@
 import type { ApprovalType, Prisma } from "@prisma/client";
+import { APPROVAL_KIND_LABEL } from "./labels";
 
 /** README 1k tab order. `?tab=` is the URL contract; open is the default. */
 export const QUEUE_TABS = [
@@ -75,4 +76,35 @@ export function slaLabel(slaAt: Date, now: Date = new Date()): { text: string; o
   const abs = Math.abs(delta);
   const amount = abs >= DAY_MS ? `${Math.round(abs / DAY_MS)} d` : `${Math.max(1, Math.round(abs / HOUR_MS))} h`;
   return { text: overdue ? `${amount} overdue` : `in ${amount}`, overdue };
+}
+
+const APPROVAL_TYPES = Object.keys(APPROVAL_KIND_LABEL) as ApprovalType[];
+
+/** `?type=` is comma-separated (plan P-5); anything not a real type is dropped. */
+export function parseTypes(raw: string | null | undefined): ApprovalType[] {
+  return (raw ?? "").split(",").map((s) => s.trim()).filter((s): s is ApprovalType => (APPROVAL_TYPES as string[]).includes(s));
+}
+
+/** Plan P-5: q over ref no, tag and person; types in. {} when neither is set. */
+export function approvalsSearchWhere(q: string, types: ApprovalType[]): Prisma.ApprovalWhereInput {
+  const and: Prisma.ApprovalWhereInput[] = [];
+  const t = q.trim();
+  if (t) {
+    const c = { contains: t, mode: "insensitive" as const };
+    and.push({ OR: [{ refNo: c }, { asset: { tag: c } }, { employee: { name: c } }, { employee: { employeeNo: c } }] });
+  }
+  if (types.length) and.push({ type: { in: types } });
+  return and.length ? { AND: and } : {};
+}
+
+/** Today's exact URLs when q/type are empty (pins such as /approvals?tab=closed&via=direct stay byte-identical). */
+export function approvalsHref(p: { tab: QueueTab; page?: number; via?: ClosedVia; q?: string; types?: ApprovalType[] }): string {
+  const qs = new URLSearchParams();
+  if (p.tab !== "open") qs.set("tab", p.tab);
+  if (p.page && p.page > 1) qs.set("page", String(p.page));
+  if (p.tab === "closed" && p.via && p.via !== "all") qs.set("via", p.via);
+  if (p.q?.trim()) qs.set("q", p.q.trim());
+  if (p.types?.length) qs.set("type", p.types.join(","));
+  const s = qs.toString().replaceAll("%2C", ",");
+  return s ? `/approvals?${s}` : "/approvals";
 }

@@ -27,8 +27,20 @@ export function feedWhere(feed: ActivityFeed, hidden: HiddenAuditRefs): Prisma.A
   }
 }
 
-export function buildActivityWhere(feed: ActivityFeed, state: ListState, hidden: HiddenAuditRefs): Prisma.AuditEntryWhereInput {
+export function buildActivityWhere(
+  feed: ActivityFeed,
+  state: ListState,
+  hidden: HiddenAuditRefs,
+  matchIds: string[] = [],
+): Prisma.AuditEntryWhereInput {
   const base = feedWhere(feed, hidden);
   const actions = state.filters.action;
-  return actions?.length ? { AND: [base, { action: { in: actions } }] } : base;
+  const q = state.q.trim();
+  const and: Prisma.AuditEntryWhereInput[] = [base];
+  if (actions?.length) and.push({ action: { in: actions } });
+  if (q) {
+    const c = { contains: q, mode: "insensitive" as const };
+    and.push({ OR: [{ action: c }, { actorLabel: c }, ...(matchIds.length ? [{ entityId: { in: matchIds } }] : [])] });
+  }
+  return and.length > 1 ? { AND: and } : base;
 }

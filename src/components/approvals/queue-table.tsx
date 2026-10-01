@@ -3,17 +3,19 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import type { ApprovalState, Priority } from "@prisma/client";
 import { cn } from "@/lib/cn";
 import { Banner } from "@/components/ui/banner";
-import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/button";
+import { Menu, type MenuItem } from "@/components/ui/menu";
 import { Pill } from "@/components/ui/pill";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { ReasonField } from "@/components/patterns/reason-field";
-import { REASON_CHIPS } from "@/lib/reason-chips";
+import { DONE, RUN, RejectApprovalDialog } from "@/components/approvals/approval-header";
+import { approvalHeader, VERB_LABEL, type ApprovalVerb } from "@/lib/approval-header";
+import { PRIORITY_LABEL } from "@/lib/labels";
 import {
   approveApproval, claimApproval, escalateApproval, rejectApproval,
 } from "@/server/modules/approvals/actions";
@@ -25,12 +27,18 @@ import type { ActionResult } from "@/server/action-result";
  * using the keyboard"): J/K (or arrows) move, Enter opens, C claim,
  * A approve (mine only), R reject (reason dialog), E escalate. The listener
  * lives on the focusable table wrapper; keys are inert for read-only roles.
+ *
+ * Spec §4.2: every row the user can act on also carries a menu (`Actions for
+ * {refNo}`) built from approvalHeader — the request page's verbs, so a PENDING
+ * row's Approve is the one-step approveNow — plus Open. The keys stay as they are.
  */
-export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: boolean }) {
+export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; canAct: boolean; isAdmin: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, startTransition] = useTransition();
   const [focused, setFocused] = useState(0);
+  // The selected-row styling shows only while the keyboard wrapper holds focus (spec §4.2).
+  const [hasFocus, setHasFocus] = useState(false);
   const [rejecting, setRejecting] = useState<ApprovalRow | null>(null);
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -71,6 +79,32 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
       else if (action === "approve") handle(await approveApproval({ id: row.id }), "approved", row.id);
       else handle(await escalateApproval({ id: row.id }), "escalated", row.id);
     });
+  }
+
+  /** A row-menu verb: the request page's server action for it, this queue's result handling. */
+  function actVerb(verb: ApprovalVerb, row: ApprovalRow) {
+    if (leaving) return;
+    setError(null);
+    startTransition(async () => {
+      handle(await RUN[verb]({ id: row.id }), DONE[verb], row.id);
+    });
+  }
+
+  /** approvalHeader's plan as menu items: the primary, Reject…, the rest, then Open. */
+  function menuItems(row: ApprovalRow): MenuItem[] {
+    const plan = approvalHeader({ state: row.state as ApprovalState, canAct, mine: row.mine, isAdmin });
+    const items: MenuItem[] = [];
+    if (plan.primary) {
+      const verb = plan.primary;
+      items.push({ label: VERB_LABEL[verb], onSelect: () => actVerb(verb, row), disabled: pending });
+    }
+    if (plan.reject) items.push({ label: "Reject…", onSelect: () => setRejecting(row), disabled: pending });
+    for (const verb of plan.more) {
+      items.push({ label: VERB_LABEL[verb], onSelect: () => actVerb(verb, row), disabled: pending });
+    }
+    // A menu whose only item is Open would just repeat the row click, so a row with nothing to act on has none.
+    if (items.length > 0) items.push({ label: "Open", onSelect: () => router.push(`/approvals/${row.id}`) });
+    return items;
   }
 
   function submitReject() {
@@ -117,6 +151,8 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
         aria-label="Approval queue — J/K move, Enter opens, C claim, A approve, R reject, E escalate"
         className="rounded-(--radius-card) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         onKeyDown={onKeyDown}
+        onFocus={() => setHasFocus(true)}
+        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHasFocus(false); }}
       >
         <Table>
           <THead>
@@ -128,75 +164,87 @@ export function QueueTable({ rows, canAct }: { rows: ApprovalRow[]; canAct: bool
               <Th width={106}>SLA</Th>
               <Th width={96}>Owner</Th>
               <Th width={104}>State</Th>
+              {canAct && <Th width={44} aria-label="Row actions" />}
             </Tr>
           </THead>
           <TBody>
-            {rows.map((row, i) => (
-              <Tr
-                key={row.id}
-                selected={i === focused}
-                className={cn(
-                  "cursor-pointer transition-opacity duration-[340ms]",
-                  leaving === row.id && "opacity-0",
-                )}
-                onClick={() => { setFocused(i); router.push(`/approvals/${row.id}`); }}
-              >
-                <Td className="pr-0">
-                  <span className={cn("inline-flex rounded-full", ringing === row.id && "animate-[ring_700ms_var(--ease-std)]")}>
-                    <StatusDot value={row.state} />
-                  </span>
-                </Td>
-                <Td mono>
-                  <Link href={`/approvals/${row.id}`} className="text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
-                    {row.refNo}
-                  </Link>
-                </Td>
-                <Td>
-                  <span className="flex flex-col py-1.5 leading-tight">
-                    <span className="font-mono text-[11px] text-fg">{row.line1}</span>
-                    <span className="text-xs text-fg-muted">{row.line2}</span>
-                  </span>
-                </Td>
-                <Td>
-                  {row.priority === "NORMAL"
-                    ? <span className="font-mono text-[10.5px] text-fg-muted">NORMAL</span>
-                    : <Pill tone={row.priority === "URGENT" ? "accent" : "neutral"}>{row.priority}</Pill>}
-                </Td>
-                <Td mono className={cn("text-[11px]", row.sla.overdue && "font-semibold text-[color:var(--st-fault-text)]")}>
-                  {row.sla.text}
-                </Td>
-                <Td className="text-xs">{row.owner ?? <span className="text-fg-muted">—</span>}</Td>
-                <Td mono className="text-[10.5px]">
-                  <span className="inline-flex items-center gap-1.5">
-                    {row.state}
-                    {row.direct && <Pill>DIRECT</Pill>}
-                  </span>
-                </Td>
-              </Tr>
-            ))}
+            {rows.map((row, i) => {
+              const items = canAct ? menuItems(row) : [];
+              return (
+                <Tr
+                  key={row.id}
+                  selected={hasFocus && i === focused}
+                  className={cn(
+                    "cursor-pointer transition-opacity duration-[340ms]",
+                    leaving === row.id && "opacity-0",
+                  )}
+                  onClick={() => { setFocused(i); router.push(`/approvals/${row.id}`); }}
+                >
+                  <Td className="pr-0">
+                    <span className={cn("inline-flex rounded-full", ringing === row.id && "animate-[ring_700ms_var(--ease-std)]")}>
+                      <StatusDot value={row.state} />
+                    </span>
+                  </Td>
+                  <Td mono>
+                    <Link href={`/approvals/${row.id}`} className="text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+                      {row.refNo}
+                    </Link>
+                  </Td>
+                  <Td>
+                    <span className="flex flex-col py-1.5 leading-tight">
+                      <span className="font-mono text-[11px] text-fg">{row.line1}</span>
+                      <span className="text-xs text-fg-muted">{row.line2}</span>
+                    </span>
+                  </Td>
+                  <Td>
+                    {row.priority === "NORMAL"
+                      ? <span className="text-xs text-fg-muted">{PRIORITY_LABEL.NORMAL}</span>
+                      : <Pill tone="accent">{PRIORITY_LABEL[row.priority as Priority]}</Pill>}
+                  </Td>
+                  <Td mono className={cn("text-[11px]", row.sla.overdue && "font-semibold text-[color:var(--st-fault-text)]")}>
+                    {row.sla.text}
+                  </Td>
+                  <Td className="text-xs">{row.owner ?? <span className="text-fg-muted">—</span>}</Td>
+                  <Td mono className="text-[10.5px]">
+                    <span className="inline-flex items-center gap-1.5">
+                      {row.state}
+                      {row.direct && <Pill>DIRECT</Pill>}
+                    </span>
+                  </Td>
+                  {canAct && (
+                    // Not part of the row: the menu's clicks and keys (Enter, arrows) stay out of the row's
+                    // click and the queue's keyboard contract — its popup is portalled, but React bubbles it here.
+                    <Td
+                      className="cursor-default px-1 text-right"
+                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                      onKeyDown={(e: React.KeyboardEvent) => e.stopPropagation()}
+                    >
+                      {items.length > 0 && (
+                        <Menu
+                          align="end"
+                          items={items}
+                          trigger={(p) => <IconButton {...p} aria-label={`Actions for ${row.refNo}`}>⋯</IconButton>}
+                        />
+                      )}
+                    </Td>
+                  )}
+                </Tr>
+              );
+            })}
           </TBody>
         </Table>
       </div>
 
-      <Dialog
+      <RejectApprovalDialog
+        refNo={rejecting?.refNo ?? ""}
         open={rejecting !== null}
         onClose={() => setRejecting(null)}
-        title={rejecting ? `Reject ${rejecting.refNo}?` : ""}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setRejecting(null)}>Cancel</Button>
-            <Button variant="danger" loading={pending} onClick={submitReject}>Reject</Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          <p className="text-xs text-fg-muted">A rejection is a human decision — the reason is recorded on the approval and in the audit trail.</p>
-          <ReasonField
-            required error={fieldErrors.reason} value={reason} onChange={setReason}
-            chips={REASON_CHIPS["approval.reject"]} disabled={pending}
-          />
-        </div>
-      </Dialog>
+        onConfirm={submitReject}
+        pending={pending}
+        reason={reason}
+        onReasonChange={setReason}
+        error={fieldErrors.reason}
+      />
     </div>
   );
 }

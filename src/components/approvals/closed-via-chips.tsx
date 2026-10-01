@@ -1,20 +1,24 @@
 import Link from "next/link";
+import type { ApprovalType } from "@prisma/client";
 import { cn } from "@/lib/cn";
-import { CLOSED_VIA, CLOSED_VIA_LABEL, type ClosedVia } from "@/lib/approvals-list";
-import type { QueueTab } from "@/lib/approvals-list";
+import { CLOSED_VIA, CLOSED_VIA_LABEL, approvalsHref, type ClosedVia } from "@/lib/approvals-list";
 
 /**
  * Closed tab's `?via=` chip row (Phase 21) — mirrors `repair-chips.tsx`'s
- * chip markup/classes. Picking a chip resets to page 1 of that filter.
+ * chip markup/classes. Picking a chip resets to page 1 of that filter and keeps
+ * the search and the Type facet (Phase 33, plan P-5: with neither set, the hrefs
+ * are exactly today's, e.g. `/approvals?tab=closed&via=direct`).
  */
 export function ClosedViaChips({
   via,
   counts,
-  hrefFor,
+  q,
+  types,
 }: {
   via: ClosedVia;
   counts: Record<ClosedVia, number>;
-  hrefFor: (tab: QueueTab, page: number, via: ClosedVia) => string;
+  q: string;
+  types: ApprovalType[];
 }) {
   const chipClass = (on: boolean) =>
     cn(
@@ -29,7 +33,7 @@ export function ClosedViaChips({
       {CLOSED_VIA.map((v) => (
         <Link
           key={v}
-          href={hrefFor("closed", 1, v)}
+          href={approvalsHref({ tab: "closed", via: v, q, types })}
           aria-current={v === via ? "true" : undefined}
           className={chipClass(v === via)}
         >

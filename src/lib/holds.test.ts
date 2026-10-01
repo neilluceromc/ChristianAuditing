@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   HOLD_DEFAULT_DAYS, HOLDS_LIST_CONFIG, buildHoldOrderBy, buildHoldWhere, defaultHoldExpiry, expireDue,
-  holdStatus, isHoldExpired, minHoldExpiry, parseReservationTab,
+  holdStatus, isHoldExpired, minHoldExpiry, parseReservationTab, expiringSoon,
 } from "./holds";
 
 const today = "2026-09-21";
@@ -67,5 +67,19 @@ describe("the /reservations list config", () => {
     expect(buildHoldOrderBy([])).toEqual([{ expiresAt: { sort: "asc", nulls: "last" } }, { id: "asc" }]);
     expect(buildHoldOrderBy([{ key: "employee", dir: "desc" }])).toEqual([{ employee: { name: "desc" } }, { id: "asc" }]);
     expect(buildHoldOrderBy([{ key: "tag", dir: "asc" }, { key: "createdAt", dir: "desc" }])).toEqual([{ asset: { tag: "asc" } }, { createdAt: "desc" }, { id: "asc" }]);
+  });
+});
+
+describe("expiringSoon — within the next two Manila days", () => {
+  it("counts ACTIVE holds expiring today, tomorrow or the day after; not later, not expired, not other states", () => {
+    const rows = [
+      { state: "ACTIVE", expiresAt: new Date("2026-09-25T00:00:00+08:00") },
+      { state: "ACTIVE", expiresAt: new Date("2026-09-27T00:00:00+08:00") },
+      { state: "ACTIVE", expiresAt: new Date("2026-09-28T00:00:00+08:00") },
+      { state: "ACTIVE", expiresAt: new Date("2026-09-24T00:00:00+08:00") },
+      { state: "ACTIVE", expiresAt: null },
+      { state: "FULFILLED", expiresAt: new Date("2026-09-25T00:00:00+08:00") },
+    ];
+    expect(expiringSoon(rows, "2026-09-25")).toBe(2);
   });
 });

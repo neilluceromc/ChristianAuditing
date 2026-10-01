@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   LABELS_PER_PAGE, LABEL_CELL_MM, LABEL_USABLE_MM,
   QR_PREFERRED_MODULE_MM, QR_MIN_MODULE_MM, QR_MAX_DARK_MM, QR_QUIET_MODULES,
-  barcodeFit, labelPages, qrFit,
+  barcodeFit, labelPages, qrFit, clampStart, labelSlots,
 } from "./label-geometry";
 
 describe("sheet geometry", () => {
@@ -179,5 +179,30 @@ describe("qrFit", () => {
   it("puts the accept/refuse boundary between version 10 and version 11", () => {
     expect(qrFit(57).renderable).toBe(true);
     expect(qrFit(61).renderable).toBe(false);
+  });
+});
+
+describe("labelSlots — Start at label N (spec §5.1)", () => {
+  const tags = (n: number) => Array.from({ length: n }, (_, i) => `T${i + 1}`);
+  it("start 1 fills from the first slot", () => {
+    expect(labelSlots(tags(3), 1)).toEqual([["T1", "T2", "T3"]]);
+  });
+  it("start N leaves N-1 blank slots on page 1 only", () => {
+    const pages = labelSlots(tags(10), 5);
+    expect(pages[0].slice(0, 4)).toEqual([null, null, null, null]);
+    expect(pages[0].slice(4)).toEqual(["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"]);
+    expect(pages[1]).toEqual(["T9", "T10"]);
+  });
+  it("a start that fills page 1 exactly spills to page 2", () => {
+    const pages = labelSlots(tags(2), LABELS_PER_PAGE);
+    expect(pages[0].filter((s) => s === null)).toHaveLength(LABELS_PER_PAGE - 1);
+    expect(pages[0][LABELS_PER_PAGE - 1]).toBe("T1");
+    expect(pages[1]).toEqual(["T2"]);
+  });
+  it("no tags, no pages", () => {
+    expect(labelSlots([], 4)).toEqual([]);
+  });
+  it("clampStart keeps 1…12", () => {
+    expect([clampStart(undefined), clampStart("0"), clampStart("5"), clampStart("99"), clampStart("x")]).toEqual([1, 1, 5, LABELS_PER_PAGE, 1]);
   });
 });

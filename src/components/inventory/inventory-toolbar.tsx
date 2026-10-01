@@ -16,7 +16,7 @@ import { CLASS_LABEL, withViewClsQS } from "@/lib/asset-class";
 import { REPAIRS_SAVED_VIEW, isRepairStage, isRepairView } from "@/lib/repairs";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
-import { useListNavigation } from "./list-navigation";
+import { useListNavigation } from "@/components/patterns/list-navigation";
 
 /** Phase 30 (spec §6.2): the view switches are pill toggles — links, so e2e and a middle-click reach them. */
 function PillLink({ href, on, children }: { href: string; on: boolean; children: React.ReactNode }) {

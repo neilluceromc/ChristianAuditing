@@ -38,6 +38,9 @@ carries it since the second 2026-09-24 code-only redeploy (`7a479e1`). See `HAND
 `e29e879`) is MERGED TO `main` via `--no-ff` `853d13d` and PUSHED (2026-09-24), and adds no migration** — the
 push also carried `7b878ed` (spec) and `4b77f59` (plan); `main` = `origin/main`. Staging carries it
 since the third 2026-09-24 code-only redeploy (`2e333ef`). See `HANDOVER.md` (y).
+**Phase 33 (`phase-33-queues-records-uiux`, Laws of UX on the IT queues and records; final tree `fd2ee57`) is
+CODE-COMPLETE, UNMERGED and UNPUSHED, and adds no migration** — local `main` carries the unpushed plan
+commit `ca86afd`. Merging, pushing and the code-only redeploy are the user's decisions. See `HANDOVER.md` (z).
 
 ---
 
@@ -161,7 +164,8 @@ Consumed what Phase 19 records. Scope agreed in the D1 brainstorm (spec
 
 ### 5.3 Small deferred items with a home in the plans' D-blocks
 
-**Phase 33 — "queues and records" (the second half of the 2026-09-24 IT-screens audit; own brainstorm).**
+**Phase 33 — "queues and records" (the second half of the 2026-09-24 IT-screens audit) — CODE-COMPLETE on
+`phase-33-queues-records-uiux` (`fd2ee57`); the list below is the scope it took (record `HANDOVER.md` (z)).**
 The audit file's findings not taken by Phase 32 (spec `2026-09-24-it-work-ux-design.md` §2): the
 old-toolbar sweep on `/offboarding`, `/reservations`, `/approvals` and `/audit` (house search shape,
 busy transition, value-only chips, `page 1 of 1` hidden); the rest of `/reservations` (the permanent
