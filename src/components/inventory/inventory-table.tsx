@@ -14,6 +14,7 @@ import { Pill } from "@/components/ui/pill";
 import { HoldPill } from "@/components/ui/hold-pill";
 import { cn } from "@/lib/cn";
 import { BULK_MAX } from "@/lib/inventory-list";
+import { withClsQS } from "@/lib/asset-class";
 import { actionLabel, recordActions, type RecordAction, type RecordState } from "@/lib/record-actions";
 import type { ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
@@ -179,7 +180,7 @@ export function InventoryTable({
   }
 
   function runRowAction(action: RecordAction, row: AssetRow) {
-    if (action === "print-label") { router.push(`/inventory/labels?ids=${row.id}`); return; }
+    if (action === "print-label") { router.push("/inventory/labels" + withClsQS(`?ids=${row.id}`, row.cls)); return; }
     setDialog({ kind: action, row });
   }
 
@@ -219,7 +220,7 @@ export function InventoryTable({
           <span className="ml-auto flex flex-wrap items-center gap-2">
             <Button size="sm" variant="ghost" onClick={clearSelection}>Clear</Button>
             {!allMatching && (
-              <ButtonLink size="sm" href={`/inventory/labels?ids=${selectedIds.join(",")}`}>Print labels</ButtonLink>
+              <ButtonLink size="sm" href={"/inventory/labels" + withClsQS(`?ids=${selectedIds.join(",")}`, cls)}>Print labels</ButtonLink>
             )}
             {/* a route handler that streams a file: a plain navigation, never prefetched */}
             <ButtonLink size="sm" native href={exportHref}>Export</ButtonLink>

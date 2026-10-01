@@ -139,7 +139,10 @@ export function ApprovalHeaderActions({
     disabled: pending,
   }));
   const hasActions = plan.primary !== null || plan.reject || moreItems.length > 0;
-  if (!hasActions && !ownerName) return null;
+  // A refusal or rate-limit notice outlives the refresh that follows it: after a
+  // conflict the refreshed request often has no actions left, and the notice is
+  // the only word that the decision was not this user's (spec §10).
+  if (!hasActions && !ownerName && !error && retryAfter === null) return null;
 
   return (
     <div className="flex flex-col items-end gap-2">

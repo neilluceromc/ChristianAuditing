@@ -192,7 +192,8 @@ test.describe.serial("registration", () => {
     // success panel's own href was built from.
     const rows = await db.asset.findMany({ where: { tag: { in: tags } }, orderBy: { tag: "asc" }, include: { documents: true } });
     const ids = rows.map((a) => a.id);
-    await expect(page.getByRole("link", { name: "Print labels" })).toHaveAttribute("href", `/inventory/labels?ids=${ids.join(",")}`);
+    // Phase 33 (I-1): a Purchasing batch's Print labels carries the class, so the labels crumb names Purchasing.
+    await expect(page.getByRole("link", { name: "Print labels" })).toHaveAttribute("href", `/inventory/labels?ids=${ids.join(",")}&cls=PURCHASING`);
 
     for (const r of rows) {
       expect(r.brand).toBe("Toyota");

@@ -56,6 +56,8 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
         }
         actions={
           <ApprovalHeaderActions
+            // Keyed by request so a notice clears on navigating to another one (Next in queue).
+            key={approval.id}
             id={approval.id}
             refNo={approval.refNo}
             plan={plan}

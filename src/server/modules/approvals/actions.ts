@@ -170,6 +170,19 @@ export async function retryApproval(input: unknown): Promise<ActionResult<Acted>
   }));
 }
 
+/** The house conflict copy (spec §7, §10): someone else acted on this item first. */
+const CHANGED_FIRST = "Someone else changed this item first — refresh and retry.";
+
+/**
+ * Thrown inside approveNow's transaction once the claim is written, so any later
+ * refusal rolls the claim back instead of committing a claim without the approve.
+ */
+class ApproveNowAbort extends Error {
+  constructor(readonly result: ActionResult<never>) {
+    super("approveNow aborted");
+  }
+}
+
 /**
  * Spec §4.1 decision 1 (plan P-3): on a PENDING request, claim and approve in one
  * transaction — the same guards, the same two audit rows (claim, then approve) and
@@ -196,13 +209,15 @@ export async function approveNow(input: unknown): Promise<ActionResult<Acted>> {
       if (!canActOnApproval(user.role, a.asset?.cls ?? null)) return forbidden();
       const isAdmin = user.role === "admin";
 
+      // No longer PENDING when this runs: another approver claimed, approved or
+      // rejected it first — the house conflict copy, not the claim wording.
       const claim = approvalTransition(a.state, "claim", { isOwner: false, isAdmin });
-      if (!claim.ok) return conflict(claim.error);
+      if (!claim.ok) return conflict(CHANGED_FIRST);
       const claimed = await tx.approval.updateMany({
         where: { id, state: "PENDING" },
         data: { state: "CLAIMED", claimedById: user.id, claimedAt: new Date() },
       });
-      if (claimed.count === 0) return conflict("Someone else changed this item first — refresh and retry.");
+      if (claimed.count === 0) return conflict(CHANGED_FIRST);
       await writeAudit(tx, {
         actorId: user.id,
         actorLabel: user.name,
@@ -213,12 +228,13 @@ export async function approveNow(input: unknown): Promise<ActionResult<Acted>> {
       });
 
       const approve = approvalTransition("CLAIMED", "approve", { isOwner: true, isAdmin });
-      if (!approve.ok) return conflict(approve.error);
+      // From here on the claim is written: any failure throws, rolling it back.
+      if (!approve.ok) throw new ApproveNowAbort(conflict(approve.error));
       const approved = await tx.approval.updateMany({
         where: { id, state: "CLAIMED", claimedById: user.id },
         data: { state: "APPROVED" },
       });
-      if (approved.count === 0) return conflict("Someone else changed this item first — refresh and retry.");
+      if (approved.count === 0) throw new ApproveNowAbort(conflict(CHANGED_FIRST));
       await tx.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: id } } });
       await writeAudit(tx, {
         actorId: user.id,
@@ -232,6 +248,7 @@ export async function approveNow(input: unknown): Promise<ActionResult<Acted>> {
       return null;
     });
   } catch (err) {
+    if (err instanceof ApproveNowAbort) return err.result;
     // Same one-live-EXECUTE_APPROVAL-job index as transition() — a typed conflict, not a 500.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return conflict("Execution for this item is already queued or running — the worker settles it first, then retry becomes available.");

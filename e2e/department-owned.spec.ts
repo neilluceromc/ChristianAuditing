@@ -68,6 +68,9 @@ function runWorkerOnce() {
 
 test.describe.serial("Purchasing owns its approvals", () => {
   test("1. request → Purchasing's queue, not IT's → claim → approve → worker executes", async ({ page }) => {
+    // Two actions now (claim via More, then approve) and the first test on a cold
+    // server: ~31 s against the 30 s default, so it gets the slow budget.
+    test.slow();
     const id = await idOf("BR-VH-0002");
     await login(page, P);
     await page.goto(`/inventory/${id}`);

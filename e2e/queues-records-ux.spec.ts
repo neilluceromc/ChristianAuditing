@@ -7,7 +7,7 @@ import { localDateISO } from "@/lib/format";
 import { addDays, dayFromISO } from "@/lib/deadlines";
 
 /**
- * Phase 33 — Laws of UX on the IT queues and records (spec §11), thirteen
+ * Phase 33 — Laws of UX on the IT queues and records (spec §11), fourteen
  * cases, each independent:
  *   1–6  approvals: a PENDING request's header (one-step Approve, a visible
  *        Reject…, Claim and Escalate in More); Approve in one step writing
@@ -17,12 +17,15 @@ import { addDays, dayFromISO } from "@/lib/deadlines";
  *   7    the queue's search by tag and its Type facet, value-only chips.
  *   8–10 labels: the Tags box (2 labels · 1 skipped, the named other-class
  *        tag) and an axe pass on the bare page; Start at label 5 (four blank
- *        slots); the Purchasing crumb.
+ *        slots); the Purchasing crumb, reached from the Purchasing list's
+ *        Print labels and inferred for an admin from the assets' class.
  *   11   /reservations: the hint line, the Active columns, the count line with
  *        a hold expiring tomorrow.
  *   12   /audit: search by tag and by a person's name, the When "Today" pill,
  *        sentences with the action slug in mono.
  *   13   /inventory/activity: search by tag narrows the feed; paging keeps q.
+ *   14   approvals: Approve on a request someone else approved after the page
+ *        opened — the house conflict copy survives the refresh.
  *
  * Plan P-18: approval fixtures are created fresh per case (never the seeded
  * APR-20xx rows other specs rely on) and closed by state in `finally` — set to
@@ -152,10 +155,13 @@ test.describe("queues-records-ux — approvals", () => {
 
   test("2. Approve in one step: claim + approve audited; Next in queue skips a request someone else claimed", async ({ page }) => {
     test.setTimeout(90_000);
-    const a = await freshApproval();
-    // Claimed by admin and the most overdue thing in IT's queue: without the skip it would be "next".
-    const othersClaim = await freshApproval({ state: "CLAIMED", claimedBy: ADMIN, slaInDays: -5, tag: SECOND_TAG });
+    const created: string[] = [];
     try {
+      const a = await freshApproval();
+      created.push(a.id);
+      // Claimed by admin and the most overdue thing in IT's queue: without the skip it would be "next".
+      const othersClaim = await freshApproval({ state: "CLAIMED", claimedBy: ADMIN, slaInDays: -5, tag: SECOND_TAG });
+      created.push(othersClaim.id);
       // The expected next: the seeded APR-2040 (PENDING, a day overdue) — the earliest SLA IT may act on.
       const expected = await db.approval.findUniqueOrThrow({ where: { refNo: "APR-2040" } });
       expect(expected.state).toBe("PENDING");
@@ -185,7 +191,7 @@ test.describe("queues-records-ux — approvals", () => {
       await expect(next).toHaveAttribute("href", `/approvals/${expected.id}`);
       await expectNoSeriousAxe(page);
     } finally {
-      await closeApprovals([a.id, othersClaim.id]);
+      await closeApprovals(created);
     }
   });
 
@@ -288,9 +294,12 @@ test.describe("queues-records-ux — approvals", () => {
 
   test("7. the queue's search by tag narrows the Open tab and its count; the Type facet narrows further; value-only chips", async ({ page }) => {
     test.setTimeout(120_000);
-    const change = await freshApproval();
-    const ret = await freshApproval({ type: "lifecycle_return", tag: SECOND_TAG });
+    const created: string[] = [];
     try {
+      const change = await freshApproval();
+      created.push(change.id);
+      const ret = await freshApproval({ type: "lifecycle_return", tag: SECOND_TAG });
+      created.push(ret.id);
       await login(page, IT);
       await page.goto("/approvals");
       const tabs = page.getByRole("navigation", { name: "Queue tabs" });
@@ -333,7 +342,47 @@ test.describe("queues-records-ux — approvals", () => {
       await page.waitForURL((u) => u.pathname === "/approvals" && u.search === "");
       await expect(rows).toHaveCount(5);
     } finally {
-      await closeApprovals([change.id, ret.id]);
+      await closeApprovals(created);
+    }
+  });
+
+  test("14. Approve after someone else approved it: the conflict copy survives the refresh and the page shows APPROVED", async ({ page }) => {
+    test.setTimeout(90_000);
+    const created: string[] = [];
+    try {
+      const a = await freshApproval();
+      created.push(a.id);
+      await login(page, IT);
+      await page.goto(`/approvals/${a.id}`);
+      const approve = page.getByRole("button", { name: "Approve", exact: true });
+      await waitForHydration(approve);
+
+      // Admin decides it while IT's page is still open (claim then approve, as approveNow would).
+      await db.approval.update({
+        where: { id: a.id },
+        data: { state: "APPROVED", claimedById: await userId(ADMIN), claimedAt: new Date() },
+      });
+
+      await approve.click();
+      await expect(page.getByText("Someone else changed this item first — the page now shows the latest state.", { exact: true }))
+        .toBeVisible({ timeout: 15_000 });
+      // The refresh landed: the header reads the new state and offers no verbs…
+      await expect(page.locator("header").getByText("APPROVED", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Reject…", exact: true })).toHaveCount(0);
+      // …and the notice is still there after it.
+      await expect(page.getByText("Someone else changed this item first — the page now shows the latest state.", { exact: true })).toBeVisible();
+      await expect(page.getByText(`${a.refNo} approved`)).toHaveCount(0);
+
+      // Nothing of IT's was written: still admin's decision, no audit row and no job from IT.
+      const after = await db.approval.findUniqueOrThrow({ where: { id: a.id } });
+      expect(after.state).toBe("APPROVED");
+      expect(after.claimedById).toBe(await userId(ADMIN));
+      expect(await db.auditEntry.count({ where: { entityType: "approval", entityId: a.id } })).toBe(0);
+      expect(await db.job.count({ where: { type: "EXECUTE_APPROVAL", payload: { path: ["approvalId"], equals: a.id } } })).toBe(0);
+      await expectNoSeriousAxe(page);
+    } finally {
+      await closeApprovals(created);
     }
   });
 });
@@ -377,7 +426,7 @@ test.describe("queues-records-ux — labels", () => {
     await expectNoSeriousAxe(page);
   });
 
-  test("10. Purchasing's labels page: the crumb and Back name Purchasing assets", async ({ page }) => {
+  test("10. Purchasing's labels page: the crumb and Back name Purchasing assets — from a real link, and inferred", async ({ page }) => {
     test.setTimeout(90_000);
     await login(page, PURCHASING);
     await page.goto("/inventory/labels?cls=PURCHASING");
@@ -386,6 +435,27 @@ test.describe("queues-records-ux — labels", () => {
     await expect(crumb.getByText("Print labels", { exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("link", { name: "Back to Purchasing assets" })).toHaveAttribute("href", "/inventory?cls=PURCHASING");
     await expectNoSeriousAxe(page);
+
+    // From a real entry point: the Purchasing list's selection bar carries the class.
+    await page.goto("/inventory?cls=PURCHASING");
+    const row = page.getByRole("row", { name: /BR-VH-0001/ });
+    const box = row.getByRole("checkbox", { name: "Select BR-VH-0001" });
+    await waitForHydration(box);
+    await box.check();
+    const vh = await assetId("BR-VH-0001");
+    const print = page.getByRole("link", { name: "Print labels", exact: true });
+    await expect(print).toHaveAttribute("href", `/inventory/labels?ids=${vh}&cls=PURCHASING`);
+    await print.click();
+    await page.waitForURL(/\/inventory\/labels\?ids=.*cls=PURCHASING/);
+    await expect(crumb.getByRole("link", { name: "Purchasing assets", exact: true })).toHaveAttribute("href", "/inventory?cls=PURCHASING", { timeout: 20_000 });
+    await expect(page.getByLabel("Barcode BR-VH-0001")).toHaveCount(1);
+
+    // No ?cls= at all: an admin (who manages both classes) gets the class of the assets it resolved.
+    await login(page, ADMIN);
+    await page.goto(`/inventory/labels?ids=${vh}`);
+    await expect(crumb.getByRole("link", { name: "Purchasing assets", exact: true })).toHaveAttribute("href", "/inventory?cls=PURCHASING", { timeout: 20_000 });
+    await page.goto(`/inventory/labels?ids=${await assetId("BR-LT-0148")}`);
+    await expect(crumb.getByRole("link", { name: "Inventory", exact: true })).toHaveAttribute("href", "/inventory", { timeout: 20_000 });
   });
 });
 

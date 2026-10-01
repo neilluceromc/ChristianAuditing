@@ -7,7 +7,7 @@ import { Button, IconButton } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Menu, type MenuItem } from "@/components/ui/menu";
 import { actionLabel, type RecordAction } from "@/lib/record-actions";
-import { CLASS_LABEL } from "@/lib/asset-class";
+import { CLASS_LABEL, withClsQS } from "@/lib/asset-class";
 import type { AssetClass, AssetStatus } from "@prisma/client";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { AssignDialog, ReserveDialog, ReturnDialog } from "./holder-control";
@@ -41,7 +41,7 @@ export function RecordActions(props: {
   const close = () => setOpen(null);
 
   function run(action: RecordAction) {
-    if (action === "print-label") { router.push(`/inventory/labels?ids=${asset.id}`); return; }
+    if (action === "print-label") { router.push("/inventory/labels" + withClsQS(`?ids=${asset.id}`, asset.cls)); return; }
     setOpen(action);
   }
 

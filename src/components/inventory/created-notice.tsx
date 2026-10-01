@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { AssetClass } from "@prisma/client";
 import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
+import { withClsQS } from "@/lib/asset-class";
 
 /**
  * Shown on the record page right after registration (`?created=1`) — a server
@@ -23,7 +24,7 @@ export function CreatedNotice({ tag, id, cls, canRegister }: {
       title={`${tag} registered`}
       actions={
         <span className="flex items-center gap-3">
-          <ButtonLink href={`/inventory/labels?ids=${id}`} size="sm">Print label</ButtonLink>
+          <ButtonLink href={"/inventory/labels" + withClsQS(`?ids=${id}`, cls)} size="sm">Print label</ButtonLink>
           {canRegister && (
             <Link href={`/inventory/register?cls=${cls}`} className="text-xs text-accent underline hover:text-accent-hover">
               Register another

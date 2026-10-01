@@ -10,6 +10,7 @@ import { BULK_MAX } from "@/lib/inventory-list";
 import { CALIBRATION_MM, clampStart, labelSlots } from "@/lib/label-geometry";
 import { qrBase } from "@/lib/label-qr";
 import { parseTagPaste } from "@/lib/tag-paste";
+import type { AssetClass } from "@prisma/client";
 import { MANAGEABLE_CLASSES, parseCls, withClsQS } from "@/lib/asset-class";
 
 /** How many tags the on-page list names before it says "and {k} more" (spec §5.1). */
@@ -32,13 +33,19 @@ export default async function LabelsPage({
   const ids = [...new Set(idsParam.split(",").map((s) => s.trim()).filter(Boolean))];
   const tagsRaw = Array.isArray(sp.tags) ? sp.tags.join("\n") : sp.tags ?? "";
   const start = clampStart(firstParam(sp.start));
-  // The class the operator came from — only for the crumb and Back; what
-  // prints is still scoped by MANAGEABLE_CLASSES below (plan P-9).
-  const cls = parseCls(firstParam(sp.cls)) ?? "IT";
-  const listHref = "/inventory" + withClsQS("", cls);
-  const listLabel = cls === "PURCHASING" ? "Purchasing assets" : "Inventory";
-  const breadcrumb = [{ label: listLabel, href: listHref }, { label: "Print labels" }];
   const manageable = [...MANAGEABLE_CLASSES[user.role]];
+  // The class the operator came from — only for the crumb and Back; what
+  // prints is still scoped by MANAGEABLE_CLASSES below (plan P-9). Every link
+  // in carries `?cls=` for Purchasing; without it, infer: a role that manages
+  // one class means that class, else the class of the resolved assets when
+  // they are all one class (decided once they are loaded), else IT.
+  const explicitCls = parseCls(firstParam(sp.cls));
+  const roleCls: AssetClass | null = manageable.length === 1 ? manageable[0] : null;
+  const crumbFor = (cls: AssetClass) => {
+    const listHref = "/inventory" + withClsQS("", cls);
+    const listLabel = cls === "PURCHASING" ? "Purchasing assets" : "Inventory";
+    return { listHref, breadcrumb: [{ label: listLabel, href: listHref }, { label: "Print labels" }] };
+  };
 
   // Which path built this request: a selection (`?ids=`, as before) or the
   // Tags box (`?tags=`). `?ids=` wins when both are present.
@@ -49,6 +56,8 @@ export default async function LabelsPage({
   // Refuse, never slice (the defect §8 records for the export route's ?ids=).
   // The same sentence for a pasted list as for a selection (spec §10).
   if (asked > BULK_MAX) {
+    const cls = explicitCls ?? roleCls ?? "IT";
+    const { breadcrumb } = crumbFor(cls);
     return (
       <>
         <PageHeader title="Print labels" breadcrumb={breadcrumb} />
@@ -60,24 +69,28 @@ export default async function LabelsPage({
     );
   }
 
-  let rows: { tag: string; model: string }[] = [];
+  let rows: { tag: string; model: string; cls: AssetClass }[] = [];
   let skipped: string[] = [];
   if (viaTags) {
     const found = await prisma.asset.findMany({
       where: { tag: { in: tags }, cls: { in: manageable } },
-      select: { tag: true, model: true },
+      select: { tag: true, model: true, cls: true },
     });
     const byTag = new Map(found.map((a) => [a.tag, a]));
     // The typed (or scanned) order is the order the stickers come off the sheet.
     rows = tags.flatMap((t) => {
       const a = byTag.get(t);
-      return a ? [{ tag: a.tag, model: a.model }] : [];
+      return a ? [{ tag: a.tag, model: a.model, cls: a.cls }] : [];
     });
     skipped = tags.filter((t) => !byTag.has(t));
   } else if (ids.length) {
-    const assets = await prisma.asset.findMany({ where: { id: { in: ids }, cls: { in: manageable } }, select: { tag: true, model: true }, orderBy: { tag: "asc" } });
-    rows = assets.map((a) => ({ tag: a.tag, model: a.model }));
+    const assets = await prisma.asset.findMany({ where: { id: { in: ids }, cls: { in: manageable } }, select: { tag: true, model: true, cls: true }, orderBy: { tag: "asc" } });
+    rows = assets.map((a) => ({ tag: a.tag, model: a.model, cls: a.cls }));
   }
+
+  const rowClasses = [...new Set(rows.map((r) => r.cls))];
+  const cls: AssetClass = explicitCls ?? roleCls ?? (rowClasses.length === 1 ? rowClasses[0] : "IT");
+  const { listHref, breadcrumb } = crumbFor(cls);
 
   const skippedLine = skipped.length > 0 && (
     <p className="font-mono text-[11px] text-fg-secondary">{skipped.join(", ")} — not found or not your class</p>
