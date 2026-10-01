@@ -199,11 +199,13 @@ test.describe.serial("deadlines", () => {
 
       // The employee record's own history surface is the audit log — see this
       // file's report for why the brief's /employees/<id>/history is not a
-      // route in this app. `/audit`'s Fields column is `Object.keys(diff)`.
+      // route in this app. Phase 33 (R5): `/audit` no longer has a Fields
+      // column (`Object.keys(diff)`); the row's sentence names the changed
+      // field in words, so `offboardingDueAt` reads "complete-by date".
       await page.goto("/audit?entity=employee");
       const entry = page.getByRole("row", { name: /Dennis Ong/ }).first();
       await expect(entry).toBeVisible({ timeout: 20_000 });
-      await expect(entry).toContainText("offboardingDueAt");
+      await expect(entry).toContainText("updated complete-by date");
       await expect(entry).toContainText("update");
     } finally {
       // Cases 3 and 6 read the seeded "2 d overdue"; the audit row above is
