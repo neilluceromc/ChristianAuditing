@@ -3,7 +3,7 @@ import { qrBase, qrUrlFor, type QrBase } from "@/lib/label-qr";
 import { qrMatrix } from "@/lib/qr";
 import {
   CALIBRATION_MM, LABEL_CELL_MM, LABEL_COLUMNS, LABEL_PADDING_MM, LABEL_USABLE_MM,
-  PAGE_MARGIN_MM, PAGE_MM, QR_QUIET_MODULES, barcodeFit, labelPages, qrFit,
+  PAGE_MARGIN_MM, PAGE_MM, QR_QUIET_MODULES, barcodeFit, labelSlots, qrFit,
 } from "@/lib/label-geometry";
 
 export interface LabelRow {
@@ -119,21 +119,23 @@ function Qr({ url }: { url: string }) {
 
 /** Named per cause, because "QR unavailable" would send someone hunting the
  *  wrong thing — a loopback base URL and a missing one need different fixes. */
-const QR_NOTE: Record<Exclude<QrBase, { ok: true }>["reason"], string> = {
+export const QR_NOTE: Record<Exclude<QrBase, { ok: true }>["reason"], string> = {
   unset: "No QR: APP_BASE_URL is not set.",
   "not-absolute": "No QR: APP_BASE_URL needs an http:// or https:// scheme.",
   loopback: "No QR: APP_BASE_URL points at this machine, which no phone can reach.",
   "bad-url": "No QR: APP_BASE_URL is not a valid URL.",
 };
 
-export function LabelSheet({ rows, baseUrl }: { rows: LabelRow[]; baseUrl?: string }) {
+/** `startAt` (spec §5.1, plan P-11): the first startAt−1 slots of page 1 print
+ * blank so a half-used sheet can go back in the printer. */
+export function LabelSheet({ rows, baseUrl, startAt }: { rows: LabelRow[]; baseUrl?: string; startAt?: number }) {
   const byTag = new Map(rows.map((r) => [r.tag, r]));
   // Validated ONCE: the reason a base URL is unusable never depends on the tag,
   // so this is one note per sheet rather than the same refusal on twelve labels.
   const base = qrBase(baseUrl);
   return (
     <div className="label-sheets">
-      {labelPages(rows.map((r) => r.tag)).map((page, p) => (
+      {labelSlots(rows.map((r) => r.tag), startAt ?? 1).map((page, p) => (
         <div
           key={p}
           className="label-page"
@@ -150,7 +152,18 @@ export function LabelSheet({ rows, baseUrl }: { rows: LabelRow[]; baseUrl?: stri
             position: "relative",
           }}
         >
-          {page.map((tag) => {
+          {page.map((tag, i) => {
+            // A skipped slot is an empty cell of the same size, so every label
+            // after it still lands on its die-cut.
+            if (tag === null) {
+              return (
+                <div
+                  key={`blank-${i}`}
+                  data-blank-label=""
+                  style={{ boxSizing: "border-box", outline: "0.2mm dashed #C4CAD4" }}
+                />
+              );
+            }
             const row = byTag.get(tag)!;
             return (
               <div

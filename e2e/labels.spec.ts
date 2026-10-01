@@ -142,6 +142,9 @@ test.describe("label sheet", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/labels?ids=nope1,nope2");
     await expect(page.getByText("Nothing to print")).toBeVisible({ timeout: 30_000 });
+    // Phase 33 (spec §5.1): the body points at the selection bar and the record menu, and the Tags box sits under it.
+    await expect(page.getByText("Select assets on the list, then choose Print labels in the selection bar — or Print label from a record's More menu.")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Tags" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Back to inventory" })).toBeVisible();
   });
 
