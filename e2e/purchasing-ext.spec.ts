@@ -348,7 +348,7 @@ test.describe.serial("purchasing extensions", () => {
     await waitForHydration(requestSelect);
     // Phase 30 (spec §5.2): the option names the request's supplier and date,
     // and Vendor is the searchable picker (it shows the supplier's name).
-    await expect(requestSelect.locator(`option[value="${pr0188.id}"]`)).toHaveText(/^PR-0188 · TechServe PH · \d{2} \w{3} \d{4}$/);
+    await expect(requestSelect.locator(`option[value="${pr0188.id}"]`)).toHaveText(/^PR-0188 · TechServe PH · \d{2} \w{3,4} \d{4}$/); // en-GB writes September as "Sept"
     await requestSelect.selectOption(pr0188.id);
     await expect(page.getByLabel("Vendor")).toHaveValue(techServe.name);
 
