@@ -33,10 +33,10 @@ export function warrantyUntilFrom(purchasedISO: string, months: number): string 
 }
 
 /**
- * Register's warranty (Review Focus 4). `months` is null until a length is
- * chosen; `manual` is set while "Warranty until" holds a date typed by hand,
- * which no later date or length change overwrites. Clearing the field hands
- * it back to the length.
+ * Register's warranty (Review Focus 4, ruling R12). `months` is null until a
+ * length is chosen; `manual` is set while "Warranty until" holds a date typed
+ * by hand, which a later purchase-date change leaves alone. Picking a length
+ * is an explicit choice: it always re-derives the date and clears `manual`.
  */
 export interface WarrantyState {
   months: number | null;
@@ -51,9 +51,8 @@ export function warrantyOnDate(s: WarrantyState, purchasedISO: string): Warranty
   return { months, until: warrantyUntilFrom(purchasedISO, months), manual: false };
 }
 
-/** A length button was pressed. */
-export function warrantyOnLength(s: WarrantyState, purchasedISO: string, months: number): WarrantyState {
-  if (s.manual) return { ...s, months };
+/** A length button was pressed: always re-derives (empty with no purchase date, or None) and drops a typed date. */
+export function warrantyOnLength(_s: WarrantyState, purchasedISO: string, months: number): WarrantyState {
   return { months, until: warrantyUntilFrom(purchasedISO, months), manual: false };
 }
 

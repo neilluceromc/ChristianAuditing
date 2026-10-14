@@ -70,6 +70,13 @@ export function DocumentSlots({
 }) {
   const base = useId();
   const [refused, setRefused] = useState<string | null>(null);
+  // A reset to EMPTY_SLOTS ("Register and add another") drops a stale refusal.
+  // Adjusted during render (React's prop-change pattern), not in an effect.
+  const [seen, setSeen] = useState(slots);
+  if (seen !== slots) {
+    setSeen(slots);
+    if (slots === EMPTY_SLOTS) setRefused(null);
+  }
   const inputs = useRef<Partial<Record<SlotKind | "other", HTMLInputElement | null>>>({});
 
   function take(list: FileList | null, apply: (files: File[]) => void) {
@@ -127,7 +134,10 @@ export function DocumentSlots({
                 <Button
                   type="button" variant="ghost" size="sm" disabled={disabled}
                   aria-describedby={`${titleId} ${fileId}`}
-                  onClick={() => onSlots({ ...slots, [s.kind]: null })}
+                  onClick={() => {
+                    setRefused(null);
+                    onSlots({ ...slots, [s.kind]: null });
+                  }}
                 >
                   Remove
                 </Button>
@@ -152,7 +162,10 @@ export function DocumentSlots({
               <Button
                 type="button" variant="ghost" size="sm" disabled={disabled}
                 aria-describedby={nameId}
-                onClick={() => onSlots({ ...slots, other: slots.other.filter((_, j) => j !== i) })}
+                onClick={() => {
+                  setRefused(null);
+                  onSlots({ ...slots, other: slots.other.filter((_, j) => j !== i) });
+                }}
               >
                 Remove
               </Button>

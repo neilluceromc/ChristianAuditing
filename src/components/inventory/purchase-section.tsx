@@ -272,7 +272,9 @@ export function PurchaseSection(props: {
               </div>
               <FormField
                 label="Warranty until"
-                hint={props.warrantyManual ? "Set by hand — a new date or length leaves it. Clear it to follow the length." : "Follows the length from the purchase date; you can change it."}
+                hint={props.warrantyManual
+                  ? "Set by hand — a new purchase date leaves it; pick a length to follow it again."
+                  : "Set by the length you pick; a date you type stays until you pick a length again."}
                 error={errors.warrantyUntil}
               >
                 {(p) => (

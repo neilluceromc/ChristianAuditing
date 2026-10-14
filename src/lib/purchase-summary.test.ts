@@ -62,12 +62,18 @@ describe("warranty state on Register (Review Focus 4)", () => {
     const s = warrantyOnLength(empty, "", 0);
     expect(warrantyOnDate(s, "2026-10-12")).toEqual({ months: 0, until: "", manual: false });
   });
-  it("a date typed by hand survives a later date or length change", () => {
+  it("a date typed by hand survives a later purchase-date change", () => {
     let s = warrantyOnDate(empty, "2026-10-12");
     s = warrantyOnTyped(s, "2029-01-15");
     s = warrantyOnDate(s, "2026-11-05");
-    s = warrantyOnLength(s, "2026-11-05", 36);
-    expect(s).toEqual({ months: 36, until: "2029-01-15", manual: true });
+    expect(s).toEqual({ months: 12, until: "2029-01-15", manual: true });
+  });
+  it("picking a length after typing re-derives the date and clears the flag (ruling R12)", () => {
+    let s = warrantyOnTyped(warrantyOnDate(empty, "2026-10-12"), "2029-01-15");
+    s = warrantyOnLength(s, "2026-10-12", 36);
+    expect(s).toEqual({ months: 36, until: "2029-10-12", manual: false });
+    expect(warrantyOnLength(warrantyOnTyped(s, "2030-01-01"), "", 24)).toEqual({ months: 24, until: "", manual: false });
+    expect(warrantyOnLength(warrantyOnTyped(s, "2030-01-01"), "2026-10-12", 0)).toEqual({ months: 0, until: "", manual: false });
   });
   it("clearing the typed date hands it back to the length", () => {
     let s = warrantyOnTyped(warrantyOnDate(empty, "2026-10-12"), "2029-01-15");
