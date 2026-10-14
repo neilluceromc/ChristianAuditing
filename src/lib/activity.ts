@@ -22,7 +22,7 @@ export const ACTION_LABELS: Record<string, string> = {
   cancel: "Cancelled", complete: "Completed", "finance.confirm": "Finance confirmed", "it.verify": "IT verified",
   "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "supplier-set": "Supplier set",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
-  "acknowledgement.recorded": "Acknowledgement signed",
+  "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
 };
 export function actionLabel(action: string): string { return ACTION_LABELS[action] ?? action; }
@@ -388,6 +388,12 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
         return omitEntity ? `${actor}set ${String(to)} as the supplier` : `${actor}set ${String(to)} as the supplier on ${entry.entityLabel}`;
       }
       return omitEntity ? `${actor}cleared the supplier` : `${actor}cleared the supplier on ${entry.entityLabel}`;
+    }
+    case "purchase.recorded": {
+      // Phase 34 (spec §7.3): one row per Register submit, entityLabel is the tag range.
+      const n = typeof diff?.quantity?.to === "number" ? diff.quantity.to : 0;
+      const what = `a purchase of ${n} item${n === 1 ? "" : "s"}`;
+      return omitEntity ? `${actor}recorded ${what}` : `${actor}recorded ${what} (${entry.entityLabel})`;
     }
     default:
       return omitEntity ? `${actor}${entry.action}` : `${actor}${entry.action} ${entry.entityLabel}`;

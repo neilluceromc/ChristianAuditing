@@ -30,6 +30,8 @@ import { humanizeGuard, loanDueFor } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
 import { rememberPicks } from "@/server/recent-picks";
 import { nextToReview } from "@/server/modules/finance/queries";
+import { serialRequired } from "@/lib/serial-rules";
+import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -185,12 +187,18 @@ const createSchema = z.object({
   categoryId: z.string().min(1, "Pick a category"),
   typeId: z.string().optional(),
   purchasedAt: dateStr.optional(),
-  cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000).multipleOf(0.01, "Whole centavos only")]).optional(),
+  cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(9_999_999_999.99).multipleOf(0.01, "Whole centavos only")]).optional(),
   warrantyUntil: dateStr.optional(),
   notes: z.string().trim().max(2000).optional(),
   vendorId: z.string().optional(),
   brand: z.string().trim().max(60).optional(),
   invoiceRef: z.string().trim().max(60).optional(),
+  // Phase 34 (spec §7.1, §8): the official receipt, who honours the warranty and how to reach them,
+  // and the purchase's fees (delivery, setup) — fees live on the PurchaseRecord, never on the asset.
+  receiptRef: z.string().trim().max(60).optional(),
+  warrantyCoveredBy: z.union([z.literal(""), z.enum(WARRANTY_COVERED_BY)]).optional(),
+  warrantyContact: z.string().trim().max(160).optional(),
+  fees: z.union([z.literal(""), z.coerce.number().nonnegative().max(9_999_999_999.99).multipleOf(0.01, "Whole centavos only")]).optional(),
   requestedStatus: z.enum(CREATABLE_STATUSES),
   assigneeId: z.string().optional(),
   // Phase 21 (spec §6): cleaned like every other reason — a zero-width string
@@ -205,7 +213,7 @@ const createSchema = z.object({
 const toDate = (s: string | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
 const toCost = (c: number | "" | undefined) => (c === "" || c === undefined ? null : c);
 
-export async function createAsset(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createAsset(input: unknown): Promise<ActionResult<{ id: string; purchaseRecordId: string }>> {
   const user = await actionRole("admin", "it_staff", "purchasing_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -223,6 +231,10 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   // managing — an IT asset Purchasing registers is IT's from this moment.
   else if (!canRegisterClass(user.role, category.cls)) {
     errors.categoryId = `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not create ${CLASS_LABEL[category.cls]} assets.`;
+  }
+  // Phase 34 (spec §8): an IT unit is not registered without its serial; Purchasing stays optional.
+  if (category && serialRequired(category.cls) && !(d.serial ?? "").trim()) {
+    errors.serial = "Enter the serial number before you register.";
   }
   const plan = category ? creationPlan(d.requestedStatus, d.assigneeId || null, category.cls) : null;
   if (category && plan && !plan.ok) {
@@ -269,7 +281,16 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   const selfChecked = category.cls === "IT" && canManageClass(user.role, "IT");
 
   try {
-    const asset = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      // Phase 34 (P-1, spec §7.2): every Register submit is one PurchaseRecord — it is also the
+      // registration batch the Labels queue groups by, so it exists even with no purchase field filled.
+      const record = await tx.purchaseRecord.create({
+        data: {
+          cls: category.cls, vendorId: d.vendorId || null, purchasedAt: toDate(d.purchasedAt),
+          invoiceRef: d.invoiceRef || null, receiptRef: d.receiptRef || null,
+          unitCost: toCost(d.cost), fees: toCost(d.fees), quantity: 1, createdById: user.id,
+        },
+      });
       const created = await tx.asset.create({
         data: {
           tag: d.tag,
@@ -286,6 +307,10 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           vendorId: d.vendorId || null,
           brand: d.brand || null,
           invoiceRef: d.invoiceRef || null,
+          receiptRef: d.receiptRef || null,
+          warrantyCoveredBy: d.warrantyCoveredBy || null,
+          warrantyContact: d.warrantyContact || null,
+          purchaseRecordId: record.id,
           purchaseRequestId: d.requestId || null,
           itVerifiedAt: selfChecked ? new Date() : null,
           itVerifiedById: selfChecked ? user.id : null,
@@ -301,6 +326,17 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           tag: { from: null, to: created.tag },
           model: { from: null, to: created.model },
           status: { from: null, to: plan.status },
+        },
+      });
+      await writeAudit(tx, {
+        actorId: user.id,
+        actorLabel: user.name,
+        entityType: "purchase-record",
+        entityId: record.id,
+        action: "purchase.recorded",
+        diff: {
+          quantity: { from: null, to: 1 },
+          total: { from: null, to: (Number(toCost(d.cost) ?? 0) + Number(toCost(d.fees) ?? 0)).toFixed(2) },
         },
       });
       if (plan.approval) {
@@ -362,11 +398,11 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           });
         }
       }
-      return created;
+      return { created, recordId: record.id };
     });
     revalidatePath("/inventory");
     await rememberPicks(user.id, { vendor: d.vendorId || null });
-    return ok({ id: asset.id });
+    return ok({ id: result.created.id, purchaseRecordId: result.recordId });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
       return conflict("A referenced record vanished mid-request — refresh and retry.");
