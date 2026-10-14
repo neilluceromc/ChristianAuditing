@@ -231,6 +231,15 @@ test.describe.serial("the asset import wizard", () => {
       await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
     }
 
+    // Phase 34 ruling R25: imported equipment is already tagged, so it counts as printed and never
+    // joins the Labels tab's Waiting to print queue.
+    const imported = await db.asset.findMany({
+      where: { tag: { in: ["BR-LT-9001", "BR-MN-9002", "BR-HS-9003"] } },
+      select: { labelPrintedAt: true },
+    });
+    expect(imported).toHaveLength(3);
+    expect(imported.every((a) => a.labelPrintedAt !== null)).toBe(true);
+
     expect(await db.auditEntry.count({ where: { action: "import-create" } })).toBe(auditBefore + 3);
     // …and /audit can NAME the rows an import wrote, rather than showing a
     // truncated cuid (§6a rule 20: `entityLabels` and `AUDIT_ENTITY_TYPES`

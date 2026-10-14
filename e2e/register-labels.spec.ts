@@ -6,7 +6,7 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 
 /**
  * Phase 34 — the Register and Labels tabs of "New equipment" (spec §3–§5),
- * fourteen cases, each independent (every case registers its own assets, with
+ * seventeen cases, each independent (every case registers its own assets, with
  * serials stamped by case number and Date.now()):
  *   1    IT's nine category cards in order, no Uncategorised / Phone /
  *        Peripheral, "in stock" on Laptop, axe on the bare page.
@@ -31,6 +31,12 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *        and toasts (ruling R7).
  *   13   the live label preview shows the typed model and the next tag.
  *   14   Purchasing's four cards in name order; its serial is optional.
+ *   15   Other offers OT, not the PH its inherited phone tags would teach
+ *        (ruling R23).
+ *   16   a category with no tag prefix and no tags: one unit is refused onto
+ *        the Tag prefix field, and the footer asks for "a tag prefix" (I3).
+ *   17   printing a list selection (`?ids=`) stamps its waiting assets too
+ *        (ruling R26, M5).
  *
  * Approvals are only ever closed by state, never deleted; audit rows are never
  * deleted. Assets created here stay (the seed in beforeAll resets).
@@ -541,5 +547,67 @@ test.describe("register — the Labels tab", () => {
     await expect(page).toHaveURL(/tags=BR-LT-0148/);
     await expect(page.getByLabel("Barcode BR-LT-0148", { exact: true })).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Print 1 label", exact: true })).toBeVisible();
+  });
+});
+
+test.describe("register — final-review fix wave", () => {
+  test("15. Other offers OT, not the PH its inherited phone tags would teach (ruling R23)", async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page, IT);
+    await openRegister(page);
+    await pickCategory(page, "Other");
+    await modelBox(page).fill(`E2E Webcam ${Date.now()}`);
+    await modelBox(page).blur();
+    await expect(page.getByText(/^tag BR-OT-\d{4}$/)).toBeVisible();
+    await expect(page.getByText(/^tag BR-PH-/)).toHaveCount(0);
+  });
+
+  test("16. a category with no tag prefix: one unit is refused onto the Tag prefix field", async ({ page }) => {
+    test.setTimeout(120_000);
+    const name = `E2E Prefixless ${Date.now() % 100000}`;
+    // A category added in Admin: no tagPrefix, no types, no assets.
+    const cat = await db.assetCategory.create({ data: { name, cls: "IT" }, select: { id: true } });
+    try {
+      await login(page, IT);
+      await openRegister(page);
+      await pickCategory(page, name);
+      await modelBox(page).fill("E2E Gadget");
+      await modelBox(page).blur();
+      await serialBox(page).fill(`C16-${Date.now()}`);
+      await expect(page.getByText(/^Still needed: a tag prefix$/)).toBeVisible();
+
+      const t0 = new Date();
+      await page.getByRole("button", { name: /^Register 1 /, exact: false }).first().click();
+      const prefixBox = page.getByRole("textbox", { name: "Tag prefix", exact: true });
+      await expect(prefixBox).toBeFocused();
+      await expect(page.getByText(`Pick a two-letter tag prefix for ${name}`, { exact: true })).toBeVisible();
+      expect(await db.asset.count({ where: { categoryId: cat.id, createdAt: { gte: t0 } } })).toBe(0);
+
+      await prefixBox.fill("zq");
+      await expect(page.getByText(/^tag BR-ZQ-\d{4}$/)).toBeVisible();
+      await expect(page.getByText(/^Still needed:/)).toHaveCount(0);
+      await expect(page.getByText(`Pick a two-letter tag prefix for ${name}`, { exact: true })).toHaveCount(0);
+    } finally {
+      await db.assetCategory.deleteMany({ where: { id: cat.id, assets: { none: {} } } });
+    }
+  });
+
+  test("17. printing a list selection (?ids=) stamps its waiting assets too (ruling R26)", async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page, IT);
+    // registerLaptops drives the batch rows, so two units; the selection names only the first.
+    const { assets } = await registerLaptops(page, 2, `C17-${Date.now()}`);
+    const id = assets[0].id;
+    expect((await db.asset.findUniqueOrThrow({ where: { id }, select: { labelPrintedAt: true } })).labelPrintedAt).toBeNull();
+
+    // A list selection, not the queue: nothing is picked, the asset arrives through ?ids=.
+    await page.goto(`/inventory/labels?ids=${id}`);
+    const print = page.getByRole("button", { name: "Print 1 label", exact: true });
+    await waitForHydration(print);
+    await page.evaluate(() => { window.print = () => {}; });
+    await print.click();
+    await expect(async () => {
+      expect((await db.asset.findUniqueOrThrow({ where: { id }, select: { labelPrintedAt: true } })).labelPrintedAt).not.toBeNull();
+    }).toPass({ timeout: 20_000 });
   });
 });
