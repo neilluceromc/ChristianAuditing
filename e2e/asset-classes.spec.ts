@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { toXlsxBuffer } from "@/server/xlsx/write";
@@ -47,6 +47,34 @@ async function highestNumber(prefix: string): Promise<number> {
 }
 const tagOf = (prefix: string, n: number) => `BR-${prefix}-${String(n).padStart(4, "0")}`;
 
+// Phase 34 register helpers, copied from e2e/register-labels.spec.ts (house rule: never import across spec files).
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
+  }).toPass({ timeout: 20_000 });
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A card is named "{name} {N} in stock" or "{name} None yet" — anchored at both ends, since "Laptop" prefixes "Laptop Bag". */
+const categoryCard = (page: Page, name: string) =>
+  page.getByRole("button", { name: new RegExp(`^${escapeRe(name)} (\\d+ in stock|None yet)$`) });
+
+async function pickCategory(page: Page, name: string) {
+  const card = categoryCard(page, name);
+  await waitForHydration(card);
+  await card.click();
+}
+
+/** The category names the "What" cards offer, in order (the card's name line, without its stock line). */
+async function categoryNames(page: Page): Promise<string[]> {
+  const cards = page.getByRole("group", { name: "What" }).locator("[data-category-card]");
+  await expect(cards.first()).toBeVisible({ timeout: 20_000 });
+  return cards.evaluateAll((els) => els.map((el) => el.querySelector(".truncate")?.textContent?.trim() ?? ""));
+}
+
 /**
  * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
  * puts every other action in its ⋯ "More actions" menu. Opens that menu and
@@ -80,21 +108,27 @@ test.describe("registration — each class is its own department's", () => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory/register");
 
-    await page.getByLabel("Category").selectOption({ label: "Vehicle" });
-    await page.getByLabel("Type").selectOption({ label: "Sedan" });
-    await page.getByLabel("Model").fill("Toyota Corolla Cross (e2e)");
-    await page.getByLabel("Quantity").fill("1");
-    await expect(page.getByLabel("Prefix")).toHaveValue("VH");
-    await expect(page.getByLabel("Tag 1")).toHaveValue(registeredTag);
+    await pickCategory(page, "Vehicle");
+    // Phase 34: the model sets the type; a new Vehicle model picks it (ruling R8 note: Vehicle has several types).
+    const model = page.getByRole("combobox", { name: "Model", exact: true });
+    await model.fill("Toyota Corolla Cross (e2e)");
+    await page.getByRole("option", { name: /^\+ Add .Toyota Corolla Cross \(e2e\). as a new model$/ }).click();
+    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "Sedan" });
+    await expect(page.getByRole("textbox", { name: "How many", exact: true })).toHaveValue("1");
+    await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
+    await page.getByText("Tag prefix and notes", { exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Tag prefix", exact: true })).toHaveValue("VH");
+    await expect(page.getByText(`tag ${registeredTag}`, { exact: true })).toBeVisible();
 
-    // Phase 30 (spec §5.6, plan P-13): quantity 1 is one asset — it goes
-    // through createAsset and ends on its record with the created notice,
-    // not on the batch card.
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
-    await expect(page.getByText(`${registeredTag} registered`)).toBeVisible();
+    // Phase 30 (plan P-13): quantity 1 is one asset through createAsset;
+    // Phase 34 (plan P-5): it lands on Labels with its purchase record ticked, in Purchasing's class.
+    await page.getByRole("button", { name: "Register 1 vehicle", exact: true }).click();
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
+    expect(new URL(page.url()).searchParams.get("cls")).toBe("PURCHASING");
+    await expect(page.getByRole("checkbox", { name: new RegExp(registeredTag) })).toBeChecked();
 
     const a = await db.asset.findUniqueOrThrow({ where: { tag: registeredTag } });
+    expect(new URL(page.url()).searchParams.get("just")).toBe(a.purchaseRecordId);
     expect(a.cls).toBe("PURCHASING");
     expect(a.status).toBe("STORED");
     expect(a.categoryId).toBe(vehicleCategoryId);
@@ -106,7 +140,7 @@ test.describe("registration — each class is its own department's", () => {
     const before = await db.asset.count();
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory/register");
-    const options = await page.getByLabel("Category").locator("option").allTextContents();
+    const options = await categoryNames(page);
     expect(options).toContain("Vehicle");
     expect(options).toContain("Laptop");
     expect(await db.asset.count()).toBe(before);
@@ -116,7 +150,7 @@ test.describe("registration — each class is its own department's", () => {
     const before = await db.asset.count();
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/register");
-    const options = await page.getByLabel("Category").locator("option").allTextContents();
+    const options = await categoryNames(page);
     expect(options).toContain("Laptop");
     expect(options).not.toContain("Vehicle");
     expect(await db.asset.count()).toBe(before);
@@ -332,8 +366,8 @@ test.describe("the inventory view", () => {
     await expect(registerLink).toHaveAttribute("href", "/inventory/register?cls=PURCHASING");
     await registerLink.click();
     await expect(page).toHaveURL(/\/inventory\/register\?cls=PURCHASING$/, { timeout: 30_000 });
-    await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
-    const purchasingOptions = await page.getByLabel("Category").locator("option").allTextContents();
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
+    const purchasingOptions = await categoryNames(page);
     expect(purchasingOptions).toContain("Vehicle");
     expect(purchasingOptions).not.toContain("Laptop");
     await page.goto("/inventory?cls=IT");
@@ -478,23 +512,25 @@ test.describe("page gates speak the class", () => {
     // own heading first — allTextContents() does not wait for anything.
     const categoryOptions = async (url: RegExp) => {
       await expect(page).toHaveURL(url);
-      await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
-      return page.getByLabel("Category").locator("option").allTextContents();
+      await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
+      return categoryNames(page);
     };
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory/new");
     let options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Vehicle");
     expect(options).toContain("Laptop");
-    // Both classes offered → one optgroup per class (spec §5.2).
-    await expect(page.getByLabel("Category").locator("optgroup")).toHaveCount(2);
+    // Both classes offered → both classes' cards (Phase 34: cards replace the optgroups).
+    await expect(categoryCard(page, "Laptop")).toBeVisible();
+    await expect(categoryCard(page, "Vehicle")).toBeVisible();
 
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/new");
     options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Laptop");
     expect(options).not.toContain("Vehicle");
-    await expect(page.getByLabel("Category").locator("optgroup")).toHaveCount(0);
+    // Only IT's cards: none of Purchasing's.
+    for (const name of ["Vehicle", "Furniture", "Pantry Equipment", "Building"]) await expect(categoryCard(page, name)).toHaveCount(0);
 
     await login(page, "finance@thebackroomop.com");
     await page.goto("/inventory/new");
@@ -505,6 +541,10 @@ test.describe("page gates speak the class", () => {
     options = await categoryOptions(/\/inventory\/register\?cls=PURCHASING$/);
     expect(options).toContain("Vehicle");
     expect(options).not.toContain("Laptop");
+    // Only Purchasing-class cards (an earlier case adds a Purchasing category, so no exact list).
+    for (const name of ["Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Type C Hub", "Docking Station", "Laptop Bag", "Other"]) {
+      expect(options).not.toContain(name);
+    }
     // The breadcrumb names the list it came from.
     await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Purchasing assets", exact: true }))
       .toHaveAttribute("href", "/inventory?cls=PURCHASING");
@@ -551,41 +591,45 @@ test.describe("the create form's initial-state control follows the class", () =>
     // state, in the friendly status words (plan P-6).
     await page.goto("/inventory/register");
 
-    await page.getByLabel("Category").selectOption({ label: "Vehicle" });
-    const initialState = page.getByRole("radiogroup", { name: "Initial state" });
+    // Phase 34 (spec §4.4): "Initial state" is "Where does it go", in everyday words —
+    // Stored / In use for Purchasing, Spare stock / Give to someone / Lend for IT.
+    await pickCategory(page, "Vehicle");
+    const initialState = page.getByRole("radiogroup", { name: "Where does it go" });
     await expect(initialState.getByRole("radio")).toHaveCount(2);
     await expect(initialState.getByRole("radio", { name: "Stored" })).toBeChecked();
-    await expect(initialState.getByRole("radio", { name: "Operational" })).toBeVisible();
-    await expect(initialState.getByRole("radio", { name: "Deployed" })).toHaveCount(0);
-    await expect(page.getByText("Registered as a spare, ready to assign.")).toBeVisible();
+    await expect(initialState.getByRole("radio", { name: "In use" })).toBeVisible();
+    await expect(initialState.getByRole("radio", { name: "Give to someone" })).toHaveCount(0);
+    await expect(page.getByText("Goes to storage.", { exact: true })).toBeVisible();
 
-    await initialState.getByText("Operational").click();
+    await initialState.getByText("In use", { exact: true }).click();
 
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    // Admin applies IT's lifecycle directly, so Loan is offered (ruling R4).
+    await pickCategory(page, "Laptop");
+    // Admin applies IT's lifecycle directly, so Lend is offered (ruling R4).
     await expect(initialState.getByRole("radio")).toHaveCount(3);
-    await expect(initialState.getByRole("radio", { name: "Spare" })).toBeChecked();
-    await expect(initialState.getByRole("radio", { name: "Loan" })).toBeVisible();
-    await expect(initialState.getByRole("radio", { name: "Operational" })).toHaveCount(0);
+    await expect(initialState.getByRole("radio", { name: "Spare stock" })).toBeChecked();
+    await expect(initialState.getByRole("radio", { name: "Lend" })).toBeVisible();
+    await expect(initialState.getByRole("radio", { name: "In use" })).toHaveCount(0);
 
     // Direct for IT: the line says what happens, with no approval.
-    await initialState.getByText("Deployed").click();
-    await expect(page.getByText("Deployed to the chosen person.")).toBeVisible();
+    await initialState.getByText("Give to someone", { exact: true }).click();
+    await expect(page.getByText("Given to the chosen person.", { exact: true })).toBeVisible();
     await expect(page.getByText("This files a request for approval.")).toHaveCount(0);
-    await initialState.getByText("Loan").click();
+    await initialState.getByText("Lend", { exact: true }).click();
     await expect(page.getByText("Lent to the chosen person until the date below.")).toBeVisible();
-    await expect(page.getByLabel("Loan until")).not.toHaveValue("");
+    await expect(page.getByLabel("Back by")).not.toHaveValue("");
 
     // Purchasing keeps its queue: a holder state files a request.
-    await page.getByLabel("Category").selectOption({ label: "Vehicle" });
-    await initialState.getByText("Operational").click();
+    await pickCategory(page, "Vehicle");
+    await initialState.getByText("In use", { exact: true }).click();
     await expect(page.getByText("This files a request for approval.")).toBeVisible();
-    await expect(page.getByLabel("Loan until")).toHaveCount(0);
+    await expect(page.getByLabel("Back by")).toHaveCount(0);
   });
 });
 
 test.describe("the IT import wizard refuses a Purchasing row by name", () => {
   test("21. names Purchasing, points at the Register screen, and admin can follow the fix", async ({ page }) => {
+    // Two roles, two imports and two Register pages: past the 30 s default on a cold dev server.
+    test.setTimeout(90_000);
     // Same helper e2e/fixtures/make.ts uses (toXlsxBuffer + ASSET_EXPORT_COLUMNS),
     // built in-memory and handed to setInputFiles — the same pattern
     // import-export.spec.ts's own round-trip test uses for an in-memory
@@ -625,7 +669,7 @@ test.describe("the IT import wizard refuses a Purchasing row by name", () => {
     // form's content has streamed in, so a bare toHaveURL race with the
     // options read below (empty array, not a wrong-role list). Wait for the
     // page's own content before reading it.
-    await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
 
     await login(page, "admin@thebackroomop.com");
     await page.goto("/inventory/import");
@@ -638,8 +682,8 @@ test.describe("the IT import wizard refuses a Purchasing row by name", () => {
     await expect(page.getByText("0 new · 0 updates · 1 blocked")).toBeVisible();
     await page.getByRole("link", { name: "Open the Register screen" }).click();
     await expect(page).toHaveURL(/\/inventory\/register$/);
-    await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
-    const options = await page.getByLabel("Category").locator("option").allTextContents();
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
+    const options = await categoryNames(page);
     expect(options).toContain("Vehicle");
   });
 });
