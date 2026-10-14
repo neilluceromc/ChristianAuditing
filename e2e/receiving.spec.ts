@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { ROLE_LANDING } from "@/lib/workspaces";
@@ -60,6 +60,43 @@ async function highestLtNumber(): Promise<number> {
   return rows.reduce((max, r) => Math.max(max, Number(r.tag.slice(6))), 0);
 }
 const ltTag = (n: number) => `BR-LT-${String(n).padStart(4, "0")}`;
+
+// Phase 34 register helpers, copied from e2e/register-labels.spec.ts (house rule: never import across spec files).
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
+  }).toPass({ timeout: 20_000 });
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A card is named "{name} {N} in stock" or "{name} None yet" — anchored at both ends, since "Laptop" prefixes "Laptop Bag". */
+async function pickCategory(page: Page, name: string) {
+  const card = page.getByRole("button", { name: new RegExp(`^${escapeRe(name)} (\\d+ in stock|None yet)$`) });
+  await waitForHydration(card);
+  await card.click();
+}
+
+const modelBox = (page: Page) => page.getByRole("combobox", { name: "Model", exact: true });
+
+/** Picks a known model from the list, else adds it as new — then a new model in a category with several types takes `type`. */
+async function pickModel(page: Page, model: string, type?: string) {
+  await modelBox(page).fill(model);
+  await expect(page.getByRole("option").first()).toBeVisible();
+  const known = page.getByRole("option", { name: model, exact: true });
+  if (await known.count()) await known.first().click();
+  else await page.getByRole("option", { name: new RegExp(`^\\+ Add .${escapeRe(model)}. as a new model$`) }).click();
+  if (type) await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: type });
+}
+
+async function setQuantity(page: Page, n: number) {
+  const box = page.getByRole("textbox", { name: "How many", exact: true });
+  await box.fill(String(n));
+  await box.blur();
+  if (n > 1) await expect(page.getByRole("textbox", { name: `Serial ${n}`, exact: true })).toBeVisible();
+}
 
 let laptopCategoryId: string;
 let thinkpadTypeId: string;
@@ -123,22 +160,28 @@ test.describe("registration — the primary path", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/register");
 
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Type").selectOption({ label: "ThinkPad" });
-    await page.getByLabel("Model").fill("ThinkPad T14 Gen 4 (e2e batch)");
-    await page.getByLabel("Quantity").fill("3");
+    await pickCategory(page, "Laptop");
+    // Phase 34: the type comes with the model — a new model picks it from "New model — which type?".
+    await pickModel(page, "ThinkPad T14 Gen 4 (e2e batch)", "ThinkPad");
+    await setQuantity(page, 3);
 
-    await expect(page.getByLabel("Prefix")).toHaveValue("LT");
-    await expect(page.getByLabel("Tag 1")).toHaveValue(tag1);
-    await expect(page.getByLabel("Tag 2")).toHaveValue(tag2);
-    await expect(page.getByLabel("Tag 3")).toHaveValue(tag3);
+    // The prefix lives in the "Tag prefix and notes" fold-out of Purchase and warranty.
+    await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
+    await page.getByText("Tag prefix and notes", { exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Tag prefix", exact: true })).toHaveValue("LT");
+    await expect(page.getByLabel("Tag 1", { exact: true })).toHaveValue(tag1);
+    await expect(page.getByLabel("Tag 2", { exact: true })).toHaveValue(tag2);
+    await expect(page.getByLabel("Tag 3", { exact: true })).toHaveValue(tag3);
+    // Phase 34: every IT unit needs a serial.
+    const stamp = `E2E-RCV-1-${Date.now()}`;
+    for (const i of [1, 2, 3]) await page.getByLabel(`Serial ${i}`, { exact: true }).fill(`${stamp}-${i}`);
 
-    await page.getByRole("button", { name: "Register 3 assets" }).click();
-    // Phase 16 Task 13: the register page no longer redirects to /inventory
-    // on success — it swaps the form for a RegisterSuccess panel in place
-    // ("3 assets registered — <first> … <last>"). Wait for that panel
-    // instead of a navigation that no longer happens.
-    await expect(page.getByText(`3 assets registered — ${tag1} … ${tag3}`)).toBeVisible();
+    await page.getByRole("button", { name: "Register 3 laptops", exact: true }).click();
+    // Plan P-5: Register lands on the Labels tab with this batch ticked
+    // ("3 × <model> <first> → <last>") and ready to print.
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
+    await expect(page.getByRole("checkbox", { name: new RegExp(`${tag1} → ${tag3}`) })).toBeChecked();
+    await expect(page.getByRole("button", { name: "Print 3 labels", exact: true })).toBeVisible();
 
     const assets = await db.asset.findMany({ where: { tag: { in: [tag1, tag2, tag3] } }, orderBy: { tag: "asc" } });
     expect(assets).toHaveLength(3);
@@ -158,19 +201,22 @@ test.describe("registration — the primary path", () => {
     await page.goto("/inventory/register");
     const before = await db.asset.count();
 
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Model").fill("e2e — in-batch duplicate");
-    await page.getByLabel("Quantity").fill("2");
-    const dupeTag = await page.getByLabel("Tag 1").inputValue();
-    await page.getByLabel("Tag 2").fill(dupeTag);
+    await pickCategory(page, "Laptop");
+    await pickModel(page, "e2e — in-batch duplicate", "ThinkPad");
+    await setQuantity(page, 2);
+    // Serials filled, so the repeated tag is the only thing wrong.
+    const stamp = `E2E-RCV-2-${Date.now()}`;
+    for (const i of [1, 2]) await page.getByLabel(`Serial ${i}`, { exact: true }).fill(`${stamp}-${i}`);
+    const dupeTag = await page.getByLabel("Tag 1", { exact: true }).inputValue();
+    await page.getByLabel("Tag 2", { exact: true }).fill(dupeTag);
 
     // Phase 30 (spec §5.5): said as soon as the row repeats, naming the row in
     // registerAssets' own words — and the submit is refused right here, so it
     // hands focus back to the repeated cell and the server is never asked.
     const repeat = page.getByText(`Row 2 · ${dupeTag} appears twice in this batch`);
     await expect(repeat).toBeVisible();
-    await page.getByRole("button", { name: "Register 2 assets" }).click();
-    await expect(page.getByLabel("Tag 2")).toBeFocused();
+    await page.getByRole("button", { name: "Register 2 laptops", exact: true }).click();
+    await expect(page.getByLabel("Tag 2", { exact: true })).toBeFocused();
     await expect(repeat).toHaveCount(1);
 
     // The absence of a success message proves nothing — only the count does.
@@ -180,19 +226,26 @@ test.describe("registration — the primary path", () => {
   test("a tag that already exists is refused and writes NOTHING", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/register");
-    const before = await db.asset.count();
 
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Model").fill("e2e — seeded tag collision");
-    await page.getByLabel("Quantity").fill("1");
-    await page.getByLabel("Tag 1").fill("BR-LT-0148"); // seeded, already exists
+    await pickCategory(page, "Laptop");
+    await pickModel(page, "e2e — seeded tag collision", "ThinkPad");
+    // Phase 34: one unit's tag is a chip, not a field — it can no longer be
+    // typed onto a seeded tag. The collision a single register still meets is
+    // a race: the suggested tag is taken by someone else before Register is
+    // pressed. Stand that in by writing an asset with the chip's tag now.
+    const chip = page.getByText(/^tag BR-LT-\d+$/);
+    const taken = (await chip.textContent())!.trim().replace(/^tag /, "");
+    await db.asset.create({
+      data: { tag: taken, model: "e2e fixture — tag race", categoryId: laptopCategoryId, status: "SPARE", itVerifiedAt: new Date() },
+    });
+    const before = await db.asset.count();
+    await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-RCV-3-${Date.now()}`);
 
     // Phase 30 (plan P-13, ruling R3): quantity 1 goes through createAsset,
-    // whose one-pass refusal names the tag on row 1 — the same words the live
-    // check shows, so one line, not two.
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    await expect(page.getByLabel("Tag 1")).toBeFocused({ timeout: 10_000 });
-    await expect(page.getByText("Row 1 · BR-LT-0148 is already registered")).toHaveCount(1);
+    // whose one-pass refusal names the tag on row 1 — one line, not two.
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    await expect(page.getByText(`Row 1 · ${taken} is already registered`)).toHaveCount(1, { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/inventory\/register$/);
 
     // This guard is a database uniqueness constraint, not application logic —
     // no mutation proof is needed for it (Step 5).
