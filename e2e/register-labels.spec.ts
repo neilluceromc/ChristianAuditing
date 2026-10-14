@@ -178,17 +178,33 @@ test.describe("register — the Register tab", () => {
     await openRegister(page);
     await pickCategory(page, "Laptop");
     await pickModel(page, KNOWN_LAPTOP, KNOWN_LAPTOP);
-    await serialBox(page).focus();
+    // Review Focus 2: a scanner types the serial, then sends Enter. That Enter must not submit.
+    const serial = `C3-${Date.now()}`;
+    await serialBox(page).fill(serial);
     await serialBox(page).press("Enter");
+    // Give a submit that should not happen time to land, then pin that it did not.
+    await page.waitForTimeout(2_000);
+    await expect(async () => {
+      expect(page.url()).toMatch(/\/inventory\/register$/);
+      expect(await db.asset.count({ where: { serial } })).toBe(0);
+    }).toPass({ timeout: 5_000 });
     await expect(page).toHaveURL(/\/inventory\/register$/);
-    await page.waitForTimeout(1_000);
     expect(await db.asset.count({ where: { model: KNOWN_LAPTOP, createdAt: { gte: t0 } } })).toBe(0);
 
+    // The empty one-unit serial is refused at Register.
+    await serialBox(page).fill("");
     await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
     await expect(page.getByText("Enter the serial number before you register.")).toBeVisible();
     await expect(page).toHaveURL(/\/inventory\/register$/);
     await expect(serialBox(page)).toHaveAttribute("aria-invalid", "true");
     expect(await db.asset.count({ where: { model: KNOWN_LAPTOP, createdAt: { gte: t0 } } })).toBe(0);
+
+    // With the serial back, the button (not Enter) registers it.
+    await serialBox(page).fill(serial);
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    const recordId = await landedRecord(page);
+    const asset = await db.asset.findFirstOrThrow({ where: { serial } });
+    expect(asset.purchaseRecordId).toBe(recordId);
   });
 
   test("4. a new model asks for its type, and is registered with it (and an untyped known model asks too)", async ({ page }) => {
@@ -519,6 +535,7 @@ test.describe("register — the Labels tab", () => {
     await login(page, IT);
     await page.goto("/inventory/labels");
     await expect(page.getByRole("heading", { name: "Reprint other tags" })).toBeVisible({ timeout: 20_000 });
+    await waitForHydration(page.getByRole("button", { name: /^Print \d+ labels?$/ }));
     await page.getByLabel("Tags", { exact: true }).fill("BR-LT-0148");
     await page.getByRole("button", { name: "Make sheet", exact: true }).click();
     await expect(page).toHaveURL(/tags=BR-LT-0148/);
