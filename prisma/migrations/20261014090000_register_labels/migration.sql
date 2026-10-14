@@ -55,11 +55,22 @@ UPDATE "Asset" SET "labelPrintedAt" = "createdAt" WHERE "labelPrintedAt" IS NULL
 DO $$
 DECLARE
   c_other TEXT; c_mouse TEXT; c_phone TEXT; c_periph TEXT;
-  t_phone TEXT; t_keyboard TEXT; t_wired TEXT;
+  t_phone TEXT; t_keyboard TEXT; clash TEXT;
 BEGIN
+  -- 0. Every name lookup below is case-insensitive, matching the lower(name) unique index
+  --    (migration 20260922010908). A target name held by a Purchasing category would receive IT
+  --    assets and trip asset_class_invariants, so stop first with a clear message.
+  SELECT "name" INTO clash FROM "AssetCategory"
+   WHERE lower("name") IN ('workstation (pc)','mouse','type c hub','laptop bag','other','docking station')
+     AND "cls" <> 'IT'
+   LIMIT 1;
+  IF clash IS NOT NULL THEN
+    RAISE EXCEPTION 'Phase 34 migration: category "%" exists as a Purchasing category; rename it before applying', clash;
+  END IF;
+
   -- 1. Dock -> Docking Station
   UPDATE "AssetCategory" SET "name" = 'Docking Station'
-   WHERE "name" = 'Dock' AND NOT EXISTS (SELECT 1 FROM "AssetCategory" WHERE lower("name") = 'docking station');
+   WHERE lower("name") = 'dock' AND NOT EXISTS (SELECT 1 FROM "AssetCategory" WHERE lower("name") = 'docking station');
 
   -- 2. New categories (deterministic ids so a re-run finds them)
   INSERT INTO "AssetCategory" ("id","name","locked","cls","tagPrefix")
@@ -71,12 +82,12 @@ BEGIN
   -- 3. tagPrefix for the categories that keep their tags (only where unset)
   UPDATE "AssetCategory" SET "tagPrefix" = v.prefix
     FROM (VALUES ('Laptop','LT'), ('Monitor','MN'), ('Headset','HS'), ('Docking Station','DK')) AS v(name,prefix)
-   WHERE "AssetCategory"."name" = v.name AND "AssetCategory"."tagPrefix" IS NULL;
+   WHERE lower("AssetCategory"."name") = lower(v.name) AND "AssetCategory"."tagPrefix" IS NULL;
 
-  SELECT "id" INTO c_other  FROM "AssetCategory" WHERE "name" = 'Other';
-  SELECT "id" INTO c_mouse  FROM "AssetCategory" WHERE "name" = 'Mouse';
-  SELECT "id" INTO c_phone  FROM "AssetCategory" WHERE "name" = 'Phone';
-  SELECT "id" INTO c_periph FROM "AssetCategory" WHERE "name" = 'Peripheral';
+  SELECT "id" INTO c_other  FROM "AssetCategory" WHERE lower("name") = 'other';
+  SELECT "id" INTO c_mouse  FROM "AssetCategory" WHERE lower("name") = 'mouse';
+  SELECT "id" INTO c_phone  FROM "AssetCategory" WHERE lower("name") = 'phone';
+  SELECT "id" INTO c_periph FROM "AssetCategory" WHERE lower("name") = 'peripheral';
 
   -- 4. Types for the new categories (never duplicating a name inside a category)
   INSERT INTO "AssetType" ("id","name","categoryId","locked")
@@ -84,24 +95,27 @@ BEGIN
     FROM (VALUES ('Workstation (PC)','Desktop tower'), ('Workstation (PC)','Mini PC'), ('Workstation (PC)','All-in-one'),
                  ('Mouse','Wireless'), ('Type C Hub','USB-C Hub'), ('Laptop Bag','Backpack'), ('Laptop Bag','Sleeve'),
                  ('Other','Phone'), ('Other','Keyboard'), ('Other','Webcam'), ('Other','Speaker'), ('Other','Printer')) AS v(cat,name)
-    JOIN "AssetCategory" cat ON cat."name" = v.cat
+    JOIN "AssetCategory" cat ON lower(cat."name") = lower(v.cat)
    WHERE NOT EXISTS (SELECT 1 FROM "AssetType" t WHERE t."categoryId" = cat.id AND lower(t."name") = lower(v.name));
 
-  SELECT "id" INTO t_phone    FROM "AssetType" WHERE "categoryId" = c_other AND "name" = 'Phone';
-  SELECT "id" INTO t_keyboard FROM "AssetType" WHERE "categoryId" = c_other AND "name" = 'Keyboard';
+  SELECT "id" INTO t_phone    FROM "AssetType" WHERE "categoryId" = c_other AND lower("name") = 'phone';
+  SELECT "id" INTO t_keyboard FROM "AssetType" WHERE "categoryId" = c_other AND lower("name") = 'keyboard';
+  IF (c_phone IS NOT NULL OR c_periph IS NOT NULL) AND (c_other IS NULL OR t_phone IS NULL OR t_keyboard IS NULL) THEN
+    RAISE EXCEPTION 'Phase 34 migration: could not resolve Other / Phone and Other / Keyboard; nothing was moved';
+  END IF;
 
   -- 5. Peripheral's Mouse type becomes Mouse/Wired, assets and all
   IF c_periph IS NOT NULL AND c_mouse IS NOT NULL THEN
     UPDATE "AssetType" SET "categoryId" = c_mouse, "name" = 'Wired'
-     WHERE "categoryId" = c_periph AND "name" = 'Mouse'
-       AND NOT EXISTS (SELECT 1 FROM "AssetType" WHERE "categoryId" = c_mouse AND "name" = 'Wired');
+     WHERE "categoryId" = c_periph AND lower("name") = 'mouse'
+       AND NOT EXISTS (SELECT 1 FROM "AssetType" WHERE "categoryId" = c_mouse AND lower("name") = 'wired');
     UPDATE "Asset" SET "categoryId" = c_mouse
      WHERE "typeId" IN (SELECT "id" FROM "AssetType" WHERE "categoryId" = c_mouse);
   END IF;
   IF c_mouse IS NOT NULL THEN
     INSERT INTO "AssetType" ("id","name","categoryId","locked")
     SELECT 'p34type_mouse_wired', 'Wired', c_mouse, false
-     WHERE NOT EXISTS (SELECT 1 FROM "AssetType" WHERE "categoryId" = c_mouse AND "name" = 'Wired');
+     WHERE NOT EXISTS (SELECT 1 FROM "AssetType" WHERE "categoryId" = c_mouse AND lower("name") = 'wired');
   END IF;
 
   -- 6. Phone -> Other/Phone; Peripheral (the rest) -> Other/Keyboard
