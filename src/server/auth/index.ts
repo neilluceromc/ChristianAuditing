@@ -5,6 +5,7 @@ import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import bcrypt from "bcryptjs";
 import { prisma } from "../db/client";
 import { normalizeEmail } from "@/lib/auth-shared";
+import { isQuickLoginEmail, parseQuickLoginEmails, quickLoginUser } from "@/lib/quick-login";
 import { authConfigEdge } from "./config.edge";
 
 // A valid cost-10 bcrypt hash of a throwaway string; compared against when no
@@ -38,6 +39,28 @@ if (
   process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER
 ) {
   providers.push(MicrosoftEntraID);
+}
+
+// Staging-only one-click sign-in (no password). Registered only when
+// QUICK_LOGIN_EMAILS lists accounts; authorize() re-reads the env on every
+// call, so removing the line and restarting turns it off completely.
+if (parseQuickLoginEmails(process.env.QUICK_LOGIN_EMAILS).length > 0) {
+  providers.push(
+    Credentials({
+      id: "quick-login",
+      name: "Quick sign-in",
+      credentials: { email: {} },
+      async authorize(credentials) {
+        const email = normalizeEmail(String(credentials?.email ?? "")).slice(0, 320);
+        if (!isQuickLoginEmail(email, process.env.QUICK_LOGIN_EMAILS)) return null;
+        const row = await prisma.user.findUnique({
+          where: { email },
+          select: { id: true, email: true, name: true, role: true, disabled: true },
+        });
+        return quickLoginUser(email, process.env.QUICK_LOGIN_EMAILS, row);
+      },
+    }),
+  );
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({

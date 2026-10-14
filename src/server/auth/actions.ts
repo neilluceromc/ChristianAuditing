@@ -8,6 +8,7 @@ import { signIn, signOut } from "./index";
 import { requireUser } from "./guards";
 import { prisma } from "../db/client";
 import { flagDomain, isAllowedDomain, normalizeEmail } from "@/lib/auth-shared";
+import { isQuickLoginEmail } from "@/lib/quick-login";
 import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 
 export interface AuthFormState {
@@ -39,6 +40,20 @@ export async function signInWithCredentials(
   // Read the role straight from the DB by email — auth() called in the same
   // request right after signIn(redirect:false) reads the pre-login request
   // cookies and returns a stale/empty session (Auth.js v5 behavior).
+  const user = await prisma.user.findUnique({ where: { email }, select: { role: true } });
+  redirect(safeNext(formData.get("next")) ?? (user ? ROLE_LANDING[user.role] : "/"));
+}
+
+// Staging-only one-click sign-in; the quick-login provider makes the decision.
+export async function quickSignIn(formData: FormData): Promise<void> {
+  const email = normalizeEmail(String(formData.get("email") ?? ""));
+  if (!isQuickLoginEmail(email, process.env.QUICK_LOGIN_EMAILS)) redirect("/login?quick=refused");
+  try {
+    await signIn("quick-login", { email, redirect: false });
+  } catch (err) {
+    if (err instanceof AuthError) redirect("/login?quick=refused");
+    throw err;
+  }
   const user = await prisma.user.findUnique({ where: { email }, select: { role: true } });
   redirect(safeNext(formData.get("next")) ?? (user ? ROLE_LANDING[user.role] : "/"));
 }
