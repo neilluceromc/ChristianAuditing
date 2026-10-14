@@ -45,7 +45,7 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     TRUNCATE "AuditEntry", "NoteEntry", "Job", "WebhookDelivery", "WebhookEndpoint",
       "RateEvent", "UserPreference", "Approval", "Reservation", "AssetSecret",
-      "AssetDocument", "PurchaseUnit", "PurchaseRequest", "Asset", "PolicySlot",
+      "AssetDocument", "PurchaseUnit", "PurchaseRequest", "PurchaseRecord", "Asset", "PolicySlot",
       "EquipmentPolicy", "EmployeeTransfer", "Employee", "AssetType", "AssetCategory", "Vendor",
       "Department", "FeatureFlag", "User",
       "StocktakeLine", "Stocktake", "StockMovement", "StockLotDocument", "StockAllocation", "StockLot",
@@ -75,23 +75,27 @@ async function main() {
   );
   const depts = Object.fromEntries(deptList.map((d) => [d.name, d]));
 
-  // Phase 13: every category carries a class. The six IT categories are what
-  // they always were; the four Purchasing ones are the meeting's own examples.
-  const catData: Record<string, { cls: AssetClass; types: string[] }> = {
-    Laptop: { cls: "IT", types: ["Dell Latitude", "ThinkPad"] },
-    Monitor: { cls: "IT", types: ["24-inch", "27-inch"] },
-    Phone: { cls: "IT", types: ["iPhone", "Android"] },
-    Dock: { cls: "IT", types: ["USB-C Dock"] },
-    Headset: { cls: "IT", types: ["Wired", "Wireless"] },
-    Peripheral: { cls: "IT", types: ["Keyboard", "Mouse"] },
+  // Phase 13: every category carries a class. Phase 34 (spec §2.1): the IT list
+  // is the spec's nine, each with its tag prefix; the four Purchasing ones are
+  // the meeting's own examples.
+  const catData: Record<string, { cls: AssetClass; types: string[]; prefix?: string }> = {
+    Laptop: { cls: "IT", types: ["Dell Latitude", "ThinkPad"], prefix: "LT" },
+    "Workstation (PC)": { cls: "IT", types: ["Desktop tower", "Mini PC", "All-in-one"], prefix: "WS" },
+    Monitor: { cls: "IT", types: ["24-inch", "27-inch"], prefix: "MN" },
+    Headset: { cls: "IT", types: ["Wired", "Wireless"], prefix: "HS" },
+    Mouse: { cls: "IT", types: ["Wired", "Wireless"], prefix: "MS" },
+    "Type C Hub": { cls: "IT", types: ["USB-C Hub"], prefix: "HB" },
+    "Docking Station": { cls: "IT", types: ["USB-C Dock"], prefix: "DK" },
+    "Laptop Bag": { cls: "IT", types: ["Backpack", "Sleeve"], prefix: "BG" },
+    Other: { cls: "IT", types: ["Phone", "Keyboard", "Webcam", "Speaker", "Printer"], prefix: "OT" },
     Vehicle: { cls: "PURCHASING", types: ["Sedan", "Van"] },
     Furniture: { cls: "PURCHASING", types: ["Desk", "Chair"] },
     "Pantry Equipment": { cls: "PURCHASING", types: ["Microwave", "Air purifier"] },
     Building: { cls: "PURCHASING", types: ["Floor", "Warehouse"] },
   };
   const cats: Record<string, { id: string; typeIds: string[]; cls: AssetClass }> = {};
-  for (const [name, { cls, types }] of Object.entries(catData)) {
-    const cat = await prisma.assetCategory.create({ data: { name, cls } });
+  for (const [name, { cls, types, prefix }] of Object.entries(catData)) {
+    const cat = await prisma.assetCategory.create({ data: { name, cls, tagPrefix: prefix ?? null } });
     const typeIds: string[] = [];
     for (const t of types) {
       typeIds.push((await prisma.assetType.create({ data: { name: t, categoryId: cat.id } })).id);
@@ -165,7 +169,9 @@ async function main() {
     // Phase 14: IT-registered rows are born checked; a car never carries a stamp.
     itVerifiedAt: cats[cat].cls === "IT" ? day(-720) : null,
     status: status as AssetStatus,
-    purchasedAt: day(-720), cost: 55_000, warrantyUntil: day(180), importedAt: null, ...extra,
+    purchasedAt: day(-720), cost: 55_000, warrantyUntil: day(180), importedAt: null,
+    // Phase 34: seeded labels count as printed, so the Labels queue starts empty (as after migration 27).
+    labelPrintedAt: day(-700), ...extra,
   });
 
   await prisma.asset.createMany({
@@ -193,7 +199,7 @@ async function main() {
       // assets rather than reassigned spares, so the spare pool (and the two
       // specs that lean on it) stay exactly as they were.
       mk("BR-LT-0166", "ThinkPad T14 Gen 2", "Laptop", "DEPLOYED", { assigneeId: emp("EMP-0090").id, cost: 48_000, purchasedAt: day(-1150), warrantyUntil: day(-60) }),
-      mk("BR-PH-0312", "Samsung A54", "Phone", "DEPLOYED", { assigneeId: emp("EMP-0090").id, cost: 18_000 }),
+      mk("BR-PH-0312", "Samsung A54", "Other", "DEPLOYED", { assigneeId: emp("EMP-0090").id, cost: 18_000 }),
       mk("BR-HS-0510", "Jabra Evolve2 40", "Headset", "DEPLOYED", { assigneeId: emp("EMP-0090").id, cost: 5_500 }),
       mk("BR-MN-0902", "Dell P2422H", "Monitor", "DEPLOYED", { assigneeId: emp("EMP-0042").id, cost: 9_500 }),
       mk("BR-MN-0731", "Dell P2419H", "Monitor", "DEFECTIVE", { defectiveSince: day(-9), vendorId: vendors[1].id, rmaRef: "RMA-8841", cost: 8_000, notes: "Backlight flicker" }),
@@ -202,13 +208,13 @@ async function main() {
       // KEEPS its defectiveSince — "was defective, isn't now" is what that
       // stage means, and clearing the date would erase the repair history
       mk("BR-MN-0911", "LG 27UL500", "Monitor", "SPARE", { cost: 12_000, purchasedAt: day(-200), defectiveSince: day(-70), notes: "Reflowed by Octagon Repairs — back in the spare pool" }),
-      mk("BR-PH-0287", "iPhone 12", "Phone", "TEMPORARY", { assigneeId: emp("EMP-0042").id, cost: 30_000, warrantyUntil: day(-100), purchasedAt: day(-1100) }),
-      mk("BR-PH-0301", "Samsung A54", "Phone", "SPARE", { cost: 18_000 }),
-      mk("BR-DK-0071", "WD19S Dock", "Dock", "DEPLOYED", { assigneeId: emp("EMP-0042").id, cost: 11_000 }),
-      mk("BR-DK-0033", "WD19S Dock", "Dock", "DEFECTIVE", { defectiveSince: day(-31), vendorId: vendors[1].id, rmaRef: "RMA-8790", cost: 11_000, notes: "Intermittent DisplayPort" }),
+      mk("BR-PH-0287", "iPhone 12", "Other", "TEMPORARY", { assigneeId: emp("EMP-0042").id, cost: 30_000, warrantyUntil: day(-100), purchasedAt: day(-1100) }),
+      mk("BR-PH-0301", "Samsung A54", "Other", "SPARE", { cost: 18_000 }),
+      mk("BR-DK-0071", "WD19S Dock", "Docking Station", "DEPLOYED", { assigneeId: emp("EMP-0042").id, cost: 11_000 }),
+      mk("BR-DK-0033", "WD19S Dock", "Docking Station", "DEFECTIVE", { defectiveSince: day(-31), vendorId: vendors[1].id, rmaRef: "RMA-8790", cost: 11_000, notes: "Intermittent DisplayPort" }),
       mk("BR-HS-0501", "Jabra Evolve2 65", "Headset", "DEPLOYED", { assigneeId: emp("EMP-0051").id, cost: 7_500 }),
       mk("BR-HS-0502", "Jabra Evolve2 40", "Headset", "SPARE", { cost: 5_500 }),
-      mk("BR-KB-0402", "Logitech MX Keys", "Peripheral", "DEFECTIVE", { defectiveSince: day(-2), cost: 6_000, notes: "Two keys unresponsive" }),
+      mk("BR-KB-0402", "Logitech MX Keys", "Other", "DEFECTIVE", { typeId: cats["Other"].typeIds[1], defectiveSince: day(-2), cost: 6_000, notes: "Two keys unresponsive" }),
       // Purchasing-class fixtures (Phase 13): one per branch a test needs —
       // a car that is assigned (custody works for a car), idle stock, a repair,
       // a building with no holder. Ramon (EMP-0051, ACTIVE) drives the car so
@@ -528,9 +534,9 @@ async function main() {
       slots: { create: [
         { name: "laptop", assetTypeId: cats["Laptop"].typeIds[0], required: true },
         { name: "monitor", assetTypeId: cats["Monitor"].typeIds[0], required: true },
-        { name: "dock", assetTypeId: cats["Dock"].typeIds[0], required: true },
+        { name: "dock", assetTypeId: cats["Docking Station"].typeIds[0], required: true },
         { name: "headset", assetTypeId: cats["Headset"].typeIds[0], required: true },
-        { name: "phone", assetTypeId: cats["Phone"].typeIds[0], required: true },
+        { name: "phone", assetTypeId: cats["Other"].typeIds[0], required: true },
         { name: "second monitor", assetTypeId: cats["Monitor"].typeIds[1], required: false },
       ] },
     },

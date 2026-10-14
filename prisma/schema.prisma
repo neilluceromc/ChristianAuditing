@@ -162,6 +162,7 @@ model User {
   stocktakesPosted         Stocktake[]             @relation("stocktakesPosted")
   stocktakeLinesCounted    StocktakeLine[]         @relation("stocktakeLinesCounted")
   employeeTransfers        EmployeeTransfer[]      @relation("employeeTransfers")
+  purchaseRecordsCreated   PurchaseRecord[]        @relation("purchaseRecordsCreated")
 }
 
 model UserPreference {
@@ -199,12 +200,14 @@ model Department {
 }
 
 model AssetCategory {
-  id     String      @id @default(cuid())
-  name   String      @unique
-  locked Boolean     @default(false)
-  cls    AssetClass  @default(IT)
-  types  AssetType[]
-  assets Asset[]
+  id        String      @id @default(cuid())
+  name      String      @unique
+  locked    Boolean     @default(false)
+  cls       AssetClass  @default(IT)
+  /// Phase 34 (spec §7.1): used when the category has no tags yet; tags that exist win (preferredPrefix).
+  tagPrefix String?
+  types     AssetType[]
+  assets    Asset[]
 }
 
 model AssetType {
@@ -231,29 +234,30 @@ enum VendorContractStatus {
 /// key the importer and the asset form already use; every profile column is
 /// nullable so the pre-phase stub rows stay valid.
 model Vendor {
-  id             String               @id @default(cuid())
-  name           String               @unique
-  locked         Boolean              @default(false)
-  registeredName String?
-  category       String?
-  contactPerson  String?
-  phone          String?
-  email          String?
-  address        String?
-  registrationNo String?
-  contractStatus VendorContractStatus @default(NONE)
-  contractStart  DateTime?
-  contractEnd    DateTime?
-  contractTerms  String?
-  notes          String?
-  archivedAt     DateTime?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @default(now()) @updatedAt
-  assets         Asset[]
-  requests       PurchaseRequest[]
-  documents      VendorDocument[]
-  bankAccounts   VendorBankAccount[]
-  stockLots      StockLot[]
+  id              String               @id @default(cuid())
+  name            String               @unique
+  locked          Boolean              @default(false)
+  registeredName  String?
+  category        String?
+  contactPerson   String?
+  phone           String?
+  email           String?
+  address         String?
+  registrationNo  String?
+  contractStatus  VendorContractStatus @default(NONE)
+  contractStart   DateTime?
+  contractEnd     DateTime?
+  contractTerms   String?
+  notes           String?
+  archivedAt      DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @default(now()) @updatedAt
+  assets          Asset[]
+  requests        PurchaseRequest[]
+  documents       VendorDocument[]
+  bankAccounts    VendorBankAccount[]
+  stockLots       StockLot[]
+  purchaseRecords PurchaseRecord[]
 
   @@index([archivedAt])
   @@index([category])
@@ -436,6 +440,15 @@ model Asset {
   brand                String?
   /// supplier invoice or receipt number, as Purchasing registered it
   invoiceRef           String?
+  /// Phase 34 (spec §4.5): official receipt (OR) number, beside invoiceRef.
+  receiptRef           String?
+  /// "manufacturer" | "vendor" | "both" — validated by zod, not an enum (spec §7.1).
+  warrantyCoveredBy    String?
+  warrantyContact      String?
+  /// Phase 34 (spec §5): set when its label was printed from the Labels tab; NULL = waiting.
+  labelPrintedAt       DateTime?
+  purchaseRecordId     String?
+  purchaseRecord       PurchaseRecord?  @relation(fields: [purchaseRecordId], references: [id], onDelete: Restrict)
   secrets              AssetSecret[]
   documents            AssetDocument[]
   reservations         Reservation[]
@@ -457,6 +470,8 @@ model Asset {
   @@index([loanDueAt])
   @@index([cls])
   @@index([importedAt])
+  @@index([purchaseRecordId])
+  @@index([labelPrintedAt])
 }
 
 model AssetSecret {
@@ -483,6 +498,28 @@ model AssetDocument {
   uploadedById String?
   uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
   createdAt    DateTime @default(now())
+}
+
+/// Phase 34 (spec §7.2): one per Register submit — the registration batch the Labels queue groups
+/// by, and the purchase (fees live here; the total is computed, never stored).
+model PurchaseRecord {
+  id          String     @id @default(cuid())
+  cls         AssetClass
+  vendorId    String?
+  vendor      Vendor?    @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  purchasedAt DateTime?
+  invoiceRef  String?
+  receiptRef  String?
+  unitCost    Decimal?   @db.Decimal(12, 2)
+  fees        Decimal?   @db.Decimal(12, 2)
+  quantity    Int
+  createdById String
+  createdBy   User       @relation("purchaseRecordsCreated", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime   @default(now())
+  assets      Asset[]
+
+  @@index([createdAt])
+  @@index([cls, createdAt])
 }
 
 model Reservation {
