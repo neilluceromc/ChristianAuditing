@@ -188,10 +188,23 @@ test.describe("it gaps", () => {
   test("2. register form: a Purchasing-class tag produces no live hint (class-scoped), but the server's own tag uniqueness still refuses it at submit", async ({ page }) => {
     await login(page, IT);
     await page.goto("/inventory/register");
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Model").fill("e2e class-scoped check");
-    await expect(page.getByLabel("Tag 1")).not.toHaveValue("");
-    const tag1 = page.getByLabel("Tag 1");
+    // Phase 34: category cards, the model sets the type, and a tag is typed by
+    // hand only in a batch's rows (one unit's tag is a chip) — so this runs at
+    // quantity 2, with both IT serials filled, and the submit goes through
+    // registerAssets, whose tag pre-check names the row in the same words.
+    const card = page.getByRole("button", { name: /^Laptop (\d+ in stock|None yet)$/ });
+    await waitForHydration(card);
+    await card.click();
+    await page.getByRole("combobox", { name: "Model", exact: true }).fill("e2e class-scoped check");
+    await page.getByRole("option", { name: /^\+ Add .e2e class-scoped check. as a new model$/ }).click();
+    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+    const howMany = page.getByRole("textbox", { name: "How many", exact: true });
+    await howMany.fill("2");
+    await howMany.blur();
+    const stamp = `E2E-GAPS-2-${Date.now()}`;
+    for (const i of [1, 2]) await page.getByLabel(`Serial ${i}`, { exact: true }).fill(`${stamp}-${i}`);
+    await expect(page.getByLabel("Tag 1", { exact: true })).not.toHaveValue("");
+    const tag1 = page.getByLabel("Tag 1", { exact: true });
     // Phase 30 (spec §5.5): the check runs while typing (400 ms). A positive
     // control first, so the negative below is not inert: an IT tag that is
     // already registered IS named, and linked to its record.
@@ -214,15 +227,17 @@ test.describe("it gaps", () => {
     await expect(page.getByText(/is already registered/)).toHaveCount(0);
 
     // The server's own `tag String @unique` (schema.prisma:372) is global,
-    // not class-scoped — submitting anyway is still refused. Quantity 1 goes
-    // through createAsset (plan P-13), whose tag pre-check names the typed tag
-    // on row 1 (ruling R3) — as text, never a link to the other class's record.
+    // not class-scoped — submitting anyway is still refused. registerAssets'
+    // pre-check is class-scoped like the live one (receiving.ts), so the
+    // cross-class collision lands on the unique constraint and is refused in
+    // its neutral copy — never naming, or linking to, the other class's record.
     const before = await db.asset.count();
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    const refused = page.getByText("Row 1 · BR-VH-0001 is already registered");
+    await page.getByRole("button", { name: "Register 2 laptops", exact: true }).click();
+    const refused = page.getByRole("alert").filter({ hasText: "One of those tags was just taken. Reload and try again." });
     await expect(refused).toBeVisible({ timeout: 10_000 });
     await expect(refused.getByRole("link")).toHaveCount(0);
-    await expect(tag1).toBeFocused();
+    await expect(page.getByText(/BR-VH-0001 is already registered/)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inventory\/register$/);
     expect(await db.asset.count()).toBe(before);
   });
 
