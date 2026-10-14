@@ -39,7 +39,7 @@ import { fmtDate } from "@/lib/format";
  *   lifecycle action); case 7 uses BR-LT-0201 (MacBook Air M3, DEPLOYED, held
  *   by EMP-0099 Carlo Dizon) instead, which carries no open approval, and
  *   case 4 uses BR-MN-0902 (Monitor, DEPLOYED, held by EMP-0042). BR-DK-0071
- *   (Dock, DEPLOYED, held by EMP-0042) carries none either. EMP-0095 Leo Tan,
+ *   (Docking Station, DEPLOYED, held by EMP-0042) carries none either. EMP-0095 Leo Tan,
  *   title "Contractor", Operations (no department policy), holds BR-LT-0210
  *   as a TEMPORARY loan. BR-VH-0001 is the seeded Vehicle (Purchasing class)
  *   tag. `it@thebackroomop.com` is seeded as User.name "J. Sarmiento"
@@ -50,7 +50,7 @@ import { fmtDate } from "@/lib/format";
  * Phase 24 fixture facts, likewise read off the seeded database rather than
  * assumed:
  *   The seed's assignable IT spares are BR-LT-0181 (Laptop), BR-MN-0910 and
- *   BR-MN-0911 (Monitors), BR-PH-0301 (Phone) and BR-HS-0502 (Headset).
+ *   BR-MN-0911 (Monitors), BR-PH-0301 (Other › Phone) and BR-HS-0502 (Headset).
  *   `spareOptions` offers three of the five: BR-MN-0910 carries an ACTIVE
  *   reservation and, since Phase 30 (spec §4.3), BR-LT-0181 is queued by the
  *   seeded APR-2041 — both are left out and counted in the dialog's

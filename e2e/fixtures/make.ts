@@ -131,8 +131,8 @@ async function main() {
   // `lifecycle-via-import` blocks. Restating them is what a real edited
   // export looks like, and it keeps this row an ordinary update.
   write("assets-mixed.xlsx", await toXlsxBuffer([...ASSET_EXPORT_COLUMNS, TYPO_COLUMN], [
-    asset({ tag: "BR-DK-9101", model: "WD22TB4 Dock", categoryName: "Dock", typeName: "USB-C Dock" }),
-    asset({ tag: "BR-PH-9102", model: "iPhone 15", categoryName: "Phone", typeName: "iPhone" }),
+    asset({ tag: "BR-DK-9101", model: "WD22TB4 Dock", categoryName: "Docking Station", typeName: "USB-C Dock" }),
+    asset({ tag: "BR-PH-9102", model: "iPhone 15", categoryName: "Other", typeName: "Phone" }),
     asset({ tag: "BR-LT-0148", model: "Dell Latitude 5420 (relabelled)", categoryName: "Laptop",
             typeName: "Dell Latitude", status: "DEPLOYED", assigneeName: "Marites Bautista",
             assigneeNo: "EMP-0042", rmaRef: "RMA-IGNORED" }),

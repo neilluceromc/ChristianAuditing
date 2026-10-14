@@ -392,7 +392,8 @@ test.describe("queues-records-ux — labels", () => {
     test.setTimeout(90_000);
     await login(page, IT);
     await page.goto("/inventory/labels");
-    await expect(page.getByText("Nothing to print")).toBeVisible({ timeout: 20_000 });
+    // Phase 34: the Labels tab's queue is empty after the seed (every seeded label is printed).
+    await expect(page.getByText("Nothing waiting. Everything registered has had its label printed.", { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByLabel("Tags", { exact: true })).toBeVisible();
     await expectNoSeriousAxe(page);
 
@@ -426,14 +427,17 @@ test.describe("queues-records-ux — labels", () => {
     await expectNoSeriousAxe(page);
   });
 
-  test("10. Purchasing's labels page: the crumb and Back name Purchasing assets — from a real link, and inferred", async ({ page }) => {
+  test("10. Purchasing's labels page: the crumb and the tabs name Purchasing — from a real link, and inferred", async ({ page }) => {
     test.setTimeout(90_000);
     await login(page, PURCHASING);
     await page.goto("/inventory/labels?cls=PURCHASING");
     const crumb = page.getByRole("navigation", { name: "Breadcrumb" });
     await expect(crumb.getByRole("link", { name: "Purchasing assets", exact: true })).toHaveAttribute("href", "/inventory?cls=PURCHASING", { timeout: 20_000 });
-    await expect(crumb.getByText("Print labels", { exact: true })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("link", { name: "Back to Purchasing assets" })).toHaveAttribute("href", "/inventory?cls=PURCHASING");
+    // Phase 34 (plan P-9): the crumb ends in "Labels"; the old "Back to Purchasing assets" link is gone —
+    // the way back is the crumb above, and the New equipment tabs keep the class.
+    await expect(crumb.getByText("Labels", { exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: /^Labels\b/ })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: "Register", exact: true })).toHaveAttribute("href", "/inventory/register?cls=PURCHASING");
     await expectNoSeriousAxe(page);
 
     // From a real entry point: the Purchasing list's selection bar carries the class.

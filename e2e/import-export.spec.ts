@@ -28,8 +28,10 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *   duplicate-serial case is built by the importer itself rather than taken
  *   from the seed. BR-LT-0148 is DEPLOYED to Marites Bautista (EMP-0042,
  *   ACTIVE). Dennis Ong EMP-0090 is the only OFFBOARDING employee and holds
- *   exactly three items. Categories: Laptop, Monitor, Phone, Dock, Headset,
- *   Peripheral, Uncategorised. Departments: IT, Finance, Sales, HR,
+ *   exactly three items. IT categories (Phase 34): Laptop, Workstation (PC),
+ *   Monitor, Headset, Mouse, Type C Hub, Docking Station, Laptop Bag, Other,
+ *   Uncategorised (phones are type Phone under Other; the mixed fixture's
+ *   "Ultrabook" row is the one category that does not exist). Departments: IT, Finance, Sales, HR,
  *   Operations. 10 employees, 3 of whom have policy gaps.
  * Never reference raw cuids — the DB is reseeded and ids change every time.
  */

@@ -32,7 +32,7 @@ import { defaultHoldExpiry } from "@/lib/holds";
  *
  * Seeded fixtures this file depends on, read off the seeded database rather
  * than assumed from the brief (prisma/seed.ts):
- *   BR-HS-0502 (Headset, SPARE, history row RELEASED), BR-PH-0301 (Phone,
+ *   BR-HS-0502 (Headset, SPARE, history row RELEASED), BR-PH-0301 (Other › Phone,
  *   SPARE, history row EXPIRED — already closed, so the sweep in case 8 never
  *   counts it), BR-MN-0911 (Monitor, SPARE, the RETURNED OK fixture:
  *   `defectiveSince` −70 d with `repairEndedAt` null, history row FULFILLED),
