@@ -11,7 +11,7 @@ import { recentPicks } from "@/server/recent-picks";
 import { toSearchParams } from "@/lib/url-state";
 import { fmtDate } from "@/lib/format";
 import {
-  ASSET_CLASSES, MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, defaultClassFor, isDirectLifecycle, parseCls,
+  ASSET_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, defaultClassFor, isDirectLifecycle, parseCls,
   withViewClsQS,
 } from "@/lib/asset-class";
 
@@ -41,8 +41,9 @@ export default async function RegisterAssetsPage({
 
   const [catalog, waiting, vendors, requests, employees, recentEmployees, recentVendors] = await Promise.all([
     registerCatalog(classes),
-    // The Labels tab's badge counts what waits in every class this role manages.
-    queueCount([...MANAGEABLE_CLASSES[user.role]]),
+    // The Labels tab's badge counts what waits in every class this role can
+    // register (ruling R18) — the same scope as the Labels tab itself.
+    queueCount([...REGISTRABLE_CLASSES[user.role]]),
     prisma.vendor.findMany({
       where: { archivedAt: null },
       select: { id: true, name: true },
