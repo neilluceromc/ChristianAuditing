@@ -1,14 +1,28 @@
-import type { AssetClass } from "@prisma/client";
+import type { AssetClass, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { groupLabelQueue, type QueueGroup } from "@/lib/label-queue";
 
-const WAITING = (classes: AssetClass[]) => ({ cls: { in: classes }, labelPrintedAt: null });
+/**
+ * Ruling R20: the Labels tab's scope — every asset in a class this role
+ * manages, plus any asset whose purchase record this user created (Purchasing
+ * prints the IT laptop it just registered, but not IT's own batches). The ONE
+ * definition: the queue, the badge, the sheet's pick/just/ids/tags resolution
+ * and markLabelsPrinted all AND this in.
+ */
+export function labelScope(classes: readonly AssetClass[], userId: string): Prisma.AssetWhereInput {
+  return { OR: [{ cls: { in: [...classes] } }, { purchaseRecord: { createdById: userId } }] };
+}
 
-/** Phase 34 (spec §5): the newest `limitGroups` batches with labels not yet printed, in the given classes. */
-export async function labelQueue(classes: AssetClass[], limitGroups = 50): Promise<{ groups: QueueGroup[]; more: boolean }> {
-  if (classes.length === 0) return { groups: [], more: false };
+const WAITING = (classes: readonly AssetClass[], userId: string): Prisma.AssetWhereInput => ({
+  ...labelScope(classes, userId), labelPrintedAt: null,
+});
+
+/** Phase 34 (spec §5): the newest `limitGroups` batches with labels not yet printed, in the Labels scope (R20). */
+export async function labelQueue(
+  classes: readonly AssetClass[], userId: string, limitGroups = 50,
+): Promise<{ groups: QueueGroup[]; more: boolean }> {
   const rows = await prisma.asset.findMany({
-    where: WAITING(classes),
+    where: WAITING(classes, userId),
     select: { id: true, tag: true, model: true, purchaseRecordId: true, createdAt: true },
     orderBy: { createdAt: "desc" }, take: 2000,
   });
@@ -16,7 +30,6 @@ export async function labelQueue(classes: AssetClass[], limitGroups = 50): Promi
   return { groups: groups.slice(0, limitGroups), more: groups.length > limitGroups };
 }
 
-export async function queueCount(classes: AssetClass[]): Promise<number> {
-  if (classes.length === 0) return 0;
-  return prisma.asset.count({ where: WAITING(classes) });
+export async function queueCount(classes: readonly AssetClass[], userId: string): Promise<number> {
+  return prisma.asset.count({ where: WAITING(classes, userId) });
 }

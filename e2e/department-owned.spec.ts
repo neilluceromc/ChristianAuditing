@@ -277,10 +277,7 @@ test.describe.serial("categories and types by class", () => {
 });
 
 test.describe("labels", () => {
-  // Ruling R18: Labels is scoped by the classes a role can REGISTER. Purchasing
-  // registers both classes (Phase 14), so it may print a laptop's label; IT
-  // registers IT only, so a car id smuggled into IT's sheet is the one skipped.
-  test("8. Purchasing prints two cars (and a laptop it could register); a car id smuggled into IT's sheet is skipped and counted", async ({ page }) => {
+  test("8. Purchasing prints two cars; a smuggled laptop id is skipped and counted", async ({ page }) => {
     const [a, b, lt] = await Promise.all([idOf("BR-VH-0001"), idOf("BR-VH-0002"), idOf("BR-LT-0148")]);
     await login(page, P);
     await page.goto(`/inventory/labels?ids=${a},${b}`);
@@ -291,15 +288,42 @@ test.describe("labels", () => {
     await expect(page.getByText("2 labels · 1 sheet")).toBeVisible();
 
     await page.goto(`/inventory/labels?ids=${a},${lt}`);
-    await expect(page.getByRole("img", { name: "Barcode BR-VH-0001" })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toBeVisible();
-    await expect(page.getByText(/could not be printed/)).toHaveCount(0);
+    await expect(page.getByText("1 selected asset could not be printed and was skipped.")).toBeVisible();
+    await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toHaveCount(0);
+  });
 
-    await login(page, IT);
-    await page.goto(`/inventory/labels?ids=${lt},${a}`);
-    await expect(page.getByText("1 selected asset could not be printed and was skipped.")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toBeVisible();
-    await expect(page.getByRole("img", { name: "Barcode BR-VH-0001" })).toHaveCount(0);
+  // Ruling R20: Labels is the classes a role MANAGES plus what this user
+  // registered. An IT batch registered by IT waits in IT's queue, never in
+  // Purchasing's (13a covers the other half: Purchasing's own IT batch).
+  test("8b. an IT batch registered by IT waits in IT's queue, not Purchasing's", async ({ page }) => {
+    const itUser = await db.user.findUniqueOrThrow({ where: { email: IT }, select: { id: true } });
+    const other = await db.assetCategory.findFirstOrThrow({ where: { name: "Other", cls: "IT" }, select: { id: true } });
+    const tag = "BR-OT-9871";
+    const record = await db.purchaseRecord.create({
+      data: {
+        cls: "IT", quantity: 1, createdById: itUser.id,
+        assets: { create: { tag, model: "Logitech C920 (e2e 8b)", categoryId: other.id, cls: "IT", status: "SPARE", labelPrintedAt: null } },
+      },
+    });
+    try {
+      const row = new RegExp(`\\b${tag}\\b`);
+      await login(page, IT);
+      await page.goto("/inventory/labels");
+      await expect(page.getByRole("heading", { name: "Waiting to print" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("checkbox", { name: row })).toHaveCount(1);
+
+      await login(page, P);
+      await page.goto("/inventory/labels?cls=PURCHASING");
+      await expect(page.getByRole("heading", { name: "Waiting to print" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("checkbox", { name: row })).toHaveCount(0);
+      // Nor can it be reached by ticking it by hand.
+      await page.goto(`/inventory/labels?cls=PURCHASING&pick=${record.id}`);
+      await expect(page.getByRole("heading", { name: "Waiting to print" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("img", { name: `Barcode ${tag}` })).toHaveCount(0);
+    } finally {
+      await db.asset.deleteMany({ where: { purchaseRecordId: record.id } });
+      await db.purchaseRecord.delete({ where: { id: record.id } });
+    }
   });
 });
 
@@ -427,9 +451,10 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     // Plan P-5: quantity 1 is one asset — it lands on Labels with its record ticked.
     await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
     await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
-    // Ruling R18: the Labels tab is scoped by what this role can REGISTER, so
-    // the IT laptop Purchasing just registered is ticked here and printable by
-    // Purchasing — not left waiting for IT.
+    // Ruling R20: the Labels tab is the classes this role manages PLUS what this
+    // user registered, so the IT laptop Purchasing just registered is ticked
+    // here and printable by Purchasing — not left waiting for IT (8b: IT's own
+    // IT batches never reach Purchasing's queue).
     await expect(page.getByRole("checkbox", { name: new RegExp(tag) })).toBeChecked({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "Print 1 label", exact: true })).toBeEnabled();
     await expect(page.getByRole("img", { name: `Barcode ${tag}` })).toHaveCount(1);

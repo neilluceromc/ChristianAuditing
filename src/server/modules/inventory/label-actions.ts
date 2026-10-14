@@ -6,7 +6,8 @@ import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
-import { REGISTRABLE_CLASSES } from "@/lib/asset-class";
+import { MANAGEABLE_CLASSES } from "@/lib/asset-class";
+import { labelScope } from "@/server/modules/inventory/label-queue";
 
 const schema = z.object({ assetIds: z.array(z.string().min(1)).min(1).max(200) });
 
@@ -22,8 +23,8 @@ export async function markLabelsPrinted(input: unknown): Promise<ActionResult<{ 
   const parsed = schema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { count } = await prisma.asset.updateMany({
-    // Ruling R18: the Labels tab's scope — the classes this role can register.
-    where: { id: { in: parsed.data.assetIds }, cls: { in: [...REGISTRABLE_CLASSES[user.role]] }, labelPrintedAt: null },
+    // Ruling R20: the Labels tab's scope — the classes this role manages, plus what this user registered.
+    where: { id: { in: parsed.data.assetIds }, ...labelScope(MANAGEABLE_CLASSES[user.role], user.id), labelPrintedAt: null },
     data: { labelPrintedAt: new Date() },
   });
   revalidatePath("/inventory/labels");

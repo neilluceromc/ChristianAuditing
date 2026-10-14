@@ -10,14 +10,14 @@ import { TagsBox } from "@/components/inventory/tags-box";
 import { NewEquipmentTabs } from "@/components/inventory/new-equipment-tabs";
 import { LabelQueueForm } from "@/components/inventory/label-queue-form";
 import { PrintLabelsButton } from "@/components/inventory/print-labels-button";
-import { labelQueue, queueCount } from "@/server/modules/inventory/label-queue";
+import { labelQueue, labelScope, queueCount } from "@/server/modules/inventory/label-queue";
 import { BULK_MAX } from "@/lib/inventory-list";
 import { CALIBRATION_MM, LABELS_PER_PAGE, clampStart, labelSlots } from "@/lib/label-geometry";
 import { qrBase } from "@/lib/label-qr";
 import { parseTagPaste } from "@/lib/tag-paste";
 import { categoryNoun } from "@/lib/register-catalog";
 import type { AssetClass } from "@prisma/client";
-import { MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, parseCls, withClsQS } from "@/lib/asset-class";
+import { MANAGEABLE_CLASSES, parseCls, withClsQS } from "@/lib/asset-class";
 
 type Params = Record<string, string | string[] | undefined>;
 type SheetRow = LabelRow & { id: string; cls: AssetClass };
@@ -67,14 +67,14 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
   const docsFailed = Number.parseInt(firstParam(sp.docsFailed) ?? "", 10);
   // Plan P-6: the ticked batches; `?just=` (Register's landing) ticks its own.
   const picked = new Set([...allParams(sp.pick).map((s) => s.trim()).filter(Boolean), ...(just ? [just] : [])]);
-  // Ruling R18: what the queue lists and what prints is scoped by the classes
-  // this role can REGISTER, not manage — Purchasing registers IT laptops
-  // (Phase 14), and Register lands here with that batch ticked, so its labels
-  // must be printable by the person who just registered them.
-  const registrable = [...REGISTRABLE_CLASSES[user.role]];
+  // Ruling R20: what the queue lists and what prints is the classes this role
+  // MANAGES plus any asset whose purchase record this user created —
+  // Purchasing registers IT laptops (Phase 14) and lands here with that batch
+  // ticked, so it can print those, but never IT's own batches.
   const manageable = MANAGEABLE_CLASSES[user.role];
+  const scope = labelScope(manageable, user.id);
   // The class the operator came from — only for the crumb and the tabs; what
-  // prints is scoped by `registrable` below (plan P-9). Every link
+  // prints is scoped by `scope` below (plan P-9; ruling R21). Every link
   // in carries `?cls=` for Purchasing; without it, infer: a role that manages
   // one class means that class, else the class of the resolved assets when
   // they are all one class (decided once they are loaded), else IT.
@@ -85,7 +85,7 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
     const listLabel = cls === "PURCHASING" ? "Purchasing assets" : "Inventory";
     return [{ label: listLabel, href: listHref }, { label: "Labels" }];
   };
-  const waiting = await queueCount(registrable);
+  const waiting = await queueCount(manageable, user.id);
 
   // Refuse, never slice (the defect §8 records for the export route's ?ids=).
   // The same sentence for a pasted list as for a selection (spec §10).
@@ -104,16 +104,16 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
   };
   if (ids.length + tags.length > BULK_MAX) return refusal(ids.length + tags.length);
 
-  const queue = await labelQueue(registrable, older ? 500 : 50);
+  const queue = await labelQueue(manageable, user.id, older ? 500 : 50);
   const pickedGroups = queue.groups.filter((g) => picked.has(g.recordId ?? g.key));
   const queuedIds = pickedGroups.flatMap((g) => g.assetIds);
   const select = { id: true, tag: true, model: true, cls: true, category: { select: { name: true } } } as const;
   const [queuedAssets, idAssets, tagAssets, justAssets] = await Promise.all([
-    queuedIds.length ? prisma.asset.findMany({ where: { id: { in: queuedIds }, cls: { in: registrable } }, select }) : [],
-    ids.length ? prisma.asset.findMany({ where: { id: { in: ids }, cls: { in: registrable } }, select, orderBy: { tag: "asc" } }) : [],
-    tags.length ? prisma.asset.findMany({ where: { tag: { in: tags }, cls: { in: registrable } }, select }) : [],
+    queuedIds.length ? prisma.asset.findMany({ where: { id: { in: queuedIds }, ...scope }, select }) : [],
+    ids.length ? prisma.asset.findMany({ where: { id: { in: ids }, ...scope }, select, orderBy: { tag: "asc" } }) : [],
+    tags.length ? prisma.asset.findMany({ where: { tag: { in: tags }, ...scope }, select }) : [],
     just
-      ? prisma.asset.findMany({ where: { purchaseRecordId: just, cls: { in: registrable } }, select: { category: { select: { name: true } } }, orderBy: { tag: "asc" } })
+      ? prisma.asset.findMany({ where: { purchaseRecordId: just, ...scope }, select: { category: { select: { name: true } } }, orderBy: { tag: "asc" } })
       : [],
   ]);
 
@@ -169,7 +169,7 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
           {/* A stale selection must not silently print fewer stickers than the
               operator counted. Cause-neutral: `ids.length - idAssets.length`
               counts an id whose asset was not found, or whose class this role
-              cannot register — "could not be printed" covers both. */}
+              cannot print (ruling R20) — "could not be printed" covers both. */}
           {missing > 0 && (
             <Banner tone="attention" title={`${missing} selected asset${missing === 1 ? "" : "s"} could not be printed and ${missing === 1 ? "was" : "were"} skipped.`} />
           )}
