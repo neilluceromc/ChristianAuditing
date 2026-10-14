@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flagDomain, isAllowedDomain, normalizeEmail } from "./auth-shared";
+import { flagDomain, isAllowedDomain, normalizeEmail, safeNextPath } from "./auth-shared";
 
 describe("normalizeEmail", () => {
   it("lowercases and trims", () => {
@@ -68,5 +68,22 @@ describe("flagDomain", () => {
 
   it("returns the domain for a normal enabled flag", () => {
     expect(flagDomain({ enabled: true, value: "thebackroomop.com" })).toBe("thebackroomop.com");
+  });
+});
+
+describe("safeNextPath", () => {
+  it("keeps a same-origin path with its query", () => {
+    expect(safeNextPath("/employees?q=a")).toBe("/employees?q=a");
+  });
+  it("refuses empty, absolute and protocol-relative targets", () => {
+    expect(safeNextPath(null)).toBeUndefined();
+    expect(safeNextPath("")).toBeUndefined();
+    expect(safeNextPath("https://evil.example")).toBeUndefined();
+    expect(safeNextPath("//evil.example")).toBeUndefined();
+  });
+  it("refuses backslash and control-character tricks that browsers fold into //", () => {
+    expect(safeNextPath("/\\evil.example")).toBeUndefined();
+    expect(safeNextPath("/\t/evil.example")).toBeUndefined();
+    expect(safeNextPath("/\n/evil.example")).toBeUndefined();
   });
 });
