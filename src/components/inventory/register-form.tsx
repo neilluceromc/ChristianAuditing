@@ -6,23 +6,22 @@ import type { AssetClass } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { FormField } from "@/components/ui/form-field";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { useBack } from "@/components/ui/back-link";
-import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { cn } from "@/lib/cn";
 import { CLASS_EXAMPLE, CREATABLE_BY_CLASS, DEFAULT_STATUS, HOLDER_STATUSES, withClsQS } from "@/lib/asset-class";
 import type { CreatableStatus } from "@/lib/asset-rules";
 import { defaultLoanDue, minLoanDue } from "@/lib/lifecycle";
 import { nextTags, preferredPrefix, RUN_REFUSAL } from "@/lib/receiving";
-import { MONEY_ERROR, normaliseCost } from "@/lib/register-input";
+import { MONEY_ERROR } from "@/lib/register-input";
+import {
+  centavosToDecimalString, formatPeso, moneyToCentavos, warrantyOnDate, warrantyOnLength, warrantyOnTyped, type WarrantyState,
+} from "@/lib/purchase-summary";
 import {
   clampQuantity, liveQuantity, MAX_BATCH, pasteSerials, resizeRows, retagRows, singleRowErrors, type RegisterRow,
 } from "@/lib/register-rows";
-import { carryDocuments } from "@/lib/register-documents";
 import { categoryNoun } from "@/lib/register-catalog";
 import { resolveModelType } from "@/lib/known-models";
 import { serialProblems } from "@/lib/serial-rules";
@@ -33,9 +32,10 @@ import { registerAssets } from "@/server/modules/purchases/receiving";
 import { uploadBatchDocument, uploadDocument } from "@/server/modules/inventory/document-actions";
 import type { CatalogCategory } from "@/server/modules/inventory/register-queries";
 import { CategoryCards } from "./category-cards";
+import { EMPTY_SLOTS, slotUploads, type SlotFiles } from "./document-slots";
 import { LabelCell } from "./label-cell";
 import { ModelCombobox } from "./model-combobox";
-import { RegisterDocuments, type StagedDocument } from "./register-documents";
+import { PURCHASE_KEYS, PurchaseSection } from "./purchase-section";
 import { RegisterInitialState } from "./register-initial-state";
 import { rowFeedback } from "./register-rows";
 import { SERIAL_REQUIRED, SerialSection } from "./serial-section";
@@ -125,17 +125,22 @@ export function RegisterForm({
   const [requestedStatus, setRequestedStatus] = useState<CreatableStatus>(DEFAULT_STATUS.IT);
   const [assigneeId, setAssigneeId] = useState<string | null>(null);
   const [loanDueAt, setLoanDueAt] = useState(() => defaultLoanDue(new Date()));
-  const [files, setFiles] = useState<StagedDocument[]>([]);
 
-  // Purchase (Task 7 replaces this block with the Purchase and warranty section).
+  // Purchase and warranty (spec §4.5) — closed until opened.
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [requestId, setRequestId] = useState("");
   const [vendorId, setVendorId] = useState("");
   const [purchasedAt, setPurchasedAt] = useState("");
-  const [warrantyUntil, setWarrantyUntil] = useState("");
-  const [cost, setCost] = useState("");
   const [invoiceRef, setInvoiceRef] = useState("");
+  const [receiptRef, setReceiptRef] = useState("");
+  const [cost, setCost] = useState("");
+  const [fees, setFees] = useState("");
+  // Review Focus 4: the length, the date and whether it was typed by hand move together.
+  const [warranty, setWarranty] = useState<WarrantyState>({ months: null, until: "", manual: false });
+  const [coveredBy, setCoveredBy] = useState("");
+  const [contact, setContact] = useState("");
   const [notes, setNotes] = useState("");
-  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [slots, setSlots] = useState<SlotFiles>(EMPTY_SLOTS);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   // Set by the first refused submit: from then on a gap is marked as the
@@ -176,6 +181,7 @@ export function RegisterForm({
     (serial ?? modelRef.current)?.focus();
   }, [focusModel]);
 
+  const vendorOptions: ComboOption[] = vendors.map((v) => ({ value: v.id, label: v.name }));
   const category = catalog.find((c) => c.id === categoryId);
   // Before a category is picked, follow the first one offered — Purchasing
   // staff may see only one class, and the other's words would be wrong.
@@ -251,16 +257,8 @@ export function RegisterForm({
     clearError("prefix");
   }
 
-  // Review R11: the documents staged for one quantity carry across to the other.
-  function carryTo(count: number) {
-    const next = carryDocuments({ files, invoice: invoiceFile }, quantity, count);
-    setFiles(next.files);
-    setInvoiceFile(next.invoice);
-  }
-
   function resize(count: number) {
     if (count === quantity) return;
-    carryTo(count);
     setRows((rs) => resizeRows(rs, count, runFor(prefix, count)));
   }
 
@@ -287,7 +285,6 @@ export function RegisterForm({
 
   function pasteColumn(at: number, values: string[]) {
     const out = pasteSerials(rows, at, values, (count) => runFor(prefix, count));
-    carryTo(out.rows.length);
     setRows(out.rows);
     setQuantityText(String(out.rows.length));
     setPasteNote(
@@ -309,16 +306,24 @@ export function RegisterForm({
     rootRef.current?.querySelector<HTMLInputElement>('[role="radiogroup"][aria-label="Where does it go"] input:checked')?.focus();
   }
 
-  // ── purchase (temporary, Task 7) ──────────────────────────────────────
+  // ── purchase and warranty (spec §4.5) ─────────────────────────────────
+  // Review Focus 4: the date follows the length from the purchase date until
+  // one is typed by hand; then no later date or length change overwrites it.
   function choosePurchased(value: string) {
     setPurchasedAt(value);
-    // Derived, pre-filled, never blank: purchase + 12 months, only while the
-    // warranty is still empty, so a hand-set date is never overwritten.
-    if (value && !warrantyUntil) {
-      const d = new Date(`${value}T00:00:00Z`);
-      d.setUTCFullYear(d.getUTCFullYear() + 1);
-      setWarrantyUntil(d.toISOString().slice(0, 10));
-    }
+    setWarranty((w) => warrantyOnDate(w, value));
+    clearError("purchasedAt");
+    clearError("warrantyUntil");
+  }
+
+  function chooseLength(months: number) {
+    setWarranty((w) => warrantyOnLength(w, purchasedAt, months));
+    clearError("warrantyUntil");
+  }
+
+  function typeWarrantyUntil(value: string) {
+    setWarranty((w) => warrantyOnTyped(w, value));
+    clearError("warrantyUntil");
   }
 
   function chooseRequest(id: string) {
@@ -329,12 +334,17 @@ export function RegisterForm({
     if (r?.vendorId && !vendorId && vendors.some((v) => v.id === r.vendorId)) setVendorId(r.vendorId);
   }
 
-  function normaliseCostField() {
-    const r = normaliseCost(cost);
-    if (r.ok) {
-      setCost(r.value);
-      clearError("cost");
-    } else setErrors((e) => ({ ...e, cost: MONEY_ERROR }));
+  /** Money settles on blur: `68,500` → `68,500.00`; anything unreadable says so and keeps what was typed. */
+  function normaliseMoney(key: "cost" | "fees") {
+    const text = key === "cost" ? cost : fees;
+    const set = key === "cost" ? setCost : setFees;
+    const c = moneyToCentavos(text);
+    if (c === "bad") {
+      setErrors((e) => ({ ...e, [key]: MONEY_ERROR }));
+      return;
+    }
+    set(c === null ? "" : formatPeso(c).slice(1));
+    clearError(key);
   }
 
   // ── status line (spec §4.6) ───────────────────────────────────────────
@@ -354,7 +364,9 @@ export function RegisterForm({
   // ── submit ────────────────────────────────────────────────────────────
   /**
    * Keeps what the next unit of the same delivery shares — the category, the model and its type
-   * (spec §3, ruling R7), vendor and dates — and clears the units, holder, loan date, cost, notes and files.
+   * (spec §3, ruling R7), the vendor, dates, request, invoice no. and warranty (length, until,
+   * covered by) — and clears the units, holder, loan date, brand, cost, fees, OR no., the
+   * repair contact, notes and the documents.
    */
   function startAnother(sentTags: string[]) {
     const mine = { ...written };
@@ -367,9 +379,11 @@ export function RegisterForm({
     setQuantityText("1");
     setBrand("");
     setCost("");
+    setFees("");
+    setReceiptRef("");
+    setContact("");
     setNotes("");
-    setFiles([]);
-    setInvoiceFile(null);
+    setSlots(EMPTY_SLOTS);
     setRequestedStatus(DEFAULT_STATUS[cls]);
     setAssigneeId(null);
     setLoanDueAt(defaultLoanDue(new Date()));
@@ -382,6 +396,8 @@ export function RegisterForm({
 
   function refuse(found: Record<string, string>) {
     categoryFirst.current = "categoryId" in found;
+    // A refusal inside the closed Purchase section opens it, so the field it names can take focus.
+    if (PURCHASE_KEYS.some((k) => k in found)) setPurchaseOpen(true);
     setErrors(found);
     setAttempted(true);
     setRefusals((n) => n + 1);
@@ -395,7 +411,8 @@ export function RegisterForm({
     setBanner(null);
     setRetryAfter(null);
 
-    const money = normaliseCost(cost);
+    const unit = moneyToCentavos(cost);
+    const fee = moneyToCentavos(fees);
     const found: Record<string, string> = {};
     if (!categoryId) found.categoryId = "Pick a category";
     if (model.trim().length < 2) found.model = "Name the model";
@@ -410,22 +427,27 @@ export function RegisterForm({
         else if (p === "duplicate") found[`serials.${i}`] = `Row ${i + 1} · serial ${rows[i].serial.trim()} appears twice in this batch`;
       });
     }
-    if (!money.ok) found.cost = MONEY_ERROR;
+    if (unit === "bad") found.cost = MONEY_ERROR;
+    if (fee === "bad") found.fees = MONEY_ERROR;
     if (single && holder && !assigneeId) found.assigneeId = "Pick who gets it";
     if (single && loan && (!loanDueAt || loanDueAt < minLoanDue(new Date()))) found.loanDueAt = "Pick the date the loan ends";
-    if (Object.keys(found).length > 0 || feedback.blocked) {
+    if (Object.keys(found).length > 0 || feedback.blocked || unit === "bad" || fee === "bad") {
       refuse(found);
       return;
     }
-    const costValue = money.ok ? money.value : "";
+    const costValue = unit === null ? "" : centavosToDecimalString(unit);
+    const feesValue = fee === null ? "" : centavosToDecimalString(fee);
+    const warrantyUntil = warranty.until;
     const sentTags = rows.map((r) => r.tag);
     const sentCls = cls;
+    const uploads = slotUploads(slots);
 
     startTransition(async () => {
       const res = single
         ? await createAsset({
             tag: rows[0].tag, serial: rows[0].serial, model, brand, categoryId, typeId, purchasedAt, cost: costValue,
             warrantyUntil, vendorId, invoiceRef, notes, requestId,
+            receiptRef, fees: feesValue, warrantyCoveredBy: coveredBy, warrantyContact: contact,
             requestedStatus: status, assigneeId: holder ? (assigneeId ?? "") : "", loanDueAt: loan ? loanDueAt : "",
           })
         : await registerAssets({
@@ -436,12 +458,16 @@ export function RegisterForm({
             serials: rows.map((r) => r.serial),
             purchasedAt: purchasedAt || undefined,
             cost: costValue || undefined,
+            fees: feesValue || undefined,
             vendorId: vendorId || undefined,
             requestId: requestId || undefined,
             warrantyUntil: warrantyUntil || undefined,
             brand: brand || undefined,
             notes: notes || undefined,
             invoiceRef: invoiceRef || undefined,
+            receiptRef: receiptRef || undefined,
+            warrantyCoveredBy: coveredBy || undefined,
+            warrantyContact: contact || undefined,
           });
 
       if (!res.ok) {
@@ -463,7 +489,7 @@ export function RegisterForm({
         // One asset. Documents upload after it exists, in parallel; a thrown
         // upload counts as a failed one and never strands the operator here.
         const id = res.data.id;
-        const results = await Promise.all(files.map(async ({ file, kind }) => {
+        const results = await Promise.all(uploads.map(async ({ file, kind }) => {
           const fd = new FormData();
           fd.set("assetId", id);
           fd.set("kind", kind);
@@ -475,7 +501,7 @@ export function RegisterForm({
           }
         }));
         const failed = results.filter((ok) => !ok).length;
-        if (failed > 0) router.push(`/inventory/${id}/documents?failed=${failed}&of=${files.length}`);
+        if (failed > 0) router.push(`/inventory/${id}/documents?failed=${failed}&of=${uploads.length}`);
         else if (intent === "register-add") {
           toast("Registered 1 asset", "settled");
           startAnother(sentTags);
@@ -483,22 +509,22 @@ export function RegisterForm({
         return;
       }
 
-      // A batch. The assets are committed; the invoice failing to attach must
-      // read as that, never as the registration having failed.
+      // A batch: each file is saved on every unit. The assets are committed; a
+      // file failing to attach must read as that, never as the registration having failed.
       const ids = res.data.ids;
-      let invoiceFailed = false;
-      if (invoiceFile) {
+      const results = await Promise.all(uploads.map(async ({ file, kind }) => {
         const fd = new FormData();
         for (const id of ids) fd.append("assetIds", id);
-        fd.set("kind", "invoice");
-        fd.set("file", invoiceFile);
+        fd.set("kind", kind);
+        fd.set("file", file);
         try {
-          invoiceFailed = !(await uploadBatchDocument(fd)).ok;
+          return (await uploadBatchDocument(fd)).ok;
         } catch {
-          invoiceFailed = true;
+          return false;
         }
-      }
-      if (invoiceFailed) router.push(labels("&docsFailed=1"));
+      }));
+      const failed = results.filter((ok) => !ok).length;
+      if (failed > 0) router.push(labels(`&docsFailed=${failed}`));
       else if (intent === "register-add") {
         toast(`Registered ${ids.length} assets`, "settled");
         startAnother(sentTags);
@@ -696,119 +722,60 @@ export function RegisterForm({
           </div>
         </section>
 
-        {/* Task 7 replaces this block with the Purchase and warranty section. */}
-        <section aria-labelledby="register-purchase-title" className="flex flex-col gap-3 border-t border-border pt-6">
-          <h2 id="register-purchase-title" className="sec">Purchase and warranty</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="Purchase request" hint="Only if this delivery fulfils a completed request." error={errors.requestId}>
-              {(p) => (
-                <Select
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  value={requestId}
-                  onChange={(e) => chooseRequest(e.target.value)}
-                >
-                  <option value="">—</option>
-                  {requests.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-                </Select>
-              )}
-            </FormField>
-            <FormField label="Vendor" error={errors.vendorId}>
-              {(p) => (
-                <EntityCombobox
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  options={vendors.map((v) => ({ value: v.id, label: v.name }))}
-                  recent={recentVendors}
-                  value={vendorId || null}
-                  onChange={(id) => setVendorId(id ?? "")}
-                  placeholder="Type a vendor name…"
-                />
-              )}
-            </FormField>
-            <FormField label="Purchased" error={errors.purchasedAt}>
-              {(p) => (
-                <Input
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  type="date"
-                  value={purchasedAt}
-                  onChange={(e) => choosePurchased(e.target.value)}
-                />
-              )}
-            </FormField>
-            <FormField label="Warranty until" hint="Pre-filled at purchase + 12 months — adjust if the quote says otherwise." error={errors.warrantyUntil}>
-              {(p) => (
-                <Input
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  type="date"
-                  value={warrantyUntil}
-                  onChange={(e) => setWarrantyUntil(e.target.value)}
-                />
-              )}
-            </FormField>
-            <FormField label="Cost (₱)" error={errors.cost}>
-              {(p) => (
-                <Input
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  inputMode="decimal"
-                  value={cost}
-                  onChange={(e) => setCost(e.target.value)}
-                  onBlur={normaliseCostField}
-                  onKeyDown={(e) => e.key === "Enter" && normaliseCostField()}
-                />
-              )}
-            </FormField>
-            <FormField label="Invoice / receipt no." error={errors.invoiceRef}>
-              {(p) => (
-                <Input
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  value={invoiceRef}
-                  onChange={(e) => setInvoiceRef(e.target.value)}
-                  onBlur={() => setInvoiceRef((v) => v.trim())}
-                />
-              )}
-            </FormField>
-            <FormField label="Brand" error={errors.brand}>
-              {(p) => (
-                <Input
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  value={brand}
-                  onChange={(e) => setBrand(e.target.value)}
-                  onBlur={() => setBrand((b) => b.trim())}
-                />
-              )}
-            </FormField>
-            <FormField label="Prefix" hint={example.prefixHint} error={prefixError}>
-              {(p) => (
-                <Input
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  className="font-mono"
-                  maxLength={2}
-                  value={prefix}
-                  onChange={(e) => changePrefix(e.target.value)}
-                />
-              )}
-            </FormField>
-
-            <RegisterDocuments
-              single={single}
-              files={files}
-              onFiles={setFiles}
-              invoiceFile={invoiceFile}
-              onInvoiceFile={setInvoiceFile}
-              disabled={pending}
-            />
-
-            <FormField label="Notes" error={errors.notes} className="sm:col-span-2">
-              {(p) => (
-                <Textarea
-                  id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  onBlur={() => setNotes((v) => v.trim())}
-                />
-              )}
-            </FormField>
-          </div>
-        </section>
+        <PurchaseSection
+          open={purchaseOpen}
+          onOpen={setPurchaseOpen}
+          single={single}
+          quantity={quantity}
+          requests={requests}
+          requestId={requestId}
+          onRequest={(id) => {
+            chooseRequest(id);
+            clearError("requestId");
+          }}
+          vendors={vendorOptions}
+          recentVendors={recentVendors}
+          vendorId={vendorId}
+          onVendor={(id) => {
+            setVendorId(id ?? "");
+            clearError("vendorId");
+          }}
+          purchasedAt={purchasedAt}
+          onPurchased={choosePurchased}
+          invoiceRef={invoiceRef}
+          onInvoice={setInvoiceRef}
+          receiptRef={receiptRef}
+          onReceipt={setReceiptRef}
+          cost={cost}
+          onCost={setCost}
+          fees={fees}
+          onFees={setFees}
+          onMoneyBlur={normaliseMoney}
+          warrantyMonths={warranty.months}
+          onWarrantyMonths={chooseLength}
+          warrantyUntil={warranty.until}
+          onWarrantyUntil={typeWarrantyUntil}
+          warrantyManual={warranty.manual}
+          coveredBy={coveredBy}
+          onCoveredBy={(v) => {
+            setCoveredBy(v);
+            clearError("warrantyCoveredBy");
+          }}
+          contact={contact}
+          onContact={setContact}
+          prefix={prefix}
+          onPrefix={changePrefix}
+          prefixHint={example.prefixHint}
+          prefixError={prefixError}
+          brand={brand}
+          onBrand={setBrand}
+          notes={notes}
+          onNotes={setNotes}
+          slots={slots}
+          onSlots={setSlots}
+          errors={errors}
+          disabled={pending}
+        />
 
         <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-3 border-t border-border bg-surface py-4">
           <p

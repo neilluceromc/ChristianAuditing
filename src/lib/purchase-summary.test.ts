@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { centavosToDecimalString, formatPeso, moneyToCentavos, purchaseTotal, warrantyUntilFrom } from "./purchase-summary";
+import {
+  centavosToDecimalString, formatPeso, moneyToCentavos, purchaseTotal, warrantyOnDate, warrantyOnLength, warrantyOnTyped,
+  warrantyUntilFrom, type WarrantyState,
+} from "./purchase-summary";
 
 describe("moneyToCentavos", () => {
   it("accepts 68,500 / 68500 / 68500.00 / ₱68,500.5", () => {
@@ -39,5 +42,37 @@ describe("warrantyUntilFrom (Review Focus 4)", () => {
   it("none or no date gives an empty string", () => {
     expect(warrantyUntilFrom("2026-10-12", 0)).toBe("");
     expect(warrantyUntilFrom("", 12)).toBe("");
+  });
+});
+
+describe("warranty state on Register (Review Focus 4)", () => {
+  const empty: WarrantyState = { months: null, until: "", manual: false };
+
+  it("the first purchase date with no length chosen picks 1 yr", () => {
+    expect(warrantyOnDate(empty, "2026-10-12")).toEqual({ months: 12, until: "2027-10-12", manual: false });
+  });
+  it("date, then length, then a new date: the until follows the length from the new date", () => {
+    let s = warrantyOnDate(empty, "2026-10-12");
+    s = warrantyOnLength(s, "2026-10-12", 24);
+    expect(s.until).toBe("2028-10-12");
+    s = warrantyOnDate(s, "2026-11-05");
+    expect(s).toEqual({ months: 24, until: "2028-11-05", manual: false });
+  });
+  it("None keeps None when a date arrives later, and clears the until", () => {
+    const s = warrantyOnLength(empty, "", 0);
+    expect(warrantyOnDate(s, "2026-10-12")).toEqual({ months: 0, until: "", manual: false });
+  });
+  it("a date typed by hand survives a later date or length change", () => {
+    let s = warrantyOnDate(empty, "2026-10-12");
+    s = warrantyOnTyped(s, "2029-01-15");
+    s = warrantyOnDate(s, "2026-11-05");
+    s = warrantyOnLength(s, "2026-11-05", 36);
+    expect(s).toEqual({ months: 36, until: "2029-01-15", manual: true });
+  });
+  it("clearing the typed date hands it back to the length", () => {
+    let s = warrantyOnTyped(warrantyOnDate(empty, "2026-10-12"), "2029-01-15");
+    s = warrantyOnTyped(s, "");
+    expect(s.manual).toBe(false);
+    expect(warrantyOnLength(s, "2026-10-12", 6).until).toBe("2027-04-12");
   });
 });

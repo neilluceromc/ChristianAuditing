@@ -32,6 +32,36 @@ export function warrantyUntilFrom(purchasedISO: string, months: number): string 
   return `${ty}-${String(tm + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+/**
+ * Register's warranty (Review Focus 4). `months` is null until a length is
+ * chosen; `manual` is set while "Warranty until" holds a date typed by hand,
+ * which no later date or length change overwrites. Clearing the field hands
+ * it back to the length.
+ */
+export interface WarrantyState {
+  months: number | null;
+  until: string;
+  manual: boolean;
+}
+
+/** The purchase date changed: the first date with no length chosen picks 1 yr (today's 12-month default). */
+export function warrantyOnDate(s: WarrantyState, purchasedISO: string): WarrantyState {
+  const months = s.months === null && purchasedISO ? 12 : s.months;
+  if (s.manual || months === null) return { ...s, months };
+  return { months, until: warrantyUntilFrom(purchasedISO, months), manual: false };
+}
+
+/** A length button was pressed. */
+export function warrantyOnLength(s: WarrantyState, purchasedISO: string, months: number): WarrantyState {
+  if (s.manual) return { ...s, months };
+  return { months, until: warrantyUntilFrom(purchasedISO, months), manual: false };
+}
+
+/** "Warranty until" was typed in. */
+export function warrantyOnTyped(s: WarrantyState, value: string): WarrantyState {
+  return { ...s, until: value, manual: value !== "" };
+}
+
 export const WARRANTY_COVERED_BY = ["manufacturer", "vendor", "both"] as const;
 export const WARRANTY_COVERED_BY_LABEL: Record<(typeof WARRANTY_COVERED_BY)[number], string> = {
   manufacturer: "Manufacturer", vendor: "Vendor", both: "Both",
