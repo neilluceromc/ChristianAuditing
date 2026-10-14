@@ -75,6 +75,28 @@ async function waitForHydration(target: Locator) {
   }).toPass({ timeout: 20_000 });
 }
 
+// Phase 34 register helpers, copied from e2e/register-labels.spec.ts (house rule: never import across spec files).
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A card is named "{name} {N} in stock" or "{name} None yet" — anchored at both ends, since "Laptop" prefixes "Laptop Bag". */
+async function pickCategory(page: Page, name: string) {
+  const card = page.getByRole("button", { name: new RegExp(`^${escapeRe(name)} (\\d+ in stock|None yet)$`) });
+  await waitForHydration(card);
+  await card.click();
+}
+
+const modelBox = (page: Page) => page.getByRole("combobox", { name: "Model", exact: true });
+
+/** Picks a known model from the list, else adds it as new — then a new model in a category with several types takes `type`. */
+async function pickModel(page: Page, model: string, type?: string) {
+  await modelBox(page).fill(model);
+  await expect(page.getByRole("option").first()).toBeVisible();
+  const known = page.getByRole("option", { name: model, exact: true });
+  if (await known.count()) await known.first().click();
+  else await page.getByRole("option", { name: new RegExp(`^\\+ Add .${escapeRe(model)}. as a new model$`) }).click();
+  if (type) await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: type });
+}
+
 /** The record's page header — the `<header>` that carries the tag as its h1. */
 function recordHeader(page: Page, tag: string): Locator {
   return page.locator("header").filter({ has: page.getByRole("heading", { level: 1, name: tag, exact: true }) });
@@ -338,29 +360,35 @@ test.describe("inventory list", () => {
 });
 
 test.describe("register", () => {
-  test("9. quantity 1 as a Loan lands on the record with Print label and Register another", async ({ page }) => {
+  test("9. quantity 1 as a Loan lands on Labels with its label waiting and Register more", async ({ page }) => {
     const model = `ThinkPad X13 (e2e ux loan ${Date.now()})`;
     const due = localDateISO(new Date(Date.now() + 10 * 86_400_000));
     const nina = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0097" } });
 
     await login(page, IT);
     await page.goto("/inventory/register");
-    await waitForHydration(page.getByLabel("Category"));
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Model").fill(model);
-    await page.getByRole("radiogroup", { name: "Initial state" }).getByText("Loan", { exact: true }).click();
-    await expect(page.getByLabel("Loan until")).toBeVisible();
-    await page.getByLabel("Assign to").fill("EMP-0097");
+    await pickCategory(page, "Laptop");
+    await pickModel(page, model, "ThinkPad");
+    await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-UX-9-${Date.now()}`);
+    // Phase 34: "Initial state" is "Where does it go"; Loan is Lend, Assign to is Who, Loan until is Back by.
+    await page.getByRole("radiogroup", { name: "Where does it go" }).getByText("Lend", { exact: true }).click();
+    const backBy = page.getByLabel("Back by");
+    await expect(backBy).toBeVisible();
+    await page.getByRole("combobox", { name: "Who", exact: true }).fill("EMP-0097");
     await page.getByRole("option", { name: /EMP-0097/ }).click();
-    await page.getByLabel("Loan until").fill(due);
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
+    await backBy.fill(due);
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
 
-    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
-    await expect(page.getByRole("link", { name: "Print label" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Register another" })).toHaveAttribute("href", "/inventory/register?cls=IT");
+    // Plan P-5: Register lands on the Labels tab with this unit's record ticked, its label to print, and Register more.
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
+    await expect(page.getByRole("link", { name: /^Labels\b/ })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("button", { name: "Print 1 label", exact: true })).toBeVisible();
+    // Labels names only the Purchasing class in its links (withClsQS); IT's is the bare Register tab.
+    await expect(page.getByRole("link", { name: "Register more" })).toHaveAttribute("href", "/inventory/register");
 
     const created = await db.asset.findFirstOrThrow({ where: { model } });
-    expect(new URL(page.url()).pathname).toBe(`/inventory/${created.id}`);
+    expect(new URL(page.url()).searchParams.get("just")).toBe(created.purchaseRecordId);
+    await expect(page.getByLabel(`Barcode ${created.tag}`, { exact: true })).toHaveCount(1);
     expect(created.status).toBe("TEMPORARY");
     expect(created.assigneeId).toBe(nina.id);
     expect(created.loanDueAt?.toISOString().slice(0, 10)).toBe(due);
@@ -371,10 +399,9 @@ test.describe("register", () => {
 
     await login(page, IT);
     await page.goto("/inventory/register");
-    await waitForHydration(page.getByLabel("Category"));
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Model").fill(model);
-    await page.getByLabel("Quantity").fill("3");
+    await pickCategory(page, "Laptop");
+    await pickModel(page, model, "ThinkPad");
+    await page.getByRole("textbox", { name: "How many", exact: true }).fill("3");
     await expect(page.getByLabel("Serial 3")).toBeVisible();
 
     // A real paste event carrying text/plain — the cell's onPaste reads clipboardData.
@@ -393,29 +420,33 @@ test.describe("register", () => {
     await page.getByLabel("Serial 1").press("Enter");
     await expect(page.getByLabel("Serial 2")).toBeFocused();
     await expect(page).toHaveURL(url);
-    await expect(page.getByRole("button", { name: "Register 3 assets" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Register 3 laptops", exact: true })).toBeVisible();
     expect(await db.asset.count({ where: { model } })).toBe(0);
 
     const tags = await Promise.all([1, 2, 3].map((i) => page.getByLabel(`Tag ${i}`).inputValue()));
-    await page.getByRole("button", { name: "Register 3 assets" }).click();
-    await expect(page.getByText(new RegExp(`^3 assets registered — ${tags[0]} … ${tags[2]}$`))).toBeVisible({ timeout: 30_000 });
-    for (const tag of tags) await expect(page.getByRole("link", { name: tag, exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Register 3 laptops", exact: true }).click();
+    // Plan P-5: the batch lands on Labels, ticked as "<first> → <last>", with every tag on the sheet.
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
+    await expect(page.getByRole("checkbox", { name: new RegExp(`${tags[0]} → ${tags[2]}$`) })).toBeChecked();
+    await expect(page.getByRole("button", { name: "Print 3 labels", exact: true })).toBeVisible();
+    for (const tag of tags) await expect(page.getByLabel(`Barcode ${tag}`, { exact: true })).toHaveCount(1);
 
     const rows = await db.asset.findMany({ where: { model }, orderBy: { tag: "asc" } });
     expect(rows.map((r) => r.tag)).toEqual([...tags].sort());
     expect(rows.map((r) => r.serial).sort()).toEqual(["SN-A", "SN-B", "SN-C"]);
   });
 
-  test("11. a refused submit shows every error at once and focuses Category", async ({ page }) => {
+  test("11. a refused submit shows every error at once and focuses the first category card", async ({ page }) => {
     await login(page, IT);
     await page.goto("/inventory/register");
-    const register = page.getByRole("button", { name: "Register 1 asset" });
+    const register = page.getByRole("button", { name: "Register 1 asset", exact: true });
     await waitForHydration(register);
     await register.click();
 
     await expect(page.getByText("Pick a category", { exact: true })).toBeVisible();
     await expect(page.getByText("Name the model", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("Category")).toBeFocused();
+    // Phase 34: the category is a grid of cards; a refusal naming it focuses the first.
+    await expect(page.getByRole("group", { name: "What" }).getByRole("button").first()).toBeFocused();
     await expect(page).toHaveURL(/\/inventory\/register$/);
   });
 });
