@@ -15,7 +15,10 @@ export function NewEquipmentTabs({ active, cls, waiting }: { active: "register" 
             <span className="inline-flex items-center gap-1.5">
               Labels
               {waiting > 0 && (
-                <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white" aria-label={`${waiting} waiting`}>{waiting}</span>
+                <>
+                  <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white" aria-hidden>{waiting}</span>
+                  <span className="sr-only">, {waiting} waiting</span>
+                </>
               )}
             </span>
           ),
