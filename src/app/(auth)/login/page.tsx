@@ -80,13 +80,16 @@ export default async function LoginPage({
               <Banner tone="fault" title="That quick sign-in is not available — the account is missing or disabled." />
             </div>
           )}
+          {quickAccounts.length === 0 && (
+            <p className="mt-3 text-[11px] text-fg-muted">None of the listed accounts exists or is enabled.</p>
+          )}
           <div className="mt-3 flex flex-col gap-2">
             {quickAccounts.map((a) => (
               <form key={a.email} action={quickSignIn}>
                 <input type="hidden" name="email" value={a.email} />
                 {next && <input type="hidden" name="next" value={next} />}
                 <Button type="submit" variant="secondary" className="w-full justify-between">
-                  <span>Sign in as {ROLE_LABELS[a.role]}</span>
+                  <span>Continue as {ROLE_LABELS[a.role]}</span>
                   <span className="font-mono text-[11px] text-fg-muted">{a.email}</span>
                 </Button>
               </form>

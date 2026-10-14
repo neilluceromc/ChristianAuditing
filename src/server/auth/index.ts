@@ -42,8 +42,7 @@ if (
 }
 
 // Staging-only one-click sign-in (no password). Registered only when
-// QUICK_LOGIN_EMAILS lists accounts; authorize() re-reads the env on every
-// call, so removing the line and restarting turns it off completely.
+// QUICK_LOGIN_EMAILS lists accounts at startup — never set it in production.
 if (parseQuickLoginEmails(process.env.QUICK_LOGIN_EMAILS).length > 0) {
   providers.push(
     Credentials({

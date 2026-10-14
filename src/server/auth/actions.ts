@@ -7,7 +7,7 @@ import bcrypt from "bcryptjs";
 import { signIn, signOut } from "./index";
 import { requireUser } from "./guards";
 import { prisma } from "../db/client";
-import { flagDomain, isAllowedDomain, normalizeEmail } from "@/lib/auth-shared";
+import { flagDomain, isAllowedDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
 import { isQuickLoginEmail } from "@/lib/quick-login";
 import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 
@@ -16,8 +16,7 @@ export interface AuthFormState {
 }
 
 function safeNext(raw: FormDataEntryValue | null): string | undefined {
-  const next = String(raw ?? "");
-  return next.startsWith("/") && !next.startsWith("//") ? next : undefined;
+  return safeNextPath(raw);
 }
 
 export async function signInWithCredentials(

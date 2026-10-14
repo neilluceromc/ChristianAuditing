@@ -37,3 +37,13 @@ export function flagDomain(
   const trimmed = flag.value.trim();
   return trimmed ? trimmed : null;
 }
+
+// A post-login redirect target must be a same-origin path. Browsers treat "\"
+// as "/" and strip tabs/newlines, so "/\evil.com" or "/<tab>/evil.com" would
+// otherwise become "//evil.com" — reject backslashes and control characters.
+export function safeNextPath(raw: unknown): string | undefined {
+  const next = String(raw ?? "");
+  if (!next.startsWith("/") || next.startsWith("//")) return undefined;
+  if (/[\\\u0000-\u001f\u007f]/.test(next)) return undefined;
+  return next;
+}
