@@ -1,9 +1,10 @@
 /** The document kinds a row can be tagged with (spec §2.3 adds "invoice" for batch uploads). */
-export const DOCUMENT_KINDS = ["receipt", "accountability-form", "photo", "other", "invoice"] as const;
+export const DOCUMENT_KINDS = ["receipt", "accountability-form", "photo", "other", "invoice", "official-receipt", "warranty-slip", "delivery-receipt"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 /** Phase 30 (spec §4.4, §5.4): the words a kind picker shows — the record's Documents tab and Register. */
 export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
   receipt: "Receipt", "accountability-form": "Accountability form", photo: "Photo", other: "Other", invoice: "Invoice",
+  "official-receipt": "Official receipt", "warranty-slip": "Warranty slip", "delivery-receipt": "Delivery receipt",
 };
 
 /** Phase 18 spec §2.3 — supplier and request document kinds, each with its label. */
