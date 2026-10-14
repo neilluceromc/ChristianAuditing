@@ -243,7 +243,8 @@ test.describe("inventory list", () => {
     await expect(itNav.getByRole("link", { name: "Register assets" })).toHaveAttribute("href", "/inventory/register");
     await itNav.getByRole("link", { name: "Register assets" }).click();
     await expect(page).toHaveURL(/\/inventory\/register$/, { timeout: 30_000 });
-    await expect(page.getByRole("heading", { name: "Register assets", level: 1 })).toBeVisible();
+    // Phase 34 (plan P-9): the page is "New equipment"; the nav link keeps its name.
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
 
     // purchasing_staff's list opens on Purchasing (plan P-7), so the Reference link names IT.
     await login(page, "purchasing@thebackroomop.com");
@@ -306,21 +307,42 @@ test.describe("inventory list", () => {
 });
 
 test.describe("asset record", () => {
-  test("create → duplicate tag is an inline error, valid create lands on the record", async ({ page }) => {
+  test("create → duplicate tag is an inline error, valid create lands on Labels and the record exists", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    // Phase 30 (spec §5.1–§5.2): one Register flow; the category comes first
-    // (it decides the tag's prefix), and at quantity 1 row 1 is the tag.
+    // Phase 34 (spec §4): the category is a card (it decides the tag's
+    // prefix), the model sets the type, and one unit's tag is a chip beside
+    // its required serial — not a field. A single register meets a taken tag
+    // only by a race, so stand one in: write an asset with the chip's tag.
     await page.goto("/inventory/register");
-    await page.getByLabel(/Category/).selectOption({ label: "Laptop" });
-    await page.getByLabel("Tag 1").fill("BR-LT-0148");
-    await page.getByLabel(/Model/).fill("e2e duplicate probe");
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    await expect(page.getByText("Row 1 · BR-LT-0148 is already registered")).toBeVisible();
+    const card = page.getByRole("button", { name: /^Laptop (\d+ in stock|None yet)$/ });
+    await waitForHydration(card);
+    await card.click();
+    const modelBox = page.getByRole("combobox", { name: "Model", exact: true });
+    await modelBox.fill("e2e duplicate probe");
+    await page.getByRole("option", { name: /^\+ Add .e2e duplicate probe. as a new model$/ }).click();
+    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+    await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-ITCORE-${Date.now()}`);
+    const taken = (await page.getByText(/^tag BR-LT-\d+$/).textContent())!.trim().replace(/^tag /, "");
+    const laptop = await db.assetCategory.findFirstOrThrow({ where: { name: "Laptop" } });
+    await db.asset.create({
+      data: { tag: taken, model: "e2e fixture — tag race", categoryId: laptop.id, status: "SPARE", itVerifiedAt: new Date() },
+    });
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    await expect(page.getByText(`Row 1 · ${taken} is already registered`)).toBeVisible();
 
-    const tag = `BR-ZZ-${String(Date.now() % 10000).padStart(4, "0")}`;
-    await page.getByLabel("Tag 1").fill(tag);
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    await expect(page.getByRole("heading", { name: tag })).toBeVisible();
+    // A different prefix (Tag prefix, in the Purchase section's fold-out) gives a free tag.
+    await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
+    await page.getByText("Tag prefix and notes", { exact: true }).click();
+    await page.getByRole("textbox", { name: "Tag prefix", exact: true }).fill("ZZ");
+    const chip = page.getByText(/^tag BR-ZZ-\d+$/);
+    await expect(chip).toBeVisible();
+    const tag = (await chip.textContent())!.trim().replace(/^tag /, "");
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    // Plan P-5: Register lands on Labels; the new record is there to open.
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
+    const created = await db.asset.findUniqueOrThrow({ where: { tag } });
+    await page.goto(`/inventory/${created.id}`);
+    await expect(page.getByRole("heading", { name: tag })).toBeVisible({ timeout: 20_000 });
   });
 
   test("edit writes field-level history rows", async ({ page }) => {
@@ -596,7 +618,8 @@ test.describe("reference data", () => {
     await page.getByRole("button", { name: "Add" }).click();
     await expect(page.getByRole("row", { name: new RegExp(name) })).toBeVisible();
 
-    await page.getByRole("row", { name: /^Laptop/ }).getByLabel(/Actions for Laptop/).click();
+    // Phase 34 seeds "Laptop Bag", which a bare /Actions for Laptop/ also matches.
+    await page.getByRole("button", { name: "Actions for Laptop", exact: true }).click();
     await page.getByRole("menuitem", { name: "Delete" }).click();
     await expect(page.getByText(/is in use by .* — move them first/)).toBeVisible();
   });
