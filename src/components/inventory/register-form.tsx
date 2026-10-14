@@ -14,7 +14,7 @@ import { cn } from "@/lib/cn";
 import { CLASS_EXAMPLE, CREATABLE_BY_CLASS, DEFAULT_STATUS, HOLDER_STATUSES, withClsQS } from "@/lib/asset-class";
 import type { CreatableStatus } from "@/lib/asset-rules";
 import { defaultLoanDue, minLoanDue } from "@/lib/lifecycle";
-import { nextTags, preferredPrefix, RUN_REFUSAL } from "@/lib/receiving";
+import { nextTags, prefixFor, RUN_REFUSAL } from "@/lib/receiving";
 import { MONEY_ERROR } from "@/lib/register-input";
 import {
   centavosToDecimalString, formatPeso, moneyToCentavos, warrantyOnDate, warrantyOnLength, warrantyOnTyped, type WarrantyState,
@@ -209,6 +209,9 @@ export function RegisterForm({
   const run = prefix ? nextTags(prefix, highestOf(highestByPrefix, written, prefix), quantity) : null;
   // Said as soon as two letters are in; one letter is still being typed.
   const prefixError = errors.prefix ?? (prefix.length === 2 && run && !run.ok ? RUN_REFUSAL[run.reason] : undefined);
+  // A category with no tagPrefix and no tags yet (one added in Admin) offers no prefix: a unit with no
+  // tag then needs one typed in the "Tag prefix and notes" fold-out (at quantity 1 there is no Tag box).
+  const needsPrefix = !!category && !prefix && rows.some((r) => !r.tag.trim());
 
   const { hits, flush } = useIdentifierCheck(
     rows.map((r) => r.tag),
@@ -234,15 +237,12 @@ export function RegisterForm({
       return next;
     });
 
-  /** Spec §7.1: the tags' own prefix wins; a category with no tags yet falls back to its seeded `tagPrefix`. */
-  const prefixFor = (id: string) =>
-    preferredPrefix(prefixCountsByCategory[id] ?? []) ?? catalog.find((c) => c.id === id)?.tagPrefix ?? "";
-
   function chooseCategory(id: string) {
     if (id === categoryId) return;
     setCategoryId(id);
     setTypeId("");
-    const p = prefixFor(id);
+    // Ruling R23: the category's tagPrefix wins; the learned prefix only fills a missing one.
+    const p = prefixFor(catalog.find((c) => c.id === id)?.tagPrefix, prefixCountsByCategory[id] ?? []);
     setPrefix(p);
     setRows((rs) => retagRows(rs, p ? runFor(p, rs.length) : null));
     clearRowErrors("tags");
@@ -307,8 +307,9 @@ export function RegisterForm({
   }
 
   // ── purchase and warranty (spec §4.5) ─────────────────────────────────
-  // Review Focus 4: the date follows the length from the purchase date until
-  // one is typed by hand; then no later date or length change overwrites it.
+  // Review Focus 4 and ruling R12: the date follows the length from the purchase
+  // date. A hand-typed date survives a later purchase-date change; pressing a
+  // length button is an explicit choice that re-derives it and drops the typed date.
   function choosePurchased(value: string) {
     setPurchasedAt(value);
     setWarranty((w) => warrantyOnDate(w, value));
@@ -351,6 +352,7 @@ export function RegisterForm({
   const still: string[] = [];
   if (!categoryId) still.push("a category");
   if (model.trim().length < 2) still.push("a model");
+  if (needsPrefix) still.push("a tag prefix");
   if (newModelNeedsType) {
     // A typed known model whose type was cleared through "Change type" is not a new model.
     const r = resolveModelType(models, model);
@@ -418,6 +420,8 @@ export function RegisterForm({
     if (model.trim().length < 2) found.model = "Name the model";
     if (newModelNeedsType) found.typeId = "Pick the type for this new model";
     if (prefix && run && !run.ok) found.prefix = RUN_REFUSAL[run.reason];
+    // Keyed `prefix` so `refuse` opens the Purchase section and its fold-out, and focus lands on Tag prefix.
+    if (needsPrefix && category) found.prefix = `Pick a two-letter tag prefix for ${category.name}`;
     // Spec §4.3: nothing is saved with a gap; the copy is the server's own (Task 3).
     if (single) {
       if (problems[0] === "required") found.serials = SERIAL_REQUIRED;

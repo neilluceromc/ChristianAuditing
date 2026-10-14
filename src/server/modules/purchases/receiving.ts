@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { NEW_MODEL_TYPE, newModelNeedsType } from "@/server/modules/inventory/register-queries";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
@@ -104,6 +105,8 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
     const type = await prisma.assetType.findUnique({ where: { id: d.typeId }, select: { categoryId: true } });
     if (!type || type.categoryId !== d.categoryId) errors.typeId = "That type doesn't belong to the chosen category";
   }
+  // Spec §8, ruling R26: a new model needs its type when the category has types.
+  else if (category && (await newModelNeedsType(d.categoryId, d.model, d.typeId))) errors.typeId = NEW_MODEL_TYPE;
 
   // Serial is unique fleet-wide (like tag), but a batch never gets to check
   // itself against the database mid-loop — two rows of ONE submission naming
