@@ -55,13 +55,16 @@ UPDATE "Asset" SET "labelPrintedAt" = "createdAt" WHERE "labelPrintedAt" IS NULL
 DO $$
 DECLARE
   c_other TEXT; c_mouse TEXT; c_phone TEXT; c_periph TEXT;
-  t_phone TEXT; t_keyboard TEXT; clash TEXT;
+  t_phone TEXT; t_keyboard TEXT; t_wired TEXT; clash TEXT;
+  touched TEXT[] := ARRAY[]::TEXT[];
 BEGIN
   -- 0. Every name lookup below is case-insensitive, matching the lower(name) unique index
   --    (migration 20260922010908). A target name held by a Purchasing category would receive IT
-  --    assets and trip asset_class_invariants, so stop first with a clear message.
+  --    assets and trip asset_class_invariants, and a SOURCE name (Phone, Peripheral, Dock) held by
+  --    one would be renamed, emptied or dropped; so stop first with a clear message.
   SELECT "name" INTO clash FROM "AssetCategory"
-   WHERE lower("name") IN ('workstation (pc)','mouse','type c hub','laptop bag','other','docking station')
+   WHERE lower("name") IN ('workstation (pc)','mouse','type c hub','laptop bag','other','docking station',
+                           'phone','peripheral','dock')
      AND "cls" <> 'IT'
    LIMIT 1;
   IF clash IS NOT NULL THEN
@@ -104,11 +107,21 @@ BEGIN
     RAISE EXCEPTION 'Phase 34 migration: could not resolve Other / Phone and Other / Keyboard; nothing was moved';
   END IF;
 
-  -- 5. Peripheral's Mouse type becomes Mouse/Wired, assets and all
+  -- 5. Peripheral's Mouse type becomes Mouse/Wired, assets and all. When Mouse/Wired already
+  --    exists, the Peripheral Mouse type's assets, slots and exceptions move onto it instead.
   IF c_periph IS NOT NULL AND c_mouse IS NOT NULL THEN
     UPDATE "AssetType" SET "categoryId" = c_mouse, "name" = 'Wired'
      WHERE "categoryId" = c_periph AND lower("name") = 'mouse'
        AND NOT EXISTS (SELECT 1 FROM "AssetType" WHERE "categoryId" = c_mouse AND lower("name") = 'wired');
+    SELECT "id" INTO t_wired FROM "AssetType" WHERE "categoryId" = c_mouse AND lower("name") = 'wired';
+    -- Only a Peripheral move makes Wired a merge target; a re-run never merges Mouse's own slots.
+    touched := touched || ARRAY[t_wired];
+    UPDATE "Asset" SET "categoryId" = c_mouse, "typeId" = t_wired
+     WHERE "typeId" IN (SELECT "id" FROM "AssetType" WHERE "categoryId" = c_periph AND lower("name") = 'mouse');
+    UPDATE "PolicySlot" SET "assetTypeId" = t_wired
+     WHERE "assetTypeId" IN (SELECT "id" FROM "AssetType" WHERE "categoryId" = c_periph AND lower("name") = 'mouse');
+    UPDATE "EmployeeSlotException" SET "assetTypeId" = t_wired
+     WHERE "assetTypeId" IN (SELECT "id" FROM "AssetType" WHERE "categoryId" = c_periph AND lower("name") = 'mouse');
     UPDATE "Asset" SET "categoryId" = c_mouse
      WHERE "typeId" IN (SELECT "id" FROM "AssetType" WHERE "categoryId" = c_mouse);
   END IF;
@@ -118,7 +131,10 @@ BEGIN
      WHERE NOT EXISTS (SELECT 1 FROM "AssetType" WHERE "categoryId" = c_mouse AND lower("name") = 'wired');
   END IF;
 
-  -- 6. Phone -> Other/Phone; Peripheral (the rest) -> Other/Keyboard
+  -- 6. Phone -> Other/Phone (every Phone type, spec §2.2); each remaining Peripheral type -> the
+  --    Other type of the same name (Keyboard -> Other/Keyboard; a type Other lacks is created there
+  --    under its own name), with its assets, policy slots and slot exceptions. Peripheral's Mouse
+  --    type was settled in step 5 (moved, or emptied onto Mouse/Wired) and is never copied to Other.
   IF c_phone IS NOT NULL THEN
     UPDATE "Asset" SET "categoryId" = c_other, "typeId" = t_phone WHERE "categoryId" = c_phone;
     UPDATE "PolicySlot" SET "assetTypeId" = t_phone
@@ -127,34 +143,51 @@ BEGIN
      WHERE "assetTypeId" IN (SELECT "id" FROM "AssetType" WHERE "categoryId" = c_phone);
   END IF;
   IF c_periph IS NOT NULL THEN
-    UPDATE "Asset" SET "categoryId" = c_other, "typeId" = t_keyboard WHERE "categoryId" = c_periph;
-    UPDATE "PolicySlot" SET "assetTypeId" = t_keyboard
-     WHERE "assetTypeId" IN (SELECT "id" FROM "AssetType" WHERE "categoryId" = c_periph);
-    UPDATE "EmployeeSlotException" SET "assetTypeId" = t_keyboard
-     WHERE "assetTypeId" IN (SELECT "id" FROM "AssetType" WHERE "categoryId" = c_periph);
+    INSERT INTO "AssetType" ("id","name","categoryId","locked")
+    SELECT 'p34type_other_' || md5(lower(t."name")), t."name", c_other, t."locked"
+      FROM "AssetType" t
+     WHERE t."categoryId" = c_periph AND lower(t."name") <> 'mouse'
+       AND NOT EXISTS (SELECT 1 FROM "AssetType" o WHERE o."categoryId" = c_other AND lower(o."name") = lower(t."name"));
+    touched := touched || ARRAY(
+      SELECT o."id" FROM "AssetType" t JOIN "AssetType" o ON o."categoryId" = c_other AND lower(o."name") = lower(t."name")
+       WHERE t."categoryId" = c_periph AND lower(t."name") <> 'mouse');
+    UPDATE "Asset" a SET "categoryId" = c_other, "typeId" = o."id"
+      FROM "AssetType" t JOIN "AssetType" o ON o."categoryId" = c_other AND lower(o."name") = lower(t."name")
+     WHERE t."categoryId" = c_periph AND lower(t."name") <> 'mouse' AND a."typeId" = t."id";
+    -- An untyped Peripheral asset goes to Other untyped (it has no type name to carry).
+    UPDATE "Asset" SET "categoryId" = c_other WHERE "categoryId" = c_periph AND "typeId" IS NULL;
+    UPDATE "PolicySlot" s SET "assetTypeId" = o."id"
+      FROM "AssetType" t JOIN "AssetType" o ON o."categoryId" = c_other AND lower(o."name") = lower(t."name")
+     WHERE t."categoryId" = c_periph AND lower(t."name") <> 'mouse' AND s."assetTypeId" = t."id";
+    UPDATE "EmployeeSlotException" e SET "assetTypeId" = o."id"
+      FROM "AssetType" t JOIN "AssetType" o ON o."categoryId" = c_other AND lower(o."name") = lower(t."name")
+     WHERE t."categoryId" = c_periph AND lower(t."name") <> 'mouse' AND e."assetTypeId" = t."id";
   END IF;
+  -- Every type a slot or exception may have been merged onto above (Phone and Keyboard as before).
+  touched := touched || ARRAY[t_phone, t_keyboard];
 
-  -- 7. Merge duplicate slots a policy now holds on one type (iPhone + Android -> one Phone slot):
+  -- 7. Merge duplicate slots a policy now holds on one type (iPhone + Android -> one Phone slot;
+  --    Peripheral Mouse onto an existing Mouse/Wired; a Peripheral type onto Other's same-name type):
   --    keep the oldest id, OR the flags, move waivers to it, drop the rest.
   WITH dup AS (
     SELECT "policyId", "assetTypeId", min("id") AS keep, bool_or("required") AS req, bool_or("loaner") AS loan
-      FROM "PolicySlot" WHERE "assetTypeId" IN (t_phone, t_keyboard)
+      FROM "PolicySlot" WHERE "assetTypeId" = ANY(touched)
      GROUP BY "policyId", "assetTypeId" HAVING count(*) > 1
   )
   UPDATE "PolicySlot" s SET "required" = d.req, "loaner" = d.loan FROM dup d WHERE s."id" = d.keep;
   UPDATE "EmployeeSlotException" e SET "slotId" = k.keep
     FROM (SELECT s."id" AS sid, min(s2."id") AS keep
             FROM "PolicySlot" s JOIN "PolicySlot" s2 ON s2."policyId" = s."policyId" AND s2."assetTypeId" = s."assetTypeId"
-           WHERE s."assetTypeId" IN (t_phone, t_keyboard) GROUP BY s."id") k
+           WHERE s."assetTypeId" = ANY(touched) GROUP BY s."id") k
    WHERE e."slotId" = k.sid AND k.sid <> k.keep;
   DELETE FROM "PolicySlot" s
    USING (SELECT "policyId", "assetTypeId", min("id") AS keep FROM "PolicySlot"
-           WHERE "assetTypeId" IN (t_phone, t_keyboard) GROUP BY "policyId", "assetTypeId") d
+           WHERE "assetTypeId" = ANY(touched) GROUP BY "policyId", "assetTypeId") d
    WHERE s."policyId" = d."policyId" AND s."assetTypeId" = d."assetTypeId" AND s."id" <> d.keep;
   --    Same-employee duplicate exceptions on one type and slot: keep the oldest.
   DELETE FROM "EmployeeSlotException" e
    USING "EmployeeSlotException" e2
-   WHERE e."assetTypeId" IN (t_phone, t_keyboard)
+   WHERE e."assetTypeId" = ANY(touched)
      AND e."employeeId" = e2."employeeId" AND e."kind" = e2."kind" AND e."assetTypeId" = e2."assetTypeId"
      AND e."slotId" IS NOT DISTINCT FROM e2."slotId"
      AND (e."createdAt", e."id") > (e2."createdAt", e2."id");
