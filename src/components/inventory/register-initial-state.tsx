@@ -5,15 +5,21 @@ import { FormError, FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
-import { DEFAULT_STATUS, STATUS_LABEL } from "@/lib/asset-class";
+import { DEFAULT_STATUS } from "@/lib/asset-class";
 import type { CreatableStatus } from "@/lib/asset-rules";
 import { minLoanDue } from "@/lib/lifecycle";
 
+/** Phase 34 (spec §4.4): the choices in words people use, not the status names. */
+const WHERE_LABEL: Record<CreatableStatus, string> = {
+  SPARE: "Spare stock", DEPLOYED: "Give to someone", TEMPORARY: "Lend", STORED: "Stored", OPERATIONAL: "In use",
+};
+
 /** Spec §5.3: what the chosen initial state means, in one line. */
 function stateLine(status: CreatableStatus, cls: AssetClass): string {
-  if (status === DEFAULT_STATUS[cls]) return "Registered as a spare, ready to assign.";
+  if (status === DEFAULT_STATUS[cls]) return cls === "IT" ? "Goes to spare stock, ready to hand out." : "Goes to storage.";
   if (status === "TEMPORARY") return "Lent to the chosen person until the date below.";
-  return "Deployed to the chosen person.";
+  if (status === "OPERATIONAL") return "In use from today.";
+  return "Given to the chosen person.";
 }
 
 /**
@@ -54,14 +60,13 @@ export function RegisterInitialState({
   errors: Record<string, string>;
 }) {
   return (
-    <div className="flex flex-col gap-3 border-t border-border-faint pt-4 sm:col-span-2">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <span aria-hidden className="text-xs font-medium text-fg">Initial state</span>
         <SegmentedControl
-          aria-label="Initial state"
+          aria-label="Where does it go"
           aria-invalid={!!errors.requestedStatus}
           className="self-start"
-          options={offered.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+          options={offered.map((s) => ({ value: s, label: WHERE_LABEL[s] }))}
           value={status}
           onChange={(v) => onStatus(v as CreatableStatus)}
         />
@@ -71,7 +76,7 @@ export function RegisterInitialState({
       </div>
       {holder && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <FormField label="Assign to" required error={errors.assigneeId}>
+          <FormField label="Who" required error={errors.assigneeId}>
             {(p) => (
               <EntityCombobox
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
@@ -84,7 +89,7 @@ export function RegisterInitialState({
             )}
           </FormField>
           {status === "TEMPORARY" && (
-            <FormField label="Loan until" required error={errors.loanDueAt}>
+            <FormField label="Back by" required error={errors.loanDueAt}>
               {(p) => (
                 <Input
                   id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
