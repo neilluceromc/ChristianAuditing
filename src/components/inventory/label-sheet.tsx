@@ -37,9 +37,16 @@ export function LabelSheet({
   // Validated ONCE: the reason a base URL is unusable never depends on the tag,
   // so this is one note per sheet rather than the same refusal on twelve labels.
   const base = qrBase(baseUrl);
+  const slots = labelSlots(rows.map((r) => r.tag), startAt ?? 1);
+  // An empty picker sheet still shows one page (blanks before the start, then
+  // free numbered slots) so the start can be chosen before anything is ticked.
+  const pages: (string | null)[][] =
+    slots.length === 0 && startHref
+      ? [Array<null>(Math.min(Math.max(1, Math.floor(startAt ?? 1)), LABELS_PER_PAGE) - 1).fill(null)]
+      : slots;
   return (
     <div className="label-sheets">
-      {labelSlots(rows.map((r) => r.tag), startAt ?? 1).map((page, p) => (
+      {pages.map((page, p) => (
         <div
           key={p}
           className="label-page"
@@ -67,7 +74,7 @@ export function LabelSheet({
                   style={{ boxSizing: "border-box", outline: "0.2mm dashed #C4CAD4", position: "relative" }}
                 >
                   {startHref && (
-                    <a className="label-slot-link print:hidden" href={startHref(i + 1)} aria-label={`Start at sticker ${i + 1}`}>
+                    <a className="label-slot-link print:hidden" href={startHref(i + 1)} aria-label={`Start at sticker ${i + 1} (used)`}>
                       used
                     </a>
                   )}
