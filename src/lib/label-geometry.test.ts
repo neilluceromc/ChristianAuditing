@@ -3,6 +3,7 @@ import {
   LABELS_PER_PAGE, LABEL_CELL_MM, LABEL_USABLE_MM,
   QR_PREFERRED_MODULE_MM, QR_MIN_MODULE_MM, QR_MAX_DARK_MM, QR_QUIET_MODULES,
   barcodeFit, labelPages, qrFit, clampStart, labelSlots,
+  LABEL_LAYOUT_MM, LABEL_PADDING_MM as PAD,
 } from "./label-geometry";
 
 describe("sheet geometry", () => {
@@ -204,5 +205,16 @@ describe("labelSlots — Start at label N (spec §5.1)", () => {
   });
   it("clampStart keeps 1…12", () => {
     expect([clampStart(undefined), clampStart("0"), clampStart("5"), clampStart("99"), clampStart("x")]).toEqual([1, 1, 5, LABELS_PER_PAGE, 1]);
+  });
+});
+
+describe("Phase 34 label layout (spec §6)", () => {
+  it("top row + QR row + tag + barcode + gaps fit inside the cell height", () => {
+    const L = LABEL_LAYOUT_MM;
+    const total = 2 * PAD + L.topRow + L.gap + QR_MAX_DARK_MM + 2 * QR_QUIET_MODULES * QR_PREFERRED_MODULE_MM + L.gap + L.tag + L.gap + L.barcode;
+    expect(total).toBeLessThanOrEqual(LABEL_CELL_MM.height);
+  });
+  it("keeps today's 4.6mm tag size as the floor", () => {
+    expect(LABEL_LAYOUT_MM.tag).toBeGreaterThanOrEqual(4.6);
   });
 });

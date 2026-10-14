@@ -1,134 +1,38 @@
-import { code128Modules } from "@/lib/code128";
-import { qrBase, qrUrlFor, type QrBase } from "@/lib/label-qr";
-import { qrMatrix } from "@/lib/qr";
+import { qrBase } from "@/lib/label-qr";
 import {
-  CALIBRATION_MM, LABEL_CELL_MM, LABEL_COLUMNS, LABEL_PADDING_MM, LABEL_USABLE_MM,
-  PAGE_MARGIN_MM, PAGE_MM, QR_QUIET_MODULES, barcodeFit, labelSlots, qrFit,
+  CALIBRATION_MM, LABEL_CELL_MM, LABEL_COLUMNS, LABELS_PER_PAGE,
+  PAGE_MARGIN_MM, PAGE_MM, labelSlots,
 } from "@/lib/label-geometry";
+import { LabelCell, QR_NOTE } from "./label-cell";
+
+// Re-exported so the labels page's `QR_NOTE` import keeps working after the
+// move into `label-cell.tsx`.
+export { QR_NOTE };
 
 export interface LabelRow {
   tag: string;
   model: string;
+  category: string;
 }
 
 /**
  * A Server Component: there is nothing interactive on a sheet of stickers.
- * Light-theme-only and absolute mm throughout, matching the two print surfaces
- * that already exist (the farewell report and the accountability form) —
- * these are printed artifacts, not screens.
+ * Each filled slot is a `LabelCell` (`label-cell.tsx`), the same component the
+ * Register form's live preview renders.
+ *
+ * `startAt` (spec §5.1, plan P-11): the first startAt−1 slots of page 1 print
+ * blank so a half-used sheet can go back in the printer.
+ *
+ * `startHref` (Phase 34, plan P-7): when given, the sheet doubles as the
+ * on-screen "where do I start" picker. Page 1 is padded with trailing free
+ * cells up to a full page, and every blank and free cell gets a link that
+ * fills it. The links, their words and the free cells are all `print:hidden`,
+ * so the PRINTED sheet is identical to one rendered without `startHref`: the
+ * free cells are trailing, so hiding them moves nothing that prints.
  */
-function Barcode({ tag }: { tag: string }) {
-  const fit = barcodeFit(tag);
-  if (!fit.encodable) {
-    // An unscannable code is worse than none: the sticker would look finished.
-    // Cause-NEUTRAL wording: `encodable: false` covers a too-fine module (a
-    // very long tag), a character Code 128-B cannot encode, AND an empty
-    // tag, so "too long" would be false for two of the three causes. Every
-    // write path validates the `BR-XX-9999` tag shape
-    // (`src/server/modules/inventory/actions.ts` and `TAG_SHAPE` in
-    // `src/lib/import-assets.ts`), so a tag that fails here cannot be
-    // created through this application today — but no DB CHECK constraint
-    // enforces that, so it is an application invariant, not a guarantee.
-    // That is why this renderer degrades one label instead of throwing, and
-    // why there is no charset-refusal banner elsewhere on this page: the
-    // absence of one is deliberate, not an oversight. The tag text above
-    // still prints — a human can read and type what no scanner can.
-    return (
-      <span style={{ fontSize: "2.4mm", color: "#B42318", fontFamily: "monospace" }}>
-        no scannable code
-      </span>
-    );
-  }
-  const widths = code128Modules(tag);
-  let x = 0;
-  const bars: React.ReactElement[] = [];
-  widths.forEach((w, i) => {
-    const width = w * fit.moduleMm;
-    if (i % 2 === 0) {
-      bars.push(<rect key={i} x={x} y={0} width={width} height={9} fill="#000" />);
-    }
-    x += width;
-  });
-  return (
-    <svg
-      width={`${fit.widthMm}mm`}
-      height="9mm"
-      viewBox={`0 0 ${fit.widthMm} 9`}
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={`Barcode ${tag}`}
-      shapeRendering="crispEdges"
-    >
-      {bars}
-    </svg>
-  );
-}
-
-/**
- * The quiet zone is drawn as a white rect inside the viewBox rather than left
- * to CSS margin: it is part of the symbol, and a margin could be collapsed or
- * overridden by a print stylesheet without anything looking wrong.
- */
-function Qr({ url }: { url: string }) {
-  const matrix = qrMatrix(url);
-  const fit = qrFit(matrix.size);
-  // Cause-neutral, and consistent with Barcode's refusal above: a code too
-  // fine for a phone to read is worse than no code, because the sticker looks
-  // finished either way. The tag text on the label is still human-readable.
-  if (!fit.renderable) {
-    return (
-      <span style={{ fontSize: "2.4mm", color: "#B42318", fontFamily: "monospace" }}>
-        no scannable QR
-      </span>
-    );
-  }
-
-  const total = matrix.size + 2 * QR_QUIET_MODULES;
-  const dark: React.ReactElement[] = [];
-  for (let y = 0; y < matrix.size; y++) {
-    for (let x = 0; x < matrix.size; x++) {
-      if (matrix.isDark(x, y)) {
-        dark.push(
-          <rect
-            key={`${x}-${y}`}
-            x={x + QR_QUIET_MODULES}
-            y={y + QR_QUIET_MODULES}
-            width={1}
-            height={1}
-            fill="#000"
-          />,
-        );
-      }
-    }
-  }
-
-  return (
-    <svg
-      width={`${fit.sizeMm}mm`}
-      height={`${fit.sizeMm}mm`}
-      viewBox={`0 0 ${total} ${total}`}
-      role="img"
-      aria-label={`QR ${url}`}
-      shapeRendering="crispEdges"
-    >
-      <rect x={0} y={0} width={total} height={total} fill="#fff" />
-      {dark}
-    </svg>
-  );
-}
-
-/** Named per cause, because "QR unavailable" would send someone hunting the
- *  wrong thing — a loopback base URL and a missing one need different fixes. */
-export const QR_NOTE: Record<Exclude<QrBase, { ok: true }>["reason"], string> = {
-  unset: "No QR: APP_BASE_URL is not set.",
-  "not-absolute": "No QR: APP_BASE_URL needs an http:// or https:// scheme.",
-  loopback: "No QR: APP_BASE_URL points at this machine, which no phone can reach.",
-  "bad-url": "No QR: APP_BASE_URL is not a valid URL.",
-};
-
-/** `startAt` (spec §5.1, plan P-11): the first startAt−1 slots of page 1 print
- * blank so a half-used sheet can go back in the printer. */
-export function LabelSheet({ rows, baseUrl, startAt }: { rows: LabelRow[]; baseUrl?: string; startAt?: number }) {
+export function LabelSheet({
+  rows, baseUrl, startAt, startHref,
+}: { rows: LabelRow[]; baseUrl?: string; startAt?: number; startHref?: (slot: number) => string }) {
   const byTag = new Map(rows.map((r) => [r.tag, r]));
   // Validated ONCE: the reason a base URL is unusable never depends on the tag,
   // so this is one note per sheet rather than the same refusal on twelve labels.
@@ -160,63 +64,36 @@ export function LabelSheet({ rows, baseUrl, startAt }: { rows: LabelRow[]; baseU
                 <div
                   key={`blank-${i}`}
                   data-blank-label=""
-                  style={{ boxSizing: "border-box", outline: "0.2mm dashed #C4CAD4" }}
-                />
+                  style={{ boxSizing: "border-box", outline: "0.2mm dashed #C4CAD4", position: "relative" }}
+                >
+                  {startHref && (
+                    <a className="label-slot-link print:hidden" href={startHref(i + 1)} aria-label={`Start at sticker ${i + 1}`}>
+                      used
+                    </a>
+                  )}
+                </div>
               );
             }
             const row = byTag.get(tag)!;
-            return (
-              <div
-                key={tag}
-                style={{
-                  padding: `${LABEL_PADDING_MM}mm`,
-                  boxSizing: "border-box",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  overflow: "hidden",
-                  // OUTLINE, not border: a border participates in the box
-                  // model, so `LABEL_USABLE_MM` (cell width minus padding
-                  // only) would be 0.4mm wider than this cell's real content
-                  // box and the widest barcodes would clip against
-                  // `overflow: hidden` — an unscannable code that looks
-                  // finished. An outline paints outside the box without
-                  // consuming layout space, so the content box is exactly
-                  // `LABEL_CELL_MM.width - 2 * LABEL_PADDING_MM`, matching
-                  // what `label-geometry.ts` already assumes. The grid has
-                  // no gaps, so adjacent cells' outlines coincide on the
-                  // shared edge — a slightly bolder shared guide line, not a
-                  // doubled one, which is the desired look here.
-                  outline: "0.2mm dashed #C4CAD4",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "1.5mm", minWidth: 0 }}>
-                  <span style={{ background: "#101828", color: "#fff", fontFamily: "monospace", fontSize: "2.6mm", padding: "0.6mm 1mm", flex: "none" }}>
-                    BR
-                  </span>
-                  <span style={{ fontSize: "2.6mm", color: "#667085", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {row.model}
-                  </span>
-                </div>
-                <div style={{ fontFamily: "monospace", fontSize: "4.6mm", fontWeight: 700, letterSpacing: "0.02em" }}>
-                  {tag}
-                </div>
-                {/* flexShrink: 0 on BOTH, for the reason the calibration bar
-                    carries it: this cell is a column flex with overflow
-                    hidden, so an over-tall child is not clipped visibly — it
-                    silently squeezes its siblings, which is how the ruler
-                    once measured 89.38mm against a declared 100mm. */}
-                <div style={{ width: `${LABEL_USABLE_MM}mm`, flexShrink: 0 }}>
-                  <Barcode tag={tag} />
-                </div>
-                {base.ok && (
-                  <div style={{ flexShrink: 0, lineHeight: 0 }}>
-                    <Qr url={qrUrlFor(tag, base)} />
-                  </div>
-                )}
-              </div>
-            );
+            return <LabelCell key={tag} tag={tag} model={row.model} category={row.category} base={base} />;
           })}
+          {/* Screen-only free slots after the last label on page 1, so every
+              slot of the sheet can be picked as the start. Hidden in print
+              along with their links: trailing cells, so the printed page is
+              unchanged. */}
+          {startHref && p === 0 &&
+            Array.from({ length: LABELS_PER_PAGE - page.length }, (_, k) => page.length + k).map((i) => (
+              <div
+                key={`free-${i}`}
+                data-free-slot=""
+                className="print:hidden"
+                style={{ boxSizing: "border-box", outline: "0.2mm dashed #C4CAD4", position: "relative" }}
+              >
+                <a className="label-slot-link print:hidden" href={startHref(i + 1)} aria-label={`Start at sticker ${i + 1}`}>
+                  {i + 1}
+                </a>
+              </div>
+            ))}
           {/* The only thing that can catch a browser printing at 96%.
               ABSOLUTELY POSITIONED, inside the page's own bottom margin --
               NOT a grid row: 4 rows x 69.25mm + 20mm padding is exactly

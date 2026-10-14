@@ -327,3 +327,12 @@ body {
     break-after: auto;
   }
 }
+
+/* Phase 34 (plan P-7): the printable sheet doubles as the on-screen preview — half size on screen only. */
+@media screen {
+  .label-preview .label-sheets { transform: scale(0.5); transform-origin: top left; width: 210mm; }
+  .label-preview { width: 105mm; height: calc(148.5mm * var(--sheets, 1)); overflow: hidden; }
+  .label-preview [data-blank-label] { background: repeating-linear-gradient(135deg, #f2f4f7 0 2mm, #fff 2mm 4mm); }
+  .label-slot-link { position: absolute; inset: 0; display: grid; place-items: center; font-size: 5mm; color: #98a2b3; text-decoration: none; }
+  .label-slot-link:focus-visible { outline: 1mm solid var(--accent); outline-offset: -1mm; }
+}

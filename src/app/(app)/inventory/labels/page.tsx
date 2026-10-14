@@ -69,7 +69,8 @@ export default async function LabelsPage({
     );
   }
 
-  let rows: { tag: string; model: string; cls: AssetClass }[] = [];
+  // `category: ""` until Task 8 (Phase 34) reads each asset's category here.
+  let rows: { tag: string; model: string; category: string; cls: AssetClass }[] = [];
   let skipped: string[] = [];
   if (viaTags) {
     const found = await prisma.asset.findMany({
@@ -80,12 +81,12 @@ export default async function LabelsPage({
     // The typed (or scanned) order is the order the stickers come off the sheet.
     rows = tags.flatMap((t) => {
       const a = byTag.get(t);
-      return a ? [{ tag: a.tag, model: a.model, cls: a.cls }] : [];
+      return a ? [{ tag: a.tag, model: a.model, category: "", cls: a.cls }] : [];
     });
     skipped = tags.filter((t) => !byTag.has(t));
   } else if (ids.length) {
     const assets = await prisma.asset.findMany({ where: { id: { in: ids }, cls: { in: manageable } }, select: { tag: true, model: true, cls: true }, orderBy: { tag: "asc" } });
-    rows = assets.map((a) => ({ tag: a.tag, model: a.model, cls: a.cls }));
+    rows = assets.map((a) => ({ tag: a.tag, model: a.model, category: "", cls: a.cls }));
   }
 
   const rowClasses = [...new Set(rows.map((r) => r.cls))];
