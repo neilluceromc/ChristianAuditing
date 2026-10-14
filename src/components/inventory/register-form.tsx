@@ -168,9 +168,12 @@ export function RegisterForm({
     first?.scrollIntoView({ block: "center" });
   }, [refusals]);
 
-  // After "add another" the next unit starts at Model.
+  // After "add another" the next unit starts at its serial — the category, model and type carry over
+  // (spec §3, ruling R7). Model when there is no serial box to go to.
   useEffect(() => {
-    if (focusModel > 0) modelRef.current?.focus();
+    if (focusModel === 0) return;
+    const serial = rootRef.current?.querySelector<HTMLInputElement>("#register-serial");
+    (serial ?? modelRef.current)?.focus();
   }, [focusModel]);
 
   const category = catalog.find((c) => c.id === categoryId);
@@ -189,7 +192,9 @@ export function RegisterForm({
   const loan = status === "TEMPORARY";
   const types = category?.types ?? [];
   const models = category?.models ?? [];
-  const newModelNeedsType = !!category && model.trim() !== "" && !resolveModelType(models, model).known && types.length > 1 && !typeId;
+  // A new model, or a known one with no type (ruling R9), must have its type picked when the category has several.
+  // A typed known model always has one here (the combobox set it), so this reads only the gap.
+  const newModelNeedsType = !!category && model.trim() !== "" && types.length > 1 && !typeId;
 
   const runFor = (p: string, count: number): string[] | null => {
     const r = nextTags(p, highestOf(highestByPrefix, written, p), count);
@@ -336,14 +341,21 @@ export function RegisterForm({
   const still: string[] = [];
   if (!categoryId) still.push("a category");
   if (model.trim().length < 2) still.push("a model");
-  if (newModelNeedsType) still.push("the type for this new model");
+  if (newModelNeedsType) {
+    // A typed known model whose type was cleared through "Change type" is not a new model.
+    const r = resolveModelType(models, model);
+    still.push(r.known && r.typeId ? "the type" : "the type for this new model");
+  }
   if (requiredRows.length > 0) still.push(plural(requiredRows.length, "serial", "serials"));
   if (duplicateRows.length > 0) still.push(plural(duplicateRows.length, "duplicate to fix", "duplicates to fix"));
   if (single && holder && !assigneeId) still.push("who gets it");
   if (single && loan && !loanDueAt) still.push("the loan end date");
 
   // ── submit ────────────────────────────────────────────────────────────
-  /** Keeps what the next unit of the same delivery shares (spec §5.6); clears the rest; starts again at Model. */
+  /**
+   * Keeps what the next unit of the same delivery shares — the category, the model and its type
+   * (spec §3, ruling R7), vendor and dates — and clears the units, holder, loan date, cost, notes and files.
+   */
   function startAnother(sentTags: string[]) {
     const mine = { ...written };
     for (const t of sentTags.map(tagKey)) {
@@ -353,7 +365,6 @@ export function RegisterForm({
     const next = prefix ? nextTags(prefix, highestOf(highestByPrefix, mine, prefix), 1) : null;
     setRows([{ tag: next?.ok ? next.tags[0] : "", serial: "" }]);
     setQuantityText("1");
-    setModel("");
     setBrand("");
     setCost("");
     setNotes("");

@@ -63,6 +63,9 @@ export function ModelCombobox({
   }, [typeKey]);
 
   const resolved = resolveModelType(models, value);
+  // Ruling R9: a known model whose newest asset has no type sets nothing — it
+  // is asked like a new model, so the flow never produces another untyped asset.
+  const modelType = resolved.known ? resolved.typeId : null;
   const matches = matchModels(models, value);
   const offerNew = value.trim() !== "" && !resolved.known;
   // The rows the list shows: the matches, then "+ Add" for a new model.
@@ -76,21 +79,30 @@ export function ModelCombobox({
     // Review Focus 1: a model typed in another case or spacing is still the
     // known one, and takes its type without being picked from the list.
     const r = resolveModelType(models, v);
-    if (r.known) {
-      onType(r.typeId ?? "");
-      setChanging(false);
-    } else if (resolved.known && types.length > 1) {
-      // Edited away from a known model: a new model asks its own type rather than keep the old one's.
-      onType("");
-    }
+    takeType(r.known ? r.typeId : null);
+  }
+
+  /** The type a model brings, or — for a new or untyped model — the one type a category has, else none yet. */
+  function takeType(fromModel: string | null) {
+    setChanging(false);
+    if (fromModel) onType(fromModel);
+    else if (types.length === 1) onType(types[0].id);
+    // Moving off a typed model: the next model asks its own type rather than keep the old one's.
+    else if (modelType) onType("");
+  }
+
+  /** Ruling (review minor): a model that resolves to a known one takes its spelling, so case variants never pile up. */
+  function canonical(v: string): string {
+    const k = v.trim().replace(/\s+/g, " ");
+    const hit = models.find((m) => m.model.toLowerCase() === k.toLowerCase());
+    return hit ? hit.model : k;
   }
 
   function pick(i: number) {
     if (i < matches.length) {
       const m = matches[i];
       onValue(m.model);
-      onType(m.typeId ?? "");
-      setChanging(false);
+      takeType(m.typeId);
     }
     // "+ Add … as a new model" keeps the text and only closes the list.
     setOpen(false);
@@ -120,8 +132,8 @@ export function ModelCombobox({
           onClick={() => setOpen(true)}
           onBlur={() => {
             setTimeout(() => setOpen(false), 120); // let an option's mousedown land first
-            const trimmed = value.trim().replace(/\s+/g, " ");
-            if (trimmed !== value) onValue(trimmed);
+            const settled = canonical(value);
+            if (settled !== value) onValue(settled);
           }}
           onChange={(e) => change(e.target.value)}
           onKeyDown={(e) => {
@@ -198,9 +210,11 @@ export function ModelCombobox({
         )}
       </div>
 
-      {resolved.known && (
+      {modelType && (
         <p className="text-[12px] text-fg-secondary">
-          Type: <b className="font-semibold text-fg">{typeName(resolved.typeId) ?? "none"}</b> — set by this model
+          {/* The line names the type that will be saved, so it never disagrees with the select below. */}
+          Type: <b className="font-semibold text-fg">{typeName(typeId) ?? "not picked yet"}</b>{" "}
+          {typeId === modelType ? "— set by this model" : "— changed from this model's type"}
           {types.length > 1 && !changing && (
             <>
               {" "}
@@ -212,11 +226,11 @@ export function ModelCombobox({
         </p>
       )}
 
-      {types.length > 1 && value.trim() !== "" && (!resolved.known || changing) && (
+      {types.length > 1 && value.trim() !== "" && (!modelType || changing) && (
         <FormField
-          label={resolved.known ? "Type" : "New model — which type?"}
+          label={modelType ? "Type" : "New model — which type?"}
           required
-          hint={resolved.known ? undefined : "Next time this model fills it in for you."}
+          hint={modelType ? undefined : "Next time this model fills it in for you."}
           error={typeError}
         >
           {(p) => (
