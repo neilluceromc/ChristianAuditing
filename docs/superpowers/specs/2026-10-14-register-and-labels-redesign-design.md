@@ -2,7 +2,12 @@
 
 **Status:** designed 2026-10-14 with the user. The design was locked from the canvas
 <https://claude.ai/artifact/7Q5i9JScWpffej9FDTi5sf> (version 4, the "Register" and "Labels" tabs).
-The spec is awaiting the user's review before a plan is written. It needs **one migration (the 27th)**.
+It needs **one migration (the 27th)**. Plan `docs/superpowers/plans/2026-10-14-phase-34-register-labels-redesign.md`
+(`2904714`, 12 tasks, P-1…P-9, D-1…D-27). **CODE-COMPLETE 2026-10-15 on `phase-34-register-labels` (final code
+tree `f7c4f70`), UNMERGED and UNPUSHED; migration 27 `20261014090000_register_labels` — the staging redeploy
+APPLIES it (the deploy script runs `prisma migrate deploy`).** Battery A 58 · B 87 (+2 skipped) · C 64 · D 70 · E1 61 · E2 56 · F 66 = 462 passed / 464 listed; the physical
+print-and-scan check of the new label on a real A4 sheet is owed. §7.1's prefix order was rewritten by ruling
+R23. Record: `docs/HANDOVER.md` (aa).
 
 ## 1. What the user asked for, and why
 
@@ -266,8 +271,10 @@ place of the QR.
 ### 7.1 New columns
 
 - `AssetCategory.tagPrefix String?`
-  - It is used when the category has no tags yet. When tags exist, `preferredPrefix` keeps deriving the
-    prefix from them.
+  - Register offers `tagPrefix ?? learned prefix ?? ""` (ruling R23, Phase 34 D-23): the category's own
+    `tagPrefix` wins when it is set; the prefix `preferredPrefix` learns from the category's existing tags
+    only fills a missing `tagPrefix`; with neither, the prefix is empty and Register asks for one. (Other
+    inherits phone and keyboard tags and must still offer `OT`.)
   - It is seeded per §2.1.
   - On the Register tab the prefix stays editable in a small **"Tag prefix and notes"** fold-out at the
     bottom of the Purchase and warranty section. That fold-out also holds today's Notes field, and its

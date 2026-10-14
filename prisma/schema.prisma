@@ -204,7 +204,8 @@ model AssetCategory {
   name      String      @unique
   locked    Boolean     @default(false)
   cls       AssetClass  @default(IT)
-  /// Phase 34 (spec §7.1): used when the category has no tags yet; tags that exist win (preferredPrefix).
+  /// Phase 34 (spec §7.1, ruling R23): Register offers tagPrefix ?? learned prefix (preferredPrefix) ?? "" —
+  /// this prefix wins when set; the prefix learned from existing tags only fills a missing one.
   tagPrefix String?
   types     AssetType[]
   assets    Asset[]

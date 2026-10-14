@@ -1879,4 +1879,32 @@ git commit -m "docs(handover,pickup,pending,plan,spec): Phase 34 code-complete -
 
 ## D-block (decisions made during execution)
 
-(Filled in during execution: each ruling as `D-n — what — why — cost if wrong`.)
+- **D-1** — Migration 27's DDL was generated with `prisma migrate diff` and applied with `migrate deploy`, not `migrate dev --create-only` — `migrate dev`'s shadow DB / drift path can prompt a reset, which the constraints forbid — none (same SQL).
+- **D-2** — The live label preview renders at true mm size (no `zoom: 0.9`) — the spec and caption say "actual size" — a slightly larger preview box.
+- **D-3** — The migration looks every category up by `lower(name)` and RAISEs if a target name exists in the PURCHASING class (the unused `t_wired` goes) — the plan's SQL could misfile or abort on a lowercase or Purchasing duplicate — none (stricter, same outcome on known data).
+- **D-4** — `inventory_dev` keeps the first version's checksum of migration 27 — the project only runs `migrate deploy` (ignores checksums) and staging never applied the old file — a "modified migration" warning if someone runs `migrate dev` on `inventory_dev`.
+- **D-5** — Commit `bb32460` keeps its 'Claude Sonnet 5.5' trailer — never amend; it names the model that wrote it — one inconsistent trailer in history.
+- **D-6** — The slot-link text uses fixed `#475467` and the Labels badge count is visually-hidden text in the tab label — the plan's colour failed AA and axe-sweep scans the page — none.
+- **D-7** — "Register and add another" keeps category, model AND type — spec §3 binds over the brief's "startAnother unchanged" — one line.
+- **D-8** — Purchasing "In use" keeps today's required Who — `HOLDER_STATUSES.PURCHASING` includes OPERATIONAL and the plan's case 7 expects Who; spec §4.4 misdescribed today — Purchasing users fill one field they might not need.
+- **D-9** — A known model with a null type is typed like a new model (several types → the "which type?" select is required; one type → silent pick) — spec §4.2 wants every registered model typed — none.
+- **D-10** — Brand moves into the "Tag prefix and notes" fold-out — it had no home in the spec — one field moves.
+- **D-11** — E2E locators for required fields use exact names or regex — `FormField` appends a hidden " *" to labels — none.
+- **D-12** — Picking a warranty length is an explicit choice: it sets Warranty until and clears the hand-typed flag; only a purchase-date change respects a typed date — brief step 1 and spec §4.5 (Review Focus 4) — one click restores a typed date.
+- **D-13** — Document Remove buttons are named "Remove" with `aria-describedby` the slot title — keeps `getByLabel("Sales invoice")` unique (house rule on field-label words) — none.
+- **D-14** — labels.spec's measurement cases emulate print media before measuring — the half-size preview is screen-only by design (P-7) and print is what matters — a screen-scale regression would go unmeasured.
+- **D-15** — `TagsBox` gains an optional `inForm` prop so the Labels tab has one "Make sheet" form — two forms meant two same-named buttons — one prop.
+- **D-16** — `PrintLabelsButton` marks the queue when `window.print()` returns (blocking in Chromium/Edge); `afterprint` stays a no-op safety — the office uses Chromium-family browsers — on a non-blocking browser the queue empties before the dialog finishes (reprint via the Tags box still works).
+- **D-17** — register-labels case 2 asserts the seeded model's real type from the DB, not the literal "ThinkPad" — the seed types every laptop as `typeIds[0]` and custody.spec relies on it — none.
+- **D-18** — (Superseded by D-20.) The Labels tab scoped by the classes the role can REGISTER — so Purchasing staff saw the IT batch they registered — n/a.
+- **D-19** — At quantity 1 the tag is a chip changed via Tag prefix only (no per-unit Tag input); tests pre-create collisions — spec §4.3 shows the tag beside the serial — one input to restore.
+- **D-20** — The Labels tab (queue, badge, pick/just/ids/tags, `markLabelsPrinted`) scopes to the classes the role MANAGES plus assets in a `PurchaseRecord` the user created — D-18 widened Purchasing to every IT asset — someone registering for another class sees only their own batches of it.
+- **D-21** — The Labels crumb and Register-more class stay the role's class, not the just-registered batch's — unchanged navigation — a Purchasing user returns to the Purchasing register after printing an IT batch.
+- **D-22** — Task 12 split as in Phase 33: final review and one fix wave first, then the battery and docs on the final tree — none.
+- **D-23** — The category's `tagPrefix` wins when set; a learned prefix only fills a missing one (`tagPrefix ?? learned ?? ""`, spec §7.1 rewritten) — the spec's order gave webcams BR-PH tags (final review I1) — categories with a seeded prefix ignore an established local habit.
+- **D-24** — The migration moves each remaining Peripheral type into Other under its own name (reusing Other/Keyboard, else creating a same-name type) with its assets, slots and exceptions — folding all into Keyboard misfiled them (I2) — none.
+- **D-25** — The asset importer stamps `labelPrintedAt` at creation (as the backfill does); imported labels print via the list selection or Tags box — imports flooded Waiting to print (I4) — an import's labels are not queued.
+- **D-26** — The fix wave also takes M1 (class guard covers the Phone/Peripheral/Dock source names), M2 (the server requires a type for a model when the category has types), M5 (printing via `?ids=` stamps waiting assets in scope), M8 (stale comment), M9 (unit tests for the prefix order and the label-scope where-builder); M3, M4, M6, M7 ship as-is — small UX follow-ups.
+- **D-27** — register-labels.spec grows to 17 cases, so `--list` was expected at 462 tests in 44 files; it reads 464 because Task 11 added two cases to existing files (department-owned 8b, labels "13 typed tags") that the expectation missed — none (a count note).
+
+**Measured at close (2026-10-15, final tree `f7c4f70`).** Battery A 58 · B 87 (+2 skipped) · C 64 · D 70 · E1 61 · E2 56 · F 66 = 462 passed / 464 listed (the 2 are quick-login's on-only cases); `tsc` and `lint` clean; 1786 unit / 106 files; 27 migrations, schema up to date; `npm run db:seed` ran last. CODE-COMPLETE, UNMERGED and UNPUSHED; the staging redeploy applies migration 27. Owed: the physical print-and-scan check of the new label on a real A4 sheet.
