@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { markLabelsPrinted } from "@/server/modules/inventory/label-actions";
 
 /**
- * Phase 34 (spec §5): opens the browser print, then stamps the queue's labels as printed. Tags from
+ * Phase 34 (spec §5): opens the browser print, then stamps the waiting labels on the sheet as printed —
+ * the queue's, and (ruling R26, M5) any still-waiting asset that came in through `?ids=`. Tags from
  * the Reprint box are not sent (they were printed before); a reprint never moves labelPrintedAt.
  *
  * Marks once per click, on `afterprint` or as soon as `print()` returns, whichever comes first.
@@ -13,7 +14,7 @@ import { markLabelsPrinted } from "@/server/modules/inventory/label-actions";
  * `afterprint`), so returning from it means printing was attempted; the flag keeps the two paths
  * from sending twice. `markLabelsPrinted` is idempotent either way (Review Focus 5).
  */
-export function PrintLabelsButton({ count, queuedAssetIds }: { count: number; queuedAssetIds: string[] }) {
+export function PrintLabelsButton({ count, waitingAssetIds }: { count: number; waitingAssetIds: string[] }) {
   const [pending, start] = useTransition();
   function print() {
     let done = false;
@@ -21,7 +22,7 @@ export function PrintLabelsButton({ count, queuedAssetIds }: { count: number; qu
       window.removeEventListener("afterprint", mark);
       if (done) return;
       done = true;
-      if (queuedAssetIds.length) start(async () => { await markLabelsPrinted({ assetIds: queuedAssetIds.slice(0, 200) }); });
+      if (waitingAssetIds.length) start(async () => { await markLabelsPrinted({ assetIds: waitingAssetIds.slice(0, 200) }); });
     };
     window.addEventListener("afterprint", mark);
     window.print();

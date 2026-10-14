@@ -107,7 +107,7 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
   const queue = await labelQueue(manageable, user.id, older ? 500 : 50);
   const pickedGroups = queue.groups.filter((g) => picked.has(g.recordId ?? g.key));
   const queuedIds = pickedGroups.flatMap((g) => g.assetIds);
-  const select = { id: true, tag: true, model: true, cls: true, category: { select: { name: true } } } as const;
+  const select = { id: true, tag: true, model: true, cls: true, labelPrintedAt: true, category: { select: { name: true } } } as const;
   const [queuedAssets, idAssets, tagAssets, justAssets] = await Promise.all([
     queuedIds.length ? prisma.asset.findMany({ where: { id: { in: queuedIds }, ...scope }, select }) : [],
     ids.length ? prisma.asset.findMany({ where: { id: { in: ids }, ...scope }, select, orderBy: { tag: "asc" } }) : [],
@@ -129,7 +129,12 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
   const seen = new Set<string>();
   const once = (list: SheetRow[]) => list.filter((r) => (seen.has(r.tag) ? false : (seen.add(r.tag), true)));
   const queuedRows = once(queuedAll);
-  const rows = [...queuedRows, ...once(idAssets.map(toRow)), ...once(tagFound)];
+  const idRows = once(idAssets.map(toRow));
+  const rows = [...queuedRows, ...idRows, ...once(tagFound)];
+  // Ruling R26 (M5): a list selection (`?ids=`) that holds assets still waiting to print stamps them
+  // with the queue's, so they leave Waiting to print; printed ones stay untouched (only NULLs are stamped).
+  const waitingIds = new Set(idAssets.filter((a) => a.labelPrintedAt === null).map((a) => a.id));
+  const stampIds = [...queuedRows.map((r) => r.id), ...idRows.filter((r) => waitingIds.has(r.id)).map((r) => r.id)];
   if (rows.length > BULK_MAX) return refusal(rows.length);
 
   const rowClasses = [...new Set(rows.map((r) => r.cls))];
@@ -237,7 +242,7 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
             )}
             <p className="text-[13px] text-fg">{summaryLine(rows.length, start, sheets)}</p>
             <div className="flex flex-wrap gap-2">
-              <PrintLabelsButton count={rows.length} queuedAssetIds={queuedRows.map((r) => r.id)} />
+              <PrintLabelsButton count={rows.length} waitingAssetIds={stampIds} />
               <ButtonLink href={"/inventory/register" + withClsQS("", cls)}>Register more</ButtonLink>
             </div>
           </div>
