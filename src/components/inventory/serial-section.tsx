@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { AssetClass } from "@prisma/client";
 import { FormError } from "@/components/ui/form-field";
 import { fieldClasses } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import { registeredRows, type IdentifierHits, type RegisterRow } from "@/lib/register-rows";
 import { serialRequired, type SerialProblem } from "@/lib/serial-rules";
@@ -26,12 +27,12 @@ export function SerialSection({
   hits,
   onSerial,
   onPasteSerials,
+  onPasteTags,
   onTag,
   onLastEnter,
   invalidTags,
   invalidSerials,
   lines,
-  tagPlaceholder,
   pasteNote,
   onBlur,
   serialRef,
@@ -43,6 +44,7 @@ export function SerialSection({
   hits: IdentifierHits;
   onSerial: (i: number, v: string) => void;
   onPasteSerials: (i: number, values: string[]) => void;
+  onPasteTags: (i: number, values: string[]) => void;
   onTag: (i: number, v: string) => void;
   /** Enter in the one-unit box, or in the last row's serial. */
   onLastEnter: () => void;
@@ -50,7 +52,6 @@ export function SerialSection({
   invalidSerials: Set<number>;
   /** `rowFeedback`'s lines: repeats, records already registered, the server's row messages. */
   lines: Array<{ text: string; node: React.ReactNode }>;
-  tagPlaceholder: string;
   pasteNote: string | null;
   onBlur: () => void;
   serialRef?: React.Ref<HTMLInputElement>;
@@ -98,7 +99,29 @@ export function SerialSection({
       </div>
 
       {single ? (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="register-tag" className="text-xs font-medium text-fg">
+              Tag
+              <span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>
+            </label>
+            <Input
+              id="register-tag"
+              autoComplete="off"
+              spellCheck={false}
+              invalid={invalidTags.has(0)}
+              className="max-w-[320px] font-mono"
+              value={rows[0].tag}
+              onChange={(e) => onTag(0, e.target.value)}
+              onBlur={onBlur}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                document.getElementById("register-serial")?.focus();
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
           <label htmlFor="register-serial" className="text-xs font-medium text-fg">
             Serial number
             {required && <span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>}
@@ -124,33 +147,26 @@ export function SerialSection({
                 onLastEnter();
               }}
             />
-            <span
-              className={cn(
-                "shrink-0 rounded-(--radius-ctl) border bg-surface-subtle px-2 py-1 font-mono text-[12px]",
-                invalidTags.has(0) ? "border-[var(--error-text)] text-fg" : "border-border text-fg-secondary",
-              )}
-            >
-              tag {rows[0].tag || "—"}
-            </span>
           </div>
           {missing && <p id={errorId} className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{SERIAL_REQUIRED}</p>}
           {shown.map((l) => <FormError key={l.text}>{l.node}</FormError>)}
+          </div>
         </div>
       ) : (
         <RegisterRows
           rows={rows}
           invalidTags={invalidTags}
           invalidSerials={invalidSerials}
-          tagPlaceholder={tagPlaceholder}
           serialPlaceholder={required ? "Required" : "Optional"}
           status={status}
           onTag={onTag}
           onSerial={onSerial}
           onPasteSerials={onPasteSerials}
+          onPasteTags={onPasteTags}
           onBlur={onBlur}
           onLastEnter={onLastEnter}
         >
-          <p className="text-[11px] text-fg-muted">Paste a column of serials into any row to fill it and the rows below.</p>
+          <p className="text-[11px] text-fg-muted">Paste a column of tags or serials into any row to fill it and the rows below.</p>
           {pasteNote && <p role="status" className="text-[11px] text-fg-secondary">{pasteNote}</p>}
           {attempted && required && missingRows > 0 && (
             <FormError>{missingRows === 1 ? "1 row has no serial — enter it before you register." : `${missingRows} rows have no serial — enter them before you register.`}</FormError>

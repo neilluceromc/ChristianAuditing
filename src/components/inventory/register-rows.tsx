@@ -84,10 +84,10 @@ export function RegisterRows({
   rows,
   invalidTags,
   invalidSerials,
-  tagPlaceholder,
   onTag,
   onSerial,
   onPasteSerials,
+  onPasteTags,
   onBlur,
   onLastEnter,
   serialPlaceholder = "Optional",
@@ -97,7 +97,6 @@ export function RegisterRows({
   rows: readonly RegisterRow[];
   invalidTags: ReadonlySet<number>;
   invalidSerials: ReadonlySet<number>;
-  tagPlaceholder: string;
   /** Phase 34 (spec §4.3): IT serials are required, so the cell no longer says "Optional" there. */
   serialPlaceholder?: string;
   /** Phase 34 (spec §4.3): a per-row status cell ("✓ ready", "missing", "duplicate", …). */
@@ -106,6 +105,8 @@ export function RegisterRows({
   onSerial: (row: number, value: string) => void;
   /** Called only when the clipboard holds more than one serial. */
   onPasteSerials: (row: number, values: string[]) => void;
+  /** Called only when the clipboard holds more than one tag. */
+  onPasteTags: (row: number, values: string[]) => void;
   onBlur: () => void;
   /** Enter in the last row's serial — the form focuses its primary button. */
   onLastEnter: () => void;
@@ -142,15 +143,21 @@ export function RegisterRows({
                   <Input
                     aria-label={`Tag ${i + 1}`}
                     invalid={invalidTags.has(i)}
-                    placeholder={tagPlaceholder}
+                    autoComplete="off"
                     className="font-mono"
                     value={r.tag}
-                    onChange={(e) => onTag(i, e.target.value.toUpperCase())}
+                    onChange={(e) => onTag(i, e.target.value)}
                     onBlur={onBlur}
                     onKeyDown={(e) => {
                       if (e.key !== "Enter") return;
                       e.preventDefault();
                       serialRefs.current[i]?.focus();
+                    }}
+                    onPaste={(e) => {
+                      const values = parseSerialPaste(e.clipboardData.getData("text"));
+                      if (values.length < 2) return;
+                      e.preventDefault();
+                      onPasteTags(i, values);
                     }}
                   />
                 </td>

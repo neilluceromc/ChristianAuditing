@@ -6,6 +6,7 @@ import type { AssetClass } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui/banner";
 import { FormField } from "@/components/ui/form-field";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { useBack } from "@/components/ui/back-link";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
@@ -14,7 +15,6 @@ import { cn } from "@/lib/cn";
 import { CLASS_EXAMPLE, CREATABLE_BY_CLASS, DEFAULT_STATUS, HOLDER_STATUSES, withClsQS } from "@/lib/asset-class";
 import type { CreatableStatus } from "@/lib/asset-rules";
 import { defaultLoanDue, minLoanDue } from "@/lib/lifecycle";
-import { nextTags, prefixFor, RUN_REFUSAL } from "@/lib/receiving";
 import { MONEY_ERROR } from "@/lib/register-input";
 import {
   centavosToDecimalString, formatPeso, moneyToCentavos, warrantyOnDate, warrantyOnLength, warrantyOnTyped, type WarrantyState,
@@ -23,10 +23,9 @@ import {
   clampQuantity, liveQuantity, MAX_BATCH, pasteColumn as pasteRows, resizeRows, singleRowErrors, type RegisterRow,
 } from "@/lib/register-rows";
 import { categoryNoun } from "@/lib/register-catalog";
-import { resolveModelType } from "@/lib/known-models";
+import { typeAfterCategoryChange, typeChoice, TYPE_REQUIRED } from "@/lib/register-type";
 import { serialProblems } from "@/lib/serial-rules";
 import { qrBase } from "@/lib/label-qr";
-import { tagKey } from "@/lib/tag-key";
 import { createAsset } from "@/server/modules/inventory/actions";
 import { registerAssets } from "@/server/modules/purchases/receiving";
 import { uploadBatchDocument, uploadDocument } from "@/server/modules/inventory/document-actions";
@@ -41,44 +40,29 @@ import { rowFeedback } from "./register-rows";
 import { SERIAL_REQUIRED, SerialSection } from "./serial-section";
 import { useIdentifierCheck } from "./use-identifier-check";
 
-// Task 3 removes the prefix-run counter below; until then it only reads old-shape tags.
-const LEGACY_TAG_SHAPE = /^BR-[A-Z]{2}-\d{4}$/;
-
 type Intent = "register" | "register-add";
 
 /** Every error key a field on this form shows; anything else reaches the banner rather than dead-ending. */
 const CLAIMED = new Set([
-  "categoryId", "typeId", "model", "brand", "prefix", "tags", "serials", "requestedStatus", "assigneeId", "loanDueAt",
+  "categoryId", "typeId", "model", "brand", "tags", "serials", "requestedStatus", "assigneeId", "loanDueAt",
   "requestId", "vendorId", "purchasedAt", "warrantyUntil", "cost", "invoiceRef", "notes",
   "receiptRef", "warrantyCoveredBy", "warrantyContact", "fees",
 ]);
 const isRowKey = (key: string) => /^(tags|serials)[.][0-9]+$/.test(key);
 
-/** The highest number a registered tag under `prefix` carries, from the page's map and this session's own writes. */
-function highestOf(server: Record<string, number | null>, mine: Record<string, number>, prefix: string): number | null {
-  const a = server[prefix];
-  const b = mine[prefix];
-  return a == null && b == null ? null : Math.max(a ?? 0, b ?? 0);
-}
-
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
- * Phase 34 (spec §4): the Register tab — one screen, top to bottom: what
- * (category cards), the model (which sets the type) and how many, the serial,
- * where it goes beside the live actual-size label, purchase details, and the
- * footer that says what is still missing. Quantity 1 submits through
+ * Phase 34 (spec §4), Phase 36: the Register tab — one screen, top to bottom: what
+ * (category cards), the model, the type (asked, never taken from the model) and how many,
+ * the tag and serial staff type, where it goes beside the live actual-size label,
+ * purchase details, and the footer that says what is still missing. Quantity 1 submits through
  * `createAsset` with its initial state and holder; more submits the batch
  * through `registerAssets`. Both land on the Labels tab with the new
  * purchase record ticked (plan P-5). The submit is always enabled: client
  * checks set every error at once, the server's refusals merge in, and the
  * first invalid field takes focus.
  */
-/** Task 3 deletes this with the prefix run: a new prefix or category re-suggests every tag. */
-function retagRows(rows: readonly RegisterRow[], runTags: readonly string[] | null): RegisterRow[] {
-  return rows.map((r, i) => ({ ...r, tag: runTags?.[i] ?? "" }));
-}
-
 export function RegisterForm({
   catalog,
   vendors,
@@ -86,8 +70,6 @@ export function RegisterForm({
   employees,
   recentEmployees,
   requests,
-  prefixCountsByCategory,
-  highestByPrefix,
   directClasses,
   listHref,
   baseUrl,
@@ -99,8 +81,6 @@ export function RegisterForm({
   recentEmployees: string[];
   /** Completed requests, labelled `{refNo} · {vendor} · {date}`. */
   requests: Array<{ id: string; label: string; vendorId: string | null }>;
-  prefixCountsByCategory: Record<string, Array<{ prefix: string; n: number }>>;
-  highestByPrefix: Record<string, number | null>;
   /** Classes this role applies lifecycle changes to directly — a set, because the category can change the class. */
   directClasses: readonly AssetClass[];
   /** The viewer's default list class. */
@@ -121,11 +101,7 @@ export function RegisterForm({
   const [model, setModel] = useState("");
   const [brand, setBrand] = useState("");
   const [quantityText, setQuantityText] = useState("1");
-  const [prefix, setPrefix] = useState("");
   const [rows, setRows] = useState<RegisterRow[]>([{ tag: "", serial: "" }]);
-  // Tags this session has written — so "add another" suggests the next free
-  // number without waiting for the page's own map to be read again.
-  const [written, setWritten] = useState<Record<string, number>>({});
   const [pasteNote, setPasteNote] = useState<string | null>(null);
   // Quantity 1 only (spec §4.4). The status is a sentinel until normalised
   // below against what this class offers, so a class switch never submits a
@@ -206,20 +182,8 @@ export function RegisterForm({
   const loan = status === "TEMPORARY";
   const types = category?.types ?? [];
   const models = category?.models ?? [];
-  // A new model, or a known one with no type (ruling R9), must have its type picked when the category has several.
-  // A typed known model always has one here (the combobox set it), so this reads only the gap.
-  const newModelNeedsType = !!category && model.trim() !== "" && types.length > 1 && !typeId;
-
-  const runFor = (p: string, count: number): string[] | null => {
-    const r = nextTags(p, highestOf(highestByPrefix, written, p), count);
-    return r.ok ? r.tags : null;
-  };
-  const run = prefix ? nextTags(prefix, highestOf(highestByPrefix, written, prefix), quantity) : null;
-  // Said as soon as two letters are in; one letter is still being typed.
-  const prefixError = errors.prefix ?? (prefix.length === 2 && run && !run.ok ? RUN_REFUSAL[run.reason] : undefined);
-  // A category with no tagPrefix and no tags yet (one added in Admin) offers no prefix: a unit with no
-  // tag then needs one typed in the "Tag prefix and notes" fold-out (at quantity 1 there is no Tag box).
-  const needsPrefix = !!category && !prefix && rows.some((r) => !r.tag.trim());
+  // Phase 36 (spec §3.1): a category with several types asks for one; one type is set silently; none leaves it empty.
+  const typeAsk = typeChoice(types);
 
   const { hits, flush } = useIdentifierCheck(
     rows.map((r) => r.tag),
@@ -248,21 +212,10 @@ export function RegisterForm({
   function chooseCategory(id: string) {
     if (id === categoryId) return;
     setCategoryId(id);
-    setTypeId("");
-    // Ruling R23: the category's tagPrefix wins; the learned prefix only fills a missing one.
-    const p = prefixFor(catalog.find((c) => c.id === id)?.tagPrefix, prefixCountsByCategory[id] ?? []);
-    setPrefix(p);
-    setRows((rs) => retagRows(rs, p ? runFor(p, rs.length) : null)); // Task 3 removes suggested tags
-    clearRowErrors("tags");
+    // The type never survives a category change: a 1-type category sets its only type, any other starts empty.
+    setTypeId(typeChoice(catalog.find((c) => c.id === id)?.types ?? []).auto ?? typeAfterCategoryChange());
+    clearError("typeId");
     clearError("categoryId");
-  }
-
-  function changePrefix(value: string) {
-    const p = value.toUpperCase();
-    setPrefix(p);
-    const tags = p ? runFor(p, rows.length) : null;
-    if (tags) setRows((rs) => retagRows(rs, tags));
-    clearError("prefix");
   }
 
   function resize(count: number) {
@@ -291,16 +244,17 @@ export function RegisterForm({
   const setRow = (i: number, patch: Partial<RegisterRow>) =>
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
-  function pasteColumn(at: number, values: string[]) {
-    const out = pasteRows(rows, at, values, "serial");
+  function pasteColumn(field: "tag" | "serial", at: number, values: string[]) {
+    const out = pasteRows(rows, at, values, field);
+    const word = field === "tag" ? "tags" : "serials";
     setRows(out.rows);
     setQuantityText(String(out.rows.length));
     setPasteNote(
       out.pasted < values.length
-        ? `Pasted ${out.pasted} of ${values.length} serials — the rest were not added.`
-        : `Pasted ${out.pasted} serials`,
+        ? `Pasted ${out.pasted} of ${values.length} ${word} — the rest were not added.`
+        : `Pasted ${out.pasted} ${word}`,
     );
-    clearRowErrors("serials");
+    clearRowErrors(field === "tag" ? "tags" : "serials");
   }
 
   const feedback = rowFeedback({ rows, hits, errors, attempted });
@@ -360,12 +314,9 @@ export function RegisterForm({
   const still: string[] = [];
   if (!categoryId) still.push("a category");
   if (model.trim().length < 2) still.push("a model");
-  if (needsPrefix) still.push("a tag prefix");
-  if (newModelNeedsType) {
-    // A typed known model whose type was cleared through "Change type" is not a new model.
-    const r = resolveModelType(models, model);
-    still.push(r.known && r.typeId ? "the type" : "the type for this new model");
-  }
+  if (typeAsk.required && !typeId) still.push("the type");
+  const emptyTags = rows.filter((r) => !r.tag.trim()).length;
+  if (emptyTags > 0) still.push(plural(emptyTags, "tag", "tags"));
   if (requiredRows.length > 0) still.push(plural(requiredRows.length, "serial", "serials"));
   if (duplicateRows.length > 0) still.push(plural(duplicateRows.length, "duplicate to fix", "duplicates to fix"));
   if (single && holder && !assigneeId) still.push("who gets it");
@@ -375,17 +326,11 @@ export function RegisterForm({
   /**
    * Keeps what the next unit of the same delivery shares — the category, the model and its type
    * (spec §3, ruling R7), the vendor, dates, request, invoice no. and warranty (length, until,
-   * covered by) — and clears the units, holder, loan date, brand, cost, fees, OR no., the
-   * repair contact, notes and the documents.
+   * covered by) — and clears the tags and serials (one empty row), holder, loan date, brand, cost, fees,
+   * OR no., the repair contact, notes and the documents.
    */
-  function startAnother(sentTags: string[]) {
-    const mine = { ...written };
-    for (const t of sentTags.map(tagKey)) {
-      if (LEGACY_TAG_SHAPE.test(t)) mine[t.slice(3, 5)] = Math.max(mine[t.slice(3, 5)] ?? 0, Number(t.slice(6)));
-    }
-    setWritten(mine);
-    const next = prefix ? nextTags(prefix, highestOf(highestByPrefix, mine, prefix), 1) : null;
-    setRows([{ tag: next?.ok ? next.tags[0] : "", serial: "" }]);
+  function startAnother() {
+    setRows([{ tag: "", serial: "" }]);
     setQuantityText("1");
     setBrand("");
     setCost("");
@@ -426,10 +371,7 @@ export function RegisterForm({
     const found: Record<string, string> = {};
     if (!categoryId) found.categoryId = "Pick a category";
     if (model.trim().length < 2) found.model = "Name the model";
-    if (newModelNeedsType) found.typeId = "Pick the type for this new model";
-    if (prefix && run && !run.ok) found.prefix = RUN_REFUSAL[run.reason];
-    // Keyed `prefix` so `refuse` opens the Purchase section and its fold-out, and focus lands on Tag prefix.
-    if (needsPrefix && category) found.prefix = `Pick a two-letter tag prefix for ${category.name}`;
+    if (typeAsk.required && !typeId) found.typeId = TYPE_REQUIRED;
     // Spec §4.3: nothing is saved with a gap; the copy is the server's own (Task 3).
     if (single) {
       if (problems[0] === "required") found.serials = SERIAL_REQUIRED;
@@ -516,7 +458,7 @@ export function RegisterForm({
         if (failed > 0) router.push(`/inventory/${id}/documents?failed=${failed}&of=${uploads.length}`);
         else if (intent === "register-add") {
           toast("Registered 1 asset", "settled");
-          startAnother(sentTags);
+          startAnother();
         } else router.push(labels());
         return;
       }
@@ -539,7 +481,7 @@ export function RegisterForm({
       if (failed > 0) router.push(labels(`&docsFailed=${failed}`));
       else if (intent === "register-add") {
         toast(`Registered ${ids.length} assets`, "settled");
-        startAnother(sentTags);
+        startAnother();
       } else router.push(labels());
     });
   }
@@ -586,22 +528,34 @@ export function RegisterForm({
                   describedBy={p["aria-describedby"]}
                   invalid={p.invalid}
                   models={models}
-                  types={types}
                   value={model}
                   onValue={(v) => {
                     setModel(v);
                     clearError("model");
                   }}
-                  typeId={typeId}
-                  onType={(id) => {
-                    setTypeId(id);
-                    clearError("typeId");
-                  }}
-                  typeError={errors.typeId}
                   placeholder={example.model}
                 />
               )}
             </FormField>
+
+            {typeAsk.show && (
+              <FormField label="Type" required error={errors.typeId}>
+                {(p) => (
+                  <Select
+                    id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                    required
+                    value={typeId}
+                    onChange={(e) => {
+                      setTypeId(e.target.value);
+                      clearError("typeId");
+                    }}
+                  >
+                    <option value="">Pick a type…</option>
+                    {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </Select>
+                )}
+              </FormField>
+            )}
 
             <div className="flex flex-col gap-1.5">
               <label htmlFor="register-quantity" className="text-xs font-medium text-fg">
@@ -669,7 +623,8 @@ export function RegisterForm({
             setRow(i, { serial });
             clearRowErrors("serials");
           }}
-          onPasteSerials={pasteColumn}
+          onPasteSerials={(i, values) => pasteColumn("serial", i, values)}
+          onPasteTags={(i, values) => pasteColumn("tag", i, values)}
           onTag={(i, tag) => {
             setRow(i, { tag });
             clearRowErrors("tags");
@@ -678,7 +633,6 @@ export function RegisterForm({
           invalidTags={feedback.invalidTags}
           invalidSerials={invalidSerials}
           lines={feedback.lines}
-          tagPlaceholder={example.tag}
           pasteNote={pasteNote}
           onBlur={flush}
         />
@@ -775,10 +729,6 @@ export function RegisterForm({
           }}
           contact={contact}
           onContact={setContact}
-          prefix={prefix}
-          onPrefix={changePrefix}
-          prefixHint={example.prefixHint}
-          prefixError={prefixError}
           brand={brand}
           onBrand={setBrand}
           notes={notes}

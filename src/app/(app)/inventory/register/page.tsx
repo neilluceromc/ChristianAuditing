@@ -5,7 +5,6 @@ import { RegisterForm } from "@/components/inventory/register-form";
 import { NewEquipmentTabs } from "@/components/inventory/new-equipment-tabs";
 import { registerCatalog } from "@/server/modules/inventory/register-queries";
 import { queueCount } from "@/server/modules/inventory/label-queue";
-import { tagSuggestions } from "@/server/modules/inventory/tag-suggest";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 import { recentPicks } from "@/server/recent-picks";
 import { toSearchParams } from "@/lib/url-state";
@@ -59,14 +58,6 @@ export default async function RegisterAssetsPage({
     recentPicks(user.id, "vendor"),
   ]);
 
-  // Both come from the same grouped reads (`tagSuggestions`): counts are per
-  // category (the field the operator picks); the highest number is per
-  // prefix, fleet-wide, because a tag is unique across the whole register.
-  const suggestions = await tagSuggestions(catalog.map((c) => c.id));
-  const prefixCountsByCategory: Record<string, Array<{ prefix: string; n: number }>> =
-    Object.fromEntries(Object.entries(suggestions).map(([id, s]) => [id, s.prefixes]));
-  const highestByPrefix: Record<string, number> = Object.values(suggestions)[0]?.highest ?? {};
-
   // The breadcrumb names the list it opens: the class `?cls=` scoped to, else the viewer's own default.
   const defaultCls = defaultClassFor(user.role);
   const listCls = scopedCls ?? defaultCls;
@@ -96,8 +87,6 @@ export default async function RegisterAssetsPage({
           vendorId: r.vendorId,
           label: [r.refNo, r.vendor?.name, fmtDate(r.completedAt ?? r.updatedAt)].filter(Boolean).join(" · "),
         }))}
-        prefixCountsByCategory={prefixCountsByCategory}
-        highestByPrefix={highestByPrefix}
         directClasses={directClasses}
         defaultCls={defaultCls}
         listHref={listHref}

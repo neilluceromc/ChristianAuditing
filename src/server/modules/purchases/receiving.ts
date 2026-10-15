@@ -106,7 +106,7 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
     const type = await prisma.assetType.findUnique({ where: { id: d.typeId }, select: { categoryId: true } });
     if (!type || type.categoryId !== d.categoryId) errors.typeId = "That type doesn't belong to the chosen category";
   }
-  // Spec §8, ruling R26: a new model needs its type when the category has types.
+  // Spec §8, a category with types needs one picked (Phase 36).
   else if (category && (await typeRequired(d.categoryId, d.typeId))) errors.typeId = TYPE_REQUIRED;
 
   // Serial is unique fleet-wide (like tag), but a batch never gets to check

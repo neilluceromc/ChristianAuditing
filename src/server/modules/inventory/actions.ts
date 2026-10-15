@@ -257,7 +257,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
     const type = await prisma.assetType.findUnique({ where: { id: d.typeId } });
     if (!type || type.categoryId !== d.categoryId) errors.typeId = "That type doesn't belong to the chosen category";
   }
-  // Spec §8, ruling R26: a new model needs its type when the category has types.
+  // Spec §8, a category with types needs one picked (Phase 36).
   else if (category && (await typeRequired(d.categoryId, d.typeId))) errors.typeId = TYPE_REQUIRED;
   if (d.requestId) {
     const req = await prisma.purchaseRequest.findUnique({ where: { id: d.requestId }, select: { refNo: true, state: true } });

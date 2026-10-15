@@ -19,7 +19,7 @@ export async function registerCatalog(classes: AssetClass[]): Promise<CatalogCat
     prisma.asset.groupBy({ by: ["categoryId", "status"], where: { categoryId: { in: ids } }, _count: { _all: true } }),
     prisma.asset.findMany({
       where: { categoryId: { in: ids } },
-      select: { categoryId: true, model: true, typeId: true, createdAt: true, status: true },
+      select: { categoryId: true, model: true, createdAt: true, status: true },
       orderBy: { createdAt: "desc" }, take: 5000,
     }),
   ]);
@@ -28,7 +28,7 @@ export async function registerCatalog(classes: AssetClass[]): Promise<CatalogCat
     inStock: stock.filter((s) => s.categoryId === c.id && s.status === STOCK_STATUS[c.cls]).reduce((n, s) => n + s._count._all, 0),
     models: mergeKnownModels(
       assets.filter((a) => a.categoryId === c.id)
-        .map((a) => ({ model: a.model, typeId: a.typeId, createdAt: a.createdAt, inStock: a.status === STOCK_STATUS[c.cls] })),
+        .map((a) => ({ model: a.model, createdAt: a.createdAt, inStock: a.status === STOCK_STATUS[c.cls] })),
     ).slice(0, 200),
   }));
 }
