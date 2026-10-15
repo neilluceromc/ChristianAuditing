@@ -163,6 +163,38 @@ test.describe("own tags and real types — Register", () => {
     expect([asset.category.name, asset.type?.name]).toEqual(["Webcam", "USB webcam"]);
   });
 
+  test("13. Windows License asks for the licence / COA no.; the Model example follows the card; Other holds docks and hubs", async ({ page }) => {
+    test.setTimeout(120_000);
+    const tag = newTag();
+    await login(page, IT);
+    await openRegister(page);
+    // The Model example changes with the card.
+    await page.getByRole("button", { name: /^Monitor (\d+ in stock|None yet)$/ }).click();
+    await expect(modelBox(page)).toHaveAttribute("placeholder", "Dell P2422H");
+    await page.getByRole("button", { name: /^Other (\d+ in stock|None yet)$/ }).click();
+    await expect(modelBox(page)).toHaveAttribute("placeholder", "Samsung A54");
+    await expect(typeSelect(page).getByRole("option", { name: "Docking Station", exact: true })).toHaveCount(1);
+    await expect(typeSelect(page).getByRole("option", { name: "Type C Hub", exact: true })).toHaveCount(1);
+    // Windows License: its own card, OEM / Retail / Volume, and the serial box asks for the licence / COA no.
+    await page.getByRole("button", { name: /^Windows License (\d+ in stock|None yet)$/ }).click();
+    await expect(modelBox(page)).toHaveAttribute("placeholder", "Windows 11 Pro");
+    await expect(page.getByRole("heading", { name: "Licence / COA no.", exact: true })).toBeVisible();
+    await expect(page.getByText("Add the product key on the record's Secrets after registering.", { exact: false })).toBeVisible();
+    await modelBox(page).fill("Windows 11 Pro (e2e)");
+    await page.getByRole("option", { name: /^\+ Add .Windows 11 Pro \(e2e\). as a new model$/ }).click();
+    await typeSelect(page).selectOption({ label: "OEM" });
+    await tagBox(page).fill(tag);
+    await page.getByRole("textbox", { name: "Licence / COA no.", exact: true }).fill(`COA-${Date.now()}`);
+    await page.getByRole("button", { name: "Register 1 Windows license", exact: true }).click();
+    await landed(page);
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag }, include: { category: true, type: true } });
+    expect([asset.category.name, asset.type?.name]).toEqual(["Windows License", "OEM"]);
+    // The docks moved into Other (migration 31 + seed), and the Finance kit's dock slot followed.
+    const dock = await db.asset.findUniqueOrThrow({ where: { tag: "BR-DK-0071" }, include: { category: true, type: true } });
+    expect([dock.category.name, dock.type?.name]).toEqual(["Other", "Docking Station"]);
+    expect(await db.assetCategory.count({ where: { name: { in: ["Docking Station", "Type C Hub"] } } })).toBe(0);
+  });
+
   test("2. a known model leaves the Type empty and required", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, IT);

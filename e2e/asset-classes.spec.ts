@@ -537,7 +537,7 @@ test.describe("page gates speak the class", () => {
     expect(options).toContain("Vehicle");
     expect(options).not.toContain("Laptop");
     // Only Purchasing-class cards (an earlier case adds a Purchasing category, so no exact list).
-    for (const name of ["Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Type C Hub", "Docking Station", "Laptop Bag", "Other"]) {
+    for (const name of ["Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Keyboard", "Webcam", "UPS", "Windows License", "Laptop Bag", "Other"]) {
       expect(options).not.toContain(name);
     }
     // The breadcrumb names the list it came from.

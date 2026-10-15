@@ -14,7 +14,7 @@ import { useLeaveTo } from "@/components/ui/back-link";
 import { EntityCombobox } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import Link from "next/link";
-import { CLASS_EXAMPLE } from "@/lib/asset-class";
+import { categoryModelExample } from "@/lib/register-catalog";
 import { fieldLabels } from "@/lib/registration";
 import { WARRANTY_COVERED_BY, WARRANTY_COVERED_BY_LABEL } from "@/lib/purchase-summary";
 import { MONEY_ERROR, normaliseCost } from "@/lib/register-input";
@@ -243,7 +243,7 @@ export function AssetForm({
             disabled: true,
           })}
           {field("Model", "model", {
-            required: true, placeholder: CLASS_EXAMPLE[cls].model, autoFocus: true, onBlur: trim("model"),
+            required: true, placeholder: categoryModelExample(categories.find((c) => c.id === form.categoryId)?.name, cls), autoFocus: true, onBlur: trim("model"),
           })}
           {field("Brand", "brand", { onBlur: trim("brand") })}
           {field("Serial", "serial", { onBlur: trim("serial") })}

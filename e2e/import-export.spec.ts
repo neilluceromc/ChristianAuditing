@@ -29,7 +29,7 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *   from the seed. BR-LT-0148 is DEPLOYED to Marites Bautista (EMP-0042,
  *   ACTIVE). Dennis Ong EMP-0090 is the only OFFBOARDING employee and holds
  *   exactly three items. IT categories (Phase 34): Laptop, Workstation (PC),
- *   Monitor, Headset, Mouse, Type C Hub, Docking Station, Laptop Bag, Other,
+ *   Monitor, Headset, Mouse, Keyboard, Webcam, UPS, Windows License, Laptop Bag, Other,
  *   Uncategorised (phones are type Phone under Other; the mixed fixture's
  *   "Ultrabook" row is the one category that does not exist). Departments: IT, Finance, Sales, HR,
  *   Operations. 10 employees, 3 of whom have policy gaps.

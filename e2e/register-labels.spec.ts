@@ -152,15 +152,15 @@ async function registerLaptops(page: Page, n: number, stamp: string) {
 }
 
 test.describe("register — the Register tab", () => {
-  test("1. IT's twelve category cards in order, no Uncategorised, stock on Laptop, axe", async ({ page }) => {
+  test("1. IT's eleven category cards in order, no Uncategorised, stock on Laptop, axe", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, IT);
     await openRegister(page);
     const cards = page.locator("[data-category-card]");
-    await expect(cards).toHaveCount(12);
+    await expect(cards).toHaveCount(11);
     const names = await cards.evaluateAll((els) => els.map((el) => el.querySelector(".truncate")?.textContent?.trim()));
     expect(names).toEqual([
-      "Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Keyboard", "Webcam", "Type C Hub", "Docking Station", "UPS",
+      "Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Keyboard", "Webcam", "UPS", "Windows License",
       "Laptop Bag", "Other",
     ]);
     await expect(page.getByRole("button", { name: /^Uncategorised\b/ })).toHaveCount(0);

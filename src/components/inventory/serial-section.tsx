@@ -36,8 +36,11 @@ export function SerialSection({
   pasteNote,
   onBlur,
   serialRef,
+  copy = { label: "Serial number", hint: "Required. It’s on the box label or the sticker under the device." },
 }: {
   cls: AssetClass;
+  /** What the box asks for — a Windows licence asks for its licence / COA number (categorySerialCopy). */
+  copy?: { label: string; hint: string };
   rows: readonly RegisterRow[];
   problems: SerialProblem[];
   attempted: boolean;
@@ -94,11 +97,11 @@ export function SerialSection({
     <section aria-labelledby="register-serial-title" className="flex flex-col gap-3 border-t border-border pt-6">
       <div className="flex flex-col gap-1">
         <h2 id="register-serial-title" className="sec">
-          {required ? "Serial number" : "Serial number (optional)"}
+          {required ? copy.label : `${copy.label} (optional)`}
           {required && <span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>}
         </h2>
         {required && (
-          <p id={hintId} className="text-[11.5px] text-fg-muted">Required. It&rsquo;s on the box label or the sticker under the device.</p>
+          <p id={hintId} className="text-[11.5px] text-fg-muted">{copy.hint}</p>
         )}
       </div>
 
@@ -129,7 +132,7 @@ export function SerialSection({
           </div>
           <div className="flex flex-col gap-1.5">
           <label htmlFor="register-serial" className="text-xs font-medium text-fg">
-            Serial number
+            {copy.label}
             {required && <span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>}
           </label>
           <div className="flex flex-wrap items-center gap-3">

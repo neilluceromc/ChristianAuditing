@@ -204,7 +204,7 @@ export function SecretsPanel({
         <form onSubmit={add} className="flex flex-col gap-3 rounded-(--radius-card) border border-border bg-surface p-4 shadow-card">
           <p className="text-[13px] font-semibold text-fg">Add a credential</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <FormField label="Label" required error={fieldErrors.label} hint="e.g. BIOS password, local admin">
+            <FormField label="Label" required error={fieldErrors.label} hint="e.g. BIOS password, local admin, product key">
               {(p) => (
                 <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                   value={label} onChange={(e) => setLabel(e.target.value)} />
