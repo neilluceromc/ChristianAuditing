@@ -34,7 +34,7 @@ import { nextToReview } from "@/server/modules/finance/queries";
 import { serialRequired } from "@/lib/serial-rules";
 import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
 import { approveSchema, resubmitSchema, sendBackSchema } from "@/lib/registration-input";
-import { fieldLabels } from "@/lib/registration";
+import { fieldLabels, shouldReopen } from "@/lib/registration";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -48,6 +48,7 @@ const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign 
  * being repainted as a banner (final review, plan D-8).
  */
 class DirectRefusal extends Error {}
+class StaleAssetError extends Error {}
 
 const bulkSchema = z
   .object({
@@ -517,14 +518,25 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
 
   // Phase 35 (spec §3.6): a cost on an asset approved as NOT capitalised reopens Finance's review —
   // Finance never saw that cost, and depreciation must start from an approval of it.
-  const reopen = asset.financeNotCapitalised && data.cost !== null;
+  // Final review I-1: keyed on "approved, had no cost, now has one" (covers legacy approvals with no cost too).
+  const reopen = shouldReopen(asset, data.cost);
 
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.asset.update({
-        where: { id: asset.id },
-        data: reopen ? { ...changed, financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false } : changed,
-      });
+      if (reopen) {
+        // M-1: state-guarded — a concurrent approval/reopen changes the preconditions, so this is a conflict, not a CHECK 500.
+        const done = await tx.asset.updateMany({
+          where: { id: asset.id, financeConfirmedAt: { not: null }, cost: null },
+          data: { ...changed, financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false },
+        });
+        if (done.count === 0) throw new StaleAssetError();
+      } else if (asset.cost === null && data.cost !== null) {
+        // Not approved when read; if Finance approves (even as not capitalised) before this lands, conflict.
+        const done = await tx.asset.updateMany({ where: { id: asset.id, financeConfirmedAt: null }, data: changed });
+        if (done.count === 0) throw new StaleAssetError();
+      } else {
+        await tx.asset.update({ where: { id: asset.id }, data: changed });
+      }
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name,
         entityType: "asset", entityId: asset.id,
@@ -538,6 +550,7 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
       }
     });
   } catch (err) {
+    if (err instanceof StaleAssetError) return conflict("Finance just changed this asset's review. Reload and try again.");
     if (uniqueTarget(err).includes("serial")) return validationError({ serial: "That serial is already registered" });
     throw err;
   }

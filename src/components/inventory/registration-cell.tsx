@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
-import { REG_LABEL } from "@/lib/registration";
+import { regLabel } from "@/lib/registration";
 import type { AssetRow } from "@/server/modules/inventory/queries";
 import { ResubmitDialog } from "./resubmit-dialog";
 
@@ -17,7 +17,7 @@ export function RegistrationCell({ row, canEdit, canMutate }: { row: AssetRow; c
   const flagged = row.reg === "needs-correction";
   return (
     <div className="flex flex-col items-start gap-1">
-      <StatusPill value={row.reg} label={REG_LABEL[row.reg]} ns="registration" />
+      <StatusPill value={row.reg} label={regLabel(row.reg, row.regNotCapitalised)} ns="registration" />
       {flagged && (
         <div className="flex flex-col gap-1 text-[11px] leading-snug text-fg-secondary">
           {row.regItems.length > 0 && (

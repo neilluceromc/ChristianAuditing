@@ -1,6 +1,7 @@
 import type { XlsxColumn } from "@/server/xlsx/write";
 import type { DepAssetRow } from "@/server/modules/finance/depreciation-queries";
 import { monthLabel, type YearRow } from "@/lib/depreciation";
+import { localDateISO } from "@/lib/format";
 import { REG_LABEL_FINANCE } from "@/lib/registration";
 
 export const EXPORT_CAP = 10_000;
@@ -370,7 +371,7 @@ export const FINANCE_ASSETS_EXPORT_COLUMNS: XlsxColumn<DepAssetRow>[] = [
   { label: "Holder", width: 24, cell: (r) => ({ value: r.holder }) },
   { label: "Registration", width: 18, cell: (r) => ({ value: r.reg === "registered" && r.notCapitalised ? "Not capitalised" : REG_LABEL_FINANCE[r.reg] }) },
   { label: "Cost", width: 14, cell: (r) => peso(r.costC) },
-  { label: "Confirmed on", width: 14, cell: (r) => ({ value: r.confirmedAt, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Confirmed on", width: 14, cell: (r) => ({ value: r.confirmedAt ? localDateISO(r.confirmedAt) : null }) },
   { label: "Starts", width: 16, cell: (r) => ({ value: r.result?.startMonth == null ? null : monthLabel(r.result.startMonth) }) },
   { label: "Life (months)", width: 13, cell: (r) => ({ value: r.result?.policy?.lifeMonths ?? null, type: Number, format: "0" }) },
   { label: "Salvage", width: 14, cell: (r) => peso(r.result?.policy?.salvage) },
@@ -378,7 +379,10 @@ export const FINANCE_ASSETS_EXPORT_COLUMNS: XlsxColumn<DepAssetRow>[] = [
   { label: "Depreciation to date", width: 20, cell: (r) => peso(r.result?.accumulated) },
   { label: "Book value", width: 14, cell: (r) => peso(r.result?.bookValue) },
   { label: "Basis", width: 11, cell: (r) => ({ value: r.result?.policy ? (r.custom ? "Custom" : "Category") : "" }) },
-  { label: "Note", width: 40, cell: (r) => ({ value: r.custom ? r.overrideNote : r.note }) },
+  { label: "Note", width: 40, cell: (r) => ({
+    // a custom row shows its reason AND, when the override is wrong, the warning (final review M-5)
+    value: r.custom ? [r.overrideNote, r.result?.state === "bad-salvage" ? r.note : null].filter(Boolean).join(" · ") : r.note,
+  }) },
 ];
 
 /** Phase 35 (plan P-11): one asset's money summary (label + figure in "Book value at end") over its month-by-month schedule. */

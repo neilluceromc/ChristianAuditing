@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FIN_FILTERS, REGISTRATION_FIELDS, REG_STATES, fieldLabels, finWhere, pageAcross, parseFin, parseRegState,
-  regWhere, registrationState, returnSummary,
+  regLabel, regWhere, registrationState, returnSummary, shouldReopen,
 } from "./registration";
 
 const d = new Date("2026-10-01T00:00:00Z");
@@ -73,5 +73,25 @@ describe("pageAcross", () => {
   });
   it("a page entirely in the rest", () => {
     expect(pageAcross(30, 50, 25)).toEqual({ first: { skip: 0, take: 0 }, rest: { skip: 20, take: 25 } });
+  });
+});
+
+describe("regLabel", () => {
+  it("Fully registered gains the not-capitalised suffix only when flagged", () => {
+    expect(regLabel("registered", false)).toBe("Fully registered");
+    expect(regLabel("registered", true)).toBe("Fully registered · not capitalised");
+    expect(regLabel("with-finance", true)).toBe("With Finance");
+  });
+});
+
+describe("shouldReopen (final review I-1)", () => {
+  const approved = new Date("2026-10-01T00:00:00Z");
+  it("an approved asset with no cost that gains one reopens (not capitalised or legacy)", () => {
+    expect(shouldReopen({ financeConfirmedAt: approved, cost: null }, 1500)).toBe(true);
+  });
+  it("does not reopen when there was already a cost, no new cost, or it is not approved", () => {
+    expect(shouldReopen({ financeConfirmedAt: approved, cost: 100 }, 200)).toBe(false);
+    expect(shouldReopen({ financeConfirmedAt: approved, cost: null }, null)).toBe(false);
+    expect(shouldReopen({ financeConfirmedAt: null, cost: null }, 1500)).toBe(false);
   });
 });

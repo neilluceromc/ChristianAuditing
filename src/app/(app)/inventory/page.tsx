@@ -91,6 +91,9 @@ export default async function InventoryPage({
     purchaseYearBuckets(state, cls),
     prisma.asset.count({ where: { AND: [{ cls }, regWhere("needs-correction")] } }),
   ]);
+  // Final review I-2: a saved column preference must not hide Registration while the reg filter is on (Show them).
+  const shownColumns = state.filters.reg?.length && !visibleColumns.includes("registration")
+    ? [...visibleColumns, "registration"] : visibleColumns;
   const yearChips = purchaseYearChips(yearBuckets);
 
   const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0 || purchaseYear !== null;
@@ -235,7 +238,7 @@ export default async function InventoryPage({
                   key={exportQS}
                   rows={rows}
                   state={state}
-                  visible={visibleColumns}
+                  visible={shownColumns}
                   canMutate={canMutate}
                   filtersQS={exportQS.replace(/^\?/, "")}
                   total={total}

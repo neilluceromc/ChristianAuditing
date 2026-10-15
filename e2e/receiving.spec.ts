@@ -286,22 +286,6 @@ test.describe("registration — the primary path", () => {
   });
 });
 
-/**
- * Phase 30 (spec §4.1): the record header shows one state-chosen primary and
- * puts every other action in its ⋯ "More actions" menu. Opens that menu and
- * returns it — retried until the island has hydrated. Declared here because
- * only the Finance-review blocks below open a record.
- */
-async function openMore(page: Page) {
-  const more = page.getByRole("button", { name: "More actions", exact: true });
-  const menu = page.getByRole("menu");
-  await expect(async () => {
-    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
-    await expect(menu).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 20_000 });
-  return menu;
-}
-
 test.describe("Finance review — confirm", () => {
   test.describe.configure({ mode: "serial" });
 
@@ -375,16 +359,11 @@ test.describe("Finance review — confirm", () => {
   test("it_staff cannot confirm", async ({ page }) => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: tag3 } });
     await login(page, "it@thebackroomop.com");
-    await page.goto(`/inventory/${asset.id}`);
-
-    // it_staff registered this very asset (Step 1) and it remains unconfirmed
-    // and unreturned — the split is that IT never sees these controls at all,
-    // not merely that clicking them fails. Phase 30: neither as a header
-    // button nor as a More item.
-    await expect(page.getByRole("button", { name: "Confirm details" })).toHaveCount(0);
-    const menu = await openMore(page);
-    await expect(menu.getByRole("menuitem", { name: "Change status…", exact: true })).toBeVisible();
-    await expect(menu.getByRole("menuitem", { name: /^(Confirm details|Send back to IT)…$/ })).toHaveCount(0);
+    // Phase 35: the review controls live only on the Finance asset page, and IT is turned away from it.
+    await page.goto(`/finance/assets/${asset.id}`);
+    expect(new URL(page.url()).pathname.startsWith("/finance")).toBe(false);
+    await expect(page.getByRole("region", { name: "Review" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Approve|Send back to IT…/ })).toHaveCount(0);
   });
 });
 
@@ -426,6 +405,9 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/${assetReturn.id}`);
     await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
+    // ...including what Finance flagged and why (restored from the pre-Phase-35 assertion).
+    await expect(page.getByText("Finance flagged:")).toBeVisible();
+    await expect(page.getByRole("paragraph").filter({ hasText: reason })).toBeVisible();
   });
 
   test("A too-short reason is refused and WRITES NOTHING", async ({ page }) => {
@@ -452,13 +434,11 @@ test.describe("Finance review — send back and correct", () => {
 
   test("it_staff cannot send back", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto(`/inventory/${assetShortReason.id}`); // still unreturned — prior test wrote nothing
-
-    // Phase 30: neither as a header button nor as a More item.
-    await expect(page.getByRole("button", { name: "Confirm details" })).toHaveCount(0);
-    const menu = await openMore(page);
-    await expect(menu.getByRole("menuitem", { name: "Change status…", exact: true })).toBeVisible();
-    await expect(menu.getByRole("menuitem", { name: /^(Confirm details|Send back to IT)…$/ })).toHaveCount(0);
+    // Phase 35: the send-back control lives only on the Finance asset page, and IT is turned away from it.
+    await page.goto(`/finance/assets/${assetShortReason.id}`);
+    expect(new URL(page.url()).pathname.startsWith("/finance")).toBe(false);
+    await expect(page.getByRole("region", { name: "Review" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Send back to IT…" })).toHaveCount(0);
   });
 
   // Same UI-unreachability as "Confirming twice", and the same fix: canConfirm

@@ -31,6 +31,19 @@ export function registrationState(a: RegFacts): RegState {
   return "with-finance";
 }
 
+/** The list/record label: "Fully registered" gains "· not capitalised" when Finance approved it that way (spec §3.1). */
+export function regLabel(state: RegState, notCapitalised: boolean): string {
+  return state === "registered" && notCapitalised ? `${REG_LABEL.registered} · not capitalised` : REG_LABEL[state];
+}
+
+/**
+ * Spec §3.6 (final review I-1): an APPROVED asset that had no cost and is given one goes back to Finance —
+ * Finance never saw that cost. Covers "approved as not capitalised" and legacy approvals with no cost.
+ */
+export function shouldReopen(asset: { financeConfirmedAt: Date | null; cost: unknown }, newCost: unknown): boolean {
+  return asset.financeConfirmedAt !== null && asset.cost === null && newCost !== null;
+}
+
 export function parseRegState(raw: string | null | undefined): RegState | null {
   return raw && (REG_STATES as readonly string[]).includes(raw) ? (raw as RegState) : null;
 }

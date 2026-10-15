@@ -665,7 +665,8 @@ export interface FinanceHome {
   bookValue: string;
   depreciation: string;
   asOfEnd: string;
-  toReview: number;
+  /** registrations waiting for Finance, per class — each is its own link, so a count always matches the page it opens */
+  toReview: { it: number; purchasing: number };
   queue: TodoRow[];
 }
 
@@ -675,7 +676,7 @@ export interface FinanceHome {
  */
 export async function financeHome(now: Date = new Date()): Promise<FinanceHome> {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [waiting, completed, capitalized, totals, toReview] = await Promise.all([
+  const [waiting, completed, capitalized, totals, toReviewIt, toReviewPurchasing] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { state: "IT_REVIEWED" },
       orderBy: { reviewedAt: "asc" },
@@ -696,7 +697,8 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
     // fronts (D-16).
     prisma.asset.aggregate({ where: { cost: { not: null } }, _sum: { cost: true }, _count: { _all: true } }),
     bookValueTotals({}, now),
-    prisma.asset.count({ where: regWhere("with-finance") }),
+    prisma.asset.count({ where: { AND: [{ cls: "IT" }, regWhere("with-finance")] } }),
+    prisma.asset.count({ where: { AND: [{ cls: "PURCHASING" }, regWhere("with-finance")] } }),
   ]);
 
   const oldest = waiting[0];
@@ -711,7 +713,7 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
     bookValue: fmtMoneyExact(totals.bookC / 100),
     depreciation: fmtMoneyExact(totals.accumulatedC / 100),
     asOfEnd: monthEndLabel(totals.asOf),
-    toReview,
+    toReview: { it: toReviewIt, purchasing: toReviewPurchasing },
     queue: waiting.slice(0, 8).map((r) => ({
       id: r.id,
       refNo: r.refNo,

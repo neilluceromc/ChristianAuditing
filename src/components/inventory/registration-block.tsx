@@ -3,7 +3,7 @@ import type { AssetClass, Role } from "@prisma/client";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/status";
 import { fmtDate } from "@/lib/format";
-import { REG_LABEL, registrationState, returnSummary } from "@/lib/registration";
+import { regLabel, registrationState, returnSummary } from "@/lib/registration";
 
 /** Phase 35 (spec §3.1): where the asset stands in Finance's registration review, as IT and Purchasing read it. */
 export function RegistrationBlock({
@@ -31,7 +31,7 @@ export function RegistrationBlock({
   const summary = state === "needs-correction" ? returnSummary(asset) : null;
   return (
     <Card className="lg:col-span-2">
-      <CardHeader title="Registration" actions={<StatusPill value={state} label={REG_LABEL[state]} ns="registration" />} />
+      <CardHeader title="Registration" actions={<StatusPill value={state} label={regLabel(state, asset.financeNotCapitalised)} ns="registration" />} />
       <CardBody className="flex flex-col gap-2 text-xs text-fg-secondary">
         {state === "registered" && (
           <p>

@@ -105,7 +105,9 @@ describe("stateNote", () => {
     const base = { cost: 1, accumulated: 0, bookValue: 1, monthly: null, startMonth: null, policy: null };
     expect(stateNote({ ...base, state: "not-started" }, "Laptop")).toBe("Not depreciating yet");
     expect(stateNote({ ...base, state: "no-policy" }, "Laptop")).toBe("No policy for Laptop");
-    expect(stateNote({ ...base, state: "bad-salvage" }, "Laptop")).toBe("Salvage is not below cost — check the override");
+    expect(stateNote({ ...base, state: "bad-salvage" }, "Laptop")).toBe("Salvage is not below cost");
+    expect(stateNote({ ...base, state: "bad-salvage", policy: { lifeMonths: 12, salvage: 5, basis: "category" } }, "Laptop")).toBe("Salvage is not below cost");
+    expect(stateNote({ ...base, state: "bad-salvage", policy: { lifeMonths: 12, salvage: 5, basis: "custom" } }, "Laptop")).toBe("Salvage is not below cost — check the override");
     expect(stateNote({ ...base, state: "fully-depreciated" }, "Laptop")).toBe("Fully depreciated");
     expect(stateNote({ ...base, state: "depreciating" }, "Laptop")).toBeNull();
   });

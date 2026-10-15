@@ -101,7 +101,7 @@ export function stateNote(r: DepResult, categoryName: string): string | null {
   switch (r.state) {
     case "not-started": return "Not depreciating yet";
     case "no-policy": return `No policy for ${categoryName}`;
-    case "bad-salvage": return "Salvage is not below cost — check the override";
+    case "bad-salvage": return r.policy?.basis === "custom" ? "Salvage is not below cost — check the override" : "Salvage is not below cost";
     case "fully-depreciated": return "Fully depreciated";
     default: return null;
   }

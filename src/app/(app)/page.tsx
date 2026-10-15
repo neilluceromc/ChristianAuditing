@@ -167,11 +167,18 @@ export default async function Home() {
                     </span>
                   )}
                 </p>
-                {d.toReview > 0 && (
-                  <p className="text-[13px]">
-                    <Link href="/finance/assets?fin=with-finance" className="font-medium text-accent hover:underline">
-                      {d.toReview} registrations to review
-                    </Link>
+                {d.toReview.it + d.toReview.purchasing > 0 && (
+                  <p className="flex flex-wrap gap-x-4 text-[13px]">
+                    {d.toReview.it > 0 && (
+                      <Link href="/finance/assets?fin=with-finance" className="font-medium text-accent hover:underline">
+                        {d.toReview.it} IT registration{d.toReview.it === 1 ? "" : "s"} to review
+                      </Link>
+                    )}
+                    {d.toReview.purchasing > 0 && (
+                      <Link href="/finance/assets?cls=PURCHASING&fin=with-finance" className="font-medium text-accent hover:underline">
+                        {d.toReview.purchasing} Purchasing registration{d.toReview.purchasing === 1 ? "" : "s"} to review
+                      </Link>
+                    )}
                   </p>
                 )}
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

@@ -36,7 +36,7 @@ const BY_AGE: Prisma.AssetOrderByWithRelationInput[] = [{ createdAt: "asc" }, { 
 /**
  * Phase 35 (spec 4.1): Finance's register of every asset of a class, with the registration chips, a page of
  * rows (To review first on All, plan P-10) and totals over EVERY matching capitalised row (plan P-4).
- * Status is shown, not filtered: Finance cares that a P55,000 laptop currently reads DEFECTIVE.
+ * Status is shown on every row, and can also be filtered (the optional status filter); Finance cares that a P55,000 laptop currently reads DEFECTIVE.
  */
 export async function financeAssets(p: FinanceListParams, now: Date = new Date()): Promise<{
   rows: DepAssetRow[]; total: number; page: number; pageCount: number;

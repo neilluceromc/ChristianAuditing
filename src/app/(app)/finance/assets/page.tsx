@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireUser } from "@/server/auth/guards";
+import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { ASSET_CLASSES, CLASS_LABEL, parseCls, statusesFor } from "@/lib/asset-class";
 import { parsePage } from "@/lib/paging";
@@ -30,7 +30,7 @@ export default async function FinanceAssetsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser();
+  await requireRole("admin", "finance_staff");
   const params = toSearchParams(await searchParams);
   const cls = parseCls(params.get("cls")) ?? "IT";
   const status = parseAssetStatus(params.get("status"), cls);

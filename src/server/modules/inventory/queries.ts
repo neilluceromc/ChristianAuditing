@@ -54,6 +54,7 @@ export interface AssetRow {
   financeReturned: boolean;
   /** Phase 35 (spec §3.1): the derived registration state, and what Finance flagged when it is needs-correction */
   reg: RegState;
+  regNotCapitalised: boolean;
   regItems: string[];
   regNote: string | null;
   regBy: string | null;
@@ -117,6 +118,7 @@ function toRow(a: {
   itVerifiedAt: Date | null;
   financeConfirmedAt: Date | null;
   financeReturnedAt: Date | null;
+  financeNotCapitalised: boolean;
   financeReturnFields: string[];
   financeReturnReason: string | null;
   financeReturnedBy: { name: string } | null;
@@ -161,6 +163,7 @@ function toRow(a: {
     financeConfirmed: a.financeConfirmedAt !== null,
     financeReturned: a.financeReturnedAt !== null,
     reg,
+    regNotCapitalised: a.financeNotCapitalised,
     regItems: summary.items,
     regNote: summary.note,
     regBy: a.financeReturnedBy?.name ?? null,

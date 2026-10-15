@@ -314,7 +314,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await years.fill("3");
       await page.getByLabel("Months for Laptop", { exact: true }).fill("0");
       await page.getByLabel("Salvage percent for Laptop", { exact: true }).fill("10");
-      await expect(page.getByText(/This updates the book value of \d+ assets, including past months on the schedule\./)).toBeVisible();
+      await expect(page.getByText(/This updates the book value of \d+ assets?, including past months on the schedule\./)).toBeVisible();
       await page.locator("tr").filter({ has: years }).getByRole("button", { name: "Save" }).click();
       await expect(page.getByText("Saved — Laptop")).toBeVisible();
 
@@ -426,7 +426,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
     await page.goto("/");
     await expect(page.getByText("Book value", { exact: true })).toBeVisible();
     await expect(page.getByText(/as of /).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /\d+ registrations to review/ })).toHaveAttribute("href", "/finance/assets?fin=with-finance");
+    await expect(page.getByRole("link", { name: /\d+ (IT|Purchasing) registrations? to review/ }).first()).toHaveAttribute("href", /\/finance\/assets\?(cls=PURCHASING&)?fin=with-finance/);
   });
 
   test("9. the year schedule: category subtotals, a Total, projected headers, and an empty year", async ({ page }) => {
@@ -525,6 +525,60 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await expect(page.getByRole("dialog", { name: `Send ${tag} back to IT` })).toBeVisible();
       await expectNoSeriousAxe(page);
     } finally {
+      await restore(tag, before);
+    }
+  });
+  test("13. legacy approval with no cost (confirmed, flag off): IT adding a cost reopens Finance's review", async ({ page }) => {
+    const tag = "BR-MN-0910";
+    const before = await snap(tag);
+    try {
+      const finance = await db.user.findUniqueOrThrow({ where: { email: FINANCE } });
+      await reset(tag, { cost: null, financeConfirmedAt: new Date(Date.now() - 30 * DAY), financeConfirmedById: finance.id });
+      const id = before.id;
+      const reopened0 = await auditCount(id, "finance.reopened");
+
+      await login(page, IT);
+      await page.goto(`/inventory/${id}/edit`);
+      const cost = page.getByLabel(/^Cost/);
+      await waitForHydration(cost);
+      await cost.fill("750");
+      await page.getByRole("button", { name: "Save changes" }).click();
+      await page.waitForURL((u) => u.pathname === `/inventory/${id}`);
+
+      const after = await db.asset.findUniqueOrThrow({ where: { id } });
+      expect(after.financeConfirmedAt).toBeNull();
+      expect(after.financeConfirmedById).toBeNull();
+      expect(after.financeNotCapitalised).toBe(false);
+      expect(await auditCount(id, "finance.reopened")).toBe(reopened0 + 1);
+      await page.goto(`/inventory?q=${listQ(tag)}`);
+      await expect(row(page, tag)).toContainText("With Finance");
+    } finally {
+      await restore(tag, before);
+    }
+  });
+
+  test("14. a saved column preference without Registration still shows it under the reg filter (Show them)", async ({ page }) => {
+    const tag = "BR-HS-0502";
+    const before = await snap(tag);
+    const user = await db.user.findUniqueOrThrow({ where: { email: IT } });
+    const key = { userId_key: { userId: user.id, key: "columns:inventory" } };
+    const prefBefore = await db.userPreference.findUnique({ where: key });
+    try {
+      await reset(tag, { financeReturnedAt: new Date(), financeReturnedById: (await db.user.findUniqueOrThrow({ where: { email: FINANCE } })).id, financeReturnFields: ["cost"], financeReturnReason: "e2e: pref" });
+      await db.userPreference.upsert({
+        where: key,
+        create: { userId: user.id, key: "columns:inventory", value: ["category"] },
+        update: { value: ["category"] },
+      });
+      await login(page, IT);
+      await page.goto("/inventory");
+      await expect(page.getByRole("columnheader", { name: "Registration" })).toHaveCount(0);
+      await page.goto("/inventory?reg=needs-correction");
+      await expect(page.getByRole("columnheader", { name: "Registration" })).toBeVisible();
+      await expect(row(page, tag)).toContainText("Finance flagged");
+    } finally {
+      if (prefBefore) await db.userPreference.update({ where: key, data: { value: prefBefore.value as never } });
+      else await db.userPreference.deleteMany({ where: { userId: user.id, key: "columns:inventory" } });
       await restore(tag, before);
     }
   });
