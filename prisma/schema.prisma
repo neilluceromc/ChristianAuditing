@@ -207,6 +207,9 @@ model AssetCategory {
   /// Phase 34 (spec §7.1, ruling R23): Register offers tagPrefix ?? learned prefix (preferredPrefix) ?? "" —
   /// this prefix wins when set; the prefix learned from existing tags only fills a missing one.
   tagPrefix String?
+  /// Phase 35 (spec §5.3): Finance's straight-line policy for the category; life null = no policy.
+  depreciationLifeMonths     Int?
+  depreciationSalvagePercent Decimal?    @db.Decimal(5, 2)
   types     AssetType[]
   assets    Asset[]
 }
@@ -425,6 +428,12 @@ model Asset {
   financeReturnedById  String?
   financeReturnedBy    User?            @relation("financeReturnedBy", fields: [financeReturnedById], references: [id], onDelete: Restrict)
   financeReturnReason  String?
+  /// Phase 35 (spec §3.2): approved by Finance as NOT capitalised — no cost, no book value, no depreciation.
+  financeNotCapitalised Boolean         @default(false)
+  /// Phase 35 (spec §3.3): the send-back checklist — keys of REGISTRATION_FIELDS (src/lib/registration.ts).
+  financeReturnFields  String[]         @default([])
+  /// Phase 35 (spec §3.4): the registering department's reply on Mark corrected; cleared by Finance's next decision.
+  financeResubmitNote  String?
   /// Phase 14: set when IT checked a Purchasing-registered IT asset, or at
   /// creation when IT registered it. NULL on an IT asset = awaiting IT's check.
   /// Always NULL on a Purchasing asset (isAwaitingItCheck includes the class).
@@ -448,6 +457,10 @@ model Asset {
   warrantyContact      String?
   /// Phase 34 (spec §5): set when its label was printed from the Labels tab; NULL = waiting.
   labelPrintedAt       DateTime?
+  /// Phase 35 (spec §5.3): a per-asset override — life AND salvage (pesos) together, or neither.
+  depreciationLifeMonths Int?
+  depreciationSalvage    Decimal?         @db.Decimal(12, 2)
+  depreciationNote       String?
   purchaseRecordId     String?
   purchaseRecord       PurchaseRecord?  @relation(fields: [purchaseRecordId], references: [id], onDelete: Restrict)
   secrets              AssetSecret[]
