@@ -28,7 +28,7 @@ export function ScheduleTable({ year, groups, total }: { year: number; groups: S
   const stickyTag = "sticky left-0 z-[1] w-[110px] min-w-[110px]";
   const stickyModel = "sticky left-[110px] z-[1] w-[180px] min-w-[180px] max-w-[180px] truncate";
   return (
-    <div className="overflow-x-auto rounded-(--radius-card) border border-border bg-surface shadow-card" style={{ overflowX: "auto" }}>
+    <div role="region" aria-label="Schedule scroll area" tabIndex={0} className="overflow-x-auto rounded-(--radius-card) border border-border bg-surface shadow-card" style={{ overflowX: "auto" }}>
       <table aria-label={`Depreciation schedule ${year}`} className="w-full border-collapse text-[12.5px]">
         <thead>
           <tr>
@@ -42,7 +42,7 @@ export function ScheduleTable({ year, groups, total }: { year: number; groups: S
                 key={m}
                 scope="col"
                 title={projected[i] ? "projected" : undefined}
-                className={cn(TH, "text-right", projected[i] && "italic opacity-60")}
+                className={cn(TH, "text-right", projected[i] && "italic")}
               >
                 {m}
               </th>

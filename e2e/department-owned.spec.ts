@@ -474,12 +474,16 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await page.getByRole("button", { name: /Save/ }).click();
     await expect(page.getByText(/Saved|saved/)).toBeVisible();
   });
-  test("13b. Finance cannot see or confirm it yet", async ({ page }) => {
+  test("13b. Finance lists it as Waiting for IT, and cannot approve it yet", async ({ page }) => {
+    // Phase 35 (spec §4.1): Finance's register lists every asset; an unchecked one reads "Waiting for IT"
+    // and its asset page carries no Review box.
     await login(page, FIN);
-    await page.goto("/finance/assets");
-    await expect(page.getByRole("link", { name: tag })).toHaveCount(0);
-    await page.goto(`/inventory/${id}`);
-    await expect(page.getByRole("button", { name: "Confirm details" })).toHaveCount(0);
+    await page.goto(`/finance/assets?fin=awaiting-it&q=${tag}`);
+    await expect(page.getByRole("row", { name: new RegExp(tag) })).toContainText("Waiting for IT");
+    await page.goto(`/finance/assets/${id}`);
+    await expect(page.getByRole("heading", { name: "Money summary" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Review" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
   });
   test("13c. IT's Home lists it under CHECK; IT marks it checked; Purchasing's Edit is gone", async ({ page }) => {
     await login(page, IT);
@@ -516,18 +520,19 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await page.goto(`/inventory/${id}`);
     await expect(page.getByRole("link", { name: "Edit" })).toHaveCount(0);
   });
-  test("13d. Finance now lists and confirms it", async ({ page }) => {
+  test("13d. Finance now lists it To review and approves it on its asset page", async ({ page }) => {
     await login(page, FIN);
-    await page.goto("/finance/assets");
-    await expect(page.getByRole("link", { name: tag })).toBeVisible();
+    await page.goto(`/finance/assets?fin=with-finance&q=${tag}`);
+    await expect(page.getByRole("row", { name: new RegExp(tag) })).toContainText("To review");
+    // Phase 35 (plan P-9): Finance reviews at /finance/assets/{id}; the record header no longer offers Confirm details.
     await page.goto(`/inventory/${id}`);
-    // exact: Finance's sidebar carries its own "Awaiting finance" link.
-    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Confirm details" }).click();
-    await page.getByRole("dialog", { name: `Confirm details of ${tag}?` }).getByRole("button", { name: "Confirm details", exact: true }).click();
-    // Phase 30 (spec §4.6): the finance-state pill left the header; Finance's next step shows instead.
-    await expect(page.getByRole("link", { name: "Next to review →" }).or(page.getByText("Queue clear"))).toBeVisible();
-    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toHaveCount(0);
-    expect((await db.asset.findUniqueOrThrow({ where: { id } })).financeConfirmedAt).not.toBeNull();
+    await expect(page.getByRole("button", { name: "Confirm details" })).toHaveCount(0);
+    await page.goto(`/finance/assets/${id}`);
+    const approve = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Approve", exact: true });
+    await expect(approve).toBeVisible();
+    await page.waitForTimeout(500);
+    await approve.click();
+    await expect(page.getByText(`${tag} approved`)).toBeVisible();
+    await expect.poll(async () => (await db.asset.findUniqueOrThrow({ where: { id } })).financeConfirmedAt !== null).toBe(true);
   });
 });

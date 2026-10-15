@@ -436,23 +436,20 @@ test.describe("Finance send-back and resubmit speak the class", () => {
     const id = await idOf("BR-FN-0003");
 
     await login(page, "finance@thebackroomop.com");
-    await page.goto(`/inventory/${id}`);
-    // Phase 30 (spec §4.1 row 5): Confirm details is Finance's primary; Send back sits in More.
-    await (await openMore(page)).getByRole("menuitem", { name: "Send back to Purchasing…", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Send back BR-FN-0003?" });
-    await dialog.getByLabel("What is wrong?").fill("e2e — wrong cost recorded");
-    await dialog.getByRole("button", { name: "Send back" }).click();
+    // Phase 35 (plan P-9): Finance reviews on its own page now — the record header no longer offers
+    // Confirm details / Send back. The checklist dialog speaks the class ("Purchasing").
+    await page.goto(`/finance/assets/${id}`);
+    const review = page.getByRole("region", { name: "Review" });
+    const sendBack = review.getByRole("button", { name: "Send back to Purchasing…", exact: true });
+    await expect(sendBack).toBeVisible();
+    await page.waitForTimeout(500);
+    await sendBack.click();
+    const dialog = page.getByRole("dialog", { name: "Send BR-FN-0003 back to Purchasing" });
+    await dialog.getByLabel("Cost", { exact: true }).check();
+    await dialog.getByLabel("Note for Purchasing").fill("e2e — wrong cost recorded");
+    await dialog.getByRole("button", { name: "Send back", exact: true }).click();
     await expect(page.getByText("BR-FN-0003 sent back to Purchasing")).toBeVisible();
-    // exact: true — Playwright's getByText is substring AND case-insensitive
-    // by default, and the Purchasing sidebar nav carries its own "Awaiting
-    // finance" link at all times, which would otherwise satisfy a loose match
-    // on "AWAITING FINANCE" below regardless of whether the pill ever changed.
-    // Phase 30 (spec §4.1): the header's one pill asks something of THIS
-    // viewer — Finance still owes a confirmation; RETURNED BY FINANCE is the
-    // pill Purchasing sees below.
-    await expect(page.getByRole("alert").filter({ hasText: "Finance sent this back" })).toContainText("e2e — wrong cost recorded");
-    await expect(page.getByText("AWAITING FINANCE", { exact: true })).toBeVisible();
-    await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/Sent back to Purchasing: Cost/)).toContainText("e2e — wrong cost recorded");
 
     // IT cannot resubmit — and, as of Phase 14's asymmetric visibility, cannot
     // even see this record: BR-FN-0003 is Purchasing-class furniture, and IT
@@ -473,9 +470,9 @@ test.describe("Finance send-back and resubmit speak the class", () => {
     await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Mark corrected" })).toBeVisible();
     await page.getByRole("button", { name: "Mark corrected" }).click();
-    const resubmitDialog = page.getByRole("dialog", { name: "Mark corrected BR-FN-0003?" });
-    await resubmitDialog.getByRole("button", { name: "Mark corrected" }).click();
-    await expect(page.getByText("BR-FN-0003 resubmitted to Finance")).toBeVisible();
+    const resubmitDialog = page.getByRole("dialog", { name: "Mark BR-FN-0003 corrected?" });
+    await resubmitDialog.getByRole("button", { name: "Send to Finance" }).click();
+    await expect(page.getByText("BR-FN-0003 sent back to Finance")).toBeVisible();
     await expect(page.getByText("RETURNED BY FINANCE", { exact: true })).toHaveCount(0);
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).financeReturnedAt).toBeNull();
   });

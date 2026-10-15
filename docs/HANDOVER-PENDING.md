@@ -162,9 +162,13 @@ Consumed what Phase 19 records. Scope agreed in the D1 brainstorm (spec
 
 ### 5.2 Other candidates (PICKUP §4 item 14, unchanged order)
 
-- **Depreciation module** (Finance; own brainstorm — straight-line by category with a useful life and
-  salvage, a monthly schedule report, and Finance's confirmation as the capitalisation date were the ideas
-  floated; nothing designed). Still the first candidate; Phase 27's spec §2 names it a non-goal again.
+- ~~**Depreciation module** (Finance; straight-line by category with a useful life and salvage, a monthly
+  schedule report, and Finance's confirmation as the capitalisation date).~~
+  **✅ SHIPPED in Phase 35 (code-complete 2026-10-15, unmerged and unpushed, migration 28) —** per-category
+  policies, per-asset overrides, the year Jan–Dec schedule, the Finance asset register and asset page. The same
+  phase added **registration review**: every registered asset goes to Finance, which approves it (or approves it
+  as not capitalised) or sends it back with a checklist and note; IT and Purchasing fix it and reply. Disposals
+  are still ignored by depreciation (spec §1). Record `HANDOVER.md` (ab).
 - **Purchasing bulk import** of assets (the IT importer is admin/IT only). Also re-recorded as a
   non-goal by Phase 27's spec §2.
 - ~~The Replace dialog's headerless **"other spares" list** when no same-type spare exists.~~
