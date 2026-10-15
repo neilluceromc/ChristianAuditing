@@ -23,7 +23,7 @@ export function ScanAction({ action, asset, holder, direct, recentPeople, heldFo
   direct: boolean;
   recentPeople: ComboOption[];
   /** an ACTIVE hold's person, preselected in Assign exactly as the record header does */
-  heldFor?: { id: string; name: string };
+  heldFor?: { id: string; name: string; active: boolean };
 }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);

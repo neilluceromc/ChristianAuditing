@@ -42,6 +42,9 @@ import { useIdentifierCheck } from "./use-identifier-check";
 
 type Intent = "register" | "register-add";
 
+/** The label preview before a tag is typed: neutral, never a real asset's tag (spec 2.2: no suggestion). */
+const TAG_PLACEHOLDER = "YOUR-TAG";
+
 /** Every error key a field on this form shows; anything else reaches the banner rather than dead-ending. */
 const CLAIMED = new Set([
   "categoryId", "typeId", "model", "brand", "tags", "serials", "requestedStatus", "assigneeId", "loanDueAt",
@@ -155,12 +158,12 @@ export function RegisterForm({
     first?.scrollIntoView({ block: "center" });
   }, [refusals]);
 
-  // After "add another" the next unit starts at its serial — the category, model and type carry over
-  // (spec §3, ruling R7). Model when there is no serial box to go to.
+  // After "add another" the next unit starts at its (cleared) tag, which comes before the serial; the
+  // category, model and type carry over (spec 2.2, 3, ruling R7). Model when there is no tag box to go to.
   useEffect(() => {
     if (focusModel === 0) return;
-    const serial = rootRef.current?.querySelector<HTMLInputElement>("#register-serial");
-    (serial ?? modelRef.current)?.focus();
+    const tag = rootRef.current?.querySelector<HTMLInputElement>("#register-tag");
+    (tag ?? modelRef.current)?.focus();
   }, [focusModel]);
 
   const vendorOptions: ComboOption[] = vendors.map((v) => ({ value: v.id, label: v.name }));
@@ -671,7 +674,7 @@ export function RegisterForm({
                 )}
                 <div className="relative overflow-hidden rounded-[6px] border border-border-strong bg-white shadow-card">
                   <LabelCell
-                    tag={rows[0].tag.trim().toUpperCase() || example.tag}
+                    tag={rows[0].tag.trim().toUpperCase() || TAG_PLACEHOLDER}
                     model={model.trim() || category?.name || example.model}
                     category={category?.name ?? ""}
                     base={qrBase(baseUrl)}

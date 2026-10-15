@@ -233,7 +233,7 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
             holder={holder}
             direct={direct}
             recentPeople={recentPeople}
-            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name } : undefined}
+            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name, active: hold.employee.employment === "ACTIVE" } : undefined}
           />
         )}
         <ButtonLink href={`/inventory/${asset.id}`} className="min-h-11 w-full">Open full record</ButtonLink>

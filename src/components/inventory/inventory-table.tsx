@@ -419,7 +419,7 @@ export function InventoryTable({
           asset={active}
           direct={direct}
           recentPeople={recentPeople}
-          heldFor={active.hold ? { id: active.hold.id, name: active.hold.name } : undefined}
+          heldFor={active.hold ? { id: active.hold.id, name: active.hold.name, active: active.hold.active } : undefined}
         />
       )}
       {dialog && active && dialog.kind === "return" && active.assigneeId !== null && (

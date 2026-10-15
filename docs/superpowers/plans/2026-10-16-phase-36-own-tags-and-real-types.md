@@ -61,7 +61,7 @@
   Every step is guarded, and no audit rows are written.
 - **Seed:** Laptop types `["Standard", "High-performance", "MacBook"]`; BR-LT-0201 uses MacBook.
 - **People search:**
-  - `searchPeople({ q, scope: "active" | "assignees", cls? })`, where `q` is 1–60 characters trimmed, matched case-insensitively as a substring of the name or employee no.;
+  - `searchPeople({ q, scope: "active" })` (pickers only; the Assigned filter uses `searchAssignees`), where `q` is 1–60 characters trimmed, matched case-insensitively as a substring of the name or employee no.;
   - at most **10** results, ordered by name then employee no.;
   - debounce **250 ms**;
   - Recent shows at most **5** active people.
@@ -445,7 +445,7 @@ export const PEOPLE_LIMIT = 10;
 export const PEOPLE_DEBOUNCE_MS = 250;
 export const RECENT_PEOPLE = 5;
 export const PEOPLE_NONE = "No match — check the spelling or the employee no.";
-export const peopleQuerySchema; // z.object({ q: z.string().trim().min(1).max(60), scope: z.enum(["active","assignees"]), cls: z.enum(["IT","PURCHASING"]).optional() })
+export const peopleQuerySchema; // z.object({ q: z.string().trim().min(1).max(60), scope: z.literal("active") })
 export function peopleWhere(q: string, scope: "active" | "assignees", cls?: AssetClass): Prisma.EmployeeWhereInput;
 // server action
 export async function searchPeople(input: unknown): Promise<ActionResult<ComboOption[]>>; // ComboOption = { value, label, sub }
@@ -485,7 +485,7 @@ describe("people search (Phase 36 spec §4.1)", () => {
 
   Run them (FAIL), then implement `people-search.ts` to match.
 - [ ] **Step 2: Server.**
-  - **`searchPeople`:** guard `actionRole("admin", "it_staff", "purchasing_staff", "finance_staff")` → `checkRate(user.id, "check")` (the live-check kind, 240/min, so typing never spends the write budget) → `peopleQuerySchema`. Then `prisma.employee.findMany({ where: peopleWhere(...), orderBy: [{ name: "asc" }, { employeeNo: "asc" }], take: PEOPLE_LIMIT, select: { id, name, employeeNo } })`, mapped to `{ value: id, label: name, sub: employeeNo }`.
+  - **`searchPeople`:** guard `actionRole("admin", "it_staff", "purchasing_staff")` → `checkRate(user.id, "check")` (the live-check kind, 240/min, so typing never spends the write budget) → `peopleQuerySchema`. Then `prisma.employee.findMany({ where: peopleWhere(...), orderBy: [{ name: "asc" }, { employeeNo: "asc" }], take: PEOPLE_LIMIT, select: { id, name, employeeNo } })`, mapped to `{ value: id, label: name, sub: employeeNo }`.
   - **`recentPeopleOptions(userId)`:** `recentPicks(userId, "employee")` → first `RECENT_PEOPLE` ids → active employees in that order.
 - [ ] **Step 3: `PeopleCombobox`.**
   - Wrap `EntityCombobox` (read `src/components/patterns/entity-combobox.tsx` first; extend it minimally if it cannot take externally changing `options` or report typed text).
@@ -542,7 +542,7 @@ it("assigneeWhere: ids, Unassigned, and both", () => {
 - [ ] **Step 2: `facetOptions`.**
   - Drop the `prisma.employee.findMany({ where: { assets: { some: { cls } } } })` and the all-assignee groupBy.
   - Instead return `assignee`: the **selected** people (ids from `state.filters.assignee` minus `none`) with names and counts (one groupBy restricted to those ids), plus `{ value: "none", label: "Unassigned", count }`.
-- [ ] **Step 3: `searchAssignees`.** Same guard as `searchPeople` (including `checkRate(user.id, "check")`). It parses `listQS` with `parseListState(new URLSearchParams(listQS), INVENTORY_LIST_CONFIG)`, then finds people with `peopleWhere(q, "assignees", cls)` (`take` 10), and counts their assets with `groupBy assigneeId` over `buildAssetWhere(without assignee)` restricted to those ids.
+- [ ] **Step 3: `searchAssignees`.** Guard `actionRole("admin", "it_staff", "purchasing_staff", "finance_staff", "viewer")` plus `canSeeClass(role, cls)` (and `checkRate(user.id, "check")`). It parses `listQS` with `parseListState(new URLSearchParams(listQS), INVENTORY_LIST_CONFIG)`, then finds people with `peopleWhere(q, "assignees", cls)` (`take` 10), and counts their assets with `groupBy assigneeId` over `buildAssetWhere(without assignee)` restricted to those ids.
 - [ ] **Step 4: `PeopleFacet` (client)** replaces `FacetDropdown` for `assignee` in `inventory-toolbar.tsx`.
   - **Button:** "Assigned" or "Assigned: {n}".
   - **Popover:** a search input labelled "Search people", the selected people as removable chips (`aria-label="Remove {name}"`), an "Unassigned {count}" checkbox, and typed results as checkboxes "{name} · {employeeNo} {count}".
@@ -675,3 +675,15 @@ git commit -m "test(e2e)+docs: Phase 36 -- typed tags, Type always asked, Laptop
 - **D-10** (Task 8) - the import fixtures use type `Standard` (`e2e/fixtures/make.ts`; only the four .xlsx files that carry a Laptop type were regenerated, the rest restored byte-for-byte) - `Dell Latitude` no longer exists after migration 29 - cost if wrong: re-run `npx tsx e2e/fixtures/make.ts`
 - **D-11** (Task 8) - `quick-forms` case 2 now expects the employee picker to list only Recent before typing (no `All` heading) - spec 4.2 - cost if wrong: one assertion
 - **D-12** (Task 8) - the idle-employee check in `own-tags-types` case 7 creates its own active employee, because every seeded active employee holds an asset or a reservation and so legitimately appears on the page - cost if wrong: one fixture row
+- **D-13** (final review, ruling) - `searchAssignees` also allows `viewer`: /inventory is the viewer's landing page and viewers already see /employees; it keeps its `canSeeClass` check - cost if wrong: one role string
+- **D-14** (final review, ruling) - `searchPeople` is pickers only: roles admin, it_staff, purchasing_staff (finance_staff dropped), `scope: "active"` only, no `cls`; the assignees branch lives only in `peopleWhere` for `searchAssignees` - spec 4.1 and this plan updated - cost if wrong: one guard line
+- **D-15** (final review) - Register and add another focuses `#register-tag`; in one-unit mode the empty or bad tag is said under the Tag box (`aria-describedby`) as "Enter a tag for every unit" or "{tag}: {TAG_RULE}", with no "Row 1 ·" - cost if wrong: one focus target
+- **D-16** (final review) - the Assign dialog preselects a hold's person only if ACTIVE (`heldFor.active`); a leaver reads "Held for {name}, who has left — pick someone else." - cost if wrong: one prop
+- **D-17** (final review) - the Register label preview shows `YOUR-TAG` while the Tag box is empty (never a real asset's tag); the Schedule drill-down subtotal row shows the category's Cost - cost if wrong: one string, one cell
+- **D-18** (final review) - added `own-tags-types` case 11 (a viewer's Assigned search); no drill-down page-2 e2e because the seed has at most 12 depreciating assets in a category (page size 25) - cost if wrong: one case
+- **D-13** (final review, ruling) - `searchAssignees` also allows `viewer`: /inventory is the viewer's landing page and viewers already see /employees; it keeps its `canSeeClass` check - cost if wrong: one role string
+- **D-14** (final review, ruling) - `searchPeople` is pickers only: roles admin, it_staff, purchasing_staff (finance_staff dropped), `scope: "active"` only, no `cls`; the `assignees` scope lives only in `peopleWhere` for `searchAssignees` - spec 4.1 and this plan updated - cost if wrong: one guard line
+- **D-15** (final review) - Register and add another focuses `#register-tag`; in one-unit mode the empty or bad tag is said under the Tag box (`aria-describedby`) as "Enter a tag for every unit" or "{tag}: {TAG_RULE}", with no "Row 1 ·" - cost if wrong: one focus target
+- **D-16** (final review) - the Assign dialog preselects a hold's person only if ACTIVE (`heldFor.active`); a leaver reads "Held for {name}, who has left — pick someone else." - cost if wrong: one prop
+- **D-17** (final review) - the Register label preview shows `YOUR-TAG` while the Tag box is empty (never a real asset's tag); the Schedule drill-down subtotal row shows the category's Cost - cost if wrong: one string, one cell
+- **D-18** (final review) - added `own-tags-types` case 11 (a viewer's Assigned search); no drill-down page-2 e2e because the seed has at most 12 depreciating assets in a category (page size 25) - cost if wrong: one case

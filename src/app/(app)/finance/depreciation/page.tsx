@@ -93,7 +93,7 @@ export default async function DepreciationPage({
                 {drill.rows.length === 0 ? (
                   <p className="text-[12.5px] text-fg-muted">No asset in {drill.category} depreciates in {year}.</p>
                 ) : (
-                  <ScheduleCategoryTable year={year} category={drill.category} rows={drill.rows} subtotal={drill.subtotal} />
+                  <ScheduleCategoryTable year={year} category={drill.category} rows={drill.rows} subtotal={drill.subtotal} subtotalCostC={drill.subtotalCostC} />
                 )}
                 <Pagination
                   page={drill.page}

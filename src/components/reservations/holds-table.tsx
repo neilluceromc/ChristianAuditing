@@ -155,7 +155,7 @@ export function HoldsTable({
         asset={{ id: dialog.row.assetId, tag: dialog.row.tag, model: dialog.row.model }}
         direct={direct}
         recentPeople={recentPeople}
-        heldFor={{ id: dialog.row.employeeId, name: dialog.row.employeeName }}
+        heldFor={{ id: dialog.row.employeeId, name: dialog.row.employeeName, active: dialog.row.employeeActive }}
       />
     )}
     {dialog?.kind === "release" && (

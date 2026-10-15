@@ -91,11 +91,12 @@ export function AssignDialog({
   asset: AssetSummary;
   direct: boolean;
   recentPeople: ComboOption[];
-  heldFor?: { id: string; name: string };
+  heldFor?: { id: string; name: string; active: boolean };
 }) {
   const { pending, fieldErrors, error, retryAfter, setRetryAfter, reset, run } = useHolderSubmit();
   // The holder a hold names comes preselected (spec 5.1), so Assign alone completes the handover.
-  const preselect = heldFor ? heldFor.id : null;
+  // A person who has left is never preselected: offboarding does not release the hold, and the guard refuses them.
+  const preselect = heldFor?.active ? heldFor.id : null;
   const [employeeId, setEmployeeId] = useState<string | null>(preselect);
   const [mode, setMode] = useState<"DEPLOYED" | "TEMPORARY">("DEPLOYED");
   const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
@@ -160,7 +161,10 @@ export function AssignDialog({
               recent={recentPeople} autoFocus />
           )}
         </FormField>
-        {heldFor && (
+        {heldFor && !heldFor.active && (
+          <p className="text-xs text-fg-muted">Held for {heldFor.name}, who has left — pick someone else.</p>
+        )}
+        {heldFor?.active && (
           <p className="text-xs text-fg-muted">Held for {heldFor.name} — assigning to anyone else is refused until the hold is released.</p>
         )}
         {direct && (

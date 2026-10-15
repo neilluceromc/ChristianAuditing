@@ -29,7 +29,7 @@ export interface AssetRow {
   status: string;
   assignee: string | null;
   /** ACTIVE-reservation holder. The asset still reads SPARE — the hold is a marker, not a status. */
-  hold: { id: string; name: string; expiresAt: Date | null } | null;
+  hold: { id: string; name: string; active: boolean; expiresAt: Date | null } | null;
   purchased: string;
   warranty: string;
   /** derived repair stage id; null if the asset was never defective */
@@ -132,7 +132,7 @@ function toRow(a: {
   repairQuote: Prisma.Decimal | null;
   category: { name: string };
   assignee: { id: string; name: string; employeeNo: string } | null;
-  reservations: Array<{ expiresAt: Date | null; employee: { id: string; name: string } }>;
+  reservations: Array<{ expiresAt: Date | null; employee: { id: string; name: string; employment: string } }>;
   approvals: Array<{ refNo: string }>;
 }, now: Date): AssetRow {
   const stage = stageOf(a);
@@ -146,7 +146,7 @@ function toRow(a: {
     category: a.category.name,
     status: a.status,
     assignee: a.assignee?.name ?? null,
-    hold: a.reservations[0] ? { id: a.reservations[0].employee.id, name: a.reservations[0].employee.name, expiresAt: a.reservations[0].expiresAt } : null,
+    hold: a.reservations[0] ? { id: a.reservations[0].employee.id, name: a.reservations[0].employee.name, active: a.reservations[0].employee.employment === "ACTIVE", expiresAt: a.reservations[0].expiresAt } : null,
     purchased: fmtDate(a.purchasedAt),
     warranty: fmtDate(a.warrantyUntil),
     stage,

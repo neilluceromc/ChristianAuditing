@@ -27,7 +27,7 @@ export function RecordActions(props: {
   holder: { id: string; name: string } | null;
   direct: boolean;
   recentPeople: ComboOption[];
-  heldFor?: { id: string; name: string };
+  heldFor?: { id: string; name: string; active: boolean };
   spares: { options: ComboOption[]; hidden: number };
   holdExpiry: { defaultExpiry: string; minExpiry: string };
 }) {

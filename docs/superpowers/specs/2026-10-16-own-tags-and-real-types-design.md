@@ -122,11 +122,13 @@ filter and the pickers.
 - **The action:** `searchPeople({ q, scope })` returns at most **10** people.
   - **Input:** `q` is 1–60 characters, trimmed. It matches the name or the employee no., ignoring case, as a
     substring.
-  - **`scope: "active"`:** ACTIVE employees, for the pickers.
-  - **`scope: "assignees"`:** anyone who currently holds an asset of the given class, for the filter.
+  - **`scope: "active"` (the only scope):** ACTIVE employees, for the pickers.
+  - The Assigned filter does not use this action: it has its own `searchAssignees` (anyone who currently holds an
+    asset of the class, class-checked), see §4.3.
   - **Order:** name, then employee no.
-- **Guard:** the same roles that can open the screens using it (`admin`, `it_staff`, `purchasing_staff`;
-  `finance_staff` too for the filter). `actionRole` → `checkRate` → zod, as every action. No audit row: it is a read.
+- **Guard:** `searchPeople` allows the roles that have a holder picker (`admin`, `it_staff`, `purchasing_staff`).
+  `searchAssignees` also allows `finance_staff` and `viewer` (`/inventory` is the viewer's landing page, and viewers
+  already see every employee). `actionRole` → `checkRate` → zod, as every action. No audit row: it is a read.
 - **Rate limit:** it uses `checkRate(user.id, "check")`, the live-check kind (240/min), not the 60/min write budget, so typing never starves a save. Typing is debounced on the client (250 ms), so normal typing
   stays well under the limit.
 
@@ -147,7 +149,7 @@ filter and the pickers.
   - a search box ("Type a name or employee no.");
   - the people already selected, each with a remove ×;
   - **Unassigned**, a new value `none` meaning `assigneeId IS NULL`.
-- **Typing** searches (`scope: "assignees"`, the current class). Each result shows its asset count under the current
+- **Typing** searches (`searchAssignees`, the current class). Each result shows its asset count under the current
   filters, except the Assigned filter itself, matching today's counting rule. Ticking a result adds it, and **Apply**
   applies, as the other filters do.
 - **The button** reads "Assigned" or "Assigned: {n}".

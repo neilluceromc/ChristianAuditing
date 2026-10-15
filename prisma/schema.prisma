@@ -204,8 +204,8 @@ model AssetCategory {
   name      String      @unique
   locked    Boolean     @default(false)
   cls       AssetClass  @default(IT)
-  /// Phase 34 (spec §7.1, ruling R23): Register offers tagPrefix ?? learned prefix (preferredPrefix) ?? "" —
-  /// this prefix wins when set; the prefix learned from existing tags only fills a missing one.
+  /// Phase 36 (spec ruling 5): no longer read by Register, which asks for the whole tag. Kept as data and in
+  /// Admin; Phase 34's tagPrefix ?? learned-prefix suggestion is gone.
   tagPrefix String?
   /// Phase 35 (spec §5.3): Finance's straight-line policy for the category; life null = no policy.
   depreciationLifeMonths     Int?

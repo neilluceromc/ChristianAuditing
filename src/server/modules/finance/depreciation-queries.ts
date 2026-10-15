@@ -184,7 +184,7 @@ export async function scheduleSummary(cls: AssetClass, year: number, now: Date =
 
 /** One category's asset rows for the year, paged by tag; the subtotal covers every row of the category, not just the page. */
 export async function scheduleCategory(cls: AssetClass, year: number, categoryId: string, page: number, now: Date = new Date()): Promise<{
-  category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow; total: number; page: number; pageCount: number;
+  category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow; subtotalCostC: number; total: number; page: number; pageCount: number;
 } | null> {
   const cat = await prisma.assetCategory.findFirst({ where: { id: categoryId, cls }, select: { name: true } });
   if (!cat) return null;
@@ -192,7 +192,7 @@ export async function scheduleCategory(cls: AssetClass, year: number, categoryId
   const all = entries.map((e) => e.row).sort((a, b) => a.tag.localeCompare(b.tag));
   const p = pageOf(all.length, page, ENTITY_PAGE_SIZE);
   return {
-    category: cat.name, rows: all.slice(p.skip, p.skip + p.take), subtotal: sumYearRows(all.map((x) => x.grid), year, asOf),
+    category: cat.name, rows: all.slice(p.skip, p.skip + p.take), subtotal: sumYearRows(all.map((x) => x.grid), year, asOf), subtotalCostC: all.reduce((a, x) => a + x.costC, 0),
     total: all.length, page: p.page, pageCount: p.pageCount,
   };
 }

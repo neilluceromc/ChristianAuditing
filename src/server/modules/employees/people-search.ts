@@ -12,15 +12,15 @@ import type { ComboOption } from "@/components/patterns/entity-combobox";
 
 /** Phase 36 (spec §4.1): at most PEOPLE_LIMIT people matching the typed text, by name then employee no. */
 export async function searchPeople(input: unknown): Promise<ActionResult<ComboOption[]>> {
-  const user = await actionRole("admin", "it_staff", "purchasing_staff", "finance_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff"); // pickers only; the Assigned filter has its own search
   if (!user) return forbidden();
   const rate = await checkRate(user.id, "check"); // a live check writes nothing: its own 240/min budget, not the write budget
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = peopleQuerySchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { q, scope, cls } = parsed.data;
+  const { q, scope } = parsed.data;
   const rows = await prisma.employee.findMany({
-    where: peopleWhere(q, scope, cls),
+    where: peopleWhere(q, scope),
     orderBy: [{ name: "asc" }, { employeeNo: "asc" }],
     take: PEOPLE_LIMIT,
     select: { id: true, name: true, employeeNo: true },
@@ -34,7 +34,7 @@ export async function searchPeople(input: unknown): Promise<ActionResult<ComboOp
  * (buildAssetWhere without `assignee`) - the same count rule as every facet.
  */
 export async function searchAssignees(input: unknown): Promise<ActionResult<Array<{ value: string; label: string; sub: string; count: number }>>> {
-  const user = await actionRole("admin", "it_staff", "purchasing_staff", "finance_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"); // /inventory is the viewer's landing page
   if (!user) return forbidden();
   const rate = await checkRate(user.id, "check");
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);

@@ -476,7 +476,7 @@ test.describe("register — the Register tab", () => {
     await expect(typeSelect(page)).toHaveValue(/.+/);
     await expect(tagBox(page)).toHaveValue("");
     await expect(serialBox(page)).toHaveValue("");
-    await expect(serialBox(page)).toBeFocused();
+    await expect(tagBox(page)).toBeFocused();
     const asset = await db.asset.findFirstOrThrow({ where: { serial }, include: { type: true } });
     expect(asset.model).toBe(KNOWN_LAPTOP);
     expect(asset.tag).toBe(tag);

@@ -95,7 +95,7 @@ export default async function AssetRecordLayout({
             holder={asset.assignee ? { id: asset.assignee.id, name: asset.assignee.name } : null}
             direct={direct}
             recentPeople={recentPeople}
-            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name } : undefined}
+            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name, active: hold.employee.employment === "ACTIVE" } : undefined}
             spares={spares}
             holdExpiry={{ defaultExpiry: defaultHoldExpiry(today), minExpiry: minHoldExpiry(today) }}
           />

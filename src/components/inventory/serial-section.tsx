@@ -6,7 +6,7 @@ import { FormError } from "@/components/ui/form-field";
 import { fieldClasses } from "@/components/ui/input";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
-import { registeredRows, type IdentifierHits, type RegisterRow } from "@/lib/register-rows";
+import { badTags, registeredRows, type IdentifierHits, type RegisterRow } from "@/lib/register-rows";
 import { serialRequired, type SerialProblem } from "@/lib/serial-rules";
 import { RegisterRows } from "./register-rows";
 
@@ -64,7 +64,11 @@ export function SerialSection({
   const missing = single && required && attempted && problems[0] === "required";
   // The per-row "needs a serial" refusals are said once, here, and by each row's status.
   const missingRows = problems.filter((p) => p === "required").length;
-  const shown = lines.filter((l) => !NEEDS_SERIAL.test(l.text) && !l.text.endsWith(SERIAL_REQUIRED));
+  // One unit: the empty or bad tag is said under the Tag box itself, without a row number.
+  const badTag = single && attempted ? badTags(rows).message : null;
+  const tagMessage = badTag ? badTag.replace(/^Row 1 · /, "") : null;
+  const tagErrorId = "register-tag-error";
+  const shown = lines.filter((l) => !NEEDS_SERIAL.test(l.text) && !l.text.endsWith(SERIAL_REQUIRED) && l.text !== badTag);
 
   function status(i: number): React.ReactNode {
     const tagHit = live.tags.find((t) => t.row === i);
@@ -110,6 +114,7 @@ export function SerialSection({
               autoComplete="off"
               spellCheck={false}
               invalid={invalidTags.has(0)}
+              aria-describedby={tagMessage ? tagErrorId : undefined}
               className="max-w-[320px] font-mono"
               value={rows[0].tag}
               onChange={(e) => onTag(0, e.target.value)}
@@ -120,6 +125,7 @@ export function SerialSection({
                 document.getElementById("register-serial")?.focus();
               }}
             />
+            {tagMessage && <p id={tagErrorId} className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{tagMessage}</p>}
           </div>
           <div className="flex flex-col gap-1.5">
           <label htmlFor="register-serial" className="text-xs font-medium text-fg">

@@ -99,17 +99,17 @@ export function ScheduleSummaryTable({ year, categories, total, totalCostC, href
 }
 
 /** The drill-down: one category's asset rows (one page), then the subtotal over every row of the category. */
-export function ScheduleCategoryTable({ year, category, rows, subtotal }: {
-  year: number; category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow;
+export function ScheduleCategoryTable({ year, category, rows, subtotal, subtotalCostC }: {
+  year: number; category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow; subtotalCostC: number;
 }) {
   return (
     <Shell year={year} projected={subtotal.projected} detail>
-      <GroupRows group={{ category, rows, subtotal }} stickyTag={STICKY_TAG} stickyModel={STICKY_MODEL} />
+      <GroupRows group={{ category, rows, subtotal }} subtotalCostC={subtotalCostC} stickyTag={STICKY_TAG} stickyModel={STICKY_MODEL} />
     </Shell>
   );
 }
 
-function GroupRows({ group, stickyTag, stickyModel }: { group: ScheduleGroup; stickyTag: string; stickyModel: string }) {
+function GroupRows({ group, subtotalCostC, stickyTag, stickyModel }: { group: ScheduleGroup; subtotalCostC: number; stickyTag: string; stickyModel: string }) {
   return (
     <>
       {group.rows.map((r) => (
@@ -125,7 +125,7 @@ function GroupRows({ group, stickyTag, stickyModel }: { group: ScheduleGroup; st
         <td className={cn("px-3 bg-surface-subtle", stickyTag)} />
         <td className={cn("px-3 bg-surface-subtle", stickyModel)} />
         <td className="whitespace-nowrap px-3 text-left text-fg">Subtotal — {group.category}</td>
-        <td className={TD} />
+        <td className={TD}>{money(subtotalCostC)}</td>
         <Grid grid={group.subtotal} />
       </tr>
     </>

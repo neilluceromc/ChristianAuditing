@@ -8,7 +8,7 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 /**
  * Phase 36 — staff type their own tags, the Type is always asked, the Laptop types are
  * Standard / High-performance / MacBook, the holder pickers and the Assigned filter search
- * people, and the Schedule opens by category. Ten cases, each independent:
+ * people, and the Schedule opens by category. Eleven cases, each independent:
  *   1   one unit: a new model, an empty Type that the status line asks for, a lower-case tag
  *       stored upper-case, the label, the scan card
  *   2   a known model leaves the Type empty and required
@@ -22,6 +22,7 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *   8   the Assigned filter: a holder, Unassigned, the chip's x
  *   9   the Schedule: category rows and a Total, a drill-down, back, the export keeps asset rows
  *   10  axe on the Assigned popover and on the Schedule summary
+ *   11  a viewer searches the Assigned filter on /inventory
  *
  * Tags are 20 characters at most and unique per run.
  */
@@ -213,6 +214,12 @@ test.describe("own tags and real types — Register", () => {
     await expect(page.getByText(TAG_RULE, { exact: false }).first()).toBeVisible();
     await expect(page).toHaveURL(/\/inventory\/register$/);
     expect(await db.asset.count({ where: { tag: "A B" } })).toBe(0);
+    // One unit: the message sits under the Tag box itself, with no row number.
+    await expect(tagBox(page)).toHaveAccessibleDescription(`A B: ${TAG_RULE}`);
+    await tagBox(page).fill("");
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    await expect(tagBox(page)).toHaveAccessibleDescription("Enter a tag for every unit");
+    await expect(page.getByText(/Row 1 ·/)).toHaveCount(0);
   });
 
   test("6. axe on Register with the Type select and a tag box", async ({ page }) => {
@@ -337,6 +344,22 @@ test.describe("own tags and real types — people", () => {
     await popover.getByLabel("Search people").fill("a");
     await expect(popover.getByRole("checkbox").nth(1)).toBeVisible({ timeout: 15_000 });
     await expectNoSeriousAxe(page);
+  });
+});
+
+test.describe("own tags and real types — viewer", () => {
+  test("11. a viewer can search the Assigned filter on /inventory", async ({ page }) => {
+    test.setTimeout(120_000);
+    const holder = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    await login(page, "viewer@thebackroomop.com");
+    await page.goto("/inventory");
+    const trigger = page.getByRole("button", { name: /^Assigned/ });
+    await waitForHydration(trigger);
+    await trigger.click();
+    const popover = page.getByRole("dialog", { name: "Filter by Assigned" });
+    await popover.getByLabel("Search people").fill(holder.name.split(" ")[0]);
+    await expect(popover.getByRole("checkbox", { name: new RegExp(holder.name) })).toBeVisible({ timeout: 15_000 });
+    await expect(popover.getByText(/Search failed/)).toHaveCount(0);
   });
 });
 

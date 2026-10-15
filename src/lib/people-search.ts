@@ -9,8 +9,7 @@ export const PEOPLE_NONE = "No match — check the spelling or the employee no."
 
 export const peopleQuerySchema = z.object({
   q: z.string().trim().min(1).max(60),
-  scope: z.enum(["active", "assignees"]),
-  cls: z.enum(["IT", "PURCHASING"]).optional(),
+  scope: z.literal("active"), // pickers only; the Assigned filter uses assigneeQuerySchema (class-checked)
 });
 
 /** "active": ACTIVE employees. "assignees": anyone holding an asset of the class (leavers included). */
