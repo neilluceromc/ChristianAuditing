@@ -77,17 +77,21 @@ async function main() {
 
   // Phase 13: every category carries a class. Phase 34 (spec §2.1): the IT list
   // is the spec's nine, each with its tag prefix; the four Purchasing ones are
-  // the meeting's own examples.
+  // the meeting's own examples. Keyboard, Webcam and UPS joined on 2026-10-16
+  // (migration 30), leaving Other with Phone, Speaker and Printer.
   const catData: Record<string, { cls: AssetClass; types: string[]; prefix?: string }> = {
     Laptop: { cls: "IT", types: ["Standard", "High-performance", "MacBook"], prefix: "LT" },
     "Workstation (PC)": { cls: "IT", types: ["Desktop tower", "Mini PC", "All-in-one"], prefix: "WS" },
     Monitor: { cls: "IT", types: ["24-inch", "27-inch"], prefix: "MN" },
     Headset: { cls: "IT", types: ["Wired", "Wireless"], prefix: "HS" },
     Mouse: { cls: "IT", types: ["Wired", "Wireless"], prefix: "MS" },
+    Keyboard: { cls: "IT", types: ["Wired", "Wireless"], prefix: "KB" },
+    Webcam: { cls: "IT", types: ["USB webcam", "Conference camera"], prefix: "WC" },
     "Type C Hub": { cls: "IT", types: ["USB-C Hub"], prefix: "HB" },
     "Docking Station": { cls: "IT", types: ["USB-C Dock"], prefix: "DK" },
+    UPS: { cls: "IT", types: ["Desktop UPS", "Rack UPS"], prefix: "UP" },
     "Laptop Bag": { cls: "IT", types: ["Backpack", "Sleeve"], prefix: "BG" },
-    Other: { cls: "IT", types: ["Phone", "Keyboard", "Webcam", "Speaker", "Printer"], prefix: "OT" },
+    Other: { cls: "IT", types: ["Phone", "Speaker", "Printer"], prefix: "OT" },
     Vehicle: { cls: "PURCHASING", types: ["Sedan", "Van"] },
     Furniture: { cls: "PURCHASING", types: ["Desk", "Chair"] },
     "Pantry Equipment": { cls: "PURCHASING", types: ["Microwave", "Air purifier"] },
@@ -214,7 +218,7 @@ async function main() {
       mk("BR-DK-0033", "WD19S Dock", "Docking Station", "DEFECTIVE", { defectiveSince: day(-31), vendorId: vendors[1].id, rmaRef: "RMA-8790", cost: 11_000, notes: "Intermittent DisplayPort" }),
       mk("BR-HS-0501", "Jabra Evolve2 65", "Headset", "DEPLOYED", { assigneeId: emp("EMP-0051").id, cost: 7_500 }),
       mk("BR-HS-0502", "Jabra Evolve2 40", "Headset", "SPARE", { cost: 5_500 }),
-      mk("BR-KB-0402", "Logitech MX Keys", "Other", "DEFECTIVE", { typeId: cats["Other"].typeIds[1], defectiveSince: day(-2), cost: 6_000, notes: "Two keys unresponsive" }),
+      mk("BR-KB-0402", "Logitech MX Keys", "Keyboard", "DEFECTIVE", { typeId: cats["Keyboard"].typeIds[1], defectiveSince: day(-2), cost: 6_000, notes: "Two keys unresponsive" }),
       // Purchasing-class fixtures (Phase 13): one per branch a test needs —
       // a car that is assigned (custody works for a car), idle stock, a repair,
       // a building with no holder. Ramon (EMP-0051, ACTIVE) drives the car so
