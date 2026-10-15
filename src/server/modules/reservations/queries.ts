@@ -20,6 +20,8 @@ export interface ReservationRow {
   assetStatus: string;
   employeeId: string;
   employeeName: string;
+  /** false once the person has left (offboarding does not release holds) */
+  employeeActive: boolean;
   employeeNo: string;
   reason: string | null;
   expiresAt: Date | null;
@@ -62,7 +64,7 @@ export async function listReservations(tab: ReservationTab, state: ListState): P
   return {
     rows: reservations.map((r): ReservationRow => ({
       id: r.id, state: r.state, assetId: r.assetId, tag: r.asset.tag, model: r.asset.model, assetStatus: r.asset.status,
-      employeeId: r.employeeId, employeeName: r.employee.name, employeeNo: r.employee.employeeNo, reason: r.reason,
+      employeeId: r.employeeId, employeeName: r.employee.name, employeeActive: r.employee.employment === "ACTIVE", employeeNo: r.employee.employeeNo, reason: r.reason,
       expiresAt: r.expiresAt, expires: fmtDate(r.expiresAt),
       created: fmtDate(r.createdAt),
       // Phase 26: the sweep now stamps resolvedAt on expiry; the seeded EXPIRED row predates it and keeps reading expiresAt.
@@ -94,6 +96,6 @@ async function holdFacets(tab: ReservationTab, state: ListState): Promise<HoldFa
 export async function activeHoldFor(assetId: string) {
   return prisma.reservation.findFirst({
     where: { assetId, state: "ACTIVE" },
-    select: { id: true, expiresAt: true, reason: true, employee: { select: { id: true, name: true, employeeNo: true } } },
+    select: { id: true, expiresAt: true, reason: true, employee: { select: { id: true, name: true, employeeNo: true, employment: true } } },
   });
 }

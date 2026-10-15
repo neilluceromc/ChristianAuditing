@@ -17,8 +17,7 @@ import { RecordTabs } from "@/components/inventory/record-tabs";
 import { RecordActions } from "@/components/inventory/record-actions";
 import { LoanLine } from "@/components/inventory/loan-due-control";
 import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
-import { activeEmployeeOptions } from "@/server/modules/employees/queries";
-import { recentPicks } from "@/server/recent-picks";
+import { recentPeopleOptions } from "@/server/modules/employees/queries";
 
 export default async function AssetRecordLayout({
   params,
@@ -49,8 +48,7 @@ export default async function AssetRecordLayout({
   const plan = recordActions(state, user.role);
   const offers = (a: RecordAction) => plan.primary === a || plan.more.includes(a);
   const needsPeople = offers("assign") || offers("reserve");
-  const employees = needsPeople ? await activeEmployeeOptions() : [];
-  const recentEmployees = needsPeople ? await recentPicks(user.id, "employee") : [];
+  const recentPeople = needsPeople ? await recentPeopleOptions(user.id) : [];
   const spares = offers("replace") ? await spareOptions(asset.typeId) : { options: [], hidden: 0 };
   const canReleaseHold = direct && !!hold;
 
@@ -96,9 +94,8 @@ export default async function AssetRecordLayout({
             }}
             holder={asset.assignee ? { id: asset.assignee.id, name: asset.assignee.name } : null}
             direct={direct}
-            employees={employees}
-            recentEmployees={recentEmployees}
-            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name } : undefined}
+            recentPeople={recentPeople}
+            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name, active: hold.employee.employment === "ACTIVE" } : undefined}
             spares={spares}
             holdExpiry={{ defaultExpiry: defaultHoldExpiry(today), minExpiry: minHoldExpiry(today) }}
           />

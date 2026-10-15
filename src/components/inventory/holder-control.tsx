@@ -11,7 +11,8 @@ import { FormField } from "@/components/ui/form-field";
 import { Banner } from "@/components/ui/banner";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
+import { PeopleCombobox } from "@/components/patterns/people-combobox";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS, chipsForOutcome } from "@/lib/reason-chips";
 import { fmtDate } from "@/lib/format";
@@ -83,19 +84,19 @@ function Refusals({ error, retryAfter, onExpire }: { error: string | null; retry
 const queued = (data: { refNo: string }) => `${data.refNo} created — waiting in the approval queue`;
 
 export function AssignDialog({
-  open, onClose, asset, direct, employees, recentEmployees, heldFor,
+  open, onClose, asset, direct, recentPeople, heldFor,
 }: {
   open: boolean;
   onClose: () => void;
   asset: AssetSummary;
   direct: boolean;
-  employees: ComboOption[];
-  recentEmployees?: string[];
-  heldFor?: { id: string; name: string };
+  recentPeople: ComboOption[];
+  heldFor?: { id: string; name: string; active: boolean };
 }) {
   const { pending, fieldErrors, error, retryAfter, setRetryAfter, reset, run } = useHolderSubmit();
   // The holder a hold names comes preselected (spec 5.1), so Assign alone completes the handover.
-  const preselect = heldFor && employees.some((o) => o.value === heldFor.id) ? heldFor.id : null;
+  // A person who has left is never preselected: offboarding does not release the hold, and the guard refuses them.
+  const preselect = heldFor?.active ? heldFor.id : null;
   const [employeeId, setEmployeeId] = useState<string | null>(preselect);
   const [mode, setMode] = useState<"DEPLOYED" | "TEMPORARY">("DEPLOYED");
   const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
@@ -154,12 +155,16 @@ export function AssignDialog({
         <Refusals error={error} retryAfter={retryAfter} onExpire={() => setRetryAfter(null)} />
         <FormField label="Assign to" required error={fieldErrors.employeeId}>
           {(p) => (
-            <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-              options={employees} value={employeeId} onChange={setEmployeeId} placeholder="Type a name or EMP number…"
-              recent={recentEmployees} autoFocus />
+            <PeopleCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+              value={employeeId} valueLabel={heldFor && employeeId === heldFor.id ? heldFor.name : null}
+              onChange={setEmployeeId} placeholder="Type a name or EMP number…"
+              recent={recentPeople} autoFocus />
           )}
         </FormField>
-        {heldFor && (
+        {heldFor && !heldFor.active && (
+          <p className="text-xs text-fg-muted">Held for {heldFor.name}, who has left — pick someone else.</p>
+        )}
+        {heldFor?.active && (
           <p className="text-xs text-fg-muted">Held for {heldFor.name} — assigning to anyone else is refused until the hold is released.</p>
         )}
         {direct && (
@@ -258,18 +263,18 @@ export function ReturnDialog({
 }
 
 export function ReserveDialog({
-  open, onClose, asset, employees, recentEmployees, defaultExpiry, minExpiry,
+  open, onClose, asset, recentPeople, defaultExpiry, minExpiry,
 }: {
   open: boolean;
   onClose: () => void;
   asset: AssetSummary;
-  employees: ComboOption[];
-  recentEmployees?: string[];
+  recentPeople: ComboOption[];
   defaultExpiry: string;
   minExpiry: string;
 }) {
   const { pending, fieldErrors, error, retryAfter, setRetryAfter, reset, run } = useHolderSubmit();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [employeeName, setEmployeeName] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState(defaultExpiry);
   const [reason, setReason] = useState("");
 
@@ -277,6 +282,7 @@ export function ReserveDialog({
     if (open) {
       reset();
       setEmployeeId(null);
+      setEmployeeName(null);
       setExpiresAt(defaultExpiry);
       setReason("");
     }
@@ -286,7 +292,7 @@ export function ReserveDialog({
   function submit() {
     run(
       () => reserveAsset({ assetId: asset.id, employeeId: employeeId ?? "", expiresAt, reason }),
-      () => `${asset.tag} reserved for ${employees.find((o) => o.value === employeeId)?.label ?? "them"}`,
+      () => `${asset.tag} reserved for ${employeeName ?? "them"}`,
       onClose,
     );
   }
@@ -310,9 +316,9 @@ export function ReserveDialog({
         <Refusals error={error} retryAfter={retryAfter} onExpire={() => setRetryAfter(null)} />
         <FormField label="For" required error={fieldErrors.employeeId}>
           {(p) => (
-            <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-              options={employees} value={employeeId} onChange={setEmployeeId} placeholder="Type a name or EMP number…"
-              recent={recentEmployees} autoFocus />
+            <PeopleCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+              value={employeeId} onChange={(v, o) => { setEmployeeId(v); setEmployeeName(o?.label ?? null); }}
+              placeholder="Type a name or EMP number…" recent={recentPeople} autoFocus />
           )}
         </FormField>
         <FormField label="Expires" required error={fieldErrors.expiresAt}>

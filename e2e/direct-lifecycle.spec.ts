@@ -239,10 +239,10 @@ test.describe.serial("direct changes", () => {
       expect(await card.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
     }).toPass({ timeout: 20_000 });
     await card.click();
-    await expect(page.getByText(`tag ${tag}`, { exact: true })).toBeVisible();
     await page.getByRole("combobox", { name: "Model", exact: true }).fill("ThinkPad X1 (e2e deploy)");
     await page.getByRole("option", { name: /^\+ Add .ThinkPad X1 \(e2e deploy\). as a new model$/ }).click();
-    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+    await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "High-performance" });
+    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(tag);
     await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-DIRECT-6-${Date.now()}`);
     const initialState = page.getByRole("radiogroup", { name: "Where does it go" });
     await initialState.getByText("Give to someone", { exact: true }).click();

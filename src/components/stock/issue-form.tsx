@@ -8,6 +8,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import { PeopleCombobox } from "@/components/patterns/people-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS } from "@/lib/reason-chips";
@@ -41,8 +42,7 @@ export function IssueForm({
   meta,
   balances,
   departments,
-  employees,
-  recentEmployees,
+  recentPeople,
   recentItems,
   initialItemId,
 }: {
@@ -50,8 +50,7 @@ export function IssueForm({
   meta: Record<string, StockItemMeta>;
   balances: Record<string, number>;
   departments: DepartmentOption[];
-  employees: ComboOption[];
-  recentEmployees: string[];
+  recentPeople: ComboOption[];
   recentItems: string[];
   initialItemId?: string | null;
 }) {
@@ -132,8 +131,8 @@ export function IssueForm({
           </FormField>
           <FormField label="Employee" error={fieldErrors.employeeId}>
             {(p) => (
-              <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                options={employees} recent={recentEmployees} value={form.employeeId || null}
+              <PeopleCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                recent={recentPeople} value={form.employeeId || null}
                 onChange={(id) => set("employeeId", id ?? "")} placeholder="Type a name or EMP number…" />
             )}
           </FormField>

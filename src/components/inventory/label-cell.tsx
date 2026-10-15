@@ -22,10 +22,9 @@ export function Barcode({ tag }: { tag: string }) {
     // Cause-NEUTRAL wording: `encodable: false` covers a too-fine module (a
     // very long tag), a character Code 128-B cannot encode, AND an empty
     // tag, so "too long" would be false for two of the three causes. Every
-    // write path validates the `BR-XX-9999` tag shape
-    // (`src/server/modules/inventory/actions.ts` and `TAG_SHAPE` in
-    // `src/lib/import-assets.ts`), so a tag that fails here cannot be
-    // created through this application today — but no DB CHECK constraint
+    // write path validates `TAG_SHAPE`
+    // (`src/lib/tag-key.ts`: at most 20 characters, which fit the barcode), so
+    // a tag that fails here cannot be created through this application today — but no DB CHECK constraint
     // enforces that, so it is an application invariant, not a guarantee.
     // That is why this renderer degrades one label instead of throwing, and
     // why there is no charset-refusal banner elsewhere on this page: the

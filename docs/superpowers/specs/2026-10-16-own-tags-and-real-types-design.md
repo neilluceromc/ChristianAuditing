@@ -1,7 +1,8 @@
 # Phase 36 — You choose the tag; types that mean something; people search; a schedule that scales
 
-**Status:** designed 2026-10-16 with the user (§4–§5 added the same day after a scale measurement); awaiting the
-user's review of the added sections. **One migration (the 29th), data only.**
+**Status:** CODE-COMPLETE 2026-10-16 on branch `phase-36-own-tags-real-types` (unmerged and unpushed; staging deploys by pulling the CI
+image). Designed 2026-10-16 with the user (§4–§5 added the same day after a scale measurement). Tags are capped at 20 characters
+in the build (Task 1 ruling), not the 30 first written. **One migration (the 29th), data only.**
 
 ## 1. What the user asked for, and why
 
@@ -36,8 +37,8 @@ The user's choices:
 
 ### 2.1 The rule (one definition)
 - **Normalisation:** the tag is trimmed and stored in **upper case**.
-- **Shape:** 1–30 characters of letters, digits, `-`, `_` and `.`, starting with a letter or digit:
-  `^[A-Z0-9][A-Z0-9._-]{0,29}$`.
+- **Shape:** 1–20 characters of letters, digits, `-`, `_` and `.`, starting with a letter or digit:
+  `^[A-Z0-9][A-Z0-9._-]{0,19}$`.
   - There are no spaces and no `/`, because the tag is one segment of the scan URL `/inventory/scan/<tag>`.
   - It cannot start with `.`, which rules out the `.` and `..` path segments.
 - **Uniqueness:** it must be unique across all assets. Tags are stored upper-case, so uniqueness ignores case.
@@ -47,7 +48,7 @@ The user's choices:
   - the CSV asset import;
   - `exactTagMatch`, the search box's jump straight to an exact tag.
 
-  Their refusal text "Format: BR-XX-0000" becomes "Tags are 1–30 letters, digits, - _ or ., no spaces".
+  Their refusal text "Format: BR-XX-0000" becomes "Tags are 1–20 letters, digits, - _ or ., no spaces".
 - **Existing tags** (`BR-LT-0148` …) already fit the new shape. Nothing is renamed.
 
 ### 2.2 Register
@@ -121,12 +122,14 @@ filter and the pickers.
 - **The action:** `searchPeople({ q, scope })` returns at most **10** people.
   - **Input:** `q` is 1–60 characters, trimmed. It matches the name or the employee no., ignoring case, as a
     substring.
-  - **`scope: "active"`:** ACTIVE employees, for the pickers.
-  - **`scope: "assignees"`:** anyone who currently holds an asset of the given class, for the filter.
+  - **`scope: "active"` (the only scope):** ACTIVE employees, for the pickers.
+  - The Assigned filter does not use this action: it has its own `searchAssignees` (anyone who currently holds an
+    asset of the class, class-checked), see §4.3.
   - **Order:** name, then employee no.
-- **Guard:** the same roles that can open the screens using it (`admin`, `it_staff`, `purchasing_staff`;
-  `finance_staff` too for the filter). `actionRole` → `checkRate` → zod, as every action. No audit row: it is a read.
-- **Rate limit:** it uses `checkRate` like every action. Typing is debounced on the client (250 ms), so normal typing
+- **Guard:** `searchPeople` allows the roles that have a holder picker (`admin`, `it_staff`, `purchasing_staff`).
+  `searchAssignees` also allows `finance_staff` and `viewer` (`/inventory` is the viewer's landing page, and viewers
+  already see every employee). `actionRole` → `checkRate` → zod, as every action. No audit row: it is a read.
+- **Rate limit:** it uses `checkRate(user.id, "check")`, the live-check kind (240/min), not the 60/min write budget, so typing never starves a save. Typing is debounced on the client (250 ms), so normal typing
   stays well under the limit.
 
 ### 4.2 The pickers (Assign, Reserve, Replace, bulk assign, Register's holder, Stock issue)
@@ -146,7 +149,7 @@ filter and the pickers.
   - a search box ("Type a name or employee no.");
   - the people already selected, each with a remove ×;
   - **Unassigned**, a new value `none` meaning `assigneeId IS NULL`.
-- **Typing** searches (`scope: "assignees"`, the current class). Each result shows its asset count under the current
+- **Typing** searches (`searchAssignees`, the current class). Each result shows its asset count under the current
   filters, except the Assigned filter itself, matching today's counting rule. Ticking a result adds it, and **Apply**
   applies, as the other filters do.
 - **The button** reads "Assigned" or "Assigned: {n}".
@@ -172,11 +175,11 @@ page. It draws every depreciating asset as a row of 12 months, unpaged. Every ot
   the sum of its drill-downs.
 
 ## 6. Testing
-- **Unit:** `TAG_SHAPE` accepts `BR-LT-0148`, `ACC-LAP-001`, `2026-0042`, `A`, `LT_1.2`, and refuses:
+- **Unit:** `TAG_SHAPE` accepts `BR-LT-0148`, `ACC-LAP-001`, `2026-0042`, `A`, `LT_1.2`, a 20-character string, and refuses:
   - the empty string;
   - `-LT`, `.X`;
   - `A B`, `A/B`;
-  - a 31-character string;
+  - a 21-character string;
   - `ñ`.
 
   The register-rows helpers accept typed tags and flag empty tags, repeats and pasted columns.
@@ -209,7 +212,8 @@ page. It draws every depreciating asset as a row of 12 months, unpaged. Every ot
 1. **Upper-case storage.** Typed tags are stored upper-case, so scanning and uniqueness never depend on case. *Cost if
    wrong: one `toUpperCase`.*
 2. **The character set** excludes `/` and spaces and requires a letter or digit first, so a tag is always a safe URL
-   segment. *Cost if wrong: one regex.*
+   segment. It is capped at 20 characters so the printed label's Code 128 barcode (about 22 characters
+   fit the sticker at the minimum module width) always scans. *Cost if wrong: one regex.*
 3. **One shape everywhere.** Receiving, the CSV import and the search jump use the same new rule rather than keeping
    `BR-XX-0000` there. *Cost if wrong: a second constant.*
 4. **Rename, don't replace.** "Dell Latitude" is renamed to Standard rather than deleted, so assets and kit slots keep

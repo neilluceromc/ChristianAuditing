@@ -94,8 +94,7 @@ export function InventoryTable({
   cls,
   role,
   direct,
-  employees,
-  recentEmployees,
+  recentPeople,
   repairMode = false,
   sortHrefs,
   today,
@@ -110,9 +109,8 @@ export function InventoryTable({
   /** the viewer's role — the row menu asks `recordActions` what each row offers */
   role: Role;
   direct: boolean;
-  /** ACTIVE employees for the drawer's assign mode and the row menu's Assign; empty when the caller can't mutate. */
-  employees: ComboOption[];
-  recentEmployees?: string[];
+  /** The user's recent holder picks for the drawer's assign mode and the row menu's Assign; empty when the caller can't mutate. */
+  recentPeople: ComboOption[];
   /** the repairs saved view: adds Stage + Down (README 7b) */
   repairMode?: boolean;
   /** Phase 26: the Manila day for the HOLD cell's expiry text. */
@@ -420,9 +418,8 @@ export function InventoryTable({
           onClose={closeDialog}
           asset={active}
           direct={direct}
-          employees={employees}
-          recentEmployees={recentEmployees}
-          heldFor={active.hold ? { id: active.hold.id, name: active.hold.name } : undefined}
+          recentPeople={recentPeople}
+          heldFor={active.hold ? { id: active.hold.id, name: active.hold.name, active: active.hold.active } : undefined}
         />
       )}
       {dialog && active && dialog.kind === "return" && active.assigneeId !== null && (
@@ -459,8 +456,7 @@ export function InventoryTable({
           total={total}
           cls={cls}
           direct={direct}
-          employees={employees}
-          recentEmployees={recentEmployees}
+          recentPeople={recentPeople}
           onDone={clearSelection}
         />
       )}

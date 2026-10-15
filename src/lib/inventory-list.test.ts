@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASSET_STATUSES, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
+  ASSET_STATUSES, assigneeWhere, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
   parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
 } from "./inventory-list";
 import { parseListState } from "./url-state";
 import { STATUSES_BY_CLASS } from "./asset-class";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), INVENTORY_LIST_CONFIG);
+
+describe("assigneeWhere", () => {
+  it("ids, Unassigned, and both", () => {
+    expect(assigneeWhere([])).toBeNull();
+    expect(assigneeWhere(["e1", "e2"])).toEqual({ assigneeId: { in: ["e1", "e2"] } });
+    expect(assigneeWhere(["none"])).toEqual({ assigneeId: null });
+    expect(assigneeWhere(["e1", "none"])).toEqual({ OR: [{ assigneeId: { in: ["e1"] } }, { assigneeId: null }] });
+  });
+});
 
 describe("buildAssetWhere", () => {
   it("empty state → IT-scoped where (cls defaults to IT — Phase 13)", () => {
@@ -29,7 +38,7 @@ describe("buildAssetWhere", () => {
     expect(where.status).toEqual({ in: ["DEPLOYED"] });
     expect(where.categoryId).toEqual({ in: ["c1"] });
     expect(where.typeId).toEqual({ in: ["t1", "t2"] });
-    expect(where.assigneeId).toEqual({ in: ["e1"] });
+    expect(where.AND).toEqual([{ assigneeId: { in: ["e1"] } }]);
   });
   it("all-invalid status facet filters nothing rather than everything", () => {
     expect(buildAssetWhere(parse("status=HACKED")).status).toBeUndefined();

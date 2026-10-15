@@ -93,15 +93,15 @@ async function pickLaptop(page: Page) {
   await card.click();
 }
 
-/** A new Laptop model, typed ThinkPad, with a unique serial (every IT unit needs one); returns the chip's tag. */
+/** A new Laptop model, typed High-performance, with a unique serial (every IT unit needs one) and its own tag (Phase 36); returns the tag. */
 async function newLaptop(page: Page, model: string, serial: string): Promise<string> {
   await page.getByRole("combobox", { name: "Model", exact: true }).fill(model);
   await page.getByRole("option", { name: /^\+ Add .* as a new model$/ }).click();
-  await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+  await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "High-performance" });
+  const tag = `PX${Date.now().toString(36).slice(-6).toUpperCase()}-${Math.floor(Math.random() * 90 + 10)}`;
+  await page.getByRole("textbox", { name: "Tag", exact: true }).fill(tag);
   await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(serial);
-  const chip = page.getByText(/^tag BR-[A-Z]{2}-\d+$/);
-  await expect(chip).toBeVisible();
-  return (await chip.textContent())!.trim().replace(/^tag /, "");
+  return tag;
 }
 
 /** "Purchase request" and "Vendor" sit inside the Purchase and warranty section, closed until opened. */

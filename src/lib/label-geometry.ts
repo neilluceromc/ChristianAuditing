@@ -85,14 +85,14 @@ export type BarcodeFit =
  * throw here escapes a Server Component rendering up to 200 labels and 500s
  * the whole sheet rather than dropping one barcode.
  *
- * NOTE the shrink and floor branches are DEFENSIVE, not routine: the asset-tag
- * shape enforced in `src/lib/import-assets.ts` and
- * `src/server/modules/inventory/actions.ts` fixes every tag at exactly 10
- * characters on both write paths, so nothing the application itself can store
- * reaches them. They exist because no DB CHECK constraint enforces that
- * shape — a longer tag is unproducible through the app but not impossible —
- * and because without any width check at all a 13-character tag would
- * silently overflow the die-cut.
+ * NOTE the shrink and floor branches are DEFENSIVE, not routine: `TAG_SHAPE`
+ * (`src/lib/tag-key.ts`, enforced by the import, Register and receiving) caps
+ * every tag at 20 characters, which fits the barcode at the minimum module
+ * (about 22 characters), so nothing the application itself can store reaches
+ * them. They exist because no DB CHECK constraint enforces that shape — a
+ * longer tag is unproducible through the app but not impossible — and because
+ * without any width check at all a long tag would silently overflow the
+ * die-cut.
  */
 export function barcodeFit(tag: string): BarcodeFit {
   if (!canEncode128(tag)) return { encodable: false };

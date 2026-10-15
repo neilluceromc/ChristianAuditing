@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { activeHoldFor } from "@/server/modules/reservations/queries";
-import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { fmtDate, localDateISO } from "@/lib/format";
 import { CLASS_PHRASE, STATUS_LABEL, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
 import { APPROVAL_TYPE_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
@@ -131,7 +131,7 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
     pendingRef: pending?.refNo ?? null, itVerifiedAt: asset.itVerifiedAt,
   }, new Date());
   const direct = isDirectLifecycle(user.role, asset.cls);
-  const employees = action === "assign" ? await activeEmployeeOptions() : [];
+  const recentPeople = action === "assign" ? await recentPeopleOptions(user.id) : [];
   const holder = asset.assignee ? { id: asset.assignee.id, name: asset.assignee.name } : null;
   // The leaver line links to /offboarding (IT workspace only): shown only where it would open.
   const leaver = asset.assignee?.employment === "OFFBOARDING" && pathAllowedForRole(`/offboarding/${asset.assignee.id}`, user.role) ? asset.assignee : null;
@@ -232,8 +232,8 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
             asset={{ id: asset.id, tag: asset.tag, model: asset.model }}
             holder={holder}
             direct={direct}
-            employees={employees}
-            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name } : undefined}
+            recentPeople={recentPeople}
+            heldFor={hold ? { id: hold.employee.id, name: hold.employee.name, active: hold.employee.employment === "ACTIVE" } : undefined}
           />
         )}
         <ButtonLink href={`/inventory/${asset.id}`} className="min-h-11 w-full">Open full record</ButtonLink>

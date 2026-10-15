@@ -190,7 +190,7 @@ export function buildAssetRefs(
  * makes debugging output stable, not because correctness rests on it.
  *
  * Tags are UPPER-CASED before the `in` query (and before they key `byTag`):
- * `createSchema`'s tag is `.toUpperCase().regex(/^BR-[A-Z]{2}-\d{4}$/)`, every
+ * `createSchema`'s tag is `.toUpperCase().regex(TAG_SHAPE)`, every
  * tag stored in the database is already upper-case, and `planAssetRows`
  * upper-cases the sheet's tag before consulting this same map (its rule 2).
  * Querying with the sheet's raw-case text would miss a row like

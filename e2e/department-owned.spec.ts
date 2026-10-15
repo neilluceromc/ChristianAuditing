@@ -431,7 +431,8 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await card.click();
     await page.getByRole("combobox", { name: "Model", exact: true }).fill("ThinkPad T14 Gen 5 (e2e)");
     await page.getByRole("option", { name: /^\+ Add .ThinkPad T14 Gen 5 \(e2e\). as a new model$/ }).click();
-    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+    await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "High-performance" });
+    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(tag);
     await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-DEPT-13A-${Date.now()}`);
     // D-: finance/queries.ts's financeAssets only lists assets with
     // `cost: { not: null }` ("Capitalized assets: anything with an
@@ -442,7 +443,6 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
     await page.getByRole("textbox", { name: "Cost (₱)", exact: true }).fill("45000");
     await expect(page.getByRole("textbox", { name: "How many", exact: true })).toHaveValue("1");
-    await expect(page.getByText(`tag ${tag}`, { exact: true })).toBeVisible();
     // Purchasing does not manage IT, so Lend is not offered (ruling R4) — the
     // approval path would create a loan with no due date.
     const initialState = page.getByRole("radiogroup", { name: "Where does it go" });

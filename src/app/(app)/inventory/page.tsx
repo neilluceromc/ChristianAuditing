@@ -19,8 +19,7 @@ import {
 import {
   exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
-import { activeEmployeeOptions } from "@/server/modules/employees/queries";
-import { recentPicks } from "@/server/recent-picks";
+import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
@@ -80,8 +79,7 @@ export default async function InventoryPage({
   // Task 9: the bulk drawer's assign mode (and, Phase 30, the row menu's Assign) needs a name to assign to. Loaded
   // only for a role that can mutate this class at all — the same condition
   // InventoryTable already uses to decide whether the drawer exists.
-  const employees = canMutate ? await activeEmployeeOptions() : [];
-  const recentEmployees = canMutate ? await recentPicks(user.id, "employee") : [];
+  const recentPeople = canMutate ? await recentPeopleOptions(user.id) : [];
   const today = localDateISO(new Date());
 
   const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets, needsCorrection] = await Promise.all([
@@ -245,8 +243,7 @@ export default async function InventoryPage({
                   cls={cls}
                   role={user.role}
                   direct={direct}
-                  employees={employees}
-                  recentEmployees={recentEmployees}
+                  recentPeople={recentPeople}
                   repairMode={repairMode}
                   sortHrefs={sortHrefs}
                   today={today}

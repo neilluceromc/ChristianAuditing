@@ -6,7 +6,7 @@ import { localDateISO } from "@/lib/format";
 import {
   RESERVATION_TABS, listReservations, parseReservationTab, type ReservationTab,
 } from "@/server/modules/reservations/queries";
-import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -31,7 +31,7 @@ export default async function ReservationsPage({
   // Phase 32 (spec §7): who may hand a held spare over or release it; the server actions guard again.
   const canAct = isDirectLifecycle(user.role, "IT");
   const direct = canAct;
-  const employees = canAct ? await activeEmployeeOptions() : [];
+  const recentPeople = canAct ? await recentPeopleOptions(user.id) : [];
 
   const href = (s: ListState, t: ReservationTab = tab) => {
     const qs = serializeListState(s, HOLDS_LIST_CONFIG);
@@ -74,7 +74,7 @@ export default async function ReservationsPage({
             {rows.length > 0 ? (
               <>
                 <HoldsTable tab={tab} rows={rows} state={state} sortHrefs={sortHrefs} today={today}
-                  canAct={canAct} direct={direct} employees={employees} />
+                  canAct={canAct} direct={direct} recentPeople={recentPeople} />
                 {/* Plan P-12: no textual pager here — the toolbar's count line says how many. */}
                 <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} linkComponent={NavLink} />
               </>

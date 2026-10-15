@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { fmtMoneyExact } from "@/lib/format";
 import type { YearRow } from "@/lib/depreciation";
@@ -22,20 +23,28 @@ function Grid({ grid }: { grid: YearRow }) {
   );
 }
 
-/** Spec §5.6: the year's Jan–Dec grid. Tag and Model stay put while the months scroll. */
-export function ScheduleTable({ year, groups, total }: { year: number; groups: ScheduleGroup[]; total: YearRow | null }) {
-  const projected = groups[0]?.subtotal.projected ?? Array<boolean>(12).fill(false);
-  const stickyTag = "sticky left-0 z-[1] w-[110px] min-w-[110px]";
-  const stickyModel = "sticky left-[110px] z-[1] w-[180px] min-w-[180px] max-w-[180px] truncate";
+const STICKY_TAG = "sticky left-0 z-[1] w-[110px] min-w-[110px]";
+const STICKY_MODEL = "sticky left-[110px] z-[1] w-[180px] min-w-[180px] max-w-[180px] truncate";
+
+function Shell({ year, projected, detail, children }: { year: number; projected: boolean[]; detail: boolean; children: React.ReactNode }) {
   return (
     <div role="region" aria-label="Schedule scroll area" tabIndex={0} className="overflow-x-auto rounded-(--radius-card) border border-border bg-surface shadow-card" style={{ overflowX: "auto" }}>
       <table aria-label={`Depreciation schedule ${year}`} className="w-full border-collapse text-[12.5px]">
         <thead>
           <tr>
-            <th scope="col" className={cn(TH, "text-left", stickyTag, "z-[2]")}>Tag</th>
-            <th scope="col" className={cn(TH, "text-left", stickyModel, "z-[2]")}>Model</th>
-            <th scope="col" className={cn(TH, "text-left")}>Category</th>
-            <th scope="col" className={cn(TH, "text-right")}>Cost</th>
+            {detail ? (
+              <>
+                <th scope="col" className={cn(TH, "text-left", STICKY_TAG, "z-[2]")}>Tag</th>
+                <th scope="col" className={cn(TH, "text-left", STICKY_MODEL, "z-[2]")}>Model</th>
+                <th scope="col" className={cn(TH, "text-left")}>Category</th>
+                <th scope="col" className={cn(TH, "text-right")}>Cost</th>
+              </>
+            ) : (
+              <>
+                <th scope="col" className={cn(TH, "text-left")}>Category</th>
+                <th scope="col" className={cn(TH, "text-right")}>Cost</th>
+              </>
+            )}
             <th scope="col" className={cn(TH, "text-right")}>Book value 1 Jan</th>
             {MONTHS.map((m, i) => (
               <th
@@ -51,26 +60,56 @@ export function ScheduleTable({ year, groups, total }: { year: number; groups: S
             <th scope="col" className={cn(TH, "text-right")}>Book value 31 Dec</th>
           </tr>
         </thead>
-        <tbody>
-          {groups.map((g) => (
-            <GroupRows key={g.category} group={g} stickyTag={stickyTag} stickyModel={stickyModel} />
-          ))}
-          {total && (
-            <tr className="border-b border-border-faint bg-surface-subtle font-semibold" style={{ height: "var(--row-h)" }}>
-              <td className={cn("px-3 bg-surface-subtle", stickyTag)} />
-              <td className={cn("px-3 bg-surface-subtle", stickyModel)} />
-              <td className="px-3 text-left text-fg">Total</td>
-              <td className={TD} />
-              <Grid grid={total} />
-            </tr>
-          )}
-        </tbody>
+        <tbody>{children}</tbody>
       </table>
     </div>
   );
 }
 
-function GroupRows({ group, stickyTag, stickyModel }: { group: ScheduleGroup; stickyTag: string; stickyModel: string }) {
+/** Phase 36 (spec 5): the default Schedule view — one row per category, then the Total. Each name opens its paged drill-down. */
+export function ScheduleSummaryTable({ year, categories, total, totalCostC, hrefFor }: {
+  year: number;
+  categories: Array<{ categoryId: string; category: string; assets: number; costC: number; row: YearRow }>;
+  total: YearRow | null;
+  totalCostC: number;
+  hrefFor: (categoryId: string) => string;
+}) {
+  const projected = categories[0]?.row.projected ?? Array<boolean>(12).fill(false);
+  return (
+    <Shell year={year} projected={projected} detail={false}>
+      {categories.map((c) => (
+        <tr key={c.categoryId} className="border-b border-border-faint hover:bg-surface-subtle" style={{ height: "var(--row-h)" }}>
+          <td className="whitespace-nowrap px-3 text-left">
+            <Link href={hrefFor(c.categoryId)} className="font-medium text-accent hover:underline">{c.category}</Link>
+            <span className="ml-2 text-xs text-fg-muted">{c.assets} {c.assets === 1 ? "asset" : "assets"}</span>
+          </td>
+          <td className={cn(TD, "text-fg-secondary")}>{money(c.costC)}</td>
+          <Grid grid={c.row} />
+        </tr>
+      ))}
+      {total && (
+        <tr className="border-b border-border-faint bg-surface-subtle font-semibold" style={{ height: "var(--row-h)" }}>
+          <td className="px-3 text-left text-fg">Total</td>
+          <td className={TD}>{money(totalCostC)}</td>
+          <Grid grid={total} />
+        </tr>
+      )}
+    </Shell>
+  );
+}
+
+/** The drill-down: one category's asset rows (one page), then the subtotal over every row of the category. */
+export function ScheduleCategoryTable({ year, category, rows, subtotal, subtotalCostC }: {
+  year: number; category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow; subtotalCostC: number;
+}) {
+  return (
+    <Shell year={year} projected={subtotal.projected} detail>
+      <GroupRows group={{ category, rows, subtotal }} subtotalCostC={subtotalCostC} stickyTag={STICKY_TAG} stickyModel={STICKY_MODEL} />
+    </Shell>
+  );
+}
+
+function GroupRows({ group, subtotalCostC, stickyTag, stickyModel }: { group: ScheduleGroup; subtotalCostC: number; stickyTag: string; stickyModel: string }) {
   return (
     <>
       {group.rows.map((r) => (
@@ -86,7 +125,7 @@ function GroupRows({ group, stickyTag, stickyModel }: { group: ScheduleGroup; st
         <td className={cn("px-3 bg-surface-subtle", stickyTag)} />
         <td className={cn("px-3 bg-surface-subtle", stickyModel)} />
         <td className="whitespace-nowrap px-3 text-left text-fg">Subtotal — {group.category}</td>
-        <td className={TD} />
+        <td className={TD}>{money(subtotalCostC)}</td>
         <Grid grid={group.subtotal} />
       </tr>
     </>

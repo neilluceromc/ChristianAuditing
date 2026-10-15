@@ -9,6 +9,8 @@ import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Menu, type MenuItem } from "@/components/ui/menu";
 import { FacetDropdown } from "@/components/patterns/facet-dropdown";
+import { PeopleFacet } from "@/components/patterns/people-facet";
+import { searchAssignees } from "@/server/modules/employees/people-search";
 import {
   INVENTORY_LIST_CONFIG, withPurchaseYearQS, type PurchaseYearValue, type YearChip,
 } from "@/lib/inventory-list";
@@ -156,10 +158,20 @@ export function InventoryToolbar({
         {(stageActive
           ? (["category", "type", "assignee", "provenance", "reg"] as const)
           : (["status", "category", "type", "assignee", "provenance", "reg"] as const)
-        ).map((facet) => (
+        ).map((facet) => facet === "assignee" ? (
+          <PeopleFacet
+            key={facet}
+            label="Assigned"
+            options={facets.assignee ?? []}
+            selected={state.filters.assignee ?? []}
+            // the list's own URL state scopes the counts: every other filter applies, this one's own does not
+            search={(q) => searchAssignees({ q, cls, listQS: withPurchaseYearQS(serializeListState(state, INVENTORY_LIST_CONFIG), purchaseYear) })}
+            onApply={(values) => navigate(hrefFor(withFilter(state, facet, values)))}
+          />
+        ) : (
           <FacetDropdown
             key={facet}
-            label={facet === "assignee" ? "Assigned" : facet === "provenance" ? "Provenance" : facet === "reg" ? "Registration" : facet[0].toUpperCase() + facet.slice(1)}
+            label={facet === "provenance" ? "Provenance" : facet === "reg" ? "Registration" : facet[0].toUpperCase() + facet.slice(1)}
             options={facets[facet] ?? []}
             selected={state.filters[facet] ?? []}
             onApply={(values) => navigate(hrefFor(withFilter(state, facet, values)))}

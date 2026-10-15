@@ -10,8 +10,8 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  * serials stamped by case number and Date.now()):
  *   1    IT's nine category cards in order, no Uncategorised / Phone /
  *        Peripheral, "in stock" on Laptop, axe on the bare page.
- *   2    a known model typed in lower case resolves and sets its type; no
- *        "New model — which type?" select.
+ *   2    a known model typed in lower case resolves, and the Type is still asked
+ *        (empty and required: the model never sets it — Phase 36).
  *   3    the one-unit serial is required, and a scanner's Enter never submits
  *        (Review Focus 2).
  *   4    a new model asks for its type and is registered with it; a known model
@@ -29,12 +29,11 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *   11   Reprint other tags: Tags + Make sheet puts the barcode on the sheet.
  *   12   Register and add another keeps category and model, clears the serial,
  *        and toasts (ruling R7).
- *   13   the live label preview shows the typed model and the next tag.
+ *   13   the live label preview shows the typed model and the typed tag.
  *   14   Purchasing's four cards in name order; its serial is optional.
- *   15   Other offers OT, not the PH its inherited phone tags would teach
- *        (ruling R23).
- *   16   a category with no tag prefix and no tags: one unit is refused onto
- *        the Tag prefix field, and the footer asks for "a tag prefix" (I3).
+ *   15   Other suggests no tag: the Tag box starts empty (Phase 36).
+ *   16   a category with no tag prefix and no types registers on a typed tag
+ *        (Phase 36: prefixes are gone) and the asset has no type.
  *   17   printing a list selection (`?ids=`) stamps its waiting assets too
  *        (ruling R26, M5).
  *
@@ -100,7 +99,17 @@ async function pickCategory(page: Page, name: string) {
 /** Ruling R11: getByLabel("Model") also hits the "Model and quantity" region, and a non-exact name hits the type select. */
 const modelBox = (page: Page) => page.getByRole("combobox", { name: "Model", exact: true });
 const serialBox = (page: Page) => page.getByRole("textbox", { name: "Serial number", exact: true });
-const typeSelect = (page: Page) => page.getByRole("combobox", { name: "New model — which type?" });
+const typeSelect = (page: Page) => page.getByRole("combobox", { name: "Type", exact: true });
+const tagBox = (page: Page) => page.getByRole("textbox", { name: "Tag", exact: true });
+
+// Phase 36: staff type their own tag. Unique per run, 20 characters at most.
+let tagSeq = 0;
+const newTag = () => `E${Date.now().toString(36).slice(-6).toUpperCase()}-${++tagSeq}`;
+
+/** Phase 36: the Type is always asked when the category has several; picks the first real one. */
+async function pickAnyType(page: Page) {
+  if ((await typeSelect(page).count()) > 0) await typeSelect(page).selectOption({ index: 1 });
+}
 
 /** Types the model and picks it from the list by its exact name. */
 async function pickModel(page: Page, typed: string, option: string) {
@@ -129,8 +138,10 @@ async function registerLaptops(page: Page, n: number, stamp: string) {
   await openRegister(page);
   await pickCategory(page, "Laptop");
   await pickModel(page, KNOWN_LAPTOP, KNOWN_LAPTOP);
+  await pickAnyType(page);
   await setQuantity(page, n);
   for (let i = 1; i <= n; i++) {
+    await page.getByRole("textbox", { name: `Tag ${i}`, exact: true }).fill(newTag());
     await page.getByRole("textbox", { name: `Serial ${i}`, exact: true }).fill(`${stamp}-${i}`);
   }
   await page.getByRole("button", { name: `Register ${n} laptops`, exact: true }).click();
@@ -158,13 +169,8 @@ test.describe("register — the Register tab", () => {
     await expectNoSeriousAxe(page);
   });
 
-  test("2. a known model typed in lower case is offered, and picking it sets its type", async ({ page }) => {
+  test("2. a known model typed in lower case is offered; the Type stays empty and required", async ({ page }) => {
     test.setTimeout(120_000);
-    // The seed types every T14 Gen 4 as its newest asset says (the first Laptop type) — read, not assumed.
-    const newest = await db.asset.findFirstOrThrow({
-      where: { model: KNOWN_LAPTOP }, orderBy: { createdAt: "desc" }, select: { type: { select: { name: true } } },
-    });
-    const typeName = newest.type!.name;
     await login(page, IT);
     await openRegister(page);
     await pickCategory(page, "Laptop");
@@ -173,8 +179,15 @@ test.describe("register — the Register tab", () => {
     await expect(option).toBeVisible();
     await option.click();
     await expect(modelBox(page)).toHaveValue(KNOWN_LAPTOP);
-    await expect(page.getByText(new RegExp(`Type:\\s*${escapeRe(typeName)}\\s*— set by this model`))).toBeVisible();
-    await expect(typeSelect(page)).toHaveCount(0);
+    // Phase 36: the model never sets the type.
+    await expect(page.getByText(/— set by this model/)).toHaveCount(0);
+    await expect(typeSelect(page)).toBeVisible();
+    await expect(typeSelect(page)).toHaveValue("");
+    await tagBox(page).fill(newTag());
+    await serialBox(page).fill(`C2-${Date.now()}`);
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    await expect(page.getByText("Pick the type", { exact: true }).first()).toBeVisible();
+    await expect(page).toHaveURL(/\/inventory\/register$/);
   });
 
   test("3. the one-unit serial is required, and a scanner's Enter never submits", async ({ page }) => {
@@ -184,6 +197,8 @@ test.describe("register — the Register tab", () => {
     await openRegister(page);
     await pickCategory(page, "Laptop");
     await pickModel(page, KNOWN_LAPTOP, KNOWN_LAPTOP);
+    await pickAnyType(page);
+    await tagBox(page).fill(newTag());
     // Review Focus 2: a scanner types the serial, then sends Enter. That Enter must not submit.
     const serial = `C3-${Date.now()}`;
     await serialBox(page).fill(serial);
@@ -239,6 +254,7 @@ test.describe("register — the Register tab", () => {
     await page.getByRole("option", { name: /^\+ Add .Logitech M720 Triathlon. as a new model$/ }).click();
     await expect(typeSelect(page)).toBeVisible();
     await typeSelect(page).selectOption({ label: "Wireless" });
+    await tagBox(page).fill(newTag());
     await serialBox(page).fill(`${stamp}-M720-1`);
     await expect(page.getByRole("radiogroup", { name: "Where does it go" }).getByRole("radio", { name: "Spare stock" })).toBeChecked();
     await page.getByRole("button", { name: "Register 1 mouse", exact: true }).click();
@@ -259,7 +275,9 @@ test.describe("register — the Register tab", () => {
     await openRegister(page);
     await pickCategory(page, "Monitor");
     await pickModel(page, "Dell P2422H", "Dell P2422H");
+    await pickAnyType(page);
     await setQuantity(page, 3);
+    for (let i = 1; i <= 3; i++) await page.getByRole("textbox", { name: `Tag ${i}`, exact: true }).fill(newTag());
 
     // A real paste event with Windows line endings and a trailing newline (Review Focus 3).
     await page.getByRole("textbox", { name: "Serial 1", exact: true }).evaluate((el, text) => {
@@ -300,6 +318,8 @@ test.describe("register — the Register tab", () => {
     await openRegister(page);
     await pickCategory(page, "Laptop");
     await pickModel(page, KNOWN_LAPTOP, KNOWN_LAPTOP);
+    await pickAnyType(page);
+    await tagBox(page).fill(newTag());
     await serialBox(page).fill(serial);
     await page.getByRole("radiogroup", { name: "Where does it go" }).getByText("Give to someone", { exact: true }).click();
     const who = page.getByRole("combobox", { name: "Who", exact: true });
@@ -327,6 +347,7 @@ test.describe("register — the Register tab", () => {
       await modelBox(page).fill(model);
       await page.getByRole("option", { name: /^\+ Add .Toyota Vios 1\.3 E. as a new model$/ }).click();
       await typeSelect(page).selectOption({ label: "Sedan" });
+      await tagBox(page).fill(newTag());
       await expect(page.getByRole("heading", { name: "Serial number (optional)" })).toBeVisible();
       await page.getByRole("radiogroup", { name: "Where does it go" }).getByText("In use", { exact: true }).click();
       await expect(page.getByText("This files a request for approval.")).toBeVisible();
@@ -368,7 +389,10 @@ test.describe("register — the Register tab", () => {
     await openRegister(page);
     await pickCategory(page, "Laptop");
     await pickModel(page, KNOWN_LAPTOP, KNOWN_LAPTOP);
+    await pickAnyType(page);
     await setQuantity(page, 2);
+    await page.getByRole("textbox", { name: "Tag 1", exact: true }).fill(newTag());
+    await page.getByRole("textbox", { name: "Tag 2", exact: true }).fill(newTag());
     await page.getByRole("textbox", { name: "Serial 1", exact: true }).fill(`${s}-1`);
     await page.getByRole("textbox", { name: "Serial 2", exact: true }).fill(`${s}-2`);
 
@@ -431,14 +455,16 @@ test.describe("register — the Register tab", () => {
     expect(record.quantity).toBe(2);
   });
 
-  test("12. Register and add another keeps the category and model, clears the serial, and toasts", async ({ page }) => {
+  test("12. Register and add another keeps the category, model and type, clears the tag and serial, and toasts", async ({ page }) => {
     test.setTimeout(120_000);
     const serial = `C12-${Date.now()}`;
+    const tag = newTag();
     await login(page, IT);
     await openRegister(page);
     await pickCategory(page, "Laptop");
     await pickModel(page, KNOWN_LAPTOP, KNOWN_LAPTOP);
-    const tagBefore = (await page.getByText(/^tag BR-LT-\d+$/).textContent())?.trim();
+    await typeSelect(page).selectOption({ label: "High-performance" });
+    await tagBox(page).fill(tag);
     await serialBox(page).fill(serial);
     await page.getByRole("button", { name: "Register and add another", exact: true }).click();
 
@@ -447,25 +473,26 @@ test.describe("register — the Register tab", () => {
     await expect(page).toHaveURL(/\/inventory\/register$/);
     await expect(categoryCard(page, "Laptop")).toHaveAttribute("aria-pressed", "true");
     await expect(modelBox(page)).toHaveValue(KNOWN_LAPTOP);
+    await expect(typeSelect(page)).toHaveValue(/.+/);
+    await expect(tagBox(page)).toHaveValue("");
     await expect(serialBox(page)).toHaveValue("");
-    await expect(serialBox(page)).toBeFocused();
-    await expect(page.getByText(/^tag BR-LT-\d+$/)).not.toHaveText(tagBefore!);
-    const asset = await db.asset.findFirstOrThrow({ where: { serial } });
+    await expect(tagBox(page)).toBeFocused();
+    const asset = await db.asset.findFirstOrThrow({ where: { serial }, include: { type: true } });
     expect(asset.model).toBe(KNOWN_LAPTOP);
-    expect(`tag ${asset.tag}`).toBe(tagBefore);
+    expect(asset.tag).toBe(tag);
+    expect(asset.type?.name).toBe("High-performance");
   });
 
-  test("13. the live label preview shows the typed model and the next tag", async ({ page }) => {
+  test("13. the live label preview shows the typed model and the typed tag", async ({ page }) => {
     test.setTimeout(120_000);
     const model = `E2E Preview ${Date.now()}`;
+    const tag = newTag();
     await login(page, IT);
     await openRegister(page);
     await pickCategory(page, "Laptop");
     await modelBox(page).fill(model);
     await modelBox(page).blur();
-    const chip = page.getByText(/^tag BR-LT-\d+$/);
-    await expect(chip).toBeVisible();
-    const tag = (await chip.textContent())!.trim().replace(/^tag /, "");
+    await tagBox(page).fill(tag.toLowerCase());
     const figure = page.getByRole("figure", { name: "Your label, actual size" });
     await expect(figure).toBeVisible();
     await expect(figure).toContainText(model);
@@ -551,42 +578,40 @@ test.describe("register — the Labels tab", () => {
 });
 
 test.describe("register — final-review fix wave", () => {
-  test("15. Other offers OT, not the PH its inherited phone tags would teach (ruling R23)", async ({ page }) => {
+  test("15. Other suggests no tag: the Tag box starts empty", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, IT);
     await openRegister(page);
     await pickCategory(page, "Other");
     await modelBox(page).fill(`E2E Webcam ${Date.now()}`);
     await modelBox(page).blur();
-    await expect(page.getByText(/^tag BR-OT-\d{4}$/)).toBeVisible();
-    await expect(page.getByText(/^tag BR-PH-/)).toHaveCount(0);
+    await expect(tagBox(page)).toHaveValue("");
+    await expect(page.getByText(/^tag BR-/)).toHaveCount(0);
   });
 
-  test("16. a category with no tag prefix: one unit is refused onto the Tag prefix field", async ({ page }) => {
+  test("16. a category with no prefix and no types registers on a typed tag, with no type", async ({ page }) => {
     test.setTimeout(120_000);
     const name = `E2E Prefixless ${Date.now() % 100000}`;
     // A category added in Admin: no tagPrefix, no types, no assets.
     const cat = await db.assetCategory.create({ data: { name, cls: "IT" }, select: { id: true } });
+    const tag = newTag();
+    const serial = `C16-${Date.now()}`;
     try {
       await login(page, IT);
       await openRegister(page);
       await pickCategory(page, name);
       await modelBox(page).fill("E2E Gadget");
       await modelBox(page).blur();
-      await serialBox(page).fill(`C16-${Date.now()}`);
-      await expect(page.getByText(/^Still needed: a tag prefix$/)).toBeVisible();
-
-      const t0 = new Date();
-      await page.getByRole("button", { name: /^Register 1 /, exact: false }).first().click();
-      const prefixBox = page.getByRole("textbox", { name: "Tag prefix", exact: true });
-      await expect(prefixBox).toBeFocused();
-      await expect(page.getByText(`Pick a two-letter tag prefix for ${name}`, { exact: true })).toBeVisible();
-      expect(await db.asset.count({ where: { categoryId: cat.id, createdAt: { gte: t0 } } })).toBe(0);
-
-      await prefixBox.fill("zq");
-      await expect(page.getByText(/^tag BR-ZQ-\d{4}$/)).toBeVisible();
+      // Phase 36: with no types the Type is not asked and the asset gets none.
+      await expect(typeSelect(page)).toHaveCount(0);
+      await tagBox(page).fill(tag);
+      await serialBox(page).fill(serial);
       await expect(page.getByText(/^Still needed:/)).toHaveCount(0);
-      await expect(page.getByText(`Pick a two-letter tag prefix for ${name}`, { exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: /^Register 1 /, exact: false }).first().click();
+      await landedRecord(page);
+      const asset = await db.asset.findUniqueOrThrow({ where: { tag } });
+      expect(asset.categoryId).toBe(cat.id);
+      expect(asset.typeId).toBeNull();
     } finally {
       await db.assetCategory.deleteMany({ where: { id: cat.id, assets: { none: {} } } });
     }

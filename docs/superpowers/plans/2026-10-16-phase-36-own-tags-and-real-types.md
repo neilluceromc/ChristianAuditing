@@ -43,8 +43,8 @@
 - Server actions follow `actionRole` → `checkRate` → zod.
 
 **Spec values**
-- **Tag shape:** `TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,29}$/`, tested after `trim().toUpperCase()`.
-- **Refusal text** (`TAG_RULE`): **"Tags are 1–30 letters, digits, - _ or ., no spaces"**.
+- **Tag shape:** `TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,19}$/`, tested after `trim().toUpperCase()`.
+- **Refusal text** (`TAG_RULE`): **"Tags are 1–20 letters, digits, - _ or ., no spaces"**.
 - **Empty tag in Register:** **"Enter a tag for every unit"**.
 - **Type:**
   - the Type select is shown when the category has ≥2 types;
@@ -61,7 +61,7 @@
   Every step is guarded, and no audit rows are written.
 - **Seed:** Laptop types `["Standard", "High-performance", "MacBook"]`; BR-LT-0201 uses MacBook.
 - **People search:**
-  - `searchPeople({ q, scope: "active" | "assignees", cls? })`, where `q` is 1–60 characters trimmed, matched case-insensitively as a substring of the name or employee no.;
+  - `searchPeople({ q, scope: "active" })` (pickers only; the Assigned filter uses `searchAssignees`), where `q` is 1–60 characters trimmed, matched case-insensitively as a substring of the name or employee no.;
   - at most **10** results, ordered by name then employee no.;
   - debounce **250 ms**;
   - Recent shows at most **5** active people.
@@ -122,8 +122,8 @@
 
 ```ts
 // src/lib/tag-key.ts
-export const TAG_SHAPE: RegExp;   // /^[A-Z0-9][A-Z0-9._-]{0,29}$/
-export const TAG_RULE: string;    // "Tags are 1–30 letters, digits, - _ or ., no spaces"
+export const TAG_SHAPE: RegExp;   // /^[A-Z0-9][A-Z0-9._-]{0,19}$/
+export const TAG_RULE: string;    // "Tags are 1–20 letters, digits, - _ or ., no spaces"
 // tagKey(raw) unchanged: trim + upper-case
 // src/lib/register-rows.ts
 export const TAG_EMPTY: string;   // "Enter a tag for every unit"
@@ -137,18 +137,18 @@ import { describe, expect, it } from "vitest";
 import { TAG_RULE, TAG_SHAPE, tagKey } from "./tag-key";
 
 describe("TAG_SHAPE (Phase 36 spec §2.1)", () => {
-  it("accepts any 1-30 letters, digits, - _ . starting alphanumeric", () => {
-    for (const t of ["BR-LT-0148", "ACC-LAP-001", "2026-0042", "A", "LT_1.2", "X".repeat(30)]) expect(TAG_SHAPE.test(t)).toBe(true);
+  it("accepts any 1-20 letters, digits, - _ . starting alphanumeric", () => {
+    for (const t of ["BR-LT-0148", "ACC-LAP-001", "2026-0042", "A", "LT_1.2", "X".repeat(20)]) expect(TAG_SHAPE.test(t)).toBe(true);
   });
-  it("refuses empty, a leading - or ., spaces, slashes, 31 chars and non-ASCII", () => {
-    for (const t of ["", "-LT", ".X", "A B", "A/B", "X".repeat(31), "Ñ"]) expect(TAG_SHAPE.test(t)).toBe(false);
+  it("refuses empty, a leading - or ., spaces, slashes, 21 chars and non-ASCII", () => {
+    for (const t of ["", "-LT", ".X", "A B", "A/B", "X".repeat(21), "Ñ"]) expect(TAG_SHAPE.test(t)).toBe(false);
   });
   it("tagKey trims and upper-cases before the test (Review Focus 1)", () => {
     expect(tagKey("  acc-1 ")).toBe("ACC-1");
     expect(TAG_SHAPE.test(tagKey(" acc-1 "))).toBe(true);
   });
   it("names the rule", () => {
-    expect(TAG_RULE).toBe("Tags are 1–30 letters, digits, - _ or ., no spaces");
+    expect(TAG_RULE).toBe("Tags are 1–20 letters, digits, - _ or ., no spaces");
   });
 });
 ```
@@ -158,7 +158,7 @@ describe("TAG_SHAPE (Phase 36 spec §2.1)", () => {
 ```ts
 it("badTags: empty tags ask for a tag; bad shapes name the rule", () => {
   expect(badTags([{ tag: "", serial: "" }, { tag: "ok-1", serial: "" }]).message).toBe("Row 1 · Enter a tag for every unit");
-  expect(badTags([{ tag: "A B", serial: "" }]).message).toBe("Row 1 · A B: Tags are 1–30 letters, digits, - _ or ., no spaces");
+  expect(badTags([{ tag: "A B", serial: "" }]).message).toBe("Row 1 · A B: Tags are 1–20 letters, digits, - _ or ., no spaces");
   expect(badTags([{ tag: "acc-1", serial: "" }]).rows.size).toBe(0);
   expect(badTags([{ tag: "", serial: "" }, { tag: "", serial: "" }]).message).toBe("Row 1 · Enter a tag for every unit and 1 more");
 });
@@ -171,13 +171,13 @@ it("badTags: empty tags ask for a tag; bad shapes name the rule", () => {
 
 ```ts
 /**
- * Phase 36 (spec §2.1): the asset tag is whatever staff type — 1-30 letters, digits, `-`, `_` or `.`,
+ * Phase 36 (spec §2.1): the asset tag is whatever staff type — 1-20 letters, digits, `-`, `_` or `.`,
  * starting with a letter or digit, tested after `tagKey` (trim + upper-case). No spaces and no `/`,
  * because the tag is one segment of `/inventory/scan/<tag>`; no leading `.` so `.`/`..` never occur.
  * ONE definition: Register, receiving, the CSV import and the search jump all use it.
  */
-export const TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,29}$/;
-export const TAG_RULE = "Tags are 1–30 letters, digits, - _ or ., no spaces";
+export const TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,19}$/;
+export const TAG_RULE = "Tags are 1–20 letters, digits, - _ or ., no spaces";
 ```
 
   - In `register-rows.ts`, `badTags` drops `example`:
@@ -206,7 +206,7 @@ export function badTags(rows: readonly RegisterRow[]): { message: string | null;
 
 ```bash
 git add src/lib src/server/modules/inventory/actions.ts src/server/modules/purchases/receiving.ts src/app/dev/kitchen-sink/page.tsx src/components/inventory/register-form.tsx
-git commit -m "feat(tags): one tag rule -- any 1-30 letters, digits, - _ . (upper-cased, unique) for Register, receiving, import and the search jump"
+git commit -m "feat(tags): one tag rule -- any 1-20 letters, digits, - _ . (upper-cased, unique) for Register, receiving, import and the search jump"
 ```
 
 ---
@@ -445,7 +445,7 @@ export const PEOPLE_LIMIT = 10;
 export const PEOPLE_DEBOUNCE_MS = 250;
 export const RECENT_PEOPLE = 5;
 export const PEOPLE_NONE = "No match — check the spelling or the employee no.";
-export const peopleQuerySchema; // z.object({ q: z.string().trim().min(1).max(60), scope: z.enum(["active","assignees"]), cls: z.enum(["IT","PURCHASING"]).optional() })
+export const peopleQuerySchema; // z.object({ q: z.string().trim().min(1).max(60), scope: z.literal("active") })
 export function peopleWhere(q: string, scope: "active" | "assignees", cls?: AssetClass): Prisma.EmployeeWhereInput;
 // server action
 export async function searchPeople(input: unknown): Promise<ActionResult<ComboOption[]>>; // ComboOption = { value, label, sub }
@@ -485,7 +485,7 @@ describe("people search (Phase 36 spec §4.1)", () => {
 
   Run them (FAIL), then implement `people-search.ts` to match.
 - [ ] **Step 2: Server.**
-  - **`searchPeople`:** guard `actionRole("admin", "it_staff", "purchasing_staff", "finance_staff")` → `checkRate(user.id)` → `peopleQuerySchema`. Then `prisma.employee.findMany({ where: peopleWhere(...), orderBy: [{ name: "asc" }, { employeeNo: "asc" }], take: PEOPLE_LIMIT, select: { id, name, employeeNo } })`, mapped to `{ value: id, label: name, sub: employeeNo }`.
+  - **`searchPeople`:** guard `actionRole("admin", "it_staff", "purchasing_staff")` → `checkRate(user.id, "check")` (the live-check kind, 240/min, so typing never spends the write budget) → `peopleQuerySchema`. Then `prisma.employee.findMany({ where: peopleWhere(...), orderBy: [{ name: "asc" }, { employeeNo: "asc" }], take: PEOPLE_LIMIT, select: { id, name, employeeNo } })`, mapped to `{ value: id, label: name, sub: employeeNo }`.
   - **`recentPeopleOptions(userId)`:** `recentPicks(userId, "employee")` → first `RECENT_PEOPLE` ids → active employees in that order.
 - [ ] **Step 3: `PeopleCombobox`.**
   - Wrap `EntityCombobox` (read `src/components/patterns/entity-combobox.tsx` first; extend it minimally if it cannot take externally changing `options` or report typed text).
@@ -542,7 +542,7 @@ it("assigneeWhere: ids, Unassigned, and both", () => {
 - [ ] **Step 2: `facetOptions`.**
   - Drop the `prisma.employee.findMany({ where: { assets: { some: { cls } } } })` and the all-assignee groupBy.
   - Instead return `assignee`: the **selected** people (ids from `state.filters.assignee` minus `none`) with names and counts (one groupBy restricted to those ids), plus `{ value: "none", label: "Unassigned", count }`.
-- [ ] **Step 3: `searchAssignees`.** Same guard as `searchPeople`. It parses `listQS` with `parseListState(new URLSearchParams(listQS), INVENTORY_LIST_CONFIG)`, then finds people with `peopleWhere(q, "assignees", cls)` (`take` 10), and counts their assets with `groupBy assigneeId` over `buildAssetWhere(without assignee)` restricted to those ids.
+- [ ] **Step 3: `searchAssignees`.** Guard `actionRole("admin", "it_staff", "purchasing_staff", "finance_staff", "viewer")` plus `canSeeClass(role, cls)` (and `checkRate(user.id, "check")`). It parses `listQS` with `parseListState(new URLSearchParams(listQS), INVENTORY_LIST_CONFIG)`, then finds people with `peopleWhere(q, "assignees", cls)` (`take` 10), and counts their assets with `groupBy assigneeId` over `buildAssetWhere(without assignee)` restricted to those ids.
 - [ ] **Step 4: `PeopleFacet` (client)** replaces `FacetDropdown` for `assignee` in `inventory-toolbar.tsx`.
   - **Button:** "Assigned" or "Assigned: {n}".
   - **Popover:** a search input labelled "Search people", the selected people as removable chips (`aria-label="Remove {name}"`), an "Unassigned {count}" checkbox, and typed results as checkboxes "{name} · {employeeNo} {count}".
@@ -663,4 +663,27 @@ git commit -m "test(e2e)+docs: Phase 36 -- typed tags, Type always asked, Laptop
 
 ## D-block (decisions made during execution)
 
-(Filled in during execution: each ruling as `D-n — what — why — cost if wrong`.)
+- **D-1** (Task 1) - tags capped at 20 characters (spec said 30) — the label's barcode fits ~22 characters at the minimum module, so 30 would print labels with no scannable barcode; spec/plan updated in the fix round — cost if wrong: one number (tags 21–30 refused)
+- **D-2** (Task 5) - accept the swap of four extra pages (scan, work, home, reservations) that also loaded every employee — same intent as spec §4.2; activeEmployeeOptions deleted — cost if wrong: none
+- **D-3** (Task 5) - searchPeople uses checkRate(user.id, "check") (the live-check budget), not the mutation budget the plan implied — typing must not starve real writes — cost if wrong: one argument
+- **D-4** (Task 6) - the Reservations page's Employee facet stays a list — it shows only people with holds in the current tab (holds expire in 7 days, so the list stays short) — cost if wrong: a third search scope later
+- **D-5** (Task 6) - include the failed-search message fix (Minor 2) in fix round 1 since the same file is being touched and a rate-limited search saying 'No match' misleads — cost if wrong: one string
+- **D-6** (Task 7) - the plan's scheduleSummary interface omitted Cost; spec §5 requires it — add costC per category and a total cost — cost if wrong: one column
+- **D-7** (Task 7) - include the O(n²) grouping fix and a 'Category not found' note in the fix round (same files, cheap) — cost if wrong: none
+- **D-8** (Task 8) - Register's label preview shows the tag upper-cased and trimmed (`register-form.tsx`, one line) - the stored tag is upper-case, so a lower-case preview barcoded something that would never be saved - cost if wrong: none
+- **D-9** (Task 8) - e2e specs that registered through a suggested tag now type their own (`E<base36>-n` style, 20 characters at most); `ThinkPad` picks became `High-performance` through the select named `Type` - the model no longer sets the type - cost if wrong: one string per spec
+- **D-10** (Task 8) - the import fixtures use type `Standard` (`e2e/fixtures/make.ts`; only the four .xlsx files that carry a Laptop type were regenerated, the rest restored byte-for-byte) - `Dell Latitude` no longer exists after migration 29 - cost if wrong: re-run `npx tsx e2e/fixtures/make.ts`
+- **D-11** (Task 8) - `quick-forms` case 2 now expects the employee picker to list only Recent before typing (no `All` heading) - spec 4.2 - cost if wrong: one assertion
+- **D-12** (Task 8) - the idle-employee check in `own-tags-types` case 7 creates its own active employee, because every seeded active employee holds an asset or a reservation and so legitimately appears on the page - cost if wrong: one fixture row
+- **D-13** (final review, ruling) - `searchAssignees` also allows `viewer`: /inventory is the viewer's landing page and viewers already see /employees; it keeps its `canSeeClass` check - cost if wrong: one role string
+- **D-14** (final review, ruling) - `searchPeople` is pickers only: roles admin, it_staff, purchasing_staff (finance_staff dropped), `scope: "active"` only, no `cls`; the assignees branch lives only in `peopleWhere` for `searchAssignees` - spec 4.1 and this plan updated - cost if wrong: one guard line
+- **D-15** (final review) - Register and add another focuses `#register-tag`; in one-unit mode the empty or bad tag is said under the Tag box (`aria-describedby`) as "Enter a tag for every unit" or "{tag}: {TAG_RULE}", with no "Row 1 ·" - cost if wrong: one focus target
+- **D-16** (final review) - the Assign dialog preselects a hold's person only if ACTIVE (`heldFor.active`); a leaver reads "Held for {name}, who has left — pick someone else." - cost if wrong: one prop
+- **D-17** (final review) - the Register label preview shows `YOUR-TAG` while the Tag box is empty (never a real asset's tag); the Schedule drill-down subtotal row shows the category's Cost - cost if wrong: one string, one cell
+- **D-18** (final review) - added `own-tags-types` case 11 (a viewer's Assigned search); no drill-down page-2 e2e because the seed has at most 12 depreciating assets in a category (page size 25) - cost if wrong: one case
+- **D-13** (final review, ruling) - `searchAssignees` also allows `viewer`: /inventory is the viewer's landing page and viewers already see /employees; it keeps its `canSeeClass` check - cost if wrong: one role string
+- **D-14** (final review, ruling) - `searchPeople` is pickers only: roles admin, it_staff, purchasing_staff (finance_staff dropped), `scope: "active"` only, no `cls`; the `assignees` scope lives only in `peopleWhere` for `searchAssignees` - spec 4.1 and this plan updated - cost if wrong: one guard line
+- **D-15** (final review) - Register and add another focuses `#register-tag`; in one-unit mode the empty or bad tag is said under the Tag box (`aria-describedby`) as "Enter a tag for every unit" or "{tag}: {TAG_RULE}", with no "Row 1 ·" - cost if wrong: one focus target
+- **D-16** (final review) - the Assign dialog preselects a hold's person only if ACTIVE (`heldFor.active`); a leaver reads "Held for {name}, who has left — pick someone else." - cost if wrong: one prop
+- **D-17** (final review) - the Register label preview shows `YOUR-TAG` while the Tag box is empty (never a real asset's tag); the Schedule drill-down subtotal row shows the category's Cost - cost if wrong: one string, one cell
+- **D-18** (final review) - added `own-tags-types` case 11 (a viewer's Assigned search); no drill-down page-2 e2e because the seed has at most 12 depreciating assets in a category (page size 25) - cost if wrong: one case

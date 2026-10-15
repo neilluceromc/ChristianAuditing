@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  affectedByPolicy, lifeYears, asOfMonth, depreciate, manilaMonth, monthEndLabel, monthLabel, resolvePolicy, stateNote, toCentavos, yearGrid,
+  affectedByPolicy, lifeYears, asOfMonth, depreciate, manilaMonth, monthEndLabel, monthLabel, resolvePolicy, stateNote, sumYearRows, toCentavos, yearGrid,
 } from "./depreciation";
 
 const M = (y: number, m: number) => y * 12 + (m - 1);
@@ -132,5 +132,15 @@ describe("lifeYears", () => {
   it("unconfirmed or no policy gives no years", () => {
     expect(lifeYears(5_500_000, null, p, 2026 * 12 + 8)).toEqual([]);
     expect(lifeYears(5_500_000, new Date("2025-03-10T10:00:00+08:00"), null, 2026 * 12 + 8)).toEqual([]);
+  });
+});
+
+describe("sumYearRows", () => {
+  it("adds element-wise and keeps the year's projected flags", () => {
+    const a = { opening: 100, months: Array(12).fill(1), projected: Array(12).fill(false), total: 12, closing: 88 };
+    const b = { opening: 50, months: Array(12).fill(2), projected: Array(12).fill(false), total: 24, closing: 26 };
+    const s = sumYearRows([a, b], 2026, 2026 * 12 + 8);
+    expect([s.opening, s.total, s.closing, s.months[0]]).toEqual([150, 36, 114, 3]);
+    expect(s.projected).toEqual([...Array(9).fill(false), true, true, true]);
   });
 });

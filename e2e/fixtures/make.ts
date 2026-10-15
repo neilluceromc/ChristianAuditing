@@ -114,7 +114,7 @@ async function main() {
 
   // assets-clean.xlsx — 3 new rows, all valid, nothing to block on.
   write("assets-clean.xlsx", await toXlsxBuffer(ASSET_EXPORT_COLUMNS, [
-    asset({ tag: "BR-LT-9001", model: "Dell Latitude 5450", categoryName: "Laptop", typeName: "Dell Latitude",
+    asset({ tag: "BR-LT-9001", model: "Dell Latitude 5450", categoryName: "Laptop", typeName: "Standard",
             purchasedAt: utcDay("2026-02-10"), cost: 62_000, warrantyUntil: utcDay("2029-02-10"),
             vendorName: "TechServe PH", notes: "imported by the e2e fixture" }),
     asset({ tag: "BR-MN-9002", model: "Dell P2425H", categoryName: "Monitor", typeName: "24-inch",
@@ -134,7 +134,7 @@ async function main() {
     asset({ tag: "BR-DK-9101", model: "WD22TB4 Dock", categoryName: "Docking Station", typeName: "USB-C Dock" }),
     asset({ tag: "BR-PH-9102", model: "iPhone 15", categoryName: "Other", typeName: "Phone" }),
     asset({ tag: "BR-LT-0148", model: "Dell Latitude 5420 (relabelled)", categoryName: "Laptop",
-            typeName: "Dell Latitude", status: "DEPLOYED", assigneeName: "Marites Bautista",
+            typeName: "Standard", status: "DEPLOYED", assigneeName: "Marites Bautista",
             assigneeNo: "EMP-0042", rmaRef: "RMA-IGNORED" }),
     asset({ tag: "BR-LT-9103", model: "Framework 13", categoryName: "Ultrabook" }),
     asset({ tag: "BR-LT-9104", model: "ThinkPad X1", categoryName: "Laptop", status: "BROKEN" }),
@@ -151,11 +151,11 @@ async function main() {
   const SERIAL = "SN-E2E-000001";
   write("assets-serial-new.xlsx", await toXlsxBuffer(ASSET_EXPORT_COLUMNS, [
     asset({ tag: "BR-LT-9201", model: "MacBook Air M4", serial: SERIAL, categoryName: "Laptop",
-            typeName: "Dell Latitude" }),
+            typeName: "Standard" }),
   ]));
   write("assets-serial-clash.xlsx", await toXlsxBuffer(ASSET_EXPORT_COLUMNS, [
     asset({ tag: "BR-LT-9202", model: "MacBook Air M4 (re-tagged)", serial: SERIAL, categoryName: "Laptop",
-            typeName: "Dell Latitude" }),
+            typeName: "Standard" }),
   ]));
 
   // assets-divergence.xlsx — two creates. The spec creates the FIRST tag

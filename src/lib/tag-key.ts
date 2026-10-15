@@ -84,15 +84,12 @@ export function tagKey(raw: unknown): string {
 }
 
 /**
- * The asset tag contract: `BR-` then two uppercase letters then four digits,
- * e.g. `BR-LT-0148`. The two letters are a human convention (mostly the
- * category, sometimes the type — see the Phase 12 spec) and this regex does
- * not care which.
- *
- * ONE definition, deliberately. It was written out separately in
- * import-assets.ts, inventory/actions.ts and inventory/queries.ts, which is
- * three chances for them to disagree about what a tag is — and the four-digit
- * group is load-bearing for tag GENERATION, which cannot exceed 9999 without
- * producing a string the other three would reject.
+ * Phase 36 (spec §2.1): the asset tag is whatever staff type — 1-20 letters, digits, `-`, `_` or `.`,
+ * starting with a letter or digit, tested after `tagKey` (trim + upper-case). No spaces and no `/`,
+ * because the tag is one segment of `/inventory/scan/<tag>`; no leading `.` so `.`/`..` never occur.
+ * 20 is the cap because the label's Code 128 barcode (label-geometry.ts, MIN_MODULE_MM) fits about 22
+ * characters on the sticker width; a longer tag would print with no scannable code.
+ * ONE definition: Register, receiving, the CSV import and the search jump all use it.
  */
-export const TAG_SHAPE = /^BR-[A-Z]{2}-\d{4}$/;
+export const TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,19}$/;
+export const TAG_RULE = "Tags are 1–20 letters, digits, - _ or ., no spaces";

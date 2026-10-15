@@ -1,94 +1,53 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { cn } from "@/lib/cn";
 import { fieldClasses } from "@/components/ui/input";
-import { FormField } from "@/components/ui/form-field";
-import { Select } from "@/components/ui/select";
 import { useOverlayLayer } from "@/components/ui/use-focus-trap";
-import { matchModels, resolveModelType, type KnownModel } from "@/lib/known-models";
+import { matchModels, type KnownModel } from "@/lib/known-models";
 
 /**
- * Phase 34 (spec §4.2): Model is one field that also sets the type. It lists
- * the models already registered in the category; picking one takes its type.
- * A free-text value is allowed — a model not in the list is a new model, and
- * only then is the type asked, in one native select. Like the house
- * `EntityCombobox` (ESC through the overlay stack, a click outside closes),
- * but the typed text is the value.
+ * Phase 34 (spec §4.2), Phase 36: Model is one free-text field that lists the models already
+ * registered in the category (name and stock count only). It never sets the type — Register
+ * asks that on its own. Like the house `EntityCombobox` (ESC through the overlay stack, a click
+ * outside closes), but the typed text is the value.
  */
 export function ModelCombobox({
   id,
   models,
-  types,
   value,
   onValue,
-  typeId,
-  onType,
   placeholder,
   invalid,
   describedBy,
-  typeError,
   inputRef,
 }: {
   id: string;
   models: KnownModel[];
-  types: Array<{ id: string; name: string }>;
   value: string;
   onValue: (v: string) => void;
-  typeId: string;
-  onType: (id: string) => void;
   placeholder: string;
   invalid?: boolean;
   describedBy?: string;
-  /** The refusal for the new-model type select. */
-  typeError?: string;
   inputRef?: React.Ref<HTMLInputElement>;
 }) {
   const listId = useId();
   const [open, setOpen] = useState(false);
   // -1 = nothing active: Enter then keeps the typed text instead of taking the first match.
   const [active, setActive] = useState(-1);
-  const [changing, setChanging] = useState(false);
 
   useOverlayLayer(open, () => setOpen(false));
 
-  // A category with one type takes it silently (spec §4.2). Keyed on the type
-  // ids, so it runs when the category changes, not on every render.
-  const typeKey = types.map((t) => t.id).join(",");
-  const onTypeRef = useRef(onType);
-  onTypeRef.current = onType;
-  useEffect(() => {
-    if (types.length === 1) onTypeRef.current(types[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- typeKey stands for `types`
-  }, [typeKey]);
-
-  const resolved = resolveModelType(models, value);
-  // Ruling R9: a known model whose newest asset has no type sets nothing — it
-  // is asked like a new model, so the flow never produces another untyped asset.
-  const modelType = resolved.known ? resolved.typeId : null;
+  const known = models.some((m) => m.model.trim().replace(/\s+/g, " ").toLowerCase() === value.trim().replace(/\s+/g, " ").toLowerCase());
   const matches = matchModels(models, value);
-  const offerNew = value.trim() !== "" && !resolved.known;
+  const offerNew = value.trim() !== "" && !known;
   // The rows the list shows: the matches, then "+ Add" for a new model.
   const count = matches.length + (offerNew ? 1 : 0);
-  const typeName = (tid: string | null) => types.find((t) => t.id === tid)?.name;
 
   function change(v: string) {
     onValue(v);
     setOpen(true);
     setActive(-1);
-    // Review Focus 1: a model typed in another case or spacing is still the
-    // known one, and takes its type without being picked from the list.
-    const r = resolveModelType(models, v);
-    takeType(r.known ? r.typeId : null);
-  }
-
-  /** The type a model brings, or — for a new or untyped model — the one type a category has, else none yet. */
-  function takeType(fromModel: string | null) {
-    setChanging(false);
-    if (fromModel) onType(fromModel);
-    else if (types.length === 1) onType(types[0].id);
-    // Moving off a typed model: the next model asks its own type rather than keep the old one's.
-    else if (modelType) onType("");
   }
 
   /** Ruling (review minor): a model that resolves to a known one takes its spelling, so case variants never pile up. */
@@ -102,7 +61,6 @@ export function ModelCombobox({
     if (i < matches.length) {
       const m = matches[i];
       onValue(m.model);
-      takeType(m.typeId);
     }
     // "+ Add … as a new model" keeps the text and only closes the list.
     setOpen(false);
@@ -179,11 +137,6 @@ export function ModelCombobox({
               >
                 <span className="min-w-0 flex-1 truncate font-medium">{m.model}</span>
                 <span id={`${optionId(i)}-d`} className="flex shrink-0 items-center gap-2">
-                  {typeName(m.typeId) && (
-                    <span className="rounded-(--radius-micro) border border-border bg-surface-subtle px-1.5 text-[10.5px] text-fg-secondary">
-                      {typeName(m.typeId)}
-                    </span>
-                  )}
                   <span className="text-[11px] text-fg-muted">{m.inStock > 0 ? `${m.inStock} in stock` : "none in stock"}</span>
                 </span>
               </li>
@@ -209,43 +162,6 @@ export function ModelCombobox({
           </ul>
         )}
       </div>
-
-      {modelType && (
-        <p className="text-[12px] text-fg-secondary">
-          {/* The line names the type that will be saved, so it never disagrees with the select below. */}
-          Type: <b className="font-semibold text-fg">{typeName(typeId) ?? "not picked yet"}</b>{" "}
-          {typeId === modelType ? "— set by this model" : "— changed from this model's type"}
-          {types.length > 1 && !changing && (
-            <>
-              {" "}
-              <button type="button" className="text-accent underline underline-offset-2" onClick={() => setChanging(true)}>
-                Change type
-              </button>
-            </>
-          )}
-        </p>
-      )}
-
-      {types.length > 1 && value.trim() !== "" && (!modelType || changing) && (
-        <FormField
-          label={modelType ? "Type" : "New model — which type?"}
-          required
-          hint={modelType ? undefined : "Next time this model fills it in for you."}
-          error={typeError}
-        >
-          {(p) => (
-            <Select
-              id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-              required
-              value={typeId}
-              onChange={(e) => onType(e.target.value)}
-            >
-              <option value="">Pick a type…</option>
-              {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </Select>
-          )}
-        </FormField>
-      )}
     </div>
   );
 }

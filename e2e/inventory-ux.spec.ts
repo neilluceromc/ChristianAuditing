@@ -94,7 +94,7 @@ async function pickModel(page: Page, model: string, type?: string) {
   const known = page.getByRole("option", { name: model, exact: true });
   if (await known.count()) await known.first().click();
   else await page.getByRole("option", { name: new RegExp(`^\\+ Add .${escapeRe(model)}. as a new model$`) }).click();
-  if (type) await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: type });
+  if (type) await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: type });
 }
 
 /** The record's page header — the `<header>` that carries the tag as its h1. */
@@ -368,7 +368,9 @@ test.describe("register", () => {
     await login(page, IT);
     await page.goto("/inventory/register");
     await pickCategory(page, "Laptop");
-    await pickModel(page, model, "ThinkPad");
+    await pickModel(page, model, "High-performance");
+    // Phase 36: staff type their own tag.
+    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(`UX9${Date.now().toString(36).slice(-6).toUpperCase()}`);
     await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-UX-9-${Date.now()}`);
     // Phase 34: "Initial state" is "Where does it go"; Loan is Lend, Assign to is Who, Loan until is Back by.
     await page.getByRole("radiogroup", { name: "Where does it go" }).getByText("Lend", { exact: true }).click();
@@ -400,9 +402,19 @@ test.describe("register", () => {
     await login(page, IT);
     await page.goto("/inventory/register");
     await pickCategory(page, "Laptop");
-    await pickModel(page, model, "ThinkPad");
+    await pickModel(page, model, "High-performance");
     await page.getByRole("textbox", { name: "How many", exact: true }).fill("3");
     await expect(page.getByLabel("Serial 3")).toBeVisible();
+    // Phase 36: staff type their own tags (a real paste of three lines into Tag 1).
+    const stamp = Date.now().toString(36).slice(-6).toUpperCase();
+    await page.getByLabel("Tag 1").evaluate((el, text) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, `UX10${stamp}-1
+UX10${stamp}-2
+UX10${stamp}-3`);
+    await expect(page.getByLabel("Tag 3")).toHaveValue(`UX10${stamp}-3`);
 
     // A real paste event carrying text/plain — the cell's onPaste reads clipboardData.
     await page.getByLabel("Serial 1").evaluate((el, text) => {

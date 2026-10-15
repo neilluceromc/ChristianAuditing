@@ -97,6 +97,18 @@ export function yearGrid(cost: number, confirmedAt: Date | null, policy: Policy 
   return { opening, months, projected: months.map((_, i) => first + i > asOf), total, closing: opening - total };
 }
 
+/** The one summing rule: element-wise sum of year rows; `projected` is the year's own flags (the same for every row of a year). */
+export function sumYearRows(rows: readonly YearRow[], year: number, asOf: MonthIndex): YearRow {
+  const first = year * 12;
+  return {
+    opening: rows.reduce((a, r) => a + r.opening, 0),
+    months: Array.from({ length: 12 }, (_, i) => rows.reduce((a, r) => a + r.months[i], 0)),
+    projected: Array.from({ length: 12 }, (_, i) => first + i > asOf),
+    total: rows.reduce((a, r) => a + r.total, 0),
+    closing: rows.reduce((a, r) => a + r.closing, 0),
+  };
+}
+
 export function stateNote(r: DepResult, categoryName: string): string | null {
   switch (r.state) {
     case "not-started": return "Not depreciating yet";

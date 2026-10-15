@@ -16,14 +16,14 @@ export type ScanActionKind = keyof typeof LABEL;
  * opening the record's own control. A client component because the page is a
  * server component and cannot hand an onClick to the DOM.
  */
-export function ScanAction({ action, asset, holder, direct, employees, heldFor }: {
+export function ScanAction({ action, asset, holder, direct, recentPeople, heldFor }: {
   action: ScanActionKind;
   asset: { id: string; tag: string; model: string };
   holder: { id: string; name: string } | null;
   direct: boolean;
-  employees: ComboOption[];
+  recentPeople: ComboOption[];
   /** an ACTIVE hold's person, preselected in Assign exactly as the record header does */
-  heldFor?: { id: string; name: string };
+  heldFor?: { id: string; name: string; active: boolean };
 }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
@@ -38,7 +38,7 @@ export function ScanAction({ action, asset, holder, direct, employees, heldFor }
         <ReturnDialog open={open} onClose={close} asset={asset} holder={holder} direct={direct} />
       )}
       {action === "assign" && (
-        <AssignDialog open={open} onClose={close} asset={asset} direct={direct} employees={employees} heldFor={heldFor} />
+        <AssignDialog open={open} onClose={close} asset={asset} direct={direct} recentPeople={recentPeople} heldFor={heldFor} />
       )}
     </>
   );

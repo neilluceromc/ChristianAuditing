@@ -480,7 +480,7 @@ export function planAssetRows(
     // case-sensitive would let "br-lt-0148" plan as a second, duplicate
     // record for one physical machine (Postgres unique is case-sensitive
     // too, so it would not even error). Blank → missing-tag. Wrong shape
-    // (not BR-XX-0000) → bad-tag.
+    // (outside TAG_SHAPE) → bad-tag.
     const tagRaw = cellAt(headers, raw, "tag");
     const tag = tagKey(tagRaw);
     if (tag === "") {

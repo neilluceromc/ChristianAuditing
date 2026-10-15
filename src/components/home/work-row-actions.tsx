@@ -18,8 +18,8 @@ const isoDay = (d: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) :
  * else stays a link. One dialog instance per row — the Phase 30 dialogs reset
  * their local state when they open, so rows never share one.
  */
-export function WorkRowActions({ row, canAct, direct, employees }: {
-  row: WorkRow; canAct: boolean; direct: boolean; employees: ComboOption[];
+export function WorkRowActions({ row, canAct, direct, recentPeople }: {
+  row: WorkRow; canAct: boolean; direct: boolean; recentPeople: ComboOption[];
 }) {
   const [open, setOpen] = useState(false);
   const label = workActionLabel(row, canAct);
@@ -34,7 +34,7 @@ export function WorkRowActions({ row, canAct, direct, employees }: {
       {c.kind === "triage" && <TriageDialog open={open} onClose={close} asset={c.asset} />}
       {c.kind === "it-check" && <ItCheckDialog open={open} onClose={close} asset={c.asset} />}
       {c.kind === "loan-due" && <LoanDueDialog open={open} onClose={close} asset={c.asset} loanDueAt={isoDay(c.loanDueAt)} />}
-      {c.kind === "assign" && <AssignDialog open={open} onClose={close} asset={c.asset} direct={direct} employees={employees} />}
+      {c.kind === "assign" && <AssignDialog open={open} onClose={close} asset={c.asset} direct={direct} recentPeople={recentPeople} />}
     </>
   );
 }

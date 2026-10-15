@@ -26,9 +26,8 @@ export function RecordActions(props: {
   asset: { id: string; tag: string; model: string; cls: AssetClass; status: AssetStatus; hasHolder: boolean; loanDueAt: string | null };
   holder: { id: string; name: string } | null;
   direct: boolean;
-  employees: ComboOption[];
-  recentEmployees: string[];
-  heldFor?: { id: string; name: string };
+  recentPeople: ComboOption[];
+  heldFor?: { id: string; name: string; active: boolean };
   spares: { options: ComboOption[]; hidden: number };
   holdExpiry: { defaultExpiry: string; minExpiry: string };
 }) {
@@ -58,7 +57,7 @@ export function RecordActions(props: {
       {/* one dialog per action kind; each mounts closed and resets itself when it opens */}
       <AssignDialog
         open={open === "assign"} onClose={close} asset={asset} direct={direct}
-        employees={props.employees} recentEmployees={props.recentEmployees} heldFor={props.heldFor}
+        recentPeople={props.recentPeople} heldFor={props.heldFor}
       />
       {holder && <ReturnDialog open={open === "return"} onClose={close} asset={asset} holder={holder} direct={direct} />}
       {holder && (
@@ -66,7 +65,7 @@ export function RecordActions(props: {
       )}
       <ReserveDialog
         open={open === "reserve"} onClose={close} asset={asset}
-        employees={props.employees} recentEmployees={props.recentEmployees} {...props.holdExpiry}
+        recentPeople={props.recentPeople} {...props.holdExpiry}
       />
       <ChangeStatusDialog open={open === "change-status"} onClose={close} asset={asset} direct={direct} />
       <TriageDialog open={open === "triage"} onClose={close} asset={asset} />

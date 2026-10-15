@@ -13,7 +13,7 @@ export function Worklist({
   groups,
   canAct,
   direct,
-  employees,
+  recentPeople,
   seeAllBase,
   headingLevel = "h3",
 }: {
@@ -21,8 +21,8 @@ export function Worklist({
   canAct: boolean;
   /** Spec §5.1: the Assign dialog applies at once (isDirectLifecycle) instead of opening an approval. */
   direct: boolean;
-  /** the Assign dialog's people; empty when no row offers Assign… */
-  employees: ComboOption[];
+  /** the Assign dialog's recent picks; empty when no row offers Assign. */
+  recentPeople: ComboOption[];
   seeAllBase?: string;
   /**
    * Home nests each group under SectionCard's `h2` ("Worklist"), so `h3` is
@@ -64,7 +64,7 @@ export function Worklist({
                   <span className="block truncate text-[12.5px] font-medium text-fg">{row.title}</span>
                   <span className="block truncate font-mono text-[10.5px] text-fg-muted">{row.meta}</span>
                 </span>
-                <WorkRowActions row={row} canAct={canAct} direct={direct} employees={employees} />
+                <WorkRowActions row={row} canAct={canAct} direct={direct} recentPeople={recentPeople} />
                 {canAct && <WorkRowMenu row={row} />}
               </li>
             ))}

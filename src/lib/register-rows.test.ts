@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_BATCH, badTags, clampQuantity, liveQuantity, pasteSerials, registeredRows, repeatedSerials, repeatedTags,
-  resizeRows, retagRows, serialsEntered, serverRowMarks, singleRowErrors, type RegisterRow,
+  MAX_BATCH, badTags, clampQuantity, liveQuantity, pasteColumn, registeredRows, repeatedSerials, repeatedTags,
+  resizeRows, serialsEntered, serverRowMarks, singleRowErrors, type RegisterRow,
 } from "./register-rows";
 
 const row = (tag: string, serial = ""): RegisterRow => ({ tag, serial });
-const run = (from: number) => (count: number) =>
-  Array.from({ length: count }, (_, i) => `BR-LT-${String(from + i).padStart(4, "0")}`);
 
 describe("Quantity — a text field that clamps on blur (spec §5.2)", () => {
   it("applies a count while typing only when it is already one", () => {
@@ -27,41 +25,42 @@ describe("Quantity — a text field that clamps on blur (spec §5.2)", () => {
   });
 });
 
-describe("rows follow the quantity and the tag run", () => {
-  it("growing keeps every row as typed and fills the new ones from the run", () => {
-    const rows = [row("BR-LT-9000", "SN-1")];
-    expect(resizeRows(rows, 3, run(201)(3))).toEqual([row("BR-LT-9000", "SN-1"), row("BR-LT-0202"), row("BR-LT-0203")]);
+describe("rows follow the quantity", () => {
+  it("growing keeps every row as typed; the new rows are empty", () => {
+    expect(resizeRows([row("BR-LT-9000", "SN-1")], 3)).toEqual([row("BR-LT-9000", "SN-1"), row(""), row("")]);
   });
-  it("without a run the new rows start blank; shrinking drops the tail", () => {
-    expect(resizeRows([row("A"), row("B")], 3, null)).toEqual([row("A"), row("B"), row("")]);
-    expect(resizeRows([row("A", "1"), row("B", "2")], 1, null)).toEqual([row("A", "1")]);
-  });
-  it("a new run replaces every tag and keeps the serials; no run blanks the tags", () => {
-    expect(retagRows([row("X", "S1"), row("Y", "S2")], ["BR-VH-0003", "BR-VH-0004"]))
-      .toEqual([row("BR-VH-0003", "S1"), row("BR-VH-0004", "S2")]);
-    expect(retagRows([row("X", "S1")], null)).toEqual([row("", "S1")]);
+  it("shrinking drops the tail", () => {
+    expect(resizeRows([row("A", "1"), row("B", "2")], 1)).toEqual([row("A", "1")]);
   });
   it("counts the serials entered", () => {
     expect(serialsEntered([row("a", "S"), row("b", " "), row("c", "T")])).toBe(2);
   });
 });
 
-describe("pasting a column of serials (spec §5.4)", () => {
+describe("pasting a column of tags or serials (spec §5.4, Phase 36)", () => {
   it("fills that row and the rows below, growing the batch", () => {
-    const out = pasteSerials([row("BR-LT-0201"), row("BR-LT-0202")], 1, ["A", "B", "C"], run(201));
+    const out = pasteColumn([row("A"), row("B")], 1, ["X", "Y", "Z"], "serial");
     expect(out.pasted).toBe(3);
-    expect(out.rows).toEqual([row("BR-LT-0201"), row("BR-LT-0202", "A"), row("BR-LT-0203", "B"), row("BR-LT-0204", "C")]);
+    expect(out.rows).toEqual([row("A"), row("B", "X"), row("", "Y"), row("", "Z")]);
   });
   it("stops at 200 rows and says how many were added", () => {
     const values = Array.from({ length: 250 }, (_, i) => `S${i}`);
-    const out = pasteSerials([row("BR-LT-0201")], 0, values, run(201));
+    const out = pasteColumn([row("A")], 0, values, "serial");
     expect(out.rows).toHaveLength(MAX_BATCH);
     expect(out.pasted).toBe(200);
     expect(out.rows[199].serial).toBe("S199");
   });
   it("never shrinks a longer batch", () => {
-    const out = pasteSerials([row("a"), row("b"), row("c")], 0, ["X", "Y"], run(1));
+    const out = pasteColumn([row("a"), row("b"), row("c")], 0, ["X", "Y"], "serial");
     expect(out.rows).toEqual([row("a", "X"), row("b", "Y"), row("c")]);
+  });
+  it("pasteColumn fills tags or serials from the row down, growing to at most 200; blanks stay blank", () => {
+    const out = pasteColumn([{ tag: "", serial: "" }], 0, ["a-1", "", "a-3"], "tag");
+    expect(out.rows.map((r) => r.tag)).toEqual(["a-1", "", "a-3"]);
+    expect(out.pasted).toBe(3);
+    const s = pasteColumn([{ tag: "x", serial: "" }], 0, ["S1"], "serial");
+    expect(s.rows).toEqual([{ tag: "x", serial: "S1" }]);
+    expect(pasteColumn([], 0, Array.from({ length: 250 }, (_, i) => `t${i}`), "tag").rows).toHaveLength(200);
   });
 });
 
@@ -84,15 +83,15 @@ describe("in-batch repeats, worded as registerAssets words them", () => {
 
 describe("a tag that is not a tag", () => {
   it("names the first bad row and counts the rest", () => {
-    const r = badTags([row("BR-LT-0201"), row(""), row("LT-1"), row("bad")], "BR-LT-0201");
-    expect(r.message).toBe("Row 2 · Type a tag like BR-LT-0201 and 2 more");
-    expect([...r.rows]).toEqual([1, 2, 3]);
+    const r = badTags([row("BR-LT-0201"), row(""), row("A B"), row("bad")]);
+    expect(r.message).toBe("Row 2 · Enter a tag for every unit and 1 more");
+    expect([...r.rows]).toEqual([1, 2]);
   });
-  it("a lower-case tag is still a tag (the server upper-cases it)", () => {
-    expect(badTags([row("br-lt-0201")], "BR-LT-0201").message).toBeNull();
-  });
-  it("a malformed tag is quoted", () => {
-    expect(badTags([row("LT-1")], "BR-LT-0201").message).toBe("Row 1 · LT-1 does not read like BR-LT-0201");
+  it("badTags: empty tags ask for a tag; bad shapes name the rule", () => {
+    expect(badTags([row(""), row("ok-1")]).message).toBe("Row 1 · Enter a tag for every unit");
+    expect(badTags([row("A B")]).message).toBe("Row 1 · A B: Tags are 1–20 letters, digits, - _ or ., no spaces");
+    expect(badTags([row("acc-1")]).rows.size).toBe(0);
+    expect(badTags([row(""), row("")]).message).toBe("Row 1 · Enter a tag for every unit and 1 more");
   });
 });
 
@@ -119,7 +118,7 @@ describe("R3: createAsset's field errors land on row 1", () => {
 describe("the rows a server message names", () => {
   it("reads the row from 'Row n ·', a serial from 'Serial s is already on', and zod's indexed keys", () => {
     const rows = [row("A", "S1"), row("B", "S2"), row("C", "S3")];
-    const marks = serverRowMarks({ tags: "Row 2 · B appears twice in this batch", serials: "Serial S3 is already on BR-LT-0001", "tags.0": "Format: BR-XX-0000" }, rows);
+    const marks = serverRowMarks({ tags: "Row 2 · B appears twice in this batch", serials: "Serial S3 is already on BR-LT-0001", "tags.0": "Tags are 1–20 letters, digits, - _ or ., no spaces" }, rows);
     expect([...marks.tags].sort()).toEqual([0, 1]);
     expect([...marks.serials]).toEqual([2]);
     expect([...serverRowMarks({ serials: "Row 1 · serial S1 appears twice in this batch", "serials.2": "Too long" }, rows).serials].sort()).toEqual([0, 2]);

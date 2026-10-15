@@ -35,6 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useToast } from "@/components/ui/toast";
 import { Tooltip } from "@/components/ui/tooltip";
+import { TAG_RULE } from "@/lib/tag-key";
 
 const ALL_STATUSES = [
   "DEPLOYED", "SPARE", "DEFECTIVE", "MISSING", "DONATED", "TEMPORARY", "BUYOUT", "DISPOSE",
@@ -126,7 +127,7 @@ function Demos() {
       <Section title="Form controls">
         <Card className="max-w-md">
           <CardBody className="flex flex-col gap-4">
-            <FormField label="Asset tag" required hint="Format BR-XX-0000">
+            <FormField label="Asset tag" required hint={TAG_RULE}>
               {(p) => <Input {...p} placeholder="BR-LT-0148" invalid={p.invalid} />}
             </FormField>
             <FormField label="Model" error="Model is required">

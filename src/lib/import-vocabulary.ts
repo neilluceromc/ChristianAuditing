@@ -1,6 +1,7 @@
 import { EMPLOYMENT_STATUSES } from "./employees-list";
 import { STATUSES_BY_CLASS } from "./asset-class";
 import { VENDOR_CONTRACT_STATUSES } from "./supplier-schema";
+import { TAG_RULE } from "./tag-key";
 
 /**
  * Scope decision 5. An import writes one AuditEntry per row, so this cap bounds
@@ -286,9 +287,7 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   "bad-tag": {
     label: "Tag format not recognised",
     explain:
-      "The Tag column on these rows isn't shaped like BR-XX-0000 — two letters and four digits after " +
-      "the prefix. Every tag in this app follows that pattern, so a differently shaped value can be " +
-      "neither matched to an existing asset nor safely created.",
+      "The Tag column on these rows isn't a valid tag — " + TAG_RULE + ".",
     fix: { kind: "reupload", label: "Fix the file" },
   },
   "missing-model": {

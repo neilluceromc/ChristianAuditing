@@ -113,12 +113,10 @@ test.describe("registration — each class is its own department's", () => {
     const model = page.getByRole("combobox", { name: "Model", exact: true });
     await model.fill("Toyota Corolla Cross (e2e)");
     await page.getByRole("option", { name: /^\+ Add .Toyota Corolla Cross \(e2e\). as a new model$/ }).click();
-    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "Sedan" });
+    // Phase 36: the type is always asked (never set by the model) and staff type their own tag.
+    await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "Sedan" });
     await expect(page.getByRole("textbox", { name: "How many", exact: true })).toHaveValue("1");
-    await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
-    await page.getByText("Tag prefix and notes", { exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Tag prefix", exact: true })).toHaveValue("VH");
-    await expect(page.getByText(`tag ${registeredTag}`, { exact: true })).toBeVisible();
+    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(registeredTag);
 
     // Phase 30 (plan P-13): quantity 1 is one asset through createAsset;
     // Phase 34 (plan P-5): it lands on Labels with its purchase record ticked, in Purchasing's class.

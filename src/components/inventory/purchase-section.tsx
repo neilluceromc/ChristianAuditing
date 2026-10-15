@@ -17,10 +17,10 @@ const LENGTH_LABEL: Record<(typeof WARRANTY_LENGTHS)[number], string> = { 0: "No
 /** The keys whose fields live inside this section — a refusal naming one opens it. */
 export const PURCHASE_KEYS = [
   "vendorId", "purchasedAt", "requestId", "invoiceRef", "receiptRef", "cost", "fees",
-  "warrantyUntil", "warrantyCoveredBy", "warrantyContact", "prefix", "brand", "notes",
+  "warrantyUntil", "warrantyCoveredBy", "warrantyContact", "brand", "notes",
 ] as const;
-/** The keys whose fields live in the "Tag prefix and notes" fold-out. */
-const FOLD_KEYS = ["prefix", "brand", "notes"] as const;
+/** The keys whose fields live in the "Notes" fold-out. */
+const FOLD_KEYS = ["brand", "notes"] as const;
 
 /** A typed amount as centavos for the live total; anything unreadable counts as nothing until it is fixed. */
 const centavos = (text: string) => {
@@ -76,10 +76,6 @@ export function PurchaseSection(props: {
   onCoveredBy: (v: string) => void;
   contact: string;
   onContact: (v: string) => void;
-  prefix: string;
-  onPrefix: (v: string) => void;
-  prefixHint: string;
-  prefixError?: string;
   /** Ruling R10: Brand has no home in the spec; it lives in the fold-out. */
   brand: string;
   onBrand: (v: string) => void;
@@ -99,7 +95,7 @@ export function PurchaseSection(props: {
   const bodyId = `${base}-body`;
   const lengthId = `${base}-length`;
   const [fold, setFold] = useState(false);
-  const foldInvalid = FOLD_KEYS.some((k) => k in errors) || !!props.prefixError;
+  const foldInvalid = FOLD_KEYS.some((k) => k in errors);
 
   const unit = centavos(props.cost);
   const fee = centavos(props.fees);
@@ -321,19 +317,8 @@ export function PurchaseSection(props: {
             onToggle={(e) => setFold(e.currentTarget.open)}
             className="rounded-[12px] border border-border px-4 py-3"
           >
-            <summary className="cursor-pointer text-[12.5px] font-medium text-fg-secondary">Tag prefix and notes</summary>
+            <summary className="cursor-pointer text-[12.5px] font-medium text-fg-secondary">Notes</summary>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField label="Tag prefix" hint={props.prefixHint} error={props.prefixError}>
-                {(p) => (
-                  <Input
-                    id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                    className="font-mono"
-                    maxLength={2}
-                    value={props.prefix}
-                    onChange={(e) => props.onPrefix(e.target.value)}
-                  />
-                )}
-              </FormField>
               <FormField label="Brand" error={errors.brand}>
                 {(p) => (
                   <Input

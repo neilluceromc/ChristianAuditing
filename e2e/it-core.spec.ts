@@ -320,9 +320,12 @@ test.describe("asset record", () => {
     const modelBox = page.getByRole("combobox", { name: "Model", exact: true });
     await modelBox.fill("e2e duplicate probe");
     await page.getByRole("option", { name: /^\+ Add .e2e duplicate probe. as a new model$/ }).click();
-    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+    await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "High-performance" });
     await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-ITCORE-${Date.now()}`);
-    const taken = (await page.getByText(/^tag BR-LT-\d+$/).textContent())!.trim().replace(/^tag /, "");
+    // Phase 36: staff type their own tag; type one that is already taken.
+    const stamp = Date.now().toString(36).slice(-6).toUpperCase();
+    const taken = `ITC${stamp}-1`;
+    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(taken);
     const laptop = await db.assetCategory.findFirstOrThrow({ where: { name: "Laptop" } });
     await db.asset.create({
       data: { tag: taken, model: "e2e fixture — tag race", categoryId: laptop.id, status: "SPARE", itVerifiedAt: new Date() },
@@ -330,13 +333,9 @@ test.describe("asset record", () => {
     await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
     await expect(page.getByText(`Row 1 · ${taken} is already registered`)).toBeVisible();
 
-    // A different prefix (Tag prefix, in the Purchase section's fold-out) gives a free tag.
-    await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
-    await page.getByText("Tag prefix and notes", { exact: true }).click();
-    await page.getByRole("textbox", { name: "Tag prefix", exact: true }).fill("ZZ");
-    const chip = page.getByText(/^tag BR-ZZ-\d+$/);
-    await expect(chip).toBeVisible();
-    const tag = (await chip.textContent())!.trim().replace(/^tag /, "");
+    // A different tag is free.
+    const tag = `ITC${stamp}-2`;
+    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(tag);
     await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
     // Plan P-5: Register lands on Labels; the new record is there to open.
     await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });

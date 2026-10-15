@@ -1,4 +1,4 @@
-import { TAG_SHAPE, tagKey } from "./tag-key";
+import { TAG_RULE, TAG_SHAPE, tagKey } from "./tag-key";
 
 /**
  * Phase 30 (spec §5.2–§5.5): the Register form's rows — one tag and one serial
@@ -31,38 +31,25 @@ export function clampQuantity(text: string, current: number): number {
   return Math.min(MAX_BATCH, Math.max(1, Number(t)));
 }
 
-/** Resize to `count` rows: every existing row stays as typed, new rows take the run's tags (blank without one). */
-export function resizeRows(rows: readonly RegisterRow[], count: number, runTags: readonly string[] | null): RegisterRow[] {
-  return Array.from({ length: count }, (_, i) => rows[i] ?? { tag: runTags?.[i] ?? "", serial: "" });
-}
-
-/** A new prefix or category re-suggests every tag; the serials typed so far stay. */
-export function retagRows(rows: readonly RegisterRow[], runTags: readonly string[] | null): RegisterRow[] {
-  return rows.map((r, i) => ({ ...r, tag: runTags?.[i] ?? "" }));
+/** Resize to `count` rows: existing rows stay as typed, new rows are empty (Phase 36: no suggested tags). */
+export function resizeRows(rows: readonly RegisterRow[], count: number): RegisterRow[] {
+  return Array.from({ length: count }, (_, i) => rows[i] ?? { tag: "", serial: "" });
 }
 
 export function serialsEntered(rows: readonly RegisterRow[]): number {
   return rows.filter((r) => r.serial.trim()).length;
 }
 
-/**
- * Paste a column of serials at row `at`: it fills that row and the rows below,
- * growing the batch (never shrinking it) up to MAX_BATCH. `runTags(count)`
- * gives the suggested tags for a batch of `count`, for the rows it adds.
- */
-export function pasteSerials(
+/** Paste a column of tags or serials at row `at`: fills that row and those below, growing (never shrinking) up to MAX_BATCH. */
+export function pasteColumn(
   rows: readonly RegisterRow[],
   at: number,
   values: readonly string[],
-  runTags: (count: number) => readonly string[] | null,
+  field: "tag" | "serial",
 ): { rows: RegisterRow[]; pasted: number } {
   const pasted = Math.max(0, Math.min(values.length, MAX_BATCH - at));
-  const count = Math.max(rows.length, at + pasted);
-  const grown = resizeRows(rows, count, count > rows.length ? runTags(count) : null);
-  return {
-    rows: grown.map((r, i) => (i >= at && i < at + pasted ? { ...r, serial: values[i - at] } : r)),
-    pasted,
-  };
+  const grown = resizeRows(rows, Math.max(rows.length, at + pasted));
+  return { rows: grown.map((r, i) => (i >= at && i < at + pasted ? { ...r, [field]: values[i - at] } : r)), pasted };
 }
 
 function repeated(values: readonly string[]): { first: number; rows: Set<number> } {
@@ -93,12 +80,14 @@ export function repeatedSerials(rows: readonly RegisterRow[]): { message: string
   return { message: r.first < 0 ? null : `Row ${r.first + 1} · serial ${serials[r.first]} appears twice in this batch`, rows: r.rows };
 }
 
-/** Rows whose tag does not read BR-XX-0000 (upper-casing is the server's job, so case is forgiven). */
-export function badTags(rows: readonly RegisterRow[], example: string): { message: string | null; rows: Set<number> } {
+export const TAG_EMPTY = "Enter a tag for every unit";
+
+/** Phase 36: rows with no tag, or a tag outside TAG_SHAPE (upper-casing is the server's job, so case is forgiven). */
+export function badTags(rows: readonly RegisterRow[]): { message: string | null; rows: Set<number> } {
   const bad = rows.flatMap((r, i) => (TAG_SHAPE.test(tagKey(r.tag)) ? [] : [i]));
   if (bad.length === 0) return { message: null, rows: new Set() };
   const first = rows[bad[0]].tag.trim();
-  const what = first ? `${first} does not read like ${example}` : `Type a tag like ${example}`;
+  const what = first ? `${first}: ${TAG_RULE}` : TAG_EMPTY;
   return { message: `Row ${bad[0] + 1} · ${what}${more(bad.length - 1)}`, rows: new Set(bad) };
 }
 

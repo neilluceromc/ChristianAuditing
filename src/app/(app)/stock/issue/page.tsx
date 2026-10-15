@@ -1,11 +1,11 @@
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { stockItemBalances, stockItemOptions } from "@/server/modules/stock/queries";
+import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { recentPicks } from "@/server/recent-picks";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { IssueForm, type DepartmentOption } from "@/components/stock/issue-form";
-import type { ComboOption } from "@/components/patterns/entity-combobox";
 import type { StockItemMeta } from "@/components/stock/receive-form";
 
 export default async function IssueStockPage({
@@ -17,16 +17,13 @@ export default async function IssueStockPage({
   const sp = toSearchParams(await searchParams);
   const initialItemId = sp.get("item");
 
-  const [items, departmentRows, employeeRows, metaRows, recentEmployees, recentItems] = await Promise.all([
+  const [items, departmentRows, metaRows, recentPeople, recentItems] = await Promise.all([
     stockItemOptions(),
     prisma.department.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    prisma.employee.findMany({
-      where: { employment: "ACTIVE" }, orderBy: { name: "asc" }, select: { id: true, name: true, employeeNo: true },
-    }),
     prisma.stockItem.findMany({
       where: { archivedAt: null }, select: { id: true, code: true, unit: true, packSize: true },
     }),
-    recentPicks(user.id, "employee"),
+    recentPeopleOptions(user.id),
     recentPicks(user.id, "stock-item"),
   ]);
 
@@ -39,7 +36,6 @@ export default async function IssueStockPage({
   for (const r of metaRows) meta[r.id] = { unit: r.unit, packSize: r.packSize, code: r.code };
 
   const departments: DepartmentOption[] = departmentRows;
-  const employees: ComboOption[] = employeeRows.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }));
 
   return (
     <>
@@ -49,8 +45,7 @@ export default async function IssueStockPage({
         meta={meta}
         balances={balances}
         departments={departments}
-        employees={employees}
-        recentEmployees={recentEmployees}
+        recentPeople={recentPeople}
         recentItems={recentItems}
         initialItemId={initialItemId}
       />

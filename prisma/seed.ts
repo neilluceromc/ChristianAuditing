@@ -79,7 +79,7 @@ async function main() {
   // is the spec's nine, each with its tag prefix; the four Purchasing ones are
   // the meeting's own examples.
   const catData: Record<string, { cls: AssetClass; types: string[]; prefix?: string }> = {
-    Laptop: { cls: "IT", types: ["Dell Latitude", "ThinkPad"], prefix: "LT" },
+    Laptop: { cls: "IT", types: ["Standard", "High-performance", "MacBook"], prefix: "LT" },
     "Workstation (PC)": { cls: "IT", types: ["Desktop tower", "Mini PC", "All-in-one"], prefix: "WS" },
     Monitor: { cls: "IT", types: ["24-inch", "27-inch"], prefix: "MN" },
     Headset: { cls: "IT", types: ["Wired", "Wireless"], prefix: "HS" },
@@ -187,7 +187,7 @@ async function main() {
       // over the 60% write-off line, so the repairs view can show the warning
       // the design is about
       mk("BR-LT-0090", "Dell Latitude 5410", "Laptop", "DEFECTIVE", { defectiveSince: day(-44), repairQuote: 34_000, notes: "Board failure, out of warranty — vendor quote is most of a new unit", warrantyUntil: day(-200), purchasedAt: day(-1250) }),
-      mk("BR-LT-0201", "MacBook Air M3", "Laptop", "DEPLOYED", { assigneeId: emp("EMP-0099").id, warrantyUntil: day(700), purchasedAt: day(-60) }),
+      mk("BR-LT-0201", "MacBook Air M3", "Laptop", "DEPLOYED", { typeId: cats["Laptop"].typeIds[2], assigneeId: emp("EMP-0099").id, warrantyUntil: day(700), purchasedAt: day(-60) }),
       mk("BR-LT-0075", "Dell Latitude 5400", "Laptop", "DONATED", { warrantyUntil: day(-400), purchasedAt: day(-1500) }),
       mk("BR-LT-0060", "ThinkPad E14", "Laptop", "BUYOUT", { warrantyUntil: day(-500), purchasedAt: day(-1700) }),
       mk("BR-LT-0031", "Acer Aspire 5", "Laptop", "DISPOSE", { warrantyUntil: day(-900), purchasedAt: day(-2100) }),

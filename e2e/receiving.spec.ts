@@ -88,7 +88,7 @@ async function pickModel(page: Page, model: string, type?: string) {
   const known = page.getByRole("option", { name: model, exact: true });
   if (await known.count()) await known.first().click();
   else await page.getByRole("option", { name: new RegExp(`^\\+ Add .${escapeRe(model)}. as a new model$`) }).click();
-  if (type) await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: type });
+  if (type) await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: type });
 }
 
 async function setQuantity(page: Page, n: number) {
@@ -122,7 +122,7 @@ let tag1: string, tag2: string, tag3: string;
 test.beforeAll(async () => {
   const laptop = await db.assetCategory.findFirstOrThrow({ where: { name: "Laptop" } });
   laptopCategoryId = laptop.id;
-  thinkpadTypeId = (await db.assetType.findFirstOrThrow({ where: { name: "ThinkPad", categoryId: laptop.id } })).id;
+  thinkpadTypeId = (await db.assetType.findFirstOrThrow({ where: { name: "High-performance", categoryId: laptop.id } })).id;
   financeUserId = (await db.user.findUniqueOrThrow({ where: { email: "finance@thebackroomop.com" } })).id;
 
   // Phase 14: an IT-class asset with itVerifiedAt still null reads as
@@ -161,17 +161,12 @@ test.describe("registration — the primary path", () => {
     await page.goto("/inventory/register");
 
     await pickCategory(page, "Laptop");
-    // Phase 34: the type comes with the model — a new model picks it from "New model — which type?".
-    await pickModel(page, "ThinkPad T14 Gen 4 (e2e batch)", "ThinkPad");
+    // Phase 36: the Type is always asked, and staff type their own tags.
+    await pickModel(page, "ThinkPad T14 Gen 4 (e2e batch)", "High-performance");
     await setQuantity(page, 3);
-
-    // The prefix lives in the "Tag prefix and notes" fold-out of Purchase and warranty.
-    await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
-    await page.getByText("Tag prefix and notes", { exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Tag prefix", exact: true })).toHaveValue("LT");
-    await expect(page.getByLabel("Tag 1", { exact: true })).toHaveValue(tag1);
-    await expect(page.getByLabel("Tag 2", { exact: true })).toHaveValue(tag2);
-    await expect(page.getByLabel("Tag 3", { exact: true })).toHaveValue(tag3);
+    await page.getByLabel("Tag 1", { exact: true }).fill(tag1);
+    await page.getByLabel("Tag 2", { exact: true }).fill(tag2);
+    await page.getByLabel("Tag 3", { exact: true }).fill(tag3);
     // Phase 34: every IT unit needs a serial.
     const stamp = `E2E-RCV-1-${Date.now()}`;
     for (const i of [1, 2, 3]) await page.getByLabel(`Serial ${i}`, { exact: true }).fill(`${stamp}-${i}`);
@@ -202,12 +197,13 @@ test.describe("registration — the primary path", () => {
     const before = await db.asset.count();
 
     await pickCategory(page, "Laptop");
-    await pickModel(page, "e2e — in-batch duplicate", "ThinkPad");
+    await pickModel(page, "e2e — in-batch duplicate", "High-performance");
     await setQuantity(page, 2);
     // Serials filled, so the repeated tag is the only thing wrong.
     const stamp = `E2E-RCV-2-${Date.now()}`;
     for (const i of [1, 2]) await page.getByLabel(`Serial ${i}`, { exact: true }).fill(`${stamp}-${i}`);
-    const dupeTag = await page.getByLabel("Tag 1", { exact: true }).inputValue();
+    const dupeTag = `RCV${Date.now().toString(36).slice(-6).toUpperCase()}-D`;
+    await page.getByLabel("Tag 1", { exact: true }).fill(dupeTag);
     await page.getByLabel("Tag 2", { exact: true }).fill(dupeTag);
 
     // Phase 30 (spec §5.5): said as soon as the row repeats, naming the row in
@@ -228,13 +224,10 @@ test.describe("registration — the primary path", () => {
     await page.goto("/inventory/register");
 
     await pickCategory(page, "Laptop");
-    await pickModel(page, "e2e — seeded tag collision", "ThinkPad");
-    // Phase 34: one unit's tag is a chip, not a field — it can no longer be
-    // typed onto a seeded tag. The collision a single register still meets is
-    // a race: the suggested tag is taken by someone else before Register is
-    // pressed. Stand that in by writing an asset with the chip's tag now.
-    const chip = page.getByText(/^tag BR-LT-\d+$/);
-    const taken = (await chip.textContent())!.trim().replace(/^tag /, "");
+    await pickModel(page, "e2e — seeded tag collision", "High-performance");
+    // Phase 36: staff type the tag, so type one that already exists.
+    const taken = `RCV${Date.now().toString(36).slice(-6).toUpperCase()}-T`;
+    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(taken);
     await db.asset.create({
       data: { tag: taken, model: "e2e fixture — tag race", categoryId: laptopCategoryId, status: "SPARE", itVerifiedAt: new Date() },
     });
