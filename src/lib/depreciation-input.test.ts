@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lifeFromYearsMonths, lifeLabel, overrideSchema, policySchema } from "./depreciation-input";
+import { lifeFromYearsMonths, lifeLabel, overrideSchema, policyDirty, policySchema } from "./depreciation-input";
 
 describe("lifeFromYearsMonths", () => {
   it("years + months → months; both empty → no policy", () => {
@@ -49,5 +49,23 @@ describe("two-decimal tolerance (float error must not reject valid inputs)", () 
   });
   it("overrideSchema accepts 19.99 and 5000.1", () => {
     for (const s of [19.99, 5000.1]) expect(overrideSchema.safeParse({ assetId: "a", lifeMonths: 24, salvage: s, note: "refurbished" }).success).toBe(true);
+  });
+});
+
+describe("policyDirty", () => {
+  const saved60 = { lifeMonths: 60, salvagePercent: 0 };
+  it("normalised equivalents are not dirty", () => {
+    expect(policyDirty({ years: "5", months: "", salvage: "" }, saved60)).toBe(false);
+    expect(policyDirty({ years: "5", months: "0", salvage: "0" }, saved60)).toBe(false);
+    expect(policyDirty({ years: " 5 ", months: "", salvage: "" }, saved60)).toBe(false);
+    expect(policyDirty({ years: "5", months: "", salvage: "7.50" }, { lifeMonths: 60, salvagePercent: 7.5 })).toBe(false);
+    expect(policyDirty({ years: "", months: "", salvage: "" }, { lifeMonths: null, salvagePercent: null })).toBe(false);
+  });
+  it("real changes and bad input are dirty", () => {
+    expect(policyDirty({ years: "6", months: "", salvage: "" }, saved60)).toBe(true);
+    expect(policyDirty({ years: "5", months: "", salvage: "5" }, saved60)).toBe(true);
+    expect(policyDirty({ years: "", months: "", salvage: "" }, saved60)).toBe(true);
+    expect(policyDirty({ years: "x", months: "", salvage: "" }, saved60)).toBe(true);
+    expect(policyDirty({ years: "5", months: "", salvage: "abc" }, saved60)).toBe(true);
   });
 });

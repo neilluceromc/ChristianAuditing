@@ -50,7 +50,7 @@ export default async function DepreciationPage({
                 </Tr>
               </THead>
               <TBody>
-                {policies.map((p) => <PolicyRow key={p.id} row={p} />)}
+                {policies.map((p) => <PolicyRow key={`${p.id}:${p.lifeMonths}:${p.salvagePercent}`} row={p} />)}
               </TBody>
             </Table>
           </>

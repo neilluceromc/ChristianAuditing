@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { CLASS_LABEL } from "@/lib/asset-class";
 import { fmtDate } from "@/lib/format";
-import { lifeFromYearsMonths } from "@/lib/depreciation-input";
+import { lifeFromYearsMonths, policyDirty } from "@/lib/depreciation-input";
 import { setCategoryPolicy } from "@/server/modules/finance/depreciation-actions";
 import type { PolicyRow as PolicyRowData } from "@/server/modules/finance/depreciation-queries";
 import { useFinanceRunner } from "./use-finance-runner";
@@ -26,7 +26,7 @@ export function PolicyRow({ row }: { row: PolicyRowData }) {
   const runner = useFinanceRunner(["lifeMonths", "salvagePercent"]);
   const { pending, error, fieldErrors, retryAfter, setRetryAfter, run } = runner;
 
-  const dirty = years !== initYears || months !== initMonths || salvage !== initSalvage;
+  const dirty = policyDirty({ years, months, salvage }, { lifeMonths: row.lifeMonths, salvagePercent: row.salvagePercent });
 
   function save() {
     setLifeError(null);

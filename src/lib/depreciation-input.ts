@@ -35,3 +35,18 @@ export const overrideSchema = z.object({
   salvage: z.number().min(0, "Salvage can't be negative").refine(twoDecimals, "Whole centavos only"),
   note: z.string().trim().min(3, "Say why this asset differs").max(300),
 });
+
+/** True when the typed row differs from the saved policy once both are normalised (blank salvage with a life is the same as 0). */
+export function policyDirty(
+  input: { years: string; months: string; salvage: string },
+  saved: { lifeMonths: number | null; salvagePercent: number | null },
+): boolean {
+  const life = lifeFromYearsMonths(input.years, input.months);
+  if (life === "bad") return true;
+  if (life !== saved.lifeMonths) return true;
+  const s = input.salvage.trim();
+  const pct = s === "" ? (life === null ? null : 0) : Number(s);
+  if (pct !== null && !Number.isFinite(pct)) return true;
+  const savedPct = saved.salvagePercent ?? (saved.lifeMonths === null ? null : 0);
+  return pct !== savedPct;
+}
