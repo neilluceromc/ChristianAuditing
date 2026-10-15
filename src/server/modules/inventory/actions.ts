@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma, type AssetClass } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { NEW_MODEL_TYPE, newModelNeedsType } from "@/server/modules/inventory/register-queries";
+import { typeRequired } from "@/server/modules/inventory/register-queries";
+import { TYPE_REQUIRED } from "@/lib/register-type";
 import { actionRole } from "@/server/auth/guards";
 import { isUniqueViolation, uniqueTarget } from "@/server/prisma-errors";
 import { checkRate } from "@/server/rate-limit";
@@ -257,7 +258,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
     if (!type || type.categoryId !== d.categoryId) errors.typeId = "That type doesn't belong to the chosen category";
   }
   // Spec §8, ruling R26: a new model needs its type when the category has types.
-  else if (category && (await newModelNeedsType(d.categoryId, d.model, d.typeId))) errors.typeId = NEW_MODEL_TYPE;
+  else if (category && (await typeRequired(d.categoryId, d.typeId))) errors.typeId = TYPE_REQUIRED;
   if (d.requestId) {
     const req = await prisma.purchaseRequest.findUnique({ where: { id: d.requestId }, select: { refNo: true, state: true } });
     if (!req) errors.requestId = "Unknown request";

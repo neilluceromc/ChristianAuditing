@@ -20,7 +20,7 @@ import {
   centavosToDecimalString, formatPeso, moneyToCentavos, warrantyOnDate, warrantyOnLength, warrantyOnTyped, type WarrantyState,
 } from "@/lib/purchase-summary";
 import {
-  clampQuantity, liveQuantity, MAX_BATCH, pasteSerials, resizeRows, retagRows, singleRowErrors, type RegisterRow,
+  clampQuantity, liveQuantity, MAX_BATCH, pasteColumn as pasteRows, resizeRows, singleRowErrors, type RegisterRow,
 } from "@/lib/register-rows";
 import { categoryNoun } from "@/lib/register-catalog";
 import { resolveModelType } from "@/lib/known-models";
@@ -74,6 +74,11 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * checks set every error at once, the server's refusals merge in, and the
  * first invalid field takes focus.
  */
+/** Task 3 deletes this with the prefix run: a new prefix or category re-suggests every tag. */
+function retagRows(rows: readonly RegisterRow[], runTags: readonly string[] | null): RegisterRow[] {
+  return rows.map((r, i) => ({ ...r, tag: runTags?.[i] ?? "" }));
+}
+
 export function RegisterForm({
   catalog,
   vendors,
@@ -247,7 +252,7 @@ export function RegisterForm({
     // Ruling R23: the category's tagPrefix wins; the learned prefix only fills a missing one.
     const p = prefixFor(catalog.find((c) => c.id === id)?.tagPrefix, prefixCountsByCategory[id] ?? []);
     setPrefix(p);
-    setRows((rs) => retagRows(rs, p ? runFor(p, rs.length) : null));
+    setRows((rs) => retagRows(rs, p ? runFor(p, rs.length) : null)); // Task 3 removes suggested tags
     clearRowErrors("tags");
     clearError("categoryId");
   }
@@ -262,7 +267,7 @@ export function RegisterForm({
 
   function resize(count: number) {
     if (count === quantity) return;
-    setRows((rs) => resizeRows(rs, count, runFor(prefix, count)));
+    setRows((rs) => resizeRows(rs, count));
   }
 
   function changeQuantity(text: string) {
@@ -287,7 +292,7 @@ export function RegisterForm({
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   function pasteColumn(at: number, values: string[]) {
-    const out = pasteSerials(rows, at, values, (count) => runFor(prefix, count));
+    const out = pasteRows(rows, at, values, "serial");
     setRows(out.rows);
     setQuantityText(String(out.rows.length));
     setPasteNote(
