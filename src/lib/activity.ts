@@ -27,6 +27,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
   rename: "Renamed", archive: "Ended or archived", restore: "Restored",
+  "policy.saved": "Policy saved",
 };
 export function actionLabel(action: string): string { return ACTION_LABELS[action] ?? action; }
 
@@ -97,6 +98,8 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
   const suffix = viaApproval ? " (approved request)" : "";
   switch (action) {
     case "create": {
+      // Phase 37: a policy copied from another group's reads as the copy, not as a bare create.
+      if (diff?.copiedFrom?.to) return `${actor}copied ${String(diff.copiedFrom.to)} to ${entry.entityLabel}`;
       // Phase 37: a department/client create carries `kind` in its diff; older department entries (no kind) read as before.
       const kind = diff?.kind?.to;
       if (kind === "CLIENT" || kind === "INTERNAL") {
@@ -105,6 +108,10 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
       }
       return omitEntity ? `${actor}created` : `${actor}created ${entry.entityLabel}`;
     }
+    case "policy.saved":
+      return diff?.copiedFrom?.to
+        ? `${actor}copied ${String(diff.copiedFrom.to)} to ${entry.entityLabel}`
+        : `${actor}saved ${entry.entityLabel}'s equipment list`;
     case "rename":
       return `${actor}renamed ${String(diff?.name?.from ?? entry.entityLabel)} to ${String(diff?.name?.to ?? "?")}`;
     case "archive": {

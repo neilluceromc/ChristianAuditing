@@ -364,6 +364,16 @@ describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sent
     expect(auditSentence({ ...nina, action: "policy.exception.removed", diff: { slot: { from: "tablet · iPad", to: null } } }))
       .toBe("J. Sarmiento removed the exception slot tablet · iPad for Nina Robles");
   });
+  it("policies: saved, and copied from another group's", () => {
+    const pol = { actorLabel: "J. Sarmiento", entityLabel: "Bluepeak Telecom" };
+    expect(auditSentence({ ...pol, action: "policy.saved", diff: { slots: { from: ["Monitor · 24-inch · required"], to: ["Monitor · 24-inch · required", "Headset · Wired · required"] } } }))
+      .toBe("J. Sarmiento saved Bluepeak Telecom's equipment list");
+    expect(auditSentence({ ...pol, action: "policy.saved", diff: { slots: { from: [], to: [] }, copiedFrom: { from: null, to: "Finance" } } }))
+      .toBe("J. Sarmiento copied Finance to Bluepeak Telecom");
+    expect(auditSentence({ ...pol, action: "create", diff: { name: { from: null, to: "Bluepeak Telecom" }, appliesTo: { from: null, to: "Bluepeak Telecom" }, copiedFrom: { from: null, to: "Finance" } } }))
+      .toBe("J. Sarmiento copied Finance to Bluepeak Telecom");
+    expect(actionLabel("policy.saved")).toBe("Policy saved");
+  });
   it("departments and clients: added, renamed, ended or archived, restored", () => {
     const dept = { actorLabel: "J. Sarmiento", entityLabel: "Bluepeak Telecom" };
     expect(auditSentence({ ...dept, action: "create", diff: { name: { from: null, to: "Bluepeak Telecom" }, kind: { from: null, to: "CLIENT" } } }))
