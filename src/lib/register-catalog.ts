@@ -1,13 +1,13 @@
 import type { AssetClass, AssetStatus } from "@prisma/client";
+import { CLASS_EXAMPLE } from "./asset-class";
 
 /** Phase 34 (spec §2.1, §4.1). */
 export type CategoryIconName =
-  | "laptop" | "workstation" | "monitor" | "headset" | "mouse" | "keyboard" | "webcam" | "hub" | "dock" | "ups" | "bag" | "other"
-  | "inventory";
+  | "laptop" | "workstation" | "monitor" | "headset" | "mouse" | "keyboard" | "webcam" | "hub" | "dock" | "ups" | "license" | "bag"
+  | "other" | "inventory";
 
 export const IT_CATEGORY_ORDER = [
-  "Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Keyboard", "Webcam", "Type C Hub", "Docking Station", "UPS",
-  "Laptop Bag", "Other",
+  "Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Keyboard", "Webcam", "UPS", "Windows License", "Laptop Bag", "Other",
 ] as const;
 
 const HIDDEN = new Set(["uncategorised"]);
@@ -24,7 +24,8 @@ export function orderCategories<T extends { name: string; cls: AssetClass }>(cat
 
 const ICONS: Record<string, CategoryIconName> = {
   laptop: "laptop", "workstation (pc)": "workstation", monitor: "monitor", headset: "headset", mouse: "mouse",
-  keyboard: "keyboard", webcam: "webcam", "type c hub": "hub", "docking station": "dock", ups: "ups", "laptop bag": "bag", other: "other",
+  keyboard: "keyboard", webcam: "webcam", "type c hub": "hub", "docking station": "dock", ups: "ups",
+  "windows license": "license", "laptop bag": "bag", other: "other",
 };
 export function categoryIcon(name: string): CategoryIconName {
   return ICONS[name.toLowerCase()] ?? "inventory";
@@ -32,7 +33,7 @@ export function categoryIcon(name: string): CategoryIconName {
 
 const NOUNS: Record<string, [string, string]> = {
   "workstation (pc)": ["workstation", "workstations"], mouse: ["mouse", "mice"], "type c hub": ["Type C hub", "Type C hubs"],
-  other: ["item", "items"], ups: ["UPS", "UPS units"], furniture: ["piece of furniture", "pieces of furniture"], "pantry equipment": ["pantry item", "pantry items"],
+  other: ["item", "items"], ups: ["UPS", "UPS units"], "windows license": ["Windows license", "Windows licenses"], furniture: ["piece of furniture", "pieces of furniture"], "pantry equipment": ["pantry item", "pantry items"],
 };
 export function categoryNoun(name: string, n: number): string {
   const pair = NOUNS[name.toLowerCase()];
@@ -42,3 +43,25 @@ export function categoryNoun(name: string, n: number): string {
 }
 
 export const STOCK_STATUS: Record<AssetClass, AssetStatus> = { IT: "SPARE", PURCHASING: "STORED" };
+
+/** The Model box's example, per IT card; categories added later in Admin get a plain "Model name". */
+const MODEL_EXAMPLES: Record<string, string> = {
+  laptop: "ThinkPad T14 Gen 4", "workstation (pc)": "Dell OptiPlex 7010", monitor: "Dell P2422H", headset: "Jabra Evolve2 40",
+  mouse: "Logitech M331", keyboard: "Logitech MX Keys", webcam: "Logitech C920", ups: "APC Back-UPS 650",
+  "windows license": "Windows 11 Pro", "laptop bag": "Targus 15.6\" Backpack", other: "Samsung A54",
+};
+export function categoryModelExample(name: string | null | undefined, cls: AssetClass): string {
+  if (cls !== "IT") return CLASS_EXAMPLE[cls].model;
+  return (name && MODEL_EXAMPLES[name.toLowerCase()]) || "Model name";
+}
+
+/** What the serial box asks for: a Windows licence carries its licence / COA number; its product key goes in Secrets. */
+export function categorySerialCopy(name: string | null | undefined): { label: string; hint: string } {
+  if (name?.toLowerCase() === "windows license") {
+    return {
+      label: "Licence / COA no.",
+      hint: "Required. The licence or COA sticker number. Add the product key on the record's Secrets after registering.",
+    };
+  }
+  return { label: "Serial number", hint: "Required. It’s on the box label or the sticker under the device." };
+}

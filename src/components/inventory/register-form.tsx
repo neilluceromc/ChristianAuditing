@@ -22,7 +22,7 @@ import {
 import {
   clampQuantity, liveQuantity, MAX_BATCH, pasteColumn as pasteRows, resizeRows, singleRowErrors, type RegisterRow,
 } from "@/lib/register-rows";
-import { categoryNoun } from "@/lib/register-catalog";
+import { categoryModelExample, categoryNoun, categorySerialCopy } from "@/lib/register-catalog";
 import { typeAfterCategoryChange, typeChoice, TYPE_REQUIRED } from "@/lib/register-type";
 import { serialProblems } from "@/lib/serial-rules";
 import { qrBase } from "@/lib/label-qr";
@@ -534,7 +534,7 @@ export function RegisterForm({
                     setModel(v);
                     clearError("model");
                   }}
-                  placeholder={example.model}
+                  placeholder={categoryModelExample(category?.name, cls)}
                 />
               )}
             </FormField>
@@ -616,6 +616,7 @@ export function RegisterForm({
 
         <SerialSection
           cls={cls}
+          copy={categorySerialCopy(category?.name)}
           rows={rows}
           problems={problems}
           attempted={attempted}

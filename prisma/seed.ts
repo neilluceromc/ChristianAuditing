@@ -78,7 +78,9 @@ async function main() {
   // Phase 13: every category carries a class. Phase 34 (spec §2.1): the IT list
   // is the spec's nine, each with its tag prefix; the four Purchasing ones are
   // the meeting's own examples. Keyboard, Webcam and UPS joined on 2026-10-16
-  // (migration 30), leaving Other with Phone, Speaker and Printer.
+  // (migration 30); Windows License joined and Docking Station / Type C Hub became
+  // Other types (migration 31), so Other holds Phone, Speaker, Printer, Docking
+  // Station and Type C Hub.
   const catData: Record<string, { cls: AssetClass; types: string[]; prefix?: string }> = {
     Laptop: { cls: "IT", types: ["Standard", "High-performance", "MacBook"], prefix: "LT" },
     "Workstation (PC)": { cls: "IT", types: ["Desktop tower", "Mini PC", "All-in-one"], prefix: "WS" },
@@ -87,11 +89,10 @@ async function main() {
     Mouse: { cls: "IT", types: ["Wired", "Wireless"], prefix: "MS" },
     Keyboard: { cls: "IT", types: ["Wired", "Wireless"], prefix: "KB" },
     Webcam: { cls: "IT", types: ["USB webcam", "Conference camera"], prefix: "WC" },
-    "Type C Hub": { cls: "IT", types: ["USB-C Hub"], prefix: "HB" },
-    "Docking Station": { cls: "IT", types: ["USB-C Dock"], prefix: "DK" },
     UPS: { cls: "IT", types: ["Desktop UPS", "Rack UPS"], prefix: "UP" },
+    "Windows License": { cls: "IT", types: ["OEM", "Retail", "Volume"], prefix: "WL" },
     "Laptop Bag": { cls: "IT", types: ["Backpack", "Sleeve"], prefix: "BG" },
-    Other: { cls: "IT", types: ["Phone", "Speaker", "Printer"], prefix: "OT" },
+    Other: { cls: "IT", types: ["Phone", "Speaker", "Printer", "Docking Station", "Type C Hub"], prefix: "OT" },
     Vehicle: { cls: "PURCHASING", types: ["Sedan", "Van"] },
     Furniture: { cls: "PURCHASING", types: ["Desk", "Chair"] },
     "Pantry Equipment": { cls: "PURCHASING", types: ["Microwave", "Air purifier"] },
@@ -214,8 +215,8 @@ async function main() {
       mk("BR-MN-0911", "LG 27UL500", "Monitor", "SPARE", { cost: 12_000, purchasedAt: day(-200), defectiveSince: day(-70), notes: "Reflowed by Octagon Repairs — back in the spare pool" }),
       mk("BR-PH-0287", "iPhone 12", "Other", "TEMPORARY", { assigneeId: emp("EMP-0042").id, cost: 30_000, warrantyUntil: day(-100), purchasedAt: day(-1100) }),
       mk("BR-PH-0301", "Samsung A54", "Other", "SPARE", { cost: 18_000 }),
-      mk("BR-DK-0071", "WD19S Dock", "Docking Station", "DEPLOYED", { assigneeId: emp("EMP-0042").id, cost: 11_000 }),
-      mk("BR-DK-0033", "WD19S Dock", "Docking Station", "DEFECTIVE", { defectiveSince: day(-31), vendorId: vendors[1].id, rmaRef: "RMA-8790", cost: 11_000, notes: "Intermittent DisplayPort" }),
+      mk("BR-DK-0071", "WD19S Dock", "Other", "DEPLOYED", { typeId: cats["Other"].typeIds[3], assigneeId: emp("EMP-0042").id, cost: 11_000 }),
+      mk("BR-DK-0033", "WD19S Dock", "Other", "DEFECTIVE", { typeId: cats["Other"].typeIds[3], defectiveSince: day(-31), vendorId: vendors[1].id, rmaRef: "RMA-8790", cost: 11_000, notes: "Intermittent DisplayPort" }),
       mk("BR-HS-0501", "Jabra Evolve2 65", "Headset", "DEPLOYED", { assigneeId: emp("EMP-0051").id, cost: 7_500 }),
       mk("BR-HS-0502", "Jabra Evolve2 40", "Headset", "SPARE", { cost: 5_500 }),
       mk("BR-KB-0402", "Logitech MX Keys", "Keyboard", "DEFECTIVE", { typeId: cats["Keyboard"].typeIds[1], defectiveSince: day(-2), cost: 6_000, notes: "Two keys unresponsive" }),
@@ -538,7 +539,7 @@ async function main() {
       slots: { create: [
         { name: "laptop", assetTypeId: cats["Laptop"].typeIds[0], required: true },
         { name: "monitor", assetTypeId: cats["Monitor"].typeIds[0], required: true },
-        { name: "dock", assetTypeId: cats["Docking Station"].typeIds[0], required: true },
+        { name: "dock", assetTypeId: cats["Other"].typeIds[3], required: true },
         { name: "headset", assetTypeId: cats["Headset"].typeIds[0], required: true },
         { name: "phone", assetTypeId: cats["Other"].typeIds[0], required: true },
         { name: "second monitor", assetTypeId: cats["Monitor"].typeIds[1], required: false },
