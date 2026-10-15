@@ -1,6 +1,6 @@
 # Phase 35 — Registration review, Finance's asset register, and depreciation
 
-**Status:** **code-complete 2026-10-15** on branch `phase-35-registration-depreciation` (unmerged, unpushed); designed
+**Status:** **code-complete 2026-10-15** on branch `phase-35-registration-depreciation`, merged to `main` via `2963bc7` and pushed 2026-10-15, staging redeployed 2026-10-15 (migration 28 applied); designed
 with the user (mockups: the "Depreciation mockups" canvas artifact). **One migration (the 28th).** The §3.3 checklist
 matches what Edit can change (plan P-7): Delivery and fees and Purchase request live on the shared purchase record, so
 they are not offered; OR no., Covered by and Who to call were added to Edit.
