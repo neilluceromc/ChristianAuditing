@@ -18,15 +18,22 @@
 .PARAMETER CheckOnly
   Report what would happen and touch nothing. No pull, no build, no restart.
 
+.PARAMETER LocalBuild
+  Build the image on this laptop instead of pulling the one GitHub Actions
+  built (ghcr.io/<owner>/<repo>:sha-<commit>). Only for when GitHub is
+  unreachable: the local build is the load that crashed this machine.
+
 .EXAMPLE
   .\scripts\deploy-staging.ps1
   .\scripts\deploy-staging.ps1 -Force
   .\scripts\deploy-staging.ps1 -CheckOnly
+  .\scripts\deploy-staging.ps1 -Force -LocalBuild
 #>
 [CmdletBinding()]
 param(
   [switch]$Force,
-  [switch]$CheckOnly
+  [switch]$CheckOnly,
+  [switch]$LocalBuild
 )
 
 # NOT "Stop". In PowerShell 5.1 a native command writing to stderr raises a
@@ -97,13 +104,38 @@ if ($after -eq $before -and -not $Force) {
 }
 if ($after -ne $before) { Say "updated $($before.Substring(0,7)) -> $($after.Substring(0,7))" }
 
-# Build BEFORE up: `up -d` builds only when a tag is missing, so a host that
-# already has an inventory-app image would silently keep running the old one.
-Say "building..."
-# Only `web` carries `build:`; migrate and worker reuse the inventory-app image
-# it produces, so this is one build, not three in parallel (2026-10-15 crash).
-docker compose --profile prod build web
-if ($LASTEXITCODE -ne 0) { Die "docker compose build failed. Nothing was restarted; the old stack is still serving." }
+if ($LocalBuild) {
+  # Build BEFORE up: `up -d` builds only when a tag is missing, so a host that
+  # already has an inventory-app image would silently keep running the old one.
+  Say "building locally (-LocalBuild)..."
+  # Only `web` carries `build:`; migrate and worker reuse the inventory-app image
+  # it produces, so this is one build, not three in parallel (2026-10-15 crash).
+  docker compose --profile prod build web
+  if ($LASTEXITCODE -ne 0) { Die "docker compose build failed. Nothing was restarted; the old stack is still serving." }
+} else {
+  # The image is built by .github/workflows/image.yml on every push to main and
+  # tagged with the commit. Pull exactly the commit being deployed, then tag it
+  # as the local `inventory-app` that docker-compose.yml runs. The laptop never
+  # builds (its CPU crashes under the build's all-core load, 2026-10-15).
+  $repo = ((git remote get-url $remoteName) -replace '\.git$', '' -replace '^.*github\.com[:/]', '').ToLower()
+  $image = "ghcr.io/${repo}:sha-$after"
+  Say "waiting for $image (GitHub Actions builds it after each push)..."
+  $found = $false
+  foreach ($attempt in 1..60) {
+    docker manifest inspect $image *> $null
+    if ($LASTEXITCODE -eq 0) { $found = $true; break }
+    if ($attempt -eq 1) { Say "  not there yet -- checking every 20 s for up to 20 minutes" }
+    Start-Sleep -Seconds 20
+  }
+  if (-not $found) {
+    Die "no image $image. Check the 'image' workflow on GitHub (Actions tab). If the package is private, run 'docker login ghcr.io' once, or make the package public. Nothing was restarted."
+  }
+  Say "pulling..."
+  docker pull $image
+  if ($LASTEXITCODE -ne 0) { Die "docker pull failed. Nothing was restarted; the old stack is still serving." }
+  docker tag $image inventory-app:latest
+  if ($LASTEXITCODE -ne 0) { Die "docker tag failed. Nothing was restarted." }
+}
 
 Say "starting..."
 docker compose --profile prod up -d --no-build

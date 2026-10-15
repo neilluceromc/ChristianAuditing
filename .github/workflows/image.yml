@@ -1,0 +1,47 @@
+# Builds the app image on GitHub instead of on the staging laptop, whose
+# i7-14700HX crashes under the all-core load of `npm ci` + `next build`
+# (bugchecks 0x12B and 0x3B on 2026-10-15). The deploy script pulls the image
+# tagged with the commit it deploys and never builds locally unless asked to.
+name: image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name (GHCR needs lower case)
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.name.outputs.image }}:sha-${{ github.sha }}
+            ${{ steps.name.outputs.image }}:main
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
