@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextTags, preferredPrefix } from "./receiving";
+import { nextTags, preferredPrefix, prefixFor } from "./receiving";
 import { TAG_SHAPE } from "./tag-key";
 
 describe("nextTags", () => {
@@ -94,5 +94,22 @@ describe("preferredPrefix", () => {
 
   it("has no opinion when there is nothing to learn from", () => {
     expect(preferredPrefix([])).toBeNull();
+  });
+});
+
+describe("prefixFor (ruling R23 fallback order)", () => {
+  it("takes the category's tagPrefix over a learned prefix", () => {
+    // Other after migration 27: three phones and a keyboard, but a webcam is still OT.
+    expect(prefixFor("OT", [{ prefix: "PH", n: 3 }, { prefix: "KB", n: 1 }])).toBe("OT");
+  });
+
+  it("falls back to the learned prefix when the category has no tagPrefix", () => {
+    expect(prefixFor(null, [{ prefix: "PH", n: 3 }, { prefix: "KB", n: 1 }])).toBe("PH");
+    expect(prefixFor(undefined, [{ prefix: "KB", n: 1 }])).toBe("KB");
+    expect(prefixFor("", [{ prefix: "KB", n: 1 }])).toBe("KB");
+  });
+
+  it("gives an empty prefix when neither is known", () => {
+    expect(prefixFor(null, [])).toBe("");
   });
 });

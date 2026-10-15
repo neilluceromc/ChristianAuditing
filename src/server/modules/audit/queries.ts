@@ -35,7 +35,7 @@ export async function entityLabels(
     byType.get(e.entityType)!.add(e.entityId);
   }
   const map = new Map<string, { label: string; href: string | null }>();
-  const [assets, employees, approvals, purchases, policies, users, flags, endpoints, vendors, stockItems, stocktakes, stockCategories, departments, assetCategories, assetTypes] = await Promise.all([
+  const [assets, employees, approvals, purchases, policies, users, flags, endpoints, vendors, stockItems, stocktakes, stockCategories, departments, assetCategories, assetTypes, purchaseRecords] = await Promise.all([
     byType.has("asset")
       ? prisma.asset.findMany({ where: { id: { in: [...byType.get("asset")!] } }, select: { id: true, tag: true } })
       : [],
@@ -101,6 +101,13 @@ export async function entityLabels(
           select: { id: true, name: true, category: { select: { name: true } } },
         })
       : [],
+    // Phase 34 (P-8): a purchase record is labelled by the tags it registered.
+    byType.has("purchase-record")
+      ? prisma.purchaseRecord.findMany({
+          where: { id: { in: [...byType.get("purchase-record")!] } },
+          select: { id: true, assets: { select: { tag: true }, orderBy: { tag: "asc" } } },
+        })
+      : [],
   ]);
   for (const a of assets) map.set(`asset:${a.id}`, { label: a.tag, href: `/inventory/${a.id}` });
   for (const e of employees) map.set(`employee:${e.id}`, { label: e.name, href: `/employees/${e.id}` });
@@ -129,6 +136,11 @@ export async function entityLabels(
   // `AssetType.name` is unique only WITHIN its category (@@unique([categoryId, name])),
   // so the label names the category too — the same reason `user` carries its email.
   for (const t of assetTypes) map.set(`asset-type:${t.id}`, { label: `${t.category.name} · ${t.name}`, href: "/admin/asset-types" });
+  // No detail page yet; a record with no assets left keeps the truncated-id fallback below.
+  for (const r of purchaseRecords) {
+    const tags = r.assets.map((a) => a.tag);
+    if (tags.length) map.set(`purchase-record:${r.id}`, { label: tags.length > 1 ? `${tags[0]} → ${tags[tags.length - 1]}` : tags[0], href: null });
+  }
   for (const e of entries) {
     const key = `${e.entityType}:${e.entityId}`;
     if (!map.has(key)) map.set(key, { label: e.entityId.slice(0, 10) + "…", href: null });
@@ -138,9 +150,10 @@ export async function entityLabels(
 
 /**
  * Phase 27 (spec §3.3/§4.1): every class-bearing row this role may NOT see — assets, the approvals
- * on them, categories of the class, types under those categories. Built from the SEE map
+ * on them, categories of the class, types under those categories, and (Phase 34) purchase records
+ * of the class. Built from the SEE map
  * (`canSeeClass`), never the manage map: Purchasing and Finance staff see both classes but manage
- * one. Four empty lists and no query for an all-class role. An approval with no asset has no class
+ * one. Empty lists and no query for an all-class role. An approval with no asset has no class
  * and is never hidden (the approvals queue's own rule).
  */
 export async function invisibleAuditRefs(role: Role): Promise<HiddenAuditRefs> {
@@ -148,13 +161,16 @@ export async function invisibleAuditRefs(role: Role): Promise<HiddenAuditRefs> {
   if (hidden.length === 0) return NO_HIDDEN_REFS;
   const cls = { in: [...hidden] };
   const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
-  const [assetIds, approvals, categories, types] = await Promise.all([
+  const [assetIds, approvals, categories, types, records] = await Promise.all([
     invisibleAssetIds(role),
     prisma.approval.findMany({ where: { asset: { cls } }, select: { id: true } }),
     prisma.assetCategory.findMany({ where: { cls }, select: { id: true } }),
     prisma.assetType.findMany({ where: { category: { cls } }, select: { id: true } }),
+    prisma.purchaseRecord.findMany({ where: { cls }, select: { id: true } }),
   ]);
-  return { assetIds, approvalIds: ids(approvals), categoryIds: ids(categories), typeIds: ids(types) };
+  return {
+    assetIds, approvalIds: ids(approvals), categoryIds: ids(categories), typeIds: ids(types), purchaseRecordIds: ids(records),
+  };
 }
 
 export async function listAudit(

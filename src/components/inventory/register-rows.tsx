@@ -59,7 +59,8 @@ export function rowFeedback({ rows, hits, errors, attempted, exampleTag }: {
   if (!(live.serials.length > 0 && errors.serials?.includes("is already on"))) say(errors.serials);
   for (const [key, message] of Object.entries(errors)) {
     const [kind, index] = key.split(".");
-    if ((kind === "tags" || kind === "serials") && /^[0-9]+$/.test(index ?? "")) say(`Row ${Number(index) + 1} · ${message}`);
+    // Phase 34: `registerAssets`' per-row serial refusal already names its row ("Row 2 · … needs a serial").
+    if ((kind === "tags" || kind === "serials") && /^[0-9]+$/.test(index ?? "")) say(message.startsWith("Row ") ? message : `Row ${Number(index) + 1} · ${message}`);
   }
 
   return {
@@ -90,12 +91,18 @@ export function RegisterRows({
   onPasteSerials,
   onBlur,
   onLastEnter,
+  serialPlaceholder = "Optional",
+  status,
   children,
 }: {
   rows: readonly RegisterRow[];
   invalidTags: ReadonlySet<number>;
   invalidSerials: ReadonlySet<number>;
   tagPlaceholder: string;
+  /** Phase 34 (spec §4.3): IT serials are required, so the cell no longer says "Optional" there. */
+  serialPlaceholder?: string;
+  /** Phase 34 (spec §4.3): a per-row status cell ("✓ ready", "missing", "duplicate", …). */
+  status?: (row: number) => React.ReactNode;
   onTag: (row: number, value: string) => void;
   onSerial: (row: number, value: string) => void;
   /** Called only when the clipboard holds more than one serial. */
@@ -125,6 +132,7 @@ export function RegisterRows({
               </th>
               <th scope="col" className="px-2 py-1.5 font-medium">Tag</th>
               <th scope="col" className="px-2 py-1.5 font-medium">Serial</th>
+              {status && <th scope="col" className="w-[150px] px-2 py-1.5 font-medium">Status</th>}
             </tr>
           </thead>
           <tbody>
@@ -154,7 +162,7 @@ export function RegisterRows({
                     }}
                     aria-label={`Serial ${i + 1}`}
                     invalid={invalidSerials.has(i)}
-                    placeholder="Optional"
+                    placeholder={serialPlaceholder}
                     className="font-mono"
                     value={r.serial}
                     onChange={(e) => onSerial(i, e.target.value)}
@@ -172,6 +180,7 @@ export function RegisterRows({
                     }}
                   />
                 </td>
+                {status && <td className="px-2 py-1 text-[11.5px]">{status(i)}</td>}
               </tr>
             ))}
           </tbody>

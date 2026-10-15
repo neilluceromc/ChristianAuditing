@@ -41,6 +41,13 @@ since the third 2026-09-24 code-only redeploy (`2e333ef`). See `HANDOVER.md` (y)
 **Phase 33 (`phase-33-queues-records-uiux`, Laws of UX on the IT queues and records; final tree `fd2ee57`) is
 MERGED (`9bc7785`) and PUSHED 2026-10-01, and adds no migration** — staging still runs `4a39db8`; the
 code-only redeploy is the user's decision. See `HANDOVER.md` (z).
+**Phase 34 (`phase-34-register-labels`, the Register and Labels redesign; final code tree `f7c4f70`) is
+CODE-COMPLETE (2026-10-15), UNMERGED and UNPUSHED, and adds MIGRATION 27 `20261014090000_register_labels`** —
+so the staging redeploy that carries it APPLIES a migration (the deploy script runs `prisma migrate deploy`;
+the migration reshapes the IT categories on real data and RAISEs on a Purchasing-class name clash). Battery
+A 58 · B 87 (+2 skipped) · C 64 · D 70 · E1 61 · E2 56 · F 66 = 462 passed / 464 listed; 1786 unit / 106 files; 27 migrations. Merge, push and the redeploy are the user's
+decisions; the spec (`908fe14`) and plan (`2904714`) commits also sit unpushed on local `main`. Owed after the
+redeploy: the physical print-and-scan check of the new label (§4). See `HANDOVER.md` (aa).
 
 ---
 
@@ -115,6 +122,10 @@ is blocked in auto mode):
 
 The inventory class-switch chips and Finance's IT/Purchasing tabs by eye, and the Register form signed in
 as `purchasing@`. Both pass e2e and axe; nobody has looked at them.
+
+**Phase 34 adds one physical check:** print a sheet of the redesigned label from the Labels tab on a real A4
+sheet on the office printer, measure the 100 mm calibration bar, and scan a barcode and a QR with the office
+scanner and a phone. Owed once staging runs Phase 34 (see `HANDOVER.md` (aa)).
 
 ## 5. Development candidates parked here
 

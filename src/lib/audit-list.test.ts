@@ -33,13 +33,19 @@ describe("buildAuditWhere", () => {
     expect(buildAuditWhere(state, { ...NO_HIDDEN_REFS, approvalIds: ["p1"] }).NOT).toEqual({ OR: [{ entityType: "approval", entityId: { in: ["p1"] } }] });
     expect(buildAuditWhere(state, { ...NO_HIDDEN_REFS, categoryIds: ["c1"] }).NOT).toEqual({ OR: [{ entityType: "asset-category", entityId: { in: ["c1"] } }] });
     expect(buildAuditWhere(state, { ...NO_HIDDEN_REFS, typeIds: ["t1"] }).NOT).toEqual({ OR: [{ entityType: "asset-type", entityId: { in: ["t1"] } }] });
-    expect(buildAuditWhere(state, { assetIds: ["a1"], approvalIds: ["p1"], categoryIds: [], typeIds: ["t1"] }).NOT).toEqual({
+    expect(buildAuditWhere(state, { ...NO_HIDDEN_REFS, purchaseRecordIds: ["r1"] }).NOT).toEqual({ OR: [{ entityType: "purchase-record", entityId: { in: ["r1"] } }] });
+    expect(buildAuditWhere(state, { assetIds: ["a1"], approvalIds: ["p1"], categoryIds: [], typeIds: ["t1"], purchaseRecordIds: ["r1"] }).NOT).toEqual({
       OR: [
         { entityType: "asset", entityId: { in: ["a1"] } },
         { entityType: "approval", entityId: { in: ["p1"] } },
         { entityType: "asset-type", entityId: { in: ["t1"] } },
+        { entityType: "purchase-record", entityId: { in: ["r1"] } },
       ],
     });
+  });
+  it("Phase 34 (P-8): purchase records are an audit entity, hidden per class like the rest", () => {
+    expect(AUDIT_ENTITY_TYPES).toContain("purchase-record");
+    expect(NO_HIDDEN_REFS).toEqual({ assetIds: [], approvalIds: [], categoryIds: [], typeIds: [], purchaseRecordIds: [] });
   });
 });
 

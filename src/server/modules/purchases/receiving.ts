@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { NEW_MODEL_TYPE, newModelNeedsType } from "@/server/modules/inventory/register-queries";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
@@ -15,12 +16,22 @@ import {
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
+import { serialRequired } from "@/lib/serial-rules";
+import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
 
 // Same shape createSchema uses (inventory/actions.ts) — a malformed date
 // string is a field error at the picker, never an Invalid Date reaching
 // Prisma's `new Date(...)` write.
 const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
 const toDate = (s: string | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
+
+// Phase 34 (spec §8): a plain decimal string (the client strips the thousands commas), at most
+// Decimal(12,2)'s 9,999,999,999.99 — the regex alone would let an 11-digit amount reach Prisma.
+const MONEY_MAX = 9_999_999_999.99;
+const money = z.string()
+  .regex(/^\d+(\.\d{1,2})?$/, "Enter an amount like 12500 or 12,500.50")
+  .refine((v) => Number(v) <= MONEY_MAX, "Enter an amount up to 9,999,999,999.99")
+  .optional().or(z.literal(""));
 
 const registerSchema = z.object({
   categoryId: z.string().min(1, "Pick a category"),
@@ -32,12 +43,19 @@ const registerSchema = z.object({
   tags: z.array(z.string().trim().toUpperCase().regex(TAG_SHAPE, "Format: BR-XX-0000")).min(1).max(200),
   serials: z.array(z.string().trim().max(120)).optional(),
   purchasedAt: dateStr.optional(),
-  cost: z.string().optional(),
+  cost: money,
+  fees: money,
   vendorId: z.string().optional(),
   warrantyUntil: dateStr.optional(),
   brand: z.string().trim().max(60).optional(),
   notes: z.string().trim().max(2000).optional(),
   invoiceRef: z.string().trim().max(60).optional(),
+  receiptRef: z.string().trim().max(60).optional(),
+  warrantyCoveredBy: z.union([z.literal(""), z.enum(WARRANTY_COVERED_BY)]).optional(),
+  warrantyContact: z.string().trim().max(160).optional(),
+  // Accepted and ignored: a batch always lands in the class's default status. It exists so the
+  // Register form can send one shape at any quantity.
+  requestedStatus: z.string().optional(),
   // OPTIONAL metadata, never a gate (C-5). If a request is named it must be
   // COMPLETED, because linking an asset to a request still in flight would
   // claim a provenance that is not settled.
@@ -47,6 +65,7 @@ const registerSchema = z.object({
 interface Registered {
   created: number;
   ids: string[];
+  purchaseRecordId: string;
 }
 
 export async function registerAssets(input: unknown): Promise<ActionResult<Registered>> {
@@ -86,6 +105,8 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
     const type = await prisma.assetType.findUnique({ where: { id: d.typeId }, select: { categoryId: true } });
     if (!type || type.categoryId !== d.categoryId) errors.typeId = "That type doesn't belong to the chosen category";
   }
+  // Spec §8, ruling R26: a new model needs its type when the category has types.
+  else if (category && (await newModelNeedsType(d.categoryId, d.model, d.typeId))) errors.typeId = NEW_MODEL_TYPE;
 
   // Serial is unique fleet-wide (like tag), but a batch never gets to check
   // itself against the database mid-loop — two rows of ONE submission naming
@@ -96,6 +117,12 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
   const serials = rowSerials.filter(Boolean);
   const dupSerialAt = rowSerials.findIndex((s, i) => s !== "" && rowSerials.indexOf(s) !== i);
   if (dupSerialAt >= 0) errors.serials = `Row ${dupSerialAt + 1} · serial ${rowSerials[dupSerialAt]} appears twice in this batch`;
+  // Phase 34 (spec §8): every IT row needs its serial; Purchasing stays optional.
+  if (category && serialRequired(category.cls)) {
+    d.tags.forEach((tag, i) => {
+      if (!(d.serials?.[i] ?? "").trim()) errors[`serials.${i}`] = `Row ${i + 1} · ${tag} needs a serial`;
+    });
+  }
 
   // Already registered — scoped to the class being registered into (identifierWhere, the same rule
   // checkIdentifiers uses): these messages name rows and records, and a record of the OTHER class
@@ -140,6 +167,14 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
       // Every refusal sits above this transaction (C-4): Prisma commits when
       // this callback resolves and rolls back only when it throws, so nothing
       // in here may decide to refuse after a write.
+      // Phase 34 (P-1, spec §7.2): one PurchaseRecord per submit — the batch the Labels queue groups by.
+      const record = await tx.purchaseRecord.create({
+        data: {
+          cls: category.cls, vendorId: d.vendorId || null, purchasedAt: toDate(d.purchasedAt),
+          invoiceRef: d.invoiceRef || null, receiptRef: d.receiptRef || null,
+          unitCost: d.cost || null, fees: d.fees || null, quantity: d.tags.length, createdById: user.id,
+        },
+      });
       let created = 0;
       const ids: string[] = [];
       for (const [i, tag] of d.tags.entries()) {
@@ -167,6 +202,10 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             brand: d.brand || null,
             notes: d.notes || null,
             invoiceRef: d.invoiceRef || null,
+            receiptRef: d.receiptRef || null,
+            warrantyCoveredBy: d.warrantyCoveredBy || null,
+            warrantyContact: d.warrantyContact || null,
+            purchaseRecordId: record.id,
             purchaseRequestId: d.requestId || null,
             itVerifiedAt: selfChecked ? new Date() : null,
             itVerifiedById: selfChecked ? user.id : null,
@@ -186,7 +225,18 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
           },
         });
       }
-      done = { created, ids };
+      await writeAudit(tx, {
+        actorId: user.id,
+        actorLabel: user.name,
+        entityType: "purchase-record",
+        entityId: record.id,
+        action: "purchase.recorded",
+        diff: {
+          quantity: { from: null, to: d.tags.length },
+          total: { from: null, to: (Number(d.cost || 0) * d.tags.length + Number(d.fees || 0)).toFixed(2) },
+        },
+      });
+      done = { created, ids, purchaseRecordId: record.id };
     }, {
       // 200 units x (one create + one audit write) can clear Prisma's 5s
       // interactive-transaction default well before the loop finishes — same

@@ -229,21 +229,35 @@ test.describe.serial("direct changes", () => {
     // Phase 30 (spec §5.1–§5.3): the one Register flow — the category first,
     // which suggests the next free tag on row 1; the initial state in the
     // friendly words (plan P-6).
+    // Phase 34: a category card (it suggests the tag, shown as the chip beside
+    // the serial), a new model picks its type, every IT unit needs a serial,
+    // and "Initial state" is "Where does it go" — Deployed is "Give to someone".
     await page.goto("/inventory/register");
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await expect(page.getByLabel("Tag 1")).toHaveValue(tag);
-    await page.getByLabel(/Model/).fill("ThinkPad X1 (e2e deploy)");
-    const initialState = page.getByRole("radiogroup", { name: "Initial state" });
-    await initialState.getByText("Deployed").click();
+    const card = page.getByRole("button", { name: /^Laptop (\d+ in stock|None yet)$/ });
+    await card.waitFor();
+    await expect(async () => {
+      expect(await card.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
+    }).toPass({ timeout: 20_000 });
+    await card.click();
+    await expect(page.getByText(`tag ${tag}`, { exact: true })).toBeVisible();
+    await page.getByRole("combobox", { name: "Model", exact: true }).fill("ThinkPad X1 (e2e deploy)");
+    await page.getByRole("option", { name: /^\+ Add .ThinkPad X1 \(e2e deploy\). as a new model$/ }).click();
+    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+    await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-DIRECT-6-${Date.now()}`);
+    const initialState = page.getByRole("radiogroup", { name: "Where does it go" });
+    await initialState.getByText("Give to someone", { exact: true }).click();
     // Direct registration never mentions an approval.
-    await expect(page.getByText("Deployed to the chosen person.")).toBeVisible();
+    await expect(page.getByText("Given to the chosen person.", { exact: true })).toBeVisible();
     await expect(page.getByText("This files a request for approval.")).toHaveCount(0);
-    await page.getByLabel("Assign to").fill("EMP-0071");
+    await page.getByRole("combobox", { name: "Who", exact: true }).fill("EMP-0071");
     await page.getByRole("option", { name: /EMP-0071/ }).click();
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    await expect(page.getByRole("heading", { name: tag })).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    // Plan P-5: Register lands on Labels; the record shows the new tag.
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
 
     const asset = await db.asset.findUniqueOrThrow({ where: { tag } });
+    await page.goto(`/inventory/${asset.id}`);
+    await expect(page.getByRole("heading", { name: tag })).toBeVisible({ timeout: 20_000 });
     expect(asset.status).toBe("DEPLOYED");
     expect(asset.assigneeId).toBe(paolo.id);
     expect(await db.approval.count({ where: { assetId: asset.id, state: { in: [...OPEN_STATES] } } })).toBe(0);

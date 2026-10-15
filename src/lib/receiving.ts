@@ -73,3 +73,12 @@ export function preferredPrefix(counts: Array<{ prefix: string; n: number }>): s
   if (counts.length === 0) return null;
   return [...counts].sort((a, b) => b.n - a.n || a.prefix.localeCompare(b.prefix))[0].prefix;
 }
+
+/**
+ * Ruling R23 (spec §7.1 as rewritten): the prefix Register offers for a category. The category's
+ * own `tagPrefix` wins when set; the prefix learned from its existing tags only fills a missing one
+ * (Other inherits phone and keyboard tags and must still offer OT); nothing known gives "".
+ */
+export function prefixFor(tagPrefix: string | null | undefined, counts: Array<{ prefix: string; n: number }>): string {
+  return tagPrefix || preferredPrefix(counts) || "";
+}

@@ -266,7 +266,8 @@ test.describe.serial("categories and types by class", () => {
     await login(page, IT);
     await page.goto("/admin/asset-categories");
     await expect(page.getByRole("row", { name: /Office Supplies/ })).toHaveCount(0);
-    await expect(page.getByRole("row", { name: /Laptop/ })).toBeVisible();
+    // Phase 34 seeds "Laptop Bag" too — anchor on the Laptop row itself.
+    await expect(page.getByRole("row").filter({ has: page.getByRole("cell", { name: "Laptop", exact: true }) })).toBeVisible();
 
     await login(page, ADMIN);
     await page.goto("/admin/asset-categories");
@@ -280,7 +281,8 @@ test.describe("labels", () => {
     const [a, b, lt] = await Promise.all([idOf("BR-VH-0001"), idOf("BR-VH-0002"), idOf("BR-LT-0148")]);
     await login(page, P);
     await page.goto(`/inventory/labels?ids=${a},${b}`);
-    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+    // Phase 34 (plan P-9): the Labels tab sits under "New equipment".
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("img", { name: "Barcode BR-VH-0001" })).toBeVisible();
     await expect(page.getByRole("img", { name: "Barcode BR-VH-0002" })).toBeVisible();
     await expect(page.getByText("2 labels · 1 sheet")).toBeVisible();
@@ -288,6 +290,40 @@ test.describe("labels", () => {
     await page.goto(`/inventory/labels?ids=${a},${lt}`);
     await expect(page.getByText("1 selected asset could not be printed and was skipped.")).toBeVisible();
     await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toHaveCount(0);
+  });
+
+  // Ruling R20: Labels is the classes a role MANAGES plus what this user
+  // registered. An IT batch registered by IT waits in IT's queue, never in
+  // Purchasing's (13a covers the other half: Purchasing's own IT batch).
+  test("8b. an IT batch registered by IT waits in IT's queue, not Purchasing's", async ({ page }) => {
+    const itUser = await db.user.findUniqueOrThrow({ where: { email: IT }, select: { id: true } });
+    const other = await db.assetCategory.findFirstOrThrow({ where: { name: "Other", cls: "IT" }, select: { id: true } });
+    const tag = "BR-OT-9871";
+    const record = await db.purchaseRecord.create({
+      data: {
+        cls: "IT", quantity: 1, createdById: itUser.id,
+        assets: { create: { tag, model: "Logitech C920 (e2e 8b)", categoryId: other.id, cls: "IT", status: "SPARE", labelPrintedAt: null } },
+      },
+    });
+    try {
+      const row = new RegExp(`\\b${tag}\\b`);
+      await login(page, IT);
+      await page.goto("/inventory/labels");
+      await expect(page.getByRole("heading", { name: "Waiting to print" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("checkbox", { name: row })).toHaveCount(1);
+
+      await login(page, P);
+      await page.goto("/inventory/labels?cls=PURCHASING");
+      await expect(page.getByRole("heading", { name: "Waiting to print" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("checkbox", { name: row })).toHaveCount(0);
+      // Nor can it be reached by ticking it by hand.
+      await page.goto(`/inventory/labels?cls=PURCHASING&pick=${record.id}`);
+      await expect(page.getByRole("heading", { name: "Waiting to print" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("img", { name: `Barcode ${tag}` })).toHaveCount(0);
+    } finally {
+      await db.asset.deleteMany({ where: { purchaseRecordId: record.id } });
+      await db.purchaseRecord.delete({ where: { id: record.id } });
+    }
   });
 });
 
@@ -344,7 +380,10 @@ test.describe("Purchasing Home", () => {
     await login(page, P);
     await page.goto("/");
     await expect(page.getByText("Approvals waiting")).toBeVisible();
-    await expect(page.getByRole("link", { name: String(expectedApprovals), exact: true })).toBeVisible();
+    // Scoped to its own Stat block: other Home stats (low stock, expiry) can carry the same number.
+    await expect(
+      page.getByText("Approvals waiting").locator("xpath=..").getByRole("link", { name: String(expectedApprovals), exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("Awaiting IT check")).toBeVisible();
     // "Awaiting IT check" (Stat's label span) and its number (Stat's value
     // span) are siblings, not one text node — assert the number lives in the
@@ -383,27 +422,45 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     tag = tagOf("LT", (await highestNumber("LT")) + 1);
     await login(page, P);
     await page.goto("/inventory/register");
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Model").fill("ThinkPad T14 Gen 5 (e2e)");
+    // Phase 34: a category card; a new model picks its type; every IT unit needs a serial.
+    const card = page.getByRole("button", { name: /^Laptop (\d+ in stock|None yet)$/ });
+    await card.waitFor();
+    await expect(async () => {
+      expect(await card.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
+    }).toPass({ timeout: 20_000 });
+    await card.click();
+    await page.getByRole("combobox", { name: "Model", exact: true }).fill("ThinkPad T14 Gen 5 (e2e)");
+    await page.getByRole("option", { name: /^\+ Add .ThinkPad T14 Gen 5 \(e2e\). as a new model$/ }).click();
+    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+    await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-DEPT-13A-${Date.now()}`);
     // D-: finance/queries.ts's financeAssets only lists assets with
     // `cost: { not: null }` ("Capitalized assets: anything with an
     // acquisition cost") — 13d expects Finance to list this asset once
     // confirmed, so it needs a cost from the start, or it would never appear
     // there regardless of itVerifiedAt/financeConfirmedAt.
-    await page.getByLabel("Cost (₱)").fill("45000");
-    await page.getByLabel("Quantity").fill("1");
-    await expect(page.getByLabel("Tag 1")).toHaveValue(tag);
-    // Purchasing does not manage IT, so Loan is not offered (ruling R4) — the
+    // Phase 34: Cost sits in the Purchase and warranty section.
+    await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
+    await page.getByRole("textbox", { name: "Cost (₱)", exact: true }).fill("45000");
+    await expect(page.getByRole("textbox", { name: "How many", exact: true })).toHaveValue("1");
+    await expect(page.getByText(`tag ${tag}`, { exact: true })).toBeVisible();
+    // Purchasing does not manage IT, so Lend is not offered (ruling R4) — the
     // approval path would create a loan with no due date.
-    const initialState = page.getByRole("radiogroup", { name: "Initial state" });
-    await expect(initialState.getByRole("radio", { name: "Spare" })).toBeChecked();
-    await expect(initialState.getByRole("radio", { name: "Loan" })).toHaveCount(0);
-    // Phase 30 (spec §5.6, plan P-13): quantity 1 is one asset — it ends on
-    // its record with the created notice rather than on the batch card.
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
-    await expect(page.getByText(`${tag} registered`)).toBeVisible();
+    const initialState = page.getByRole("radiogroup", { name: "Where does it go" });
+    await expect(initialState.getByRole("radio", { name: "Spare stock" })).toBeChecked();
+    await expect(initialState.getByRole("radio", { name: "Lend" })).toHaveCount(0);
+    // Plan P-5: quantity 1 is one asset — it lands on Labels with its record ticked.
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
+    // Ruling R20: the Labels tab is the classes this role manages PLUS what this
+    // user registered, so the IT laptop Purchasing just registered is ticked
+    // here and printable by Purchasing — not left waiting for IT (8b: IT's own
+    // IT batches never reach Purchasing's queue).
+    await expect(page.getByRole("checkbox", { name: new RegExp(tag) })).toBeChecked({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Print 1 label", exact: true })).toBeEnabled();
+    await expect(page.getByRole("img", { name: `Barcode ${tag}` })).toHaveCount(1);
     const a = await db.asset.findUniqueOrThrow({ where: { tag } });
+    expect(new URL(page.url()).searchParams.get("just")).toBe(a.purchaseRecordId);
+    expect(Number(a.cost)).toBe(45000);
     id = a.id;
     expect(a.cls).toBe("IT");
     expect(a.itVerifiedAt).toBeNull();

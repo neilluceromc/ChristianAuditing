@@ -46,17 +46,23 @@ test.describe("label sheet", () => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/labels?ids=${asset.id}`);
-    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+    // Phase 34 (plan P-9): the page is the Labels tab of "New equipment".
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("link", { name: /^Labels\b/ })).toHaveAttribute("aria-current", "page");
     // The barcode is a real <svg role="img"> named after its tag — asserted by
     // ROLE, so a sticker that renders no code fails rather than passing on the
     // tag text alone.
     await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toBeVisible();
     await expect(page.getByText("1 label · 1 sheet")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Print 1 label", exact: true })).toBeEnabled();
     await expect(page.getByText(/exactly 100mm — measure it/)).toBeVisible();
 
     // A-17, since it's free on a page we've already loaded: the page box
     // itself, which catches a future change to PAGE_MM, PAGE_MARGIN_MM or the
-    // grid template silently breaking the die-cut fit.
+    // grid template silently breaking the die-cut fit. Measured under PRINT
+    // media (ruling R14): the screen preview is half size by design (plan P-7),
+    // and print is what the die-cut has to match.
+    await page.emulateMedia({ media: "print" });
     const box = await page.locator(".label-page").boundingBox();
     expect(box?.width).toBeCloseTo(PAGE_MM.width * MM_TO_PX, 1);
     expect(box?.height).toBeCloseTo(PAGE_MM.height * MM_TO_PX, 1);
@@ -70,7 +76,9 @@ test.describe("label sheet", () => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/labels?ids=${asset.id}`);
-    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible({ timeout: 30_000 });
+    // Ruling R14: measure what prints — the on-screen preview is half size (plan P-7).
+    await page.emulateMedia({ media: "print" });
     // The bar is the only 1.5mm-tall span with a background on the sheet.
     const widths = await page.evaluate(() =>
       [...document.querySelectorAll("span[style*='background']")]
@@ -95,9 +103,12 @@ test.describe("label sheet", () => {
     expect(assets.length).toBe(13); // the seed must still carry at least 13 IT assets for this to mean anything
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/labels?ids=${assets.map((a) => a.id).join(",")}`);
-    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("13 labels · 2 sheets")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Print 13 labels", exact: true })).toBeEnabled();
 
+    // Ruling R14: measure what prints — the on-screen preview is half size (plan P-7).
+    await page.emulateMedia({ media: "print" });
     const pages = page.locator(".label-page");
     await expect(pages).toHaveCount(2);
     // 12 on the first sheet, 1 on the second — not just "13 barcodes somewhere".
@@ -141,11 +152,48 @@ test.describe("label sheet", () => {
   test("ids that match nothing say so instead of printing a blank sheet", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/labels?ids=nope1,nope2");
-    await expect(page.getByText("Nothing to print")).toBeVisible({ timeout: 30_000 });
-    // Phase 33 (spec §5.1): the body points at the selection bar and the record menu, and the Tags box sits under it.
-    await expect(page.getByText("Select assets on the list, then choose Print labels in the selection bar — or Print label from a record's More menu.")).toBeVisible();
+    // Phase 34: the Labels tab names the skip, prints nothing, and keeps its way
+    // forward — the queue (empty after the seed) and the Tags box under it. The
+    // old "Back to inventory" link is gone; the crumb is the way back.
+    await expect(page.getByText("2 selected assets could not be printed and were skipped.")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Nothing waiting. Everything registered has had its label printed.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("img", { name: /^Barcode /i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Print 0 labels", exact: true })).toBeDisabled();
     await expect(page.getByRole("textbox", { name: "Tags" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Back to inventory" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Inventory", exact: true })).toHaveAttribute("href", "/inventory");
+  });
+
+  // Task 8's final review: the print job itself, not the half-size preview. A
+  // 13-tag paste (typed order) is two A4 pages under print media, and the
+  // first breaks to a new sheet while the last does not add a blank one.
+  test("13 typed tags print as two A4 pages, with a page break between them", async ({ page }) => {
+    const tags = (await db.asset.findMany({ where: { cls: "IT" }, orderBy: { tag: "asc" }, take: 13, select: { tag: true } })).map((a) => a.tag);
+    expect(tags.length).toBe(13);
+    await login(page, "it@thebackroomop.com");
+    await page.goto(`/inventory/labels?tags=${encodeURIComponent(tags.join("\n"))}`);
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("13 labels · 0 skipped", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Print 13 labels", exact: true })).toBeEnabled();
+
+    await page.emulateMedia({ media: "print" });
+    const pages = page.locator(".label-page");
+    await expect(pages).toHaveCount(2);
+    await expect(pages.nth(0).getByRole("img", { name: /^Barcode /i })).toHaveCount(12);
+    await expect(pages.nth(1).getByRole("img", { name: /^Barcode /i })).toHaveCount(1);
+    const boxes = await pages.evaluateAll((els) => els.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { width: r.width, height: r.height, top: r.top, bottom: r.bottom, breakAfter: getComputedStyle(el).breakAfter };
+    }));
+    for (const box of boxes) {
+      expect(box.width).toBeCloseTo(PAGE_MM.width * MM_TO_PX, 1);
+      expect(box.height).toBeCloseTo(PAGE_MM.height * MM_TO_PX, 1);
+    }
+    // Stacked, not overlapped (no screen-only scale left over), and the break sits after the first page only.
+    expect(boxes[1].top).toBeGreaterThanOrEqual(boxes[0].bottom - 0.5);
+    expect(boxes[0].breakAfter).toBe("page");
+    expect(boxes[1].breakAfter).toBe("auto");
+    // The preview chrome is screen-only: nothing but the sheet prints.
+    await expect(page.getByRole("button", { name: "Print 13 labels", exact: true })).toBeHidden();
   });
 
   // Rule 10: a stale selection (an id that no longer/never existed mixed in
@@ -155,7 +203,7 @@ test.describe("label sheet", () => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/labels?ids=${asset.id},nope1`);
-    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("1 selected asset could not be printed and was skipped.")).toBeVisible();
     await expect(page.getByRole("img", { name: "Barcode BR-LT-0148" })).toBeVisible();
   });
@@ -231,7 +279,7 @@ test.describe("label sheet", () => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
     await login(page, "it@thebackroomop.com");
     await page.goto(`/inventory/labels?ids=${asset.id}`);
-    await expect(page.getByRole("heading", { name: "Print labels", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible({ timeout: 30_000 });
 
     // The QR is gated on APP_BASE_URL being set to a NON-loopback value
     // (src/lib/label-qr.ts refuses localhost — a QR that scans on the dev box
@@ -268,7 +316,9 @@ test.describe("label sheet", () => {
 
     // A-16's class of bug, guarded in the direction the QR made possible: the
     // cell is a column flex with overflow hidden, so a too-tall QR compresses
-    // these instead of overflowing. Both are MEASURED, not asserted visible.
+    // these instead of overflowing. Both are MEASURED, not asserted visible —
+    // under print media (ruling R14), since the screen preview is half size (plan P-7).
+    await page.emulateMedia({ media: "print" });
     const pageBox = await page.locator(".label-page").first().boundingBox();
     expect(pageBox?.width).toBeCloseTo(PAGE_MM.width * MM_TO_PX, 1);
     expect(pageBox?.height).toBeCloseTo(PAGE_MM.height * MM_TO_PX, 1);

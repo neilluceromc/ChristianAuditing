@@ -203,8 +203,12 @@ export async function applyAssetImport(
           // only (import-assets.ts), so every row it creates is self-checked.
           // Phase 18 spec §6: only the importer stamps importedAt, and only on
           // CREATE — updates never touch it.
+          // Phase 34 ruling R25: an import brings in existing, already-tagged
+          // equipment, so it counts as printed (R4's backfill rule) and never
+          // floods Waiting to print; its labels print via the list or Tags box.
+          const now = new Date();
           const asset = await tx.asset.create({
-            data: { ...row.data, itVerifiedAt: new Date(), itVerifiedById: actor.id, importedAt: new Date() },
+            data: { ...row.data, itVerifiedAt: now, itVerifiedById: actor.id, importedAt: now, labelPrintedAt: now },
           });
           // A-5: `createAsset` can hardcode tag/model/status as a from-null
           // because `creationPlan` guarantees DEFAULT_STATUS[cls]-only direct

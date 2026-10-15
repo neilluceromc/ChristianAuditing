@@ -85,6 +85,33 @@ const PURCHASING = "purchasing@thebackroomop.com";
 const FINANCE = "finance@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
+// Phase 34 register helpers, copied from e2e/register-labels.spec.ts (house rule: never import across spec files).
+/** A card is named "{name} {N} in stock" or "{name} None yet" — anchored at both ends, since "Laptop" prefixes "Laptop Bag". */
+async function pickLaptop(page: Page) {
+  const card = page.getByRole("button", { name: /^Laptop (\d+ in stock|None yet)$/ });
+  await waitForHydration(card);
+  await card.click();
+}
+
+/** A new Laptop model, typed ThinkPad, with a unique serial (every IT unit needs one); returns the chip's tag. */
+async function newLaptop(page: Page, model: string, serial: string): Promise<string> {
+  await page.getByRole("combobox", { name: "Model", exact: true }).fill(model);
+  await page.getByRole("option", { name: /^\+ Add .* as a new model$/ }).click();
+  await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+  await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(serial);
+  const chip = page.getByText(/^tag BR-[A-Z]{2}-\d+$/);
+  await expect(chip).toBeVisible();
+  return (await chip.textContent())!.trim().replace(/^tag /, "");
+}
+
+/** "Purchase request" and "Vendor" sit inside the Purchase and warranty section, closed until opened. */
+async function openPurchase(page: Page) {
+  const header = page.getByRole("button", { name: /^Purchase and warranty/ });
+  await waitForHydration(header);
+  if ((await header.getAttribute("aria-expanded")) !== "true") await header.click();
+  await expect(header).toHaveAttribute("aria-expanded", "true");
+}
+
 const reqByRef = (refNo: string) => db.purchaseRequest.findUniqueOrThrow({ where: { refNo } });
 const vendorByName = (name: string) => db.vendor.findUniqueOrThrow({ where: { name } });
 const deptByName = (name: string) => db.department.findUniqueOrThrow({ where: { name } });
@@ -291,16 +318,12 @@ test.describe.serial("purchasing extensions", () => {
 
     // Register one laptop with no request — Direct provenance.
     await page.goto("/inventory/register");
-    const category1 = page.getByLabel("Category");
-    await waitForHydration(category1);
-    await category1.selectOption({ label: "Laptop" });
-    await page.getByLabel("Model").fill("e2e provenance -- direct");
-    await expect(page.getByLabel("Tag 1")).not.toHaveValue("");
-    const directTag = await page.getByLabel("Tag 1").inputValue();
-    // Phase 30 (spec §5.6, plan P-13): quantity 1 is one asset and ends on its record.
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
-    await expect(page.getByText(`${directTag} registered`)).toBeVisible();
+    await pickLaptop(page);
+    const directTag = await newLaptop(page, "e2e provenance -- direct", `E2E-PEXT-6A-${Date.now()}`);
+    // Plan P-5: quantity 1 is one asset and lands on Labels.
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
+    expect(await db.asset.count({ where: { tag: directTag } })).toBe(1);
 
     await page.goto(`/inventory?q=${directTag}`);
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
@@ -308,15 +331,14 @@ test.describe.serial("purchasing extensions", () => {
 
     // Register one laptop against PR-0188 (COMPLETED) — From-a-request provenance.
     await page.goto("/inventory/register");
-    await page.getByLabel("Category").selectOption({ label: "Laptop" });
-    await page.getByLabel("Model").fill("e2e provenance -- from PR-0188");
+    await pickLaptop(page);
+    const fromPrTag = await newLaptop(page, "e2e provenance -- from PR-0188", `E2E-PEXT-6B-${Date.now()}`);
     // Phase 30 (spec §5.2): a request option reads `{refNo} · {vendor} · {date}`, so pick it by id.
+    await openPurchase(page);
     await page.getByLabel("Purchase request").selectOption((await reqByRef("PR-0188")).id);
-    await expect(page.getByLabel("Tag 1")).not.toHaveValue("");
-    const fromPrTag = await page.getByLabel("Tag 1").inputValue();
-    await page.getByRole("button", { name: "Register 1 asset" }).click();
-    await expect(page).toHaveURL(/\/inventory\/[^/?]+\?created=1$/, { timeout: 30_000 });
-    await expect(page.getByText(`${fromPrTag} registered`)).toBeVisible();
+    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
+    expect(await db.asset.count({ where: { tag: fromPrTag } })).toBe(1);
 
     await page.goto(`/inventory?q=${fromPrTag}`);
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
@@ -344,6 +366,7 @@ test.describe.serial("purchasing extensions", () => {
 
     const pr0188 = await reqByRef("PR-0188");
     await page.goto("/inventory/register");
+    await openPurchase(page);
     const requestSelect = page.getByLabel("Purchase request");
     await waitForHydration(requestSelect);
     // Phase 30 (spec §5.2): the option names the request's supplier and date,
@@ -353,6 +376,7 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page.getByLabel("Vendor")).toHaveValue(techServe.name);
 
     await page.goto("/inventory/register");
+    await openPurchase(page);
     const vendorPicker = page.getByLabel("Vendor");
     await waitForHydration(vendorPicker);
     await vendorPicker.fill("Octagon");

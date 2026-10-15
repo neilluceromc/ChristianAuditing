@@ -402,3 +402,12 @@ describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sent
     expect(Object.keys(ACTION_LABELS).length).toBeGreaterThanOrEqual(42);
   });
 });
+
+describe("purchase.recorded (Phase 34)", () => {
+  it("reads as a purchase of N items", () => {
+    expect(auditSentence({ actorLabel: "J. Sarmiento", action: "purchase.recorded", diff: { quantity: { from: null, to: 3 } }, entityLabel: "BR-LT-0201 → BR-LT-0203" }))
+      .toBe("J. Sarmiento recorded a purchase of 3 items (BR-LT-0201 → BR-LT-0203)");
+    expect(auditSentence({ actorLabel: "J. Sarmiento", action: "purchase.recorded", diff: { quantity: { from: null, to: 1 } }, entityLabel: "BR-LT-0201" }, { omitEntity: true }))
+      .toBe("J. Sarmiento recorded a purchase of 1 item");
+  });
+});

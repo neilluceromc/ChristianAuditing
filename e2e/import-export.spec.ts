@@ -28,8 +28,10 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *   duplicate-serial case is built by the importer itself rather than taken
  *   from the seed. BR-LT-0148 is DEPLOYED to Marites Bautista (EMP-0042,
  *   ACTIVE). Dennis Ong EMP-0090 is the only OFFBOARDING employee and holds
- *   exactly three items. Categories: Laptop, Monitor, Phone, Dock, Headset,
- *   Peripheral, Uncategorised. Departments: IT, Finance, Sales, HR,
+ *   exactly three items. IT categories (Phase 34): Laptop, Workstation (PC),
+ *   Monitor, Headset, Mouse, Type C Hub, Docking Station, Laptop Bag, Other,
+ *   Uncategorised (phones are type Phone under Other; the mixed fixture's
+ *   "Ultrabook" row is the one category that does not exist). Departments: IT, Finance, Sales, HR,
  *   Operations. 10 employees, 3 of whom have policy gaps.
  * Never reference raw cuids — the DB is reseeded and ids change every time.
  */
@@ -228,6 +230,15 @@ test.describe.serial("the asset import wizard", () => {
       // The scanner contract redirects an exact tag match straight to the record.
       await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
     }
+
+    // Phase 34 ruling R25: imported equipment is already tagged, so it counts as printed and never
+    // joins the Labels tab's Waiting to print queue.
+    const imported = await db.asset.findMany({
+      where: { tag: { in: ["BR-LT-9001", "BR-MN-9002", "BR-HS-9003"] } },
+      select: { labelPrintedAt: true },
+    });
+    expect(imported).toHaveLength(3);
+    expect(imported.every((a) => a.labelPrintedAt !== null)).toBe(true);
 
     expect(await db.auditEntry.count({ where: { action: "import-create" } })).toBe(auditBefore + 3);
     // …and /audit can NAME the rows an import wrote, rather than showing a

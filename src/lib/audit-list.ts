@@ -8,6 +8,7 @@ export const AUDIT_ENTITY_TYPES = [
   "asset-category", "asset-type", "department", "equipment-policy",
   "feature-flag", "webhook-endpoint",
   "vendor", "stock-item", "stock-category", "stocktake", // Phase 27 (spec §3.3): rows the page already renders and links
+  "purchase-record", // Phase 34 (P-8): one `purchase.recorded` row per Register submit
 ] as const;
 
 export const AUDIT_LIST_CONFIG: ListConfig = {
@@ -17,8 +18,8 @@ export const AUDIT_LIST_CONFIG: ListConfig = {
 };
 
 /** Ids of the class-bearing rows a role may NOT see — one list per audit entityType that has a class (spec §3.3). */
-export interface HiddenAuditRefs { assetIds: string[]; approvalIds: string[]; categoryIds: string[]; typeIds: string[] }
-export const NO_HIDDEN_REFS: HiddenAuditRefs = { assetIds: [], approvalIds: [], categoryIds: [], typeIds: [] };
+export interface HiddenAuditRefs { assetIds: string[]; approvalIds: string[]; categoryIds: string[]; typeIds: string[]; purchaseRecordIds: string[] }
+export const NO_HIDDEN_REFS: HiddenAuditRefs = { assetIds: [], approvalIds: [], categoryIds: [], typeIds: [], purchaseRecordIds: [] };
 
 export const WHEN_VALUES = ["today", "7d", "30d"] as const;
 export const WHEN_LABEL: Record<(typeof WHEN_VALUES)[number], string> = { today: "Today", "7d": "Last 7 days", "30d": "Last 30 days" };
@@ -55,6 +56,7 @@ export function buildAuditWhere(
   const branches = ([
     ["asset", hidden.assetIds], ["approval", hidden.approvalIds],
     ["asset-category", hidden.categoryIds], ["asset-type", hidden.typeIds],
+    ["purchase-record", hidden.purchaseRecordIds],
   ] as const)
     .filter(([, ids]) => ids.length > 0)
     .map(([entityType, ids]) => ({ entityType, entityId: { in: [...ids] } }));

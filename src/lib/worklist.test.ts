@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { dayFromISO } from "./deadlines";
 import { fmtDate } from "./format";
 import {
-  DEFAULT_LOAN_DAYS, LOAN_DUE_SOON_DAYS, SEE_ALL_HREF, WORK_SECTIONS, capLine, groupWork, leaverRow, loanRow,
-  loanSoonEdge, pastSlaCount, summaryChips, workActionLabel, workHeadline, workRowHref, type LeaverLike, type WorkGroup, type WorkRow,
+  DEFAULT_LOAN_DAYS, SEE_ALL_HREF, WORK_SECTIONS, capLine, groupWork, leaverRow, loanRow,
+  loanSoonEdge, pastSlaCount, summaryChips, workActionLabel, workHeadline, workRowHref, type LeaverLike, type WorkRow,
 } from "./worklist";
 
 const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>

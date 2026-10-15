@@ -22,6 +22,9 @@ export const LABEL_CELL_MM = {
 export const LABEL_PADDING_MM = 5;
 export const LABEL_USABLE_MM = LABEL_CELL_MM.width - 2 * LABEL_PADDING_MM;
 
+/** Phase 34 (spec §6): the redesigned cell's row heights in mm, checked against the cell in the test. */
+export const LABEL_LAYOUT_MM = { topRow: 4, gap: 2, tag: 5.2, barcode: 9 } as const;
+
 /** ~13 mil. Comfortable for any cheap handheld. */
 export const PREFERRED_MODULE_MM = 0.33;
 /**

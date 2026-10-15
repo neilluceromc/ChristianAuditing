@@ -20,17 +20,22 @@ export function TagsBox({
   ids,
   start = 1,
   cls,
+  inForm = false,
 }: {
   mode: "tags" | "start";
   tags?: string;
   ids?: string;
   start?: number;
   cls: AssetClass;
+  /**
+   * Phase 34: the fields only, for the Labels tab, where they sit inside the
+   * Waiting to print form so one "Make sheet" submits the ticked batches, the
+   * tags and the start together. That form carries `cls` and `ids` itself.
+   */
+  inForm?: boolean;
 }) {
-  return (
-    <form method="get" action="/inventory/labels" className="flex max-w-[520px] flex-col gap-3">
-      {cls === "PURCHASING" && <input type="hidden" name="cls" value="PURCHASING" />}
-      {mode === "start" && ids && <input type="hidden" name="ids" value={ids} />}
+  const fields = (
+    <>
       {mode === "tags" && (
         <div className="flex flex-col gap-1.5">
           <label htmlFor="labels-tags" className="text-xs font-medium text-fg">Tags</label>
@@ -63,8 +68,16 @@ export function TagsBox({
             inputMode="numeric"
           />
         </div>
-        <Button type="submit" variant={mode === "tags" ? "primary" : "secondary"}>Make sheet</Button>
+        {!inForm && <Button type="submit" variant={mode === "tags" ? "primary" : "secondary"}>Make sheet</Button>}
       </div>
+    </>
+  );
+  if (inForm) return <div className="flex max-w-[520px] flex-col gap-3">{fields}</div>;
+  return (
+    <form method="get" action="/inventory/labels" className="flex max-w-[520px] flex-col gap-3">
+      {cls === "PURCHASING" && <input type="hidden" name="cls" value="PURCHASING" />}
+      {mode === "start" && ids && <input type="hidden" name="ids" value={ids} />}
+      {fields}
     </form>
   );
 }

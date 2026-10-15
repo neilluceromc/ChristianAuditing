@@ -3,7 +3,8 @@ import { cn } from "@/lib/cn";
 export type IconName =
   | "laptop" | "monitor" | "phone" | "dock" | "headset" | "inventory"
   | "employee" | "approval" | "audit" | "search" | "filter" | "sla"
-  | "alert" | "secret" | "export" | "add";
+  | "alert" | "secret" | "export" | "add"
+  | "workstation" | "mouse" | "hub" | "bag" | "other" | "scan";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   laptop: (<><rect x="3" y="4" width="12" height="8" /><line x1="1.5" y1="14.5" x2="16.5" y2="14.5" /></>),
@@ -22,6 +23,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
   secret: (<><circle cx="6.5" cy="9" r="3.5" /><line x1="10" y1="9" x2="15.5" y2="9" /><line x1="13" y1="9" x2="13" y2="12" /><line x1="15.5" y1="9" x2="15.5" y2="11.5" /></>),
   export: (<><line x1="9" y1="11.5" x2="9" y2="2.5" /><polyline points="5.5,6 9,2.5 12.5,6" /><polyline points="3,11 3,15 15,15 15,11" /></>),
   add: (<><line x1="9" y1="3.5" x2="9" y2="14.5" /><line x1="3.5" y1="9" x2="14.5" y2="9" /></>),
+  // Phase 34: the Register category cards (`categoryIcon` in register-catalog.ts) and the Labels scan hint.
+  workstation: (<><rect x="1.5" y="3" width="10" height="7" /><line x1="6.5" y1="10" x2="6.5" y2="13.5" /><line x1="4" y1="13.5" x2="9" y2="13.5" /><rect x="13" y="3" width="3.5" height="11" /></>),
+  mouse: (<><rect x="5" y="2.5" width="8" height="13" rx="4" /><line x1="9" y1="4.5" x2="9" y2="7.5" /></>),
+  hub: (<><rect x="7" y="1.5" width="4" height="4" /><rect x="3.5" y="5.5" width="11" height="10" /><line x1="6" y1="12" x2="12" y2="12" /></>),
+  bag: (<><rect x="2" y="6" width="14" height="9.5" /><path d="M6.5 6 V3.5 h5 V6" /><line x1="2" y1="10" x2="16" y2="10" /></>),
+  other: (<><rect x="2.5" y="2.5" width="5" height="5" /><rect x="10.5" y="2.5" width="5" height="5" /><rect x="2.5" y="10.5" width="5" height="5" /><line x1="13" y1="10.5" x2="13" y2="15.5" /><line x1="10.5" y1="13" x2="15.5" y2="13" /></>),
+  scan: (<><polyline points="2,6 2,2 6,2" /><polyline points="12,2 16,2 16,6" /><polyline points="16,12 16,16 12,16" /><polyline points="6,16 2,16 2,12" /><line x1="4.5" y1="9" x2="13.5" y2="9" /></>),
 };
 
 export function Icon({

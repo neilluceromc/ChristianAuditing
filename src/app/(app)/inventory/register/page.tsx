@@ -2,19 +2,24 @@ import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { RegisterForm } from "@/components/inventory/register-form";
+import { NewEquipmentTabs } from "@/components/inventory/new-equipment-tabs";
+import { registerCatalog } from "@/server/modules/inventory/register-queries";
+import { queueCount } from "@/server/modules/inventory/label-queue";
 import { tagSuggestions } from "@/server/modules/inventory/tag-suggest";
 import { activeEmployeeOptions } from "@/server/modules/employees/queries";
 import { recentPicks } from "@/server/recent-picks";
 import { toSearchParams } from "@/lib/url-state";
 import { fmtDate } from "@/lib/format";
 import {
-  ASSET_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, defaultClassFor, isDirectLifecycle, parseCls, withViewClsQS,
+  ASSET_CLASSES, MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, defaultClassFor, isDirectLifecycle, parseCls,
+  withViewClsQS,
 } from "@/lib/asset-class";
 
 /**
- * Phase 30 (spec §5): the one Register flow — quantity 1 creates one asset
- * (with its initial state, holder, loan date and documents), more creates a
- * batch. Purchasing registers both classes, IT its own (Phase 14); the class
+ * Phase 34 (spec §3, §4): the Register tab of New equipment. Phase 30's one
+ * Register flow — quantity 1 creates one asset (with its initial state,
+ * holder, loan date and documents), more creates a batch — now picks its
+ * category from cards and its type from the model (`registerCatalog`). Purchasing registers both classes, IT its own (Phase 14); the class
  * checks themselves live in `createAsset` / `registerAssets`, this only scopes
  * what the form offers.
  */
@@ -34,17 +39,11 @@ export default async function RegisterAssetsPage({
   // every class this role applies lifecycle changes to directly, not one flag.
   const directClasses = ASSET_CLASSES.filter((c) => isDirectLifecycle(user.role, c));
 
-  const [categories, types, vendors, requests, employees, recentEmployees, recentVendors] = await Promise.all([
-    prisma.assetCategory.findMany({
-      where: { cls: { in: classes } },
-      select: { id: true, name: true, cls: true },
-      orderBy: { name: "asc" },
-    }),
-    prisma.assetType.findMany({
-      where: { category: { cls: { in: classes } } },
-      select: { id: true, name: true, categoryId: true },
-      orderBy: { name: "asc" },
-    }),
+  const [catalog, waiting, vendors, requests, employees, recentEmployees, recentVendors] = await Promise.all([
+    registerCatalog(classes),
+    // The Labels tab's badge counts what waits in the Labels tab's own scope
+    // (ruling R20): the classes this role manages, plus what this user registered.
+    queueCount(MANAGEABLE_CLASSES[user.role], user.id),
     prisma.vendor.findMany({
       where: { archivedAt: null },
       select: { id: true, name: true },
@@ -63,7 +62,7 @@ export default async function RegisterAssetsPage({
   // Both come from the same grouped reads (`tagSuggestions`): counts are per
   // category (the field the operator picks); the highest number is per
   // prefix, fleet-wide, because a tag is unique across the whole register.
-  const suggestions = await tagSuggestions(categories.map((c) => c.id));
+  const suggestions = await tagSuggestions(catalog.map((c) => c.id));
   const prefixCountsByCategory: Record<string, Array<{ prefix: string; n: number }>> =
     Object.fromEntries(Object.entries(suggestions).map(([id, s]) => [id, s.prefixes]));
   const highestByPrefix: Record<string, number> = Object.values(suggestions)[0]?.highest ?? {};
@@ -76,18 +75,18 @@ export default async function RegisterAssetsPage({
   return (
     <>
       <PageHeader
-        title="Register assets"
+        title="New equipment"
         breadcrumb={[
           {
             label: listCls === "PURCHASING" ? "Purchasing assets" : "Inventory",
             href: listHref,
           },
-          { label: "Register assets" },
+          { label: "Register" },
         ]}
       />
+      <NewEquipmentTabs active="register" cls={listCls} waiting={waiting} />
       <RegisterForm
-        categories={categories}
-        types={types}
+        catalog={catalog}
         vendors={vendors}
         recentVendors={recentVendors}
         employees={employees}
@@ -102,6 +101,7 @@ export default async function RegisterAssetsPage({
         directClasses={directClasses}
         defaultCls={defaultCls}
         listHref={listHref}
+        baseUrl={process.env.APP_BASE_URL}
       />
     </>
   );
