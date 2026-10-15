@@ -118,8 +118,11 @@ redeploy with:
 .\scripts\deploy-staging.ps1
 ```
 
-It pulls the current branch, rebuilds, restarts, and then **polls the app until it answers** rather
-than assuming `up -d` succeeded. `-CheckOnly` reports what is waiting and touches nothing; `-Force`
+It pulls the current branch, waits for the image GitHub Actions built for that commit
+(`.github/workflows/image.yml` → `ghcr.io/<owner>/<repo>:sha-<commit>`), pulls it, restarts, and then
+**polls the app until it answers** rather than assuming `up -d` succeeded. The staging host never builds the
+image itself (a local build crashed the staging laptop); `-LocalBuild` restores the old local build as a
+last resort. `-CheckOnly` reports what is waiting and touches nothing; `-Force`
 rebuilds even when the pull brought nothing new, which is what lets you run it on a Task Scheduler
 timer cheaply.
 

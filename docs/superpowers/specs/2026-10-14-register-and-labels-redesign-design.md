@@ -4,7 +4,7 @@
 <https://claude.ai/artifact/7Q5i9JScWpffej9FDTi5sf> (version 4, the "Register" and "Labels" tabs).
 It needs **one migration (the 27th)**. Plan `docs/superpowers/plans/2026-10-14-phase-34-register-labels-redesign.md`
 (`2904714`, 12 tasks, P-1…P-9, D-1…D-27). **CODE-COMPLETE 2026-10-15 on `phase-34-register-labels` (final code
-tree `f7c4f70`), MERGED to `main` via `ffbc0e8` (`--no-ff`, merged tree = tested tip `cf39923`) and PUSHED 2026-10-15; staging NOT yet redeployed; migration 27 `20261014090000_register_labels` — the staging redeploy
+tree `f7c4f70`), MERGED to `main` via `ffbc0e8` (`--no-ff`, merged tree = tested tip `cf39923`) and PUSHED 2026-10-15; staging redeployed 2026-10-15 at `07b1f32` (migration 27 applied); migration 27 `20261014090000_register_labels` — the staging redeploy
 APPLIES it (the deploy script runs `prisma migrate deploy`).** Battery A 58 · B 87 (+2 skipped) · C 64 · D 70 · E1 61 · E2 56 · F 66 = 462 passed / 464 listed; the physical
 print-and-scan check of the new label on a real A4 sheet is owed. §7.1's prefix order was rewritten by ruling
 R23. Record: `docs/HANDOVER.md` (aa).
