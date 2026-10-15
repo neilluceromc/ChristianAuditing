@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   experimental: {
+    // Cap the build's worker processes: on this 28-core host the default
+    // spawns one per core, each with its own heap, and the deploy build's
+    // peak memory helped crash the staging laptop (2026-10-15).
+    cpus: 4,
     serverActions: {
       // R-5, round 2: Next 15's default is 1MB, and this module's own
       // ceilings can legally produce more than that — 2,000 rows with Notes

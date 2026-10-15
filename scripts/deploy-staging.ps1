@@ -100,11 +100,13 @@ if ($after -ne $before) { Say "updated $($before.Substring(0,7)) -> $($after.Sub
 # Build BEFORE up: `up -d` builds only when a tag is missing, so a host that
 # already has an inventory-app image would silently keep running the old one.
 Say "building..."
-docker compose --profile prod build
+# Only `web` carries `build:`; migrate and worker reuse the inventory-app image
+# it produces, so this is one build, not three in parallel (2026-10-15 crash).
+docker compose --profile prod build web
 if ($LASTEXITCODE -ne 0) { Die "docker compose build failed. Nothing was restarted; the old stack is still serving." }
 
 Say "starting..."
-docker compose --profile prod up -d
+docker compose --profile prod up -d --no-build
 if ($LASTEXITCODE -ne 0) { Die "docker compose up failed. Check 'docker compose --profile prod logs migrate' first -- a failed migration stops web and worker by design." }
 
 # `migrate` exits 0 on success, so a stopped `migrate` container is correct and

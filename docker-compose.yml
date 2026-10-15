@@ -22,8 +22,12 @@ services:
 
   migrate:
     profiles: ["prod"]
+    # Built ONCE, by `web` below; migrate and worker reuse that image. Three
+    # `build: .` entries made every deploy build, export and unpack the 2.6 GB
+    # image three times in parallel — enough memory pressure to take this
+    # laptop down (bugcheck 0x12B, 2026-10-15).
     image: inventory-app
-    build: .
+    pull_policy: never
     restart: "no"
     command: ["node_modules/.bin/prisma", "migrate", "deploy"]
     environment:
@@ -67,8 +71,8 @@ services:
 
   worker:
     profiles: ["prod"]
-    image: inventory-app
-    build: .
+    image: inventory-app   # built by `web` (see migrate)
+    pull_policy: never
     restart: unless-stopped
     command: ["node_modules/.bin/tsx", "src/worker/index.ts"]
     stop_grace_period: 30s
