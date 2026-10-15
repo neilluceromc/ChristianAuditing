@@ -73,7 +73,7 @@ const OPEN_STATES = ["PENDING", "CLAIMED", "APPROVED"] as const;
 
 test.describe.serial("custody", () => {
   test("7. a loaner slot fills only from a TEMPORARY device", async ({ page }) => {
-    // BR-LT-0210's real AssetType is "Dell Latitude" (the model text
+    // BR-LT-0210's real AssetType is "Standard" (the model text
     // "ThinkPad T14 Gen 4" is free-form and does not have to match) — looked
     // up rather than assumed, since a slot only fills from an exact typeId
     // match (computeLoadout).
