@@ -17,6 +17,7 @@ import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
 import { auditPhrase, auditSentence } from "@/lib/activity";
+import { REG_LABEL, REG_STATES, regWhere, registrationState, returnSummary, type RegState } from "@/lib/registration";
 import { attentionOf, attentionWhere, orderByAttention, type Attention } from "@/lib/inventory-attention";
 
 /** Serializable DTO for the client table island — strings only, preformatted. */
@@ -51,6 +52,13 @@ export interface AssetRow {
   awaitingItCheck: boolean;
   financeConfirmed: boolean;
   financeReturned: boolean;
+  /** Phase 35 (spec §3.1): the derived registration state, and what Finance flagged when it is needs-correction */
+  reg: RegState;
+  regNotCapitalised: boolean;
+  regItems: string[];
+  regNote: string | null;
+  regBy: string | null;
+  regAt: string | null;
   /** the one reason this row still owes someone something, worst first (attentionOf) */
   attention: Attention | null;
 }
@@ -96,6 +104,7 @@ const LIST_INCLUDE = {
     orderBy: { createdAt: "desc" },
     take: 1,
   },
+  financeReturnedBy: { select: { name: true } },
 } satisfies Prisma.AssetInclude;
 
 function toRow(a: {
@@ -109,6 +118,10 @@ function toRow(a: {
   itVerifiedAt: Date | null;
   financeConfirmedAt: Date | null;
   financeReturnedAt: Date | null;
+  financeNotCapitalised: boolean;
+  financeReturnFields: string[];
+  financeReturnReason: string | null;
+  financeReturnedBy: { name: string } | null;
   purchasedAt: Date | null;
   warrantyUntil: Date | null;
   defectiveSince: Date | null;
@@ -124,6 +137,8 @@ function toRow(a: {
 }, now: Date): AssetRow {
   const stage = stageOf(a);
   const pendingRef = a.approvals[0]?.refNo ?? null;
+  const reg = registrationState(a);
+  const summary = reg === "needs-correction" ? returnSummary(a) : { items: [], note: null };
   return {
     id: a.id,
     tag: a.tag,
@@ -147,6 +162,12 @@ function toRow(a: {
     awaitingItCheck: a.cls === "IT" && a.itVerifiedAt === null,
     financeConfirmed: a.financeConfirmedAt !== null,
     financeReturned: a.financeReturnedAt !== null,
+    reg,
+    regNotCapitalised: a.financeNotCapitalised,
+    regItems: summary.items,
+    regNote: summary.note,
+    regBy: a.financeReturnedBy?.name ?? null,
+    regAt: a.financeReturnedAt ? fmtDate(a.financeReturnedAt) : null,
     attention: attentionOf({
       cls: a.cls, status: a.status, returnedAt: a.returnedAt, loanDueAt: a.loanDueAt,
       pendingRef, itVerifiedAt: a.itVerifiedAt,
@@ -337,7 +358,7 @@ export async function facetOptions(
   // simply never "its own" facet here, because it isn't one of the four
   // being computed. Matches the without(facet) rule above: apply everything
   // else, never the facet's own selection.
-  const [statusG, categoryG, typeG, assigneeG, categories, types, assignees, provenanceCounts] = await Promise.all([
+  const [statusG, categoryG, typeG, assigneeG, categories, types, assignees, provenanceCounts, regCounts] = await Promise.all([
     prisma.asset.groupBy({ by: ["status"], where: buildAssetWhere(without("status"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["categoryId"], where: buildAssetWhere(without("category"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["typeId"], where: buildAssetWhere(without("type"), purchaseYear, cls), _count: true }),
@@ -349,6 +370,11 @@ export async function facetOptions(
     Promise.all(
       PROVENANCES.map((p) =>
         prisma.asset.count({ where: { AND: [buildAssetWhere(without("provenance"), purchaseYear, cls), provenanceWhere(p)] } }),
+      ),
+    ),
+    Promise.all(
+      REG_STATES.map((r) =>
+        prisma.asset.count({ where: { AND: [buildAssetWhere(without("reg"), purchaseYear, cls), regWhere(r)] } }),
       ),
     ),
   ]);
@@ -368,6 +394,7 @@ export async function facetOptions(
       value: e.id, label: e.name, count: assigneeG.find((g) => g.assigneeId === e.id)?._count ?? 0,
     })),
     provenance: PROVENANCES.map((p, i) => ({ value: p, label: PROVENANCE_LABEL[p], count: provenanceCounts[i] })),
+    reg: REG_STATES.map((r, i) => ({ value: r, label: REG_LABEL[r], count: regCounts[i] })),
   };
 }
 
@@ -430,6 +457,8 @@ export const getAsset = cache((id: string) =>
       assignee: true,
       vendor: true,
       purchaseRequest: { select: { id: true, refNo: true } },
+      financeReturnedBy: { select: { name: true } },
+      financeConfirmedBy: { select: { name: true } },
       approvals: {
         where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
         orderBy: { createdAt: "desc" },

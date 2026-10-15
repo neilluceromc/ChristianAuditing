@@ -1,108 +1,96 @@
 import { Prisma, type AssetClass, type AssetStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { pagedSnapshot } from "@/server/paged";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtMoneyExact } from "@/lib/format";
 import { isStatusOf } from "@/lib/asset-class";
-import { ageBucket } from "@/lib/home";
-import { ENTITY_PAGE_SIZE } from "@/lib/paging";
-import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
-
-export interface FinanceAssetRow {
-  id: string;
-  tag: string;
-  model: string;
-  category: string;
-  status: string;
-  cost: string;
-  purchased: string;
-  age: string;
-  warranty: string;
-  assignee: string | null;
-  provenance: string;
-}
+import { monthLabel } from "@/lib/depreciation";
+import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { FIN_FILTERS, finWhere, pageAcross, regWhere, type FinFilter } from "@/lib/registration";
+import { CAPITALISED, bookValueTotals, depRows, type DepAssetRow } from "./depreciation-queries";
 
 export function parseAssetStatus(raw: string | null | undefined, cls: AssetClass): AssetStatus | null {
   return raw != null && isStatusOf(cls, raw) ? raw : null;
 }
 
-/**
- * Capitalized assets: anything with an acquisition cost. Status is shown, not
- * filtered — finance cares that a ₱55,000 laptop currently reads DEFECTIVE.
- * No book-value column: depreciation is a policy nobody has stated, and
- * inventing one would put a number on screen the business never agreed to.
- */
-export async function financeAssets(
-  status: AssetStatus | null,
-  page: number,
-  cls: AssetClass,
-  now: Date = new Date(),
-): Promise<{ rows: FinanceAssetRow[]; total: number; page: number; pageCount: number; totalCost: string }> {
-  // Spec §5.3: Finance sees an IT asset only once IT has checked it. Purchasing
-  // rows never carry a stamp and are not gated.
-  const where: Prisma.AssetWhereInput = {
-    cls, cost: { not: null },
-    ...(cls === "IT" ? { itVerifiedAt: { not: null } } : {}),
-    ...(status ? { status } : {}),
-  };
-  // The aggregate must read the same snapshot as the count, so it runs
-  // inside pagedSnapshot's transaction alongside the page's own findMany —
-  // captured via closure since the helper's `rows` callback returns T[].
-  let costSum = 0;
-  const { rows: assets, ...pg } = await pagedSnapshot(
-    ENTITY_PAGE_SIZE,
-    page,
-    (tx) => tx.asset.count({ where }),
-    async (tx, pg) => {
-      const [rows, sum] = await Promise.all([
-        tx.asset.findMany({
-          where,
-          orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
-          skip: pg.skip,
-          take: pg.take,
-          // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
-          include: { category: true, assignee: true },
-        }),
-        tx.asset.aggregate({ where, _sum: { cost: true } }),
-      ]);
-      costSum = sum._sum.cost === null ? 0 : Number(sum._sum.cost);
-      return rows;
-    },
-  );
+export interface FinanceListParams { cls: AssetClass; status: AssetStatus | null; fin: FinFilter | null; q: string; page: number }
 
+/** Phase 35 (spec 4.1): every asset of the class — no cost filter and no IT gate. */
+export function financeListWhere(p: Omit<FinanceListParams, "page" | "fin">): Prisma.AssetWhereInput {
+  const q = p.q.trim();
   return {
-    total: pg.total,
-    page: pg.page,
-    pageCount: pg.pageCount,
-    // Decimal never leaves this module
-    totalCost: fmtMoney(costSum),
-    rows: assets.map((a): FinanceAssetRow => ({
-      id: a.id,
-      tag: a.tag,
-      model: a.model,
-      category: a.category.name,
-      status: a.status,
-      cost: fmtMoney(a.cost === null ? 0 : Number(a.cost)),
-      purchased: fmtDate(a.purchasedAt),
-      age: ageBucket(a.purchasedAt, now) ?? "—",
-      warranty: fmtDate(a.warrantyUntil),
-      assignee: a.assignee?.name ?? null,
-      provenance: PROVENANCE_LABEL[provenanceOf(a)],
-    })),
+    cls: p.cls,
+    ...(p.status ? { status: p.status } : {}),
+    ...(q ? {
+      OR: [
+        { tag: { contains: q, mode: "insensitive" } },
+        { model: { contains: q, mode: "insensitive" } },
+        { serial: { contains: q, mode: "insensitive" } },
+        { assignee: { name: { contains: q, mode: "insensitive" } } },
+      ],
+    } : {}),
+  };
+}
+
+const BY_COST: Prisma.AssetOrderByWithRelationInput[] = [{ cost: { sort: "desc", nulls: "last" } }, { tag: "asc" }, { id: "asc" }];
+const BY_AGE: Prisma.AssetOrderByWithRelationInput[] = [{ createdAt: "asc" }, { id: "asc" }];
+
+/**
+ * Phase 35 (spec 4.1): Finance's register of every asset of a class, with the registration chips, a page of
+ * rows (To review first on All, plan P-10) and totals over EVERY matching capitalised row (plan P-4).
+ * Status is shown on every row, and can also be filtered (the optional status filter); Finance cares that a P55,000 laptop currently reads DEFECTIVE.
+ */
+export async function financeAssets(p: FinanceListParams, now: Date = new Date()): Promise<{
+  rows: DepAssetRow[]; total: number; page: number; pageCount: number;
+  chips: Record<FinFilter | "all", number>;
+  totals: { count: number; costed: number; cost: string; depreciation: string; book: string; asOfLabel: string };
+}> {
+  const where = financeListWhere(p);
+  const scoped: Prisma.AssetWhereInput = p.fin ? { AND: [where, finWhere(p.fin)] } : where;
+  const [all, ...counts] = await Promise.all([
+    prisma.asset.count({ where }),
+    ...FIN_FILTERS.map((f) => prisma.asset.count({ where: { AND: [where, finWhere(f)] } })),
+  ]);
+  const chips = { all } as Record<FinFilter | "all", number>;
+  FIN_FILTERS.forEach((f, i) => { chips[f] = counts[i]; });
+
+  const total = p.fin ? chips[p.fin] : all;
+  const pg = pageOf(total, p.page, ENTITY_PAGE_SIZE);
+  let rows: DepAssetRow[];
+  if (p.fin) {
+    rows = await depRows(scoped, now, { orderBy: BY_COST, skip: pg.skip, take: pg.take });
+  } else {
+    const w = pageAcross(chips["with-finance"], pg.skip, pg.take);
+    const review = finWhere("with-finance");
+    const [first, rest] = await Promise.all([
+      w.first.take ? depRows({ AND: [where, review] }, now, { orderBy: BY_AGE, ...w.first }) : Promise.resolve([]),
+      w.rest.take ? depRows({ AND: [where, { NOT: review }] }, now, { orderBy: BY_COST, ...w.rest }) : Promise.resolve([]),
+    ]);
+    rows = [...first, ...rest];
+  }
+
+  const [sums, costed] = await Promise.all([
+    bookValueTotals(scoped, now),
+    prisma.asset.count({ where: { AND: [scoped, CAPITALISED] } }),
+  ]);
+  return {
+    rows, total: pg.total, page: pg.page, pageCount: pg.pageCount, chips,
+    totals: {
+      count: total, costed,
+      cost: fmtMoneyExact(sums.costC / 100),
+      depreciation: fmtMoneyExact(sums.accumulatedC / 100),
+      book: fmtMoneyExact(sums.bookC / 100),
+      asOfLabel: monthLabel(sums.asOf),
+    },
   };
 }
 
 /**
- * Phase 30 (spec §4.6): the next record waiting on Finance, in the queue's own order — the
- * `financeAssets` where (costed; an IT asset only once IT has checked it) narrowed to the rows
- * still undecided, cost desc then tag then id, never the record just decided.
+ * Phase 35 (spec §4.1): the next record waiting on Finance — every `with-finance` asset of the class
+ * (an asset with no cost is reviewable too), oldest registration first, never the record just decided.
  */
 export async function nextToReview(currentId: string, cls: AssetClass): Promise<{ id: string; tag: string } | null> {
   return prisma.asset.findFirst({
-    where: {
-      cls, cost: { not: null }, ...(cls === "IT" ? { itVerifiedAt: { not: null } } : {}),
-      financeConfirmedAt: null, financeReturnedAt: null, id: { not: currentId },
-    },
-    orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
+    where: { cls, ...regWhere("with-finance"), id: { not: currentId } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { id: true, tag: true },
   });
 }

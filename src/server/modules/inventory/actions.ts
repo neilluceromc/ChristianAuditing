@@ -33,6 +33,8 @@ import { rememberPicks } from "@/server/recent-picks";
 import { nextToReview } from "@/server/modules/finance/queries";
 import { serialRequired } from "@/lib/serial-rules";
 import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
+import { approveSchema, resubmitSchema, sendBackSchema } from "@/lib/registration-input";
+import { fieldLabels, shouldReopen } from "@/lib/registration";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -46,6 +48,7 @@ const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign 
  * being repainted as a banner (final review, plan D-8).
  */
 class DirectRefusal extends Error {}
+class StaleAssetError extends Error {}
 
 const bulkSchema = z
   .object({
@@ -439,6 +442,10 @@ const updateSchema = z.object({
   invoiceRef: z.string().trim().max(60).optional(),
   rmaRef: z.string().trim().max(60).optional(),
   repairQuote: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000).multipleOf(0.01, "Whole centavos only")]).optional(),
+  // Phase 35 (plan P-7): the Phase 34 register fields, now editable so a Finance send-back can be fixed here (same limits as register).
+  receiptRef: z.string().trim().max(60).optional(),
+  warrantyCoveredBy: z.union([z.literal(""), z.enum(WARRANTY_COVERED_BY)]).optional(),
+  warrantyContact: z.string().trim().max(160).optional(),
 });
 
 /**
@@ -491,6 +498,9 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
     invoiceRef: d.invoiceRef || null,
     rmaRef: d.rmaRef || null,
     repairQuote: toCost(d.repairQuote),
+    receiptRef: d.receiptRef || null,
+    warrantyCoveredBy: d.warrantyCoveredBy || null,
+    warrantyContact: d.warrantyContact || null,
   };
   // The form round-trips dates at DAY precision while seed/legacy rows carry
   // time-of-day. Compare at day precision — otherwise every first edit of an
@@ -506,21 +516,50 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   // produced a write, not every time a form was opened and closed.
   if (Object.keys(diff).length === 0) return ok({ id: asset.id }); // no audit noise for no-ops
 
+  // Phase 35 (spec §3.6): a cost on an asset approved as NOT capitalised reopens Finance's review —
+  // Finance never saw that cost, and depreciation must start from an approval of it.
+  // Final review I-1: keyed on "approved, had no cost, now has one" (covers legacy approvals with no cost too).
+  const reopen = shouldReopen(asset, data.cost);
+
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.asset.update({ where: { id: asset.id }, data: changed });
+      if (reopen) {
+        // M-1: state-guarded — a concurrent approval/reopen changes the preconditions, so this is a conflict, not a CHECK 500.
+        const done = await tx.asset.updateMany({
+          where: { id: asset.id, financeConfirmedAt: { not: null }, cost: null },
+          data: { ...changed, financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false },
+        });
+        if (done.count === 0) throw new StaleAssetError();
+      } else if (asset.cost === null && data.cost !== null) {
+        // Not approved when read; if Finance approves (even as not capitalised) before this lands, conflict.
+        const done = await tx.asset.updateMany({ where: { id: asset.id, financeConfirmedAt: null }, data: changed });
+        if (done.count === 0) throw new StaleAssetError();
+      } else {
+        await tx.asset.update({ where: { id: asset.id }, data: changed });
+      }
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name,
         entityType: "asset", entityId: asset.id,
         action: "update", diff,
       });
+      if (reopen) {
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
+          action: "finance.reopened", diff: { cost: diff.cost ?? { from: null, to: Number(data.cost) } },
+        });
+      }
     });
   } catch (err) {
+    if (err instanceof StaleAssetError) return conflict("Finance just changed this asset's review. Reload and try again.");
     if (uniqueTarget(err).includes("serial")) return validationError({ serial: "That serial is already registered" });
     throw err;
   }
   revalidatePath(`/inventory/${asset.id}`);
   revalidatePath("/inventory");
+  if (reopen) {
+    revalidatePath("/finance/assets");
+    revalidatePath(`/finance/assets/${asset.id}`);
+  }
   await rememberPicks(user.id, { vendor: d.vendorId || null });
   return ok({ id: asset.id });
 }
@@ -583,10 +622,9 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
   return ok({ refNo });
 }
 
-const confirmSchema = z.object({ id: z.string().min(1) });
-
 /**
- * Finance confirms that a registered asset's details are correct. Separate
+ * Finance approves a registered asset — as capitalised (it has a cost), or as not capitalised
+ * (Phase 35, spec §3.4: no cost, so it never depreciates). Separate
  * from the approval queue on purpose (C-5): every ApprovalType is a lifecycle
  * change to an asset that already exists, whereas this is data verification —
  * a different question with a different audience.
@@ -606,7 +644,7 @@ export async function confirmAssetDetails(
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
-  const parsed = confirmSchema.safeParse(input);
+  const parsed = approveSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
 
   let out: { id: string; tag: string; cls: AssetClass } | null = null;
@@ -615,7 +653,7 @@ export async function confirmAssetDetails(
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id: parsed.data.id },
-      select: { id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true },
+      select: { id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true, cost: true, financeReturnedAt: true },
     });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
@@ -629,13 +667,29 @@ export async function confirmAssetDetails(
       failure = conflict(`${asset.tag} is waiting for IT's check — Finance confirms after IT.`);
       return;
     }
+    if (asset.financeReturnedAt) {
+      failure = conflict(`${asset.tag} is waiting for ${CLASS_LABEL[asset.cls]} to correct it — Finance reviews it when it comes back.`);
+      return;
+    }
+    const notCap = parsed.data.notCapitalised === true;
+    if (notCap && asset.cost !== null) {
+      failure = conflict(`${asset.tag} has a cost, so it is approved as capitalised — use Approve.`);
+      return;
+    }
+    if (!notCap && asset.cost === null) {
+      failure = conflict(`${asset.tag} has no cost. Send it back for the cost, or approve it as not capitalised.`);
+      return;
+    }
     // State-guarded write: the null check is IN the where clause, so two
     // simultaneous confirmations cannot both succeed.
     const hit = await tx.asset.updateMany({
-      where: { id: asset.id, financeConfirmedAt: null },
+      where: { id: asset.id, financeConfirmedAt: null, financeReturnedAt: null, cost: notCap ? null : { not: null } },
       data: {
         financeConfirmedAt: new Date(),
         financeConfirmedById: user.id,
+        financeNotCapitalised: notCap,
+        financeReturnFields: [],
+        financeResubmitNote: null,
         // Clearing the return here is what makes "confirmed AND returned"
         // unreachable, so the pill's three states stay mutually exclusive.
         financeReturnedAt: null,
@@ -644,7 +698,7 @@ export async function confirmAssetDetails(
       },
     });
     if (hit.count === 0) {
-      failure = conflict(`${asset.tag} was confirmed by someone else just now.`);
+      failure = conflict(`${asset.tag} was changed by someone else just now — reload and review it again.`);
       return;
     }
     await writeAudit(tx, {
@@ -653,7 +707,7 @@ export async function confirmAssetDetails(
       entityType: "asset",
       entityId: asset.id,
       action: "finance.confirm",
-      diff: { financeConfirmed: { from: null, to: user.name } },
+      diff: { financeConfirmed: { from: null, to: user.name }, ...(notCap ? { notCapitalised: { from: false, to: true } } : {}) },
     });
     out = { id: asset.id, tag: asset.tag, cls: asset.cls };
   });
@@ -662,22 +716,20 @@ export async function confirmAssetDetails(
   const done = out!;
   revalidatePath(`/inventory/${parsed.data.id}`);
   revalidatePath("/inventory");
+  revalidatePath("/finance/assets");
+  revalidatePath(`/finance/assets/${parsed.data.id}`);
   return ok({ tag: done.tag, next: await nextToReview(done.id, done.cls) });
 }
 
-const returnSchema = z.object({
-  id: z.string().min(1),
-  reason: reasonRequired({ min: 5, message: "Say what is wrong — at least 5 characters." }),
-});
-
 /**
- * Finance sends a registration back to IT with a reason. The counterpart to
+ * Finance sends a registration back to IT or Purchasing with a checklist of what is wrong and an
+ * optional note (Phase 35, spec §3.3). The counterpart to
  * confirmAssetDetails, and deliberately NOT a gate (C-7): the asset stays
  * live and usable throughout — what changes is that IT can see what to fix.
  *
- * A SECOND return is allowed and overwrites the current reason: Finance
+ * A SECOND return is allowed and overwrites the current checklist and note: Finance
  * re-checking after IT's fix and finding it still wrong is a real sequence.
- * Only the current reason lives in the column; every one survives in the
+ * Only the current ones live in the columns; every one survives in the
  * audit trail.
  */
 export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ tag: string }>> {
@@ -686,9 +738,10 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
-  const parsed = returnSchema.safeParse(input);
+  const parsed = sendBackSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { id, reason } = parsed.data;
+  const { id, fields, note } = parsed.data;
+  const cleanNote = note ? note : null;
 
   let out: { tag: string } | null = null;
   let failure: ActionResult<{ tag: string }> | null = null;
@@ -718,7 +771,9 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
       data: {
         financeReturnedAt: new Date(),
         financeReturnedById: user.id,
-        financeReturnReason: reason,
+        financeReturnReason: cleanNote,
+        financeReturnFields: fields,
+        financeResubmitNote: null,
       },
     });
     if (hit.count === 0) {
@@ -731,9 +786,9 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
       entityType: "asset",
       entityId: asset.id,
       action: "finance.return",
-      // The reason goes in the diff, and that is what makes the audit trail
-      // the history: the column holds only the CURRENT reason.
-      diff: { financeReturn: { from: null, to: reason } },
+      // The checklist (as labels) and note go in the diff, and that is what makes the audit trail
+      // the history: the columns hold only the CURRENT ones.
+      diff: { financeReturn: { from: null, to: { fields: fieldLabels(fields), note: cleanNote } } },
     });
     out = { tag: asset.tag };
   });
@@ -741,10 +796,10 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
   if (failure) return failure;
   revalidatePath(`/inventory/${id}`);
   revalidatePath("/inventory");
+  revalidatePath("/finance/assets");
+  revalidatePath(`/finance/assets/${id}`);
   return ok(out!);
 }
-
-const resubmitSchema = z.object({ id: z.string().min(1) });
 
 /**
  * The registering department says "fixed, look again", clearing the return
@@ -762,7 +817,7 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
 
   const parsed = resubmitSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { id } = parsed.data;
+  const { id, reply } = parsed.data;
 
   let out: { tag: string } | null = null;
   let failure: ActionResult<{ tag: string }> | null = null;
@@ -788,7 +843,10 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
     }
     const hit = await tx.asset.updateMany({
       where: { id: asset.id, financeReturnedAt: { not: null } },
-      data: { financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null },
+      data: {
+        financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null,
+        financeReturnFields: [], financeResubmitNote: reply ? reply : null,
+      },
     });
     if (hit.count === 0) {
       failure = conflict(`${asset.tag} was resubmitted by someone else just now.`);
@@ -800,7 +858,7 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
       entityType: "asset",
       entityId: asset.id,
       action: "finance.resubmit",
-      diff: { financeReturn: { from: "returned", to: null } },
+      diff: { financeReturn: { from: "returned", to: null }, ...(reply ? { reply: { from: null, to: reply } } : {}) },
     });
     out = { tag: asset.tag };
   });
@@ -808,6 +866,8 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
   if (failure) return failure;
   revalidatePath(`/inventory/${id}`);
   revalidatePath("/inventory");
+  revalidatePath("/finance/assets");
+  revalidatePath(`/finance/assets/${id}`);
   return ok(out!);
 }
 

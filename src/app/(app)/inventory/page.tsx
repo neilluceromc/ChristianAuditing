@@ -1,4 +1,7 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { prisma } from "@/server/db/client";
+import { regWhere } from "@/lib/registration";
 import type { AssetClass } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
 import { localDateISO } from "@/lib/format";
@@ -81,12 +84,16 @@ export default async function InventoryPage({
   const recentEmployees = canMutate ? await recentPicks(user.id, "employee") : [];
   const today = localDateISO(new Date());
 
-  const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets] = await Promise.all([
+  const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets, needsCorrection] = await Promise.all([
     listAssets(state, purchaseYear, cls),
     facetOptions(state, purchaseYear, cls),
     getInventoryColumns(user.id),
     purchaseYearBuckets(state, cls),
+    prisma.asset.count({ where: { AND: [{ cls }, regWhere("needs-correction")] } }),
   ]);
+  // Final review I-2: a saved column preference must not hide Registration while the reg filter is on (Show them).
+  const shownColumns = state.filters.reg?.length && !visibleColumns.includes("registration")
+    ? [...visibleColumns, "registration"] : visibleColumns;
   const yearChips = purchaseYearChips(yearBuckets);
 
   const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0 || purchaseYear !== null;
@@ -175,6 +182,26 @@ export default async function InventoryPage({
           </>
         }
       />
+      {needsCorrection > 0 && !(state.filters.reg?.length === 1 && state.filters.reg[0] === "needs-correction") && (
+        <div
+          role="status"
+          className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-(--radius-card) border px-4 py-2.5 text-[13px]"
+          style={{
+            background: "var(--st-fault-bg)",
+            borderColor: "var(--st-fault-border)",
+            borderLeft: "3px solid var(--st-fault-dot)",
+            color: "var(--st-fault-text)",
+          }}
+        >
+          <span className="font-semibold">{needsCorrection} need correction — Finance sent them back.</span>
+          <Link
+            href={"/inventory" + withViewClsQS(serializeListState(withFilter(clearFilters(state), "reg", ["needs-correction"]), INVENTORY_LIST_CONFIG), cls, defaultCls)}
+            className="underline hover:no-underline"
+          >
+            Show them
+          </Link>
+        </div>
+      )}
       <ListNavigationProvider>
         <div className="flex flex-col gap-2">
           <InventoryToolbar
@@ -211,7 +238,7 @@ export default async function InventoryPage({
                   key={exportQS}
                   rows={rows}
                   state={state}
-                  visible={visibleColumns}
+                  visible={shownColumns}
                   canMutate={canMutate}
                   filtersQS={exportQS.replace(/^\?/, "")}
                   total={total}

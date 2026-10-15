@@ -1,4 +1,8 @@
 import type { XlsxColumn } from "@/server/xlsx/write";
+import type { DepAssetRow } from "@/server/modules/finance/depreciation-queries";
+import { monthLabel, type YearRow } from "@/lib/depreciation";
+import { localDateISO } from "@/lib/format";
+import { REG_LABEL_FINANCE } from "@/lib/registration";
 
 export const EXPORT_CAP = 10_000;
 
@@ -352,4 +356,60 @@ export const OFFBOARDING_EXPORT_COLUMNS: XlsxColumn<OffboardingExportRow>[] = [
   { label: "Complete by", width: 13, cell: (r) => ({ value: r.dueAt, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Undecided", width: 11, cell: (r) => ({ value: r.undecided, type: Number }) },
   { label: "Progress", width: 11, cell: (r) => ({ value: r.progress }) },
+];
+
+/** Phase 35 (spec 4.1): Finance's register sheet. Money is a number cell (centavos / 100), never text. */
+const peso = (c: number | null | undefined) =>
+  ({ value: c === null || c === undefined ? null : c / 100, type: Number, format: "#,##0.00" }) as const;
+
+export const FINANCE_ASSETS_EXPORT_COLUMNS: XlsxColumn<DepAssetRow>[] = [
+  { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
+  { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
+  { label: "Category", width: 18, cell: (r) => ({ value: r.category }) },
+  { label: "Class", width: 12, cell: (r) => ({ value: r.cls }) },
+  { label: "Status", width: 14, cell: (r) => ({ value: r.status }) },
+  { label: "Holder", width: 24, cell: (r) => ({ value: r.holder }) },
+  { label: "Registration", width: 18, cell: (r) => ({ value: r.reg === "registered" && r.notCapitalised ? "Not capitalised" : REG_LABEL_FINANCE[r.reg] }) },
+  { label: "Cost", width: 14, cell: (r) => peso(r.costC) },
+  { label: "Confirmed on", width: 14, cell: (r) => ({ value: r.confirmedAt ? localDateISO(r.confirmedAt) : null }) },
+  { label: "Starts", width: 16, cell: (r) => ({ value: r.result?.startMonth == null ? null : monthLabel(r.result.startMonth) }) },
+  { label: "Life (months)", width: 13, cell: (r) => ({ value: r.result?.policy?.lifeMonths ?? null, type: Number, format: "0" }) },
+  { label: "Salvage", width: 14, cell: (r) => peso(r.result?.policy?.salvage) },
+  { label: "Monthly amount", width: 15, cell: (r) => peso(r.result?.monthly) },
+  { label: "Depreciation to date", width: 20, cell: (r) => peso(r.result?.accumulated) },
+  { label: "Book value", width: 14, cell: (r) => peso(r.result?.bookValue) },
+  { label: "Basis", width: 11, cell: (r) => ({ value: r.result?.policy ? (r.custom ? "Custom" : "Category") : "" }) },
+  { label: "Note", width: 40, cell: (r) => ({
+    // a custom row shows its reason AND, when the override is wrong, the warning (final review M-5)
+    value: r.custom ? [r.overrideNote, r.result?.state === "bad-salvage" ? r.note : null].filter(Boolean).join(" · ") : r.note,
+  }) },
+];
+
+/** Phase 35 (plan P-11): one asset's money summary (label + figure in "Book value at end") over its month-by-month schedule. */
+export const ASSET_SCHEDULE_EXPORT_COLUMNS: XlsxColumn<{
+  label: string; opening: number | null; charge: number | null; closing: number | null; projected: string;
+}>[] = [
+  { label: "Month", width: 22, cell: (r) => ({ value: r.label }) },
+  { label: "Book value at start", width: 20, cell: (r) => peso(r.opening) },
+  { label: "Depreciation", width: 16, cell: (r) => peso(r.charge) },
+  { label: "Book value at end", width: 20, cell: (r) => peso(r.closing) },
+  { label: "Projected", width: 11, cell: (r) => ({ value: r.projected }) },
+];
+
+/** Phase 35 (spec §5.6): the year schedule. Subtotal and total rows carry an empty tag/model and a null cost. */
+export interface ScheduleSheetRow { tag: string; model: string; category: string; costC: number | null; grid: YearRow }
+
+const SCHEDULE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export const SCHEDULE_EXPORT_COLUMNS: XlsxColumn<ScheduleSheetRow>[] = [
+  { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
+  { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
+  { label: "Category", width: 26, cell: (r) => ({ value: r.category }) },
+  { label: "Cost", width: 14, cell: (r) => peso(r.costC) },
+  { label: "Book value 1 Jan", width: 16, cell: (r) => peso(r.grid.opening) },
+  ...SCHEDULE_MONTHS.map((m, i): XlsxColumn<ScheduleSheetRow> => ({
+    label: m, width: 12, cell: (r) => peso(r.grid.months[i]),
+  })),
+  { label: "Year total", width: 14, cell: (r) => peso(r.grid.total) },
+  { label: "Book value 31 Dec", width: 16, cell: (r) => peso(r.grid.closing) },
 ];

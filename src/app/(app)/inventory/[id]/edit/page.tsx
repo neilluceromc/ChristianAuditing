@@ -74,7 +74,12 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
           invoiceRef: asset.invoiceRef ?? "",
           rmaRef: asset.rmaRef ?? "",
           repairQuote: asset.repairQuote === null ? "" : String(asset.repairQuote),
+          receiptRef: asset.receiptRef ?? "",
+          warrantyCoveredBy: asset.warrantyCoveredBy ?? "",
+          warrantyContact: asset.warrantyContact ?? "",
         }}
+        flagged={asset.financeReturnedAt ? asset.financeReturnFields : undefined}
+        flagNote={asset.financeReturnedAt ? asset.financeReturnReason : undefined}
         action={action}
       />
     </>

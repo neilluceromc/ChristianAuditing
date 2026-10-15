@@ -13,7 +13,10 @@ import { useToast } from "@/components/ui/toast";
 import { useLeaveTo } from "@/components/ui/back-link";
 import { EntityCombobox } from "@/components/patterns/entity-combobox";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import Link from "next/link";
 import { CLASS_EXAMPLE } from "@/lib/asset-class";
+import { fieldLabels } from "@/lib/registration";
+import { WARRANTY_COVERED_BY, WARRANTY_COVERED_BY_LABEL } from "@/lib/purchase-summary";
 import { MONEY_ERROR, normaliseCost } from "@/lib/register-input";
 import type { ActionResult } from "@/server/action-result";
 
@@ -32,10 +35,13 @@ export interface AssetFormInitial {
   invoiceRef: string;
   rmaRef: string;
   repairQuote: string;
+  receiptRef: string;
+  warrantyCoveredBy: string; // "" | manufacturer | vendor | both
+  warrantyContact: string;
 }
 
 type MoneyKey = "cost" | "repairQuote";
-type TextKey = "model" | "brand" | "serial" | "invoiceRef" | "rmaRef" | "notes";
+type TextKey = "model" | "brand" | "serial" | "invoiceRef" | "receiptRef" | "warrantyContact" | "rmaRef" | "notes";
 
 /**
  * Phase 30 (spec §4.5): the record's Edit form — edit-only; registering goes
@@ -50,6 +56,8 @@ export function AssetForm({
   recentVendors,
   initial,
   action,
+  flagged,
+  flagNote,
 }: {
   assetId: string;
   categories: Array<{ id: string; name: string; cls: AssetClass }>;
@@ -58,6 +66,10 @@ export function AssetForm({
   recentVendors?: string[];
   initial: AssetFormInitial;
   action: (payload: Record<string, unknown>) => Promise<ActionResult<{ id: string }>>;
+  /** Phase 35 (spec §3.5): the checklist keys Finance ticked when it sent this back (REGISTRATION_FIELDS keys). */
+  flagged?: string[];
+  /** Finance's note on that send-back. */
+  flagNote?: string | null;
 }) {
   const toast = useToast();
   // Save and Cancel leave the way Back does (review R9): a plain push would stack
@@ -164,6 +176,15 @@ export function AssetForm({
     });
   }
 
+  // Finance's send-back (spec §3.5): a flagged field is ringed and its hint says so.
+  const isFlagged = (key: string) => !!flagged?.includes(key);
+  const flagHint = (key: string, hint?: string) => (isFlagged(key) ? (hint ? `Finance flagged this \u00b7 ${hint}` : "Finance flagged this") : hint);
+  const flag = (key: string, node: React.ReactNode) =>
+    isFlagged(key) ? (
+      <div key={key} data-flagged className="rounded-(--radius-ctl) p-2 ring-2 ring-[var(--st-attention-border)]">{node}</div>
+    ) : node;
+  const flaggedDocs = (flagged ?? []).some((k) => k.startsWith("doc:"));
+
   const field = (
     label: string,
     key: keyof AssetFormInitial,
@@ -177,8 +198,8 @@ export function AssetForm({
       onBlur?: () => void;
       autoFocus?: boolean;
     } = {},
-  ) => (
-    <FormField label={label} required={opts.required} hint={opts.hint} error={errors[key]}>
+  ) => flag(key, (
+    <FormField label={label} required={opts.required} hint={flagHint(key, opts.hint)} error={errors[key]}>
       {(p) => (
         <Input
           id={p.id}
@@ -195,12 +216,23 @@ export function AssetForm({
         />
       )}
     </FormField>
-  );
+  ));
 
   return (
     <form ref={rootRef} onSubmit={submit} className="flex max-w-[720px] flex-col gap-4">
       {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
       {conflictMsg && <Banner tone="fault" title={conflictMsg} />}
+      {(!!flagged?.length || !!flagNote) && (
+        <Banner tone="attention" title="Finance sent this back">
+          {!!flagged?.length && <p>{fieldLabels(flagged).join(", ")}</p>}
+          {flagNote && <p className="mt-1">{`\u201c${flagNote}\u201d`}</p>}
+          {flaggedDocs && (
+            <p className="mt-1">
+              <Link href={`/inventory/${assetId}/documents`} className="underline">Upload documents on the record &rarr;</Link>
+            </p>
+          )}
+        </Banner>
+      )}
 
       <Card>
         <CardHeader title="Identity" />
@@ -215,7 +247,7 @@ export function AssetForm({
           })}
           {field("Brand", "brand", { onBlur: trim("brand") })}
           {field("Serial", "serial", { onBlur: trim("serial") })}
-          <FormField label="Category" required error={errors.categoryId}>
+          {flag("categoryId", <FormField label="Category" required hint={flagHint("categoryId")} error={errors.categoryId}>
             {(p) => (
               <Select
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
@@ -229,7 +261,7 @@ export function AssetForm({
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
             )}
-          </FormField>
+          </FormField>)}
           <FormField label="Type" hint="Types drive loadout-slot matching." error={errors.typeId}>
             {(p) => (
               <Select
@@ -251,16 +283,16 @@ export function AssetForm({
         <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {field("Purchased", "purchasedAt", { type: "date" })}
           {field("Cost (₱)", "cost", { inputMode: "decimal", onBlur: normaliseMoney("cost") })}
-          <FormField label="Vendor" error={errors.vendorId}>
+          {flag("vendorId", <FormField label="Vendor" hint={flagHint("vendorId")} error={errors.vendorId}>
             {(p) => (
               <EntityCombobox id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 options={vendors.map((v) => ({ value: v.id, label: v.name }))} recent={recentVendors}
                 value={form.vendorId || null} onChange={(id) => setForm((f) => ({ ...f, vendorId: id ?? "" }))}
                 placeholder="Type a vendor name…" />
             )}
-          </FormField>
-          {field("Invoice / receipt no.", "invoiceRef", { onBlur: trim("invoiceRef") })}
-          {field("Warranty until", "warrantyUntil", { type: "date", hint: "Pre-filled at purchase + 12 months — adjust if the quote says otherwise." })}
+          </FormField>)}
+          {field("Invoice no.", "invoiceRef", { onBlur: trim("invoiceRef") })}
+          {field("Official receipt (OR) no.", "receiptRef", { onBlur: trim("receiptRef") })}
           <FormField label="Notes" error={errors.notes} className="sm:col-span-2">
             {(p) => (
               <Textarea
@@ -271,6 +303,26 @@ export function AssetForm({
               />
             )}
           </FormField>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Warranty" />
+        <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {field("Warranty until", "warrantyUntil", { type: "date", hint: "Pre-filled at purchase + 12 months — adjust if the quote says otherwise." })}
+          {flag("warrantyCoveredBy", <FormField label="Covered by" hint={flagHint("warrantyCoveredBy")} error={errors.warrantyCoveredBy}>
+            {(p) => (
+              <Select
+                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                value={form.warrantyCoveredBy}
+                onChange={(e) => set("warrantyCoveredBy")(e.target.value)}
+              >
+                <option value="">—</option>
+                {WARRANTY_COVERED_BY.map((c) => <option key={c} value={c}>{WARRANTY_COVERED_BY_LABEL[c]}</option>)}
+              </Select>
+            )}
+          </FormField>)}
+          {field("Who to call for repairs", "warrantyContact", { onBlur: trim("warrantyContact") })}
         </CardBody>
       </Card>
 

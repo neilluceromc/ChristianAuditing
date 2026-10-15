@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset, stageOf } from "@/server/modules/inventory/queries";
 import { warrantyProgress } from "@/lib/asset-rules";
-import { CLASS_LABEL, canRegisterClass, isAwaitingItCheck } from "@/lib/asset-class";
+import { CLASS_LABEL, canRegisterClass } from "@/lib/asset-class";
 import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
@@ -13,6 +13,7 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { DuePill } from "@/components/ui/due-pill";
 import { Banner } from "@/components/ui/banner";
 import { Pill } from "@/components/ui/pill";
+import { RegistrationBlock } from "@/components/inventory/registration-block";
 import { CreatedNotice } from "@/components/inventory/created-notice";
 import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
 import { statusFamily } from "@/lib/status";
@@ -38,15 +39,6 @@ export default async function AssetOverviewPage({
   const warning = quoteWarning(quote, cost);
   const down = downDays(asset);
   const provenance = provenanceOf(asset);
-  // Spec §4.4: what the header used to say in three pills — the class, where
-  // the record came from, and where Finance stands — now one Record row.
-  const financeState = asset.financeConfirmedAt
-    ? `Finance confirmed · ${fmtDate(asset.financeConfirmedAt)}`
-    : asset.financeReturnedAt
-      ? "Returned by Finance"
-      : isAwaitingItCheck(asset)
-        ? "Awaiting IT check"
-        : "Awaiting Finance";
 
   return (
     <div className="grid max-w-[860px] grid-cols-1 gap-4 lg:grid-cols-2">
@@ -55,6 +47,7 @@ export default async function AssetOverviewPage({
           <CreatedNotice tag={asset.tag} id={asset.id} cls={asset.cls} canRegister={canRegisterClass(user.role, asset.cls)} />
         </div>
       )}
+      <RegistrationBlock asset={asset} viewerRole={user.role} />
       <Card>
         <CardHeader title="Identity" />
         <CardBody>
@@ -105,8 +98,6 @@ export default async function AssetOverviewPage({
                         {provenance === "HISTORICAL" && " · no purchase request"}
                       </span>
                     )}
-                    <span aria-hidden className="text-fg-muted">·</span>
-                    <span>{financeState}</span>
                   </span>
                 ),
               },

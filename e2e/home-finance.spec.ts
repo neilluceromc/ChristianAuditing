@@ -239,15 +239,16 @@ test.describe("home — fleet coverage, age distribution and warranty runway", (
   });
 });
 
-test.describe("home — /finance/assets, the capitalized register", () => {
-  test("lists capitalized assets with a cost total; a status chip filters; a tag opens the asset record", async ({ page }) => {
+test.describe("home — /finance/assets, the register", () => {
+  test("lists every asset with a cost total; a status chip filters; a tag opens Finance's asset page", async ({ page }) => {
     await login(page, "finance@thebackroomop.com");
     await page.goto("/finance/assets");
 
     // The finance sidebar has an h3 nav-group heading with this same text —
     // scope to the page's h1 title.
-    await expect(page.getByRole("heading", { name: "Capitalized assets", level: 1 })).toBeVisible();
-    await expect(page.getByText(/\d+ assets? · ₱[\d,]+ at cost/)).toBeVisible();
+    // Phase 35 (plan P-5): the page is "Assets"; its footer line carries the whole filter's totals.
+    await expect(page.getByRole("heading", { name: "Assets", level: 1 })).toBeVisible();
+    await expect(page.getByText(/\d+ assets? · \d+ with a cost · ₱[\d,.]+ at cost/)).toBeVisible();
 
     const chip = page.getByRole("link", { name: "DEFECTIVE" });
     await chip.click();
@@ -257,10 +258,9 @@ test.describe("home — /finance/assets, the capitalized register", () => {
     const row = page.getByRole("row", { name: /BR-MN-0731/ });
     await expect(row).toBeVisible();
 
-    // Finance was granted access to /inventory/<id> for this Phase — the tag
-    // link must actually open the record, not redirect finance away.
+    // Phase 35: the tag opens Finance's own asset page (/finance/assets/<id>).
     await row.getByRole("link").first().click();
-    await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/finance\/assets\/[a-z0-9]+$/i, { timeout: 15_000 });
   });
 });
 

@@ -1822,4 +1822,18 @@ git commit -m "test(e2e)+docs: Phase 35 -- registration review round trip, not c
 
 ## D-block (decisions made during execution)
 
-(Filled in during execution: each ruling as `D-n — what — why — cost if wrong`.)
+Each ruling as `D-n — what — why — cost if wrong`.
+
+- **D-1 — `warrantyContact` allows 160 characters** (the Phase 34 register schema's limit), not the plan's 120 — the plan said to copy the register's limits where they differ — one number.
+- **D-2 — the flagged-documents link on Edit goes to `/inventory/{id}/documents`** — record tabs are path segments in this codebase — one href.
+- **D-3 — a user with a saved `columns:inventory` preference sees the Registration column only after ticking it** — saved preferences store an explicit visible list, and changing that mechanism is out of scope — a small migration of saved prefs.
+- **D-4 — the needs-correction notice is a `role="status"` div with fault tokens, not `Banner`** — `Banner` with the fault tone is `role="alert"`, and the DOM contract says status — one element.
+- **D-5 — flagged-by dates use `fmtDate` (with the year)**, as Task 4's brief says, not the contract's `{d Mon}` — one formatter.
+- **D-6 — the plan's `twoDecimals` check is replaced by a tolerance check** — `Math.round(n*100) === n*100` rejects valid values such as 8.2 and 19.99 — none.
+- **D-7 — the restored asset-status filter's first chip reads "Any status"** (it was "All") — it would otherwise clash with Finance's chip "All {n}" on the same page; `/finance/assets` carries two chip navs, `Finance state` and `Asset status` — one label and any e2e pin.
+- **D-8 — the schedule's "{n} assets aren't depreciating yet · {m} have no policy" line is hidden when both counts are 0** — a "0 · 0" line says nothing — one condition.
+- **D-9 — the brief's "starts with Cost" for the single-asset export is read as "the header row is Month…, then the five summary rows start with Cost"** — P-11 puts the summary block under the column header — e2e pin only.
+- **D-10 — Task 12 changed two product lines in Task 11's `schedule-table.tsx`, found by the new spec's axe pass:** the scroll container became a focusable `role="region"` (axe `scrollable-region-focusable`), and the projected month headers lost `opacity-60` (colour contrast 2.31) — two attributes.
+- **D-11 — final-review fix wave (controller rulings): I-1 reopens Finance review whenever an APPROVED asset goes from no cost to a cost** (`shouldReopen`: `financeConfirmedAt` set, stored cost null, new cost set), covering not-capitalised and legacy no-cost approvals — no new migration (no legacy backfill); the write is state-guarded (`updateMany`), so a concurrent approval is a conflict, not a CHECK 500 (M-1).
+- **D-12 — I-2 overrides D-3: Registration is forced into the inventory list's visible columns whenever the `reg` filter is active**, even if the saved `columns:inventory` preference hides it (page-level only; the saved preference and the column chooser are untouched).
+- **D-13 — Finance home shows per-class review links** ("3 IT registrations to review", "1 Purchasing registration to review") instead of one combined count linking to the IT tab (M-3); the register export's "Confirmed on" is the Manila date and its Note keeps the bad-salvage warning on custom rows (M-4, M-5); the bad-salvage note says "check the override" only for custom policies (M-9).

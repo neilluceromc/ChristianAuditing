@@ -411,3 +411,38 @@ describe("purchase.recorded (Phase 34)", () => {
       .toBe("J. Sarmiento recorded a purchase of 1 item");
   });
 });
+
+describe("Phase 35 registration sentences", () => {
+  const s = (action: string, diff: unknown) => auditSentence({ actorLabel: "L. Domingo", action, diff, entityLabel: "BR-LT-0214" });
+  it("send-back with items and a note; an old reason still reads", () => {
+    expect(s("finance.return", { financeReturn: { from: null, to: { fields: ["Cost", "Sales invoice"], note: "Wrong PO" } } }))
+      .toBe("L. Domingo sent BR-LT-0214 back: Cost, Sales invoice — “Wrong PO”");
+    expect(s("finance.return", { financeReturn: { from: null, to: { fields: ["Cost"], note: null } } }))
+      .toBe("L. Domingo sent BR-LT-0214 back: Cost");
+    expect(s("finance.return", { financeReturn: { from: null, to: "Wrong invoice" } }))
+      .toBe("L. Domingo sent BR-LT-0214 back to IT · Wrong invoice");
+  });
+  it("resubmit with a reply, approval as not capitalised, reopen", () => {
+    expect(s("finance.resubmit", { financeReturn: { from: "returned", to: null }, reply: { from: null, to: "Uploaded it" } }))
+      .toBe("L. Domingo marked BR-LT-0214 corrected — “Uploaded it”");
+    expect(s("finance.confirm", { financeConfirmed: { from: null, to: "L. Domingo" }, notCapitalised: { from: false, to: true } }))
+      .toBe("L. Domingo approved BR-LT-0214 as not capitalised");
+    expect(s("finance.reopened", { cost: { from: null, to: 500 } }))
+      .toBe("L. Domingo added a cost to BR-LT-0214, so it went back to Finance");
+  });
+});
+
+describe("Phase 35 depreciation sentences", () => {
+  const s = (action: string, diff: unknown, label = "Laptop") => auditSentence({ actorLabel: "L. Domingo", action, diff, entityLabel: label });
+  it("policy set and cleared", () => {
+    expect(s("depreciation.policy", { lifeMonths: { from: null, to: 36 }, salvagePercent: { from: null, to: 10 } }))
+      .toBe("L. Domingo set depreciation on Laptop: 3 years, 10% salvage");
+    expect(s("depreciation.policy", { lifeMonths: { from: 36, to: null }, salvagePercent: { from: 10, to: null } }))
+      .toBe("L. Domingo cleared depreciation on Laptop");
+  });
+  it("override set and cleared", () => {
+    expect(s("depreciation.override", { lifeMonths: { from: null, to: 24 }, salvage: { from: null, to: 5000 } }, "BR-LT-0148"))
+      .toBe("L. Domingo set custom depreciation on BR-LT-0148: 2 years, \u20b15,000.00 salvage");
+    expect(s("depreciation.override.cleared", null, "BR-LT-0148")).toBe("L. Domingo cleared custom depreciation on BR-LT-0148");
+  });
+});

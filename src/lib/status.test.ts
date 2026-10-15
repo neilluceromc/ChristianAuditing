@@ -87,6 +87,12 @@ describe("delivery namespace (DeliveryStatus)", () => {
   it("unknown delivery values map to neutral, not the flat map", () => {
     expect(statusFamily("SUBMITTED", "delivery")).toBe("neutral");
   });
+
+  it("registration namespace: needs-correction is a fault, registered is settled (Phase 35)", () => {
+    expect(hasStatusFamily("needs-correction", "registration")).toBe(true);
+    expect(statusFamily("needs-correction", "registration")).toBe("fault");
+    expect(statusFamily("registered", "registration")).toBe("settled");
+  });
 });
 
 describe("every Prisma enum member maps to a real family", () => {

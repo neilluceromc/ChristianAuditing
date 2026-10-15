@@ -1,7 +1,9 @@
 # Phase 35 — Registration review, Finance's asset register, and depreciation
 
-**Status:** designed 2026-10-15 with the user (mockups: the "Depreciation mockups" canvas artifact); awaiting the
-user's review before the plan. **One migration (the 28th).**
+**Status:** **code-complete 2026-10-15** on branch `phase-35-registration-depreciation` (unmerged, unpushed); designed
+with the user (mockups: the "Depreciation mockups" canvas artifact). **One migration (the 28th).** The §3.3 checklist
+matches what Edit can change (plan P-7): Delivery and fees and Purchase request live on the shared purchase record, so
+they are not offered; OR no., Covered by and Who to call were added to Edit.
 
 This phase has three parts that share one list and one page:
 
@@ -117,7 +119,7 @@ When the state is `with-finance`, the page shows a **"Waiting for your review"**
 
   | Group | Items |
   |---|---|
-  | Purchase | Cost · Delivery and fees · Vendor · Invoice no. · Official receipt (OR) no. · Purchase date · Purchase request |
+  | Purchase | Cost · Purchase date · Vendor · Invoice no. · Official receipt (OR) no. |
   | Warranty | Warranty until · Covered by · Who to call for repairs |
   | Asset details | Brand · Model · Category · Serial number |
   | Documents | Sales invoice · Official receipt · Warranty slip · Delivery receipt |

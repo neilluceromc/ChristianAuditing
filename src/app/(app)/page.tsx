@@ -167,10 +167,27 @@ export default async function Home() {
                     </span>
                   )}
                 </p>
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                {d.toReview.it + d.toReview.purchasing > 0 && (
+                  <p className="flex flex-wrap gap-x-4 text-[13px]">
+                    {d.toReview.it > 0 && (
+                      <Link href="/finance/assets?fin=with-finance" className="font-medium text-accent hover:underline">
+                        {d.toReview.it} IT registration{d.toReview.it === 1 ? "" : "s"} to review
+                      </Link>
+                    )}
+                    {d.toReview.purchasing > 0 && (
+                      <Link href="/finance/assets?cls=PURCHASING&fin=with-finance" className="font-medium text-accent hover:underline">
+                        {d.toReview.purchasing} Purchasing registration{d.toReview.purchasing === 1 ? "" : "s"} to review
+                      </Link>
+                    )}
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                   <Stat label="Requests waiting" value={d.waitingCount} />
                   <Stat label="Approved this month" value={d.approvedThisMonth} />
                   <Stat label="Capitalized" value={d.capitalized} hint={`${d.capitalizedCount} assets`} />
+                  <Link href="/finance/assets" className="hover:opacity-80">
+                    <Stat label="Book value" value={d.bookValue} hint={`after ${d.depreciation} depreciation · as of ${d.asOfEnd}`} />
+                  </Link>
                 </div>
                 <TodoList rows={d.queue} empty="Nothing is waiting on finance right now." />
               </div>

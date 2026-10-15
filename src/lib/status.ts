@@ -62,11 +62,14 @@ const MAP: Record<string, StatusFamily> = {
  * DeliveryStatus values live together and a caller never has to guess which
  * one needs the namespace.
  */
-export type StatusNamespace = "employment" | "delivery";
+export type StatusNamespace = "employment" | "delivery" | "registration";
 
 const NAMESPACED: Record<StatusNamespace, Record<string, StatusFamily>> = {
   employment: { ACTIVE: "settled", OFFBOARDING: "inflight", OFFBOARDED: "closed" },
   delivery: { PENDING: "inflight", RETRYING: "attention", DELIVERED: "settled", DEAD: "fault" },
+  // Phase 35 (spec §3.1): registration states are their own namespace, not flat-map entries; they
+  // are lowercase kebab-case, so they cannot collide with an enum value anyway.
+  registration: { "awaiting-it": "neutral", "with-finance": "inflight", "needs-correction": "fault", registered: "settled" },
 };
 
 export function statusFamily(value: string, ns?: StatusNamespace): StatusFamily {
