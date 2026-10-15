@@ -343,9 +343,9 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
   test("7. search clears and matches a department", async ({ page }) => {
     await login(page, IT);
     await page.goto("/employees");
-    // The Department facet's own count is what "the department name is a
+    // The Works for facet's own count is what "the department name is a
     // search term" has to reproduce — read it rather than hard-coding 3.
-    const counts = await facetCounts(page, "Department");
+    const counts = await facetCounts(page, "Works for");
     const financeCount = Number(counts["Finance"]);
     expect(financeCount).toBeGreaterThan(0);
 

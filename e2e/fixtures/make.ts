@@ -67,7 +67,7 @@ function employee(
   row: Partial<EmployeeSheetRow> &
     Pick<EmployeeSheetRow, "employeeNo" | "name" | "department" | "title" | "joinedAt">,
 ): EmployeeSheetRow {
-  return { employment: "", m365Status: null, itemsHeld: 0, ...row };
+  return { kind: "INTERNAL", employment: "", m365Status: null, itemsHeld: 0, ...row };
 }
 
 /** Every column blank but Name — the minimal supplier row. */

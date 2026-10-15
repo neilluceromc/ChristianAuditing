@@ -65,7 +65,7 @@ describe("splitUnknownColumns", () => {
 // "RMA ref".
 describe("EMPLOYEE_KNOWN_UNIMPORTED_COLUMNS", () => {
   it("is exactly the employee export's columns with no import field, as of today", () => {
-    expect(EMPLOYEE_KNOWN_UNIMPORTED_COLUMNS).toEqual(["M365", "Items held"]);
+    expect(EMPLOYEE_KNOWN_UNIMPORTED_COLUMNS).toEqual(["Staff", "M365", "Items held"]);
   });
 
   it("cannot diverge from the employee export/import header tables it is derived from", () => {
@@ -82,9 +82,9 @@ describe("EMPLOYEE_KNOWN_UNIMPORTED_COLUMNS", () => {
 });
 
 describe("splitEmployeeUnknownColumns", () => {
-  it("files the employee export's own M365/Items held columns as known, not a typo", () => {
-    expect(splitEmployeeUnknownColumns(["M365", "Items held"])).toEqual({
-      known: ["M365", "Items held"],
+  it("files the employee export's own Staff/M365/Items held columns as known, not a typo", () => {
+    expect(splitEmployeeUnknownColumns(["Staff", "M365", "Items held"])).toEqual({
+      known: ["Staff", "M365", "Items held"],
       unknown: [],
     });
   });

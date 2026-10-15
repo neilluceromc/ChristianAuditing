@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button, IconButton } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Menu, type MenuItem } from "@/components/ui/menu";
+import type { PickerGroup } from "@/lib/groups";
 import { TransferDialog } from "./transfer-dialog";
 import { StartOffboardingDialog } from "./start-offboarding-dialog";
 
@@ -17,7 +18,7 @@ export function ProfileActions({
 }: {
   employeeId: string; employeeName: string; currentTitle: string; employment: string; canMutate: boolean;
   primary: { kind: "assign-kit" | "fill-gaps" | "wizard"; label: string } | null;
-  departments: Array<{ id: string; name: string }>; defaultDue: string; minDue: string;
+  departments: PickerGroup[]; defaultDue: string; minDue: string;
 }) {
   const router = useRouter();
   const [transferOpen, setTransferOpen] = useState(false);

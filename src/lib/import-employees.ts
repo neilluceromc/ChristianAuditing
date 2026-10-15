@@ -27,12 +27,18 @@ export const EMPLOYEE_IMPORT_HEADERS = [
   { key: "employeeNo", labels: ["employee no", "employee number", "emp no"], required: true, title: "Employee no" },
   { key: "name", labels: ["name", "full name"], required: true, title: "Name" },
   { key: "title", labels: ["title", "job title", "role"], required: true, title: "Title" },
-  { key: "department", labels: ["department", "dept"], required: true, title: "Department" },
+  { key: "department", labels: ["department", "dept", "works for", "client"], required: true, title: "Department" },
   { key: "employment", labels: ["employment", "employment status", "status"], required: false, title: "Employment" },
   { key: "joinedAt", labels: ["joined", "joined at", "start date", "started"], required: true, title: "Joined" },
 ] as const;
 
 export type EmployeeField = (typeof EMPLOYEE_IMPORT_HEADERS)[number]["key"];
+
+/** Phase 37 (spec §2.1): a department or client by name; `archivedAt` set means it is archived (Ended) and blocked. */
+export interface DepartmentRef {
+  id: string;
+  archivedAt: Date | null;
+}
 
 /** The matched employee's current record, as far as the row rules need it. */
 export interface EmployeeRecordRef {
@@ -65,7 +71,7 @@ export interface EmployeeRecordRef {
  * forward).
  */
 export interface EmployeeRefs {
-  departments: Map<string, string | null>;
+  departments: Map<string, DepartmentRef | null>;
   /**
    * `null` means the key matched MORE THAN ONE stored employee — two rows
    * whose `employeeNo` differs only by case, which two concurrent applies can
@@ -296,17 +302,24 @@ export function planEmployeeRows(
     // Rule 4: department must resolve to reference data — never created as
     // a side effect of an upload (scope decision 12, the same rule
     // categories/types/vendors follow).
-    const departmentId = refs.departments.get(refKey(departmentRaw));
-    if (departmentId === undefined) {
+    const departmentRef = refs.departments.get(refKey(departmentRaw));
+    if (departmentRef === undefined) {
       block("unknown-department", departmentRaw);
       return;
     }
     // E-6: two departments sharing this name case-insensitively — genuinely
     // undecidable, so this blocks rather than picking one.
-    if (departmentId === null) {
+    if (departmentRef === null) {
       block("duplicate-department-name", departmentRaw);
       return;
     }
+    // Phase 37 (spec §2.1): an archived department or client keeps its people but takes no new
+    // choices, so a row naming one blocks — create or update alike — whichever kind it is.
+    if (departmentRef.archivedAt) {
+      block("archived-department", departmentRaw);
+      return;
+    }
+    const departmentId = departmentRef.id;
 
     // Rule 5: employment format — blank reads as ACTIVE (create-only
     // default; see below), non-blank must be one of the three, upper-cased.

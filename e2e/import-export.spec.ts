@@ -619,6 +619,20 @@ test.describe("export", () => {
     expect(download.suggestedFilename()).toMatch(/^assets-\d{4}-\d{2}-\d{2}\.xlsx$/);
   });
 
+  // Phase 37 (spec §2.3): the employees sheet says "Works for", then "Staff" (Internal | Client).
+  test("the employees export names Works for, then Staff", async ({ page }) => {
+    await login(page, "admin@thebackroomop.com");
+    const res = await page.request.get("/employees/export");
+    expect(res.status()).toBe(200);
+    const grid = (await readSheet(Buffer.from(await res.body()))) as unknown[][];
+    const header = grid[0].map(String);
+    expect(header).not.toContain("Department");
+    expect(header[header.indexOf("Works for") + 1]).toBe("Staff");
+    const staff = grid.slice(1).map((r) => String(r[header.indexOf("Staff")]));
+    expect(staff.length).toBeGreaterThan(0);
+    expect(staff.every((v) => v === "Internal" || v === "Client")).toBe(true);
+  });
+
   test("an oversized ?ids= selection is refused, not silently sliced", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
     // The refusal precedes the query, so the ids need not exist. Built from

@@ -85,12 +85,14 @@ export const AUDIT_EXPORT_COLUMNS: XlsxColumn<{
  * Email column here — nothing would fill it.
  */
 export const EMPLOYEE_EXPORT_COLUMNS: XlsxColumn<{
-  employeeNo: string; name: string; department: string; title: string;
+  employeeNo: string; name: string; department: string; kind: "INTERNAL" | "CLIENT"; title: string;
   employment: string; m365Status: string | null; joinedAt: Date; itemsHeld: number;
 }>[] = [
   { label: "Employee no", width: 14, cell: (r) => ({ value: r.employeeNo }) },
   { label: "Name", width: 26, cell: (r) => ({ value: r.name }) },
-  { label: "Department", width: 20, cell: (r) => ({ value: r.department }) },
+  // Phase 37 (spec §2.3): the group's name, then whether it is a department or a client.
+  { label: "Works for", width: 20, cell: (r) => ({ value: r.department }) },
+  { label: "Staff", width: 10, cell: (r) => ({ value: r.kind === "CLIENT" ? "Client" : "Internal" }) },
   { label: "Title", width: 24, cell: (r) => ({ value: r.title }) },
   { label: "Employment", width: 16, cell: (r) => ({ value: r.employment }) },
   // Nullable and deliberately last of the text columns: null means "never

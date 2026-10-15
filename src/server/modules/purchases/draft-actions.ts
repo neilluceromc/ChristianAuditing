@@ -9,6 +9,7 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { diffOf } from "@/lib/audit-diff";
 import { DRAFT_ROLES } from "@/lib/purchase-flow";
+import { GROUP_ARCHIVED } from "@/lib/groups";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -83,8 +84,10 @@ async function createDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
-  const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, name: true } });
+  const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, name: true, archivedAt: true } });
   if (!dept) return validationError({ departmentId: "Unknown department" });
+  // Phase 37 (spec §2.1): a new request never names an archived department or client.
+  if (dept.archivedAt) return validationError({ departmentId: GROUP_ARCHIVED });
 
   const created = await prisma.$transaction(async (tx) => {
     const [{ nextval }] = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('purchase_request_ref_seq')`;
@@ -148,8 +151,14 @@ async function saveDraftImpl(input: unknown): Promise<ActionResult<DraftSaved>> 
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
-  const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, name: true } });
+  const dept = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, name: true, archivedAt: true } });
   if (!dept) return validationError({ departmentId: "Unknown department" });
+  // Phase 37 (spec §2.1): an edit keeps the draft's current value even when it is archived, and
+  // refuses any other archived one.
+  if (dept.archivedAt) {
+    const current = await prisma.purchaseRequest.findUnique({ where: { id }, select: { departmentId: true } });
+    if (current?.departmentId !== dept.id) return validationError({ departmentId: GROUP_ARCHIVED });
+  }
 
   let saved: DraftSaved | null = null;
   const failure = await prisma.$transaction(async (tx) => {

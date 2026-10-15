@@ -21,6 +21,12 @@ describe("buildEmployeeWhere", () => {
     expect(where.departmentId).toEqual({ in: ["d1"] });
     expect(where.employment).toEqual({ in: ["ACTIVE"] });
   });
+  // Phase 37 (spec §2.3): the Staff facet filters on the group's kind.
+  it("maps the kind facet to department.kind and drops values that are not a kind", () => {
+    expect(buildEmployeeWhere(parse("kind=CLIENT")).department).toEqual({ kind: { in: ["CLIENT"] } });
+    expect(buildEmployeeWhere(parse("kind=CLIENT,INTERNAL")).department).toEqual({ kind: { in: ["CLIENT", "INTERNAL"] } });
+    expect(buildEmployeeWhere(parse("kind=BOGUS")).department).toBeUndefined();
+  });
 
   // Phase 20 (spec §5): leavers are hidden by default.
   describe("leavers hidden by default", () => {
@@ -37,7 +43,7 @@ describe("buildEmployeeWhere", () => {
       expect(buildEmployeeWhere(parse("employment=ACTIVE&leavers=1"))).toEqual({ employment: { in: ["ACTIVE"] } });
     });
     it("facets include leavers, so the toggle round-trips through the URL", () => {
-      expect(EMPLOYEES_LIST_CONFIG.facets).toEqual(["department", "employment", "leavers"]);
+      expect(EMPLOYEES_LIST_CONFIG.facets).toEqual(["department", "kind", "employment", "leavers"]);
     });
   });
 });

@@ -175,7 +175,7 @@ export default async function EmployeePage({
   // header line only ever looks at the first row.
   const newestTransfer = transfers[0] ?? null;
   const recentTransfer = newestTransfer && isRecentTransfer(newestTransfer.effectiveAt) ? newestTransfer : null;
-  const otherDepartments = departments.filter((d) => d.id !== employee.departmentId).map((d) => ({ id: d.id, name: d.name }));
+  const otherDepartments = departments.filter((d) => d.id !== employee.departmentId).map((d) => ({ id: d.id, name: d.name, kind: d.kind, archivedAt: d.archivedAt }));
 
   return (
     <>

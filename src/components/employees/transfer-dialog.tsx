@@ -7,9 +7,11 @@ import { Dialog } from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { GroupSelectOptions } from "@/components/ui/group-select-options";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS } from "@/lib/reason-chips";
+import { groupPickerOptions, type PickerGroup } from "@/lib/groups";
 import { localDateISO } from "@/lib/format";
 import { transferEmployee } from "@/server/modules/employees/transfer-actions";
 import { useEmployeeRunner } from "./use-employee-runner";
@@ -23,10 +25,10 @@ const today = () => localDateISO(new Date());
  * employee page header, admin/it_staff only — controlled by the caller
  * (`ProfileActions`), which owns the trigger (the More menu's "Transfer…"
  * item) and the `open` state; this component renders no trigger of its own.
- * `departments` is handed in with the employee's CURRENT department already
- * excluded — a transfer to the same department is a schema-level refusal
+ * `departments` (departments AND clients, Phase 37) is handed in with the employee's CURRENT one
+ * already excluded — a transfer to the same one is a schema-level refusal
  * (`transferEmployee`'s own "Already in this department"), so the picker
- * never offers it in the first place. `toTitle` is prefilled with the
+ * never offers it in the first place. Archived rows are never offered (spec §2.1). `toTitle` is prefilled with the
  * current title (still required — see transfer-actions.ts's own note on why
  * a same-title transfer is still a real transfer, not a no-op).
  */
@@ -43,11 +45,14 @@ export function TransferDialog({
   employeeId: string;
   employeeName: string;
   currentTitle: string;
-  departments: Array<{ id: string; name: string }>;
+  departments: PickerGroup[];
 }) {
+  // Internal first, then clients — the order the picker shows, so the preselected row is the one on top.
+  const usable = groupPickerOptions(departments);
+  const choices = [...usable.internal, ...usable.client];
   const { pending, error, fieldErrors, retryAfter, setRetryAfter, reset, run } =
     useEmployeeRunner(["toDepartmentId", "toTitle", "effectiveAt", "reason"]);
-  const [toDepartmentId, setToDepartmentId] = useState(departments[0]?.id ?? "");
+  const [toDepartmentId, setToDepartmentId] = useState(choices[0]?.id ?? "");
   const [toTitle, setToTitle] = useState(currentTitle);
   const [effectiveAt, setEffectiveAt] = useState(today());
   const [reason, setReason] = useState("");
@@ -55,7 +60,7 @@ export function TransferDialog({
   useEffect(() => {
     if (open) {
       reset();
-      setToDepartmentId(departments[0]?.id ?? "");
+      setToDepartmentId(choices[0]?.id ?? "");
       setToTitle(currentTitle);
       setEffectiveAt(today());
       setReason("");
@@ -64,7 +69,7 @@ export function TransferDialog({
   }, [open]);
 
   function submit() {
-    const toDeptName = departments.find((d) => d.id === toDepartmentId)?.name ?? "the new department";
+    const toDeptName = choices.find((d) => d.id === toDepartmentId)?.name ?? "the new department";
     run(
       () => transferEmployee({ employeeId, toDepartmentId, toTitle, effectiveAt, reason }),
       `Transferred to ${toDeptName}`,
@@ -83,7 +88,7 @@ export function TransferDialog({
           <Button
             variant="primary"
             loading={pending}
-            disabled={departments.length === 0}
+            disabled={choices.length === 0}
             onClick={submit}
           >
             Record transfer
@@ -94,10 +99,10 @@ export function TransferDialog({
       <div className="flex flex-col gap-3">
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title={error} />}
-        {departments.length === 0 ? (
-          <p className="text-xs text-fg-muted">No other department exists to transfer into.</p>
+        {choices.length === 0 ? (
+          <p className="text-xs text-fg-muted">No other department or client exists to move them to.</p>
         ) : (
-          <FormField label="New department" required error={fieldErrors.toDepartmentId}>
+          <FormField label="Moves to" required error={fieldErrors.toDepartmentId}>
             {(p) => (
               <Select
                 id={p.id}
@@ -106,7 +111,7 @@ export function TransferDialog({
                 value={toDepartmentId}
                 onChange={(e) => setToDepartmentId(e.target.value)}
               >
-                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                <GroupSelectOptions groups={departments} />
               </Select>
             )}
           </FormField>

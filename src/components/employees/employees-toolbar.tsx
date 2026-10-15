@@ -51,7 +51,7 @@ export function EmployeesToolbar({
           key={state.q}
           type="search"
           aria-label="Search employees"
-          placeholder="Search name, number, title, department · Enter"
+          placeholder="Search name, number, title, department or client · Enter"
           defaultValue={state.q}
           className="pl-8 pr-7"
           onKeyDown={(e) => {
@@ -70,10 +70,16 @@ export function EmployeesToolbar({
         )}
       </div>
       <FacetDropdown
-        label="Department"
+        label="Works for"
         options={facets.department}
         selected={state.filters.department ?? []}
         onApply={(values) => router.push(href(withFilter(state, "department", values), gapsOnly))}
+      />
+      <FacetDropdown
+        label="Staff"
+        options={facets.kind}
+        selected={state.filters.kind ?? []}
+        onApply={(values) => router.push(href(withFilter(state, "kind", values), gapsOnly))}
       />
       <FacetDropdown
         label="Employment"

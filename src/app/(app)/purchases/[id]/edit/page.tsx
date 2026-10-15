@@ -12,7 +12,7 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
   const [request, loadouts, departments] = await Promise.all([
     getPurchase(id),
     policyLoadouts(),
-    prisma.department.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ select: { id: true, name: true, kind: true, archivedAt: true }, orderBy: { name: "asc" } }),
   ]);
   if (!request) notFound();
   // only a draft is editable, and only by its requester (or an admin) — the

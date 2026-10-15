@@ -9,6 +9,7 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { transferSchema } from "@/lib/transfer-schema";
+import { GROUP_ARCHIVED } from "@/lib/groups";
 
 /**
  * I-4, the same local class `item-actions.ts`/`movement-actions.ts`/
@@ -66,6 +67,8 @@ export async function transferEmployee(input: unknown): Promise<ActionResult<{ i
   }
   const toDepartment = await prisma.department.findUnique({ where: { id: d.toDepartmentId } });
   if (!toDepartment) return validationError({ toDepartmentId: "Unknown department" });
+  // Phase 37 (spec §2.1): an archived department or client takes no new people.
+  if (toDepartment.archivedAt) return validationError({ toDepartmentId: GROUP_ARCHIVED });
 
   const effectiveAt = new Date(`${d.effectiveAt}T00:00:00Z`);
   if (Number.isNaN(effectiveAt.getTime())) return validationError({ effectiveAt: "Use the date picker" });

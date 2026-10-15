@@ -99,7 +99,7 @@ test.describe.serial("transfers", () => {
     await waitForHydration(dialog);
     await expect(dialog.getByRole("heading", { name: "Transfer Marites Bautista" })).toBeVisible();
 
-    await dialog.getByLabel(/^New department\b/).selectOption({ label: "HR" });
+    await dialog.getByLabel(/^Moves to\b/).selectOption({ label: "HR" });
     await dialog.getByLabel("Reason").fill("Reorg");
     await dialog.getByRole("button", { name: "Record transfer" }).click();
 
@@ -166,7 +166,7 @@ test.describe.serial("transfers", () => {
     await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
-    await dialog.getByLabel(/^New department\b/).selectOption({ label: "Finance" });
+    await dialog.getByLabel(/^Moves to\b/).selectOption({ label: "Finance" });
     await dialog.getByRole("button", { name: "Record transfer" }).click();
     await expect(dialog).toBeHidden();
 
@@ -190,7 +190,7 @@ test.describe.serial("transfers", () => {
 
     // R8: the picker excludes the employee's CURRENT department (IT) — the
     // UI alone can never produce this refusal.
-    const deptSelect = dialog.getByLabel(/^New department\b/);
+    const deptSelect = dialog.getByLabel(/^Moves to\b/);
     const optionLabels = await deptSelect.locator("option").allTextContents();
     expect(optionLabels).not.toContain("IT");
     expect(optionLabels).toContain("HR");
@@ -202,7 +202,7 @@ test.describe.serial("transfers", () => {
 
     await dialog.getByRole("button", { name: "Record transfer" }).click();
     // The server's own guard (transferEmployee: toDepartmentId ===
-    // employee.departmentId), surfaced under "New department".
+    // employee.departmentId), surfaced under "Moves to".
     await expect(dialog.getByText("Already in this department")).toBeVisible({ timeout: 10_000 });
     await expect(dialog).toBeVisible();
   });
@@ -215,7 +215,7 @@ test.describe.serial("transfers", () => {
     await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
-    await dialog.getByLabel(/^New department\b/).selectOption({ label: "HR" });
+    await dialog.getByLabel(/^Moves to\b/).selectOption({ label: "HR" });
 
     // Tomorrow on the app's own Asia/Manila calendar (Phase 21 D-15): the UTC
     // date is still "today" in Manila before 08:00, and the schema would

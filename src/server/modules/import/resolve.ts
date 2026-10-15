@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { refKey, tagKey } from "@/lib/import-assets";
 import type { AssetRecordRef, AssetRefs, EmployeeRef } from "@/lib/import-assets";
-import type { EmployeeRecordRef, EmployeeRefs } from "@/lib/import-employees";
+import type { DepartmentRef, EmployeeRecordRef, EmployeeRefs } from "@/lib/import-employees";
 import type { SupplierRefs } from "@/lib/import-suppliers";
 import type { StockRefs } from "@/lib/import-stock";
 import { nameDeptKey } from "@/lib/same-name";
@@ -235,6 +235,8 @@ export async function resolveAssetRefs(tags: string[], serials: string[]): Promi
 interface DepartmentRow {
   id: string;
   name: string;
+  /** Phase 37 (spec §2.1): set when the department or client is archived — the importer blocks it. */
+  archivedAt: Date | null;
 }
 interface EmployeeIdentityRow {
   id: string;
@@ -243,6 +245,17 @@ interface EmployeeIdentityRow {
   // Phase 20 (spec §5): needed to key `byNameDept` — see `buildEmployeeRefs`.
   name: string;
   departmentId: string;
+}
+
+/** Phase 37: the collision map's ids, each widened to the ref the employee importer reads (id + archivedAt). */
+function departmentRefs(departments: DepartmentRow[]): Map<string, DepartmentRef | null> {
+  const byId = new Map(departments.map((d) => [d.id, d]));
+  return new Map(
+    [...buildCollisionMap(departments, (d) => refKey(d.name))].map(([key, id]) => {
+      const row = id === null ? undefined : byId.get(id);
+      return [key, row ? { id: row.id, archivedAt: row.archivedAt } : null] as const;
+    }),
+  );
 }
 
 /**
@@ -312,7 +325,7 @@ export function buildEmployeeRefs(
   }
 
   return {
-    departments: buildCollisionMap(departments, (d) => refKey(d.name)),
+    departments: departmentRefs(departments),
     byEmployeeNo,
     byNameDept,
   };
@@ -329,7 +342,7 @@ export function buildEmployeeRefs(
  */
 export async function resolveEmployeeRefs(): Promise<EmployeeRefs> {
   const [departments, employees] = await Promise.all([
-    prisma.department.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ select: { id: true, name: true, archivedAt: true }, orderBy: { name: "asc" } }),
     prisma.employee.findMany({
       // name/departmentId (Phase 20, spec §5): what buildEmployeeRefs needs to key byNameDept.
       select: { id: true, employeeNo: true, employment: true, name: true, departmentId: true },

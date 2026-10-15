@@ -142,6 +142,9 @@ export const BLOCK_CAUSES = [
   // since a category can be archived between the dry run and the click.
   // Appended, per this array's own rule above — never inserted.
   "archived-stock-category",
+  // Phase 37 (spec §2.1): a row naming a department or client that is archived (Ended). Appended, per
+  // this array's own rule above — never inserted.
+  "archived-department",
 ] as const;
 
 export type BlockCause = (typeof BLOCK_CAUSES)[number];
@@ -587,6 +590,14 @@ const SPECS: Record<BlockCause, BlockSpec> = {
     label: "Category is archived",
     explain: "That category is archived. Restore it under Stock categories, or name an active one.",
     fix: { kind: "link", label: "Open stock categories", href: "/stock/categories" },
+  },
+  // Phase 37 (spec §2.1). Each row's own name is the "e.g." line under this text, so the cause reads
+  // "{name} is archived — restore it first or pick another". Matching is by name across both kinds,
+  // and the one real fix is the Departments & clients page, where an archived row is restored.
+  "archived-department": {
+    label: "Department or client is archived",
+    explain: "The department or client on these rows is archived — restore it first or pick another.",
+    fix: { kind: "link", label: "Open departments & clients", href: "/admin/departments" },
   },
 };
 

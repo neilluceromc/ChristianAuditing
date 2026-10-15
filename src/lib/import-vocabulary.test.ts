@@ -279,6 +279,7 @@ describe("BLOCK_CAUSES", () => {
       "same-name-in-department": "option",
       "department-via-import": "option",
       "archived-stock-category": "link",
+      "archived-department": "link",
     };
     for (const c of BLOCK_CAUSES) {
       expect(blockSpec(c).fix?.kind).toBe(expected[c]);
