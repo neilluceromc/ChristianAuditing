@@ -364,6 +364,26 @@ describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sent
     expect(auditSentence({ ...nina, action: "policy.exception.removed", diff: { slot: { from: "tablet · iPad", to: null } } }))
       .toBe("J. Sarmiento removed the exception slot tablet · iPad for Nina Robles");
   });
+  it("departments and clients: added, renamed, ended or archived, restored", () => {
+    const dept = { actorLabel: "J. Sarmiento", entityLabel: "Bluepeak Telecom" };
+    expect(auditSentence({ ...dept, action: "create", diff: { name: { from: null, to: "Bluepeak Telecom" }, kind: { from: null, to: "CLIENT" } } }))
+      .toBe("J. Sarmiento added client Bluepeak Telecom");
+    expect(auditSentence({ ...dept, entityLabel: "Finance", action: "create", diff: { name: { from: null, to: "Finance" }, kind: { from: null, to: "INTERNAL" } } }))
+      .toBe("J. Sarmiento added department Finance");
+    expect(auditSentence({ ...dept, entityLabel: "Finance", action: "create", diff: { name: { from: null, to: "Finance" } } }))
+      .toBe("J. Sarmiento created Finance");
+    expect(auditSentence({ ...dept, action: "rename", diff: { name: { from: "Bluepeak", to: "Bluepeak Telecom" } } }))
+      .toBe("J. Sarmiento renamed Bluepeak to Bluepeak Telecom");
+    expect(auditSentence({ ...dept, action: "archive", diff: { name: { from: "Bluepeak Telecom", to: "Bluepeak Telecom" }, kind: { from: "CLIENT", to: "CLIENT" } } }))
+      .toBe("J. Sarmiento ended the Bluepeak Telecom account");
+    expect(auditSentence({ ...dept, entityLabel: "Finance", action: "archive", diff: { name: { from: "Finance", to: "Finance" }, kind: { from: "INTERNAL", to: "INTERNAL" } } }))
+      .toBe("J. Sarmiento archived Finance");
+    expect(auditSentence({ ...dept, action: "restore", diff: { name: { from: "Bluepeak Telecom", to: "Bluepeak Telecom" }, kind: { from: "CLIENT", to: "CLIENT" } } }))
+      .toBe("J. Sarmiento restored Bluepeak Telecom");
+    expect(actionLabel("rename")).toBe("Renamed");
+    expect(actionLabel("archive")).toBe("Ended or archived");
+    expect(actionLabel("restore")).toBe("Restored");
+  });
   it("supplier set or cleared on a request", () => {
     const pr = { ...base, entityLabel: "PR-0188" };
     expect(auditSentence({ ...pr, action: "supplier-set", diff: { supplier: { from: null, to: "TechServe PH" } } }))

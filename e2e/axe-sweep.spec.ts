@@ -129,7 +129,7 @@ const ADMIN_ROUTES = ["/admin/users", "/admin/flags", "/admin/webhooks", "/admin
 // scan the Register form twice (and scanRoute's landing check would, rightly, refuse the redirect).
 const IT_STAFF_ROUTES = [
   "/inventory/import", "/inventory/register", "/inventory/work",
-  "/admin/asset-categories", "/admin/asset-types", "/admin/departments",
+  "/admin/asset-categories", "/admin/asset-types", "/admin/departments", "/admin/departments?tab=internal",
   "/employees/import", "/employees/new",
 ];
 

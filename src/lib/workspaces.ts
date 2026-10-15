@@ -71,7 +71,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       items: [
         { label: "Asset categories", href: "/admin/asset-categories", roles: ["admin", "it_staff"] },
         { label: "Asset types", href: "/admin/asset-types", roles: ["admin", "it_staff"] },
-        { label: "Departments", href: "/admin/departments", roles: ["admin", "it_staff"] },
+        { label: "Departments & clients", href: "/admin/departments", roles: ["admin", "it_staff"] },
       ],
     },
     {

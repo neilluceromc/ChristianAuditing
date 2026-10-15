@@ -381,13 +381,70 @@ test.describe("reference names are unique whatever the case (Phase 27)", () => {
     }
   });
 
-  test("a department that differs only by case is refused", async ({ page }) => {
-    await login(page, "admin@thebackroomop.com");
-    await page.goto("/admin/departments");
-    const input = page.getByLabel("New department name");
-    await waitForHydration(input);
-    await input.fill("hr");
-    await input.press("Enter");
-    await expect(page.locator('p[role="alert"]')).toHaveText('That name is already taken by "HR"', { timeout: 10_000 });
+  // Phase 37 (spec 2.2): the Departments & clients page. Rows created here are removed in `finally`;
+  // their audit entries stay (R3).
+  test("an internal department: clash, add, rename, archive, restore", async ({ page }) => {
+    const stamp = Date.now();
+    const name = `E2E Dept ${stamp}`;
+    const renamed = `${name} B`;
+    try {
+      await login(page, "admin@thebackroomop.com");
+      await page.goto("/admin/departments");
+      const tab = page.getByRole("tab", { name: /Internal departments/ });
+      await waitForHydration(tab);
+      await tab.click();
+      await page.getByRole("button", { name: "+ Add department" }).click();
+      const input = page.getByLabel("Name for the new department");
+
+      // the clash is case-insensitive and across both kinds; Add stays disabled
+      await input.fill("hr");
+      await expect(page.locator('p[role="alert"]')).toHaveText("A department or client with that name already exists");
+      await expect(page.getByRole("button", { name: "Add", exact: true })).toBeDisabled();
+
+      await input.fill(name);
+      await expect(page.getByText("Next: set up its equipment policy")).toBeVisible();
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      const row = page.getByRole("row").filter({ hasText: name });
+      await expect(row).toContainText("Internal department", { timeout: 10_000 });
+
+      await page.getByRole("button", { name: `Rename ${name}` }).click();
+      const rename = page.getByLabel(`New name for ${name}`);
+      await rename.fill(renamed);
+      await rename.press("Enter");
+      await expect(page.getByRole("row").filter({ hasText: renamed })).toBeVisible({ timeout: 10_000 });
+
+      // archive: leaves Active, shows under Archived
+      await page.getByRole("button", { name: `Archive ${renamed}` }).click();
+      await expect(page.getByRole("row").filter({ hasText: renamed })).toHaveCount(0, { timeout: 10_000 });
+      await page.getByRole("button", { name: /^Archived/ }).click();
+      await expect(page.getByRole("row").filter({ hasText: renamed })).toContainText("Archived ");
+
+      // restore
+      await page.getByRole("button", { name: `Restore ${renamed}` }).click();
+      await expect(page.getByRole("row").filter({ hasText: renamed })).toHaveCount(0, { timeout: 10_000 });
+      await page.getByRole("button", { name: /^Active/ }).click();
+      await expect(page.getByRole("row").filter({ hasText: renamed })).toContainText("Internal department");
+    } finally {
+      await db.department.deleteMany({ where: { name: { in: [name, renamed] } } });
+    }
+  });
+
+  test("a client starts with no policy and links to set one up", async ({ page }) => {
+    const name = `E2E Client ${Date.now()}`;
+    try {
+      await login(page, "admin@thebackroomop.com");
+      await page.goto("/admin/departments");
+      const add = page.getByRole("button", { name: "+ Add client" });
+      await waitForHydration(add);
+      await add.click();
+      await page.getByLabel("Name for the new client").fill(name);
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      const row = page.getByRole("row").filter({ hasText: name });
+      await expect(row).toContainText("Client account", { timeout: 10_000 });
+      await expect(row).toContainText("No policy");
+      await expect(row.getByRole("link", { name: /Set one up/ })).toHaveAttribute("href", /group=/);
+    } finally {
+      await db.department.deleteMany({ where: { name } });
+    }
   });
 });

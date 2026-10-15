@@ -526,15 +526,14 @@ test.describe("it navigation sweep (Phase 25)", () => {
     const ops = await db.department.findFirstOrThrow({ where: { name: "Operations" } });
     try {
       await login(page, ADMIN);
-      await page.goto("/admin/departments");
-      const actions = page.getByRole("button", { name: "Actions for Operations" });
-      await waitForHydration(actions);
-      await actions.click();
-      await page.getByRole("menuitem", { name: "Rename" }).click();
+      await page.goto("/admin/departments?tab=internal");
+      const rename = page.getByRole("button", { name: "Rename Operations" });
+      await waitForHydration(rename);
+      await rename.click();
 
-      // The rename input only exists once the menu item has opened it; Enter is
-      // ref-table.tsx's save gesture (blur cancels).
-      const input = page.getByLabel("Rename Operations");
+      // The rename input only exists once the button has opened it; Enter is
+      // groups-page.tsx's save gesture (blur cancels).
+      const input = page.getByLabel("New name for Operations");
       await input.fill("Operations X");
       await input.press("Enter");
       await expect(page.getByText("Operations X", { exact: true })).toBeVisible();
