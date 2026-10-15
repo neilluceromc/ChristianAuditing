@@ -670,7 +670,7 @@ export async function confirmAssetDetails(
     // State-guarded write: the null check is IN the where clause, so two
     // simultaneous confirmations cannot both succeed.
     const hit = await tx.asset.updateMany({
-      where: { id: asset.id, financeConfirmedAt: null, financeReturnedAt: null },
+      where: { id: asset.id, financeConfirmedAt: null, financeReturnedAt: null, cost: notCap ? null : { not: null } },
       data: {
         financeConfirmedAt: new Date(),
         financeConfirmedById: user.id,
@@ -685,7 +685,7 @@ export async function confirmAssetDetails(
       },
     });
     if (hit.count === 0) {
-      failure = conflict(`${asset.tag} was confirmed by someone else just now.`);
+      failure = conflict(`${asset.tag} was changed by someone else just now — reload and review it again.`);
       return;
     }
     await writeAudit(tx, {
