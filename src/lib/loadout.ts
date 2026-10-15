@@ -1,7 +1,8 @@
 /**
  * The loadout view's brain: equipment policies define expected slots per
  * role/department, so "what do they have" and "what's missing" are the same
- * glance. Role (title) policy beats department policy; policy edits never
+ * glance. Phase 37 (spec §3.1) order: a group's own title rule beats a global
+ * title policy, which beats the group's base policy; policy edits never
  * touch existing assignments.
  */
 export interface PolicyLike {
@@ -45,11 +46,29 @@ export function resolvePolicy<P extends PolicyLike>(
   policies: P[],
 ): P | null {
   const title = employee.title.trim().toLowerCase();
+  const titleMatch = (p: P) => p.appliesToTitle?.trim().toLowerCase() === title;
   return (
-    policies.find((p) => p.appliesToTitle?.trim().toLowerCase() === title) ??
-    policies.find((p) => p.appliesToDepartmentId === employee.departmentId) ??
+    policies.find((p) => p.appliesToDepartmentId === employee.departmentId && titleMatch(p)) ??
+    policies.find((p) => p.appliesToDepartmentId === null && titleMatch(p)) ??
+    policies.find((p) => p.appliesToDepartmentId === employee.departmentId && !p.appliesToTitle) ??
     null
   );
+}
+
+/** Phase 37 (spec §3.2): the label a slot shows — the type inside "Other", else the category. */
+export function slotLabel(categoryName: string, typeName: string): string {
+  return categoryName.trim().toLowerCase() === "other" ? typeName : categoryName;
+}
+
+/** Phase 37 (spec §3.2): repeats become "Monitor 2", "Monitor 3" … in order; counted case-insensitively. */
+export function numberSlotLabels(labels: string[]): string[] {
+  const seen = new Map<string, number>();
+  return labels.map((label) => {
+    const key = label.trim().toLowerCase();
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    return n === 1 ? label : `${label} ${n}`;
+  });
 }
 
 /**

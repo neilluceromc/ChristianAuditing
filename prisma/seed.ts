@@ -6,6 +6,7 @@ import { SEED_PASSWORD } from "./fixtures";
 import { allocate, type LotState, type Allocation } from "../src/lib/stock-allocation";
 import { localDateISO } from "../src/lib/format";
 import { dayFromISO } from "../src/lib/deadlines";
+import { slotLabel } from "../src/lib/loadout";
 
 const prisma = new PrismaClient();
 
@@ -74,6 +75,14 @@ async function main() {
     ),
   );
   const depts = Object.fromEntries(deptList.map((d) => [d.name, d]));
+  // Phase 37 (spec §2.1): clients are Department rows with kind CLIENT. Bluepeak gets a base policy below;
+  // Harborline Billing has none. No people are seeded under either.
+  const clientList = await Promise.all(
+    ["Bluepeak Telecom", "Harborline Billing"].map((name) =>
+      prisma.department.create({ data: { name, kind: "CLIENT" } }),
+    ),
+  );
+  const clients = Object.fromEntries(clientList.map((d) => [d.name, d]));
 
   // Phase 13: every category carries a class. Phase 34 (spec §2.1): the IT list
   // is the spec's nine, each with its tag prefix; the four Purchasing ones are
@@ -532,17 +541,37 @@ async function main() {
     ],
   });
 
+  // Phase 37 (spec §3.2): a slot's name is derived from its type — the category, or the type inside Other.
+  const policySlot = (category: string, typeIndex: number, required: boolean) => ({
+    name: slotLabel(category, catData[category].types[typeIndex]),
+    assetTypeId: cats[category].typeIds[typeIndex],
+    required,
+  });
+
   // Equipment policy for Finance (drives the loadout view in Phase 3)
   await prisma.equipmentPolicy.create({
     data: {
       name: "Finance standard", appliesToDepartmentId: depts["Finance"].id,
       slots: { create: [
-        { name: "laptop", assetTypeId: cats["Laptop"].typeIds[0], required: true },
-        { name: "monitor", assetTypeId: cats["Monitor"].typeIds[0], required: true },
-        { name: "dock", assetTypeId: cats["Other"].typeIds[3], required: true },
-        { name: "headset", assetTypeId: cats["Headset"].typeIds[0], required: true },
-        { name: "phone", assetTypeId: cats["Other"].typeIds[0], required: true },
-        { name: "second monitor", assetTypeId: cats["Monitor"].typeIds[1], required: false },
+        policySlot("Laptop", 0, true),
+        policySlot("Monitor", 0, true),
+        policySlot("Other", 3, true),
+        policySlot("Headset", 0, true),
+        policySlot("Other", 0, true),
+        policySlot("Monitor", 1, false),
+      ] },
+    },
+  });
+
+  // Phase 37 (spec §7): Bluepeak Telecom's base policy — four required lines, none a loaner.
+  await prisma.equipmentPolicy.create({
+    data: {
+      name: "Bluepeak Telecom", appliesToDepartmentId: clients["Bluepeak Telecom"].id,
+      slots: { create: [
+        policySlot("Workstation (PC)", 1, true),
+        policySlot("Monitor", 0, true),
+        policySlot("Monitor", 0, true),
+        policySlot("Headset", 0, true),
       ] },
     },
   });

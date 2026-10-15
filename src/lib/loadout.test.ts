@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, orderTiles, profilePrimary, resolvePolicy, tileMenuItems, type ExceptionLike } from "./loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, numberSlotLabels, orderTiles, profilePrimary, resolvePolicy, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
 
 const policies = [
   { id: "p-dept", name: "Finance standard", appliesToTitle: null, appliesToDepartmentId: "dept-fin", slots: [] },
@@ -233,5 +233,47 @@ describe("tileMenuItems — what a tile's menu offers (spec §4.4)", () => {
   });
   it("Replace needs the direct path; the request path still returns", () => {
     expect(tileMenuItems({ filled: true, pending: false, exceptionId: null, waivable: true }, { mayAct: true, direct: false })).toEqual(["return", "open", "waive"]);
+  });
+});
+
+describe("slotLabel", () => {
+  it("uses the category name", () => {
+    expect(slotLabel("Monitor", "24-inch")).toBe("Monitor");
+    expect(slotLabel("Workstation (PC)", "Mini PC")).toBe("Workstation (PC)");
+  });
+  it("uses the type name inside Other, any case", () => {
+    expect(slotLabel("Other", "Docking Station")).toBe("Docking Station");
+    expect(slotLabel(" other ", "Phone")).toBe("Phone");
+  });
+});
+
+describe("numberSlotLabels", () => {
+  it("leaves unique labels alone", () => {
+    expect(numberSlotLabels(["Laptop", "Monitor"])).toEqual(["Laptop", "Monitor"]);
+  });
+  it("numbers repeats in order", () => {
+    expect(numberSlotLabels(["Monitor", "Laptop", "Monitor", "Monitor"])).toEqual(["Monitor", "Laptop", "Monitor 2", "Monitor 3"]);
+  });
+  it("counts case-insensitively but keeps the first spelling", () => {
+    expect(numberSlotLabels(["Monitor", "monitor"])).toEqual(["Monitor", "monitor 2"]);
+  });
+});
+
+describe("resolvePolicy order (Phase 37)", () => {
+  const base = { id: "b", name: "Acme", appliesToTitle: null, appliesToDepartmentId: "acme" };
+  const rule = { id: "r", name: "Acme · Team Lead", appliesToTitle: "Team Lead", appliesToDepartmentId: "acme" };
+  const otherRule = { id: "o", name: "Zen · Team Lead", appliesToTitle: "Team Lead", appliesToDepartmentId: "zen" };
+  const global = { id: "g", name: "Leads", appliesToTitle: "team lead", appliesToDepartmentId: null };
+  it("a group title rule beats a global title policy", () => {
+    expect(resolvePolicy({ title: " team lead ", departmentId: "acme" }, [global, base, otherRule, rule])?.id).toBe("r");
+  });
+  it("a global title policy beats the group base", () => {
+    expect(resolvePolicy({ title: "Team Lead", departmentId: "acme" }, [base, global])?.id).toBe("g");
+  });
+  it("another group's title rule never applies", () => {
+    expect(resolvePolicy({ title: "Team Lead", departmentId: "acme" }, [otherRule, base])?.id).toBe("b");
+  });
+  it("falls back to null", () => {
+    expect(resolvePolicy({ title: "Agent", departmentId: "none" }, [base, rule])).toBeNull();
   });
 });
