@@ -41,6 +41,7 @@ export function PeopleFacet({
   const [draft, setDraft] = useState<Set<string>>(new Set(selected));
   const [typed, setTyped] = useState("");
   const [hits, setHits] = useState<PersonHit[] | null>(null);
+  const [failed, setFailed] = useState(false);
   // names for every person seen while the popover is open, so a chip keeps its name after the search moves on
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const rootRef = useRef<HTMLDivElement>(null);
@@ -59,6 +60,7 @@ export function PeopleFacet({
     setDraft(new Set(selected));
     setTyped("");
     setHits(null);
+    setFailed(false);
     setNames(new Map(options.map((o) => [o.value, o.label])));
     function onDocClick(e: MouseEvent) {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
@@ -72,6 +74,7 @@ export function PeopleFacet({
   useEffect(() => {
     const q = typed.trim();
     const mine = ++seq.current;
+    setFailed(false);
     if (!open || !q) {
       setHits(null);
       return;
@@ -80,7 +83,8 @@ export function PeopleFacet({
       void search(q).then((res) => {
         if (mine !== seq.current) return;
         if (!res.ok) {
-          setHits([]);
+          setFailed(true);
+          setHits(null);
           return;
         }
         setHits(res.data);
@@ -89,6 +93,10 @@ export function PeopleFacet({
           for (const h of res.data) next.set(h.value, h.label);
           return next;
         });
+      }).catch(() => {
+        if (mine !== seq.current) return;
+        setFailed(true);
+        setHits(null);
       });
     }, PEOPLE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -186,7 +194,8 @@ export function PeopleFacet({
                 <span className="font-mono text-[10px] text-fg-faint">{h.count}</span>
               </label>
             ))}
-            {hits !== null && hits.length === 0 && (
+            {failed && <p className="px-1.5 py-2 text-[11px] text-fg-muted">Search failed — try again</p>}
+            {!failed && hits !== null && hits.length === 0 && (
               <p className="px-1.5 py-2 text-[11px] text-fg-muted">{PEOPLE_NONE}</p>
             )}
           </div>

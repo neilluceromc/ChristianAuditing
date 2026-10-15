@@ -24,7 +24,7 @@ export function peopleWhere(q: string, scope: "active" | "assignees", cls?: Asse
     : { assets: { some: cls ? { cls } : {} }, OR: match };
 }
 
-/** Phase 36 (spec §4.3): the inventory Assigned filter's search — the typed text plus the list state that scopes the counts. */
+/** Phase 36 (spec sec. 4.3): the inventory Assigned filter's search - the typed text plus the list state that scopes the counts. */
 export const assigneeQuerySchema = z.object({
   q: z.string().trim().min(1).max(60),
   cls: z.enum(["IT", "PURCHASING"]),

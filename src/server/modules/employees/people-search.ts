@@ -29,9 +29,9 @@ export async function searchPeople(input: unknown): Promise<ActionResult<ComboOp
 }
 
 /**
- * Phase 36 (spec §4.3): the Assigned filter's search. People holding an asset of the class (leavers included)
+ * Phase 36 (spec sec. 4.3): the Assigned filter's search. People holding an asset of the class (leavers included)
  * matching the typed text, each with how many assets they hold under the list's OTHER filters
- * (buildAssetWhere without `assignee`) — the same count rule as every facet.
+ * (buildAssetWhere without `assignee`) - the same count rule as every facet.
  */
 export async function searchAssignees(input: unknown): Promise<ActionResult<Array<{ value: string; label: string; sub: string; count: number }>>> {
   const user = await actionRole("admin", "it_staff", "purchasing_staff", "finance_staff");

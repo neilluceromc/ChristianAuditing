@@ -102,7 +102,7 @@ export function purchaseYearChips(buckets: Array<{ year: number | null; count: n
 /** The Assigned filter's value for "no holder" (`?assignee=none`). */
 export const UNASSIGNED = "none";
 
-/** Phase 36 (spec §4.3): holder ids and/or Unassigned (`none` = assigneeId IS NULL); null when nothing is chosen. */
+/** Phase 36 (spec sec. 4.3): holder ids and/or Unassigned (`none` = assigneeId IS NULL); null when nothing is chosen. */
 export function assigneeWhere(values: readonly string[]): Prisma.AssetWhereInput | null {
   const ids = values.filter((v) => v !== UNASSIGNED);
   const none = values.includes(UNASSIGNED);
@@ -137,7 +137,7 @@ export function buildAssetWhere(
   if (statuses.length) where.status = { in: statuses };
   if (f.category?.length) where.categoryId = { in: f.category };
   if (f.type?.length) where.typeId = { in: f.type };
-  // Phase 36 (spec §4.3): holder ids and/or the Unassigned sentinel, appended to AND like the derived facets.
+  // Phase 36 (spec sec. 4.3): holder ids and/or the Unassigned sentinel, appended to AND like the derived facets.
   const holder = assigneeWhere(f.assignee ?? []);
   if (holder) {
     const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];

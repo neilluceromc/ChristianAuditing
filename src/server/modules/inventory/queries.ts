@@ -358,7 +358,7 @@ export async function facetOptions(
   // simply never "its own" facet here, because it isn't one of the four
   // being computed. Matches the without(facet) rule above: apply everything
   // else, never the facet's own selection.
-  // Phase 36 (spec §4.3): the Assigned facet no longer lists every holder — only the CHOSEN people
+  // Phase 36 (spec sec. 4.3): the Assigned facet no longer lists every holder - only the CHOSEN people
   // (names + counts) and Unassigned; the rest is found by searching (`searchAssignees`).
   const chosenIds = (state.filters.assignee ?? []).filter((v) => v !== UNASSIGNED);
   const [statusG, categoryG, typeG, assigneeG, categories, types, chosen, provenanceCounts, regCounts] = await Promise.all([
