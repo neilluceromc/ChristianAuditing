@@ -43,8 +43,8 @@
 - Server actions follow `actionRole` → `checkRate` → zod.
 
 **Spec values**
-- **Tag shape:** `TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,29}$/`, tested after `trim().toUpperCase()`.
-- **Refusal text** (`TAG_RULE`): **"Tags are 1–30 letters, digits, - _ or ., no spaces"**.
+- **Tag shape:** `TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,19}$/`, tested after `trim().toUpperCase()`.
+- **Refusal text** (`TAG_RULE`): **"Tags are 1–20 letters, digits, - _ or ., no spaces"**.
 - **Empty tag in Register:** **"Enter a tag for every unit"**.
 - **Type:**
   - the Type select is shown when the category has ≥2 types;
@@ -122,8 +122,8 @@
 
 ```ts
 // src/lib/tag-key.ts
-export const TAG_SHAPE: RegExp;   // /^[A-Z0-9][A-Z0-9._-]{0,29}$/
-export const TAG_RULE: string;    // "Tags are 1–30 letters, digits, - _ or ., no spaces"
+export const TAG_SHAPE: RegExp;   // /^[A-Z0-9][A-Z0-9._-]{0,19}$/
+export const TAG_RULE: string;    // "Tags are 1–20 letters, digits, - _ or ., no spaces"
 // tagKey(raw) unchanged: trim + upper-case
 // src/lib/register-rows.ts
 export const TAG_EMPTY: string;   // "Enter a tag for every unit"
@@ -137,18 +137,18 @@ import { describe, expect, it } from "vitest";
 import { TAG_RULE, TAG_SHAPE, tagKey } from "./tag-key";
 
 describe("TAG_SHAPE (Phase 36 spec §2.1)", () => {
-  it("accepts any 1-30 letters, digits, - _ . starting alphanumeric", () => {
-    for (const t of ["BR-LT-0148", "ACC-LAP-001", "2026-0042", "A", "LT_1.2", "X".repeat(30)]) expect(TAG_SHAPE.test(t)).toBe(true);
+  it("accepts any 1-20 letters, digits, - _ . starting alphanumeric", () => {
+    for (const t of ["BR-LT-0148", "ACC-LAP-001", "2026-0042", "A", "LT_1.2", "X".repeat(20)]) expect(TAG_SHAPE.test(t)).toBe(true);
   });
-  it("refuses empty, a leading - or ., spaces, slashes, 31 chars and non-ASCII", () => {
-    for (const t of ["", "-LT", ".X", "A B", "A/B", "X".repeat(31), "Ñ"]) expect(TAG_SHAPE.test(t)).toBe(false);
+  it("refuses empty, a leading - or ., spaces, slashes, 21 chars and non-ASCII", () => {
+    for (const t of ["", "-LT", ".X", "A B", "A/B", "X".repeat(21), "Ñ"]) expect(TAG_SHAPE.test(t)).toBe(false);
   });
   it("tagKey trims and upper-cases before the test (Review Focus 1)", () => {
     expect(tagKey("  acc-1 ")).toBe("ACC-1");
     expect(TAG_SHAPE.test(tagKey(" acc-1 "))).toBe(true);
   });
   it("names the rule", () => {
-    expect(TAG_RULE).toBe("Tags are 1–30 letters, digits, - _ or ., no spaces");
+    expect(TAG_RULE).toBe("Tags are 1–20 letters, digits, - _ or ., no spaces");
   });
 });
 ```
@@ -158,7 +158,7 @@ describe("TAG_SHAPE (Phase 36 spec §2.1)", () => {
 ```ts
 it("badTags: empty tags ask for a tag; bad shapes name the rule", () => {
   expect(badTags([{ tag: "", serial: "" }, { tag: "ok-1", serial: "" }]).message).toBe("Row 1 · Enter a tag for every unit");
-  expect(badTags([{ tag: "A B", serial: "" }]).message).toBe("Row 1 · A B: Tags are 1–30 letters, digits, - _ or ., no spaces");
+  expect(badTags([{ tag: "A B", serial: "" }]).message).toBe("Row 1 · A B: Tags are 1–20 letters, digits, - _ or ., no spaces");
   expect(badTags([{ tag: "acc-1", serial: "" }]).rows.size).toBe(0);
   expect(badTags([{ tag: "", serial: "" }, { tag: "", serial: "" }]).message).toBe("Row 1 · Enter a tag for every unit and 1 more");
 });
@@ -171,13 +171,13 @@ it("badTags: empty tags ask for a tag; bad shapes name the rule", () => {
 
 ```ts
 /**
- * Phase 36 (spec §2.1): the asset tag is whatever staff type — 1-30 letters, digits, `-`, `_` or `.`,
+ * Phase 36 (spec §2.1): the asset tag is whatever staff type — 1-20 letters, digits, `-`, `_` or `.`,
  * starting with a letter or digit, tested after `tagKey` (trim + upper-case). No spaces and no `/`,
  * because the tag is one segment of `/inventory/scan/<tag>`; no leading `.` so `.`/`..` never occur.
  * ONE definition: Register, receiving, the CSV import and the search jump all use it.
  */
-export const TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,29}$/;
-export const TAG_RULE = "Tags are 1–30 letters, digits, - _ or ., no spaces";
+export const TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,19}$/;
+export const TAG_RULE = "Tags are 1–20 letters, digits, - _ or ., no spaces";
 ```
 
   - In `register-rows.ts`, `badTags` drops `example`:
@@ -206,7 +206,7 @@ export function badTags(rows: readonly RegisterRow[]): { message: string | null;
 
 ```bash
 git add src/lib src/server/modules/inventory/actions.ts src/server/modules/purchases/receiving.ts src/app/dev/kitchen-sink/page.tsx src/components/inventory/register-form.tsx
-git commit -m "feat(tags): one tag rule -- any 1-30 letters, digits, - _ . (upper-cased, unique) for Register, receiving, import and the search jump"
+git commit -m "feat(tags): one tag rule -- any 1-20 letters, digits, - _ . (upper-cased, unique) for Register, receiving, import and the search jump"
 ```
 
 ---

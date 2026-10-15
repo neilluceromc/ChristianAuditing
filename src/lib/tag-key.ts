@@ -84,10 +84,12 @@ export function tagKey(raw: unknown): string {
 }
 
 /**
- * Phase 36 (spec §2.1): the asset tag is whatever staff type — 1-30 letters, digits, `-`, `_` or `.`,
+ * Phase 36 (spec §2.1): the asset tag is whatever staff type — 1-20 letters, digits, `-`, `_` or `.`,
  * starting with a letter or digit, tested after `tagKey` (trim + upper-case). No spaces and no `/`,
  * because the tag is one segment of `/inventory/scan/<tag>`; no leading `.` so `.`/`..` never occur.
+ * 20 is the cap because the label's Code 128 barcode (label-geometry.ts, MIN_MODULE_MM) fits about 22
+ * characters on the sticker width; a longer tag would print with no scannable code.
  * ONE definition: Register, receiving, the CSV import and the search jump all use it.
  */
-export const TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,29}$/;
-export const TAG_RULE = "Tags are 1–30 letters, digits, - _ or ., no spaces";
+export const TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,19}$/;
+export const TAG_RULE = "Tags are 1–20 letters, digits, - _ or ., no spaces";

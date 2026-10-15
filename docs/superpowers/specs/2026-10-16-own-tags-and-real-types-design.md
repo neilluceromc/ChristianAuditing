@@ -36,8 +36,8 @@ The user's choices:
 
 ### 2.1 The rule (one definition)
 - **Normalisation:** the tag is trimmed and stored in **upper case**.
-- **Shape:** 1–30 characters of letters, digits, `-`, `_` and `.`, starting with a letter or digit:
-  `^[A-Z0-9][A-Z0-9._-]{0,29}$`.
+- **Shape:** 1–20 characters of letters, digits, `-`, `_` and `.`, starting with a letter or digit:
+  `^[A-Z0-9][A-Z0-9._-]{0,19}$`.
   - There are no spaces and no `/`, because the tag is one segment of the scan URL `/inventory/scan/<tag>`.
   - It cannot start with `.`, which rules out the `.` and `..` path segments.
 - **Uniqueness:** it must be unique across all assets. Tags are stored upper-case, so uniqueness ignores case.
@@ -47,7 +47,7 @@ The user's choices:
   - the CSV asset import;
   - `exactTagMatch`, the search box's jump straight to an exact tag.
 
-  Their refusal text "Format: BR-XX-0000" becomes "Tags are 1–30 letters, digits, - _ or ., no spaces".
+  Their refusal text "Format: BR-XX-0000" becomes "Tags are 1–20 letters, digits, - _ or ., no spaces".
 - **Existing tags** (`BR-LT-0148` …) already fit the new shape. Nothing is renamed.
 
 ### 2.2 Register
@@ -172,11 +172,11 @@ page. It draws every depreciating asset as a row of 12 months, unpaged. Every ot
   the sum of its drill-downs.
 
 ## 6. Testing
-- **Unit:** `TAG_SHAPE` accepts `BR-LT-0148`, `ACC-LAP-001`, `2026-0042`, `A`, `LT_1.2`, and refuses:
+- **Unit:** `TAG_SHAPE` accepts `BR-LT-0148`, `ACC-LAP-001`, `2026-0042`, `A`, `LT_1.2`, a 20-character string, and refuses:
   - the empty string;
   - `-LT`, `.X`;
   - `A B`, `A/B`;
-  - a 31-character string;
+  - a 21-character string;
   - `ñ`.
 
   The register-rows helpers accept typed tags and flag empty tags, repeats and pasted columns.
@@ -209,7 +209,8 @@ page. It draws every depreciating asset as a row of 12 months, unpaged. Every ot
 1. **Upper-case storage.** Typed tags are stored upper-case, so scanning and uniqueness never depend on case. *Cost if
    wrong: one `toUpperCase`.*
 2. **The character set** excludes `/` and spaces and requires a letter or digit first, so a tag is always a safe URL
-   segment. *Cost if wrong: one regex.*
+   segment. It is capped at 20 characters so the printed label's Code 128 barcode (about 22 characters
+   fit the sticker at the minimum module width) always scans. *Cost if wrong: one regex.*
 3. **One shape everywhere.** Receiving, the CSV import and the search jump use the same new rule rather than keeping
    `BR-XX-0000` there. *Cost if wrong: a second constant.*
 4. **Rename, don't replace.** "Dell Latitude" is renamed to Standard rather than deleted, so assets and kit slots keep
