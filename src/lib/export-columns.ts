@@ -1,6 +1,6 @@
 import type { XlsxColumn } from "@/server/xlsx/write";
 import type { DepAssetRow } from "@/server/modules/finance/depreciation-queries";
-import { monthLabel } from "@/lib/depreciation";
+import { monthLabel, type YearRow } from "@/lib/depreciation";
 import { REG_LABEL_FINANCE } from "@/lib/registration";
 
 export const EXPORT_CAP = 10_000;
@@ -390,4 +390,22 @@ export const ASSET_SCHEDULE_EXPORT_COLUMNS: XlsxColumn<{
   { label: "Depreciation", width: 16, cell: (r) => peso(r.charge) },
   { label: "Book value at end", width: 20, cell: (r) => peso(r.closing) },
   { label: "Projected", width: 11, cell: (r) => ({ value: r.projected }) },
+];
+
+/** Phase 35 (spec §5.6): the year schedule. Subtotal and total rows carry an empty tag/model and a null cost. */
+export interface ScheduleSheetRow { tag: string; model: string; category: string; costC: number | null; grid: YearRow }
+
+const SCHEDULE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export const SCHEDULE_EXPORT_COLUMNS: XlsxColumn<ScheduleSheetRow>[] = [
+  { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
+  { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
+  { label: "Category", width: 26, cell: (r) => ({ value: r.category }) },
+  { label: "Cost", width: 14, cell: (r) => peso(r.costC) },
+  { label: "Book value 1 Jan", width: 16, cell: (r) => peso(r.grid.opening) },
+  ...SCHEDULE_MONTHS.map((m, i): XlsxColumn<ScheduleSheetRow> => ({
+    label: m, width: 12, cell: (r) => peso(r.grid.months[i]),
+  })),
+  { label: "Year total", width: 14, cell: (r) => peso(r.grid.total) },
+  { label: "Book value 31 Dec", width: 16, cell: (r) => peso(r.grid.closing) },
 ];
