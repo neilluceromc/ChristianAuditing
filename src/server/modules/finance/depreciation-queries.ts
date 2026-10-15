@@ -1,16 +1,17 @@
 import type { AssetClass, AssetStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import {
-  asOfMonth, depreciate, manilaMonth, resolvePolicy, stateNote, toCentavos, yearGrid,
+  asOfMonth, depreciate, manilaMonth, resolvePolicy, stateNote, sumYearRows, toCentavos, yearGrid,
   type DepResult, type MonthIndex, type YearRow,
 } from "@/lib/depreciation";
+import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import { registrationState, type RegState } from "@/lib/registration";
 
 /** Phase 35 (spec 5.1): depreciation covers capitalised assets only. */
 export const CAPITALISED: Prisma.AssetWhereInput = { cost: { not: null }, financeNotCapitalised: false };
 
 export interface DepAssetRow {
-  id: string; tag: string; model: string; category: string; cls: AssetClass; status: AssetStatus;
+  id: string; tag: string; model: string; categoryId: string; category: string; cls: AssetClass; status: AssetStatus;
   holder: string | null; reg: RegState; notCapitalised: boolean;
   costC: number | null; confirmedAt: Date | null; result: DepResult | null; note: string | null; custom: boolean; overrideNote: string | null;
   lifeMonths: number | null; salvageC: number | null; categoryLife: number | null; categorySalvagePercent: number | null;
@@ -28,7 +29,7 @@ export async function depRows(
     ...(opts.skip !== undefined ? { skip: opts.skip } : {}),
     ...(opts.take !== undefined ? { take: opts.take } : {}),
     select: {
-      id: true, tag: true, model: true, cls: true, status: true, cost: true,
+      id: true, tag: true, model: true, categoryId: true, cls: true, status: true, cost: true,
       itVerifiedAt: true, financeConfirmedAt: true, financeReturnedAt: true, financeNotCapitalised: true,
       depreciationLifeMonths: true, depreciationSalvage: true, depreciationNote: true,
       assignee: { select: { name: true } },
@@ -54,7 +55,7 @@ export async function depRows(
       note = r.financeNotCapitalised ? "Not capitalised" : "No cost recorded";
     }
     return {
-      id: r.id, tag: r.tag, model: r.model, category: r.category.name, cls: r.cls, status: r.status,
+      id: r.id, tag: r.tag, model: r.model, categoryId: r.categoryId, category: r.category.name, cls: r.cls, status: r.status,
       holder: r.assignee?.name ?? null, reg: registrationState(r), notCapitalised: r.financeNotCapitalised,
       costC, confirmedAt: r.financeConfirmedAt, result, note, custom, overrideNote: r.depreciationNote,
       lifeMonths: r.depreciationLifeMonths, salvageC, categoryLife: r.category.depreciationLifeMonths, categorySalvagePercent,
@@ -119,22 +120,13 @@ export interface ScheduleGroup {
   subtotal: YearRow;
 }
 
-function sumRows(rows: YearRow[]): YearRow {
-  return {
-    opening: rows.reduce((a, r) => a + r.opening, 0),
-    months: Array.from({ length: 12 }, (_, i) => rows.reduce((a, r) => a + r.months[i], 0)),
-    projected: rows[0].projected,
-    total: rows.reduce((a, r) => a + r.total, 0),
-    closing: rows.reduce((a, r) => a + r.closing, 0),
-  };
-}
+type GridEntry = { categoryId: string; category: string; row: ScheduleGroup["rows"][number] };
 
-export async function scheduleYear(cls: AssetClass, year: number, now: Date = new Date()): Promise<{
-  groups: ScheduleGroup[]; total: YearRow | null; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[];
-}> {
+/** The one pass behind the export, the category summary and the drill-down: capitalised assets of a class, each with its year grid. */
+async function gridPass(cls: AssetClass, year: number, now: Date, categoryId?: string) {
   const asOf = asOfMonth(now);
-  const rows = await depRows({ AND: [{ cls }, CAPITALISED] }, now);
-  const byCat = new Map<string, ScheduleGroup["rows"]>();
+  const rows = await depRows({ AND: [{ cls }, CAPITALISED, ...(categoryId ? [{ categoryId }] : [])] }, now);
+  const entries: GridEntry[] = [];
   let notStarted = 0, noPolicy = 0;
   const thisYear = Math.floor(manilaMonth(now) / 12);
   let earliest = thisYear;
@@ -145,17 +137,57 @@ export async function scheduleYear(cls: AssetClass, year: number, now: Date = ne
     if (r.confirmedAt) earliest = Math.min(earliest, Math.floor(manilaMonth(r.confirmedAt) / 12));
     const grid = yearGrid(r.result.cost, r.confirmedAt, r.result.policy, year, asOf);
     if (!grid) continue;
-    const list = byCat.get(r.category) ?? [];
-    list.push({ id: r.id, tag: r.tag, model: r.model, costC: r.result.cost, custom: r.custom, grid });
-    byCat.set(r.category, list);
+    entries.push({ categoryId: r.categoryId, category: r.category, row: { id: r.id, tag: r.tag, model: r.model, costC: r.result.cost, custom: r.custom, grid } });
   }
+  const years: number[] = [];
+  for (let y = earliest; y <= thisYear + 1; y++) years.push(y);
+  return { entries, notStarted, noPolicy, asOf, years };
+}
+
+export async function scheduleYear(cls: AssetClass, year: number, now: Date = new Date()): Promise<{
+  groups: ScheduleGroup[]; total: YearRow | null; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[];
+}> {
+  const { entries, notStarted, noPolicy, asOf, years } = await gridPass(cls, year, now);
+  const byCat = new Map<string, ScheduleGroup["rows"]>();
+  for (const e of entries) byCat.set(e.category, [...(byCat.get(e.category) ?? []), e.row]);
   const groups = [...byCat.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([category, list]): ScheduleGroup => {
       list.sort((a, b) => a.tag.localeCompare(b.tag));
-      return { category, rows: list, subtotal: sumRows(list.map((x) => x.grid)) };
+      return { category, rows: list, subtotal: sumYearRows(list.map((x) => x.grid), year, asOf) };
     });
-  const years: number[] = [];
-  for (let y = earliest; y <= thisYear + 1; y++) years.push(y);
-  return { groups, total: groups.length ? sumRows(groups.map((g) => g.subtotal)) : null, notStarted, noPolicy, asOf, years };
+  return { groups, total: groups.length ? sumYearRows(groups.map((g) => g.subtotal), year, asOf) : null, notStarted, noPolicy, asOf, years };
+}
+
+/** Phase 36 (spec 5): category totals only, no asset rows — the Schedule's default view. */
+export async function scheduleSummary(cls: AssetClass, year: number, now: Date = new Date()): Promise<{
+  categories: Array<{ categoryId: string; category: string; assets: number; row: YearRow }>;
+  total: YearRow | null; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[];
+}> {
+  const { entries, notStarted, noPolicy, asOf, years } = await gridPass(cls, year, now);
+  const byCat = new Map<string, { category: string; grids: YearRow[] }>();
+  for (const e of entries) {
+    const c = byCat.get(e.categoryId) ?? { category: e.category, grids: [] };
+    c.grids.push(e.row.grid);
+    byCat.set(e.categoryId, c);
+  }
+  const categories = [...byCat.entries()]
+    .map(([categoryId, c]) => ({ categoryId, category: c.category, assets: c.grids.length, row: sumYearRows(c.grids, year, asOf) }))
+    .sort((a, b) => a.category.localeCompare(b.category));
+  return { categories, total: categories.length ? sumYearRows(categories.map((c) => c.row), year, asOf) : null, notStarted, noPolicy, asOf, years };
+}
+
+/** One category's asset rows for the year, paged by tag; the subtotal covers every row of the category, not just the page. */
+export async function scheduleCategory(cls: AssetClass, year: number, categoryId: string, page: number, now: Date = new Date()): Promise<{
+  category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow; total: number; page: number; pageCount: number;
+} | null> {
+  const cat = await prisma.assetCategory.findFirst({ where: { id: categoryId, cls }, select: { name: true } });
+  if (!cat) return null;
+  const { entries, asOf } = await gridPass(cls, year, now, categoryId);
+  const all = entries.map((e) => e.row).sort((a, b) => a.tag.localeCompare(b.tag));
+  const p = pageOf(all.length, page, ENTITY_PAGE_SIZE);
+  return {
+    category: cat.name, rows: all.slice(p.skip, p.skip + p.take), subtotal: sumYearRows(all.map((x) => x.grid), year, asOf),
+    total: all.length, page: p.page, pageCount: p.pageCount,
+  };
 }

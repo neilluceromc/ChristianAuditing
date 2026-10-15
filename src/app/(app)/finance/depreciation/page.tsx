@@ -1,15 +1,17 @@
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import Link from "next/link";
-import { policyRows, scheduleYear } from "@/server/modules/finance/depreciation-queries";
+import { policyRows, scheduleCategory, scheduleSummary } from "@/server/modules/finance/depreciation-queries";
 import { ASSET_CLASSES, CLASS_LABEL, parseCls } from "@/lib/asset-class";
+import { parsePage } from "@/lib/paging";
 import { manilaMonth } from "@/lib/depreciation";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { ScheduleTable } from "@/components/finance/schedule-table";
+import { ScheduleCategoryTable, ScheduleSummaryTable } from "@/components/finance/schedule-table";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs } from "@/components/ui/tabs";
+import { Pagination } from "@/components/ui/pagination";
 import { Banner } from "@/components/ui/banner";
 import { Table, TBody, THead, Th, Tr } from "@/components/ui/table";
 import { PolicyRow } from "@/components/finance/policy-row";
@@ -29,7 +31,10 @@ export default async function DepreciationPage({
   const rawYear = params.get("year") ?? "";
   const parsedYear = /^\d{4}$/.test(rawYear) ? Number(rawYear) : NaN;
   const year = parsedYear >= 2000 && parsedYear <= 2100 ? parsedYear : thisYear;
-  const sched = tab === "schedule" ? await scheduleYear(cls, year, now) : null;
+  const catId = params.get("cat") ?? "";
+  const sched = tab === "schedule" ? await scheduleSummary(cls, year, now) : null;
+  const drill = sched && catId ? await scheduleCategory(cls, year, catId, parsePage(params), now) : null;
+  const schedHref = (extra = "") => `/finance/depreciation?tab=schedule&year=${year}&cls=${cls}${extra}`;
   const years = sched ? (sched.years.includes(year) ? sched.years : [...sched.years, year].sort((a, b) => a - b)) : [];
 
   const policies = tab === "policies" ? await policyRows() : [];
@@ -76,10 +81,32 @@ export default async function DepreciationPage({
                 <Link href="/finance/depreciation?tab=policies" className="font-medium text-accent hover:underline">Set policies</Link>
               </p>
             )}
-            {sched.groups.length === 0 ? (
+            {drill ? (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-sm font-semibold text-fg">{drill.category} — {year}</h2>
+                  <Link href={schedHref()} className="text-xs font-medium text-accent hover:underline">← All categories</Link>
+                </div>
+                {drill.rows.length === 0 ? (
+                  <p className="text-[12.5px] text-fg-muted">No asset in {drill.category} depreciates in {year}.</p>
+                ) : (
+                  <ScheduleCategoryTable year={year} category={drill.category} rows={drill.rows} subtotal={drill.subtotal} />
+                )}
+                <Pagination
+                  page={drill.page}
+                  pageCount={drill.pageCount}
+                  hrefFor={(p) => schedHref(`&cat=${encodeURIComponent(catId)}${p > 1 ? `&page=${p}` : ""}`)}
+                />
+              </>
+            ) : sched.categories.length === 0 ? (
               <p className="text-[12.5px] text-fg-muted">No asset depreciates in {year}.</p>
             ) : (
-              <ScheduleTable year={year} groups={sched.groups} total={sched.total} />
+              <ScheduleSummaryTable
+                year={year}
+                categories={sched.categories}
+                total={sched.total}
+                hrefFor={(id) => schedHref(`&cat=${encodeURIComponent(id)}`)}
+              />
             )}
           </>
         )}
