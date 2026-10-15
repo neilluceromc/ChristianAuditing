@@ -1,9 +1,9 @@
 import type { AssetClass, AssetStatus, Role } from "@prisma/client";
-import { CLASS_LABEL, canEditAsset, canManageClass, isAssignable, isAwaitingItCheck, isDirectLifecycle, statusTargets } from "./asset-class";
+import { canEditAsset, canManageClass, isAssignable, isAwaitingItCheck, isDirectLifecycle, statusTargets } from "./asset-class";
 
 /** Phase 30 (spec §4.1, plan P-4): everything a record header or a list row can offer. */
 export type RecordAction =
-  | "triage" | "mark-checked" | "mark-corrected" | "confirm-details" | "send-back"
+  | "triage" | "mark-checked" | "mark-corrected"
   | "return" | "assign" | "replace" | "reserve" | "change-status" | "set-loan-date" | "print-label";
 
 export interface RecordState {
@@ -20,9 +20,9 @@ export interface RecordState {
   held: boolean;
 }
 
-const PRIMARY_ORDER: readonly RecordAction[] = ["triage", "mark-checked", "mark-corrected", "confirm-details", "return", "assign"];
+const PRIMARY_ORDER: readonly RecordAction[] = ["triage", "mark-checked", "mark-corrected", "return", "assign"];
 const FULL_ORDER: readonly RecordAction[] = [
-  "triage", "mark-checked", "mark-corrected", "confirm-details", "send-back",
+  "triage", "mark-checked", "mark-corrected",
   "return", "assign", "replace", "reserve", "change-status", "set-loan-date", "print-label",
 ];
 
@@ -31,14 +31,11 @@ function applicable(a: RecordState, role: Role): Record<RecordAction, boolean> {
   const direct = isDirectLifecycle(role, a.cls);
   const awaitingIt = isAwaitingItCheck(a);
   const assignable = isAssignable(a);
-  const finance = (role === "admin" || role === "finance_staff") && a.financeConfirmedAt === null && !awaitingIt;
   const live = !a.pending; // plan P-4: only lifecycle actions wait for an open approval
   return {
     triage: direct && live && a.returnedAt !== null,
     "mark-checked": awaitingIt && canManageClass(role, "IT"),
     "mark-corrected": canMutate && a.financeReturnedAt !== null,
-    "confirm-details": finance,
-    "send-back": finance,
     return: canMutate && live && a.hasHolder,
     assign: canMutate && live && !a.hasHolder && assignable,
     replace: direct && live && a.hasHolder,
@@ -67,8 +64,6 @@ export function actionLabel(action: RecordAction, ctx: { cls: AssetClass; direct
     case "triage": return `Triage${dots}`;
     case "mark-checked": return `Mark checked${dots}`;
     case "mark-corrected": return `Mark corrected${dots}`;
-    case "confirm-details": return `Confirm details${dots}`;
-    case "send-back": return `Send back to ${CLASS_LABEL[ctx.cls]}…`;
     case "return": return `Return${dots}`;
     case "assign": return `${ctx.direct ? "Assign" : "Assign holder"}${dots}`;
     case "replace": return "Replace…";

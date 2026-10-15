@@ -19,6 +19,8 @@ import { actionLabel, recordActions, type RecordAction, type RecordState } from 
 import type { ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
+import { canEditAsset } from "@/lib/asset-class";
+import { RegistrationCell } from "./registration-cell";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { AssignDialog, ReturnDialog } from "./holder-control";
 import { ChangeStatusDialog } from "./status-control";
@@ -42,6 +44,8 @@ export const INVENTORY_COLUMNS: ColumnDef[] = [
   { id: "category", label: "Category", width: 84, sortKey: "category" },
   { id: "assigned", label: "Assigned", width: 168 },
   { id: "status", label: "Status", width: 128, sortKey: "status" },
+  // Phase 35 (spec §3.1): where Finance's registration review stands, and what to fix when it was sent back
+  { id: "registration", label: "Registration", width: 220 },
   // repairs saved view only (README 7b)
   { id: "stage", label: "Stage", width: 108 },
   { id: "down", label: "Down", width: 68, sortKey: "defectiveSince" },
@@ -361,6 +365,16 @@ export function InventoryTable({
                             {row.attention.label}
                           </span>
                         )}
+                      </Td>
+                    );
+                  case "registration":
+                    return (
+                      <Td key={col.id} className="py-1.5">
+                        <RegistrationCell
+                          row={row}
+                          canMutate={canMutate}
+                          canEdit={canEditAsset(role, { cls: row.cls, itVerifiedAt: row.awaitingItCheck ? null : new Date(0) })}
+                        />
                       </Td>
                     );
                   case "stage":

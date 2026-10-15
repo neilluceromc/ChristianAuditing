@@ -34,18 +34,17 @@ describe("recordActions — one state-chosen primary per record (spec §4.1, pla
     expect(recordPrimary(awaiting, "it_staff")).toBe("mark-checked");
     expect(recordActions(awaiting, "purchasing_staff")).toEqual({ primary: null, more: [], edit: true });
   });
-  it("Finance on an unconfirmed record: Confirm details, Send back in More, no Edit", () => {
-    expect(recordActions({ ...base, financeConfirmedAt: null }, "finance_staff"))
-      .toEqual({ primary: "confirm-details", more: ["send-back"], edit: false });
-  });
-  it("a pending approval does not suppress Finance's review (plan P-4)", () => {
-    expect(recordPrimary({ ...base, financeConfirmedAt: null, pending: true }, "finance_staff")).toBe("confirm-details");
+  it("Finance on an unconfirmed, IT-checked asset gets no header action at all (plan P-9: review lives on the Finance page)", () => {
+    const plan = recordActions({ ...base, financeConfirmedAt: null }, "finance_staff");
+    expect(plan.primary).toBeNull();
+    expect(plan.more).toEqual([]);
+    expect(plan.edit).toBe(false);
   });
   it("admin on a Finance-returned IT spare: one primary, the rest in More in the fixed order", () => {
     const returned = { ...base, financeConfirmedAt: null, financeReturnedAt: new Date("2026-09-21") };
     expect(recordActions(returned, "admin")).toEqual({
       primary: "mark-corrected",
-      more: ["confirm-details", "send-back", "assign", "reserve", "change-status", "print-label"],
+      more: ["assign", "reserve", "change-status", "print-label"],
       edit: true,
     });
   });
@@ -73,7 +72,8 @@ describe("actionLabel — header buttons, menu items, and the approval path's wo
     expect(actionLabel("assign", { cls: "PURCHASING", direct: false, inMenu: false })).toBe("Assign holder");
     expect(actionLabel("change-status", { cls: "PURCHASING", direct: false, inMenu: true })).toBe("Request status change…");
   });
-  it("Send back names the class it returns to", () => {
-    expect(actionLabel("send-back", { cls: "PURCHASING", direct: false, inMenu: true })).toBe("Send back to Purchasing…");
+  it("Mark corrected: no ellipsis on the button, one in the menu", () => {
+    expect(actionLabel("mark-corrected", { cls: "IT", direct: true, inMenu: false })).toBe("Mark corrected");
+    expect(actionLabel("mark-corrected", { cls: "IT", direct: true, inMenu: true })).toBe("Mark corrected…");
   });
 });

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, IconButton } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -16,7 +15,7 @@ import { ChangeStatusDialog } from "./status-control";
 import { TriageDialog } from "./triage-control";
 import { LoanDueDialog } from "./loan-due-control";
 import { ItCheckDialog } from "./it-check";
-import { FinanceReviewDialog, type NextToReview } from "./finance-review";
+import { ResubmitDialog } from "./resubmit-dialog";
 
 /**
  * Phase 30 (spec §4.1, plan P-3/P-4): the record's one state-chosen primary, Edit visible, the rest in More.
@@ -35,8 +34,6 @@ export function RecordActions(props: {
 }) {
   const router = useRouter();
   const [open, setOpen] = useState<RecordAction | null>(null);
-  // undefined until Finance confirms here; then the next record to review, or null for a clear queue (spec §4.6)
-  const [next, setNext] = useState<NextToReview | undefined>(undefined);
   const { plan, asset, direct, holder } = props;
   const close = () => setOpen(null);
 
@@ -47,18 +44,10 @@ export function RecordActions(props: {
 
   const items: MenuItem[] = plan.more.map((a) => ({ label: actionLabel(a, { cls: asset.cls, direct, inMenu: true }), onSelect: () => run(a) }));
   const nothing = !plan.primary && !plan.edit && items.length === 0;
-  const financeMode = open === "confirm-details" ? "confirm" : open === "send-back" ? "return" : open === "mark-corrected" ? "resubmit" : null;
 
   return (
     <>
-      {next !== undefined && (next
-        ? <ButtonLink href={`/inventory/${next.id}`}>Next to review →</ButtonLink>
-        : (
-          <span className="text-xs text-fg-muted">
-            Queue clear · <Link href="/finance/assets" className="text-accent underline hover:text-accent-hover">Back to the queue</Link>
-          </span>
-        ))}
-      {nothing && next === undefined && <span className="text-xs text-fg-muted">Managed by {CLASS_LABEL[asset.cls]} — view only</span>}
+      {nothing && <span className="text-xs text-fg-muted">Managed by {CLASS_LABEL[asset.cls]} — view only</span>}
       {plan.primary && (
         <Button variant="primary" onClick={() => run(plan.primary!)}>{actionLabel(plan.primary, { cls: asset.cls, direct, inMenu: false })}</Button>
       )}
@@ -83,7 +72,7 @@ export function RecordActions(props: {
       <TriageDialog open={open === "triage"} onClose={close} asset={asset} />
       <LoanDueDialog open={open === "set-loan-date"} onClose={close} asset={asset} loanDueAt={asset.loanDueAt} />
       <ItCheckDialog open={open === "mark-checked"} onClose={close} asset={asset} />
-      <FinanceReviewDialog mode={financeMode} onClose={close} asset={asset} onConfirmed={setNext} />
+      <ResubmitDialog open={open === "mark-corrected"} onClose={close} asset={asset} />
     </>
   );
 }

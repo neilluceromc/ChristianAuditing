@@ -2,6 +2,7 @@ import type { AssetClass, AssetStatus, Prisma } from "@prisma/client";
 import type { ListConfig, ListState, SortKey } from "./url-state";
 import { isRepairStage } from "./repairs";
 import { STATUSES_BY_CLASS, isStatusOf } from "./asset-class";
+import { parseRegState, regWhere, type RegState } from "./registration";
 import { parseProvenance, provenanceWhere, type Provenance } from "./provenance";
 
 /**
@@ -25,7 +26,7 @@ export const ASSET_STATUSES = [
 export const BULK_MAX = 200;
 
 export const INVENTORY_LIST_CONFIG: ListConfig = {
-  facets: ["status", "category", "type", "assignee", "stage", "provenance"],
+  facets: ["status", "category", "type", "assignee", "stage", "provenance", "reg"],
   sortable: [
     "tag", "model", "category", "status", "purchasedAt", "warrantyUntil",
     // the repairs view's Down column
@@ -145,6 +146,13 @@ export function buildAssetWhere(
   if (provenances.length) {
     const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
     and.push({ OR: provenances.map(provenanceWhere) });
+    where.AND = and;
+  }
+  // Phase 35 (spec §3.1): registration is derived the same way — an OR of where-shapes appended to AND.
+  const regs = (f.reg ?? []).map(parseRegState).filter((r): r is RegState => r !== null);
+  if (regs.length) {
+    const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+    and.push({ OR: regs.map(regWhere) });
     where.AND = and;
   }
   // purchaseYear is fully expressible in SQL — a straight range on
