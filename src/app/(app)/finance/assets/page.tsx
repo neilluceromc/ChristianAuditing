@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
-import { ASSET_CLASSES, CLASS_LABEL, parseCls } from "@/lib/asset-class";
+import { ASSET_CLASSES, CLASS_LABEL, parseCls, statusesFor } from "@/lib/asset-class";
 import { parsePage } from "@/lib/paging";
 import { lifeLabel } from "@/lib/depreciation-input";
 import { REG_LABEL_FINANCE, parseFin } from "@/lib/registration";
 import { financeAssets, parseAssetStatus } from "@/server/modules/finance/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, TBody, THead, Th, Td, Tr } from "@/components/ui/table";
-import { StatusPill } from "@/components/ui/status";
+import { StatusDot, StatusPill } from "@/components/ui/status";
 import { Pill } from "@/components/ui/pill";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
@@ -57,6 +57,15 @@ export default async function FinanceAssetsPage({
   if (status) exportQs.set("status", status);
   if (fin) exportQs.set("fin", fin);
   if (q) exportQs.set("q", q);
+  const statusHref = (s: string | null) => {
+    const next = new URLSearchParams();
+    if (cls === "PURCHASING") next.set("cls", "PURCHASING");
+    if (s) next.set("status", s);
+    if (fin) next.set("fin", fin);
+    if (q) next.set("q", q);
+    const qs = next.toString();
+    return qs ? `/finance/assets?${qs}` : "/finance/assets";
+  };
   const clearHref = cls === "PURCHASING" ? "/finance/assets?cls=PURCHASING" : "/finance/assets";
 
   return (
@@ -95,6 +104,33 @@ export default async function FinanceAssetsPage({
         </form>
 
         <FinChips chips={chips} current={fin} cls={cls} q={q} status={status} />
+
+        <nav aria-label="Asset status" className="flex flex-wrap items-center gap-1.5">
+          <Link
+            href={statusHref(null)}
+            aria-current={status ? undefined : "page"}
+            className={cn(
+              "rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
+              status ? "border-border bg-surface text-fg-secondary hover:bg-surface-subtle" : "border-accent-soft-border bg-accent-soft text-accent-soft-text",
+            )}
+          >
+            Any status
+          </Link>
+          {statusesFor(cls).map((s) => (
+            <Link
+              key={s}
+              href={statusHref(s)}
+              aria-current={status === s ? "page" : undefined}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-(--radius-ctl) border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em]",
+                status === s ? "border-accent-soft-border bg-accent-soft text-accent-soft-text" : "border-border bg-surface text-fg-secondary hover:bg-surface-subtle",
+              )}
+            >
+              <StatusDot value={s} />
+              {s}
+            </Link>
+          ))}
+        </nav>
 
         {rows.length > 0 ? (
           <>
@@ -148,6 +184,7 @@ export default async function FinanceAssetsPage({
                           id={a.id}
                           tag={a.tag}
                           costC={a.costC}
+                          confirmedAt={a.confirmedAt ? a.confirmedAt.toISOString() : null}
                           custom={a.custom}
                           lifeMonths={a.lifeMonths}
                           salvageC={a.salvageC}

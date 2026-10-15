@@ -8,7 +8,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
-import { asOfMonth, depreciate, resolvePolicy } from "@/lib/depreciation";
+import { asOfMonth, depreciate, monthLabel, resolvePolicy } from "@/lib/depreciation";
 import { lifeFromYearsMonths } from "@/lib/depreciation-input";
 import { fmtMoneyExact } from "@/lib/format";
 import { clearAssetOverride, setAssetOverride } from "@/server/modules/finance/depreciation-actions";
@@ -18,6 +18,8 @@ export interface OverrideAsset {
   id: string;
   tag: string;
   costC: number | null;
+  /** ISO date Finance approved the record, or null while unconfirmed. */
+  confirmedAt: string | null;
   custom: boolean;
   lifeMonths: number | null;
   salvageC: number | null;
@@ -61,11 +63,21 @@ export function OverrideDialog({ open, onClose, asset }: { open: boolean; onClos
       { cost: asset.costC, lifeMonths: life, salvage: Math.round(salvagePesos * 100) },
       { lifeMonths: asset.categoryLife, salvagePercent: asset.categorySalvagePercent },
     );
-    // Preview as if approved long ago, so the figures show the rate and where the book value stands today.
-    const r = depreciate(asset.costC, new Date(0), policy, asOfMonth(new Date()));
-    preview = r.monthly === null
-      ? "With this: salvage is not below cost"
-      : `With this: ${fmtMoneyExact(r.monthly / 100)} a month · book value now ${fmtMoneyExact(r.bookValue / 100)}`;
+    const confirmedAt = asset.confirmedAt ? new Date(asset.confirmedAt) : null;
+    const r = depreciate(asset.costC, confirmedAt, policy, asOfMonth(new Date()));
+    const base = asset.costC - policy!.salvage;
+    if (policy!.salvage >= asset.costC) {
+      preview = "With this: salvage is not below cost";
+    } else {
+      const monthly = fmtMoneyExact(Math.floor(base / life) / 100);
+      const book = fmtMoneyExact(r.bookValue / 100);
+      preview = `With this: ${monthly} a month · book value now ${book}`;
+      if (r.state === "not-started") {
+        preview += confirmedAt && r.startMonth !== null
+          ? `. It starts depreciating in ${monthLabel(r.startMonth)}, the month after approval.`
+          : ". It starts depreciating the month after Finance approves it.";
+      }
+    }
   }
 
   function save() {
