@@ -139,6 +139,30 @@ test.describe("own tags and real types — Register", () => {
     await expect(page.getByText(tag, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   });
 
+  test("12. Keyboard, Webcam and UPS have their own cards; a webcam registers with a typed tag and its type", async ({ page }) => {
+    test.setTimeout(120_000);
+    const tag = newTag();
+    await login(page, IT);
+    await openRegister(page);
+    for (const name of ["Keyboard", "Webcam", "UPS"]) {
+      await expect(page.getByRole("button", { name: new RegExp(`^${name} (\\d+ in stock|None yet)$`) })).toBeVisible();
+    }
+    // The MX Keys moved out of Other into Keyboard / Wireless (migration 30 + seed).
+    const kb = await db.asset.findUniqueOrThrow({ where: { tag: "BR-KB-0402" }, include: { category: true, type: true } });
+    expect([kb.category.name, kb.type?.name]).toEqual(["Keyboard", "Wireless"]);
+    await page.getByRole("button", { name: /^Webcam (\d+ in stock|None yet)$/ }).click();
+    await modelBox(page).fill("Logitech C920 (e2e)");
+    await page.getByRole("option", { name: /^\+ Add .Logitech C920 \(e2e\). as a new model$/ }).click();
+    await expect(typeSelect(page)).toHaveValue("");
+    await typeSelect(page).selectOption({ label: "USB webcam" });
+    await tagBox(page).fill(tag);
+    await serialBox(page).fill(`OWN12-${Date.now()}`);
+    await page.getByRole("button", { name: "Register 1 webcam", exact: true }).click();
+    await landed(page);
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag }, include: { category: true, type: true } });
+    expect([asset.category.name, asset.type?.name]).toEqual(["Webcam", "USB webcam"]);
+  });
+
   test("2. a known model leaves the Type empty and required", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, IT);

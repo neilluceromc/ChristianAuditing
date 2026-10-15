@@ -1,10 +1,13 @@
 import type { AssetClass, AssetStatus } from "@prisma/client";
 
 /** Phase 34 (spec §2.1, §4.1). */
-export type CategoryIconName = "laptop" | "workstation" | "monitor" | "headset" | "mouse" | "hub" | "dock" | "bag" | "other" | "inventory";
+export type CategoryIconName =
+  | "laptop" | "workstation" | "monitor" | "headset" | "mouse" | "keyboard" | "webcam" | "hub" | "dock" | "ups" | "bag" | "other"
+  | "inventory";
 
 export const IT_CATEGORY_ORDER = [
-  "Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Type C Hub", "Docking Station", "Laptop Bag", "Other",
+  "Laptop", "Workstation (PC)", "Monitor", "Headset", "Mouse", "Keyboard", "Webcam", "Type C Hub", "Docking Station", "UPS",
+  "Laptop Bag", "Other",
 ] as const;
 
 const HIDDEN = new Set(["uncategorised"]);
@@ -21,7 +24,7 @@ export function orderCategories<T extends { name: string; cls: AssetClass }>(cat
 
 const ICONS: Record<string, CategoryIconName> = {
   laptop: "laptop", "workstation (pc)": "workstation", monitor: "monitor", headset: "headset", mouse: "mouse",
-  "type c hub": "hub", "docking station": "dock", "laptop bag": "bag", other: "other",
+  keyboard: "keyboard", webcam: "webcam", "type c hub": "hub", "docking station": "dock", ups: "ups", "laptop bag": "bag", other: "other",
 };
 export function categoryIcon(name: string): CategoryIconName {
   return ICONS[name.toLowerCase()] ?? "inventory";
@@ -29,7 +32,7 @@ export function categoryIcon(name: string): CategoryIconName {
 
 const NOUNS: Record<string, [string, string]> = {
   "workstation (pc)": ["workstation", "workstations"], mouse: ["mouse", "mice"], "type c hub": ["Type C hub", "Type C hubs"],
-  other: ["item", "items"], furniture: ["piece of furniture", "pieces of furniture"], "pantry equipment": ["pantry item", "pantry items"],
+  other: ["item", "items"], ups: ["UPS", "UPS units"], furniture: ["piece of furniture", "pieces of furniture"], "pantry equipment": ["pantry item", "pantry items"],
 };
 export function categoryNoun(name: string, n: number): string {
   const pair = NOUNS[name.toLowerCase()];
