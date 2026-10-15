@@ -380,3 +380,14 @@ export const FINANCE_ASSETS_EXPORT_COLUMNS: XlsxColumn<DepAssetRow>[] = [
   { label: "Basis", width: 11, cell: (r) => ({ value: r.result?.policy ? (r.custom ? "Custom" : "Category") : "" }) },
   { label: "Note", width: 40, cell: (r) => ({ value: r.custom ? r.overrideNote : r.note }) },
 ];
+
+/** Phase 35 (plan P-11): one asset's money summary (label + figure in "Book value at end") over its month-by-month schedule. */
+export const ASSET_SCHEDULE_EXPORT_COLUMNS: XlsxColumn<{
+  label: string; opening: number | null; charge: number | null; closing: number | null; projected: string;
+}>[] = [
+  { label: "Month", width: 22, cell: (r) => ({ value: r.label }) },
+  { label: "Book value at start", width: 20, cell: (r) => peso(r.opening) },
+  { label: "Depreciation", width: 16, cell: (r) => peso(r.charge) },
+  { label: "Book value at end", width: 20, cell: (r) => peso(r.closing) },
+  { label: "Projected", width: 11, cell: (r) => ({ value: r.projected }) },
+];
