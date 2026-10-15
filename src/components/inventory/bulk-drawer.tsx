@@ -12,7 +12,8 @@ import { Banner } from "@/components/ui/banner";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import { PeopleCombobox } from "@/components/patterns/people-combobox";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS } from "@/lib/reason-chips";
 import { DEFAULT_STATUS, HOLDER_STATUSES, STATUS_LABEL, statusesFor } from "@/lib/asset-class";
@@ -48,8 +49,7 @@ export function BulkDrawer({
   total,
   cls,
   direct,
-  employees,
-  recentEmployees,
+  recentPeople,
   onDone,
 }: {
   open: boolean;
@@ -64,8 +64,7 @@ export function BulkDrawer({
   total: number;
   cls: AssetClass;
   direct: boolean;
-  employees: ComboOption[];
-  recentEmployees?: string[];
+  recentPeople: ComboOption[];
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -95,6 +94,7 @@ export function BulkDrawer({
     if (open) setMode(initialMode);
   }, [open, initialMode]);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [employeeName, setEmployeeName] = useState<string | null>(null);
   const [assignKind, setAssignKind] = useState<"DEPLOYED" | "TEMPORARY">("DEPLOYED");
   const [loanDueAt, setLoanDueAt] = useState(defaultLoanDue(new Date()));
   const [skippedList, setSkippedList] = useState<Array<{ tag: string; reason: string }>>([]);
@@ -137,7 +137,7 @@ export function BulkDrawer({
         });
         if (res.ok) {
           const { assigned, skipped } = res.data;
-          const name = employees.find((e) => e.value === employeeId)?.label ?? "them";
+          const name = employeeName ?? "them";
           toast(`${assigned} asset${assigned === 1 ? "" : "s"} assigned to ${name}`, "settled");
           setReason(""); // a fresh batch never inherits the last batch's reason
           onDone();
@@ -259,15 +259,14 @@ export function BulkDrawer({
               <>
                 <FormField label="Assign to" required error={fieldErrors.employeeId}>
                   {(props) => (
-                    <EntityCombobox
+                    <PeopleCombobox
                       id={props.id}
                       aria-describedby={props["aria-describedby"]}
                       invalid={props.invalid}
-                      options={employees}
                       value={employeeId}
-                      onChange={setEmployeeId}
+                      onChange={(v, o) => { setEmployeeId(v); setEmployeeName(o?.label ?? null); }}
                       placeholder="Type a name or EMP number…"
-                      recent={recentEmployees}
+                      recent={recentPeople}
                     />
                   )}
                 </FormField>

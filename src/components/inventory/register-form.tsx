@@ -67,8 +67,7 @@ export function RegisterForm({
   catalog,
   vendors,
   recentVendors,
-  employees,
-  recentEmployees,
+  recentPeople,
   requests,
   directClasses,
   listHref,
@@ -77,8 +76,7 @@ export function RegisterForm({
   catalog: CatalogCategory[];
   vendors: Array<{ id: string; name: string }>;
   recentVendors: string[];
-  employees: ComboOption[];
-  recentEmployees: string[];
+  recentPeople: ComboOption[];
   /** Completed requests, labelled `{refNo} · {vendor} · {date}`. */
   requests: Array<{ id: string; label: string; vendorId: string | null }>;
   /** Classes this role applies lifecycle changes to directly — a set, because the category can change the class. */
@@ -649,8 +647,7 @@ export function RegisterForm({
                   onStatus={setRequestedStatus}
                   holder={holder}
                   direct={direct}
-                  employees={employees}
-                  recentEmployees={recentEmployees}
+                  recentPeople={recentPeople}
                   assigneeId={assigneeId}
                   onAssignee={setAssigneeId}
                   loanDueAt={loanDueAt}

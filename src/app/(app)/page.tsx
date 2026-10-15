@@ -7,7 +7,7 @@ import {
   ageHistogram, claimedByYou, directChanges, financeHome, fleet, purchasingHome, warrantyRunway, worklist,
 } from "@/server/modules/home/queries";
 import { adminHome } from "@/server/modules/admin/queries";
-import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { isDirectLifecycle } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
 import { workHeadline } from "@/lib/worklist";
@@ -220,7 +220,7 @@ export default async function Home() {
   // and if it ever does and fails, the card still renders (its dialog just
   // has nobody to pick) rather than erroring the whole page.
   const assignOffered = shift.ok && shift.data.some((g) => g.rows.some((r) => r.control?.kind === "assign"));
-  const employees = assignOffered ? await activeEmployeeOptions().catch(() => []) : [];
+  const recentPeople = assignOffered ? await recentPeopleOptions(user.id).catch(() => []) : [];
 
   return (
     <>
@@ -245,7 +245,7 @@ export default async function Home() {
                   groups={groups}
                   canAct={!isViewer}
                   direct={isDirectLifecycle(user.role, "IT")}
-                  employees={employees}
+                  recentPeople={recentPeople}
                   seeAllBase="/inventory/work"
                 />
               </div>

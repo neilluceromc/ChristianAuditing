@@ -36,10 +36,10 @@ const CLOSED_STATE_LABEL: Record<string, string> = { RELEASED: "Released", EXPIR
  * spare still reads SPARE.)
  */
 export function HoldsTable({
-  tab, rows, state, sortHrefs, today, canAct, direct, employees,
+  tab, rows, state, sortHrefs, today, canAct, direct, recentPeople,
 }: {
   tab: ReservationTab; rows: ReservationRow[]; state: ListState; sortHrefs: Record<string, string>; today: string;
-  canAct: boolean; direct: boolean; employees: ComboOption[];
+  canAct: boolean; direct: boolean; recentPeople: ComboOption[];
 }) {
   const router = useRouter();
   // A header sort is a list navigation: it runs in the shared transition so the table reads busy.
@@ -154,7 +154,7 @@ export function HoldsTable({
         onClose={() => setDialog(null)}
         asset={{ id: dialog.row.assetId, tag: dialog.row.tag, model: dialog.row.model }}
         direct={direct}
-        employees={employees}
+        recentPeople={recentPeople}
         heldFor={{ id: dialog.row.employeeId, name: dialog.row.employeeName }}
       />
     )}

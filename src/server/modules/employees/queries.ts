@@ -7,6 +7,8 @@ import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 import { EXPORT_CAP, type HoldingsExportRow } from "@/lib/export-columns";
 import { sameNameKey } from "@/lib/same-name";
+import { RECENT_PEOPLE } from "@/lib/people-search";
+import { recentPicks } from "@/server/recent-picks";
 import { primarySortOf, type ListState, type SortKey } from "@/lib/url-state";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 
@@ -232,14 +234,19 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
   };
 }
 
-/** The holder picker's options â€” the same shape /inventory/new builds inline. */
-export async function activeEmployeeOptions(): Promise<ComboOption[]> {
+/** Phase 36 (spec §4.1): the holder picker's "Recent" list — the user's last picks, still ACTIVE, at most RECENT_PEOPLE. */
+export async function recentPeopleOptions(userId: string): Promise<ComboOption[]> {
+  const ids = (await recentPicks(userId, "employee")).slice(0, RECENT_PEOPLE);
+  if (ids.length === 0) return [];
   const rows = await prisma.employee.findMany({
-    where: { employment: "ACTIVE" },
-    orderBy: { name: "asc" },
+    where: { id: { in: ids }, employment: "ACTIVE" },
     select: { id: true, name: true, employeeNo: true },
   });
-  return rows.map((e) => ({ value: e.id, label: e.name, sub: e.employeeNo }));
+  const byId = new Map(rows.map((e) => [e.id, e]));
+  return ids.flatMap((id) => {
+    const e = byId.get(id);
+    return e ? [{ value: e.id, label: e.name, sub: e.employeeNo }] : [];
+  });
 }
 
 /**

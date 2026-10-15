@@ -5,7 +5,7 @@ import { RegisterForm } from "@/components/inventory/register-form";
 import { NewEquipmentTabs } from "@/components/inventory/new-equipment-tabs";
 import { registerCatalog } from "@/server/modules/inventory/register-queries";
 import { queueCount } from "@/server/modules/inventory/label-queue";
-import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { recentPicks } from "@/server/recent-picks";
 import { toSearchParams } from "@/lib/url-state";
 import { fmtDate } from "@/lib/format";
@@ -38,7 +38,7 @@ export default async function RegisterAssetsPage({
   // every class this role applies lifecycle changes to directly, not one flag.
   const directClasses = ASSET_CLASSES.filter((c) => isDirectLifecycle(user.role, c));
 
-  const [catalog, waiting, vendors, requests, employees, recentEmployees, recentVendors] = await Promise.all([
+  const [catalog, waiting, vendors, requests, recentPeople, recentVendors] = await Promise.all([
     registerCatalog(classes),
     // The Labels tab's badge counts what waits in the Labels tab's own scope
     // (ruling R20): the classes this role manages, plus what this user registered.
@@ -53,8 +53,7 @@ export default async function RegisterAssetsPage({
       select: { id: true, refNo: true, vendorId: true, completedAt: true, updatedAt: true, vendor: { select: { name: true } } },
       orderBy: [{ completedAt: "desc" }, { refNo: "desc" }],
     }),
-    activeEmployeeOptions(),
-    recentPicks(user.id, "employee"),
+    recentPeopleOptions(user.id),
     recentPicks(user.id, "vendor"),
   ]);
 
@@ -80,8 +79,7 @@ export default async function RegisterAssetsPage({
         catalog={catalog}
         vendors={vendors}
         recentVendors={recentVendors}
-        employees={employees}
-        recentEmployees={recentEmployees}
+        recentPeople={recentPeople}
         requests={requests.map((r) => ({
           id: r.id,
           vendorId: r.vendorId,

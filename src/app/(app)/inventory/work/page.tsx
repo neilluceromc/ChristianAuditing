@@ -3,7 +3,7 @@ import { requireUser } from "@/server/auth/guards";
 import { canManageClass, isDirectLifecycle } from "@/lib/asset-class";
 import { ROLE_LANDING } from "@/lib/workspaces";
 import { worklist } from "@/server/modules/home/queries";
-import { activeEmployeeOptions } from "@/server/modules/employees/queries";
+import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Worklist } from "@/components/home/worklist";
 import { WorkSummary } from "@/components/home/work-summary";
@@ -17,7 +17,7 @@ export default async function WorklistPage() {
 
   const groups = await worklist(user.id, user.role, {});
   // Only Assign… needs the people list (spec §5.1); skip the read otherwise.
-  const employees = groups.some((g) => g.rows.some((r) => r.control?.kind === "assign")) ? await activeEmployeeOptions() : [];
+  const recentPeople = groups.some((g) => g.rows.some((r) => r.control?.kind === "assign")) ? await recentPeopleOptions(user.id) : [];
 
   return (
     <>
@@ -31,7 +31,7 @@ export default async function WorklistPage() {
           groups={groups}
           canAct={user.role !== "viewer"}
           direct={isDirectLifecycle(user.role, "IT")}
-          employees={employees}
+          recentPeople={recentPeople}
           headingLevel="h2"
         />
       </div>

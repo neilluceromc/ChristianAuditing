@@ -4,7 +4,8 @@ import type { AssetClass } from "@prisma/client";
 import { FormError, FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-combobox";
+import { PeopleCombobox } from "@/components/patterns/people-combobox";
+import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { DEFAULT_STATUS } from "@/lib/asset-class";
 import type { CreatableStatus } from "@/lib/asset-rules";
 import { minLoanDue } from "@/lib/lifecycle";
@@ -35,8 +36,7 @@ export function RegisterInitialState({
   onStatus,
   holder,
   direct,
-  employees,
-  recentEmployees,
+  recentPeople,
   assigneeId,
   onAssignee,
   loanDueAt,
@@ -51,8 +51,7 @@ export function RegisterInitialState({
   holder: boolean;
   /** The registrant applies it directly; otherwise it files a request. */
   direct: boolean;
-  employees: ComboOption[];
-  recentEmployees: string[];
+  recentPeople: ComboOption[];
   assigneeId: string | null;
   onAssignee: (id: string | null) => void;
   loanDueAt: string;
@@ -78,10 +77,9 @@ export function RegisterInitialState({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField label="Who" required error={errors.assigneeId}>
             {(p) => (
-              <EntityCombobox
+              <PeopleCombobox
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                options={employees}
-                recent={recentEmployees}
+                recent={recentPeople}
                 value={assigneeId}
                 onChange={onAssignee}
                 placeholder="Type a name or EMP number…"

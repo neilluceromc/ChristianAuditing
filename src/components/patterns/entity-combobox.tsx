@@ -24,16 +24,28 @@ export function EntityCombobox({
   "aria-describedby": describedBy,
   recent,
   autoFocus,
+  valueOption,
+  onQuery,
+  serverFiltered,
+  emptyText,
 }: {
   options: ComboOption[];
   value: string | null;
-  onChange: (value: string | null) => void;
+  onChange: (value: string | null, option?: ComboOption) => void;
   placeholder?: string;
   id?: string;
   invalid?: boolean;
   "aria-describedby"?: string;
   recent?: string[];
   autoFocus?: boolean;
+  /** Phase 36: the chosen row when it is not (or no longer) in `options` — display only, never listed. */
+  valueOption?: ComboOption | null;
+  /** Phase 36: told the typed text on every change ("" when cleared) — a server-searched caller swaps `options` in response. */
+  onQuery?: (query: string) => void;
+  /** Phase 36: `options` already match the typed text (the server filtered them) — skip the local filter. */
+  serverFiltered?: boolean;
+  /** Phase 36: the text shown when no row is listed; the default is "No matches." */
+  emptyText?: string;
 }) {
   const listId = useId();
   const [open, setOpen] = useState(false);
@@ -47,8 +59,8 @@ export function EntityCombobox({
   // layer means ESC dismisses the dropdown first, then the dialog.
   useOverlayLayer(open, () => setOpen(false));
 
-  const selected = options.find((o) => o.value === value) ?? null;
-  const filtered = query
+  const selected = options.find((o) => o.value === value) ?? (value !== null && valueOption?.value === value ? valueOption : null);
+  const filtered = query && !serverFiltered
     ? options.filter((o) => (o.label + " " + (o.sub ?? "")).toLowerCase().includes(query.toLowerCase()))
     : options;
   const recentShown = query ? [] : recentOptions(options, recent ?? []);
@@ -57,8 +69,9 @@ export function EntityCombobox({
   const shown = [...recentShown, ...rest];
 
   function pick(option: ComboOption | null) {
-    onChange(option?.value ?? null);
+    onChange(option?.value ?? null, option ?? undefined);
     setQuery("");
+    onQuery?.("");
     setOpen(false);
   }
 
@@ -94,7 +107,7 @@ export function EntityCombobox({
         onFocus={() => setActive(0)}
         onClick={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)} // let option mousedown land first
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); if (!e.target.value) onChange(null); }}
+        onChange={(e) => { setQuery(e.target.value); onQuery?.(e.target.value); setOpen(true); setActive(0); if (!e.target.value) onChange(null); }}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setActive((i) => Math.min(i + 1, shown.length - 1)); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
@@ -109,7 +122,7 @@ export function EntityCombobox({
           className="absolute z-40 mt-1 max-h-[220px] w-full overflow-y-auto rounded-(--radius-btn) border border-border bg-surface-raised p-1 shadow-pop"
           style={{ animation: "fade var(--dur-2) var(--ease-std)" }}
         >
-          {shown.length === 0 && <li className="px-2 py-1.5 text-xs text-fg-muted">No matches.</li>}
+          {shown.length === 0 && <li className="px-2 py-1.5 text-xs text-fg-muted">{emptyText ?? "No matches."}</li>}
           {rows.map(({ option, heading, headingId, describedBy }, i) => (
             // "" is the clear sentinel (receive-form's "No supplier") â€” give it a real id and key
             <Fragment key={option.value || "none"}>
