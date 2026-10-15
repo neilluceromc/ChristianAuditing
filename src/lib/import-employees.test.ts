@@ -133,12 +133,24 @@ describe("planEmployeeRows", () => {
     expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "archived-department", detail: "Bluepeak Telecom" });
   });
 
-  it("blocks an UPDATE row that names an archived department too", () => {
+  // Ruling (review round 1): only a CREATE is blocked for an archived group. An UPDATE naming the
+  // person's own current archived group is accepted, so export, edit, re-import still works for them.
+  it("accepts an UPDATE row naming the person's current archived group", () => {
     const refs: EmployeeRefs = {
       ...REFS,
       departments: new Map([["finance", { id: "dept-1", archivedAt: new Date() }]]),
     };
     const row = [cells({ employeeNo: "EMP-0042", name: "Marites Bautista", department: "Finance", title: "Accountant", joined: "2020-01-01" })];
+    const plan = planEmployeeRows(matchHeaders(HEADER, EMPLOYEE_IMPORT_HEADERS), row, refs, OPTS);
+    expect(plan.rows[0]).toMatchObject({ kind: "update", employeeId: "e-1" });
+  });
+
+  it("still blocks a CREATE row naming an archived group as archived-department", () => {
+    const refs: EmployeeRefs = {
+      ...REFS,
+      departments: new Map([["finance", { id: "dept-1", archivedAt: new Date() }]]),
+    };
+    const row = [cells({ employeeNo: "EMP-0777", name: "Nina Robles", department: "Finance", title: "Accountant", joined: "2026-01-05" })];
     const plan = planEmployeeRows(matchHeaders(HEADER, EMPLOYEE_IMPORT_HEADERS), row, refs, OPTS);
     expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "archived-department", detail: "Finance" });
   });

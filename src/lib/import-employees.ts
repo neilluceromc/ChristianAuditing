@@ -314,8 +314,11 @@ export function planEmployeeRows(
       return;
     }
     // Phase 37 (spec §2.1): an archived department or client keeps its people but takes no new
-    // choices, so a row naming one blocks — create or update alike — whichever kind it is.
-    if (departmentRef.archivedAt) {
+    // ones, so a CREATE row naming one blocks, whichever kind it is. An UPDATE row never does: it
+    // cannot move anyone (Rule 6b below blocks a changed department, and keepCurrentDepartment
+    // ignores the cell), so blocking it would only break export, edit, re-import for the staff of
+    // an archived group.
+    if (departmentRef.archivedAt && !matched) {
       block("archived-department", departmentRaw);
       return;
     }
