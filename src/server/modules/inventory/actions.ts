@@ -26,7 +26,7 @@ import { repairStageIds } from "@/server/modules/inventory/queries";
 import { creationPlan, CREATABLE_STATUSES } from "@/lib/asset-rules";
 import { statusFamily } from "@/lib/status";
 import { assetDiff } from "@/lib/asset-diff";
-import { TAG_SHAPE, tagKey } from "@/lib/tag-key";
+import { TAG_RULE, TAG_SHAPE, tagKey } from "@/lib/tag-key";
 import { humanizeGuard, loanDueFor } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
 import { rememberPicks } from "@/server/recent-picks";
@@ -185,7 +185,7 @@ export async function bulkRequestStatusChange(
 const dateStr = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker")]);
 
 const createSchema = z.object({
-  tag: z.string().trim().toUpperCase().regex(TAG_SHAPE, "Format: BR-XX-0000"),
+  tag: z.string().trim().toUpperCase().regex(TAG_SHAPE, TAG_RULE),
   model: z.string().trim().min(2, "Name the model").max(120),
   serial: z.string().trim().max(120).optional(),
   categoryId: z.string().min(1, "Pick a category"),

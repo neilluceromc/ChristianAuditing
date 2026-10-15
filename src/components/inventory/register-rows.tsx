@@ -17,12 +17,11 @@ const NAMED = 5;
  * record), a bad tag once a submit has been refused, and the server's own row
  * messages unless a live line already says the same thing.
  */
-export function rowFeedback({ rows, hits, errors, attempted, exampleTag }: {
+export function rowFeedback({ rows, hits, errors, attempted }: {
   rows: readonly RegisterRow[];
   hits: IdentifierHits;
   errors: Record<string, string>;
   attempted: boolean;
-  exampleTag: string;
 }): {
   invalidTags: Set<number>;
   invalidSerials: Set<number>;
@@ -32,7 +31,7 @@ export function rowFeedback({ rows, hits, errors, attempted, exampleTag }: {
 } {
   const repeatsT = repeatedTags(rows);
   const repeatsS = repeatedSerials(rows);
-  const bad = badTags(rows, exampleTag);
+  const bad = badTags(rows);
   const live = registeredRows(rows, hits);
   const marks = serverRowMarks(errors, rows);
 

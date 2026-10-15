@@ -8,7 +8,7 @@ import { NEW_MODEL_TYPE, newModelNeedsType } from "@/server/modules/inventory/re
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
-import { TAG_SHAPE } from "@/lib/tag-key";
+import { TAG_RULE, TAG_SHAPE } from "@/lib/tag-key";
 import { identifierWhere } from "@/lib/inventory-list";
 import {
   CLASS_LABEL, CLASS_PHRASE, DEFAULT_STATUS, canManageClass, canRegisterClass,
@@ -40,7 +40,7 @@ const registerSchema = z.object({
   model: z.string().trim().min(2, "Name the model").max(120),
   // One tag per asset. The COUNT is the quantity — there is no separate qty
   // field, so the two cannot disagree.
-  tags: z.array(z.string().trim().toUpperCase().regex(TAG_SHAPE, "Format: BR-XX-0000")).min(1).max(200),
+  tags: z.array(z.string().trim().toUpperCase().regex(TAG_SHAPE, TAG_RULE)).min(1).max(200),
   serials: z.array(z.string().trim().max(120)).optional(),
   purchasedAt: dateStr.optional(),
   cost: money,

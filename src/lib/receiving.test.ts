@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { nextTags, preferredPrefix, prefixFor } from "./receiving";
-import { TAG_SHAPE } from "./tag-key";
+// Phase 36 widened TAG_SHAPE; nextTags (removed in Task 3) still mints the old BR-XX-0000 shape.
+const LEGACY_TAG_SHAPE = /^BR-[A-Z]{2}-\d{4}$/;
 
 describe("nextTags", () => {
   it("runs on from the highest existing number", () => {
@@ -22,7 +23,7 @@ describe("nextTags", () => {
     const r = nextTags("MN", 8, 2);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    for (const t of r.tags) expect(TAG_SHAPE.test(t), t).toBe(true);
+    for (const t of r.tags) expect(LEGACY_TAG_SHAPE.test(t), t).toBe(true);
   });
 
   // THE boundary. Four digits means 9999 is the last legal tag, and a run that
@@ -74,10 +75,10 @@ describe("nextTags", () => {
     expect(last.ok).toBe(true);
     if (!last.ok) return;
     // The highest number the generator will mint must be a legal tag...
-    expect(TAG_SHAPE.test(last.tags[0])).toBe(true);
+    expect(LEGACY_TAG_SHAPE.test(last.tags[0])).toBe(true);
     expect(last.tags[0]).toBe("BR-LT-9999");
     // ...and one past it must not be, which is WHY the generator refuses there.
-    expect(TAG_SHAPE.test("BR-LT-10000")).toBe(false);
+    expect(LEGACY_TAG_SHAPE.test("BR-LT-10000")).toBe(false);
   });
 });
 

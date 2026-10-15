@@ -84,15 +84,15 @@ describe("in-batch repeats, worded as registerAssets words them", () => {
 
 describe("a tag that is not a tag", () => {
   it("names the first bad row and counts the rest", () => {
-    const r = badTags([row("BR-LT-0201"), row(""), row("LT-1"), row("bad")], "BR-LT-0201");
-    expect(r.message).toBe("Row 2 · Type a tag like BR-LT-0201 and 2 more");
-    expect([...r.rows]).toEqual([1, 2, 3]);
+    const r = badTags([row("BR-LT-0201"), row(""), row("A B"), row("bad")]);
+    expect(r.message).toBe("Row 2 · Enter a tag for every unit and 1 more");
+    expect([...r.rows]).toEqual([1, 2]);
   });
-  it("a lower-case tag is still a tag (the server upper-cases it)", () => {
-    expect(badTags([row("br-lt-0201")], "BR-LT-0201").message).toBeNull();
-  });
-  it("a malformed tag is quoted", () => {
-    expect(badTags([row("LT-1")], "BR-LT-0201").message).toBe("Row 1 · LT-1 does not read like BR-LT-0201");
+  it("badTags: empty tags ask for a tag; bad shapes name the rule", () => {
+    expect(badTags([row(""), row("ok-1")]).message).toBe("Row 1 · Enter a tag for every unit");
+    expect(badTags([row("A B")]).message).toBe("Row 1 · A B: Tags are 1–30 letters, digits, - _ or ., no spaces");
+    expect(badTags([row("acc-1")]).rows.size).toBe(0);
+    expect(badTags([row(""), row("")]).message).toBe("Row 1 · Enter a tag for every unit and 1 more");
   });
 });
 
@@ -119,7 +119,7 @@ describe("R3: createAsset's field errors land on row 1", () => {
 describe("the rows a server message names", () => {
   it("reads the row from 'Row n ·', a serial from 'Serial s is already on', and zod's indexed keys", () => {
     const rows = [row("A", "S1"), row("B", "S2"), row("C", "S3")];
-    const marks = serverRowMarks({ tags: "Row 2 · B appears twice in this batch", serials: "Serial S3 is already on BR-LT-0001", "tags.0": "Format: BR-XX-0000" }, rows);
+    const marks = serverRowMarks({ tags: "Row 2 · B appears twice in this batch", serials: "Serial S3 is already on BR-LT-0001", "tags.0": "Tags are 1–30 letters, digits, - _ or ., no spaces" }, rows);
     expect([...marks.tags].sort()).toEqual([0, 1]);
     expect([...marks.serials]).toEqual([2]);
     expect([...serverRowMarks({ serials: "Row 1 · serial S1 appears twice in this batch", "serials.2": "Too long" }, rows).serials].sort()).toEqual([0, 2]);

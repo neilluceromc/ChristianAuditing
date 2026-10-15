@@ -26,7 +26,7 @@ import { categoryNoun } from "@/lib/register-catalog";
 import { resolveModelType } from "@/lib/known-models";
 import { serialProblems } from "@/lib/serial-rules";
 import { qrBase } from "@/lib/label-qr";
-import { TAG_SHAPE, tagKey } from "@/lib/tag-key";
+import { tagKey } from "@/lib/tag-key";
 import { createAsset } from "@/server/modules/inventory/actions";
 import { registerAssets } from "@/server/modules/purchases/receiving";
 import { uploadBatchDocument, uploadDocument } from "@/server/modules/inventory/document-actions";
@@ -40,6 +40,9 @@ import { RegisterInitialState } from "./register-initial-state";
 import { rowFeedback } from "./register-rows";
 import { SERIAL_REQUIRED, SerialSection } from "./serial-section";
 import { useIdentifierCheck } from "./use-identifier-check";
+
+// Task 3 removes the prefix-run counter below; until then it only reads old-shape tags.
+const LEGACY_TAG_SHAPE = /^BR-[A-Z]{2}-\d{4}$/;
 
 type Intent = "register" | "register-add";
 
@@ -295,7 +298,7 @@ export function RegisterForm({
     clearRowErrors("serials");
   }
 
-  const feedback = rowFeedback({ rows, hits, errors, attempted, exampleTag: example.tag });
+  const feedback = rowFeedback({ rows, hits, errors, attempted });
   const problems = serialProblems(rows.map((r) => r.serial), cls);
   const requiredRows = problems.flatMap((p, i) => (p === "required" ? [i] : []));
   const duplicateRows = problems.flatMap((p, i) => (p === "duplicate" ? [i] : []));
@@ -373,7 +376,7 @@ export function RegisterForm({
   function startAnother(sentTags: string[]) {
     const mine = { ...written };
     for (const t of sentTags.map(tagKey)) {
-      if (TAG_SHAPE.test(t)) mine[t.slice(3, 5)] = Math.max(mine[t.slice(3, 5)] ?? 0, Number(t.slice(6)));
+      if (LEGACY_TAG_SHAPE.test(t)) mine[t.slice(3, 5)] = Math.max(mine[t.slice(3, 5)] ?? 0, Number(t.slice(6)));
     }
     setWritten(mine);
     const next = prefix ? nextTags(prefix, highestOf(highestByPrefix, mine, prefix), 1) : null;

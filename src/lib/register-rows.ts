@@ -1,4 +1,4 @@
-import { TAG_SHAPE, tagKey } from "./tag-key";
+import { TAG_RULE, TAG_SHAPE, tagKey } from "./tag-key";
 
 /**
  * Phase 30 (spec §5.2–§5.5): the Register form's rows — one tag and one serial
@@ -93,12 +93,14 @@ export function repeatedSerials(rows: readonly RegisterRow[]): { message: string
   return { message: r.first < 0 ? null : `Row ${r.first + 1} · serial ${serials[r.first]} appears twice in this batch`, rows: r.rows };
 }
 
-/** Rows whose tag does not read BR-XX-0000 (upper-casing is the server's job, so case is forgiven). */
-export function badTags(rows: readonly RegisterRow[], example: string): { message: string | null; rows: Set<number> } {
+export const TAG_EMPTY = "Enter a tag for every unit";
+
+/** Phase 36: rows with no tag, or a tag outside TAG_SHAPE (upper-casing is the server's job, so case is forgiven). */
+export function badTags(rows: readonly RegisterRow[]): { message: string | null; rows: Set<number> } {
   const bad = rows.flatMap((r, i) => (TAG_SHAPE.test(tagKey(r.tag)) ? [] : [i]));
   if (bad.length === 0) return { message: null, rows: new Set() };
   const first = rows[bad[0]].tag.trim();
-  const what = first ? `${first} does not read like ${example}` : `Type a tag like ${example}`;
+  const what = first ? `${first}: ${TAG_RULE}` : TAG_EMPTY;
   return { message: `Row ${bad[0] + 1} · ${what}${more(bad.length - 1)}`, rows: new Set(bad) };
 }
 

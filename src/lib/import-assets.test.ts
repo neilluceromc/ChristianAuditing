@@ -187,9 +187,9 @@ describe("planAssetRows", () => {
     expect(p.rows[0]).toMatchObject({ kind: "update", assetId: "a-1" });
   });
 
-  it("blocks a tag that isn't shaped like BR-XX-0000", () => {
-    const p = plan([cells({ tag: "LAPTOP-01", model: "Dell", category: "Laptops" })]);
-    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-tag", detail: "LAPTOP-01" });
+  it("blocks a tag outside the tag rule", () => {
+    const p = plan([cells({ tag: "LAPTOP 01", model: "Dell", category: "Laptops" })]);
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "bad-tag", detail: "LAPTOP 01" });
   });
 
   // A known tag is an UPDATE, not a duplicate error — that is what makes
