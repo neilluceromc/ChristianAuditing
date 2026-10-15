@@ -1,23 +1,24 @@
-# Phase 35 — Depreciation Implementation Plan
+# Phase 35 — Registration review, Finance's asset register, and depreciation — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give Finance a correct current book value for every costed asset. It shows on the Approved assets list (with totals and an export) and on the Finance home, alongside a full-year schedule (with an export). All of it is driven by per-category depreciation policies and per-asset overrides that Finance edits.
+**Goal:** Every registered asset goes through a Finance review that IT and Purchasing can see and act on. Finance gets a full asset register with a per-asset money page. Finance also sees straight-line book value with policies, overrides, a year schedule and exports.
 
 **Architecture:**
-- **One calculation.** `src/lib/depreciation.ts` is a pure module that does all the arithmetic, in integer centavos and Asia/Manila months, and is fully unit-tested. Every screen and export calls it, so nothing else computes depreciation.
-- **Stored settings only.** Five optional columns (migration 28) hold the settings; nothing is precomputed.
-- **Server side.** Server actions edit the policies and overrides with the house guard order and an audit row. Finance queries read the settings and feed the pure functions.
-- **Pages.** They live under `/finance`, which is already gated to the Finance workspace.
+- **Registration is derived, never stored.** `src/lib/registration.ts` maps today's columns (`itVerifiedAt`, `financeConfirmedAt`, `financeReturnedAt`) to four states, plus a filter `where` for each. Three new columns hold the not-capitalised flag, the send-back checklist and IT's reply.
+- **The existing actions grow.** `confirmAssetDetails`, `returnAssetToIt` and `resubmitAssetToFinance` (`src/server/modules/inventory/actions.ts`) gain those fields. Finance's review UI moves from IT's record page to a new Finance asset page.
+- **Depreciation is one pure module.** `src/lib/depreciation.ts` works in integer centavos and Asia/Manila months. Every screen and export calls it.
+- **Settings only.** Five optional columns hold the depreciation settings; nothing is precomputed.
+- **All of it is migration 28.**
 
-**Tech Stack:** Next.js 15 App Router (RSC + client islands), Prisma 6 / Postgres 16, zod, vitest (pure, node env), Playwright + axe, write-excel-file through `src/server/xlsx/write.ts`.
+**Tech Stack:** Next.js 15 App Router (RSC + client islands), Prisma 6 / Postgres 16, zod, vitest (pure, node env, `src/**/*.test.{ts,tsx}`), Playwright + axe, write-excel-file through `src/server/xlsx/write.ts`.
 
-**Spec:** `docs/superpowers/specs/2026-10-15-depreciation-design.md` (commits `d51ac73`, `d1d328c`). Read it first.
+**Spec:** `docs/superpowers/specs/2026-10-15-depreciation-design.md` (commit `58355c0`). Read it first, and treat it as the authority. The mockups are the "Depreciation mockups" canvas artifact; they are illustrative, and the spec wins where they differ (e.g. chip names).
 
 ## Global Constraints
 
 **Where the work happens**
-- Do the work in the worktree `.claude/worktrees/phase-35-depreciation`, branch `phase-35-depreciation`.
+- Do the work in the worktree `.claude/worktrees/phase-35-registration-depreciation`, on branch `phase-35-registration-depreciation`.
 - `.env` there points at `inventory_dev` with `APP_BASE_URL=http://192.168.1.193:3100`, and has no `SEED_PASSWORD` or `QUICK_LOGIN_EMAILS`.
 - Never read or print `.env`. Never touch the `inventory` database or port 3000.
 
@@ -30,7 +31,8 @@
 **Playwright**
 - Run it in the **foreground only**: `E2E_PORT=3100 npx playwright test <files> --workers=1 --global-timeout=540000`, with a Bash timeout of 600000.
 - Never use `run_in_background` or the Monitor tool. One Playwright process at a time.
-- Check that port 3100 is free before and after each run.
+- Check port 3100 before and after each run with `netstat -ano | findstr :3100 | findstr LISTENING`.
+- Only ONE implementer runs a dev server at a time. The dev server is `npm run dev -- -p 3100`, never 3000.
 
 **Git**
 - Never amend. Never run `git stash`, `checkout`, `restore`, `reset` or `switch`.
@@ -42,70 +44,112 @@
 - Product aria-labels near a field never contain that field's label word.
 - `AuditEntry` is append-only, so tests never delete audit rows.
 - Server actions follow the guard order `actionRole` → `checkRate(user.id)` → zod. They return the house `ActionResult` (`@/server/action-result`) and write audit rows through `writeAudit(tx, …)` in the same transaction.
+- State changes are state-guarded writes (`updateMany` with the precondition in `where`, then `count === 0` → `conflict`), as the existing finance actions already do.
 - Money is never handled as floats in the calculation: convert to integer centavos (`Math.round(Number(decimal) * 100)`) at the boundary.
 - Show money on screen with `fmtMoneyExact` (2 decimals) wherever depreciation appears, and in Excel as `{ type: Number, format: "#,##0.00" }`.
 
 **Spec values**
-- Access to the new pages and actions is roles `admin` and `finance_staff` only. Pages live under `/finance` (PATH_RULE `/finance` → workspace `finance`), and actions check `actionRole("admin", "finance_staff")`.
-- Life is 1–600 months.
-- A category's salvage % is ≥ 0 and < 100, with at most 2 decimals.
-- An override's salvage is ≥ 0 and < the asset's cost.
-- An override reason is 3–300 characters.
-- An override is both fields or neither.
-- Depreciation starts the month **after** the month of `financeConfirmedAt` (Asia/Manila).
-- The as-of month is the last **completed** Asia/Manila month.
-- `monthly = floor(base / lifeMonths)` in centavos. The last month charges `base − monthly × (lifeMonths − 1)`.
-- Book value is never below salvage.
-- `cost` null means the asset is excluded everywhere.
-- Unconfirmed assets and assets with no policy show book value = cost and count in totals at cost.
-- Disposals are ignored: status never stops depreciation.
+- **Registration states and labels:**
+
+  | State | IT / Purchasing label | Finance label |
+  |---|---|---|
+  | `awaiting-it` | Waiting for IT check | Waiting for IT |
+  | `with-finance` | With Finance | To review |
+  | `needs-correction` | Needs correction | Sent back |
+  | `registered` | Fully registered | Approved / Not capitalised |
+
+  `registrationState` checks them in the order `awaiting-it` → `registered` → `needs-correction` → `with-finance`.
+- **Send-back:**
+  - at least one checklist key; keys come from `REGISTRATION_FIELDS`, with no duplicates;
+  - the note is 3–500 characters when given, and required when `other` is ticked;
+  - the reply is 3–500 characters when given.
+- **Approve as not capitalised** only when `cost` is null. **Approve** only when `cost` is set. Finance acts only on `with-finance` assets.
+- **A cost saved on a not-capitalised asset** clears `financeConfirmedAt/ById` and `financeNotCapitalised` in the same write, plus the audit `finance.reopened`.
+- **Finance's asset list `fin` values:**
+
+  | Value | Chip |
+  |---|---|
+  | `with-finance` | To review |
+  | `needs-correction` | Sent back |
+  | `awaiting-it` | Waiting for IT |
+  | `approved` | Approved |
+  | `not-capitalised` | Not capitalised |
+  | `no-cost` | No cost |
+
+- **Access:** the new pages and actions are for roles `admin` and `finance_staff` only. Pages live under `/finance` (PATH_RULE `/finance` → workspace `finance`), and actions check `actionRole("admin", "finance_staff")`.
+- **Life** is 1–600 months. A category's salvage % is ≥ 0 and < 100, with at most 2 decimals.
+- **Override:**
+  - salvage is ≥ 0 and < the asset's cost;
+  - the reason is 3–300 characters;
+  - it is both fields or neither.
+- **Depreciation start:** the month **after** the month of `financeConfirmedAt` (Asia/Manila).
+- **As-of month:** the last **completed** Asia/Manila month.
+- **Monthly amount:** `monthly = floor(base / lifeMonths)` in centavos. The last month charges `base − monthly × (lifeMonths − 1)`.
+- **Floor:** book value is never below salvage.
+- **Excluded:** depreciation covers capitalised assets only (`cost` not null AND `financeNotCapitalised` false). The rest are excluded from every total.
+- **At cost:** unconfirmed assets and assets with no policy show book value = cost and count in totals at cost.
+- **Disposals are ignored:** status never stops depreciation.
 
 ## Review Focus
 
 These are the inputs most likely to bite a real user that no task's tests cover by default. Each one gets a test in the task named.
 
-1. **Confirmation late in the evening (Manila) on the last day of a month.** For example, `2026-01-31T22:00+08:00` is still 31 Jan in Manila but already February in UTC. The start must be February, never March. *(Task 2 test.)*
-2. **Opening the page on the 1st of a month.** On 1 Oct the as-of month is September; before 08:00 Manila the UTC date is still 30 Sep. *(Task 2 test.)*
-3. **A cost edited after confirmation.** The numbers follow the new cost, and a cost lowered below an existing override salvage must not produce a negative base. *(Task 2 test: salvage ≥ cost → state `no-policy`-like "salvage exceeds cost" guard, see `depreciate`.)*
-4. **A category policy changed while overrides exist.** Assets with a custom override keep their override, and the "updates N assets" count excludes them. *(Task 4 test of the count query's where, via the pure `affectedByPolicy` helper.)*
-5. **Year picker on a year with no confirmed assets.** The grid is empty with a plain sentence, not an error, and the export still has a header row. *(Task 7 e2e assertion plus Task 2 `yearGrid` returning an empty list.)*
+1. **Confirmation late in the evening (Manila) on the last day of a month.** For example, `2026-01-31T22:00+08:00` is still 31 Jan in Manila but already February in UTC. The start must be February. *(Task 5 test.)*
+2. **Opening a page on the 1st of a month before 08:00 Manila.** The as-of month is still the month before last. *(Task 5 test.)*
+3. **A cost lowered below an existing override's salvage.** It must not produce a negative base. *(Task 5 test: state `bad-salvage`.)*
+4. **A send-back whose checklist arrives with a duplicate or unknown key from a tampered form.** It is refused, never stored. *(Task 2 test of `sendBackSchema`.)*
+5. **An old send-back from before this phase** (a reason, no field list). It reads as Needs correction with the reason as its note, and an empty checklist. *(Task 2 test of `registrationState` plus `returnSummary`.)*
 
 ## Decisions taken in this plan
 
-- **P-1.** If salvage ≥ cost (possible after a cost edit), `depreciate` returns a new state, `bad-salvage`: book value = cost, with the reason "Salvage exceeds cost". It is not a fifth spec state, but the only safe answer to Review Focus 3. It is shown like `no-policy`.
-- **P-2.** The Policies tab edits each row inline (life in years + months, salvage %, Save). Rows are client islands, each with its own runner; the page is a Server Component.
-- **P-3.** The "Last changed" column reads the newest `depreciation.policy` audit row per category, in one query.
-- **P-4.** Approved assets totals cover every matching row, not just the page. The page computes them in Node by streaming the matching rows' minimal fields (`id, cost, financeConfirmedAt, depreciationLifeMonths, depreciationSalvage, category policy`) through `depreciate`. The volume is fine: under 10k costed assets.
-- **P-5.** Nav: the Finance sidebar's "Capitalized assets" section gains `{ label: "Depreciation", href: "/finance/depreciation" }` after "Approved assets". The "By status" list is untouched, so its pinned last item stays "Stock".
-- **P-6.** Exports: `/finance/assets/export` and `/finance/depreciation/export` use `requireRole("admin", "finance_staff")`. Today's `/finance/assets` page uses `requireUser()` and the workspace gate; the new routes use the stricter role guard.
+- **P-1.** If salvage ≥ cost (possible after a cost edit), `depreciate` returns state `bad-salvage`: book value = cost, with the note **"Salvage is not below cost — check the override"** (spec §5.2's `bad-salvage` row).
+- **P-2.** The Policies tab edits each row inline. Rows are client islands; the page is a Server Component.
+- **P-3.** "Last changed" reads the newest `depreciation.policy` audit row per category, in one query.
+- **P-4.** List totals cover every matching capitalised row, not just the page. They are computed in Node through `depreciate` (under 10k assets).
+- **P-5.** The Finance nav section "Capitalized assets" is renamed **"Assets & depreciation"**, with items Assets (`/finance/assets`) · Depreciation (`/finance/depreciation`) · Activity log. The page title becomes **"Assets"**.
+- **P-6.** The new export routes use `requireRole("admin", "finance_staff")`.
+- **P-7. The checklist matches what Edit can change.** The spec §3.3 table lists Delivery and fees and Purchase request. Those live on the shared `PurchaseRecord` and the PR link, and no per-asset edit exists for them, so ticking them would ask IT for a fix it cannot make. `REGISTRATION_FIELDS` therefore drops them. Meanwhile **OR no., Covered by and Who to call** exist on `Asset` (Phase 34) but not on the Edit form, so Task 3 **adds them to `AssetForm` and `updateAsset`**. Task 12 updates the spec's table to match. *Cost if wrong: two checklist rows and one edit surface.*
+- **P-8.** "Approve" keeps the existing action `confirmAssetDetails`, and the audit action stays `finance.confirm`. The existing sentence "confirmed {tag}'s details" stays; a not-capitalised approval reads "approved {tag} as not capitalised". *Cost if wrong: one sentence.*
+- **P-9.** Finance's review controls leave IT's record page (spec ruling 1):
+  - `RecordAction` loses `confirm-details` and `send-back`;
+  - `FinanceReviewDialog` is replaced by `ResubmitDialog` (IT's Mark corrected… with a reply), and Finance's own review box lives on the Finance asset page;
+  - three e2e specs pinned the old flow (`asset-classes`, `department-owned`, `receiving`), and Task 12 moves them to the new page.
+- **P-10.** The **To-review-first** ordering on Finance's list (spec §4.1) applies on the **All** chip. It uses two queries stitched by the pure `pageAcross` helper; with a `fin` chip set, the order is cost desc, tag, id.
+- **P-11.** The asset page's **Export** is one sheet: the month-by-month schedule over the asset's whole life (Month, Book value at start, Depreciation, Book value at end, Projected), headed by a summary block of the five money figures. File: `asset-{tag}-YYYY-MM-DD.xlsx`.
+- **P-12.** The asset page's Purchase section shows the PR as its ref number (linked) and requester, plus the PR total from its units. The approver's name is omitted, because the PR model's approval data is per-approval rather than a field. *Cost if wrong: one line.*
 
 ---
 
 ## File structure
 
 **Create**
-- `prisma/migrations/20261015090000_depreciation/migration.sql`: the DDL only.
-- `src/lib/depreciation.ts` and `src/lib/depreciation.test.ts`: the pure calculation.
-- `src/lib/depreciation-input.ts` and `src/lib/depreciation-input.test.ts`: zod schemas and the "years+months" parse/format helpers.
-- `src/server/modules/finance/depreciation-actions.ts` ("use server"): `setCategoryPolicy`, `setAssetOverride`, `clearAssetOverride`.
-- `src/server/modules/finance/depreciation-queries.ts`: `policyRows`, `bookValueTotals`, `scheduleYear`, and the export rows.
-- `src/app/(app)/finance/depreciation/page.tsx`: the Schedule and Policies tabs.
-- `src/app/(app)/finance/depreciation/export/route.ts`
+- `prisma/migrations/20261015090000_registration_depreciation/migration.sql`
+- `src/lib/registration.ts` and `src/lib/registration.test.ts`: states, labels, the checklist constant, `where` builders and `pageAcross`.
+- `src/lib/registration-input.ts` and `src/lib/registration-input.test.ts`: `sendBackSchema`, `resubmitSchema`, `approveSchema`.
+- `src/lib/depreciation.ts` and `src/lib/depreciation.test.ts`
+- `src/lib/depreciation-input.ts` and `src/lib/depreciation-input.test.ts`
+- `src/server/modules/finance/depreciation-actions.ts` and `src/server/modules/finance/depreciation-queries.ts`
+- `src/server/modules/finance/asset-detail.ts`: `financeAssetDetail(id)`.
+- `src/components/inventory/resubmit-dialog.tsx`, `src/components/inventory/registration-cell.tsx`, `src/components/inventory/registration-block.tsx`
+- `src/components/finance/review-box.tsx`, `send-back-dialog.tsx`, `policy-row.tsx`, `override-dialog.tsx`, `asset-row-menu.tsx`, `schedule-table.tsx`, `fin-chips.tsx`, `use-finance-runner.ts`
+- `src/app/(app)/finance/assets/[id]/page.tsx` and `src/app/(app)/finance/assets/[id]/export/route.ts`
 - `src/app/(app)/finance/assets/export/route.ts`
-- `src/components/finance/policy-row.tsx`: client, one editable policy row.
-- `src/components/finance/override-dialog.tsx`: client.
-- `src/components/finance/asset-row-menu.tsx`: client, the ⋯ menu opening the dialog.
-- `src/components/finance/schedule-table.tsx`: server, the grid.
-- `e2e/finance-depreciation.spec.ts`
+- `src/app/(app)/finance/depreciation/page.tsx` and `src/app/(app)/finance/depreciation/export/route.ts`
+- `e2e/finance-registration-depreciation.spec.ts`
 
 **Modify**
 - `prisma/schema.prisma`
-- `src/lib/activity.ts` and `src/lib/activity.test.ts`: the audit sentences.
-- `src/lib/workspaces.ts` and `src/lib/workspaces.test.ts`: the nav entry.
-- `src/server/modules/finance/queries.ts`: rows and totals carry depreciation.
-- `src/app/(app)/finance/assets/page.tsx`: columns, footer, row menu, Export.
-- `src/server/modules/home/queries.ts` (`financeHome`) and `src/app/(app)/page.tsx`: the Book value stat.
-- `src/lib/export-columns.ts`: the two new column sets.
+- `src/lib/status.ts`: the `registration` namespace.
+- `src/lib/activity.ts` and `src/lib/activity.test.ts`
+- `src/lib/workspaces.ts` and `src/lib/workspaces.test.ts`
+- `src/lib/record-actions.ts` and `src/lib/record-actions.test.ts`
+- `src/lib/inventory-list.ts`, `src/lib/column-prefs.ts`, `src/lib/export-columns.ts`
+- `src/server/modules/inventory/actions.ts` and `src/server/modules/inventory/queries.ts`
+- `src/server/modules/finance/queries.ts` and `src/server/modules/home/queries.ts`
+- `src/components/inventory/inventory-table.tsx`, `inventory-toolbar.tsx`, `record-actions.tsx`, `asset-form.tsx`
+- `src/app/(app)/inventory/page.tsx`, `src/app/(app)/inventory/[id]/(record)/page.tsx`, `src/app/(app)/inventory/[id]/edit/page.tsx`
+- `src/app/(app)/finance/assets/page.tsx` and `src/app/(app)/page.tsx`
+- **Delete:** `src/components/inventory/finance-review.tsx` (P-9).
 
 ---
 
@@ -113,62 +157,669 @@ These are the inputs most likely to bite a real user that no task's tests cover 
 
 **Files:**
 - Modify: `prisma/schema.prisma`
-- Create: `prisma/migrations/20261015090000_depreciation/migration.sql`
+- Create: `prisma/migrations/20261015090000_registration_depreciation/migration.sql`
 
 **Interfaces — Produces:**
-- `AssetCategory.depreciationLifeMonths Int?`, `AssetCategory.depreciationSalvagePercent Decimal? @db.Decimal(5,2)`
+- `Asset.financeNotCapitalised Boolean @default(false)`, `Asset.financeReturnFields String[] @default([])`, `Asset.financeResubmitNote String?`
 - `Asset.depreciationLifeMonths Int?`, `Asset.depreciationSalvage Decimal? @db.Decimal(12,2)`, `Asset.depreciationNote String?`
+- `AssetCategory.depreciationLifeMonths Int?`, `AssetCategory.depreciationSalvagePercent Decimal? @db.Decimal(5,2)`
 
 - [ ] **Step 1: Edit the schema.**
 
-  In `model AssetCategory`, after `tagPrefix`, add:
+  In `model Asset`, right after `financeReturnReason String?`, add:
 
 ```prisma
-  /// Phase 35 (spec §3.1): Finance's straight-line policy for the category; both null = no policy.
-  depreciationLifeMonths     Int?
-  depreciationSalvagePercent Decimal?    @db.Decimal(5, 2)
+  /// Phase 35 (spec §3.2): approved by Finance as NOT capitalised — no cost, no book value, no depreciation.
+  financeNotCapitalised Boolean         @default(false)
+  /// Phase 35 (spec §3.3): the send-back checklist — keys of REGISTRATION_FIELDS (src/lib/registration.ts).
+  financeReturnFields  String[]         @default([])
+  /// Phase 35 (spec §3.4): the registering department's reply on Mark corrected; cleared by Finance's next decision.
+  financeResubmitNote  String?
 ```
 
   In `model Asset`, after `labelPrintedAt`, add:
 
 ```prisma
-  /// Phase 35 (spec §3.3): a per-asset override — life AND salvage (pesos) together, or neither.
+  /// Phase 35 (spec §5.3): a per-asset override — life AND salvage (pesos) together, or neither.
   depreciationLifeMonths Int?
   depreciationSalvage    Decimal?         @db.Decimal(12, 2)
   depreciationNote       String?
+```
+
+  In `model AssetCategory`, after `tagPrefix`, add:
+
+```prisma
+  /// Phase 35 (spec §5.3): Finance's straight-line policy for the category; life null = no policy.
+  depreciationLifeMonths     Int?
+  depreciationSalvagePercent Decimal?    @db.Decimal(5, 2)
 ```
 
 - [ ] **Step 2: Generate the DDL.**
 
   Run `git show HEAD:prisma/schema.prisma > <SDD workspace>/old.prisma`, then
   `npx prisma migrate diff --from-schema-datamodel <SDD workspace>/old.prisma --to-schema-datamodel prisma/schema.prisma --script`.
-  Write the output to `prisma/migrations/20261015090000_depreciation/migration.sql`.
+  Write the output to the migration file. Expected: eight `ADD COLUMN` statements and no drops.
 
-  Expected: five `ALTER TABLE … ADD COLUMN` statements, with no drops.
-
-  Append this guard as the file's last statement:
+  Append these guards as the file's last statements:
 
 ```sql
--- Phase 35 (spec §3.3): an override is both fields or neither.
+-- Phase 35 (spec §6): an override is both fields or neither.
 ALTER TABLE "Asset" ADD CONSTRAINT "Asset_depreciation_override_pair"
   CHECK (("depreciationLifeMonths" IS NULL) = ("depreciationSalvage" IS NULL));
+-- Phase 35 (spec §6): "not capitalised" is an approval of an asset with no cost.
+ALTER TABLE "Asset" ADD CONSTRAINT "Asset_not_capitalised_needs_confirm"
+  CHECK (NOT "financeNotCapitalised" OR "financeConfirmedAt" IS NOT NULL);
+ALTER TABLE "Asset" ADD CONSTRAINT "Asset_not_capitalised_no_cost"
+  CHECK (NOT "financeNotCapitalised" OR "cost" IS NULL);
 ```
 
 - [ ] **Step 3: Apply and check.**
-
   Run `npx prisma migrate deploy && npx prisma generate && npx tsc --noEmit`.
   Expected: `28 migrations found … applied`, and `tsc` clean.
 
 - [ ] **Step 4: Commit.**
 
 ```bash
-git add prisma/schema.prisma prisma/migrations/20261015090000_depreciation/migration.sql
-git commit -m "feat(db): migration 28 -- depreciation policy on categories, per-asset override (life + salvage + note, paired by CHECK)"
+git add prisma/schema.prisma prisma/migrations/20261015090000_registration_depreciation/migration.sql
+git commit -m "feat(db): migration 28 -- registration review (not-capitalised flag, send-back checklist, resubmit reply) and depreciation settings (category policy, paired per-asset override), with CHECKs"
 ```
 
 ---
 
-### Task 2: The pure calculation
+### Task 2: Registration — the pure module and its inputs
+
+**Files:**
+- Create: `src/lib/registration.ts`, `src/lib/registration.test.ts`, `src/lib/registration-input.ts`, `src/lib/registration-input.test.ts`
+- Modify: `src/lib/status.ts` (add the namespace), and its test if one pins the namespace list.
+
+**Interfaces — Produces (exact):**
+
+```ts
+// registration.ts
+export type RegState = "awaiting-it" | "with-finance" | "needs-correction" | "registered";
+export const REG_STATES: readonly RegState[];            // ["needs-correction","with-finance","awaiting-it","registered"] (facet order)
+export const REG_LABEL: Record<RegState, string>;         // IT / Purchasing wording
+export const REG_LABEL_FINANCE: Record<RegState, string>; // Finance wording ("registered" → "Approved")
+export interface RegFacts { cls: AssetClass; itVerifiedAt: Date | null; financeConfirmedAt: Date | null; financeReturnedAt: Date | null }
+export function registrationState(a: RegFacts): RegState;
+export function parseRegState(raw: string | null | undefined): RegState | null;
+export function regWhere(s: RegState): Prisma.AssetWhereInput;
+export const REGISTRATION_FIELDS: ReadonlyArray<{ key: RegFieldKey; label: string; group: RegFieldGroup }>;
+export type RegFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"];
+export const REGISTRATION_FIELD_KEYS: [RegFieldKey, ...RegFieldKey[]];
+export const REG_FIELD_GROUPS: readonly RegFieldGroup[]; // ["Purchase","Warranty","Asset details","Documents","Anything else"]
+export function fieldLabels(keys: readonly string[]): string[]; // unknown keys dropped, form order kept
+export function returnSummary(a: { financeReturnFields: string[]; financeReturnReason: string | null }): { items: string[]; note: string | null };
+export type FinFilter = "with-finance" | "needs-correction" | "awaiting-it" | "approved" | "not-capitalised" | "no-cost";
+export const FIN_FILTERS: readonly FinFilter[];
+export const FIN_LABEL: Record<FinFilter, string>;
+export function parseFin(raw: string | null | undefined): FinFilter | null;
+export function finWhere(f: FinFilter): Prisma.AssetWhereInput;
+export function pageAcross(firstCount: number, skip: number, take: number): { first: { skip: number; take: number }; rest: { skip: number; take: number } };
+// registration-input.ts
+export const sendBackSchema; // { id, fields: RegFieldKey[], note?: "" | string }
+export const resubmitSchema; // { id, reply?: "" | string }
+export const approveSchema;  // { id, notCapitalised?: boolean }
+```
+
+- [ ] **Step 1: Write the failing tests** in `src/lib/registration.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import {
+  FIN_FILTERS, REGISTRATION_FIELDS, REG_STATES, fieldLabels, finWhere, pageAcross, parseFin, parseRegState,
+  regWhere, registrationState, returnSummary,
+} from "./registration";
+
+const d = new Date("2026-10-01T00:00:00Z");
+const base = { cls: "IT" as const, itVerifiedAt: d, financeConfirmedAt: null, financeReturnedAt: null };
+
+describe("registrationState", () => {
+  it("each state, in the spec's order", () => {
+    expect(registrationState({ ...base, itVerifiedAt: null })).toBe("awaiting-it");
+    expect(registrationState({ ...base, financeConfirmedAt: d })).toBe("registered");
+    expect(registrationState({ ...base, financeReturnedAt: d })).toBe("needs-correction");
+    expect(registrationState(base)).toBe("with-finance");
+  });
+  it("a Purchasing asset is never awaiting IT", () => {
+    expect(registrationState({ ...base, cls: "PURCHASING", itVerifiedAt: null })).toBe("with-finance");
+  });
+  it("awaiting IT wins over everything else", () => {
+    expect(registrationState({ ...base, itVerifiedAt: null, financeReturnedAt: d })).toBe("awaiting-it");
+  });
+  it("parses only known states", () => {
+    expect(parseRegState("needs-correction")).toBe("needs-correction");
+    expect(parseRegState("bogus")).toBeNull();
+    expect(REG_STATES).toEqual(["needs-correction", "with-finance", "awaiting-it", "registered"]);
+  });
+  it("regWhere mirrors registrationState", () => {
+    expect(regWhere("awaiting-it")).toEqual({ cls: "IT", itVerifiedAt: null });
+    expect(regWhere("registered")).toEqual({ NOT: { cls: "IT", itVerifiedAt: null }, financeConfirmedAt: { not: null } });
+    expect(regWhere("needs-correction")).toEqual({ NOT: { cls: "IT", itVerifiedAt: null }, financeConfirmedAt: null, financeReturnedAt: { not: null } });
+    expect(regWhere("with-finance")).toEqual({ NOT: { cls: "IT", itVerifiedAt: null }, financeConfirmedAt: null, financeReturnedAt: null });
+  });
+});
+
+describe("REGISTRATION_FIELDS", () => {
+  it("unique keys, other present and last", () => {
+    const keys = REGISTRATION_FIELDS.map((f) => f.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.at(-1)).toBe("other");
+  });
+  it("fieldLabels keeps form order and drops unknown keys", () => {
+    expect(fieldLabels(["doc:invoice", "cost", "nope"])).toEqual(["Cost", "Sales invoice"]);
+  });
+});
+
+describe("returnSummary (Review Focus 5)", () => {
+  it("a pre-Phase-35 send-back: reason becomes the note, no items", () => {
+    expect(returnSummary({ financeReturnFields: [], financeReturnReason: "Wrong invoice" })).toEqual({ items: [], note: "Wrong invoice" });
+  });
+  it("a checklist with no note", () => {
+    expect(returnSummary({ financeReturnFields: ["cost"], financeReturnReason: null })).toEqual({ items: ["Cost"], note: null });
+  });
+});
+
+describe("fin filters", () => {
+  it("parse and where", () => {
+    expect(FIN_FILTERS).toEqual(["with-finance", "needs-correction", "awaiting-it", "approved", "not-capitalised", "no-cost"]);
+    expect(parseFin("approved")).toBe("approved");
+    expect(parseFin("x")).toBeNull();
+    expect(finWhere("approved")).toEqual({ ...regWhere("registered"), financeNotCapitalised: false });
+    expect(finWhere("not-capitalised")).toEqual({ ...regWhere("registered"), financeNotCapitalised: true });
+    expect(finWhere("no-cost")).toEqual({ cost: null });
+  });
+});
+
+describe("pageAcross", () => {
+  it("a page entirely inside the first group", () => {
+    expect(pageAcross(30, 0, 25)).toEqual({ first: { skip: 0, take: 25 }, rest: { skip: 0, take: 0 } });
+  });
+  it("a page straddling both groups", () => {
+    expect(pageAcross(30, 25, 25)).toEqual({ first: { skip: 25, take: 5 }, rest: { skip: 0, take: 20 } });
+  });
+  it("a page entirely in the rest", () => {
+    expect(pageAcross(30, 50, 25)).toEqual({ first: { skip: 0, take: 0 }, rest: { skip: 20, take: 25 } });
+  });
+});
+```
+
+  And `src/lib/registration-input.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { approveSchema, resubmitSchema, sendBackSchema } from "./registration-input";
+
+describe("sendBackSchema", () => {
+  it("accepts ticked fields with or without a note", () => {
+    expect(sendBackSchema.safeParse({ id: "a", fields: ["cost", "doc:invoice"] }).success).toBe(true);
+    expect(sendBackSchema.safeParse({ id: "a", fields: ["cost"], note: "Invoice is for PO-90" }).success).toBe(true);
+  });
+  it("refuses none ticked, unknown or duplicate keys (Review Focus 4)", () => {
+    expect(sendBackSchema.safeParse({ id: "a", fields: [] }).success).toBe(false);
+    expect(sendBackSchema.safeParse({ id: "a", fields: ["cost", "hacker"] }).success).toBe(false);
+    expect(sendBackSchema.safeParse({ id: "a", fields: ["cost", "cost"] }).success).toBe(false);
+  });
+  it("Other needs a note; a note is 3-500 characters", () => {
+    expect(sendBackSchema.safeParse({ id: "a", fields: ["other"] }).success).toBe(false);
+    expect(sendBackSchema.safeParse({ id: "a", fields: ["other"], note: "Box was opened" }).success).toBe(true);
+    expect(sendBackSchema.safeParse({ id: "a", fields: ["cost"], note: "no" }).success).toBe(false);
+    expect(sendBackSchema.safeParse({ id: "a", fields: ["cost"], note: "x".repeat(501) }).success).toBe(false);
+  });
+});
+
+describe("resubmitSchema / approveSchema", () => {
+  it("reply optional, 3-500 when given", () => {
+    expect(resubmitSchema.safeParse({ id: "a" }).success).toBe(true);
+    expect(resubmitSchema.safeParse({ id: "a", reply: "" }).success).toBe(true);
+    expect(resubmitSchema.safeParse({ id: "a", reply: "ok" }).success).toBe(false);
+    expect(resubmitSchema.safeParse({ id: "a", reply: "Uploaded the right invoice" }).success).toBe(true);
+  });
+  it("approve takes an optional notCapitalised flag", () => {
+    expect(approveSchema.safeParse({ id: "a" }).success).toBe(true);
+    expect(approveSchema.safeParse({ id: "a", notCapitalised: true }).success).toBe(true);
+  });
+});
+```
+
+  Run `npx vitest run src/lib/registration.test.ts src/lib/registration-input.test.ts`. Expected: FAIL, the modules are missing.
+
+- [ ] **Step 2: Implement `src/lib/registration.ts`.**
+
+```ts
+import type { AssetClass, Prisma } from "@prisma/client";
+import { isAwaitingItCheck } from "./asset-class";
+
+/**
+ * Phase 35 (spec §3.1): an asset's registration review, DERIVED from today's columns — never stored.
+ * Order matters: awaiting IT → registered → needs correction → with Finance.
+ */
+export type RegState = "awaiting-it" | "with-finance" | "needs-correction" | "registered";
+export const REG_STATES: readonly RegState[] = ["needs-correction", "with-finance", "awaiting-it", "registered"];
+
+export const REG_LABEL: Record<RegState, string> = {
+  "awaiting-it": "Waiting for IT check",
+  "with-finance": "With Finance",
+  "needs-correction": "Needs correction",
+  registered: "Fully registered",
+};
+
+export const REG_LABEL_FINANCE: Record<RegState, string> = {
+  "awaiting-it": "Waiting for IT",
+  "with-finance": "To review",
+  "needs-correction": "Sent back",
+  registered: "Approved",
+};
+
+export interface RegFacts { cls: AssetClass; itVerifiedAt: Date | null; financeConfirmedAt: Date | null; financeReturnedAt: Date | null }
+
+export function registrationState(a: RegFacts): RegState {
+  if (isAwaitingItCheck(a)) return "awaiting-it";
+  if (a.financeConfirmedAt) return "registered";
+  if (a.financeReturnedAt) return "needs-correction";
+  return "with-finance";
+}
+
+export function parseRegState(raw: string | null | undefined): RegState | null {
+  return raw && (REG_STATES as readonly string[]).includes(raw) ? (raw as RegState) : null;
+}
+
+const AWAITING_IT: Prisma.AssetWhereInput = { cls: "IT", itVerifiedAt: null };
+
+export function regWhere(s: RegState): Prisma.AssetWhereInput {
+  switch (s) {
+    case "awaiting-it": return { ...AWAITING_IT };
+    case "registered": return { NOT: AWAITING_IT, financeConfirmedAt: { not: null } };
+    case "needs-correction": return { NOT: AWAITING_IT, financeConfirmedAt: null, financeReturnedAt: { not: null } };
+    case "with-finance": return { NOT: AWAITING_IT, financeConfirmedAt: null, financeReturnedAt: null };
+  }
+}
+
+/**
+ * Phase 35 (spec §3.3, plan P-7): every field IT or Purchasing can fix from Edit (or the Documents tab),
+ * in the form's order. Keys equal AssetForm's field keys, so the Edit page can flag them; documents are `doc:<kind>`.
+ */
+export const REGISTRATION_FIELDS = [
+  { key: "cost", label: "Cost", group: "Purchase" },
+  { key: "purchasedAt", label: "Purchase date", group: "Purchase" },
+  { key: "vendorId", label: "Vendor", group: "Purchase" },
+  { key: "invoiceRef", label: "Invoice no.", group: "Purchase" },
+  { key: "receiptRef", label: "Official receipt (OR) no.", group: "Purchase" },
+  { key: "warrantyUntil", label: "Warranty until", group: "Warranty" },
+  { key: "warrantyCoveredBy", label: "Covered by", group: "Warranty" },
+  { key: "warrantyContact", label: "Who to call for repairs", group: "Warranty" },
+  { key: "brand", label: "Brand", group: "Asset details" },
+  { key: "model", label: "Model", group: "Asset details" },
+  { key: "categoryId", label: "Category", group: "Asset details" },
+  { key: "serial", label: "Serial number", group: "Asset details" },
+  { key: "doc:invoice", label: "Sales invoice", group: "Documents" },
+  { key: "doc:official-receipt", label: "Official receipt", group: "Documents" },
+  { key: "doc:warranty-slip", label: "Warranty slip", group: "Documents" },
+  { key: "doc:delivery-receipt", label: "Delivery receipt", group: "Documents" },
+  { key: "other", label: "Other (explain in the note)", group: "Anything else" },
+] as const;
+
+export type RegFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"];
+export type RegFieldGroup = (typeof REGISTRATION_FIELDS)[number]["group"];
+export const REGISTRATION_FIELD_KEYS = REGISTRATION_FIELDS.map((f) => f.key) as unknown as [RegFieldKey, ...RegFieldKey[]];
+export const REG_FIELD_GROUPS: readonly RegFieldGroup[] = ["Purchase", "Warranty", "Asset details", "Documents", "Anything else"];
+
+export function fieldLabels(keys: readonly string[]): string[] {
+  const set = new Set(keys);
+  return REGISTRATION_FIELDS.filter((f) => set.has(f.key)).map((f) => f.label);
+}
+
+/** What IT reads: the ticked labels, and the note (a pre-Phase-35 reason reads as the note). */
+export function returnSummary(a: { financeReturnFields: string[]; financeReturnReason: string | null }): { items: string[]; note: string | null } {
+  return { items: fieldLabels(a.financeReturnFields), note: a.financeReturnReason };
+}
+
+/** Phase 35 (spec §4.1): Finance's list chips. */
+export type FinFilter = "with-finance" | "needs-correction" | "awaiting-it" | "approved" | "not-capitalised" | "no-cost";
+export const FIN_FILTERS: readonly FinFilter[] = ["with-finance", "needs-correction", "awaiting-it", "approved", "not-capitalised", "no-cost"];
+export const FIN_LABEL: Record<FinFilter, string> = {
+  "with-finance": "To review", "needs-correction": "Sent back", "awaiting-it": "Waiting for IT",
+  approved: "Approved", "not-capitalised": "Not capitalised", "no-cost": "No cost",
+};
+
+export function parseFin(raw: string | null | undefined): FinFilter | null {
+  return raw && (FIN_FILTERS as readonly string[]).includes(raw) ? (raw as FinFilter) : null;
+}
+
+export function finWhere(f: FinFilter): Prisma.AssetWhereInput {
+  switch (f) {
+    case "approved": return { ...regWhere("registered"), financeNotCapitalised: false };
+    case "not-capitalised": return { ...regWhere("registered"), financeNotCapitalised: true };
+    case "no-cost": return { cost: null };
+    default: return regWhere(f);
+  }
+}
+
+/** Plan P-10: one page of `firstCount` rows of group A followed by group B, as two (skip, take) windows. */
+export function pageAcross(firstCount: number, skip: number, take: number) {
+  const firstSkip = Math.min(skip, firstCount);
+  const firstTake = Math.max(0, Math.min(take, firstCount - skip));
+  const restSkip = Math.max(0, skip - firstCount);
+  return { first: { skip: firstTake ? firstSkip : 0, take: firstTake }, rest: { skip: restSkip, take: take - firstTake } };
+}
+```
+
+- [ ] **Step 3: Implement `src/lib/registration-input.ts`.**
+
+```ts
+import { z } from "zod";
+import { REGISTRATION_FIELD_KEYS } from "./registration";
+
+/** Phase 35 (spec §3.3-3.4): Finance's send-back, the department's reply, Finance's approval. */
+const text = z.string().trim().min(3, "Say a little more — at least 3 characters").max(500, "500 characters at most");
+
+export const sendBackSchema = z.object({
+  id: z.string().min(1),
+  fields: z.array(z.enum(REGISTRATION_FIELD_KEYS)).min(1, "Tick at least one thing that's wrong")
+    .refine((f) => new Set(f).size === f.length, "Each item once"),
+  note: z.union([z.literal(""), text]).optional(),
+}).refine((v) => !v.fields.includes("other") || !!v.note, { message: "Explain “Other” in the note", path: ["note"] });
+
+export const resubmitSchema = z.object({ id: z.string().min(1), reply: z.union([z.literal(""), text]).optional() });
+
+export const approveSchema = z.object({ id: z.string().min(1), notCapitalised: z.boolean().optional() });
+```
+
+- [ ] **Step 4: Add the status namespace.**
+  In `src/lib/status.ts`, `StatusNamespace` becomes `"employment" | "delivery" | "registration"`, and `NAMESPACED` gains:
+
+```ts
+  registration: { "awaiting-it": "neutral", "with-finance": "inflight", "needs-correction": "fault", registered: "settled" },
+```
+
+  If a test pins the namespaces (`grep -n NAMESPACED src/lib/status.test.ts`), add a case asserting `hasStatusFamily("needs-correction", "registration")`.
+
+- [ ] **Step 5: Run the checks.** Run `npx vitest run && npx tsc --noEmit`. Expected: green.
+
+- [ ] **Step 6: Commit.**
+
+```bash
+git add src/lib/registration.ts src/lib/registration.test.ts src/lib/registration-input.ts src/lib/registration-input.test.ts src/lib/status.ts src/lib/status.test.ts
+git commit -m "feat(registration): derived registration state, the send-back checklist, Finance filters and their inputs"
+```
+
+---
+
+### Task 3: Registration — actions, Edit form fields, audit sentences
+
+**Files:**
+- Modify: `src/server/modules/inventory/actions.ts` (`confirmAssetDetails`, `returnAssetToIt`, `resubmitAssetToFinance`, `updateSchema` / `updateAsset`), `src/server/modules/finance/queries.ts` (`nextToReview`), `src/components/inventory/asset-form.tsx`, `src/app/(app)/inventory/[id]/edit/page.tsx`, `src/lib/activity.ts`, `src/lib/activity.test.ts`
+
+**Interfaces:**
+- Consumes: Task 2 (`sendBackSchema`, `resubmitSchema`, `approveSchema`, `fieldLabels`).
+- Produces:
+  - `confirmAssetDetails({ id, notCapitalised? })` → `ActionResult<{ tag; next: { id; tag } | null }>`
+  - `returnAssetToIt({ id, fields, note? })` → `ActionResult<{ tag }>`
+  - `resubmitAssetToFinance({ id, reply? })` → `ActionResult<{ tag }>`
+  - `updateAsset` accepts `receiptRef`, `warrantyCoveredBy` (`"" | "manufacturer" | "vendor" | "both"`) and `warrantyContact`.
+  - `AssetForm` takes the optional props `flagged?: string[]` and `flagNote?: string | null`.
+  - `nextToReview(currentId, cls)` covers every `with-finance` asset, oldest `createdAt` first.
+
+- [ ] **Step 1: Failing audit-sentence tests.** Append to `src/lib/activity.test.ts`:
+
+```ts
+describe("Phase 35 registration sentences", () => {
+  const s = (action: string, diff: unknown) => auditSentence({ actorLabel: "L. Domingo", action, diff, entityLabel: "BR-LT-0214" });
+  it("send-back with items and a note; an old reason still reads", () => {
+    expect(s("finance.return", { financeReturn: { from: null, to: { fields: ["Cost", "Sales invoice"], note: "Wrong PO" } } }))
+      .toBe("L. Domingo sent BR-LT-0214 back: Cost, Sales invoice — “Wrong PO”");
+    expect(s("finance.return", { financeReturn: { from: null, to: { fields: ["Cost"], note: null } } }))
+      .toBe("L. Domingo sent BR-LT-0214 back: Cost");
+    expect(s("finance.return", { financeReturn: { from: null, to: "Wrong invoice" } }))
+      .toBe("L. Domingo sent BR-LT-0214 back to IT · Wrong invoice");
+  });
+  it("resubmit with a reply, approval as not capitalised, reopen", () => {
+    expect(s("finance.resubmit", { financeReturn: { from: "returned", to: null }, reply: { from: null, to: "Uploaded it" } }))
+      .toBe("L. Domingo marked BR-LT-0214 corrected — “Uploaded it”");
+    expect(s("finance.confirm", { financeConfirmed: { from: null, to: "L. Domingo" }, notCapitalised: { from: false, to: true } }))
+      .toBe("L. Domingo approved BR-LT-0214 as not capitalised");
+    expect(s("finance.reopened", { cost: { from: null, to: 500 } }))
+      .toBe("L. Domingo added a cost to BR-LT-0214, so it went back to Finance");
+  });
+});
+```
+
+  Run it. Expected: FAIL.
+
+- [ ] **Step 2: The sentences.** In `src/lib/activity.ts`:
+  - Replace the `finance.return` case:
+
+```ts
+    case "finance.return": {
+      // Phase 35 (spec §3.3): `to` is { fields: labels[], note } now; a string is a pre-Phase-35 reason.
+      const to = diff?.financeReturn?.to as { fields?: string[]; note?: string | null } | string | null | undefined;
+      if (to && typeof to === "object") {
+        const items = (to.fields ?? []).join(", ");
+        const note = to.note ? ` — “${to.note}”` : "";
+        return omitEntity ? `${actor}sent back: ${items}${note}` : `${actor}sent ${entry.entityLabel} back: ${items}${note}`;
+      }
+      const tail = to ? ` · ${String(to)}` : "";
+      return omitEntity ? `${actor}sent back to IT${tail}` : `${actor}sent ${entry.entityLabel} back to IT${tail}`;
+    }
+```
+
+  - Replace `finance.resubmit`:
+
+```ts
+    case "finance.resubmit": {
+      const reply = diff?.reply?.to ? ` — “${String(diff.reply.to)}”` : "";
+      if (reply) return omitEntity ? `${actor}marked corrected${reply}` : `${actor}marked ${entry.entityLabel} corrected${reply}`;
+      return omitEntity ? `${actor}marked corrected for Finance` : `${actor}marked ${entry.entityLabel} corrected for Finance`;
+    }
+```
+
+  - In `finance.confirm`, before the existing return, add:
+
+```ts
+      if (diff?.notCapitalised?.to === true) {
+        return omitEntity ? `${actor}approved as not capitalised` : `${actor}approved ${entry.entityLabel} as not capitalised`;
+      }
+```
+
+    The `case` becomes a block `{ … }` if it isn't one.
+  - Add `finance.reopened`:
+
+```ts
+    case "finance.reopened":
+      return omitEntity ? `${actor}added a cost, so it went back to Finance` : `${actor}added a cost to ${entry.entityLabel}, so it went back to Finance`;
+```
+
+  - In the action-label map near the top of the file (line ~22), add `"finance.reopened": "Back to Finance"`.
+
+  Run the test. Expected: PASS. Run the whole `activity.test.ts`; existing `finance.return` pins still pass via the string branch.
+
+- [ ] **Step 3: `confirmAssetDetails`.** Replace `confirmSchema` with `approveSchema` (import from `@/lib/registration-input`).
+  - **Select:** add `cost: true, financeReturnedAt: true` to the `findUnique` select.
+  - **Guards,** after the existing awaiting-IT guard:
+
+```ts
+    if (asset.financeReturnedAt) {
+      failure = conflict(`${asset.tag} is waiting for ${CLASS_LABEL[asset.cls]} to correct it — Finance reviews it when it comes back.`);
+      return;
+    }
+    const notCap = parsed.data.notCapitalised === true;
+    if (notCap && asset.cost !== null) {
+      failure = conflict(`${asset.tag} has a cost, so it is approved as capitalised — use Approve.`);
+      return;
+    }
+    if (!notCap && asset.cost === null) {
+      failure = conflict(`${asset.tag} has no cost. Send it back for the cost, or approve it as not capitalised.`);
+      return;
+    }
+```
+
+  - **Where:** the `updateMany` gains `financeReturnedAt: null` (state-guarded).
+  - **Data** gains `financeNotCapitalised: notCap, financeReturnFields: [], financeResubmitNote: null`.
+  - **Audit diff** becomes `{ financeConfirmed: { from: null, to: user.name }, ...(notCap ? { notCapitalised: { from: false, to: true } } : {}) }`.
+  - **Revalidate:** add `revalidatePath("/finance/assets")` and `revalidatePath(\`/finance/assets/${parsed.data.id}\`)`.
+
+  Import `CLASS_LABEL` from `@/lib/asset-class` if it isn't imported already.
+
+- [ ] **Step 4: `returnAssetToIt`.**
+  - **Schema:** replace `returnSchema` with `sendBackSchema`.
+  - **Body:** destructure `{ id, fields, note }` and compute `const cleanNote = note ? note : null;`.
+  - **Data:** `financeReturnedAt: new Date(), financeReturnedById: user.id, financeReturnReason: cleanNote, financeReturnFields: fields, financeResubmitNote: null`.
+  - **Audit diff:** `{ financeReturn: { from: null, to: { fields: fieldLabels(fields), note: cleanNote } } }`.
+  - Keep the rest as is, and add the two `/finance/assets` revalidations.
+  - Update the doc comment: the reason is now an optional note plus a checklist (spec §3.3).
+
+- [ ] **Step 5: `resubmitAssetToFinance`.**
+  - **Schema:** `resubmitSchema`.
+  - **Data:** `financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null, financeReturnFields: [], financeResubmitNote: reply ? reply : null`.
+  - **Audit diff:** `{ financeReturn: { from: "returned", to: null }, ...(reply ? { reply: { from: null, to: reply } } : {}) }`.
+  - Add the two `/finance/assets` revalidations.
+
+- [ ] **Step 6: `updateSchema` / `updateAsset` (P-7 and spec §3.6).**
+  - **Schema:** add to `updateSchema`:
+
+```ts
+  receiptRef: z.string().trim().max(60).optional(),
+  warrantyCoveredBy: z.union([z.literal(""), z.enum(["manufacturer", "vendor", "both"])]).optional(),
+  warrantyContact: z.string().trim().max(120).optional(),
+```
+
+    If the Phase 34 register schema uses different max lengths for these, copy those instead: `grep -n "warrantyContact\|receiptRef" src/server/modules/inventory/*.ts`.
+  - **`data`:** add `receiptRef: d.receiptRef || null, warrantyCoveredBy: d.warrantyCoveredBy || null, warrantyContact: d.warrantyContact || null`.
+  - **Reopen (spec §3.6):** after computing `{ diff, changed }`, and before the no-op return:
+
+```ts
+  // Phase 35 (spec §3.6): a cost on an asset approved as NOT capitalised reopens Finance's review —
+  // Finance never saw that cost, and depreciation must start from an approval of it.
+  const reopen = asset.financeNotCapitalised && data.cost !== null;
+```
+
+  - **Inside the transaction:** use `data: reopen ? { ...changed, financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false } : changed`. When `reopen`, write a second audit row:
+
+```ts
+      if (reopen) {
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
+          action: "finance.reopened", diff: { cost: diff.cost ?? { from: null, to: Number(data.cost) } },
+        });
+      }
+```
+
+  - Revalidate `/finance/assets` as well.
+
+- [ ] **Step 7: Edit form fields and flags.**
+  - **`asset-form.tsx`:**
+    - Add `receiptRef`, `warrantyCoveredBy` and `warrantyContact` to the form state and `initial` type.
+    - Rename the existing "Invoice / receipt no." field label to **"Invoice no."**.
+    - In Procurement, add `field("Official receipt (OR) no.", "receiptRef", …)`.
+    - Add a **Warranty** card holding `Warranty until` (moved from wherever it renders now), **Covered by** (a `Select` with —, Manufacturer, Vendor, Both — the same options as `purchase-section.tsx:289`) and `field("Who to call for repairs", "warrantyContact")`.
+  - **New props:** `flagged?: string[]` and `flagNote?: string | null`.
+    - When `flagged` includes a field's key, wrap that `FormField` in `<div data-flagged className="rounded-(--radius-ctl) p-2 ring-2 ring-[var(--st-attention-border)]">`. Its `hint` becomes "Finance flagged this" (prepended to any existing hint with " · ").
+    - Above the first card, when `flagged?.length || flagNote`, render `<Banner tone="attention" title="Finance sent this back">`. It lists `fieldLabels(flagged)` and shows `flagNote` in quotes. When any `doc:` key is flagged, it adds a link "Upload documents on the record →" to `/inventory/{assetId}?tab=documents`; check the record's documents tab param with `grep -n "documents" src/components/inventory/record-tabs.tsx`.
+  - **`edit/page.tsx`:** pass `initial.receiptRef`, `warrantyCoveredBy` and `warrantyContact` from the asset. When `asset.financeReturnedAt` is set, pass `flagged={asset.financeReturnFields}` and `flagNote={asset.financeReturnReason}`.
+
+- [ ] **Step 8: `nextToReview`** in `src/server/modules/finance/queries.ts`.
+  - **Where:** `{ cls, ...regWhere("with-finance"), id: { not: currentId } }`.
+  - **Order:** `orderBy: [{ createdAt: "asc" }, { id: "asc" }]`.
+  - Update its doc comment (spec §4.1: the queue covers assets without a cost too, oldest registration first).
+
+- [ ] **Step 9: Run the checks.** Run `npx tsc --noEmit && npm run lint && npx vitest run`. Expected: green. (`finance-review.tsx` still compiles: Task 4 removes it.)
+
+- [ ] **Step 10: Commit.**
+
+```bash
+git add src/server/modules/inventory/actions.ts src/server/modules/finance/queries.ts src/components/inventory/asset-form.tsx "src/app/(app)/inventory/[id]/edit/page.tsx" src/lib/activity.ts src/lib/activity.test.ts
+git commit -m "feat(registration): approve / approve as not capitalised / send back with a checklist / resubmit with a reply; Edit gains OR no., covered by, repair contact and Finance's flags; a cost reopens a not-capitalised asset"
+```
+
+---
+
+### Task 4: Registration — IT and Purchasing see it
+
+**Files:**
+- Create: `src/components/inventory/resubmit-dialog.tsx`, `src/components/inventory/registration-cell.tsx`, `src/components/inventory/registration-block.tsx`
+- Modify: `src/lib/record-actions.ts`, `src/lib/record-actions.test.ts`, `src/components/inventory/record-actions.tsx`, `src/lib/inventory-list.ts`, `src/lib/column-prefs.ts`, `src/server/modules/inventory/queries.ts`, `src/components/inventory/inventory-table.tsx`, `src/components/inventory/inventory-toolbar.tsx`, `src/app/(app)/inventory/page.tsx`, `src/app/(app)/inventory/[id]/(record)/page.tsx`
+- Delete: `src/components/inventory/finance-review.tsx`
+
+**Interfaces:**
+- Consumes: Task 2 (`registrationState`, `REG_LABEL`, `REG_STATES`, `parseRegState`, `regWhere`, `returnSummary`) and Task 3 (`resubmitAssetToFinance({ id, reply })`).
+- Produces the DOM contract (relied on by e2e):
+  - **Column:** the inventory table has a column header **"Registration"**. Each cell holds a `StatusPill ns="registration"` reading the `REG_LABEL`.
+  - **Needs correction** cells also show:
+    - "Finance flagged:" followed by a `<ul>` of the item labels;
+    - the note in quotes;
+    - "— {name}, {d Mon}";
+    - a link **"Edit"** (only when the viewer may edit);
+    - a button **"Mark corrected…"** (only when the viewer manages the class).
+  - **Resubmit dialog:** titled `Mark {tag} corrected?`. It has a textarea labelled **"Reply to Finance"** (optional) and the buttons "Cancel" and **"Send to Finance"**. The toast reads `{tag} sent back to Finance`.
+  - **Notice:** above the list, when the class has any `needs-correction` asset: `role="status"` with the text "{n} need correction — Finance sent them back." and a link **"Show them"** → `?reg=needs-correction` (keeping `cls`).
+  - **Filter:** the facet labelled **"Registration"** in the toolbar, URL parameter `reg`.
+  - **Record page:** a block with the heading **"Registration"** showing the pill, then the needs-correction details, and for Finance viewers (role `finance_staff` or `admin`) a link **"Review in Finance →"** to `/finance/assets/{id}`.
+  - **Record header:** never offers "Confirm details" or "Send back…" (P-9).
+
+- [ ] **Step 1: `recordActions` (P-9).**
+  - In `src/lib/record-actions.ts`:
+    - remove `"confirm-details"` and `"send-back"` from the `RecordAction` union, `PRIMARY_ORDER`, `FULL_ORDER`, `applicable` and `actionLabel`;
+    - delete the `finance` local.
+  - In `record-actions.test.ts`:
+    - delete or rewrite every case that expected those two actions;
+    - add one case: a Finance user on an unconfirmed, IT-checked asset gets `primary === null` and `more` without any finance action.
+  - Run the test. Expected: PASS after the edit.
+
+- [ ] **Step 2: `resubmit-dialog.tsx` (client).**
+  - **Props:** `{ open: boolean; onClose: () => void; asset: { id: string; tag: string } }`.
+  - **Shape:** copy the runner, toast and rate-limit handling from the deleted `finance-review.tsx`; that file is shown in git history, so `git show HEAD:src/components/inventory/finance-review.tsx`.
+  - **Content:** title `Mark ${tag} corrected?`, the blurb "Finance reviews it again. Say what you fixed if it helps them." and `FormField label="Reply to Finance" hint="Optional"` around a `Textarea`.
+  - **Submit:** call `resubmitAssetToFinance({ id, reply })`. Field errors go to `fieldErrors.reply`. On success, toast `${tag} sent back to Finance` with tone `settled`, then `router.refresh()`.
+
+- [ ] **Step 3: `record-actions.tsx`.**
+  - Remove the `FinanceReviewDialog` import and its `confirm` / `return` triggers.
+  - The `mark-corrected` primary and menu item open `ResubmitDialog`.
+  - Delete `src/components/inventory/finance-review.tsx`; `grep -rn "finance-review\|NextToReview" src` must return nothing afterwards.
+
+- [ ] **Step 4: Rows carry registration.** In `src/server/modules/inventory/queries.ts`:
+  - **Include:** add `financeReturnFields`, `financeReturnReason`, `financeResubmitNote` and `financeReturnedBy: { select: { name: true } }` to the list include/select. The row mapper gets them through `toRow`'s parameter type.
+  - **`AssetRow`:** gains `reg: RegState`, `regItems: string[]`, `regNote: string | null`, `regBy: string | null` and `regAt: string | null`. Compute `regAt` with `fmtDate(financeReturnedAt)` and the rest with `registrationState` / `returnSummary`.
+  - **Facet:**
+    - `INVENTORY_LIST_CONFIG.facets` gains `"reg"`.
+    - In `buildAssetWhere` (`src/lib/inventory-list.ts`), next to provenance, add: `const regs = (f.reg ?? []).map(parseRegState).filter((r): r is RegState => r !== null); if (regs.length) and.push({ OR: regs.map(regWhere) });`.
+    - In `facetOptions`, add four counts the same way provenance does: `reg: REG_STATES.map((r, i) => ({ value: r, label: REG_LABEL[r], count: regCounts[i] }))`, with `without("reg")`.
+  - **Toolbar:** in `inventory-toolbar.tsx`, add `"reg"` to both facet lists. The label is "Registration" (extend the label ternary).
+
+- [ ] **Step 5: The column.**
+  - **Column definition:** in `inventory-table.tsx`, `INVENTORY_COLUMNS` gains `{ id: "registration", label: "Registration", width: 220 }` after `status`. `COLUMN_PREF_KEYS["columns:inventory"]` (`src/lib/column-prefs.ts`) gains `"registration"`; check the default-visible list there and include it. Update `column-prefs.test.ts` if it pins the list.
+  - **Cell:** `registration-cell.tsx` (client, because it opens `ResubmitDialog`).
+    - **Props:** `{ row: AssetRow; canEdit: boolean; canMutate: boolean }`.
+    - **Content:** the pill, and the needs-correction block per the DOM contract.
+  - **`canEdit`:** computed per row with `canEditAsset(role, { cls: row.cls, itVerifiedAt: row.awaitingItCheck ? null : new Date(0) })`.
+
+- [ ] **Step 6: The notice.** In `src/app/(app)/inventory/page.tsx`:
+  - Count `prisma.asset.count({ where: { AND: [{ cls }, regWhere("needs-correction")] } })`, beside the existing reads.
+  - When it is above 0 and `state.filters.reg` is not exactly `["needs-correction"]`, render the notice with `Banner tone="fault"`, or the house equivalent used by other list notices: `grep -rn 'role="status"' src/app/\(app\)/inventory`.
+
+- [ ] **Step 7: Record page block.** In `src/app/(app)/inventory/[id]/(record)/page.tsx`, replace the `financeState` line (currently around lines 43–49) with `<RegistrationBlock>`.
+  - **Type:** `registration-block.tsx` is a server component.
+  - **Props:** `{ asset: { id; tag; cls; itVerifiedAt; financeConfirmedAt; financeReturnedAt; financeReturnFields; financeReturnReason; financeResubmitNote; financeNotCapitalised; financeReturnedBy: { name } | null; financeConfirmedBy: { name } | null }; viewerRole: Role }`.
+  - **Contents:**
+    - the heading "Registration" and the pill;
+    - for `registered`: "Approved by {name} · {date}", plus " · not capitalised" when flagged;
+    - for `needs-correction`: the summary;
+    - for `with-finance` with a reply: "Your reply: “…”";
+    - for Finance viewers: the "Review in Finance →" link.
+
+  Extend the record page's asset query to include those relations.
+
+- [ ] **Step 8: Run the checks.** Run `npx tsc --noEmit && npm run lint && npx vitest run`. Expected: green.
+
+- [ ] **Step 9: Commit.**
+
+```bash
+git add -A src/components/inventory src/lib/record-actions.ts src/lib/record-actions.test.ts src/lib/inventory-list.ts src/lib/column-prefs.ts src/lib/column-prefs.test.ts src/server/modules/inventory/queries.ts "src/app/(app)/inventory"
+git commit -m "feat(registration): IT and Purchasing see Registration on the list (column, filter, needs-correction notice) and the record; Mark corrected takes a reply; Finance's review leaves the record page"
+```
+
+---
+
+### Task 5: Depreciation — the pure calculation
 
 **Files:**
 - Create: `src/lib/depreciation.ts`, `src/lib/depreciation.test.ts`
@@ -308,7 +959,7 @@ describe("stateNote", () => {
     const base = { cost: 1, accumulated: 0, bookValue: 1, monthly: null, startMonth: null, policy: null };
     expect(stateNote({ ...base, state: "not-started" }, "Laptop")).toBe("Not depreciating yet");
     expect(stateNote({ ...base, state: "no-policy" }, "Laptop")).toBe("No policy for Laptop");
-    expect(stateNote({ ...base, state: "bad-salvage" }, "Laptop")).toBe("Salvage exceeds cost");
+    expect(stateNote({ ...base, state: "bad-salvage" }, "Laptop")).toBe("Salvage is not below cost — check the override");
     expect(stateNote({ ...base, state: "fully-depreciated" }, "Laptop")).toBe("Fully depreciated");
     expect(stateNote({ ...base, state: "depreciating" }, "Laptop")).toBeNull();
   });
@@ -322,7 +973,7 @@ describe("stateNote", () => {
 
 ```ts
 /**
- * Phase 35 (spec §2): straight-line depreciation, computed on read. Integer centavos and
+ * Phase 35 (spec §5.2): straight-line depreciation, computed on read. Integer centavos and
  * Asia/Manila calendar months throughout; every screen and export calls these functions.
  */
 export type MonthIndex = number;
@@ -424,7 +1075,7 @@ export function stateNote(r: DepResult, categoryName: string): string | null {
   switch (r.state) {
     case "not-started": return "Not depreciating yet";
     case "no-policy": return `No policy for ${categoryName}`;
-    case "bad-salvage": return "Salvage exceeds cost";
+    case "bad-salvage": return "Salvage is not below cost — check the override";
     case "fully-depreciated": return "Fully depreciated";
     default: return null;
   }
@@ -443,7 +1094,7 @@ git commit -m "feat(finance): pure straight-line depreciation (Manila months, ce
 
 ---
 
-### Task 3: Inputs, actions and audit sentences
+### Task 6: Depreciation — inputs, actions and audit sentences
 
 **Files:**
 - Create: `src/lib/depreciation-input.ts`, `src/lib/depreciation-input.test.ts`, `src/server/modules/finance/depreciation-actions.ts`
@@ -521,7 +1172,7 @@ describe("overrideSchema", () => {
 ```ts
 import { z } from "zod";
 
-/** Phase 35 (spec §3.2-3.3): the depreciation settings' input rules, shared by the forms and the actions. */
+/** Phase 35 (spec §5.4-5.5): the depreciation settings' input rules, shared by the forms and the actions. */
 export const MAX_LIFE_MONTHS = 600;
 
 export function lifeFromYearsMonths(years: string, months: string): number | null | "bad" {
@@ -616,7 +1267,7 @@ import { writeAudit } from "@/server/audit";
 import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
 import { overrideSchema, policySchema } from "@/lib/depreciation-input";
 
-/** Phase 35 (spec §3.2): a category's policy; the reply says how many costed assets it now drives (overrides excluded). */
+/** Phase 35 (spec §5.4): a category's policy; the reply says how many costed assets it now drives (overrides excluded). */
 export async function setCategoryPolicy(input: unknown): Promise<ActionResult<{ affected: number }>> {
   const user = await actionRole("admin", "finance_staff");
   if (!user) return forbidden();
@@ -641,13 +1292,13 @@ export async function setCategoryPolicy(input: unknown): Promise<ActionResult<{ 
       },
     });
   });
-  const affected = await prisma.asset.count({ where: { categoryId: cat.id, cost: { not: null }, depreciationLifeMonths: null } });
+  const affected = await prisma.asset.count({ where: { categoryId: cat.id, cost: { not: null }, financeNotCapitalised: false, depreciationLifeMonths: null } });
   revalidatePath("/finance/depreciation");
   revalidatePath("/finance/assets");
   return ok({ affected });
 }
 
-/** Phase 35 (spec §3.3): life AND salvage (pesos) AND a reason, together. */
+/** Phase 35 (spec §5.5): life AND salvage (pesos) AND a reason, together. */
 export async function setAssetOverride(input: unknown): Promise<ActionResult<null>> {
   const user = await actionRole("admin", "finance_staff");
   if (!user) return forbidden();
@@ -705,254 +1356,467 @@ git commit -m "feat(finance): depreciation inputs, policy/override actions (role
 
 ---
 
-### Task 4: Queries (rows, totals, policies, schedule, home)
+### Task 7: Finance queries — the register, totals, policies, schedule, asset detail, home
 
 **Files:**
-- Create: `src/server/modules/finance/depreciation-queries.ts`
-- Modify: `src/server/modules/finance/queries.ts`, `src/server/modules/home/queries.ts`
+- Create: `src/server/modules/finance/depreciation-queries.ts`, `src/server/modules/finance/asset-detail.ts`
+- Modify: `src/server/modules/finance/queries.ts`, `src/server/modules/home/queries.ts`, `src/lib/depreciation.ts`, `src/lib/depreciation.test.ts`
 
 **Interfaces:**
-- Consumes: `depreciate`, `resolvePolicy`, `toCentavos`, `asOfMonth`, `monthLabel`, `monthEndLabel`, `stateNote`, `yearGrid`, `manilaMonth` (Task 2); `lifeLabel` (Task 3).
+- Consumes: Task 2 (`regWhere`, `finWhere`, `FIN_FILTERS`, `pageAcross`, `registrationState`, `REG_LABEL_FINANCE`, `returnSummary`), Task 5 (`depreciate`, `resolvePolicy`, `toCentavos`, `asOfMonth`, `monthLabel`, `monthEndLabel`, `stateNote`, `yearGrid`, `manilaMonth`) and Task 6 (`lifeLabel`).
 - Produces:
 
 ```ts
+// src/lib/depreciation.ts (pure, added here)
+export function affectedByPolicy(rows: Array<{ costC: number | null; custom: boolean }>): number;
+export interface LifeYear { year: number; opening: number; total: number; closing: number; done: number; projected: number; months: Array<{ month: MonthIndex; opening: number; charge: number; closing: number; projected: boolean }> }
+export function lifeYears(cost: number, confirmedAt: Date | null, policy: Policy | null, asOf: MonthIndex): LifeYear[];
 // depreciation-queries.ts (server-only)
+export const CAPITALISED: Prisma.AssetWhereInput; // { cost: { not: null }, financeNotCapitalised: false }
 export interface DepAssetRow { id: string; tag: string; model: string; category: string; cls: AssetClass; status: AssetStatus;
-  costC: number; confirmedAt: Date | null; result: DepResult; note: string | null; custom: boolean; overrideNote: string | null;
+  holder: string | null; reg: RegState; notCapitalised: boolean;
+  costC: number | null; confirmedAt: Date | null; result: DepResult | null; note: string | null; custom: boolean; overrideNote: string | null;
   lifeMonths: number | null; salvageC: number | null; categoryLife: number | null; categorySalvagePercent: number | null }
-// (affectedByPolicy lives in src/lib/depreciation.ts — pure, unit-tested; see Step 1)
-export async function depRows(where: Prisma.AssetWhereInput, now?: Date): Promise<DepAssetRow[]>;
+export async function depRows(where: Prisma.AssetWhereInput, now?: Date): Promise<DepAssetRow[]>; // every row; result null when excluded
 export async function bookValueTotals(where: Prisma.AssetWhereInput, now?: Date): Promise<{ costC: number; accumulatedC: number; bookC: number; asOf: MonthIndex }>;
-export interface PolicyRow { id: string; name: string; cls: AssetClass; costed: number; lifeMonths: number | null; salvagePercent: number | null; changedBy: string | null; changedAt: Date | null }
-export async function policyRows(): Promise<PolicyRow[]>;     // no-policy first, then class, then name
-export interface ScheduleGroup { category: string; rows: Array<{ id: string; tag: string; model: string; costC: number; grid: YearRow }>; subtotal: YearRow }
-export async function scheduleYear(cls: AssetClass, year: number, now?: Date): Promise<{ groups: ScheduleGroup[]; total: YearRow; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[] }>;
-// finance/queries.ts: FinanceAssetRow gains { accumulated: string; bookValue: string; note: string | null; custom: boolean; overrideNote: string | null; lifeMonths: number | null; salvage: string | null; categoryLife: string; costNumber: number }
-//   financeAssets(...) return adds { totalDepreciation: string; totalBookValue: string; asOfLabel: string }
-// home/queries.ts: FinanceHome gains { bookValue: string; depreciation: string; asOfEnd: string }
+export interface PolicyRow { id: string; name: string; cls: AssetClass; costed: number; affected: number; lifeMonths: number | null; salvagePercent: number | null; changedBy: string | null; changedAt: Date | null }
+export async function policyRows(): Promise<PolicyRow[]>;
+export interface ScheduleGroup { category: string; rows: Array<{ id: string; tag: string; model: string; costC: number; custom: boolean; grid: YearRow }>; subtotal: YearRow }
+export async function scheduleYear(cls: AssetClass, year: number, now?: Date): Promise<{ groups: ScheduleGroup[]; total: YearRow | null; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[] }>;
+// finance/queries.ts
+export interface FinanceListParams { cls: AssetClass; status: AssetStatus | null; fin: FinFilter | null; q: string; page: number }
+export function financeListWhere(p: Omit<FinanceListParams, "page" | "fin">): Prisma.AssetWhereInput;
+export async function financeAssets(p: FinanceListParams, now?: Date): Promise<{
+  rows: DepAssetRow[]; total: number; page: number; pageCount: number;
+  chips: Record<FinFilter | "all", number>;
+  totals: { count: number; costed: number; cost: string; depreciation: string; book: string; asOfLabel: string } }>;
+// asset-detail.ts
+export async function financeAssetDetail(id: string, now?: Date): Promise<FinanceAssetDetail | null>; // see Step 5
+// home/queries.ts: FinanceHome gains { bookValue: string; depreciation: string; asOfEnd: string; toReview: number }
 ```
 
-- [ ] **Step 1: A failing test for the pure helper** (Review Focus 4).
-  Add `src/server/modules/finance/depreciation-queries.test.ts`, or put the helper in `src/lib/depreciation.ts` if server modules are excluded from vitest's include. **They are not:** the include is `src/**/*.test.{ts,tsx}`. The test must import only the pure helper, so put `affectedByPolicy` in `src/lib/depreciation.ts` and re-export it.
+- [ ] **Step 1: Pure helpers, test first.** Append to `src/lib/depreciation.test.ts`:
 
 ```ts
-import { affectedByPolicy } from "./depreciation";
-it("a category change counts costed rows without a custom override", () => {
-  expect(affectedByPolicy([{ costC: 100, custom: false }, { costC: 200, custom: true }, { costC: null, custom: false }])).toBe(1);
+import { affectedByPolicy, lifeYears } from "./depreciation";
+
+describe("affectedByPolicy", () => {
+  it("counts costed rows without a custom override", () => {
+    expect(affectedByPolicy([{ costC: 100, custom: false }, { costC: 200, custom: true }, { costC: null, custom: false }])).toBe(1);
+  });
+});
+
+describe("lifeYears", () => {
+  const p = { lifeMonths: 36, salvage: 550_000, basis: "category" as const };
+  it("BR-LT-0148: ₱55,000 confirmed 10 Mar 2025, 3 years, 10% salvage, as of Sep 2026", () => {
+    const ys = lifeYears(5_500_000, new Date("2025-03-10T10:00:00+08:00"), p, 2026 * 12 + 8);
+    expect(ys.map((y) => y.year)).toEqual([2025, 2026, 2027, 2028]);
+    expect(ys[0]).toMatchObject({ opening: 5_500_000, total: 9 * 137_500, done: 9, projected: 0 });
+    expect(ys[1]).toMatchObject({ done: 9, projected: 3 });
+    expect(ys[3].closing).toBe(550_000);
+    expect(ys[1].months[0]).toMatchObject({ charge: 137_500, projected: false });
+  });
+  it("unconfirmed or no policy → no years", () => {
+    expect(lifeYears(5_500_000, null, p, 2026 * 12 + 8)).toEqual([]);
+    expect(lifeYears(5_500_000, new Date("2025-03-10T10:00:00+08:00"), null, 2026 * 12 + 8)).toEqual([]);
+  });
 });
 ```
 
-  Implement it in `src/lib/depreciation.ts`:
+  Run it (FAIL), then implement in `src/lib/depreciation.ts`:
 
 ```ts
 export function affectedByPolicy(rows: Array<{ costC: number | null; custom: boolean }>): number {
   return rows.filter((r) => r.costC !== null && !r.custom).length;
 }
+
+export interface LifeYear {
+  year: number; opening: number; total: number; closing: number; done: number; projected: number;
+  months: Array<{ month: MonthIndex; opening: number; charge: number; closing: number; projected: boolean }>;
+}
+
+/** Phase 35 (spec §4.2 item 5): the asset page's year-by-year schedule over the whole life. */
+export function lifeYears(cost: number, confirmedAt: Date | null, policy: Policy | null, asOf: MonthIndex): LifeYear[] {
+  if (!confirmedAt || !policy || policy.salvage >= cost) return [];
+  const start = manilaMonth(confirmedAt) + 1;
+  const end = start + policy.lifeMonths - 1;
+  const base = cost - policy.salvage;
+  const out: LifeYear[] = [];
+  let book = cost;
+  for (let y = Math.floor(start / 12); y <= Math.floor(end / 12); y++) {
+    const months: LifeYear["months"] = [];
+    const opening = book;
+    for (let m = Math.max(y * 12, start); m <= Math.min(y * 12 + 11, end); m++) {
+      const charge = chargeFor(base, policy.lifeMonths, m - start + 1);
+      months.push({ month: m, opening: book, charge, closing: book - charge, projected: m > asOf });
+      book -= charge;
+    }
+    const projected = months.filter((x) => x.projected).length;
+    out.push({ year: y, opening, total: opening - book, closing: book, done: months.length - projected, projected, months });
+  }
+  return out;
+}
 ```
 
-- [ ] **Step 2: Implement `depreciation-queries.ts`.** Every function routes through the Task 2 functions; none recomputes arithmetic itself.
-  - **`depRows(where)`:** `prisma.asset.findMany({ where: { ...where, cost: { not: null } }, select: { id, tag, model, cls, status, cost, financeConfirmedAt, depreciationLifeMonths, depreciationSalvage, depreciationNote, category: { select: { name, depreciationLifeMonths, depreciationSalvagePercent } } } })`. Map each row with `costC = toCentavos(cost)!`, `policy = resolvePolicy(...)` and `result = depreciate(costC, financeConfirmedAt, policy, asOfMonth(now))`.
-  - **`bookValueTotals(where)`:** sums `depRows` results.
-  - **`policyRows()`:** reads categories with `_count` of costed assets. Find the latest change per category with `prisma.auditEntry.findMany({ where: { entityType: "asset-category", action: "depreciation.policy" }, orderBy: { createdAt: "desc" }, select: { entityId, actorLabel, createdAt } })`, keeping the first per `entityId`.
+  Run it. Expected: PASS.
+
+- [ ] **Step 2: `depreciation-queries.ts`.** Every function routes through the Task 5 functions; none recomputes arithmetic itself.
+  - **`CAPITALISED`:** `{ cost: { not: null }, financeNotCapitalised: false }`.
+  - **`depRows(where)`:**
+    - `findMany({ where, select: { id, tag, model, cls, status, cost, itVerifiedAt, financeConfirmedAt, financeReturnedAt, financeNotCapitalised, depreciationLifeMonths, depreciationSalvage, depreciationNote, assignee: { select: { name } }, category: { select: { name, depreciationLifeMonths, depreciationSalvagePercent } } } })`.
+    - Map each row:
+      - `reg = registrationState(row)`;
+      - `costC = toCentavos(cost)`;
+      - when `costC !== null && !financeNotCapitalised`: `policy = resolvePolicy(...)`, `result = depreciate(costC, financeConfirmedAt, policy, asOfMonth(now))` and `note = stateNote(result, category.name)`;
+      - otherwise `result = null` and `note = notCapitalised ? "Not capitalised" : "No cost recorded"`;
+      - `custom = policy?.basis === "custom"`.
+  - **`bookValueTotals(where)`:** sum over `depRows({ AND: [where, CAPITALISED] })`.
+  - **`policyRows()`:**
+    - Read categories (both classes) with `_count` of capitalised assets.
+    - For each category, `affected` = `affectedByPolicy` over its capitalised rows (`depreciationLifeMonths: null` means not custom). One grouped read: `prisma.asset.groupBy({ by: ["categoryId"], where: { ...CAPITALISED, depreciationLifeMonths: null }, _count: { _all: true } })`.
+    - Find the latest change per category with `prisma.auditEntry.findMany({ where: { entityType: "asset-category", action: "depreciation.policy" }, orderBy: { createdAt: "desc" }, select: { entityId, actorLabel, createdAt } })`, keeping the first per `entityId`.
+    - Sort no-policy first, then class, then name.
   - **`scheduleYear(cls, year)`:**
-    - Build `depRows({ cls })`, then `yearGrid` per row, dropping nulls.
+    - Build `depRows({ AND: [{ cls }, CAPITALISED] })`, then `yearGrid` per row, dropping nulls.
     - Group by category name and sort by category, then tag.
-    - Subtotals and the total sum the `YearRow` fields element-wise; a subtotal's `projected` equals the year's projected flags.
+    - Subtotals and the total sum the `YearRow` fields element-wise; `projected` is the year's flags. `total` is null when there are no groups.
     - `notStarted` / `noPolicy` count the rows whose `result.state` is `not-started` / `no-policy`.
-    - `years` runs from the earliest `manilaMonth(financeConfirmedAt)` year (or this year) to this year + 1.
-- [ ] **Step 3: Extend `financeAssets` in `finance/queries.ts`.**
-  - **Per row:** add `select`/`include` of the depreciation fields and the category policy, then compute each row with `resolvePolicy` + `depreciate`. Set `accumulated` / `bookValue` via `fmtMoneyExact(c / 100)`, `note = stateNote(...)`, `custom = policy?.basis === "custom"`, `overrideNote`, `lifeMonths`, `salvage` (pesos as string) and `categoryLife = lifeLabel(category life)`.
-  - **Totals over the whole filter (P-4):** call `bookValueTotals(where)` inside the same function and return `totalDepreciation`, `totalBookValue` and `asOfLabel = monthLabel(asOf)`.
-  - Update the doc comment that says "No book-value column".
-- [ ] **Step 4: Extend `financeHome`.**
-  Add `bookValueTotals({})`, which gives both classes as the spec requires. Return `bookValue`, `depreciation` (via `fmtMoneyExact`) and `asOfEnd = monthEndLabel(asOf)`.
-- [ ] **Step 5: Run the checks.** Run `npx tsc --noEmit && npx vitest run`. Expected: green.
-- [ ] **Step 6: Commit.**
+    - `years` runs from the earliest confirmation year (or this year) to this year + 1.
+
+- [ ] **Step 3: `financeAssets`** (rewrite; spec §4.1).
+  - **`financeListWhere({ cls, status, q })`:** `{ cls, ...(status ? { status } : {}), ...(q ? { OR: [{ tag: { contains: q, mode: "insensitive" } }, { model: { contains: q, mode: "insensitive" } }, { serial: { contains: q, mode: "insensitive" } }, { assignee: { name: { contains: q, mode: "insensitive" } } }] } : {}) }`. There is no cost filter and no IT gate any more.
+  - **Chips:** `chips.all = count(where)`; for each `f` of `FIN_FILTERS`, `count({ AND: [where, finWhere(f)] })`. Run them in one `Promise.all`.
+  - **Paging:** `ENTITY_PAGE_SIZE`.
+    - **With `fin` set:** `depRows` over `{ AND: [where, finWhere(fin)] }`, ordered by `[{ cost: { sort: "desc", nulls: "last" } }, { tag: "asc" }, { id: "asc" }]`, skip/take.
+    - **With `fin` null (P-10):**
+      - Group A is `with-finance` ordered `[{ createdAt: "asc" }, { id: "asc" }]`.
+      - Group B is `NOT with-finance`, ordered as above.
+      - Compute the windows with `pageAcross(chips["with-finance"], skip, take)` and concatenate.
+    - `depRows` must accept `orderBy`, `skip` and `take`: extend its signature with an optional `opts: { orderBy?; skip?; take? }`.
+  - **Totals:** `bookValueTotals(where)` with the `fin` filter applied when set, plus `count = total` and `costed` = the count of `{ AND: [where(+fin), CAPITALISED] }`. Format with `fmtMoneyExact(c / 100)`; `asOfLabel = monthLabel(asOf)`.
+  - **Clean-up:** delete `FinanceAssetRow` and the old body; keep `parseAssetStatus` and `nextToReview`. Update the doc comment (no more "No book-value column").
+
+- [ ] **Step 4: Home.** `financeHome` adds:
+  - `bookValueTotals({})` → `bookValue` and `depreciation` (via `fmtMoneyExact`), plus `asOfEnd = monthEndLabel(asOf)`;
+  - `toReview = prisma.asset.count({ where: regWhere("with-finance") })`.
+
+  `capitalized` keeps its meaning (cost sum of costed assets).
+
+- [ ] **Step 5: `asset-detail.ts`.**
+  - **Read:** `financeAssetDetail(id, now)` reads one asset with:
+    - `category` (with its policy), `assignee { name }`, `vendor { name }`;
+    - `purchaseRequest { id, refNo, requestedBy { name }, units { qty, unitPrice } }`;
+    - `purchaseRecord { fees }`;
+    - `documents { id, kind, fileName, createdAt }`;
+    - `financeConfirmedBy { name }` and `financeReturnedBy { name }`.
+  - **Returns `FinanceAssetDetail`:**
+    - **Identity:** `id, tag, model, brand, serial, cls, status, category, holder`.
+    - **Registration:** `reg` and `regFinanceLabel` (`REG_LABEL_FINANCE`, or "Not capitalised"); `returnSummary`; `resubmitNote`; `approvedBy`, `approvedAt`; `notCapitalised`.
+    - **Money:** `costC`, `result: DepResult | null`, `note`, `policyText` ("Laptop policy · 3 years, 10% salvage", "Custom · 2 years, ₱20,000.00 salvage — {reason}" or "No policy for {category}"), `custom`, `lifeMonths`, `salvageC`, `startLabel`, `endLabel`, `monthsUsed`, `asOfLabel`.
+    - **Purchase:** `pr: { id, refNo, requester, totalC } | null`, `vendor`, `invoiceRef`, `receiptRef`, `purchasedAt`, `feesC`, `warrantyUntil`, `coveredBy`, `contact`.
+    - **Documents:** `docs` — the four `SLOTS` kinds in order, each `{ kind, title, file: { id, fileName } | null }`, then `other` documents.
+    - **Schedule:** `years: LifeYear[]`.
+    - **History:** `history: Array<{ at: Date; sentence: string }>`. It holds this asset's audit rows with actions `register`, `update` (only when the diff has `cost`), `finance.*`, `it.verify` and `depreciation.*`, plus its category's `depreciation.policy` rows, newest first, capped at 50. Each sentence comes from `auditSentence`, with entity labels the tag / category name.
+  - Returns `null` if not found.
+
+- [ ] **Step 6: Run the checks.** Run `npx tsc --noEmit && npx vitest run`. Expected: green. (The `/finance/assets` page breaks against the new `financeAssets` shape; fix it minimally to compile, since Task 9 rebuilds it.)
+
+- [ ] **Step 7: Commit.**
 
 ```bash
-git add src/server/modules/finance/depreciation-queries.ts src/server/modules/finance/queries.ts src/server/modules/home/queries.ts src/lib/depreciation.ts src/lib/depreciation.test.ts
-git commit -m "feat(finance): depreciation queries -- per-row results, whole-filter totals, policy rows with last change, year schedule, home totals"
+git add src/server/modules/finance src/server/modules/home/queries.ts src/lib/depreciation.ts src/lib/depreciation.test.ts "src/app/(app)/finance/assets/page.tsx"
+git commit -m "feat(finance): register queries (every asset, search, Finance-state chips, to-review first), depreciation rows/totals/policies/schedule, asset detail, home figures"
 ```
 
 ---
 
-### Task 5: The Depreciation page — Policies tab, nav entry
+### Task 8: Depreciation page — Policies tab, and the Finance nav
 
 **Files:**
-- Create: `src/app/(app)/finance/depreciation/page.tsx`, `src/components/finance/policy-row.tsx`
+- Create: `src/app/(app)/finance/depreciation/page.tsx`, `src/components/finance/policy-row.tsx`, `src/components/finance/use-finance-runner.ts`
 - Modify: `src/lib/workspaces.ts`, `src/lib/workspaces.test.ts`
 
 **Interfaces:**
-- Consumes: `policyRows` (Task 4), `setCategoryPolicy` (Task 3), `lifeFromYearsMonths`, `lifeLabel` (Task 3).
-- Produces the DOM contract (relied on by e2e):
+- Consumes: `policyRows` (Task 7), `setCategoryPolicy` (Task 6), `lifeFromYearsMonths`, `lifeLabel` (Task 6).
+- Produces the DOM contract:
   - **Page:** `PageHeader title="Depreciation"`, and `Tabs label="Depreciation views"` with items "Schedule" (`?tab=schedule` or bare) and "Policies" (`?tab=policies`).
   - **Notice:** when policies are missing, `"{n} categories have no useful life yet — their assets show at full cost."`
   - **Row:** each row is a `<tr>` whose first cell is the category name.
-    - Its inputs are labelled `"Years for {category}"`, `"Months for {category}"` and `"Salvage percent for {category}"`. The word "life" is avoided so the labels don't repeat the column header word.
+    - Its inputs are labelled `"Years for {category}"`, `"Months for {category}"` and `"Salvage percent for {category}"`.
     - The save button reads `Save`.
-    - The warning line `"This updates the book value of {n} assets, including past months on the schedule."` shows only while the row is dirty and the category has costed, non-custom assets.
+    - The warning `"This updates the book value of {n} assets, including past months on the schedule."` shows while the row is dirty and `affected > 0`.
   - **Toast on save:** `Saved — {category}`.
 
-- [ ] **Step 1: Nav entry (P-5).**
-  In `WORKSPACE_NAV.finance`, the "Capitalized assets" `items` become `[{ label: "Approved assets", href: "/finance/assets" }, { label: "Depreciation", href: "/finance/depreciation" }, { label: "Activity log", href: "/finance/activity" }]`. Add to `workspaces.test.ts`:
+- [ ] **Step 1: Nav (P-5).**
+  - In `WORKSPACE_NAV.finance`, the section `{ heading: "Capitalized assets", … }` becomes `{ heading: "Assets & depreciation", items: [{ label: "Assets", href: "/finance/assets" }, { label: "Depreciation", href: "/finance/depreciation" }, { label: "Activity log", href: "/finance/activity" }] }`.
+  - Fix any existing `workspaces.test.ts` pin of the old heading or label.
+  - Add:
 
 ```ts
-it("Finance nav carries Depreciation under Capitalized assets", () => {
-  const sec = WORKSPACE_NAV.finance.find((s) => s.heading === "Capitalized assets");
-  expect(sec?.items.map((i) => i.label)).toEqual(["Approved assets", "Depreciation", "Activity log"]);
+it("Finance nav: Assets & depreciation", () => {
+  const sec = WORKSPACE_NAV.finance.find((s) => s.heading === "Assets & depreciation");
+  expect(sec?.items.map((i) => i.label)).toEqual(["Assets", "Depreciation", "Activity log"]);
 });
-it("/finance/depreciation is Finance-only", () => {
-  expect(pathAllowedForRole("/finance/depreciation", "finance_staff")).toBe(true);
-  expect(pathAllowedForRole("/finance/depreciation", "it_staff")).toBe(false);
-  expect(pathAllowedForRole("/finance/depreciation", "purchasing_staff")).toBe(false);
+it("/finance/depreciation and /finance/assets/<id> are Finance-only", () => {
+  for (const p of ["/finance/depreciation", "/finance/assets/abc"]) {
+    expect(pathAllowedForRole(p, "finance_staff")).toBe(true);
+    expect(pathAllowedForRole(p, "it_staff")).toBe(false);
+    expect(pathAllowedForRole(p, "purchasing_staff")).toBe(false);
+  }
 });
 ```
 
   Run `npx vitest run src/lib/workspaces.test.ts`. Expected: PASS.
-- [ ] **Step 2: `policy-row.tsx` (client).**
-  - **Props:** `{ row: PolicyRow; affected: number }`, where `affected` is the costed count minus custom overrides, computed server-side with `affectedByPolicy`.
-  - **State:** `years`, `months` (from `row.lifeMonths`) and `salvage` (string).
-  - **Dirty** means the values differ from the initial ones.
+
+- [ ] **Step 2: `use-finance-runner.ts`.** Copy the shape of `useEmployeeRunner` (`grep -rn "export function useEmployeeRunner" src`) into a local `useFinanceRunner`: pending, errors, rate-limit, toast.
+
+- [ ] **Step 3: `policy-row.tsx` (client).**
+  - **Props:** `{ row: PolicyRow }`.
+  - **State:** `years`, `months` (from `row.lifeMonths`) and `salvage` (string). Dirty means the values differ from the initial ones.
   - **Save:** parse with `lifeFromYearsMonths`. A `"bad"` result shows the inline error "Enter whole years and 0–11 months, up to 50 years". Otherwise call `setCategoryPolicy({ categoryId, lifeMonths, salvagePercent: salvage === "" ? null : Number(salvage) })`.
-  - **Result handling:** use the `useEmployeeRunner` pattern (copy its shape into a local `useFinanceRunner` inside `src/components/finance/use-finance-runner.ts`). Field errors render under the inputs.
-  - **Visible cells:** Category · Class pill · Costed (count) · Useful life (two numeric inputs, `inputMode="numeric"`, "y" / "m" suffixes) · Salvage % (input, "%" suffix) · Last changed ("L. Domingo · 15 Oct 2026" or "—") · Save button.
-- [ ] **Step 3: `page.tsx`.**
+  - **Visible cells:** Category · Class pill · Costed · Useful life (two numeric inputs, "y" / "m" suffixes) · Salvage % · Last changed ("L. Domingo · 15 Oct 2026" or "—") · Save.
+
+- [ ] **Step 4: `page.tsx`.**
   - **Guard:** `requireRole("admin", "finance_staff")`.
-  - **Tab:** read `tab` from `searchParams`, defaulting to `schedule`.
-  - **Policies:** call `policyRows()` and `affected` per category from `depRows`, i.e. the count of costed rows with no override; reuse `affectedByPolicy`. Render the notice and a `Table` of `PolicyRow`s.
-  - **Schedule:** until Task 7 lands (same branch, never merged alone) the Schedule tab renders only the tab row; Task 7 fills it and makes it the default.
-- [ ] **Step 4: Run the checks.** Run `npx tsc --noEmit && npm run lint && npx vitest run`, then a foreground smoke: `E2E_PORT=3100 npx playwright test e2e/axe-sweep.spec.ts --workers=1 --global-timeout=540000`. Expected: green.
-- [ ] **Step 5: Commit.**
+  - **Tab:** read `tab`, defaulting to `schedule`.
+  - **Policies:** `policyRows()`, the notice, and a `Table` of `PolicyRow`s.
+  - **Schedule:** until Task 11, the Schedule tab renders only the tab row.
+
+- [ ] **Step 5: Run the checks.** Run `npx tsc --noEmit && npm run lint && npx vitest run`. Expected: green.
+
+- [ ] **Step 6: Commit.**
 
 ```bash
-git add src/lib/workspaces.ts src/lib/workspaces.test.ts src/app/(app)/finance/depreciation/page.tsx src/components/finance/policy-row.tsx src/components/finance/use-finance-runner.ts
-git commit -m "feat(finance): Depreciation page Policies tab -- inline life + salvage per category, change warning, last changed; nav entry"
+git add src/lib/workspaces.ts src/lib/workspaces.test.ts "src/app/(app)/finance/depreciation/page.tsx" src/components/finance/policy-row.tsx src/components/finance/use-finance-runner.ts
+git commit -m "feat(finance): Depreciation page Policies tab (inline life + salvage per category, change warning, last changed); nav becomes Assets & depreciation"
 ```
 
 ---
 
-### Task 6: Approved assets — columns, totals, override dialog, export
+### Task 9: Finance's Assets list — the register
 
 **Files:**
 - Modify: `src/app/(app)/finance/assets/page.tsx`, `src/lib/export-columns.ts`
-- Create: `src/components/finance/asset-row-menu.tsx`, `src/components/finance/override-dialog.tsx`, `src/app/(app)/finance/assets/export/route.ts`
+- Create: `src/components/finance/fin-chips.tsx`, `src/components/finance/asset-row-menu.tsx`, `src/components/finance/override-dialog.tsx`, `src/app/(app)/finance/assets/export/route.ts`
 
 **Interfaces:**
-- Consumes: the extended `financeAssets` (Task 4), `depRows` (Task 4), `setAssetOverride` / `clearAssetOverride` (Task 3).
+- Consumes: `financeAssets`, `financeListWhere`, `depRows`, `CAPITALISED` (Task 7); `setAssetOverride` / `clearAssetOverride`, `lifeFromYearsMonths` (Task 6); `FIN_FILTERS`, `FIN_LABEL`, `parseFin`, `finWhere`, `REG_LABEL_FINANCE` (Task 2).
 - Produces the DOM contract:
-  - **New headers:** "Depreciation to date" and "Book value", both right-aligned.
-  - **Under the book value:** the state note (muted, 11px).
-  - **Custom marker:** a `Pill` "custom" beside the tag when overridden.
-  - **Row menu:** `IconButton aria-label="Actions for {tag}"`, with the item "Depreciation for this asset…".
-  - **Dialog** titled `Depreciation for {tag}`, containing:
-    - the category's values as muted text, e.g. "Category: 3 years, 10% salvage", or "Category: no policy";
-    - inputs labelled "Years", "Months", "Salvage (₱)" and **Reason** (`ReasonField`);
+  - **Header:** `PageHeader title="Assets"`, with the class tabs (IT · Purchasing) as today.
+  - **Search:** a GET form with a search input labelled **"Search assets"** (placeholder "Tag, model, serial or holder") and parameter `q`.
+  - **Chips:** a `nav aria-label="Finance state"` of links "All {n}", "To review {n}", "Sent back {n}", "Waiting for IT {n}", "Approved {n}", "Not capitalised {n}" and "No cost {n}". The current chip has `aria-current="page"`. They keep `cls`, `q` and `status`.
+  - **Table headers:** Tag · Model · Category · Status · **Finance** · Cost · **Depreciation to date** · **Book value** · (row menu).
+    - The tag links to `/finance/assets/{id}`.
+    - The holder shows under the model.
+    - The Finance cell is a `StatusPill ns="registration"` with `REG_LABEL_FINANCE`, or "Not capitalised" (value `registered`).
+    - Cost is "—" when null.
+    - Under the book value: the note (`DepAssetRow.note`), muted.
+    - A custom override shows a `Pill` "custom" beside the tag.
+  - **Row menu:** `IconButton aria-label="Actions for {tag}"`, with the item **"Depreciation for this asset…"**, only for capitalised rows.
+  - **Dialog:** titled `Depreciation for {tag}`, containing:
+    - the muted category values ("Category: 3 years, 10% salvage" or "Category: no policy");
+    - the inputs "Years", "Months", "Salvage (₱)" and **Reason** (`ReasonField`);
+    - a preview line "With this: {monthly} a month · book value now {book}", computed client-side with `resolvePolicy` + `depreciate` from `@/lib/depreciation` (pure);
     - the buttons "Save", "Cancel" and, when custom, "Clear override".
-  - **Footer line:** `{n} assets · {cost} at cost · {dep} depreciation · {book} book value` plus `As of the end of {Month YYYY}`.
-  - **Export:** a button "Export" (`ButtonLink` to `/finance/assets/export?…`, carrying the current `cls`/`status`).
+  - **Footer line:** `{count} assets · {costed} with a cost · {cost} at cost · {depreciation} depreciation · {book} book value` plus `As of the end of {Month YYYY}`.
+  - **Export:** a button "Export" (`ButtonLink` to `/finance/assets/export?` plus the current `cls`, `status`, `fin` and `q`).
 
-- [ ] **Step 1: Export columns.**
-  In `src/lib/export-columns.ts`, add `BOOK_VALUE_EXPORT_COLUMNS: XlsxColumn<DepAssetRow>[]`. Its labels, in order: Tag, Model, Category, Class, Status, Cost, Confirmed on, Starts, Life (months), Salvage, Monthly amount, Depreciation to date, Book value, Basis, Note.
-  - Money cells are `{ value: c / 100, type: Number, format: "#,##0.00" }`.
-  - Dates are `{ value: date, type: Date, format: "yyyy-mm-dd" }`.
-  - "Starts" is the `monthLabel` text.
-  - "Basis" is "Custom" or "Category" (empty when there is no policy).
-  - "Note" is the override note if custom, else the state note.
-- [ ] **Step 2: Export route** `src/app/(app)/finance/assets/export/route.ts`.
-  `requireRole("admin", "finance_staff")`. Parse `cls` (default IT) and `status` exactly as the page does. Build the same `where` the page uses (costed; IT gated on `itVerifiedAt`), then call `depRows(where)`. Over `EXPORT_CAP` → `capRefusal`. Otherwise `toXlsxBuffer(BOOK_VALUE_EXPORT_COLUMNS, rows)` → `xlsxResponse(exportFilename("finance-book-value", new Date()), buf)`.
-- [ ] **Step 3: Row menu and dialog (client).**
-  - **Menu:** `asset-row-menu.tsx` takes `{ id, tag, cost: number, custom: boolean, lifeMonths, salvage, note, categoryText }` and holds `open` state. It renders `Menu` + `IconButton` (pattern: `src/components/home/work-row-menu.tsx`) and `OverrideDialog`.
+- [ ] **Step 1: Export columns.** In `src/lib/export-columns.ts`, add `FINANCE_ASSETS_EXPORT_COLUMNS: XlsxColumn<DepAssetRow>[]`. Its labels, in order (spec §4.1): Tag, Model, Category, Class, Status, Holder, Registration, Cost, Confirmed on, Starts, Life (months), Salvage, Monthly amount, Depreciation to date, Book value, Basis, Note.
+  - Money cells are `{ value: c / 100, type: Number, format: "#,##0.00" }`, or empty when null.
+  - Dates are `{ type: Date, format: "yyyy-mm-dd" }`.
+  - "Starts" is the `monthLabel` of `result.startMonth`.
+  - "Basis" is "Custom" / "Category" / "".
+  - "Registration" is the Finance label.
+  - "Note" is the override note if custom, else the row note.
+- [ ] **Step 2: Export route.**
+  - **Guard:** `requireRole("admin", "finance_staff")`.
+  - **Parse:** `cls`, `status`, `fin` and `q` exactly as the page does.
+  - **Rows:** `depRows({ AND: [financeListWhere(...), ...(fin ? [finWhere(fin)] : [])] })`.
+  - **Cap:** over `EXPORT_CAP` → `capRefusal`.
+  - **Output:** `xlsxResponse(exportFilename("finance-assets", new Date()), toXlsxBuffer(FINANCE_ASSETS_EXPORT_COLUMNS, rows))`.
+- [ ] **Step 3: Row menu and override dialog (client).**
+  - **Menu:** `asset-row-menu.tsx` takes `{ id, tag, costC, custom, lifeMonths, salvageC, note, categoryText, categoryLife, categorySalvagePercent }` and holds `open` state. It renders `Menu` + `IconButton` (pattern: `src/components/home/work-row-menu.tsx`) and `OverrideDialog`.
   - **Dialog:** the `TransferDialog` pattern (Dialog + FormField + ReasonField + runner).
     - Save: `lifeFromYearsMonths` must not be null or "bad" (refuse with "Enter the asset's useful life"), the salvage is parsed as pesos, then call `setAssetOverride`.
     - Clear: `clearAssetOverride`.
     - Toasts: "Custom depreciation saved — {tag}" and "Custom depreciation cleared — {tag}".
-- [ ] **Step 4: Page.**
-  Add the two columns, the note, the custom pill, the last column holding `AssetRowMenu`, the new footer line, and Export next to the class tabs. Rename the page title from "Capitalized assets" to "Approved assets" only if the nav already says "Approved assets" (it does); keep the heading text in sync with the nav. **Ruling P-7:** the title becomes "Approved assets". Grep the e2e for `"Capitalized assets"` heading pins and update them in Task 8.
+  - **Reuse:** export `OverrideDialog` so Task 10 reuses it.
+- [ ] **Step 4: `fin-chips.tsx` (server)** and the page rewrite per the DOM contract. Parse `fin` with `parseFin` and `q` trimmed, max 100 characters.
 - [ ] **Step 5: Run the checks.** Run `npx tsc --noEmit && npm run lint && npx vitest run`. Expected: green.
 - [ ] **Step 6: Commit.**
 
 ```bash
-git add -A src/app/(app)/finance/assets src/components/finance src/lib/export-columns.ts
-git commit -m "feat(finance): Approved assets shows depreciation to date and book value with whole-filter totals, a per-asset override dialog, and an Excel export"
+git add -A "src/app/(app)/finance/assets" src/components/finance src/lib/export-columns.ts
+git commit -m "feat(finance): Assets register -- every asset, search, Finance-state chips (to review first), depreciation and book value with whole-filter totals, per-asset override, Excel export"
 ```
 
 ---
 
-### Task 7: Schedule tab, its export, and the home stat
+### Task 10: The Finance asset page and Finance's review
+
+**Files:**
+- Create: `src/app/(app)/finance/assets/[id]/page.tsx`, `src/app/(app)/finance/assets/[id]/export/route.ts`, `src/components/finance/review-box.tsx`, `src/components/finance/send-back-dialog.tsx`
+- Modify: `src/lib/export-columns.ts`
+
+**Interfaces:**
+- Consumes: `financeAssetDetail` (Task 7); `confirmAssetDetails`, `returnAssetToIt` (Task 3); `REGISTRATION_FIELDS`, `REG_FIELD_GROUPS` (Task 2); `OverrideDialog` (Task 9).
+- Produces the DOM contract:
+  - **Header:** a breadcrumb "Assets" → `/finance/assets?cls=…`, then `PageHeader title={tag}`. The subtitle reads `{model} · {category} · {IT|Purchasing} · S/N {serial} · {holder}`, plus the Status pill and the Finance pill. The buttons are **"Depreciation settings…"** (capitalised only; opens `OverrideDialog`) and **"Export"**.
+  - **Review box** (only `with-finance`): `role="region" aria-label="Review"`, containing:
+    - the heading **"Waiting for your review"**;
+    - the hint (spec §3.2 wording; no-cost: "No cost recorded. Send it back for the cost, or approve it as not capitalised.");
+    - when present, "{Department} replied: “{reply}”";
+    - the buttons **"Approve"** (cost set) or **"Approve as not capitalised"** (no cost), and **"Send back to {IT|Purchasing}…"**.
+  - **After Approve:** the toast is `{tag} approved` / `{tag} approved as not capitalised`. Then navigate to the next asset (`/finance/assets/{next.id}`) if `next`, else `router.refresh()`.
+  - **Send-back dialog:** titled `Send {tag} back to {IT|Purchasing}`.
+    - One `fieldset` per group, with a `legend` = the group name.
+    - One checkbox per field, labelled by the field label.
+    - When the asset has no cost, Cost is pre-ticked.
+    - A textarea labelled **"Note for {IT|Purchasing}"**, with the hint "Optional — required for Other".
+    - The buttons "Cancel" and **"Send back"** (danger).
+    - A "{n} ticked" count.
+    - On success, the toast reads `{tag} sent back to {IT|Purchasing}`.
+  - **Section headings:** "Money summary", "Purchase", "Capitalization & depreciation", "Documents", "Depreciation schedule" (capitalised with a policy only) and "Financial history".
+  - **Schedule:** a table `aria-label="Depreciation by year"` with a row per year (a `button` "{year}" toggles `aria-expanded` and reveals that year's month rows). Projected months carry the text "projected".
+  - **Not shown when:** for no-cost and not-capitalised assets, the money summary shows the state note instead of figures.
+
+- [ ] **Step 1: `send-back-dialog.tsx` (client).** Use the runner; state is `Set<RegFieldKey>` plus `note`. Call `returnAssetToIt({ id, fields: [...set], note })`. Field errors: `fields` → banner, `note` → under the textarea.
+- [ ] **Step 2: `review-box.tsx` (client).** Props: `{ id; tag; cls; hasCost: boolean; reply: string | null; deptLabel: string }`. It renders the buttons and calls `confirmAssetDetails({ id, notCapitalised: !hasCost })`.
+- [ ] **Step 3: `page.tsx` (server).**
+  - **Guard:** `requireRole("admin", "finance_staff")`; `const d = await financeAssetDetail(id)`; `notFound()` when null.
+  - **Render:** the sections in spec §4.2 order. Documents link through the existing document route; find it with `grep -rn "documents/\[" src/app`. The schedule's expand/collapse is a small client component inside the page file's folder, or inline in `review-box.tsx`'s file if simpler.
+- [ ] **Step 4: Export (P-11).**
+  - **Columns:** `ASSET_SCHEDULE_EXPORT_COLUMNS: XlsxColumn<{ label: string; opening: number | null; charge: number | null; closing: number | null; projected: string }>[]`, with labels Month, Book value at start, Depreciation, Book value at end, Projected.
+  - **Rows:** first the five summary rows (label = "Cost" / "Depreciation to date" / "Book value" / "Monthly amount" / "Salvage", value in `closing`), then a blank row, then every month from `lifeYears`.
+  - **Route:** `requireRole("admin", "finance_staff")`; 404 when not found. File: `asset-${tag}-YYYY-MM-DD.xlsx` via `exportFilename(\`asset-${tag}\`, new Date())`.
+- [ ] **Step 5: Run the checks.** Run `npx tsc --noEmit && npm run lint && npx vitest run`. Expected: green.
+- [ ] **Step 6: Commit.**
+
+```bash
+git add -A "src/app/(app)/finance/assets/[id]" src/components/finance/review-box.tsx src/components/finance/send-back-dialog.tsx src/lib/export-columns.ts
+git commit -m "feat(finance): the Finance asset page -- money summary, purchase, capitalization, documents, year-by-year schedule, history; Finance approves (or not capitalised) or sends back with a checklist and note"
+```
+
+---
+
+### Task 11: Schedule tab, its export, and the home
 
 **Files:**
 - Create: `src/components/finance/schedule-table.tsx`, `src/app/(app)/finance/depreciation/export/route.ts`
 - Modify: `src/app/(app)/finance/depreciation/page.tsx`, `src/app/(app)/page.tsx`, `src/lib/export-columns.ts`
 
 **Interfaces:**
-- Consumes: `scheduleYear` (Task 4), `financeHome` additions (Task 4).
+- Consumes: `scheduleYear` and the `financeHome` additions (Task 7).
 - Produces the DOM contract:
-  - **Controls:** class tabs (`Tabs label="Asset class"`: IT / Purchasing) and a year `<select aria-label="Year">`. The year select is a GET form whose submit button reads "Show", for no-JS; keep the selected `tab` and `cls`.
+  - **Controls:** class tabs (`Tabs label="Asset class"`: IT / Purchasing) and a year `<select aria-label="Year">`. The year select is a GET form whose submit button reads "Show", for no-JS; keep `tab` and `cls`.
   - **Table:** `<table aria-label="Depreciation schedule {year}">`, with headers Tag, Model, Category, Cost, "Book value 1 Jan", Jan … Dec, "Year total", "Book value 31 Dec".
-    - A projected month header carries `title="projected"` and a muted style. Its cells are muted too.
-  - **Rows:** category subtotal rows read `Subtotal — {category}`, and the grand total reads `Total`.
-  - **Above the table:** `{n} assets aren't depreciating yet · {m} have no policy`, with a link "Set policies" to `?tab=policies`.
-  - **Empty year:** "No asset depreciates in {year}." (Review Focus 5).
+    - A projected month header has `title="projected"` and a muted style. Its cells are muted too.
+  - **Rows:** subtotal rows read `Subtotal — {category}`, and the grand total reads `Total`.
+  - **Above the table:** `{n} assets aren't depreciating yet · {m} have no policy`, with a link "Set policies" → `?tab=policies`.
+  - **Empty year:** "No asset depreciates in {year}."
   - **Export:** a link "Export" → `/finance/depreciation/export?year={y}&cls={c}`.
-  - **Home:** `<Stat label="Book value" value={d.bookValue} hint={`after ${d.depreciation} depreciation · as of ${d.asOfEnd}`} />`, linked to `/finance/assets`. Wrap the `Stat` in a `Link`, and make the grid `sm:grid-cols-4`.
+  - **Home stats:**
+    - `<Stat label="Book value" value={d.bookValue} hint={\`after ${d.depreciation} depreciation · as of ${d.asOfEnd}\`} />`, linked to `/finance/assets`, with the grid `sm:grid-cols-4`.
+    - When `toReview > 0`, a line or link **"{n} registrations to review"** → `/finance/assets?fin=with-finance`, placed with the home's existing waiting items.
 
-- [ ] **Step 1: `schedule-table.tsx` (server).**
-  Render the grid with `fmtMoneyExact(c / 100)` per cell, inside an `overflow-x: auto` box. The first two columns are sticky (`sticky left-0` and `left-[112px]`, with a background). Subtotal rows get `bg-surface-subtle font-semibold`.
+- [ ] **Step 1: `schedule-table.tsx` (server).** Render each cell with `fmtMoneyExact(c / 100)`, inside an `overflow-x: auto` box. The first two columns are sticky. Subtotal rows get `bg-surface-subtle font-semibold`.
 - [ ] **Step 2: Export columns and route.**
-  - **Columns:** `SCHEDULE_EXPORT_COLUMNS: XlsxColumn<ScheduleSheetRow>[]`, where `ScheduleSheetRow = { tag: string; model: string; category: string; costC: number | null; grid: YearRow }`. Subtotal and total rows use an empty tag and model, with category "Subtotal — {category}" / "Total" and cost `null`.
-  - **Route:** `requireRole("admin", "finance_staff")`. Parse `year` (integer 2000–2100, default this year) and `cls`. Flatten the groups into rows with the subtotal after each group and the total last. Over `EXPORT_CAP` → `capRefusal`. File name: `depreciation-${cls.toLowerCase()}-${year}.xlsx`. Use `xlsxResponse(\`depreciation-${cls.toLowerCase()}-${year}.xlsx\`, buf)`; that name is already safe characters.
-- [ ] **Step 3: Page Schedule tab and home stat.**
-  Replace Task 5's placeholder with the Schedule tab, and add the home stat.
+  - **Columns:** `SCHEDULE_EXPORT_COLUMNS: XlsxColumn<ScheduleSheetRow>[]`, where `ScheduleSheetRow = { tag: string; model: string; category: string; costC: number | null; grid: YearRow }`. Subtotal and total rows use an empty tag and model, category "Subtotal — {category}" / "Total", and cost `null`.
+  - **Route:** `requireRole("admin", "finance_staff")`. Parse `year` (integer 2000–2100, default this year) and `cls`. Flatten the groups into rows with the subtotal after each group and the total last. Over `EXPORT_CAP` → `capRefusal`. File: `depreciation-${cls.toLowerCase()}-${year}.xlsx`.
+- [ ] **Step 3: Page Schedule tab and home.** Replace Task 8's placeholder, then add the home stat and the to-review link.
 - [ ] **Step 4: Run the checks.** Run `npx tsc --noEmit && npm run lint && npx vitest run`. Expected: green.
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add -A src/app/(app)/finance/depreciation src/components/finance/schedule-table.tsx src/app/(app)/page.tsx src/lib/export-columns.ts
-git commit -m "feat(finance): year depreciation schedule (Jan-Dec grid, category subtotals, projected months, Excel export) and the home Book value stat"
+git add -A "src/app/(app)/finance/depreciation" src/components/finance/schedule-table.tsx "src/app/(app)/page.tsx" src/lib/export-columns.ts
+git commit -m "feat(finance): year depreciation schedule (Jan-Dec grid, category subtotals, projected months, Excel export); home Book value stat and registrations to review"
 ```
 
 ---
 
-### Task 8: e2e, adapted pins, battery and docs
+### Task 12: e2e, adapted pins, battery and docs
 
 **Files:**
-- Create: `e2e/finance-depreciation.spec.ts`
-- Modify: any spec pinning "Capitalized assets" as the `/finance/assets` heading (grep), and the docs.
+- Create: `e2e/finance-registration-depreciation.spec.ts`
+- Modify: `e2e/asset-classes.spec.ts`, `e2e/department-owned.spec.ts`, `e2e/receiving.spec.ts`, `e2e/home-finance.spec.ts` (and anything else the greps below find), `docs/HANDOVER.md`, `docs/PICKUP.md`, `docs/HANDOVER-PENDING.md`, the spec and this plan.
 
-- [ ] **Step 1: Write `e2e/finance-depreciation.spec.ts`.**
+- [ ] **Step 1: Write `e2e/finance-registration-depreciation.spec.ts`.**
   - **House shape:** copy `login`, `expectNoSeriousAxe` and `waitForHydration` from `e2e/queues-records-ux.spec.ts:62-85`; `beforeAll` seeds; `afterAll` disconnects.
-  - **Fixture:** a Prisma helper sets `financeConfirmedAt` on chosen seeded assets to a fixed past date, e.g. `2026-01-14T10:00:00+08:00`. Restore them in `finally` (plain field updates, no audit rows touched). Read exports with `readSheet` from `read-excel-file/node`, as `e2e/directory.spec.ts:5` does.
+  - **Fixtures:** Prisma helpers set registration and confirmation fields on chosen seeded assets, and restore them in `finally` with plain field updates. No audit rows are deleted. Read exports with `readSheet` from `read-excel-file/node` (`e2e/directory.spec.ts:5`).
   - **Cases:**
-    1. Finance (finance@) opens `/finance/depreciation?tab=policies`. The notice counts categories without a policy. Fill "Years for Laptop" = 3 and "Salvage percent for Laptop" = 10; the change warning shows; Save. The toast reads "Saved — Laptop". The DB category has life 36 and 10.00%, and one `depreciation.policy` audit row exists. Axe passes.
-    2. `/finance/assets` (IT tab) shows "Depreciation to date" and "Book value". For one confirmed laptop, the book value equals the value computed in the test with the same formula from `src/lib/depreciation.ts`: import `depreciate` / `resolvePolicy` / `asOfMonth` from `@/lib/depreciation`, the way existing specs import from `@/lib`. The footer shows totals and "As of the end of".
-    3. Override: the row menu "Actions for BR-LT-0148" opens "Depreciation for this asset…". Set 2 years, ₱5,000 and the reason "refurbished unit"; Save. The row shows "custom", and the book value changes. "Clear override" reverts it, and two audit rows exist.
-    4. An unconfirmed costed asset shows "Not depreciating yet". A confirmed asset in a no-policy category shows "No policy for {category}".
-    5. Home (finance@ on `/`) shows the "Book value" stat with "as of".
-    6. Schedule: on `/finance/depreciation` (the current year), the table "Depreciation schedule {year}" has a "Subtotal — Laptop" row and a "Total" row. Months after the as-of month have `title="projected"`. The year select switches to `year + 1`. Pick a year before any confirmation (e.g. 2020) and see "No asset depreciates in 2020." Axe passes.
-    7. Both exports download. `finance-book-value-YYYY-MM-DD.xlsx` has header row `[Tag, Model, …, Note]`. `depreciation-it-{year}.xlsx` has the header row and a "Total" row.
-    8. it@ and purchasing@ visiting `/finance/depreciation` are redirected away (not 200 on that path), and posting the action from their session is refused. The action refusal is covered by the role guard; asserting the redirect is enough.
-- [ ] **Step 2: Adapt pins.**
-  Run `grep -rn "Capitalized assets" e2e`. Every heading pin on `/finance/assets` becomes "Approved assets" (P-7); the nav-section heading "Capitalized assets" is unchanged. Run each changed file alone in the foreground.
+    1. **Registration round trip.**
+       - it@ registers nothing new: pick a seeded IT asset with a cost and reset it to `with-finance`.
+       - On it@'s `/inventory`, its Registration cell reads "With Finance".
+       - finance@ opens `/finance/assets/{id}`: the region "Review" shows. "Send back to IT…" opens the dialog; tick "Cost" and "Sales invoice", enter the note "Invoice is for another PO", then "Send back".
+       - it@'s list shows "Needs correction", "Finance flagged:", both labels and the note.
+       - `/inventory/{id}/edit` shows the banner "Finance sent this back", and the Cost field wrapper has `data-flagged`.
+       - "Mark corrected…" with the reply "Uploaded the right invoice" → "Send to Finance".
+       - finance@ sees "IT replied: “Uploaded the right invoice”", then Approve.
+       - it@ sees "Fully registered".
+       - The audit rows `finance.return`, `finance.resubmit` and `finance.confirm` exist.
+    2. **No cost.** A seeded asset with `cost` null, reset to `with-finance`:
+       - finance@ sees "Approve as not capitalised" (and no "Approve") and approves.
+       - The list chip "Not capitalised" includes it.
+       - it@ edits Cost = 500 and saves.
+       - The asset reads "With Finance" again; a `finance.reopened` audit row exists, and `financeNotCapitalised` is false.
+    3. **Register.**
+       - `/finance/assets` (IT) lists a no-cost asset and an `awaiting-it` asset; the chips filter (`?fin=no-cost` shows only cost "—" rows).
+       - Search `q` by a model substring narrows the list.
+       - The tag link opens the asset page, which has the "Money summary", "Documents" and "Financial history" headings.
+    4. **Policies.**
+       - On `/finance/depreciation?tab=policies`, the notice counts categories without a policy.
+       - Set "Years for Laptop" = 3 and "Salvage percent for Laptop" = 10; the warning shows; Save.
+       - The toast reads "Saved — Laptop"; the DB has 36 and 10.00, plus one `depreciation.policy` audit row.
+       - Axe passes.
+    5. **Book value.**
+       - On `/finance/assets?fin=approved` (IT), one confirmed laptop's book value equals `depreciate(resolvePolicy(...))` computed in the test from `@/lib/depreciation`.
+       - The footer shows totals and "As of the end of".
+    6. **Override.**
+       - "Actions for {tag}" → "Depreciation for this asset…": 2 years, ₱5,000, the reason "refurbished unit"; Save.
+       - The row shows "custom" and the book value changes.
+       - "Clear override" reverts it, and two audit rows exist.
+    7. **Asset page schedule.** On a confirmed laptop with the Laptop policy, the "Depreciation by year" table has a year button; expanding it shows month rows, and future months read "projected".
+    8. **Home.** finance@ on `/` sees "Book value" with "as of", and "registrations to review" when any exist.
+    9. **Schedule.**
+       - `/finance/depreciation` (this year) shows a "Subtotal — Laptop" row and a "Total" row; projected headers have `title="projected"`.
+       - Year 2020 shows "No asset depreciates in 2020."
+       - Axe passes.
+    10. **Exports.**
+        - `finance-assets-YYYY-MM-DD.xlsx` has the header row `[Tag, …, Note]`.
+        - `depreciation-it-{year}.xlsx` has a "Total" row.
+        - `asset-{tag}-YYYY-MM-DD.xlsx` starts with "Cost".
+    11. **Access.** it@ and purchasing@ visiting `/finance/depreciation` and `/finance/assets/{id}` are redirected away.
+    12. **Axe** on: it@'s `/inventory` with the Registration column, `/finance/assets`, and `/finance/assets/{id}` in review with the send-back dialog open.
+- [ ] **Step 2: Adapt pins (P-9 and P-5).**
+  - Run `grep -rn "Confirm details\|Send back\|Mark corrected\|Capitalized assets\|Approved assets" e2e`.
+  - Every Finance confirm or send-back flow moves to `/finance/assets/{id}`, using the new names ("Approve", "Send back to …", the checklist dialog).
+  - Mark corrected uses `Mark {tag} corrected?` / "Send to Finance".
+  - The `/finance/assets` heading pin becomes "Assets".
+  - `receiving.spec.ts`'s "next to review" flow now lands on `/finance/assets/{next}`.
+  - Run each changed file alone in the foreground.
 - [ ] **Step 3: The battery.**
-  Run the seven chunks from `docs/HANDOVER.md` §0 item 9 with `e2e/finance-depreciation.spec.ts` added to **chunk C** (home-finance is there). Split D, E1 and F into halves when slow, as before.
-  - `npx playwright test --list | tail -1`: expect the previous total + this file's cases, in 45 files.
+  - Run the seven chunks from `docs/HANDOVER.md` §0 item 9, with `e2e/finance-registration-depreciation.spec.ts` added to **chunk C** (home-finance is there). Split D, E1 and F into halves when slow.
+  - `npx playwright test --list | tail -1`: expect the previous total plus this file's cases, in one more file.
   - `npx vitest run`, `npx tsc --noEmit` and `npm run lint` must be green.
   - `npx prisma migrate status`: 28 migrations.
   - `npm run db:seed` runs last.
 - [ ] **Step 4: Docs.**
-  - `HANDOVER.md`: a status prefix on line 3, a new lettered block before the newest (that is "(aa)", so add "(ab)"), and the chunk C line gains the new file.
-  - `PICKUP.md`: branch row, battery row, §4 item 1.
-  - `HANDOVER-PENDING.md`: §5.2 marks "Depreciation module" shipped in Phase 35.
-  - The spec's Status line, and this plan's D-block.
-  - State everywhere: code-complete, unmerged and unpushed; **migration 28**; staging deploys by pulling the GitHub Actions image (the laptop never builds).
+  - **Spec:** update the §3.3 checklist table to P-7's field set (drop Delivery and fees and Purchase request), and set the Status line to code-complete.
+  - **`HANDOVER.md`:** a status prefix on line 3, a new lettered block "(ab)", and the chunk C line gains the new file.
+  - **`PICKUP.md`:** the branch row, the battery row, and §4 item 1.
+  - **`HANDOVER-PENDING.md`:** §5.2 marks "Depreciation module" shipped in Phase 35, and notes registration review.
+  - **This plan:** the D-block.
+  - **State everywhere:**
+    - code-complete, unmerged and unpushed;
+    - **migration 28**;
+    - staging deploys by pulling the GitHub Actions image (the laptop never builds);
+    - on first deploy every unconfirmed asset lands in Finance's To review (spec §3.1, by design).
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add e2e/finance-depreciation.spec.ts docs/HANDOVER.md docs/PICKUP.md docs/HANDOVER-PENDING.md docs/superpowers/specs/2026-10-15-depreciation-design.md docs/superpowers/plans/2026-10-15-phase-35-depreciation.md
-git commit -m "test(e2e)+docs: Phase 35 depreciation -- policies, book value, override, home stat, year schedule, exports, access; battery; migration 28"
+git add e2e docs/HANDOVER.md docs/PICKUP.md docs/HANDOVER-PENDING.md docs/superpowers/specs/2026-10-15-depreciation-design.md docs/superpowers/plans/2026-10-15-phase-35-depreciation.md
+git commit -m "test(e2e)+docs: Phase 35 -- registration review round trip, not capitalised + reopen, Finance register and asset page, depreciation policies/override/schedule/home/exports, access; adapted pins; battery; migration 28"
 ```
-
-(Add the adapted spec files to the commit too.)
 
 ---
 
