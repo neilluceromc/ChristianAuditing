@@ -671,7 +671,7 @@ export function RegisterForm({
                 )}
                 <div className="relative overflow-hidden rounded-[6px] border border-border-strong bg-white shadow-card">
                   <LabelCell
-                    tag={rows[0].tag || example.tag}
+                    tag={rows[0].tag.trim().toUpperCase() || example.tag}
                     model={model.trim() || category?.name || example.model}
                     category={category?.name ?? ""}
                     base={qrBase(baseUrl)}

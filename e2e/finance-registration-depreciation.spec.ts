@@ -440,8 +440,12 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await page.goto("/finance/depreciation");
       const table = page.getByRole("table", { name: `Depreciation schedule ${year}` });
       await expect(table).toBeVisible();
-      await expect(table.getByRole("cell", { name: "Subtotal — Laptop" })).toBeVisible();
+      // Phase 36: the default view is the category summary; a category link drills into its assets.
+      await expect(table.getByRole("link", { name: "Laptop", exact: true })).toBeVisible();
       await expect(table.getByRole("cell", { name: "Total", exact: true })).toBeVisible();
+      await table.getByRole("link", { name: "Laptop", exact: true }).click();
+      await expect(page.getByRole("cell", { name: "Subtotal — Laptop" })).toBeVisible();
+      await page.getByRole("link", { name: "← All categories" }).click();
       await expect(table.locator('th[title="projected"]').first()).toBeVisible();
       await expectNoSeriousAxe(page);
 

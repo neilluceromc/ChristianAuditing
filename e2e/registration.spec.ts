@@ -80,11 +80,6 @@ async function waitForHydration(target: Locator) {
   }).toPass({ timeout: 20_000 });
 }
 
-/** Highest number in use under a prefix — never hardcode a literal; an earlier test may have registered more. */
-async function highestNumber(prefix: string): Promise<number> {
-  const rows = await db.asset.findMany({ where: { tag: { startsWith: `BR-${prefix}-` } }, select: { tag: true } });
-  return rows.reduce((max, r) => Math.max(max, Number(r.tag.slice(6))), 0);
-}
 const tagOf = (prefix: string, n: number) => `BR-${prefix}-${String(n).padStart(4, "0")}`;
 
 // Phase 34 register helpers, copied from e2e/register-labels.spec.ts (house rule: never import across spec files).
@@ -107,7 +102,7 @@ async function pickModel(page: Page, model: string, type?: string) {
   const known = page.getByRole("option", { name: model, exact: true });
   if (await known.count()) await known.first().click();
   else await page.getByRole("option", { name: new RegExp(`^\\+ Add .${escapeRe(model)}. as a new model$`) }).click();
-  if (type) await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: type });
+  if (type) await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: type });
 }
 
 /** The first type a category offers, read from the DB — never assumed. */
@@ -132,10 +127,20 @@ async function openPurchase(page: Page) {
   await expect(header).toHaveAttribute("aria-expanded", "true");
 }
 
-/** Brand, Notes and Tag prefix sit in the "Tag prefix and notes" fold-out inside Purchase and warranty. */
+/** Phase 36: staff type their own tags — unique per run, 20 characters at most. One unit has the Tag box; a batch has Tag 1…n. */
+async function fillTags(page: Page, n: number): Promise<string[]> {
+  const stamp = Date.now().toString(36).slice(-6).toUpperCase();
+  const tags = Array.from({ length: n }, (_, i) => `REG${stamp}-${i + 1}`);
+  for (const [i, t] of tags.entries()) {
+    await (n === 1 ? page.getByRole("textbox", { name: "Tag", exact: true }) : page.getByLabel(`Tag ${i + 1}`, { exact: true })).fill(t);
+  }
+  return tags;
+}
+
+/** Brand and Notes sit in the "Notes" fold-out inside Purchase and warranty. */
 async function openFold(page: Page) {
   await openPurchase(page);
-  const summary = page.getByText("Tag prefix and notes", { exact: true });
+  const summary = page.locator("summary", { hasText: /^Notes$/ });
   if (!(await page.getByRole("textbox", { name: "Notes", exact: true }).isVisible())) await summary.click();
   await expect(page.getByRole("textbox", { name: "Notes", exact: true })).toBeVisible();
 }
@@ -152,8 +157,7 @@ const IT = "it@thebackroomop.com";
 const P = "purchasing@thebackroomop.com";
 
 test.describe.serial("registration", () => {
-  test("1. picking a category prefills the next free tag for its most-used prefix", async ({ page }) => {
-    const next = tagOf("LT", (await highestNumber("LT")) + 1);
+  test("1. picking a category suggests no tag; a typed tag in a batch row survives", async ({ page }) => {
     await login(page, IT);
     // Phase 30 (spec §5.1): /inventory/new is a redirect to the one Register
     // flow, whose quantity-1 row IS the single tag field (plan P-12).
@@ -161,25 +165,25 @@ test.describe.serial("registration", () => {
     await expect(page).toHaveURL(/\/inventory\/register$/);
     // The redirect streams (inventory/loading.tsx), so the form can still be
     // hydrating when the URL has already changed.
-    // Phase 34: the category is a card, and one unit's tag is the chip beside its serial.
+    // Phase 36: the category is a card, and no tag is suggested — the Tag box starts empty.
     await pickCategory(page, "Laptop");
-    await expect(page.getByText(`tag ${next}`, { exact: true })).toBeVisible();
-    // Phase 34: a tag is typed by hand only in a batch's rows — still editable,
-    // and a hand-typed tag survives the suggestion.
+    await expect(page.getByRole("textbox", { name: "Tag", exact: true })).toHaveValue("");
+    await expect(page.getByText(/^tag BR-/)).toHaveCount(0);
+    // A tag typed in a batch row stays as typed.
     await setQuantity(page, 2);
-    await expect(page.getByLabel("Tag 1", { exact: true })).toHaveValue(next);
+    await expect(page.getByLabel("Tag 1", { exact: true })).toHaveValue("");
     await page.getByLabel("Tag 1", { exact: true }).fill(tagOf("LT", 9000));
     await page.getByLabel("Serial 1", { exact: true }).click();
     await expect(page.getByLabel("Tag 1", { exact: true })).toHaveValue("BR-LT-9000");
   });
 
   test("2. vendor, brand and a document chosen at creation land on the record", async ({ page }) => {
-    const tag = tagOf("LT", (await highestNumber("LT")) + 1);
     const serial = `E2E-REG-2-${Date.now()}`;
     await login(page, IT);
     await page.goto("/inventory/register");
     await pickCategory(page, "Laptop");
     await pickModel(page, "ThinkPad E14 (e2e reg)", await firstType("Laptop"));
+    const [tag] = await fillTags(page, 1);
     await serialBox(page).fill(serial);
     await openFold(page);
     await page.getByRole("textbox", { name: "Brand", exact: true }).fill("Lenovo");
@@ -250,7 +254,7 @@ test.describe.serial("registration", () => {
     await page.getByLabel("Sales invoice", { exact: true }).setInputFiles({
       name: "inv.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 inv"),
     });
-    const tags = await Promise.all([1, 2, 3].map((i) => page.getByLabel(`Tag ${i}`, { exact: true }).inputValue()));
+    const tags = await fillTags(page, 3);
     await page.getByRole("button", { name: "Register 3 vehicles", exact: true }).click();
     // Plan P-5: the batch lands on Labels, ticked and ready to print; a Purchasing batch carries its class (Phase 33 I-1).
     const recordId = await landedRecord(page);
@@ -289,6 +293,7 @@ test.describe.serial("registration", () => {
     await pickCategory(page, "Vehicle");
     await pickModel(page, "Dup test", await firstType("Vehicle"));
     await setQuantity(page, 2);
+    await fillTags(page, 2);
     await page.getByLabel("Serial 1", { exact: true }).fill("SAME-1");
     await page.getByLabel("Serial 2", { exact: true }).fill("SAME-1");
     await modelBox(page).click(); // blur
@@ -337,7 +342,7 @@ test.describe.serial("registration", () => {
     await page.getByLabel("Sales invoice", { exact: true }).setInputFiles({
       name: "it-inv.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 it-inv"),
     });
-    const tags = await Promise.all([1, 2].map((i) => page.getByLabel(`Tag ${i}`, { exact: true }).inputValue()));
+    const tags = await fillTags(page, 2);
     await page.getByRole("button", { name: "Register 2 laptops", exact: true }).click();
     await landedRecord(page);
     // The invoice attached: a batch whose file failed lands with `docsFailed` (the old "did not attach" banner).
@@ -371,7 +376,7 @@ test.describe.serial("registration", () => {
     await expect(page.getByText("carry.pdf")).toBeVisible();
     const stamp = `E2E-REG-8-${Date.now()}`;
     for (const i of [1, 2, 3]) await page.getByLabel(`Serial ${i}`, { exact: true }).fill(`${stamp}-${i}`);
-    const tags = await Promise.all([1, 2, 3].map((i) => page.getByLabel(`Tag ${i}`, { exact: true }).inputValue()));
+    const tags = await fillTags(page, 3);
     await page.getByRole("button", { name: "Register 3 laptops", exact: true }).click();
     await landedRecord(page);
     expect(new URL(page.url()).searchParams.get("docsFailed")).toBeNull();
@@ -397,6 +402,7 @@ test.describe.serial("registration", () => {
     await setQuantity(page, 1);
     await expect(page.getByText("back.pdf")).toBeVisible();
     const serial = `E2E-REG-9-${Date.now()}`;
+    await fillTags(page, 1);
     await serialBox(page).fill(serial);
     await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
     // Plan P-5: Register lands on Labels; the record (opened from there) says what last happened.

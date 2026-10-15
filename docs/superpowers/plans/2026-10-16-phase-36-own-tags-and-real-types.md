@@ -663,4 +663,15 @@ git commit -m "test(e2e)+docs: Phase 36 -- typed tags, Type always asked, Laptop
 
 ## D-block (decisions made during execution)
 
-(Filled in during execution: each ruling as `D-n — what — why — cost if wrong`.)
+- **D-1** (Task 1) - tags capped at 20 characters (spec said 30) — the label's barcode fits ~22 characters at the minimum module, so 30 would print labels with no scannable barcode; spec/plan updated in the fix round — cost if wrong: one number (tags 21–30 refused)
+- **D-2** (Task 5) - accept the swap of four extra pages (scan, work, home, reservations) that also loaded every employee — same intent as spec §4.2; activeEmployeeOptions deleted — cost if wrong: none
+- **D-3** (Task 5) - searchPeople uses checkRate(user.id, "check") (the live-check budget), not the mutation budget the plan implied — typing must not starve real writes — cost if wrong: one argument
+- **D-4** (Task 6) - the Reservations page's Employee facet stays a list — it shows only people with holds in the current tab (holds expire in 7 days, so the list stays short) — cost if wrong: a third search scope later
+- **D-5** (Task 6) - include the failed-search message fix (Minor 2) in fix round 1 since the same file is being touched and a rate-limited search saying 'No match' misleads — cost if wrong: one string
+- **D-6** (Task 7) - the plan's scheduleSummary interface omitted Cost; spec §5 requires it — add costC per category and a total cost — cost if wrong: one column
+- **D-7** (Task 7) - include the O(n²) grouping fix and a 'Category not found' note in the fix round (same files, cheap) — cost if wrong: none
+- **D-8** (Task 8) - Register's label preview shows the tag upper-cased and trimmed (`register-form.tsx`, one line) - the stored tag is upper-case, so a lower-case preview barcoded something that would never be saved - cost if wrong: none
+- **D-9** (Task 8) - e2e specs that registered through a suggested tag now type their own (`E<base36>-n` style, 20 characters at most); `ThinkPad` picks became `High-performance` through the select named `Type` - the model no longer sets the type - cost if wrong: one string per spec
+- **D-10** (Task 8) - the import fixtures use type `Standard` (`e2e/fixtures/make.ts`; only the four .xlsx files that carry a Laptop type were regenerated, the rest restored byte-for-byte) - `Dell Latitude` no longer exists after migration 29 - cost if wrong: re-run `npx tsx e2e/fixtures/make.ts`
+- **D-11** (Task 8) - `quick-forms` case 2 now expects the employee picker to list only Recent before typing (no `All` heading) - spec 4.2 - cost if wrong: one assertion
+- **D-12** (Task 8) - the idle-employee check in `own-tags-types` case 7 creates its own active employee, because every seeded active employee holds an asset or a reservation and so legitimately appears on the page - cost if wrong: one fixture row

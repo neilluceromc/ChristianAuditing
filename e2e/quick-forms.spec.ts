@@ -267,7 +267,8 @@ test.describe.serial("quick forms", () => {
     const employeeRows = await employeeList.locator("li").allTextContents();
     expect(employeeRows[0]).toBe("Recent");
     expect(employeeRows[1]).toContain(target.name);
-    expect(employeeRows[2]).toBe("All"); // exactly one recent pick, then the full list
+    // Phase 36 (spec 4.2): the people picker lists only Recent until you type — never every employee.
+    expect(employeeRows).toHaveLength(2);
 
     await itemCombo.click();
     const itemList = comboList(itemCombo);

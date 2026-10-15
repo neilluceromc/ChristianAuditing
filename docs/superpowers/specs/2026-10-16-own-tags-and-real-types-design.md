@@ -1,7 +1,8 @@
 # Phase 36 — You choose the tag; types that mean something; people search; a schedule that scales
 
-**Status:** designed 2026-10-16 with the user (§4–§5 added the same day after a scale measurement); awaiting the
-user's review of the added sections. **One migration (the 29th), data only.**
+**Status:** CODE-COMPLETE 2026-10-16 on branch `phase-36-own-tags-real-types` (unmerged and unpushed; staging deploys by pulling the CI
+image). Designed 2026-10-16 with the user (§4–§5 added the same day after a scale measurement). Tags are capped at 20 characters
+in the build (Task 1 ruling), not the 30 first written. **One migration (the 29th), data only.**
 
 ## 1. What the user asked for, and why
 

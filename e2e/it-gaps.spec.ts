@@ -197,13 +197,14 @@ test.describe("it gaps", () => {
     await card.click();
     await page.getByRole("combobox", { name: "Model", exact: true }).fill("e2e class-scoped check");
     await page.getByRole("option", { name: /^\+ Add .e2e class-scoped check. as a new model$/ }).click();
-    await page.getByRole("combobox", { name: "New model — which type?" }).selectOption({ label: "ThinkPad" });
+    await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "High-performance" });
     const howMany = page.getByRole("textbox", { name: "How many", exact: true });
     await howMany.fill("2");
     await howMany.blur();
     const stamp = `E2E-GAPS-2-${Date.now()}`;
     for (const i of [1, 2]) await page.getByLabel(`Serial ${i}`, { exact: true }).fill(`${stamp}-${i}`);
-    await expect(page.getByLabel("Tag 1", { exact: true })).not.toHaveValue("");
+    // Phase 36: staff type their own tags; Tag 2 is a free one so only Tag 1 can be refused.
+    await page.getByLabel("Tag 2", { exact: true }).fill(`GAP${Date.now().toString(36).slice(-6).toUpperCase()}-2`);
     const tag1 = page.getByLabel("Tag 1", { exact: true });
     // Phase 30 (spec §5.5): the check runs while typing (400 ms). A positive
     // control first, so the negative below is not inert: an IT tag that is
