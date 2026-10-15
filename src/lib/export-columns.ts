@@ -1,4 +1,7 @@
 import type { XlsxColumn } from "@/server/xlsx/write";
+import type { DepAssetRow } from "@/server/modules/finance/depreciation-queries";
+import { monthLabel } from "@/lib/depreciation";
+import { REG_LABEL_FINANCE } from "@/lib/registration";
 
 export const EXPORT_CAP = 10_000;
 
@@ -352,4 +355,28 @@ export const OFFBOARDING_EXPORT_COLUMNS: XlsxColumn<OffboardingExportRow>[] = [
   { label: "Complete by", width: 13, cell: (r) => ({ value: r.dueAt, type: Date, format: "yyyy-mm-dd" }) },
   { label: "Undecided", width: 11, cell: (r) => ({ value: r.undecided, type: Number }) },
   { label: "Progress", width: 11, cell: (r) => ({ value: r.progress }) },
+];
+
+/** Phase 35 (spec 4.1): Finance's register sheet. Money is a number cell (centavos / 100), never text. */
+const peso = (c: number | null | undefined) =>
+  ({ value: c === null || c === undefined ? null : c / 100, type: Number, format: "#,##0.00" }) as const;
+
+export const FINANCE_ASSETS_EXPORT_COLUMNS: XlsxColumn<DepAssetRow>[] = [
+  { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
+  { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
+  { label: "Category", width: 18, cell: (r) => ({ value: r.category }) },
+  { label: "Class", width: 12, cell: (r) => ({ value: r.cls }) },
+  { label: "Status", width: 14, cell: (r) => ({ value: r.status }) },
+  { label: "Holder", width: 24, cell: (r) => ({ value: r.holder }) },
+  { label: "Registration", width: 18, cell: (r) => ({ value: r.reg === "registered" && r.notCapitalised ? "Not capitalised" : REG_LABEL_FINANCE[r.reg] }) },
+  { label: "Cost", width: 14, cell: (r) => peso(r.costC) },
+  { label: "Confirmed on", width: 14, cell: (r) => ({ value: r.confirmedAt, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Starts", width: 16, cell: (r) => ({ value: r.result?.startMonth == null ? null : monthLabel(r.result.startMonth) }) },
+  { label: "Life (months)", width: 13, cell: (r) => ({ value: r.result?.policy?.lifeMonths ?? null, type: Number, format: "0" }) },
+  { label: "Salvage", width: 14, cell: (r) => peso(r.result?.policy?.salvage) },
+  { label: "Monthly amount", width: 15, cell: (r) => peso(r.result?.monthly) },
+  { label: "Depreciation to date", width: 20, cell: (r) => peso(r.result?.accumulated) },
+  { label: "Book value", width: 14, cell: (r) => peso(r.result?.bookValue) },
+  { label: "Basis", width: 11, cell: (r) => ({ value: r.result?.policy ? (r.custom ? "Custom" : "Category") : "" }) },
+  { label: "Note", width: 40, cell: (r) => ({ value: r.custom ? r.overrideNote : r.note }) },
 ];
