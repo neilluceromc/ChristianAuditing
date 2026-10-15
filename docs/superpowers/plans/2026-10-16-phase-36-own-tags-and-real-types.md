@@ -1,18 +1,20 @@
-# Phase 36 — You choose the tag; types that mean something — Implementation Plan
+# Phase 36 — Own tags, real types, people search, a schedule that scales — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Staff type every asset tag themselves (any 1–30 letters/digits/`-_.`, upper-cased, unique), and Register always asks a real type. The Laptop category's types are fixed to Standard / High-performance / MacBook by a data-only migration.
+**Goal:** Staff type every asset tag themselves, and Register always asks a real type; the Laptop types are fixed by a data-only migration. Employee pickers and the Assigned filter search the server instead of shipping 600 names. The depreciation Schedule shows categories first, with paged drill-down.
 
 **Architecture:**
 - **One tag rule.** `TAG_SHAPE` in `src/lib/tag-key.ts` changes, with one shared refusal message `TAG_RULE`. Every consumer (Register, receiving, import, search jump) follows it.
 - **Register.** It drops its tag suggestion (`nextTags` / `prefixFor` / the prefix fold-out) and makes every tag box editable and empty. The model box stops setting the type; a plain Type select is required whenever the category has two or more types.
 - **Server.** The server rule becomes "the category has types ⇒ a type is required".
 - **Data.** Migration 29 renames and adds Laptop types and moves BR-LT-0201. The seed matches.
+- **People search.** One server action `searchPeople` (≤10 results) feeds a `PeopleCombobox` (every holder picker) and a searchable Assigned filter. Pages stop loading every employee.
+- **Schedule.** It shows the category summary by default; `?cat=` drills into one category, paged. The export is unchanged.
 
 **Tech Stack:** Next.js 15 App Router, Prisma 6 / Postgres 16, zod, vitest (pure), Playwright + axe.
 
-**Spec:** `docs/superpowers/specs/2026-10-16-own-tags-and-real-types-design.md` (commit `efa6b1c`). Read it first; it is the authority.
+**Spec:** `docs/superpowers/specs/2026-10-16-own-tags-and-real-types-design.md` (`efa6b1c`, §4–§5 added after the scale measurement). Read it first; it is the authority.
 
 ## Global Constraints
 
@@ -58,6 +60,14 @@
 
   Every step is guarded, and no audit rows are written.
 - **Seed:** Laptop types `["Standard", "High-performance", "MacBook"]`; BR-LT-0201 uses MacBook.
+- **People search:**
+  - `searchPeople({ q, scope: "active" | "assignees", cls? })`, where `q` is 1–60 characters trimmed, matched case-insensitively as a substring of the name or employee no.;
+  - at most **10** results, ordered by name then employee no.;
+  - debounce **250 ms**;
+  - Recent shows at most **5** active people.
+  - Empty-result text: **"No match — check the spelling or the employee no."**
+- **Assigned filter:** the value `none` = Unassigned (`assigneeId IS NULL`); the button reads "Assigned" / "Assigned: {n}".
+- **Schedule:** the default is the category summary; `?cat=<categoryId>` shows the drill-down paged by `ENTITY_PAGE_SIZE`, with the category subtotal and a "← All categories" link. The export is unchanged.
 
 ## Review Focus
 
@@ -74,6 +84,8 @@
 - **P-3.** The Type select's accessible name becomes **"Type"**, which replaces "New model — which type?". The model list rows stop showing a type.
 - **P-4.** `newModelNeedsType` and `NEW_MODEL_TYPE` (`register-queries.ts`) are replaced by `typeRequired(categoryId, typeId)` with the message `TYPE_REQUIRED = "Pick the type"`, used by both `createAsset` and `registerAssets`.
 - **P-5.** `KnownModel.typeId` and `resolveModelType` are removed if nothing else uses them (`src/lib/known-models.ts` keeps `mergeKnownModels` / `matchModels`).
+- **P-7.** `activeEmployeeOptions()` is deleted if no caller remains after Task 5. `facetOptions` stops loading every assignee (Task 6).
+- **P-8.** `scheduleYear` stays (the export uses it). The page uses a new `scheduleSummary` (category rows + total, no asset rows) and `scheduleCategory` (one category's rows, paged).
 - **P-6.** e2e pins that pick "ThinkPad" via "New model — which type?" become "High-performance" via "Type". Pins that relied on a suggested tag type their own tag: a unique `E2E-<n>-<rand>` built per test.
 
 ---
@@ -419,7 +431,178 @@ git commit -m "feat(db): migration 29 -- Laptop types Standard / High-performanc
 
 ---
 
-### Task 5: e2e, adapted pins, battery and docs
+### Task 5: People search and the PeopleCombobox
+
+**Files:**
+- Create: `src/lib/people-search.ts` (+ `.test.ts`), `src/server/modules/employees/people-search.ts` ("use server"), `src/components/patterns/people-combobox.tsx`
+- Modify: `src/server/modules/employees/queries.ts` (add `recentPeopleOptions`; delete `activeEmployeeOptions` if unused, P-7), the pages `src/app/(app)/inventory/page.tsx`, `src/app/(app)/inventory/[id]/(record)/layout.tsx`, `src/app/(app)/inventory/register/page.tsx`, `src/app/(app)/stock/issue/page.tsx`, and the pickers `src/components/inventory/holder-control.tsx`, `bulk-drawer.tsx`, `replace-control.tsx`, `register-initial-state.tsx`, `inventory-table.tsx`, `record-actions.tsx`, `register-form.tsx`, `src/components/stock/issue-form.tsx`.
+
+**Interfaces — Produces:**
+
+```ts
+// src/lib/people-search.ts (pure)
+export const PEOPLE_LIMIT = 10;
+export const PEOPLE_DEBOUNCE_MS = 250;
+export const RECENT_PEOPLE = 5;
+export const PEOPLE_NONE = "No match — check the spelling or the employee no.";
+export const peopleQuerySchema; // z.object({ q: z.string().trim().min(1).max(60), scope: z.enum(["active","assignees"]), cls: z.enum(["IT","PURCHASING"]).optional() })
+export function peopleWhere(q: string, scope: "active" | "assignees", cls?: AssetClass): Prisma.EmployeeWhereInput;
+// server action
+export async function searchPeople(input: unknown): Promise<ActionResult<ComboOption[]>>; // ComboOption = { value, label, sub }
+// queries
+export async function recentPeopleOptions(userId: string): Promise<ComboOption[]>; // the user's recent employee picks, ACTIVE only, max 5
+// client
+export function PeopleCombobox(props: { id?: string; "aria-describedby"?: string; invalid?: boolean; value: string | null; valueLabel?: string | null; recent: ComboOption[]; onChange: (id: string | null, option?: ComboOption) => void; placeholder?: string }): JSX.Element;
+```
+
+- [ ] **Step 1: Failing tests** (`src/lib/people-search.test.ts`):
+
+```ts
+import { describe, expect, it } from "vitest";
+import { peopleQuerySchema, peopleWhere } from "./people-search";
+
+describe("people search (Phase 36 spec §4.1)", () => {
+  it("q is 1-60 trimmed characters; scope is required", () => {
+    expect(peopleQuerySchema.safeParse({ q: " ana ", scope: "active" }).success).toBe(true);
+    expect(peopleQuerySchema.safeParse({ q: "  ", scope: "active" }).success).toBe(false);
+    expect(peopleQuerySchema.safeParse({ q: "x".repeat(61), scope: "active" }).success).toBe(false);
+    expect(peopleQuerySchema.safeParse({ q: "ana" }).success).toBe(false);
+  });
+  it("active scope: ACTIVE employees by name or employee no.", () => {
+    expect(peopleWhere("ana", "active")).toEqual({
+      employment: "ACTIVE",
+      OR: [{ name: { contains: "ana", mode: "insensitive" } }, { employeeNo: { contains: "ana", mode: "insensitive" } }],
+    });
+  });
+  it("assignees scope: anyone holding an asset of the class", () => {
+    expect(peopleWhere("042", "assignees", "IT")).toEqual({
+      assets: { some: { cls: "IT" } },
+      OR: [{ name: { contains: "042", mode: "insensitive" } }, { employeeNo: { contains: "042", mode: "insensitive" } }],
+    });
+  });
+});
+```
+
+  Run them (FAIL), then implement `people-search.ts` to match.
+- [ ] **Step 2: Server.**
+  - **`searchPeople`:** guard `actionRole("admin", "it_staff", "purchasing_staff", "finance_staff")` → `checkRate(user.id)` → `peopleQuerySchema`. Then `prisma.employee.findMany({ where: peopleWhere(...), orderBy: [{ name: "asc" }, { employeeNo: "asc" }], take: PEOPLE_LIMIT, select: { id, name, employeeNo } })`, mapped to `{ value: id, label: name, sub: employeeNo }`.
+  - **`recentPeopleOptions(userId)`:** `recentPicks(userId, "employee")` → first `RECENT_PEOPLE` ids → active employees in that order.
+- [ ] **Step 3: `PeopleCombobox`.**
+  - Wrap `EntityCombobox` (read `src/components/patterns/entity-combobox.tsx` first; extend it minimally if it cannot take externally changing `options` or report typed text).
+  - **Before typing:** options = `recent`.
+  - **On input:** debounce `PEOPLE_DEBOUNCE_MS`, call `searchPeople({ q, scope: "active" })`, set options to the result. Show `PEOPLE_NONE` when empty.
+  - **Value:** the selected value is always in `options` (add `{ value, label: valueLabel }` if missing) so the input shows its name.
+  - **Races:** ignore out-of-order responses (a request counter).
+- [ ] **Step 4: Swap the pickers.**
+  - Every picker that took `employees: ComboOption[]` (plus `recentEmployees`) takes `recentPeople: ComboOption[]` instead and renders `PeopleCombobox`.
+  - The four pages pass `recentPeopleOptions(user.id)` and stop calling `activeEmployeeOptions()`.
+  - Where a picker shows a current holder by name (e.g. Replace), pass `valueLabel`.
+  - Then `grep -rn "activeEmployeeOptions" src`; delete it if unused (P-7).
+- [ ] **Step 5: Run.** Run `npx tsc --noEmit && npm run lint && npx vitest run`. Expected: green.
+- [ ] **Step 6: Commit.**
+
+```bash
+git add -A src
+git commit -m "feat(people): holder pickers search the server as you type (10 results, recent picks first); pages stop loading every employee"
+```
+
+---
+
+### Task 6: The Assigned filter searches
+
+**Files:**
+- Create: `src/components/patterns/people-facet.tsx`
+- Modify: `src/lib/inventory-list.ts` (+test), `src/server/modules/inventory/queries.ts` (`facetOptions`), `src/server/modules/employees/people-search.ts` (counts), `src/components/inventory/inventory-toolbar.tsx`
+
+**Interfaces:**
+- Consumes: `searchPeople`, `peopleWhere`, `PEOPLE_DEBOUNCE_MS`, `PEOPLE_NONE` (Task 5).
+- Produces:
+
+```ts
+// src/lib/inventory-list.ts
+export const UNASSIGNED = "none";
+export function assigneeWhere(values: readonly string[]): Prisma.AssetWhereInput | null; // ids and/or "none"
+// src/server/modules/employees/people-search.ts
+export async function searchAssignees(input: unknown): Promise<ActionResult<Array<{ value: string; label: string; sub: string; count: number }>>>;
+// input: { q, cls, listQS } — listQS is the serialized list state; counts use buildAssetWhere(without("assignee"))
+```
+
+- [ ] **Step 1: Failing test** (`inventory-list.test.ts`):
+
+```ts
+it("assigneeWhere: ids, Unassigned, and both", () => {
+  expect(assigneeWhere([])).toBeNull();
+  expect(assigneeWhere(["e1", "e2"])).toEqual({ assigneeId: { in: ["e1", "e2"] } });
+  expect(assigneeWhere(["none"])).toEqual({ assigneeId: null });
+  expect(assigneeWhere(["e1", "none"])).toEqual({ OR: [{ assigneeId: { in: ["e1"] } }, { assigneeId: null }] });
+});
+```
+
+  Implement it, and use it in `buildAssetWhere` in place of `where.assigneeId = { in: f.assignee }` (push into the `and` list).
+- [ ] **Step 2: `facetOptions`.**
+  - Drop the `prisma.employee.findMany({ where: { assets: { some: { cls } } } })` and the all-assignee groupBy.
+  - Instead return `assignee`: the **selected** people (ids from `state.filters.assignee` minus `none`) with names and counts (one groupBy restricted to those ids), plus `{ value: "none", label: "Unassigned", count }`.
+- [ ] **Step 3: `searchAssignees`.** Same guard as `searchPeople`. It parses `listQS` with `parseListState(new URLSearchParams(listQS), INVENTORY_LIST_CONFIG)`, then finds people with `peopleWhere(q, "assignees", cls)` (`take` 10), and counts their assets with `groupBy assigneeId` over `buildAssetWhere(without assignee)` restricted to those ids.
+- [ ] **Step 4: `PeopleFacet` (client)** replaces `FacetDropdown` for `assignee` in `inventory-toolbar.tsx`.
+  - **Button:** "Assigned" or "Assigned: {n}".
+  - **Popover:** a search input labelled "Search people", the selected people as removable chips (`aria-label="Remove {name}"`), an "Unassigned {count}" checkbox, and typed results as checkboxes "{name} · {employeeNo} {count}".
+  - **Behaviour:** `PEOPLE_NONE` when empty. Apply and Clear behave like `FacetDropdown`'s (read `src/components/patterns/facet-dropdown.tsx` and mirror its apply / keyboard behaviour).
+- [ ] **Step 5: Run.** Run `npx tsc --noEmit && npm run lint && npx vitest run`.
+- [ ] **Step 6: Commit.**
+
+```bash
+git add -A src
+git commit -m "feat(inventory): the Assigned filter searches people (10 results with counts), keeps the chosen ones as chips, and offers Unassigned; the page no longer loads every assignee"
+```
+
+---
+
+### Task 7: The Schedule — categories first, drill-down paged
+
+**Files:**
+- Modify: `src/server/modules/finance/depreciation-queries.ts` (+ a pure helper in `src/lib/depreciation.ts` with a test), `src/app/(app)/finance/depreciation/page.tsx`, `src/components/finance/schedule-table.tsx`
+
+**Interfaces — Produces:**
+
+```ts
+// src/lib/depreciation.ts
+export function sumYearRows(rows: readonly YearRow[], year: number, asOf: MonthIndex): YearRow; // element-wise sum; projected = the year's flags
+// depreciation-queries.ts
+export async function scheduleSummary(cls: AssetClass, year: number, now?: Date): Promise<{ categories: Array<{ categoryId: string; category: string; assets: number; row: YearRow }>; total: YearRow | null; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[] }>;
+export async function scheduleCategory(cls: AssetClass, year: number, categoryId: string, page: number, now?: Date): Promise<{ category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow; total: number; page: number; pageCount: number } | null>;
+```
+
+- [ ] **Step 1: Failing test** for `sumYearRows`:
+
+```ts
+it("sumYearRows adds element-wise and keeps the year's projected flags", () => {
+  const a = { opening: 100, months: Array(12).fill(1), projected: Array(12).fill(false), total: 12, closing: 88 };
+  const b = { opening: 50, months: Array(12).fill(2), projected: Array(12).fill(false), total: 24, closing: 26 };
+  const s = sumYearRows([a, b], 2026, 2026 * 12 + 8);
+  expect([s.opening, s.total, s.closing, s.months[0]]).toEqual([150, 36, 114, 3]);
+  expect(s.projected).toEqual([...Array(9).fill(false), true, true, true]);
+});
+```
+
+  Implement it, and refactor `scheduleYear` to use it for subtotals and the total, so there is one summing rule.
+- [ ] **Step 2: Queries.**
+  - **`scheduleSummary`:** reuse the `depRows` + `yearGrid` pass from `scheduleYear`, but return per-category `{ assets: rowCount, row: sumYearRows(...) }` and no asset rows.
+  - **`scheduleCategory`:** the same pass restricted to `categoryId`, sorted by tag, sliced to the page with `pageOf` / `ENTITY_PAGE_SIZE`, with the subtotal computed over **all** of the category's rows. It returns null if the category is not in `cls`.
+- [ ] **Step 3: Page.**
+  - **No `cat`:** the summary table `aria-label="Depreciation schedule {year}"`, with one row per category (its name a link to `?tab=schedule&year=&cls=&cat=<id>`, with an "{n} assets" muted note) and the **Total** row. The empty-year sentence and the not-depreciating line stay.
+  - **With `cat`:** a heading "{category} — {year}", a "← All categories" link, the asset rows (as today), a `Subtotal — {category}` row, and `Pagination`.
+  - **Export link:** unchanged (`scheduleYear`).
+- [ ] **Step 4: Run.** Run `npx tsc --noEmit && npm run lint && npx vitest run`.
+- [ ] **Step 5: Commit.**
+
+```bash
+git add -A src
+git commit -m "feat(finance): the depreciation Schedule shows category totals first with a paged drill-down per category; one summing rule; export unchanged"
+```
+
+---
+
+### Task 8: e2e, adapted pins, battery and docs
 
 **Files:**
 - Create: `e2e/own-tags-types.spec.ts`
@@ -441,6 +624,22 @@ git commit -m "feat(db): migration 29 -- Laptop types Standard / High-performanc
      - In DB, the Laptop types are exactly Standard, High-performance, MacBook, and BR-LT-0201's type is MacBook.
      - The Finance standard policy's "laptop" slot type is Standard: check on the Admin equipment policy page or in the DB.
   6. **Axe** on Register with the Type select and a tag box visible.
+  7. **People picker.**
+     - On a SPARE laptop's record, Assign: before typing, Recent shows (after one earlier assign).
+     - Typing "EMP-00" lists at most 10.
+     - Typing part of a seeded name finds it, and assigning works.
+     - The inventory page HTML does not contain a seeded active employee's name that holds nothing (spec §4.2).
+  8. **Assigned filter.**
+     - Search a seeded holder, tick, Apply: rows narrow and the button reads "Assigned: 1".
+     - Unassigned narrows to assets with no holder.
+     - The chip's × removes it.
+  9. **Schedule.**
+     - Set a Laptop policy (fixture).
+     - `/finance/depreciation` shows a "Laptop" category row and Total, and no asset tag cells.
+     - Clicking "Laptop" shows its asset rows with `Subtotal — Laptop`.
+     - "← All categories" returns.
+     - The export still has asset rows.
+  10. **Axe** on the Assigned popover open and on the Schedule summary.
 - [ ] **Step 2: Adapt pins (P-6).** Run each changed file alone in the foreground.
 - [ ] **Step 3: The battery.**
   - Run the seven chunks from `docs/HANDOVER.md` §0 item 9, with the new file in the chunk that holds `register-labels.spec.ts`. Split slow chunks.
@@ -457,7 +656,7 @@ git commit -m "feat(db): migration 29 -- Laptop types Standard / High-performanc
 
 ```bash
 git add e2e docs/HANDOVER.md docs/PICKUP.md docs/HANDOVER-PENDING.md docs/superpowers/specs/2026-10-16-own-tags-and-real-types-design.md docs/superpowers/plans/2026-10-16-phase-36-own-tags-and-real-types.md
-git commit -m "test(e2e)+docs: Phase 36 -- typed tags (single, batch, paste, duplicates, shape), Type always asked, Laptop types data fix; adapted pins; battery; migration 29"
+git commit -m "test(e2e)+docs: Phase 36 -- typed tags, Type always asked, Laptop types data fix, people search (pickers + Assigned filter), Schedule by category; adapted pins; battery; migration 29"
 ```
 
 ---

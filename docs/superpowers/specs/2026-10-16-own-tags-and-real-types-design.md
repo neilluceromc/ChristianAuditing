@@ -1,7 +1,7 @@
-# Phase 36 — You choose the tag; types that mean something
+# Phase 36 — You choose the tag; types that mean something; people search; a schedule that scales
 
-**Status:** designed 2026-10-16 with the user; awaiting the user's review before the plan. **One migration (the
-29th), data only.**
+**Status:** designed 2026-10-16 with the user (§4–§5 added the same day after a scale measurement); awaiting the
+user's review of the added sections. **One migration (the 29th), data only.**
 
 ## 1. What the user asked for, and why
 
@@ -109,7 +109,69 @@ fixture uses MacBook). A fresh seed and staging then agree.
 - **Edit and Admin:** the Edit page's Type select and Admin → Asset types (add, rename) stay as they are. IT retypes
   any other laptop (e.g. a high-end ThinkPad) from Edit.
 
-## 4. Testing
+## 4. People search instead of 600-item lists
+
+**Why.** The user: "I don't want the categories like Assigned to list down 600 items." A measurement on
+`inventory_dev` with 610 employees and 10,032 assets (2026-10-16) showed that every inventory page ships every
+assignee for the **Assigned** filter, and every active employee for the holder pickers, up front. The page still
+loads in time, but it carries about 90 KB more, and a 600-row dropdown is unusable. The user chose **both** the
+filter and the pickers.
+
+### 4.1 One server search
+- **The action:** `searchPeople({ q, scope })` returns at most **10** people.
+  - **Input:** `q` is 1–60 characters, trimmed. It matches the name or the employee no., ignoring case, as a
+    substring.
+  - **`scope: "active"`:** ACTIVE employees, for the pickers.
+  - **`scope: "assignees"`:** anyone who currently holds an asset of the given class, for the filter.
+  - **Order:** name, then employee no.
+- **Guard:** the same roles that can open the screens using it (`admin`, `it_staff`, `purchasing_staff`;
+  `finance_staff` too for the filter). `actionRole` → `checkRate` → zod, as every action. No audit row: it is a read.
+- **Rate limit:** it uses `checkRate` like every action. Typing is debounced on the client (250 ms), so normal typing
+  stays well under the limit.
+
+### 4.2 The pickers (Assign, Reserve, Replace, bulk assign, Register's holder, Stock issue)
+- **One component.** `PeopleCombobox` wraps the house `EntityCombobox`.
+  - **Before typing:** it shows the user's **Recent** picks (the existing remembered picks, at most 5, active only),
+    resolved on the server into names.
+  - **While typing:** it searches the server (`scope: "active"`), up to 10 results, with "No match — check the
+    spelling or the employee no." when there are none.
+  - **The chosen person** stays shown by name. The component receives the current value's label from the page.
+- **Pages stop loading the full list.** `activeEmployeeOptions()` is no longer called by the inventory list, the
+  record layout, Register or Stock issue. It is deleted if nothing else uses it.
+- **Behaviour otherwise unchanged:** the same validation, the same remembered picks, the same keyboard behaviour as
+  `EntityCombobox` today.
+
+### 4.3 The Assigned filter
+- **Opening it shows:**
+  - a search box ("Type a name or employee no.");
+  - the people already selected, each with a remove ×;
+  - **Unassigned**, a new value `none` meaning `assigneeId IS NULL`.
+- **Typing** searches (`scope: "assignees"`, the current class). Each result shows its asset count under the current
+  filters, except the Assigned filter itself, matching today's counting rule. Ticking a result adds it, and **Apply**
+  applies, as the other filters do.
+- **The button** reads "Assigned" or "Assigned: {n}".
+- **Page load:** `facetOptions` no longer loads every assignee. It returns only the selected people (names and
+  counts) and the Unassigned count.
+- **The other filters** (Status, Category, Type, Provenance, Registration) stay plain lists, because each has at
+  most a few dozen options.
+
+## 5. The depreciation Schedule scales
+
+**Why.** In the same measurement, `/finance/depreciation` (the Schedule) took **7.5 s** and produced a **10 MB**
+page. It draws every depreciating asset as a row of 12 months, unpaged. Every other page grew by 0–200 ms.
+
+- **The default view is by category.** One row per category with the same columns as today (Cost, Book value 1 Jan,
+  Jan … Dec, Year total, Book value 31 Dec), with projected months greyed, plus the **Total** row. The "{n} assets
+  aren't depreciating yet · {m} have no policy" line stays.
+- **Drill-down.** Each category name links to `?cat=<categoryId>`, which shows that category's assets as today's
+  rows. It is **paged** (the house page size) and keeps the category subtotal row. A "← All categories" link returns
+  to the summary.
+- **The export is unchanged.** It still lists every asset row with subtotals and the total; a spreadsheet handles
+  10,000 rows.
+- **Arithmetic:** subtotals are computed the same way as today (`yearGrid` per asset, summed), so the summary equals
+  the sum of its drill-downs.
+
+## 6. Testing
 - **Unit:** `TAG_SHAPE` accepts `BR-LT-0148`, `ACC-LAP-001`, `2026-0042`, `A`, `LT_1.2`, and refuses:
   - the empty string;
   - `-LT`, `.X`;
@@ -129,8 +191,21 @@ fixture uses MacBook). A fresh seed and staging then agree.
     kit's laptop slot shows "Standard".
   - The scan URL `/inventory/scan/ACC-LAP-001` opens the asset.
   - Existing register specs that relied on suggested tags type their tags instead.
+  - **People search:**
+    - The Assign dialog finds a person by part of the name and by employee no. Recent picks show before typing.
+    - The page HTML no longer contains every active employee's name (assert a far-down seeded name is absent until
+      searched).
+  - **Assigned filter:**
+    - search, tick, Apply; the chip count;
+    - Unassigned filters to assets with no holder.
+  - **Schedule:**
+    - the default shows category rows plus Total, and no asset rows;
+    - a category drill-down shows its assets paged, with the subtotal;
+    - the export still lists asset rows.
+- **Unit:** the search input schema (1–60 characters, scope); `assigneeWhere` with `none`; the schedule summary
+  equals the sum of its category rows (pure).
 
-## 5. Rulings taken while writing
+## 7. Rulings taken while writing
 1. **Upper-case storage.** Typed tags are stored upper-case, so scanning and uniqueness never depend on case. *Cost if
    wrong: one `toUpperCase`.*
 2. **The character set** excludes `/` and spaces and requires a letter or digit first, so a tag is always a safe URL
@@ -141,3 +216,9 @@ fixture uses MacBook). A fresh seed and staging then agree.
    their links with no remapping. *Cost if wrong: none; a rename is reversible in Admin.*
 5. **`tagPrefix` stays.** It is kept in the data and Admin, though unused by Register, so nothing else that reads it
    breaks. *Cost if wrong: a dead column to drop later.*
+6. **10 results, 250 ms debounce, 5 recents.** These are small fixed numbers, chosen so a picker never lists more
+   than fits on screen. *Cost if wrong: constants.*
+7. **Unassigned is a filter value** (`none`) on the Assigned filter rather than a separate filter. *Cost if wrong:
+   one value.*
+8. **The Schedule summary is the default view**, with the asset rows one click away (paged); the export stays
+   complete. *Cost if wrong: the default `cat` value.*
