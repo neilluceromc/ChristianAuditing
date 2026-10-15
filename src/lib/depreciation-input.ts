@@ -19,7 +19,7 @@ export function lifeLabel(months: number | null): string {
   return [y ? part(y, "year") : "", m ? part(m, "month") : ""].filter(Boolean).join(" ");
 }
 
-const twoDecimals = (n: number) => Math.round(n * 100) === n * 100;
+const twoDecimals = (n: number) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
 const life = z.number().int().min(1, "Life is at least 1 month").max(MAX_LIFE_MONTHS, "Life is at most 50 years");
 
 export const policySchema = z.object({

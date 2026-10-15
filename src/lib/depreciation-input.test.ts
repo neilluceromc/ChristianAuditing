@@ -41,3 +41,13 @@ describe("overrideSchema", () => {
     expect(overrideSchema.safeParse({ assetId: "a", lifeMonths: 24, salvage: -1, note: "refurbished" }).success).toBe(false);
   });
 });
+
+describe("two-decimal tolerance (float error must not reject valid inputs)", () => {
+  it("policySchema accepts 8.2, 0.07 and 19.99; rejects 10.005", () => {
+    for (const p of [8.2, 0.07, 19.99]) expect(policySchema.safeParse({ categoryId: "c", lifeMonths: 36, salvagePercent: p }).success).toBe(true);
+    expect(policySchema.safeParse({ categoryId: "c", lifeMonths: 36, salvagePercent: 10.005 }).success).toBe(false);
+  });
+  it("overrideSchema accepts 19.99 and 5000.1", () => {
+    for (const s of [19.99, 5000.1]) expect(overrideSchema.safeParse({ assetId: "a", lifeMonths: 24, salvage: s, note: "refurbished" }).success).toBe(true);
+  });
+});
