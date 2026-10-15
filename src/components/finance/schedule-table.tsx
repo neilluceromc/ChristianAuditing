@@ -40,7 +40,10 @@ function Shell({ year, projected, detail, children }: { year: number; projected:
                 <th scope="col" className={cn(TH, "text-right")}>Cost</th>
               </>
             ) : (
-              <th scope="col" className={cn(TH, "text-left")}>Category</th>
+              <>
+                <th scope="col" className={cn(TH, "text-left")}>Category</th>
+                <th scope="col" className={cn(TH, "text-right")}>Cost</th>
+              </>
             )}
             <th scope="col" className={cn(TH, "text-right")}>Book value 1 Jan</th>
             {MONTHS.map((m, i) => (
@@ -64,10 +67,11 @@ function Shell({ year, projected, detail, children }: { year: number; projected:
 }
 
 /** Phase 36 (spec 5): the default Schedule view — one row per category, then the Total. Each name opens its paged drill-down. */
-export function ScheduleSummaryTable({ year, categories, total, hrefFor }: {
+export function ScheduleSummaryTable({ year, categories, total, totalCostC, hrefFor }: {
   year: number;
-  categories: Array<{ categoryId: string; category: string; assets: number; row: YearRow }>;
+  categories: Array<{ categoryId: string; category: string; assets: number; costC: number; row: YearRow }>;
   total: YearRow | null;
+  totalCostC: number;
   hrefFor: (categoryId: string) => string;
 }) {
   const projected = categories[0]?.row.projected ?? Array<boolean>(12).fill(false);
@@ -79,12 +83,14 @@ export function ScheduleSummaryTable({ year, categories, total, hrefFor }: {
             <Link href={hrefFor(c.categoryId)} className="font-medium text-accent hover:underline">{c.category}</Link>
             <span className="ml-2 text-xs text-fg-muted">{c.assets} {c.assets === 1 ? "asset" : "assets"}</span>
           </td>
+          <td className={cn(TD, "text-fg-secondary")}>{money(c.costC)}</td>
           <Grid grid={c.row} />
         </tr>
       ))}
       {total && (
         <tr className="border-b border-border-faint bg-surface-subtle font-semibold" style={{ height: "var(--row-h)" }}>
           <td className="px-3 text-left text-fg">Total</td>
+          <td className={TD}>{money(totalCostC)}</td>
           <Grid grid={total} />
         </tr>
       )}

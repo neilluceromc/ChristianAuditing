@@ -81,6 +81,9 @@ export default async function DepreciationPage({
                 <Link href="/finance/depreciation?tab=policies" className="font-medium text-accent hover:underline">Set policies</Link>
               </p>
             )}
+            {catId && !drill && (
+              <p className="text-xs text-fg-muted">Category not found — showing all categories.</p>
+            )}
             {drill ? (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -105,6 +108,7 @@ export default async function DepreciationPage({
                 year={year}
                 categories={sched.categories}
                 total={sched.total}
+                totalCostC={sched.totalCostC}
                 hrefFor={(id) => schedHref(`&cat=${encodeURIComponent(id)}`)}
               />
             )}

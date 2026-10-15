@@ -149,7 +149,11 @@ export async function scheduleYear(cls: AssetClass, year: number, now: Date = ne
 }> {
   const { entries, notStarted, noPolicy, asOf, years } = await gridPass(cls, year, now);
   const byCat = new Map<string, ScheduleGroup["rows"]>();
-  for (const e of entries) byCat.set(e.category, [...(byCat.get(e.category) ?? []), e.row]);
+  for (const e of entries) {
+    const list = byCat.get(e.category);
+    if (list) list.push(e.row);
+    else byCat.set(e.category, [e.row]);
+  }
   const groups = [...byCat.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([category, list]): ScheduleGroup => {
@@ -161,20 +165,21 @@ export async function scheduleYear(cls: AssetClass, year: number, now: Date = ne
 
 /** Phase 36 (spec 5): category totals only, no asset rows — the Schedule's default view. */
 export async function scheduleSummary(cls: AssetClass, year: number, now: Date = new Date()): Promise<{
-  categories: Array<{ categoryId: string; category: string; assets: number; row: YearRow }>;
-  total: YearRow | null; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[];
+  categories: Array<{ categoryId: string; category: string; assets: number; costC: number; row: YearRow }>;
+  total: YearRow | null; totalCostC: number; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[];
 }> {
   const { entries, notStarted, noPolicy, asOf, years } = await gridPass(cls, year, now);
-  const byCat = new Map<string, { category: string; grids: YearRow[] }>();
+  const byCat = new Map<string, { category: string; grids: YearRow[]; costC: number }>();
   for (const e of entries) {
-    const c = byCat.get(e.categoryId) ?? { category: e.category, grids: [] };
+    const c = byCat.get(e.categoryId) ?? { category: e.category, grids: [], costC: 0 };
     c.grids.push(e.row.grid);
+    c.costC += e.row.costC;
     byCat.set(e.categoryId, c);
   }
   const categories = [...byCat.entries()]
-    .map(([categoryId, c]) => ({ categoryId, category: c.category, assets: c.grids.length, row: sumYearRows(c.grids, year, asOf) }))
+    .map(([categoryId, c]) => ({ categoryId, category: c.category, assets: c.grids.length, costC: c.costC, row: sumYearRows(c.grids, year, asOf) }))
     .sort((a, b) => a.category.localeCompare(b.category));
-  return { categories, total: categories.length ? sumYearRows(categories.map((c) => c.row), year, asOf) : null, notStarted, noPolicy, asOf, years };
+  return { categories, total: categories.length ? sumYearRows(categories.map((c) => c.row), year, asOf) : null, totalCostC: categories.reduce((a, c) => a + c.costC, 0), notStarted, noPolicy, asOf, years };
 }
 
 /** One category's asset rows for the year, paged by tag; the subtotal covers every row of the category, not just the page. */
