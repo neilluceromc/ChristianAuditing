@@ -1,4 +1,5 @@
-import { fmtDate } from "./format";
+import { fmtDate, fmtMoneyExact } from "./format";
+import { lifeLabel } from "./depreciation-input";
 
 /** Phase 27 (spec §3.5): the facet's words for each action a feed can show; an unmapped action shows its raw name. */
 export const ACTION_LABELS: Record<string, string> = {
@@ -21,6 +22,7 @@ export const ACTION_LABELS: Record<string, string> = {
   submit: "Submitted", "it-review": "IT review", "it-reject": "Returned by IT", "request-info": "Info requested",
   cancel: "Cancelled", complete: "Completed", "finance.confirm": "Finance confirmed", "it.verify": "IT verified",
   "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "finance.reopened": "Back to Finance", "supplier-set": "Supplier set",
+  "depreciation.policy": "Depreciation policy", "depreciation.override": "Custom depreciation", "depreciation.override.cleared": "Custom depreciation cleared",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
@@ -149,6 +151,19 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
     }
     case "finance.reopened":
       return omitEntity ? `${actor}added a cost, so it went back to Finance` : `${actor}added a cost to ${entry.entityLabel}, so it went back to Finance`;
+    case "depreciation.policy": {
+      const life = diff?.lifeMonths?.to as number | null | undefined;
+      if (life == null) return omitEntity ? `${actor}cleared depreciation` : `${actor}cleared depreciation on ${entry.entityLabel}`;
+      const pct = (diff?.salvagePercent?.to as number | null | undefined) ?? 0;
+      const tail = `${lifeLabel(life)}, ${pct}% salvage`;
+      return omitEntity ? `${actor}set depreciation: ${tail}` : `${actor}set depreciation on ${entry.entityLabel}: ${tail}`;
+    }
+    case "depreciation.override": {
+      const tail = `${lifeLabel(diff?.lifeMonths?.to as number)}, ${fmtMoneyExact(diff?.salvage?.to as number)} salvage`;
+      return omitEntity ? `${actor}set custom depreciation: ${tail}` : `${actor}set custom depreciation on ${entry.entityLabel}: ${tail}`;
+    }
+    case "depreciation.override.cleared":
+      return omitEntity ? `${actor}cleared custom depreciation` : `${actor}cleared custom depreciation on ${entry.entityLabel}`;
     // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
     // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {
     // from: null, to } }` (transfer-actions.ts) — without this case the raw

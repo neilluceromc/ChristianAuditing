@@ -1,0 +1,43 @@
+import { describe, expect, it } from "vitest";
+import { lifeFromYearsMonths, lifeLabel, overrideSchema, policySchema } from "./depreciation-input";
+
+describe("lifeFromYearsMonths", () => {
+  it("years + months → months; both empty → no policy", () => {
+    expect(lifeFromYearsMonths("3", "")).toBe(36);
+    expect(lifeFromYearsMonths("1", "6")).toBe(18);
+    expect(lifeFromYearsMonths("", "")).toBeNull();
+  });
+  it("refuses junk, months ≥ 12, zero and > 50 years", () => {
+    for (const [y, m] of [["x", ""], ["1", "12"], ["0", "0"], ["51", "0"], ["-1", ""]]) expect(lifeFromYearsMonths(y, m)).toBe("bad");
+  });
+});
+
+describe("lifeLabel", () => {
+  it("reads naturally", () => {
+    expect(lifeLabel(36)).toBe("3 years");
+    expect(lifeLabel(18)).toBe("1 year 6 months");
+    expect(lifeLabel(5)).toBe("5 months");
+    expect(lifeLabel(null)).toBe("—");
+  });
+});
+
+describe("policySchema", () => {
+  it("accepts a policy and a cleared policy", () => {
+    expect(policySchema.safeParse({ categoryId: "c", lifeMonths: 36, salvagePercent: 10 }).success).toBe(true);
+    expect(policySchema.safeParse({ categoryId: "c", lifeMonths: null, salvagePercent: null }).success).toBe(true);
+  });
+  it("refuses salvage ≥ 100, > 2 decimals, a % without a life, and life out of range", () => {
+    for (const v of [
+      { lifeMonths: 36, salvagePercent: 100 }, { lifeMonths: 36, salvagePercent: 10.123 },
+      { lifeMonths: null, salvagePercent: 10 }, { lifeMonths: 0, salvagePercent: 0 }, { lifeMonths: 601, salvagePercent: 0 },
+    ]) expect(policySchema.safeParse({ categoryId: "c", ...v }).success).toBe(false);
+  });
+});
+
+describe("overrideSchema", () => {
+  it("needs life, salvage and a 3–300 character reason", () => {
+    expect(overrideSchema.safeParse({ assetId: "a", lifeMonths: 24, salvage: 5000, note: "refurbished" }).success).toBe(true);
+    expect(overrideSchema.safeParse({ assetId: "a", lifeMonths: 24, salvage: 5000, note: "no" }).success).toBe(false);
+    expect(overrideSchema.safeParse({ assetId: "a", lifeMonths: 24, salvage: -1, note: "refurbished" }).success).toBe(false);
+  });
+});

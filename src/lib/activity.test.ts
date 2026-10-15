@@ -431,3 +431,18 @@ describe("Phase 35 registration sentences", () => {
       .toBe("L. Domingo added a cost to BR-LT-0214, so it went back to Finance");
   });
 });
+
+describe("Phase 35 depreciation sentences", () => {
+  const s = (action: string, diff: unknown, label = "Laptop") => auditSentence({ actorLabel: "L. Domingo", action, diff, entityLabel: label });
+  it("policy set and cleared", () => {
+    expect(s("depreciation.policy", { lifeMonths: { from: null, to: 36 }, salvagePercent: { from: null, to: 10 } }))
+      .toBe("L. Domingo set depreciation on Laptop: 3 years, 10% salvage");
+    expect(s("depreciation.policy", { lifeMonths: { from: 36, to: null }, salvagePercent: { from: 10, to: null } }))
+      .toBe("L. Domingo cleared depreciation on Laptop");
+  });
+  it("override set and cleared", () => {
+    expect(s("depreciation.override", { lifeMonths: { from: null, to: 24 }, salvage: { from: null, to: 5000 } }, "BR-LT-0148"))
+      .toBe("L. Domingo set custom depreciation on BR-LT-0148: 2 years, \u20b15,000.00 salvage");
+    expect(s("depreciation.override.cleared", null, "BR-LT-0148")).toBe("L. Domingo cleared custom depreciation on BR-LT-0148");
+  });
+});
