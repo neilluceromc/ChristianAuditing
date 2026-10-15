@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  asOfMonth, depreciate, manilaMonth, monthEndLabel, monthLabel, resolvePolicy, stateNote, toCentavos, yearGrid,
+  affectedByPolicy, lifeYears, asOfMonth, depreciate, manilaMonth, monthEndLabel, monthLabel, resolvePolicy, stateNote, toCentavos, yearGrid,
 } from "./depreciation";
 
 const M = (y: number, m: number) => y * 12 + (m - 1);
@@ -108,5 +108,27 @@ describe("stateNote", () => {
     expect(stateNote({ ...base, state: "bad-salvage" }, "Laptop")).toBe("Salvage is not below cost — check the override");
     expect(stateNote({ ...base, state: "fully-depreciated" }, "Laptop")).toBe("Fully depreciated");
     expect(stateNote({ ...base, state: "depreciating" }, "Laptop")).toBeNull();
+  });
+});
+
+describe("affectedByPolicy", () => {
+  it("counts costed rows without a custom override", () => {
+    expect(affectedByPolicy([{ costC: 100, custom: false }, { costC: 200, custom: true }, { costC: null, custom: false }])).toBe(1);
+  });
+});
+
+describe("lifeYears", () => {
+  const p = { lifeMonths: 36, salvage: 550_000, basis: "category" as const };
+  it("BR-LT-0148: P55,000 confirmed 10 Mar 2025, 3 years, 10% salvage, as of Sep 2026", () => {
+    const ys = lifeYears(5_500_000, new Date("2025-03-10T10:00:00+08:00"), p, 2026 * 12 + 8);
+    expect(ys.map((y) => y.year)).toEqual([2025, 2026, 2027, 2028]);
+    expect(ys[0]).toMatchObject({ opening: 5_500_000, total: 9 * 137_500, done: 9, projected: 0 });
+    expect(ys[1]).toMatchObject({ done: 9, projected: 3 });
+    expect(ys[3].closing).toBe(550_000);
+    expect(ys[1].months[0]).toMatchObject({ charge: 137_500, projected: false });
+  });
+  it("unconfirmed or no policy gives no years", () => {
+    expect(lifeYears(5_500_000, null, p, 2026 * 12 + 8)).toEqual([]);
+    expect(lifeYears(5_500_000, new Date("2025-03-10T10:00:00+08:00"), null, 2026 * 12 + 8)).toEqual([]);
   });
 });

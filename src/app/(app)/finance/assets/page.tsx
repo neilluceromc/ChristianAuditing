@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { ButtonLink } from "@/components/ui/button-link";
 import { cn } from "@/lib/cn";
+import { fmtMoneyExact } from "@/lib/format";
 
 export default async function FinanceAssetsPage({
   searchParams,
@@ -22,7 +23,8 @@ export default async function FinanceAssetsPage({
   const cls = parseCls(params.get("cls")) ?? "IT";
   const status = parseAssetStatus(params.get("status"), cls);
   const page = parsePage(params);
-  const { rows, total, page: current, pageCount, totalCost } = await financeAssets(status, page, cls);
+  const { rows, total, page: current, pageCount, totals } = await financeAssets({ cls, status, fin: null, q: "", page });
+  const totalCost = totals.cost;
 
   const hrefFor = (p: number) => {
     const next = new URLSearchParams();
@@ -97,11 +99,6 @@ export default async function FinanceAssetsPage({
                   <Th>Model</Th>
                   <Th width={96}>Category</Th>
                   <Th width={124} align="right">Cost</Th>
-                  <Th width={104}>Purchased</Th>
-                  <Th width={150}>Provenance</Th>
-                  <Th width={64}>Age</Th>
-                  <Th width={104}>Warranty</Th>
-                  <Th width={150}>Held by</Th>
                   <Th width={104}>Status</Th>
                 </Tr>
               </THead>
@@ -116,12 +113,7 @@ export default async function FinanceAssetsPage({
                     </Td>
                     <Td className="text-fg">{a.model}</Td>
                     <Td mono>{a.category}</Td>
-                    <Td align="right" mono>{a.cost}</Td>
-                    <Td mono>{a.purchased}</Td>
-                    <Td>{a.provenance}</Td>
-                    <Td mono>{a.age}</Td>
-                    <Td mono>{a.warranty}</Td>
-                    <Td>{a.assignee ?? "—"}</Td>
+                    <Td align="right" mono>{a.costC === null ? "—" : fmtMoneyExact(a.costC / 100)}</Td>
                     <Td><StatusPill value={a.status} /></Td>
                   </Tr>
                 ))}

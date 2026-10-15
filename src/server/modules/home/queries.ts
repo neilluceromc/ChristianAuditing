@@ -1,6 +1,9 @@
 import type { ApprovalType, Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
+import { fmtDate, fmtMoney, fmtMoneyExact, localDateISO } from "@/lib/format";
+import { monthEndLabel } from "@/lib/depreciation";
+import { regWhere } from "@/lib/registration";
+import { bookValueTotals } from "@/server/modules/finance/depreciation-queries";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState, serializeListState, withFilter } from "@/lib/url-state";
 import { stockHomeSignals } from "@/server/modules/stock/queries";
@@ -658,6 +661,11 @@ export interface FinanceHome {
   approvedThisMonth: string;
   capitalized: string;
   capitalizedCount: number;
+  /** Phase 35: book value, depreciation to date (both as of the last completed month) and the review backlog */
+  bookValue: string;
+  depreciation: string;
+  asOfEnd: string;
+  toReview: number;
   queue: TodoRow[];
 }
 
@@ -667,7 +675,7 @@ export interface FinanceHome {
  */
 export async function financeHome(now: Date = new Date()): Promise<FinanceHome> {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [waiting, completed, capitalized] = await Promise.all([
+  const [waiting, completed, capitalized, totals, toReview] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { state: "IT_REVIEWED" },
       orderBy: { reviewedAt: "asc" },
@@ -687,6 +695,8 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
     // tabs, so a headline total that showed one would contradict the page it
     // fronts (D-16).
     prisma.asset.aggregate({ where: { cost: { not: null } }, _sum: { cost: true }, _count: { _all: true } }),
+    bookValueTotals({}, now),
+    prisma.asset.count({ where: regWhere("with-finance") }),
   ]);
 
   const oldest = waiting[0];
@@ -698,6 +708,10 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
     // Prisma returns Decimal | null from _sum — Number() before it ever leaves here
     capitalized: fmtMoney(capitalized._sum.cost === null ? 0 : Number(capitalized._sum.cost)),
     capitalizedCount: capitalized._count._all,
+    bookValue: fmtMoneyExact(totals.bookC / 100),
+    depreciation: fmtMoneyExact(totals.accumulatedC / 100),
+    asOfEnd: monthEndLabel(totals.asOf),
+    toReview,
     queue: waiting.slice(0, 8).map((r) => ({
       id: r.id,
       refNo: r.refNo,

@@ -106,3 +106,34 @@ export function stateNote(r: DepResult, categoryName: string): string | null {
     default: return null;
   }
 }
+
+export function affectedByPolicy(rows: Array<{ costC: number | null; custom: boolean }>): number {
+  return rows.filter((r) => r.costC !== null && !r.custom).length;
+}
+
+export interface LifeYear {
+  year: number; opening: number; total: number; closing: number; done: number; projected: number;
+  months: Array<{ month: MonthIndex; opening: number; charge: number; closing: number; projected: boolean }>;
+}
+
+/** Phase 35 (spec 4.2 item 5): the asset page's year-by-year schedule over the whole life. */
+export function lifeYears(cost: number, confirmedAt: Date | null, policy: Policy | null, asOf: MonthIndex): LifeYear[] {
+  if (!confirmedAt || !policy || policy.salvage >= cost) return [];
+  const start = manilaMonth(confirmedAt) + 1;
+  const end = start + policy.lifeMonths - 1;
+  const base = cost - policy.salvage;
+  const out: LifeYear[] = [];
+  let book = cost;
+  for (let y = Math.floor(start / 12); y <= Math.floor(end / 12); y++) {
+    const months: LifeYear["months"] = [];
+    const opening = book;
+    for (let m = Math.max(y * 12, start); m <= Math.min(y * 12 + 11, end); m++) {
+      const charge = chargeFor(base, policy.lifeMonths, m - start + 1);
+      months.push({ month: m, opening: book, charge, closing: book - charge, projected: m > asOf });
+      book -= charge;
+    }
+    const projected = months.filter((x) => x.projected).length;
+    out.push({ year: y, opening, total: opening - book, closing: book, done: months.length - projected, projected, months });
+  }
+  return out;
+}
