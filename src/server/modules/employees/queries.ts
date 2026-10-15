@@ -234,7 +234,7 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
   };
 }
 
-/** Phase 36 (spec §4.1): the holder picker's "Recent" list — the user's last picks, still ACTIVE, at most RECENT_PEOPLE. */
+/** Phase 36 (spec Â§4.1): the holder picker's "Recent" list â€” the user's last picks, still ACTIVE, at most RECENT_PEOPLE. */
 export async function recentPeopleOptions(userId: string): Promise<ComboOption[]> {
   const ids = (await recentPicks(userId, "employee")).slice(0, RECENT_PEOPLE);
   if (ids.length === 0) return [];

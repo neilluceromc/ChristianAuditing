@@ -485,7 +485,7 @@ describe("people search (Phase 36 spec §4.1)", () => {
 
   Run them (FAIL), then implement `people-search.ts` to match.
 - [ ] **Step 2: Server.**
-  - **`searchPeople`:** guard `actionRole("admin", "it_staff", "purchasing_staff", "finance_staff")` → `checkRate(user.id)` → `peopleQuerySchema`. Then `prisma.employee.findMany({ where: peopleWhere(...), orderBy: [{ name: "asc" }, { employeeNo: "asc" }], take: PEOPLE_LIMIT, select: { id, name, employeeNo } })`, mapped to `{ value: id, label: name, sub: employeeNo }`.
+  - **`searchPeople`:** guard `actionRole("admin", "it_staff", "purchasing_staff", "finance_staff")` → `checkRate(user.id, "check")` (the live-check kind, 240/min, so typing never spends the write budget) → `peopleQuerySchema`. Then `prisma.employee.findMany({ where: peopleWhere(...), orderBy: [{ name: "asc" }, { employeeNo: "asc" }], take: PEOPLE_LIMIT, select: { id, name, employeeNo } })`, mapped to `{ value: id, label: name, sub: employeeNo }`.
   - **`recentPeopleOptions(userId)`:** `recentPicks(userId, "employee")` → first `RECENT_PEOPLE` ids → active employees in that order.
 - [ ] **Step 3: `PeopleCombobox`.**
   - Wrap `EntityCombobox` (read `src/components/patterns/entity-combobox.tsx` first; extend it minimally if it cannot take externally changing `options` or report typed text).
@@ -542,7 +542,7 @@ it("assigneeWhere: ids, Unassigned, and both", () => {
 - [ ] **Step 2: `facetOptions`.**
   - Drop the `prisma.employee.findMany({ where: { assets: { some: { cls } } } })` and the all-assignee groupBy.
   - Instead return `assignee`: the **selected** people (ids from `state.filters.assignee` minus `none`) with names and counts (one groupBy restricted to those ids), plus `{ value: "none", label: "Unassigned", count }`.
-- [ ] **Step 3: `searchAssignees`.** Same guard as `searchPeople`. It parses `listQS` with `parseListState(new URLSearchParams(listQS), INVENTORY_LIST_CONFIG)`, then finds people with `peopleWhere(q, "assignees", cls)` (`take` 10), and counts their assets with `groupBy assigneeId` over `buildAssetWhere(without assignee)` restricted to those ids.
+- [ ] **Step 3: `searchAssignees`.** Same guard as `searchPeople` (including `checkRate(user.id, "check")`). It parses `listQS` with `parseListState(new URLSearchParams(listQS), INVENTORY_LIST_CONFIG)`, then finds people with `peopleWhere(q, "assignees", cls)` (`take` 10), and counts their assets with `groupBy assigneeId` over `buildAssetWhere(without assignee)` restricted to those ids.
 - [ ] **Step 4: `PeopleFacet` (client)** replaces `FacetDropdown` for `assignee` in `inventory-toolbar.tsx`.
   - **Button:** "Assigned" or "Assigned: {n}".
   - **Popover:** a search input labelled "Search people", the selected people as removable chips (`aria-label="Remove {name}"`), an "Unassigned {count}" checkbox, and typed results as checkboxes "{name} · {employeeNo} {count}".

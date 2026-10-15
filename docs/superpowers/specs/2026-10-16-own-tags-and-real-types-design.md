@@ -126,7 +126,7 @@ filter and the pickers.
   - **Order:** name, then employee no.
 - **Guard:** the same roles that can open the screens using it (`admin`, `it_staff`, `purchasing_staff`;
   `finance_staff` too for the filter). `actionRole` → `checkRate` → zod, as every action. No audit row: it is a read.
-- **Rate limit:** it uses `checkRate` like every action. Typing is debounced on the client (250 ms), so normal typing
+- **Rate limit:** it uses `checkRate(user.id, "check")`, the live-check kind (240/min), not the 60/min write budget, so typing never starves a save. Typing is debounced on the client (250 ms), so normal typing
   stays well under the limit.
 
 ### 4.2 The pickers (Assign, Reserve, Replace, bulk assign, Register's holder, Stock issue)

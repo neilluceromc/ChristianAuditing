@@ -11,7 +11,7 @@ import type { ComboOption } from "@/components/patterns/entity-combobox";
 export async function searchPeople(input: unknown): Promise<ActionResult<ComboOption[]>> {
   const user = await actionRole("admin", "it_staff", "purchasing_staff", "finance_staff");
   if (!user) return forbidden();
-  const rate = await checkRate(user.id);
+  const rate = await checkRate(user.id, "check"); // a live check writes nothing: its own 240/min budget, not the write budget
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = peopleQuerySchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));

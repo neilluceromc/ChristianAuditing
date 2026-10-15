@@ -38,11 +38,11 @@ export function EntityCombobox({
   "aria-describedby"?: string;
   recent?: string[];
   autoFocus?: boolean;
-  /** Phase 36: the chosen row when it is not (or no longer) in `options` — display only, never listed. */
+  /** Phase 36: the chosen row when it is not (or no longer) in `options` â€” display only, never listed. */
   valueOption?: ComboOption | null;
-  /** Phase 36: told the typed text on every change ("" when cleared) — a server-searched caller swaps `options` in response. */
+  /** Phase 36: told the typed text on every change ("" when cleared) â€” a server-searched caller swaps `options` in response. */
   onQuery?: (query: string) => void;
-  /** Phase 36: `options` already match the typed text (the server filtered them) — skip the local filter. */
+  /** Phase 36: `options` already match the typed text (the server filtered them) â€” skip the local filter. */
   serverFiltered?: boolean;
   /** Phase 36: the text shown when no row is listed; the default is "No matches." */
   emptyText?: string;
