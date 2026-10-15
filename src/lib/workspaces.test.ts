@@ -387,3 +387,17 @@ describe("IT workspace nav", () => {
     expect(navFor("viewer").some((i) => i.href === "/inventory/register")).toBe(false);
   });
 });
+
+describe("Phase 35 Finance nav", () => {
+  it("Finance nav: Assets & depreciation", () => {
+    const sec = WORKSPACE_NAV.finance.find((s) => s.heading === "Assets & depreciation");
+    expect(sec?.items.map((i) => i.label)).toEqual(["Assets", "Depreciation", "Activity log"]);
+  });
+  it("/finance/depreciation and /finance/assets/<id> are Finance-only", () => {
+    for (const p of ["/finance/depreciation", "/finance/assets/abc"]) {
+      expect(pathAllowedForRole(p, "finance_staff")).toBe(true);
+      expect(pathAllowedForRole(p, "it_staff")).toBe(false);
+      expect(pathAllowedForRole(p, "purchasing_staff")).toBe(false);
+    }
+  });
+});

@@ -143,9 +143,10 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
   finance: [
     { heading: "Overview", items: [{ label: "Home", href: "/" }] },
     {
-      heading: "Capitalized assets",
+      heading: "Assets & depreciation",
       items: [
-        { label: "Approved assets", href: "/finance/assets" },
+        { label: "Assets", href: "/finance/assets" },
+        { label: "Depreciation", href: "/finance/depreciation" },
         { label: "Activity log", href: "/finance/activity" },
       ],
     },
