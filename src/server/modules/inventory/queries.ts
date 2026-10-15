@@ -3,7 +3,7 @@ import { Prisma, type AssetClass, type AssetStatus, type Role } from "@prisma/cl
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
-  buildAssetOrderBy, buildAssetWhere, type PurchaseYearValue,
+  buildAssetOrderBy, buildAssetWhere, UNASSIGNED, type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import { ASSET_CLASSES, ASSIGNABLE_FROM, canSeeClass, statusesFor } from "@/lib/asset-class";
 import { primarySortOf, type ListState } from "@/lib/url-state";
@@ -358,14 +358,23 @@ export async function facetOptions(
   // simply never "its own" facet here, because it isn't one of the four
   // being computed. Matches the without(facet) rule above: apply everything
   // else, never the facet's own selection.
-  const [statusG, categoryG, typeG, assigneeG, categories, types, assignees, provenanceCounts, regCounts] = await Promise.all([
+  // Phase 36 (spec §4.3): the Assigned facet no longer lists every holder — only the CHOSEN people
+  // (names + counts) and Unassigned; the rest is found by searching (`searchAssignees`).
+  const chosenIds = (state.filters.assignee ?? []).filter((v) => v !== UNASSIGNED);
+  const [statusG, categoryG, typeG, assigneeG, categories, types, chosen, provenanceCounts, regCounts] = await Promise.all([
     prisma.asset.groupBy({ by: ["status"], where: buildAssetWhere(without("status"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["categoryId"], where: buildAssetWhere(without("category"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["typeId"], where: buildAssetWhere(without("type"), purchaseYear, cls), _count: true }),
-    prisma.asset.groupBy({ by: ["assigneeId"], where: buildAssetWhere(without("assignee"), purchaseYear, cls), _count: true }),
+    prisma.asset.groupBy({
+      by: ["assigneeId"],
+      where: { AND: [buildAssetWhere(without("assignee"), purchaseYear, cls), { OR: [{ assigneeId: { in: chosenIds } }, { assigneeId: null }] }] },
+      _count: true,
+    }),
     prisma.assetCategory.findMany({ where: { cls }, orderBy: { name: "asc" } }),
     prisma.assetType.findMany({ where: { category: { cls } }, orderBy: { name: "asc" }, include: { category: true } }),
-    prisma.employee.findMany({ where: { assets: { some: { cls } } }, orderBy: { name: "asc" } }),
+    chosenIds.length
+      ? prisma.employee.findMany({ where: { id: { in: chosenIds } }, orderBy: [{ name: "asc" }, { employeeNo: "asc" }], select: { id: true, name: true } })
+      : Promise.resolve([] as Array<{ id: string; name: string }>),
     // a derived facet cannot groupBy â€” three counts over the same where minus its own key (spec Â§6)
     Promise.all(
       PROVENANCES.map((p) =>
@@ -390,9 +399,12 @@ export async function facetOptions(
       value: t.id, label: `${t.category.name} Â· ${t.name}`,
       count: typeG.find((g) => g.typeId === t.id)?._count ?? 0,
     })),
-    assignee: assignees.map((e) => ({
-      value: e.id, label: e.name, count: assigneeG.find((g) => g.assigneeId === e.id)?._count ?? 0,
-    })),
+    assignee: [
+      ...chosen.map((e) => ({
+        value: e.id, label: e.name, count: assigneeG.find((g) => g.assigneeId === e.id)?._count ?? 0,
+      })),
+      { value: UNASSIGNED, label: "Unassigned", count: assigneeG.find((g) => g.assigneeId === null)?._count ?? 0 },
+    ],
     provenance: PROVENANCES.map((p, i) => ({ value: p, label: PROVENANCE_LABEL[p], count: provenanceCounts[i] })),
     reg: REG_STATES.map((r, i) => ({ value: r, label: REG_LABEL[r], count: regCounts[i] })),
   };

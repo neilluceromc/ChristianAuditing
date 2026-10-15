@@ -99,6 +99,19 @@ export function purchaseYearChips(buckets: Array<{ year: number | null; count: n
   }));
 }
 
+/** The Assigned filter's value for "no holder" (`?assignee=none`). */
+export const UNASSIGNED = "none";
+
+/** Phase 36 (spec §4.3): holder ids and/or Unassigned (`none` = assigneeId IS NULL); null when nothing is chosen. */
+export function assigneeWhere(values: readonly string[]): Prisma.AssetWhereInput | null {
+  const ids = values.filter((v) => v !== UNASSIGNED);
+  const none = values.includes(UNASSIGNED);
+  if (ids.length && none) return { OR: [{ assigneeId: { in: ids } }, { assigneeId: null }] };
+  if (ids.length) return { assigneeId: { in: ids } };
+  if (none) return { assigneeId: null };
+  return null;
+}
+
 export function buildAssetWhere(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
@@ -124,7 +137,13 @@ export function buildAssetWhere(
   if (statuses.length) where.status = { in: statuses };
   if (f.category?.length) where.categoryId = { in: f.category };
   if (f.type?.length) where.typeId = { in: f.type };
-  if (f.assignee?.length) where.assigneeId = { in: f.assignee };
+  // Phase 36 (spec §4.3): holder ids and/or the Unassigned sentinel, appended to AND like the derived facets.
+  const holder = assigneeWhere(f.assignee ?? []);
+  if (holder) {
+    const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+    and.push(holder);
+    where.AND = and;
+  }
   // `stage` is DERIVED, and one of its four values (beyond-repair) compares
   // repairQuote against cost â€” something no Prisma filter can express. So the
   // facet narrows to the repair CANDIDATE set here and repairStageIds' SQL
