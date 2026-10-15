@@ -6,6 +6,7 @@ import { isStatusOf } from "@/lib/asset-class";
 import { ageBucket } from "@/lib/home";
 import { ENTITY_PAGE_SIZE } from "@/lib/paging";
 import { PROVENANCE_LABEL, provenanceOf } from "@/lib/provenance";
+import { regWhere } from "@/lib/registration";
 
 export interface FinanceAssetRow {
   id: string;
@@ -92,17 +93,13 @@ export async function financeAssets(
 }
 
 /**
- * Phase 30 (spec §4.6): the next record waiting on Finance, in the queue's own order — the
- * `financeAssets` where (costed; an IT asset only once IT has checked it) narrowed to the rows
- * still undecided, cost desc then tag then id, never the record just decided.
+ * Phase 35 (spec §4.1): the next record waiting on Finance — every `with-finance` asset of the class
+ * (an asset with no cost is reviewable too), oldest registration first, never the record just decided.
  */
 export async function nextToReview(currentId: string, cls: AssetClass): Promise<{ id: string; tag: string } | null> {
   return prisma.asset.findFirst({
-    where: {
-      cls, cost: { not: null }, ...(cls === "IT" ? { itVerifiedAt: { not: null } } : {}),
-      financeConfirmedAt: null, financeReturnedAt: null, id: { not: currentId },
-    },
-    orderBy: [{ cost: "desc" }, { tag: "asc" }, { id: "asc" }],
+    where: { cls, ...regWhere("with-finance"), id: { not: currentId } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { id: true, tag: true },
   });
 }

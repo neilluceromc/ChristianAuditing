@@ -411,3 +411,23 @@ describe("purchase.recorded (Phase 34)", () => {
       .toBe("J. Sarmiento recorded a purchase of 1 item");
   });
 });
+
+describe("Phase 35 registration sentences", () => {
+  const s = (action: string, diff: unknown) => auditSentence({ actorLabel: "L. Domingo", action, diff, entityLabel: "BR-LT-0214" });
+  it("send-back with items and a note; an old reason still reads", () => {
+    expect(s("finance.return", { financeReturn: { from: null, to: { fields: ["Cost", "Sales invoice"], note: "Wrong PO" } } }))
+      .toBe("L. Domingo sent BR-LT-0214 back: Cost, Sales invoice — “Wrong PO”");
+    expect(s("finance.return", { financeReturn: { from: null, to: { fields: ["Cost"], note: null } } }))
+      .toBe("L. Domingo sent BR-LT-0214 back: Cost");
+    expect(s("finance.return", { financeReturn: { from: null, to: "Wrong invoice" } }))
+      .toBe("L. Domingo sent BR-LT-0214 back to IT · Wrong invoice");
+  });
+  it("resubmit with a reply, approval as not capitalised, reopen", () => {
+    expect(s("finance.resubmit", { financeReturn: { from: "returned", to: null }, reply: { from: null, to: "Uploaded it" } }))
+      .toBe("L. Domingo marked BR-LT-0214 corrected — “Uploaded it”");
+    expect(s("finance.confirm", { financeConfirmed: { from: null, to: "L. Domingo" }, notCapitalised: { from: false, to: true } }))
+      .toBe("L. Domingo approved BR-LT-0214 as not capitalised");
+    expect(s("finance.reopened", { cost: { from: null, to: 500 } }))
+      .toBe("L. Domingo added a cost to BR-LT-0214, so it went back to Finance");
+  });
+});

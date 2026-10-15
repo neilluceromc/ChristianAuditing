@@ -20,7 +20,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "approval.requested": "Change requested", comment: "Comment", "unit-update": "Units updated",
   submit: "Submitted", "it-review": "IT review", "it-reject": "Returned by IT", "request-info": "Info requested",
   cancel: "Cancelled", complete: "Completed", "finance.confirm": "Finance confirmed", "it.verify": "IT verified",
-  "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "supplier-set": "Supplier set",
+  "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "finance.reopened": "Back to Finance", "supplier-set": "Supplier set",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
@@ -123,19 +123,32 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
     // sentence and buries the one thing a reader of the feed wants.
     case "register":
       return omitEntity ? `${actor}registered` : `${actor}registered ${entry.entityLabel}`;
-    case "finance.confirm":
+    case "finance.confirm": {
+      if (diff?.notCapitalised?.to === true) {
+        return omitEntity ? `${actor}approved as not capitalised` : `${actor}approved ${entry.entityLabel} as not capitalised`;
+      }
       return omitEntity ? `${actor}confirmed details` : `${actor}confirmed ${entry.entityLabel}'s details`;
+    }
     case "it.verify":
       return omitEntity ? `${actor}checked` : `${actor}checked ${entry.entityLabel}`;
     case "finance.return": {
-      // The reason is the entire point of a return, so it belongs in the
-      // sentence rather than one click away in the diff.
-      const why = diff?.financeReturn?.to;
-      const tail = why ? ` \u00b7 ${String(why)}` : "";
+      // Phase 35 (spec §3.3): `to` is { fields: labels[], note } now; a string is a pre-Phase-35 reason.
+      const to = diff?.financeReturn?.to as { fields?: string[]; note?: string | null } | string | null | undefined;
+      if (to && typeof to === "object") {
+        const items = (to.fields ?? []).join(", ");
+        const note = to.note ? ` \u2014 \u201c${to.note}\u201d` : "";
+        return omitEntity ? `${actor}sent back: ${items}${note}` : `${actor}sent ${entry.entityLabel} back: ${items}${note}`;
+      }
+      const tail = to ? ` \u00b7 ${String(to)}` : "";
       return omitEntity ? `${actor}sent back to IT${tail}` : `${actor}sent ${entry.entityLabel} back to IT${tail}`;
     }
-    case "finance.resubmit":
+    case "finance.resubmit": {
+      const reply = diff?.reply?.to ? ` \u2014 \u201c${String(diff.reply.to)}\u201d` : "";
+      if (reply) return omitEntity ? `${actor}marked corrected${reply}` : `${actor}marked ${entry.entityLabel} corrected${reply}`;
       return omitEntity ? `${actor}marked corrected for Finance` : `${actor}marked ${entry.entityLabel} corrected for Finance`;
+    }
+    case "finance.reopened":
+      return omitEntity ? `${actor}added a cost, so it went back to Finance` : `${actor}added a cost to ${entry.entityLabel}, so it went back to Finance`;
     // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
     // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {
     // from: null, to } }` (transfer-actions.ts) — without this case the raw
