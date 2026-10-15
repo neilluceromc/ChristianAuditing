@@ -33,10 +33,11 @@ All dates are Asia/Manila calendar months.
 - `salvage`: the asset override (pesos) if set, else `cost × category salvage % ÷ 100`, rounded to the centavo.
 
 **Monthly amount**
-- `base = cost − salvage`, and `monthly = round2(base ÷ lifeMonths)`.
+- `base = cost − salvage`, and `monthly = floor2(base ÷ lifeMonths)`, rounded **down** to the centavo.
 - Month `k` of the life (1…`lifeMonths`) charges `monthly`.
-- The **last** month charges `base − monthly × (lifeMonths − 1)`, so the total is exactly `base`. That last charge may
-  be zero or slightly different; it is never negative, because `monthly ≤ base ÷ (lifeMonths − 1)`. The test pins this.
+- The **last** month charges `base − monthly × (lifeMonths − 1)`, so the total is exactly `base`. Because `monthly`
+  is rounded down, that last charge is never below `monthly` and never negative, even for tiny bases over long lives
+  (rounding half-up could make it negative, e.g. ₱0.07 over 10 months). The test pins this.
 
 **Current values ("as of")**
 - **As-of month:** the last completed month. On any day in October 2026 it is September 2026; a month's depreciation
