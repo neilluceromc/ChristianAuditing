@@ -141,6 +141,8 @@ const IT_STAFF_ROUTES = [
   "/employees/import", "/employees/new",
   // Phase 37 (spec §7.2): the per-client policies tab. /employees/new is scanned again below at steps 2 and 3.
   "/admin/equipment-policies?tab=client",
+  // Phase 38 (spec §4.2): Equipment by client, both tabs, without money columns. The panel-open scan is below.
+  "/equipment-by-client", "/equipment-by-client?tab=internal",
 ];
 
 // ── purchasing_staff: requireRole(...DRAFT_ROLES) = [purchasing_staff, admin] ─
@@ -150,7 +152,11 @@ const PURCHASING_STAFF_ROUTES = [
 ];
 
 // ── finance_staff: PATH_RULES workspace "finance" only ─────────────────────
-const FINANCE_STAFF_ROUTES = ["/finance/assets", "/finance/activity", "/finance/assets?cls=PURCHASING"];
+// Phase 38 (spec §4.2): Equipment by client with the Book value and Per person columns and the money stat.
+const FINANCE_STAFF_ROUTES = [
+  "/finance/assets", "/finance/activity", "/finance/assets?cls=PURCHASING",
+  "/equipment-by-client", "/equipment-by-client?tab=internal",
+];
 
 // ── viewer: everything else — PATH_RULES workspace "it" (viewer's only
 // workspace) with no further role restriction. This is the lowest role that
@@ -224,6 +230,13 @@ test.describe("axe sweep", () => {
     await expect(panel).toBeVisible({ timeout: 20_000 });
     await expect(panel.getByRole("heading", { name: "Recent history" })).toBeVisible({ timeout: 15_000 });
     await scanHere(page, "/employees/[EMP-0042]?item=[BR-LT-0148] (panel open)");
+
+    // Phase 38 (spec §4.2): Equipment by client with Bluepeak Telecom's detail panel open. The id is read off the
+    // name; the panel is on screen once its heading is.
+    const bluepeak = await db.department.findUniqueOrThrow({ where: { name: "Bluepeak Telecom" } });
+    await page.goto(`/equipment-by-client?tab=client&group=${bluepeak.id}`);
+    await expect(page.getByRole("heading", { name: "Bluepeak Telecom", level: 2 })).toBeVisible({ timeout: 20_000 });
+    await scanHere(page, "/equipment-by-client?group=[Bluepeak Telecom] (panel open)");
   });
 
   // Phase 37 (spec §5, §7.2): Add employee, scanned on each of its three steps with valid input and nothing
@@ -278,6 +291,12 @@ test.describe("axe sweep", () => {
     await login(page, "finance@thebackroomop.com");
     await scanRoute(page, "/"); // Home's finance branch — this role's own default landing
     for (const path of FINANCE_STAFF_ROUTES) await scanRoute(page, path);
+
+    // Phase 38 (spec §4.2): the same page with a panel open, where the per-category values show.
+    const bluepeak = await db.department.findUniqueOrThrow({ where: { name: "Bluepeak Telecom" } });
+    await page.goto(`/equipment-by-client?tab=client&group=${bluepeak.id}`);
+    await expect(page.getByRole("heading", { name: "Bluepeak Telecom", level: 2 })).toBeVisible({ timeout: 20_000 });
+    await scanHere(page, "/equipment-by-client?group=[Bluepeak Telecom] (panel open, money)");
   });
 
   // The one public, unauthenticated page nothing had ever scanned. /login has
