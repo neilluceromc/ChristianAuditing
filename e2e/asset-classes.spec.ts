@@ -562,20 +562,22 @@ test.describe("page gates speak the class", () => {
 
 test.describe("the leaver-kit policy picker", () => {
   test("19. names no Purchasing type", async ({ page }) => {
+    const finance = await db.department.findFirstOrThrow({ where: { name: "Finance" } });
     await login(page, "admin@thebackroomop.com");
-    await page.goto("/admin/equipment-policies");
-    // policy-editor.tsx: aria-label is `Asset type for the new slot in ${policy.name}`
-    // — "Finance standard" is the seed's one policy.
+    // Phase 37 (spec §3.3): a policy line picks a Category, then one of its Types. The Category select
+    // lists the IT categories that have a type — so no Purchasing CATEGORY may be offered at all (a bare
+    // type-name negative would pass even if the whole Purchasing side leaked in), alongside a positive
+    // that Laptop is.
+    await page.goto(`/admin/equipment-policies?tab=internal&group=${finance.id}`);
     const options = await page
-      .getByLabel("Asset type for the new slot in Finance standard")
+      .getByRole("region", { name: "What their staff should have" })
+      .getByLabel("Line 1 kind", { exact: true })
       .locator("option")
       .allTextContents();
-    // Options are `${category.name} · ${type.name}`. A bare /Sedan/ negative
-    // would pass even if the whole Purchasing side leaked in (every Purchasing
-    // type name happens not to be "Sedan"), so assert no Purchasing CATEGORY
-    // is offered at all, alongside a positive that Laptop is.
-    expect(options.some((o) => /^Laptop · /.test(o))).toBe(true);
-    expect(options.some((o) => /^(Vehicle|Furniture|Pantry Equipment|Building) · /.test(o))).toBe(false);
+    expect(options).toContain("Laptop");
+    for (const name of ["Vehicle", "Furniture", "Pantry Equipment", "Building"]) {
+      expect(options).not.toContain(name);
+    }
   });
 });
 

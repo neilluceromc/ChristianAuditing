@@ -33,8 +33,11 @@ const rowInclude = {
   assets: { select: { id: true, tag: true, model: true, typeId: true, status: true } },
 } as const;
 
-/** Loadout resolution for exactly these employees — one exceptions read, bounded by the page. */
-async function resolveMissing(employees: Array<{
+/**
+ * Loadout resolution for exactly these employees — one exceptions read, bounded by the page.
+ * Phase 37: also the Equipment policies page's gap count for one group's active people.
+ */
+export async function resolveMissing(employees: Array<{
   id: string; title: string; departmentId: string;
   assets: Array<{ typeId: string | null; status: string; id: string; tag: string; model: string }>;
 }>) {

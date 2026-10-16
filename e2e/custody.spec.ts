@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
@@ -66,6 +66,18 @@ async function expectNoSeriousAxe(page: Page) {
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
 }
 
+// Copied from e2e/admin.spec.ts (itself from e2e/it-nav.spec.ts:88-97) — house rule: never import
+// helpers across spec files.
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(
+      true,
+    );
+  }).toPass({ timeout: 20_000 });
+}
+
 const IT = "it@thebackroomop.com";
 const ADMIN = "admin@thebackroomop.com";
 
@@ -81,63 +93,46 @@ test.describe.serial("custody", () => {
     const laptopType = await db.assetType.findUniqueOrThrow({ where: { id: bp.typeId! }, include: { category: true } });
     const emp = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0095" } }); // Leo Tan, Contractor, holds BR-LT-0210 on loan
 
-    // Verified against the seeded DB: only "Finance standard" (applies to the
-    // Finance department) exists, and EMP-0095 is Operations/"Contractor" —
-    // no policy applies to them yet, so a title policy is created below.
+    // Phase 37 (spec §3.3): a policy belongs to a department or client and is edited on the Equipment
+    // policies page. EMP-0095 is Operations, which the seed leaves without one, so Operations gets one
+    // here: Start empty (one Laptop line), pin it to this laptop's own type, then a second line of the
+    // SAME type marked Loan. Both lines show as "Laptop" tiles (numbered "Laptop 2" once Task 8 lands).
+    const ops = await db.department.findFirstOrThrow({ where: { name: "Operations" } });
     await login(page, ADMIN);
-    await page.goto("/admin/equipment-policies");
+    await page.goto(`/admin/equipment-policies?tab=internal&group=${ops.id}`);
+    const startEmpty = page.getByRole("button", { name: "Start empty" });
+    await waitForHydration(startEmpty);
+    await startEmpty.click();
 
-    await page.getByLabel("New policy name").fill("Contractor kit");
-    // exact:true — "Applies to" is otherwise a substring match of the
-    // department select's own label ("Department this policy applies to").
-    await page.getByLabel("Applies to", { exact: true }).selectOption({ label: "a role title" });
-    await page.getByLabel("Role title this policy applies to").fill(emp.title);
-    await page.getByRole("button", { name: "Create policy" }).click();
-    await expect(page.getByText("Policy created — add its slots next")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("heading", { name: "Contractor kit", level: 2 })).toBeVisible({ timeout: 10_000 });
-
-    // Scoped to the Contractor kit card: "Add slot" is a bare button label
-    // repeated on every policy card (Finance standard has its own), so an
-    // unscoped getByRole would hit both once a second policy exists.
-    const card = page.getByRole("heading", { name: "Contractor kit", level: 2 }).locator("xpath=../..");
-
-    const typeLabel = `${laptopType.category.name} · ${laptopType.name}`;
-
-    // A standard (non-loaner) slot of the SAME type first, to prove the
-    // converse half of this case's title: a plain slot must NOT claim a
-    // TEMPORARY device either.
-    // Wait for the slot CHIP, not the toast: the chip renders only once the
-    // action has committed and router.refresh() has carried the new slot back,
-    // so the next step sees settled state. The toast is the wrong signal here
-    // — the first add's toast is still showing when the second add is clicked,
-    // so a `.first()` toast wait passes at once and the page.goto below can
-    // outrun the second insert (seen: the employee page rendered one slot,
-    // Phase 17 final battery, custody after admin + axe-sweep in one server).
-    await card.getByLabel("New slot name for Contractor kit").fill("laptop");
-    await card.getByLabel("Asset type for the new slot in Contractor kit").selectOption({ label: typeLabel });
-    await card.getByRole("button", { name: "Add slot" }).click();
-    await expect(card.getByRole("button", { name: "Remove the laptop slot from Contractor kit", exact: true })).toBeVisible({ timeout: 10_000 });
-
-    await card.getByLabel("New slot name for Contractor kit").fill("loaner laptop");
-    await card.getByLabel("Asset type for the new slot in Contractor kit").selectOption({ label: typeLabel });
-    await card.getByLabel("loaner slot — filled by a device on loan (TEMPORARY)").check();
-    await card.getByRole("button", { name: "Add slot" }).click();
-    await expect(card.getByRole("button", { name: "Remove the loaner laptop slot from Contractor kit", exact: true })).toBeVisible({ timeout: 10_000 });
+    const editor = page.getByRole("region", { name: "What their staff should have" });
+    await editor.getByLabel("Line 1 kind", { exact: true }).selectOption({ label: laptopType.category.name });
+    await editor.getByLabel("Line 1 variant", { exact: true }).selectOption({ label: laptopType.name });
+    // A standard (non-loaner) line of the SAME type first, to prove the converse half of this case's
+    // title: a plain slot must NOT claim a TEMPORARY device either.
+    await editor.getByRole("button", { name: "+ Add slot" }).click();
+    await editor.getByLabel("Line 2 kind", { exact: true }).selectOption({ label: laptopType.category.name });
+    await editor.getByLabel("Line 2 variant", { exact: true }).selectOption({ label: laptopType.name });
+    await editor.getByLabel("Line 2 filled by a lent device").check();
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
+    // Wait for the refreshed page to replace the editor (Save idle and disabled: nothing unsaved) — leaving
+    // earlier would meet the editor's beforeunload guard — and for both slots to be in the database.
+    const save = editor.getByRole("button", { name: "Save", exact: true });
+    await expect(save).not.toHaveAttribute("aria-busy", "true", { timeout: 15_000 });
+    await expect(save).toBeDisabled();
+    expect(await db.policySlot.count({ where: { policy: { appliesToDepartmentId: ops.id, appliesToTitle: null } } })).toBe(2);
 
     await page.goto(`/employees/${emp.id}`);
-    const loanerTile = page.getByRole("button", { name: /^loaner laptop slot,/ });
-    await expect(loanerTile).toBeVisible();
-    await expect(loanerTile.getByText("BR-LT-0210")).toBeVisible();
-    // exact:true — "LOAN" is otherwise a substring match of the tile's own
-    // "loaner laptop" name label.
+    const laptopTiles = page.getByRole("button", { name: /^Laptop( 2)? slot,/ });
+    await expect(laptopTiles).toHaveCount(2);
+    const loanerTile = laptopTiles.filter({ hasText: "BR-LT-0210" });
+    await expect(loanerTile).toHaveCount(1);
     await expect(loanerTile.getByText("LOAN", { exact: true })).toBeVisible();
 
-    // The plain "laptop" slot (same type, not loaner) stays empty — Leo Tan
-    // holds nothing else of this type, and BR-LT-0210 is TEMPORARY so the
-    // non-loaner slot's own predicate excludes it.
-    const standardTile = page.getByRole("button", { name: /^laptop slot,/ });
-    await expect(standardTile).toBeVisible();
-    await expect(standardTile.getByText("BR-LT-0210")).toHaveCount(0);
+    // The plain line (same type, not loaner) stays empty — Leo Tan holds nothing else of this type, and
+    // BR-LT-0210 is TEMPORARY so the non-loaner slot's own predicate excludes it.
+    const standardTile = laptopTiles.filter({ hasNotText: "BR-LT-0210" });
+    await expect(standardTile).toHaveCount(1);
     await expect(standardTile.getByText("policy gap")).toBeVisible();
   });
 

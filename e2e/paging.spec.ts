@@ -466,7 +466,7 @@ test.describe.serial("paging", () => {
     await expect(workRepairsSection.locator("ol > li")).toHaveCount(50);
   });
 
-  test("10. Policies head-count: the Finance standard card counts non-OFFBOARDED Finance employees", async ({ page }) => {
+  test("10. Policies head-count: the Finance row and its policy count non-OFFBOARDED Finance employees", async ({ page }) => {
     const financeDept = await db.department.findFirstOrThrow({ where: { name: "Finance" } });
     const expectedCount = await db.employee.count({
       where: { departmentId: financeDept.id, employment: { not: "OFFBOARDED" } },
@@ -474,11 +474,18 @@ test.describe.serial("paging", () => {
     expect(expectedCount).toBeGreaterThan(0);
 
     await login(page, "admin@thebackroomop.com");
-    await page.goto("/admin/equipment-policies");
-    const heading = page.getByRole("heading", { name: "Finance standard", level: 2 });
-    await expect(heading).toBeVisible();
-    const headerRow = heading.locator("..");
-    await expect(headerRow).toContainText(new RegExp(`department: Finance · ${expectedCount} (person|people)`));
+    // Phase 37 (spec §3.3): the Finance row in the Internal list carries the count, as do the detail
+    // header ("{n} people · …") and the impact line of its one base policy, which no title rule narrows.
+    await page.goto(`/admin/equipment-policies?tab=internal&group=${financeDept.id}`);
+    const row = page.getByRole("link", { name: /^Finance · / });
+    await expect(row).toHaveAttribute("aria-current", "page");
+    await expect(row).toContainText(String(expectedCount));
+    await expect(page.getByRole("heading", { name: "Finance", level: 2 }).locator("..")).toContainText(
+      new RegExp(`${expectedCount} (person|people) · `),
+    );
+    await expect(page.getByRole("region", { name: "What their staff should have" })).toContainText(
+      new RegExp(`${expectedCount} (person gets|people get) `),
+    );
   });
 
   test("11. Scale smoke: 1000 ZZ assets and 600+ employees page and render at scale", async ({ page }) => {
