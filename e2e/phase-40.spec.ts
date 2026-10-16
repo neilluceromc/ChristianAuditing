@@ -497,3 +497,112 @@ test.describe("phase 40 — palette search", () => {
     await expect(palette).toHaveCount(0);
   });
 });
+
+/**
+ * Phase 40 (spec §10, Task 9): the overlays the phase added, scanned with axe, and the toasts' keyboard hand-off.
+ *
+ * Cases 6, 7 and 11 already run expectNoSeriousAxe with the drawer, the shortcuts dialog and the palette (with
+ * results) on screen — serious and critical only, whole page. Cases 13 and 14 hold the two overlays to a stricter
+ * bar: the dialog's own subtree, WCAG A/AA tags, NO violation of any impact. (The "region" and "landmark-unique"
+ * rules are page-structure rules that mean nothing inside a dialog's subtree, so they are off here.) The palette
+ * is not repeated: case 11 scans it open, with its results showing.
+ */
+async function expectDialogClean(page: Page, label: string) {
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(700);
+  const results = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .disableRules(["region", "landmark-unique"])
+    .analyze();
+  expect(
+    results.violations.map((v) => `${v.id} (${v.impact}) ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`),
+    `axe on ${label}`,
+  ).toEqual([]);
+}
+/** Press Tab until the target holds focus — how a keyboard user reaches a toast, which sits last in the page. */
+async function tabTo(page: Page, target: Locator) {
+  const el = target.first();
+  for (let i = 0; i < 300; i++) {
+    await page.keyboard.press("Tab");
+    if (await el.evaluate((node) => node === document.activeElement)) return;
+  }
+  throw new Error("Tab never reached the target within 300 presses");
+}
+
+test.describe("phase 40 — axe on the new overlays, and toast keyboard hand-off", () => {
+  test("13. axe: the Keyboard shortcuts dialog has no violations of any impact", async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page, IT);
+    await page.goto("/inventory");
+    const button = page.getByRole("button", { name: "Keyboard shortcuts", exact: true });
+    await waitForHydration(button);
+    await button.click();
+    const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("kbd", { hasText: /^\/$/ })).toBeVisible();
+    await expectDialogClean(page, "the Keyboard shortcuts dialog");
+  });
+
+  test("14. axe: the phone shell at 375 px with the drawer open has no violations of any impact", async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await login(page, ADMIN);
+    const menu = page.getByRole("button", { name: "Open menu", exact: true });
+    await waitForHydration(menu);
+    await menu.click();
+    const drawer = page.getByRole("dialog", { name: "IT" });
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+    await expectDialogClean(page, "the phone drawer at 375 px");
+  });
+
+  // The kitchen sink's Row actions menu: "Dispose" raises an error toast, and an error toast stays until dismissed,
+  // so nothing expires while the keyboard walks to it (a success toast would, after ~4 s, until focus reaches it).
+  test("15. with two toasts up, Enter on the first one's Dismiss moves focus to the remaining toast's Dismiss", async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.goto("/dev/kitchen-sink");
+    const menuButton = page.getByRole("button", { name: "Row actions ⋯" });
+    await waitForHydration(menuButton);
+    const cards = page.locator('[aria-live="polite"] [data-toast-id]');
+
+    for (let n = 1; n <= 2; n++) {
+      await menuButton.click();
+      await page.getByRole("menuitem", { name: "Dispose" }).click();
+      await expect(cards).toHaveCount(n);
+    }
+    await expect(cards.first()).toContainText("Not allowed");
+
+    await tabTo(page, cards.first().getByRole("button", { name: "Dismiss", exact: true }));
+    await page.keyboard.press("Enter");
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first().getByRole("button", { name: "Dismiss", exact: true })).toBeFocused();
+
+    // the last one goes too, and focus is still not dropped on the page
+    await page.keyboard.press("Enter");
+    await expect(cards).toHaveCount(0);
+    expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
+  });
+
+  test("16. with a single toast, Enter on its Dismiss hands focus back to the page, never the body", async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.goto("/dev/kitchen-sink");
+    const menuButton = page.getByRole("button", { name: "Row actions ⋯" });
+    await waitForHydration(menuButton);
+    const cards = page.locator('[aria-live="polite"] [data-toast-id]');
+
+    await menuButton.click();
+    await page.getByRole("menuitem", { name: "Dispose" }).click();
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first()).toContainText("Not allowed");
+
+    const dismiss = cards.first().getByRole("button", { name: "Dismiss", exact: true });
+    await tabTo(page, dismiss);
+    await expect(dismiss).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(cards).toHaveCount(0);
+    // the toast went away with focus on it: focus moved to a page element first (the control it came from, or main)
+    expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
+    expect(await page.evaluate(() => document.activeElement?.isConnected === true)).toBe(true);
+  });
+});
