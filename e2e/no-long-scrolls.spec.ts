@@ -22,7 +22,9 @@ import { notYetCount } from "../src/lib/it-setup";
  *   5 (§4.1) the stocktake sheet: 55 extra items in a test category (via prisma) under an all-categories stocktake
  *     page 50 at a time. A count typed on page 1 is in the database the moment "Next page" lands, and one typed
  *     before ticking "Only uncounted" likewise; Only uncounted then leaves both lines out and "{n} still to count"
- *     drops by two. The search and Category narrow. The review pages too, keeps its totals over every line, and
+ *     drops by two, with focus kept on the checkbox. "-2" blocks "Next page" with a message at the box; Enter on a
+ *     count under Only uncounted moves focus to the next row before the counted one drops out. The search (focus
+ *     kept, also on "No item matches.") and Category narrow. The review pages too, keeps its totals over every line, and
  *     "Only differences" narrows. The stocktake, the items and the category are deleted afterwards.
  *
  * Seed (prisma/seed.ts): J. Sarmiento is it@ (it_staff), System Admin is admin@. Bluepeak Telecom's base policy has
@@ -383,7 +385,6 @@ test.describe("Phase 39 — the stocktake sheet", () => {
         code: `ZZ-${tag}-${String(i + 1).padStart(4, "0")}`, name: `Bulk item ${i + 1} ${tag}`, unit: "pc", categoryId: cat.id,
       })),
     });
-    let stocktakeId: string | null = null;
     try {
       await login(page, "purchasing@thebackroomop.com");
       await page.goto("/stock/stocktakes/new");
@@ -393,7 +394,6 @@ test.describe("Phase 39 — the stocktake sheet", () => {
       await page.getByRole("button", { name: "Open stocktake" }).click();
       await page.waitForURL(/\/stock\/stocktakes\/(?!new)[^/?]+$/, { timeout: 20_000 });
       const st = await db.stocktake.findFirstOrThrow({ where: { state: "OPEN", categoryId: null }, orderBy: { openedAt: "desc" } });
-      stocktakeId = st.id;
 
       // The app's own order (item code), read the same way.
       const lines = await db.stocktakeLine.findMany({
@@ -438,6 +438,24 @@ test.describe("Phase 39 — the stocktake sheet", () => {
       await expect(page.getByText(`${total - 2} still to count`, { exact: true })).toBeVisible();
       await expect(page.getByText(`2/${total} counted`, { exact: true })).toBeVisible();
       await expect(page.getByRole("checkbox", { name: "Only uncounted", exact: true })).toBeChecked();
+      // The toolbar is not remounted by the navigation: focus stays on the control just used.
+      await expect(page.getByRole("checkbox", { name: "Only uncounted", exact: true })).toBeFocused();
+
+      // Something that is not a count blocks the page change, with the message at the box and focus on it.
+      await counted(2).fill("-2");
+      await pager.getByRole("link", { name: "Next page", exact: true }).click();
+      await expect(page.getByText("A whole number, zero or more", { exact: true })).toBeVisible();
+      await expect(counted(2)).toBeFocused();
+      await expect(page).not.toHaveURL(/[?&]page=2(&|$)/);
+
+      // Enter under Only uncounted moves focus to the next row before the counted row drops out.
+      await counted(2).fill("5");
+      await counted(2).press("Enter");
+      await expect(counted(3)).toBeFocused();
+      await expect(counted(2)).toHaveCount(0);
+      await expect(counted(3)).toBeFocused();
+      expect((await db.stocktakeLine.findUniqueOrThrow({ where: { id: lines[2].id } })).countedQty).toBe(5);
+      await expect(page.getByText(`${total - 3} still to count`, { exact: true })).toBeVisible();
 
       // The search (code or name) narrows, keeping Only uncounted.
       const search = page.getByRole("searchbox", { name: "Search the stocktake", exact: true });
@@ -446,10 +464,12 @@ test.describe("Phase 39 — the stocktake sheet", () => {
       await search.press("Enter");
       await expect(page).toHaveURL(/[?&]q=/);
       await expect(inputs).toHaveCount(1);
+      await expect(search).toBeFocused();
       await expect(page.getByRole("spinbutton", { name: `Counted ZZ-${tag}-0055`, exact: true })).toBeVisible();
       await search.fill("no such item anywhere");
       await search.press("Enter");
       await expect(page.getByText("No item matches.", { exact: true })).toBeVisible();
+      await expect(search).toBeFocused();
 
       // Category narrows to that category's lines.
       await page.goto(`/stock/stocktakes/${st.id}`);
@@ -469,14 +489,14 @@ test.describe("Phase 39 — the stocktake sheet", () => {
         by: ["itemId"], where: { itemId: { in: lines.map((l) => l.itemId) } }, _sum: { quantity: true },
       });
       const now = new Map(sums.map((x) => [x.itemId, x._sum.quantity ?? 0]));
-      const countedQty = new Map([[lines[0].id, 7], [lines[1].id, 3]]);
+      const countedQty = new Map([[lines[0].id, 7], [lines[1].id, 3], [lines[2].id, 5]]);
       const withDiff = lines.filter((l) => countedQty.has(l.id) && countedQty.get(l.id) !== (now.get(l.itemId) ?? 0)).length;
       const moved = lines.filter((l) => (now.get(l.itemId) ?? 0) !== l.bookQty).length;
       await page.goto(`/stock/stocktakes/${st.id}?view=review`);
       const summary = page.getByText(/items counted/);
       await expect(summary).toBeVisible({ timeout: 20_000 });
       expect((await summary.innerText()).replace(/\s+/g, " ").trim()).toBe(
-        `2 items counted · ${withDiff} with a difference · ${total - 2} not counted · ${moved} moved since opening`,
+        `3 items counted · ${withDiff} with a difference · ${total - 3} not counted · ${moved} moved since opening`,
       );
       const reviewRows = page.getByRole("table").getByRole("row");
       await expect(reviewRows).toHaveCount(51);
@@ -489,10 +509,12 @@ test.describe("Phase 39 — the stocktake sheet", () => {
       if (withDiff > 0) await expect(reviewRows).toHaveCount(withDiff + 1);
       else await expect(page.getByText("No item matches.", { exact: true })).toBeVisible();
       await expect(pager).toHaveCount(0);
-      expect((await summary.innerText()).replace(/\s+/g, " ").trim()).toContain(`${total - 2} not counted`);
+      expect((await summary.innerText()).replace(/\s+/g, " ").trim()).toContain(`${total - 3} not counted`);
     } finally {
-      // The lines go with the stocktake (Cascade); nothing was posted, so the items have no movements.
-      if (stocktakeId) await db.stocktake.delete({ where: { id: stocktakeId } });
+      // Every stocktake holding a line on these items (found by the lines, so a run that failed before the id was
+      // read still cleans up) goes first: its lines go with it (Cascade) and they Restrict the items. Nothing was
+      // posted, so the items have no movements.
+      await db.stocktake.deleteMany({ where: { lines: { some: { item: { categoryId: cat.id } } } } });
       await db.stockItem.deleteMany({ where: { categoryId: cat.id } });
       await db.stockCategory.delete({ where: { id: cat.id } });
     }

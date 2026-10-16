@@ -92,10 +92,9 @@ export default async function StocktakeDetailPage({
                 pageCount={review.pageCount}
               />
             ) : count ? (
-              // Keyed by the URL: each page or filter starts from the server's values (the row inputs are local
-              // state), while a save's own refresh — same URL — keeps what is being typed.
+              // Never keyed by the URL: the toolbar and pagination inside stay mounted, so focus stays on the
+              // control just used; the rows reset to the server's values on a page or filter change themselves.
               <StocktakeCount
-                key={sp.toString()}
                 stocktakeId={st.id}
                 lines={count.lines}
                 sheet={sheet}

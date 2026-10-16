@@ -24,8 +24,9 @@ import { StocktakeSheetToolbar } from "./stocktake-sheet-toolbar";
  * The two shapes are different enough (no `currentQty`/`drift` in one, no
  * `adjustment` in the other) that a discriminated union is clearer than one
  * interface with fields that are meaningless half the time; `kind` always
- * agrees with the `state` prop below, since the page builds both from the
- * same `st.state` check (`varianceRows` vs `postedReviewRows`).
+ * agrees with the `state` prop below, since `stocktakeReviewSheet`
+ * (server/modules/stock/queries.ts) builds both from the same stocktake
+ * state check (`varianceRows` vs `postedReviewRows`).
  */
 export type ReviewRow =
   | {
@@ -61,18 +62,20 @@ function fmtVariance(v: number | null): string {
 
 /**
  * Spec §5.3/§7.5, Task 5 Step 4, I-4. `rows`/`summary` are computed
- * server-side in the page — `varianceRows` (OPEN, a live view against
- * today's ledger) or `postedReviewRows` (POSTED/CANCELLED, a frozen record
- * of what was actually posted) from `lib/stocktake.ts`; this component only
- * formats, picking columns by `state`, and, for an OPEN stocktake a manager
- * is viewing, offers post/cancel. The preview counts in the post confirm
- * dialog (`summary.withDiff`/`summary.notCounted`, OPEN only) mirror exactly
- * what `planStocktakePost` computes server-side, since both come from the
- * same countedQty-vs-current comparison.
+ * server-side by `stocktakeReviewSheet` — `varianceRows` (OPEN, a live view
+ * against today's ledger) or `postedReviewRows` (POSTED/CANCELLED, a frozen
+ * record of what was actually posted) from `lib/stocktake.ts`; this
+ * component formats them, picking columns by `state`, carries the sheet's
+ * toolbar and pagination, and, for an OPEN stocktake a manager is viewing,
+ * offers post/cancel.
  *
- * Phase 39 (spec §4.1): `rows` is one page of 50 (search, Category, Only
- * differences); `summary` — and so the post dialog's numbers — is always
- * over every line of the stocktake.
+ * Phase 39 (spec §4.1): `rows` is one page of 50 lines (search, Category,
+ * Only differences, all in the URL); `summary` is always over EVERY line of
+ * the stocktake, so the post confirm dialog's preview counts
+ * (`summary.withDiff`/`summary.notCounted`, OPEN only) still mirror exactly
+ * what `planStocktakePost` computes server-side over all lines, from the same
+ * countedQty-vs-current comparison. The toolbar is never keyed by the URL,
+ * so focus stays on the control just used.
  */
 export function StocktakeReview({
   stocktakeId,
@@ -125,7 +128,6 @@ export function StocktakeReview({
     <div className="flex flex-col gap-3">
       {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
       <StocktakeSheetToolbar
-        key={sheetHref(stocktakeId, "review", sheet)}
         sheet={sheet}
         categories={categories}
         toggleLabel="Only differences"

@@ -142,3 +142,11 @@ export function pageSheet<T>(rows: T[], keep: (r: T) => boolean, requested: numb
   const pg = pageOf(kept.length, requested, size);
   return { ...pg, rows: kept.slice(pg.skip, pg.skip + pg.take), matching: kept.length };
 }
+
+/** A count box's content: a whole number of zero or more, "blank" (nothing to save), or "invalid" (blocks leaving the page). */
+export function parseCount(raw: string | undefined): number | "blank" | "invalid" {
+  const t = (raw ?? "").trim();
+  if (t === "") return "blank";
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 0 ? n : "invalid";
+}

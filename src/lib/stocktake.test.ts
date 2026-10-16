@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  isDifference, pageSheet, parseSheetState, planStocktakePost, postedReviewRows, sheetHref, sheetLineMatches, varianceRows,
+  isDifference, pageSheet, parseCount, parseSheetState, planStocktakePost, postedReviewRows, sheetHref, sheetLineMatches, varianceRows,
   type StocktakeLineInput,
 } from "./stocktake";
 
@@ -120,5 +120,18 @@ describe("the paged sheet (Phase 39, spec §4.1)", () => {
     expect(last.page).toBe(2);
     expect(last.rows).toEqual([100, 102, 104, 106, 108, 110, 112, 114, 116, 118]);
     expect(pageSheet(rows, () => false, 1)).toMatchObject({ rows: [], page: 1, pageCount: 1, matching: 0 });
+  });
+});
+
+describe("parseCount — what a count box holds", () => {
+  it("a whole number of zero or more is a count; blank is blank; anything else is invalid", () => {
+    expect(parseCount("12")).toBe(12);
+    expect(parseCount(" 0 ")).toBe(0);
+    expect(parseCount("")).toBe("blank");
+    expect(parseCount("   ")).toBe("blank");
+    expect(parseCount(undefined)).toBe("blank");
+    expect(parseCount("1.5")).toBe("invalid");
+    expect(parseCount("-2")).toBe("invalid");
+    expect(parseCount("abc")).toBe("invalid");
   });
 });
