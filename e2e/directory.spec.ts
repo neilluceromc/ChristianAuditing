@@ -188,9 +188,10 @@ test.describe.serial("directory", () => {
   test("5. no serious or critical axe violations on an employee page with a populated Transfers card", async ({ page }) => {
     const carlo = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0099" } });
     await login(page, IT);
-    await page.goto(`/employees/${carlo.id}`);
-    await expect(page.getByRole("heading", { name: "Transfers" })).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator("li").filter({ hasText: "HR → Operations" })).toBeVisible();
+    // Phase 39 (spec §2.1, §2.5): transfers live on the side card's Transfers tab; ?side= opens it.
+    await page.goto(`/employees/${carlo.id}?side=transfers`);
+    await expect(page.getByRole("tab", { name: /^Transfers/ })).toHaveAttribute("aria-selected", "true", { timeout: 15_000 });
+    await expect(page.getByRole("tabpanel", { name: /^Transfers/ }).locator("li").filter({ hasText: "HR → Operations" })).toBeVisible();
     await expectNoSeriousAxe(page);
   });
 });

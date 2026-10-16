@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { fmtDate, fmtDayMonth, localDateISO } from "../src/lib/format";
+import { fmtDate, fmtDayMonth, fmtDayMonthYear, localDateISO } from "../src/lib/format";
 import { dueStatus } from "../src/lib/deadlines";
 
 /**
@@ -368,7 +368,8 @@ test.describe.serial("custody", () => {
     const heldCount = await db.asset.count({ where: { assigneeId: finance.id } });
 
     await login(page, IT);
-    await page.goto(`/employees/${finance.id}`);
+    // Phase 39 (spec §2.4): the form lives on the side card's Form tab; ?side=form opens it.
+    await page.goto(`/employees/${finance.id}?side=form`);
     await expect(page.getByText("No signed form on file")).toBeVisible();
 
     await page.getByRole("button", { name: "Record a signed form…" }).click();
@@ -383,7 +384,7 @@ test.describe.serial("custody", () => {
     await expect(page.getByText("Signed form recorded")).toBeVisible({ timeout: 15_000 });
 
     const plural = heldCount === 1 ? "" : "s";
-    await expect(page.getByText(`Signed ${fmtDate(signedRaw)} · ${heldCount} item${plural} covered`)).toBeVisible();
+    await expect(page.getByText(`Signed ${fmtDayMonthYear(signedRaw)} · covers ${heldCount} item${plural}`)).toBeVisible();
 
     const ack = await db.acknowledgement.findFirstOrThrow({ where: { employeeId: finance.id } });
     expect((ack.items as unknown as Array<{ assetId: string }>)).toHaveLength(heldCount);
@@ -405,7 +406,9 @@ test.describe.serial("custody", () => {
     await assignDialog.getByRole("button", { name: "Assign", exact: true }).click();
     await expect(page.getByText(`BR-HS-0502 assigned to ${finance.name}`)).toBeVisible({ timeout: 15_000 });
 
-    await page.goto(`/employees/${finance.id}`);
-    await expect(page.getByText("Issued since last signature: BR-HS-0502")).toBeVisible();
+    await page.goto(`/employees/${finance.id}?side=form`);
+    const since = page.getByText("1 issued since", { exact: true });
+    await expect(since).toBeVisible();
+    await expect(since).toHaveAttribute("title", "BR-HS-0502");
   });
 });

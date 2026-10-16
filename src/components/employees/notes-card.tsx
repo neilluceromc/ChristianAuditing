@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +25,8 @@ const FIRST = 5;
 /**
  * Phase 37 (spec §4.5): the note log on a profile. Admin and it_staff add; the author edits their own; the
  * author or any admin deletes. The server re-checks every one of those — this only decides what to show.
+ * Phase 39 (Task 2): rendered inside the side card's Notes tab, so it has no card or heading of its own — the tab
+ * carries the count. Task 3 replaces it with the preview and the side panel.
  */
 export function NotesCard({
   employeeId, employeeName, notes, viewer, canAdd,
@@ -47,9 +48,8 @@ export function NotesCard({
   }
 
   return (
-    <Card>
-      <CardHeader title={`Notes (${notes.length})`} />
-      <CardBody className="flex flex-col gap-3">
+    <>
+      <div className="flex flex-col gap-3">
         {canAdd && (
           <div className="flex flex-col gap-2">
             {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
@@ -92,9 +92,9 @@ export function NotesCard({
             </Button>
           </div>
         )}
-      </CardBody>
+      </div>
       <DeleteNoteDialog key={deleting?.id ?? "none"} note={deleting} onClose={() => setDeleting(null)} />
-    </Card>
+    </>
   );
 }
 

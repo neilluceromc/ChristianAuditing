@@ -593,9 +593,11 @@ test.describe("employees & loadout", () => {
     await page.getByRole("link", { name: /Marites Bautista/ }).click();
     await expect(page).toHaveURL(/\/employees\/[a-z0-9]+$/i, { timeout: 20_000 });
     // Phase 29 (spec §4.1): "Accountability form" left the profile header; the
-    // acknowledgement card's own link to /employees/{id}/form is "Print form"
-    // (the card's heading still reads "Accountability form", but a heading is
-    // not a link).
+    // link to /employees/{id}/form is "Print form" — since Phase 39 (spec §2.4)
+    // on the side card's Form tab.
+    const formTab = page.getByRole("tab", { name: /^Form/ });
+    await waitForHydration(formTab);
+    await formTab.click();
     await page.getByRole("link", { name: "Print form" }).click();
     await expect(page.getByText("Equipment accountability form")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("BR-LT-0148")).toBeVisible();

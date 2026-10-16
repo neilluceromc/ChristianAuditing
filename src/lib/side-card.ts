@@ -3,6 +3,7 @@
  * opens, what the tab badges say, and which status dot an IT-setup value gets.
  * No React, no DOM — the component calls these and the tests pin them.
  */
+import { fmtDayMonthYear } from "./format";
 
 export type SideTab = "notes" | "setup" | "form" | "transfers";
 export const SIDE_TABS: readonly SideTab[] = ["notes", "setup", "form", "transfers"];
@@ -61,4 +62,32 @@ export function setupDot(value: string | null): SetupDot {
   if (value === "NOT_YET") return "notyet";
   if (value === "NOT_NEEDED" || value === "None") return "off";
   return "done"; // DONE, or any VPN name
+}
+
+/** Roving focus on the tab row: ←/→ move to the neighbour (wrapping), Home/End jump to the ends; anything else is null. */
+export function tabAfterKey(current: SideTab, key: string): SideTab | null {
+  const i = SIDE_TABS.indexOf(current);
+  const n = SIDE_TABS.length;
+  if (key === "ArrowRight") return SIDE_TABS[(i + 1) % n];
+  if (key === "ArrowLeft") return SIDE_TABS[(i - 1 + n) % n];
+  if (key === "Home") return SIDE_TABS[0];
+  if (key === "End") return SIDE_TABS[n - 1];
+  return null;
+}
+
+/**
+ * The Form tab's status line (§2.4): amber "No signed form on file", or green "Signed {d MMM yyyy} · covers {n}
+ * items", plus "{k} issued since" when held items are not on the latest signed form.
+ */
+export function formStatus(
+  latest: { signedAt: Date; items: number } | null,
+  uncovered: number,
+): { dot: "done" | "notyet"; text: string; since: string | null } {
+  if (!latest) return { dot: "notyet", text: "No signed form on file", since: null };
+  const items = `${latest.items} item${latest.items === 1 ? "" : "s"}`;
+  return {
+    dot: "done",
+    text: `Signed ${fmtDayMonthYear(latest.signedAt)} · covers ${items}`,
+    since: uncovered > 0 ? `${uncovered} issued since` : null,
+  };
 }

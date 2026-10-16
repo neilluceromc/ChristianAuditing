@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/toast";
-import type { ActionResult } from "@/server/action-result";
+import type { ActionErrorKind, ActionResult } from "@/server/action-result";
 
 /**
  * Phase 20: one runner per area (mirrors use-stock-runner.ts / use-supplier-
@@ -17,6 +17,9 @@ import type { ActionResult } from "@/server/action-result";
  * mutation).
  *
  * `okMsg` may be a plain string or a function of the result data.
+ *
+ * `onFail` runs on any refusal (rate limit, validation, conflict, forbidden) — Phase 39 (spec §2.3): the IT
+ * setup selects snap back to the stored value with it.
  */
 export function useEmployeeRunner(claimedFieldKeys: string[] = []) {
   const router = useRouter();
@@ -29,7 +32,7 @@ export function useEmployeeRunner(claimedFieldKeys: string[] = []) {
   function run<T>(
     fn: () => Promise<ActionResult<T>>,
     okMsg: string | ((data: T) => string),
-    opts?: { onOk?: (data: T) => void; refresh?: boolean },
+    opts?: { onOk?: (data: T) => void; onFail?: (kind: ActionErrorKind) => void; refresh?: boolean },
   ) {
     setError(null);
     setFieldErrors({});
@@ -39,7 +42,10 @@ export function useEmployeeRunner(claimedFieldKeys: string[] = []) {
         toast(typeof okMsg === "function" ? okMsg(res.data) : okMsg, "settled");
         opts?.onOk?.(res.data);
         if (opts?.refresh ?? true) router.refresh();
-      } else if (res.kind === "rate_limited") {
+        return;
+      }
+      opts?.onFail?.(res.kind);
+      if (res.kind === "rate_limited") {
         setRetryAfter(res.retryAfterSec ?? 60);
       } else if (res.kind === "validation") {
         const errs = res.fieldErrors ?? {};

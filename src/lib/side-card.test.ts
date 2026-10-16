@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  formStatus,
   pickSideTab,
+  tabAfterKey,
   readStoredTab,
   SIDE_TAB_KEY,
   SIDE_TABS,
@@ -98,5 +100,40 @@ describe("setupDot", () => {
     expect(setupDot("None")).toBe("off");
     expect(setupDot(null)).toBe("unrecorded");
     expect(setupDot("Zscaler")).toBe("done");
+  });
+});
+
+describe("tabAfterKey", () => {
+  it("arrows move to the neighbour and wrap at the ends", () => {
+    expect(tabAfterKey("notes", "ArrowRight")).toBe("setup");
+    expect(tabAfterKey("transfers", "ArrowRight")).toBe("notes");
+    expect(tabAfterKey("setup", "ArrowLeft")).toBe("notes");
+    expect(tabAfterKey("notes", "ArrowLeft")).toBe("transfers");
+  });
+  it("Home and End jump to the ends", () => {
+    expect(tabAfterKey("form", "Home")).toBe("notes");
+    expect(tabAfterKey("setup", "End")).toBe("transfers");
+  });
+  it("any other key is not a tab move", () => {
+    expect(tabAfterKey("notes", "Enter")).toBeNull();
+    expect(tabAfterKey("notes", "ArrowDown")).toBeNull();
+  });
+});
+
+describe("formStatus", () => {
+  it("with nothing signed: the amber line, no issued-since", () => {
+    expect(formStatus(null, 3)).toEqual({ dot: "notyet", text: "No signed form on file", since: null });
+  });
+  it("signed: the date (d MMM yyyy, Manila) and the item count", () => {
+    // 2026-10-03T17:00Z is 4 Oct 01:00 in Manila.
+    expect(formStatus({ signedAt: new Date("2026-10-03T17:00:00Z"), items: 4 }, 0))
+      .toEqual({ dot: "done", text: "Signed 4 Oct 2026 · covers 4 items", since: null });
+  });
+  it("one item reads singular", () => {
+    expect(formStatus({ signedAt: new Date("2026-10-04T04:00:00Z"), items: 1 }, 0).text)
+      .toBe("Signed 4 Oct 2026 · covers 1 item");
+  });
+  it("items issued after the signature read as {k} issued since", () => {
+    expect(formStatus({ signedAt: new Date("2026-10-04T04:00:00Z"), items: 2 }, 3).since).toBe("3 issued since");
   });
 });

@@ -116,10 +116,10 @@ test.describe.serial("transfers", () => {
       page.getByText(`Transferred from Finance on ${fmtDate(new Date())}`),
     ).toBeVisible({ timeout: 15_000 });
 
-    // The Transfers card (transfers-card.tsx): a new row, Finance -> HR,
-    // carrying the reason and the actor.
-    await expect(page.getByRole("heading", { name: "Transfers" })).toBeVisible();
-    const row = page.locator("li").filter({ hasText: "Finance → HR" });
+    // The side card's Transfers tab (Phase 39, spec §2.5 — side-card/transfers-tab.tsx): a new row,
+    // Finance -> HR, carrying the reason and the actor.
+    await page.getByRole("tab", { name: /^Transfers/ }).click();
+    const row = page.getByRole("tabpanel", { name: /^Transfers/ }).locator("li").filter({ hasText: "Finance → HR" });
     await expect(row).toBeVisible();
     await expect(row).toContainText("Reorg");
     await expect(row).toContainText("J. Sarmiento");
