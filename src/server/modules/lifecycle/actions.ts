@@ -22,7 +22,7 @@ import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, defaultClassFor, isAssignable, isDirectLifecycle, isStatusOf, parseCls, statusLabel,
 } from "@/lib/asset-class";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
+  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan, triageInputSchema,
 } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange } from "./apply";
 import { rememberPicks } from "@/server/recent-picks";
@@ -320,14 +320,15 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
 }
 
 // ── triageAsset ─────────────────────────────────────────────────────────────
-const triageSchema = z.object({ assetId: z.string().min(1), outcome: z.enum(TRIAGE_OUTCOMES), note: z.string().trim().max(500).optional() });
+// Phase 40 (spec §8): the schema lives in lib/lifecycle (triageInputSchema) so its reason rule is unit-tested;
+// a missing decision, or Dispose/Donate without a reason of at least 2 characters, is refused before any write.
 
 export async function triageAsset(input: unknown): Promise<ActionResult<{ tag: string; status: string }>> {
   const user = await actionUser();
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
-  const parsed = triageSchema.safeParse(input);
+  const parsed = triageInputSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
   const now = new Date();
@@ -339,11 +340,21 @@ export async function triageAsset(input: unknown): Promise<ActionResult<{ tag: s
     if (asset.returnedAt === null) return conflict(`${asset.tag} is not waiting for triage.`);
     const full = await tx.asset.findUniqueOrThrow({ where: { id: asset.id }, select: { notes: true } });
     const notes = d.note ? (full.notes ? `${full.notes}\n${d.note}` : d.note) : undefined;
-    const triageDiff: AuditDiff = { triage: { from: null, to: TRIAGE_LABEL[d.outcome] } };
+    // The asset has no disposal-reason column: the reason rides the audit entry (`reason`, the key other
+    // reasoned actions use), the EXECUTED approval's payload and the asset's notes, as the note always did.
+    const triageDiff: AuditDiff = {
+      triage: { from: null, to: TRIAGE_LABEL[d.outcome] },
+      ...(d.note ? { reason: { from: null, to: d.note } } : {}),
+    };
     if (d.outcome === asset.status) {
       // Keep as spare: only the flag moves. No approval row — nothing about the
       // asset's lifecycle changed, so there is no decision to record as one.
-      await tx.asset.update({ where: { id: asset.id }, data: { returnedAt: null, ...(notes !== undefined ? { notes } : {}) } });
+      // State-guarded: a second, concurrent triage of the same device finds nothing still waiting.
+      const { count } = await tx.asset.updateMany({
+        where: { id: asset.id, status: asset.status, returnedAt: { not: null } },
+        data: { returnedAt: null, ...(notes !== undefined ? { notes } : {}) },
+      });
+      if (count === 0) return conflict(`${asset.tag} is not waiting for triage.`);
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
         action: "lifecycle.triage", diff: { ...triageDiff, returnedAt: { from: asset.returnedAt, to: null } },

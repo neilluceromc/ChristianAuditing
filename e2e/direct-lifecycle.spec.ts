@@ -148,7 +148,9 @@ test.describe.serial("direct changes", () => {
 
     await page.getByRole("button", { name: "Triage", exact: true }).click();
     const triageDialog = page.getByRole("dialog", { name: "Triage BR-LT-0210 · ThinkPad T14 Gen 4" });
-    await expect(triageDialog.getByLabel("Decision")).toHaveValue("SPARE"); // default: Keep as spare
+    // Phase 40 §8: no default decision — Keep as spare is chosen, not saved past.
+    await expect(triageDialog.getByLabel("Decision")).toHaveValue("");
+    await triageDialog.getByLabel("Decision").selectOption("SPARE");
     await triageDialog.getByRole("button", { name: "Save decision", exact: true }).click();
     await expect(page.getByText("BR-LT-0210 triaged · Keep as spare")).toBeVisible();
 
