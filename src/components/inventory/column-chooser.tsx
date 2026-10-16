@@ -6,12 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useOverlayLayer } from "@/components/ui/use-focus-trap";
 import { useToast } from "@/components/ui/toast";
-import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
+import { COLUMN_LABELS, COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import { saveColumns } from "@/server/preferences";
 
-const LABELS: Record<string, string> = {
-  category: "Category", assigned: "Assigned", purchased: "Purchased", warranty: "Warranty",
-};
+const LABELS = COLUMN_LABELS["columns:inventory"];
 
 export function ColumnChooser({ visible }: { visible: string[] }) {
   const router = useRouter();

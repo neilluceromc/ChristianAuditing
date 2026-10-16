@@ -20,6 +20,12 @@ import { RegistrationBlock } from "@/components/inventory/registration-block";
 import { CreatedNotice } from "@/components/inventory/created-notice";
 import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
 import { statusFamily } from "@/lib/status";
+import { WARRANTY_COVERED_BY_LABEL } from "@/lib/purchase-summary";
+
+/** A stored value outside the zod set (an older import) reads as itself rather than blank. */
+function coveredByLabel(v: string): string {
+  return (WARRANTY_COVERED_BY_LABEL as Record<string, string>)[v] ?? v;
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -113,6 +119,12 @@ export default async function AssetOverviewPage({
               { label: "Cost", value: fmtMoney(asset.cost === null ? null : Number(asset.cost)), mono: true },
               { label: "Vendor", value: asset.vendor?.name ?? "—" },
               { label: "Invoice / receipt no.", value: asset.invoiceRef ?? "—", mono: true },
+              // Phase 40 §8: the Phase 34 purchase fields, each shown only when set
+              ...(asset.receiptRef ? [{ label: "OR no.", value: asset.receiptRef, mono: true }] : []),
+              ...(asset.warrantyCoveredBy
+                ? [{ label: "Covered by", value: coveredByLabel(asset.warrantyCoveredBy) }]
+                : []),
+              ...(asset.warrantyContact ? [{ label: "Who to call for repairs", value: asset.warrantyContact }] : []),
               {
                 label: "Warranty",
                 value: warranty ? (
