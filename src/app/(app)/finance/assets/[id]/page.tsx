@@ -56,7 +56,7 @@ export default async function FinanceAssetPage({ params }: { params: Promise<{ i
               <SettingsButton
                 asset={{
                   id: d.id, tag: d.tag, costC: d.costC,
-                  confirmedAt: d.approvedAt ? d.approvedAt.toISOString() : null,
+                  startMonth: d.result?.startMonth ?? null,
                   custom: d.custom, lifeMonths: d.lifeMonths, salvageC: d.salvageC,
                   note: extra?.depreciationNote ?? null,
                   categoryText: catLife === null ? `${d.category}: no policy` : `${d.category}: ${lifeLabel(catLife)}, ${catPct ?? 0}% salvage`,
@@ -112,7 +112,7 @@ export default async function FinanceAssetPage({ params }: { params: Promise<{ i
                   <div className="flex flex-col gap-1.5">
                     <ProgressBar value={d.monthsUsed} max={d.lifeMonths} label="Months used" />
                     <p className="font-mono text-[11px] text-fg-muted">
-                      {d.monthsUsed} of {d.lifeMonths} months · {d.startLabel} → {d.endLabel} · as of the end of {d.asOfLabel}
+                      {d.monthsUsed} of {d.lifeMonths} months · {d.startLabel} → {d.endLabel} · as of today ({d.asOfLabel} counted)
                     </p>
                   </div>
                 )}

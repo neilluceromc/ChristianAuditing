@@ -1,31 +1,35 @@
 /**
  * Phase 35 (spec §5.2): straight-line depreciation, computed on read. Integer centavos and
  * Asia/Manila calendar months throughout; every screen and export calls these functions.
+ * Phase 38 (spec §2): an asset depreciates from its purchase month (approval month when it has no purchase date),
+ * that month counted in full, and the current month is taken (not projected).
  */
 export type MonthIndex = number;
 
 const MANILA = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", timeZone: "Asia/Manila" });
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function manilaMonth(d: Date): MonthIndex {
   const [y, m] = MANILA.format(d).split("-").map(Number);
   return y * 12 + (m - 1);
 }
 
+/** Phase 38: the current Manila month — it is counted as actual, not projected. */
 export function asOfMonth(now: Date): MonthIndex {
-  return manilaMonth(now) - 1;
+  return manilaMonth(now);
+}
+
+/**
+ * Phase 38 (spec §2): the month an asset starts depreciating (month 1, charged in full): the purchase month, or the
+ * approval month when there is no purchase date. Null while Finance has not approved it.
+ */
+export function depStartMonth(asset: { purchasedAt: Date | null; financeConfirmedAt: Date | null }): MonthIndex | null {
+  if (!asset.financeConfirmedAt) return null;
+  return manilaMonth(asset.purchasedAt ?? asset.financeConfirmedAt);
 }
 
 export function monthLabel(m: MonthIndex): string {
   return `${MONTH_NAMES[((m % 12) + 12) % 12]} ${Math.floor(m / 12)}`;
-}
-
-export function monthEndLabel(m: MonthIndex): string {
-  const y = Math.floor(m / 12);
-  const mo = ((m % 12) + 12) % 12;
-  const last = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
-  return `${String(last).padStart(2, "0")} ${SHORT[mo]} ${y}`;
 }
 
 export function toCentavos(v: number | string | { toString(): string } | null | undefined): number | null {
@@ -65,11 +69,11 @@ function accumulatedThrough(base: number, life: number, start: MonthIndex, throu
   return Math.floor(base / life) * months;
 }
 
-export function depreciate(cost: number, confirmedAt: Date | null, policy: Policy | null, asOf: MonthIndex): DepResult {
+/** `start` is `depStartMonth(...)`: null means Finance has not approved the asset. */
+export function depreciate(cost: number, start: MonthIndex | null, policy: Policy | null, asOf: MonthIndex): DepResult {
   const flat = (state: DepState, startMonth: MonthIndex | null): DepResult =>
     ({ state, cost, accumulated: 0, bookValue: cost, monthly: null, startMonth, policy });
-  if (!confirmedAt) return flat("not-started", null);
-  const start = manilaMonth(confirmedAt) + 1;
+  if (start === null) return flat("not-started", null);
   if (!policy) return flat("no-policy", start);
   if (policy.salvage >= cost) return flat("bad-salvage", start);
   if (start > asOf) return flat("not-started", start);
@@ -84,9 +88,8 @@ export function depreciate(cost: number, confirmedAt: Date | null, policy: Polic
 
 export interface YearRow { opening: number; months: number[]; projected: boolean[]; total: number; closing: number }
 
-export function yearGrid(cost: number, confirmedAt: Date | null, policy: Policy | null, year: number, asOf: MonthIndex): YearRow | null {
-  if (!confirmedAt || !policy || policy.salvage >= cost) return null;
-  const start = manilaMonth(confirmedAt) + 1;
+export function yearGrid(cost: number, start: MonthIndex | null, policy: Policy | null, year: number, asOf: MonthIndex): YearRow | null {
+  if (start === null || !policy || policy.salvage >= cost) return null;
   const first = year * 12;
   if (start > first + 11) return null;
   const base = cost - policy.salvage;
@@ -129,9 +132,8 @@ export interface LifeYear {
 }
 
 /** Phase 35 (spec 4.2 item 5): the asset page's year-by-year schedule over the whole life. */
-export function lifeYears(cost: number, confirmedAt: Date | null, policy: Policy | null, asOf: MonthIndex): LifeYear[] {
-  if (!confirmedAt || !policy || policy.salvage >= cost) return [];
-  const start = manilaMonth(confirmedAt) + 1;
+export function lifeYears(cost: number, start: MonthIndex | null, policy: Policy | null, asOf: MonthIndex): LifeYear[] {
+  if (start === null || !policy || policy.salvage >= cost) return [];
   const end = start + policy.lifeMonths - 1;
   const base = cost - policy.salvage;
   const out: LifeYear[] = [];

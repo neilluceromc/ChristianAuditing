@@ -18,8 +18,8 @@ export interface OverrideAsset {
   id: string;
   tag: string;
   costC: number | null;
-  /** ISO date Finance approved the record, or null while unconfirmed. */
-  confirmedAt: string | null;
+  /** The month it starts depreciating (`depStartMonth`: the purchase month), or null while Finance has not approved it. */
+  startMonth: number | null;
   custom: boolean;
   lifeMonths: number | null;
   salvageC: number | null;
@@ -63,8 +63,7 @@ export function OverrideDialog({ open, onClose, asset }: { open: boolean; onClos
       { cost: asset.costC, lifeMonths: life, salvage: Math.round(salvagePesos * 100) },
       { lifeMonths: asset.categoryLife, salvagePercent: asset.categorySalvagePercent },
     );
-    const confirmedAt = asset.confirmedAt ? new Date(asset.confirmedAt) : null;
-    const r = depreciate(asset.costC, confirmedAt, policy, asOfMonth(new Date()));
+    const r = depreciate(asset.costC, asset.startMonth, policy, asOfMonth(new Date()));
     const base = asset.costC - policy!.salvage;
     if (policy!.salvage >= asset.costC) {
       preview = "With this: salvage is not below cost";
@@ -73,9 +72,9 @@ export function OverrideDialog({ open, onClose, asset }: { open: boolean; onClos
       const book = fmtMoneyExact(r.bookValue / 100);
       preview = `With this: ${monthly} a month · book value now ${book}`;
       if (r.state === "not-started") {
-        preview += confirmedAt && r.startMonth !== null
-          ? `. It starts depreciating in ${monthLabel(r.startMonth)}, the month after approval.`
-          : ". It starts depreciating the month after Finance approves it.";
+        preview += r.startMonth !== null
+          ? `. It depreciates from ${monthLabel(r.startMonth)}, the purchase month.`
+          : ". It starts depreciating once Finance approves it, from the purchase month.";
       }
     }
   }

@@ -4,7 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { readSheet } from "read-excel-file/node";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { asOfMonth, depreciate, manilaMonth, resolvePolicy } from "@/lib/depreciation";
+import { asOfMonth, depStartMonth, depreciate, manilaMonth, resolvePolicy, type MonthIndex } from "@/lib/depreciation";
 import { fmtMoneyExact } from "@/lib/format";
 
 /**
@@ -114,25 +114,31 @@ async function setLaptopPolicy(life: number | null, salvage: number | null) {
   await db.assetCategory.update({ where: { id: cat.id }, data: { depreciationLifeMonths: life, depreciationSalvagePercent: salvage } });
 }
 
-async function approvedLaptop(tag: string) {
+/**
+ * Approves the laptop and returns the month it starts depreciating. Phase 38: that is the PURCHASE month (the seeded
+ * BR-LT-0148 was bought about 720 days ago), not the month after approval — so the expectation reads the asset's own
+ * purchasedAt rather than assuming approval-date arithmetic.
+ */
+async function approvedLaptop(tag: string): Promise<MonthIndex> {
   const finance = await db.user.findUniqueOrThrow({ where: { email: FINANCE } });
   const confirmedAt = new Date(Date.now() - 100 * DAY);
   await reset(tag, { financeConfirmedAt: confirmedAt, financeConfirmedById: finance.id });
   await setLaptopPolicy(CATEGORY_LIFE, CATEGORY_SALVAGE);
-  return confirmedAt;
+  const { purchasedAt } = await db.asset.findUniqueOrThrow({ where: { tag }, select: { purchasedAt: true } });
+  return depStartMonth({ purchasedAt, financeConfirmedAt: confirmedAt })!;
 }
 
 async function auditCount(entityId: string, action: string) {
   return db.auditEntry.count({ where: { entityId, action } });
 }
 
-function expectedBook(costPesos: number, confirmedAt: Date, life = CATEGORY_LIFE, salvagePercent: number | null = CATEGORY_SALVAGE, salvageC: number | null = null) {
+function expectedBook(costPesos: number, start: MonthIndex, life = CATEGORY_LIFE, salvagePercent: number | null = CATEGORY_SALVAGE, salvageC: number | null = null) {
   const costC = Math.round(costPesos * 100);
   const policy = resolvePolicy(
     { cost: costC, lifeMonths: salvageC === null ? null : life, salvage: salvageC },
     { lifeMonths: life, salvagePercent },
   );
-  return fmtMoneyExact(depreciate(costC, confirmedAt, policy, asOfMonth(new Date())).bookValue / 100);
+  return fmtMoneyExact(depreciate(costC, start, policy, asOfMonth(new Date())).bookValue / 100);
 }
 
 /** An exact tag in the search box opens the record (scanner contract); the tag minus its last digit lists. */
@@ -336,15 +342,15 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
     const before = await snap(tag);
     const cat = await laptopCategory();
     try {
-      const confirmedAt = await approvedLaptop(tag);
+      const start = await approvedLaptop(tag);
       await login(page, FINANCE);
       await page.goto(`/finance/assets?fin=approved&q=${tag}`);
       const r = row(page, tag);
       await expect(r).toBeVisible();
       await expect(r).toContainText("Approved");
-      await expect(r).toContainText(expectedBook(55000, confirmedAt));
+      await expect(r).toContainText(expectedBook(55000, start));
       await expect(page.getByText(/^1 asset · 1 with a cost · .* book value/)).toBeVisible();
-      await expect(page.getByText(/As of the end of/)).toBeVisible();
+      await expect(page.getByText(/As of today \(.+ counted\)/)).toBeVisible();
     } finally {
       await restore(tag, before);
       await db.assetCategory.update({ where: { id: cat.id }, data: { depreciationLifeMonths: cat.depreciationLifeMonths, depreciationSalvagePercent: cat.depreciationSalvagePercent } });
@@ -356,13 +362,13 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
     const before = await snap(tag);
     const cat = await laptopCategory();
     try {
-      const confirmedAt = await approvedLaptop(tag);
+      const start = await approvedLaptop(tag);
       const id = before.id;
       const [set0, cleared0] = await Promise.all([auditCount(id, "depreciation.override"), auditCount(id, "depreciation.override.cleared")]);
 
       await login(page, FINANCE);
       await page.goto(`/finance/assets?fin=approved&q=${tag}`);
-      const categoryBook = expectedBook(55000, confirmedAt);
+      const categoryBook = expectedBook(55000, start);
       await expect(row(page, tag)).toContainText(categoryBook);
 
       const trigger = page.getByRole("button", { name: `Actions for ${tag}` });
@@ -378,7 +384,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await dialog.getByRole("button", { name: "Save", exact: true }).click();
       await expect(page.getByText(`Custom depreciation saved — ${tag}`)).toBeVisible();
 
-      const customBook = expectedBook(55000, confirmedAt, 24, null, 500_000);
+      const customBook = expectedBook(55000, start, 24, null, 500_000);
       expect(customBook).not.toBe(categoryBook);
       await expect(row(page, tag)).toContainText("custom");
       await expect(row(page, tag)).toContainText(customBook);
@@ -421,11 +427,11 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
     }
   });
 
-  test("8. Finance's home: Book value as of a month, and registrations to review", async ({ page }) => {
+  test("8. Finance's home: Book value as of today, and registrations to review", async ({ page }) => {
     await login(page, FINANCE);
     await page.goto("/");
     await expect(page.getByText("Book value", { exact: true })).toBeVisible();
-    await expect(page.getByText(/as of /).first()).toBeVisible();
+    await expect(page.getByText(/as of today/).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /\d+ (IT|Purchasing) registrations? to review/ }).first()).toHaveAttribute("href", /\/finance\/assets\?(cls=PURCHASING&)?fin=with-finance/);
   });
 
