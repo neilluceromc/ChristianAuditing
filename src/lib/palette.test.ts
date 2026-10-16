@@ -9,23 +9,10 @@ import {
   exactTagFirst,
   holderHint,
   holdsHint,
-  isExactTag,
   rateLimitMessage,
   searchRateDecision,
   serialHint,
 } from "./palette";
-
-describe("isExactTag (spec §4: the query equals the tag, case-insensitive, trimmed)", () => {
-  it("matches regardless of case and surrounding spaces", () => {
-    expect(isExactTag("BR-LT-0148", "BR-LT-0148")).toBe(true);
-    expect(isExactTag("BR-LT-0148", "  br-lt-0148 ")).toBe(true);
-  });
-  it("does not match a prefix or a longer tag", () => {
-    expect(isExactTag("BR-LT-0148", "BR-LT-014")).toBe(false);
-    expect(isExactTag("BR-LT-01480", "BR-LT-0148")).toBe(false);
-    expect(isExactTag("BR-LT-0148", "")).toBe(false);
-  });
-});
 
 describe("exactTagFirst (spec §4: the exact tag is the first result)", () => {
   const row = (id: string, tag: string) => ({ id, tag });

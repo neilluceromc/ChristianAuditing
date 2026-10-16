@@ -1,3 +1,5 @@
+import type { TriageOutcome } from "./lifecycle";
+
 /**
  * Phase 23 (spec §4.2). One list, reviewable in one file. Every chip is >= 4
  * characters, above the min-3 rule every chip site enforces (reasonRequired
@@ -36,7 +38,7 @@ export function chipsForOutcome(outcome: "MISSING" | "DEFECTIVE" | "BUYOUT" | "T
 }
 
 /** Phase 40 §8: the triage dialog's chips for a decision — Dispose and Donate have their own; Keep and Repair none. */
-export function chipsForTriage(outcome: "SPARE" | "DEFECTIVE" | "DISPOSE" | "DONATED" | ""): readonly string[] {
+export function chipsForTriage(outcome: TriageOutcome | ""): readonly string[] {
   switch (outcome) {
     case "DISPOSE": return REASON_CHIPS["asset.dispose"];
     case "DONATED": return REASON_CHIPS["asset.donate"];

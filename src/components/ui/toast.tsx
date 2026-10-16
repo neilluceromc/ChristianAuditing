@@ -148,9 +148,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         aria-live="polite"
         className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col gap-2"
         onFocus={(e) => {
-          // focus coming in from outside the toasts: remember where from
+          // focus coming in from outside the toasts: remember where from. Coming from nowhere (the window, the
+          // address bar) clears it, so a dismissal never hands focus back to an opener from an earlier visit.
           const from = e.relatedTarget;
-          if (from instanceof HTMLElement && !e.currentTarget.contains(from)) opener.current = from;
+          if (from === null) opener.current = null;
+          else if (from instanceof HTMLElement && !e.currentTarget.contains(from)) opener.current = from;
         }}
       >
         {toasts.map((t) => (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLoadout, createAssignments, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, numberSlotLabels, orderTiles, profilePrimary, profileTiles, profileTileMenuItems, resolvePolicy, tileChip, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, numberSlotLabels, orderTiles, profilePrimary, profileTiles, profileTileMenuItems, resolvePolicy, tileChip, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
 
 const policies = [
   { id: "p-dept", name: "Finance standard", appliesToTitle: null, appliesToDepartmentId: "dept-fin", slots: [] },
@@ -364,16 +364,5 @@ describe("profileTileMenuItems — the ⋯ items for any profile tile (spec §4.
     expect(profileTileMenuItems({ ...extra, kind: "loan" }, act)).toEqual(["return", "open"]);
     expect(profileTileMenuItems({ ...extra, pending: true }, act)).toEqual(["open"]);
     expect(profileTileMenuItems(extra, { mayAct: false, direct: true })).toEqual(["open"]);
-  });
-});
-
-describe("createAssignments", () => {
-  const picks = [{ assetId: "a1" }, { assetId: "a2" }];
-  it("assigns the picks for someone ACTIVE", () => {
-    expect(createAssignments("ACTIVE", picks)).toEqual(picks);
-  });
-  it("assigns nothing for someone offboarding or offboarded", () => {
-    expect(createAssignments("OFFBOARDING", picks)).toEqual([]);
-    expect(createAssignments("OFFBOARDED", picks)).toEqual([]);
   });
 });

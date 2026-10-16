@@ -10,12 +10,6 @@ import type { Prisma } from "@prisma/client";
 /** Rows per group. */
 export const PALETTE_LIMIT = 5;
 
-/** The query equals the tag, case-insensitive and trimmed (spec §4 "Exact tag"). */
-export function isExactTag(tag: string, query: string): boolean {
-  const q = query.trim();
-  return q.length > 0 && tag.toLowerCase() === q.toLowerCase();
-}
-
 /**
  * The exact-tag asset first, then the rest in their own order without it,
  * capped at `limit`. The exact row comes from its own lookup, so it leads even
