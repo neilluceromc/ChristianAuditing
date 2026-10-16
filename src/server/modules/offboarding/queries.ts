@@ -1,5 +1,6 @@
 import type { ApprovalType, AssetClass, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { liveAccessFields, type SetupRecord } from "@/lib/it-setup";
 import { pagedSnapshot } from "@/server/paged";
 import { OPEN_APPROVAL_STATES } from "@/server/modules/approvals/create";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
@@ -27,6 +28,8 @@ export interface OffboardingRow {
   /** Phase 20 (spec §4.2): the Department facet's own filter value. */
   departmentId: string;
   m365: string | null;
+  /** Phase 40 (spec §7): how many rows of their IT access are live. */
+  itAccess: number;
   /** still physically held by them */
   itemsOut: number;
   /** decided items, INCLUDING ones whose return already executed and left */
@@ -153,6 +156,7 @@ function toOffboardingRow(e: OffboardingCandidate, todayISO: string): Offboardin
   const state = {
     id: e.id, employment: e.employment, dueAt: e.offboardingDueAt, undecided: heldIdSet.size - decidedHeld,
     failed: failed ? { refNo: failed.refNo, approvalId: failed.id } : null, m365Status: e.m365Status,
+    itAccess: liveAccessFields(e).length,
   };
   return {
     id: e.id,
@@ -162,6 +166,7 @@ function toOffboardingRow(e: OffboardingCandidate, todayISO: string): Offboardin
     department: e.department.name,
     departmentId: e.departmentId,
     m365: e.m365Status,
+    itAccess: state.itAccess,
     itemsOut: heldIdSet.size,
     decided: decidedHeld + decidedGone,
     total: heldIdSet.size + decidedGone,
@@ -366,6 +371,8 @@ export interface WizardData {
     department: string;
     employment: string;
     m365Status: string | null;
+    /** Phase 40 (spec §7): the four IT-access rows the Accounts step lists. */
+    setup: SetupRecord;
     joined: string;
     dueAt: Date | null;
   };
@@ -530,6 +537,10 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
       department: employee.department.name,
       employment: employee.employment,
       m365Status: employee.m365Status,
+      setup: {
+        entraStatus: employee.entraStatus, autopilotStatus: employee.autopilotStatus,
+        argusStatus: employee.argusStatus, vpn: employee.vpn,
+      },
       joined: fmtDate(employee.joinedAt),
       dueAt: employee.offboardingDueAt,
     },

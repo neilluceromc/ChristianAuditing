@@ -12,6 +12,9 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { M365_CANONICAL } from "@/lib/labels";
 import { m365Live } from "@/lib/offboarding";
+import { useEmployeeRunner } from "@/components/employees/use-employee-runner";
+import { liveAccessFields, SETUP_LABELS, SETUP_STATE_LABELS, VPN_REMOVED, type SetupField, type SetupRecord } from "@/lib/it-setup";
+import { setItSetup } from "@/server/modules/employees/setup-actions";
 import { closeAccounts } from "@/server/modules/offboarding/actions";
 
 const CUSTOM = "__custom";
@@ -179,5 +182,72 @@ export function AccountsPanel({
         </div>
       </Dialog>
     </>
+  );
+}
+
+const ACCESS_ROWS: Array<{ field: SetupField; value: (s: SetupRecord) => string | null }> = [
+  { field: "entra", value: (s) => s.entraStatus },
+  { field: "autopilot", value: (s) => s.autopilotStatus },
+  { field: "argus", value: (s) => s.argusStatus },
+  { field: "vpn", value: (s) => s.vpn },
+];
+
+/**
+ * Phase 40 (spec §7): under Microsoft 365, the four IT-access rows with their current value. A live one (Done, or
+ * a named VPN) offers Mark removed, which writes Removed through setItSetup; the Finish checklist and the server
+ * gate stay blocked until none is live. A viewer sees the values without the button.
+ */
+export function ItAccessSection({
+  employeeId, setup, canRemove,
+}: {
+  employeeId: string;
+  setup: SetupRecord;
+  canRemove: boolean;
+}) {
+  const { pending, error, retryAfter, setRetryAfter, run } = useEmployeeRunner();
+  const [busy, setBusy] = useState<SetupField | null>(null);
+  const live = new Set(liveAccessFields(setup));
+
+  function remove(field: SetupField) {
+    setBusy(field);
+    run(
+      () => setItSetup(field === "vpn" ? { employeeId, field, value: VPN_REMOVED } : { employeeId, field, value: "REMOVED" }),
+      `${SETUP_LABELS[field]} marked removed`,
+      { onFail: () => setBusy(null), onOk: () => setBusy(null) },
+    );
+  }
+
+  return (
+    <section aria-labelledby="it-access-heading" className="flex max-w-[420px] flex-col gap-2 border-t border-line pt-3">
+      <h3 id="it-access-heading" className="text-xs font-semibold text-fg">IT access</h3>
+      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+      {error && <Banner tone="fault" title={error} />}
+      <ul className="flex flex-col gap-1.5">
+        {ACCESS_ROWS.map(({ field, value }) => {
+          const v = value(setup);
+          const shown = v === null ? "Not recorded" : (SETUP_STATE_LABELS as Record<string, string>)[v] ?? v;
+          return (
+            <li key={field} className="flex items-center justify-between gap-3 text-[12.5px]">
+              <span className="text-fg-secondary">{SETUP_LABELS[field]}</span>
+              <span className="flex items-center gap-2">
+                <span className="text-fg">{shown}</span>
+                {canRemove && live.has(field) && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    aria-label={`Mark removed: ${SETUP_LABELS[field]}`}
+                    loading={pending && busy === field}
+                    disabled={pending}
+                    onClick={() => remove(field)}
+                  >
+                    Mark removed
+                  </Button>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

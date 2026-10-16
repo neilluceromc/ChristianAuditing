@@ -40,7 +40,7 @@ const SETUP_ROWS = [
   { key: "autopilotStatus", label: "Autopilot" },
   { key: "argusStatus", label: "Argus" },
 ] as const;
-const SETUP_OPTIONS = (Object.keys(SETUP_STATE_LABELS) as SetupState[]).map((s) => ({ value: s, label: SETUP_STATE_LABELS[s] }));
+const SETUP_OPTIONS = (Object.keys(SETUP_STATE_LABELS) as SetupState[]).filter((s) => s !== "REMOVED").map((s) => ({ value: s, label: SETUP_STATE_LABELS[s] }));
 /** Server field errors that live inside the "More" fold, which opens to show them. */
 const MORE_KEYS = ["employment", "offboardingDueAt", "m365Status"];
 

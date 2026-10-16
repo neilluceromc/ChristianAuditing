@@ -1,0 +1,1 @@
+ALTER TYPE "SetupState" ADD VALUE 'REMOVED';

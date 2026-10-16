@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { getWizard, nextLeaver } from "@/server/modules/offboarding/queries";
+import { liveAccessFields } from "@/lib/it-setup";
 import { canContinue, completionBlockers, decisionStateLabel, defaultStep, offboardingNext, OUTCOME_LABEL, parseStep, readiness } from "@/lib/offboarding";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
@@ -20,7 +21,7 @@ import { Stat } from "@/components/ui/stat";
 import { StatusDot, StatusPill } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { TagRef } from "@/components/inventory/tag-ref";
-import { AccountsPanel } from "@/components/offboarding/accounts-panel";
+import { AccountsPanel, ItAccessSection } from "@/components/offboarding/accounts-panel";
 import { CompleteButton } from "@/components/offboarding/complete-button";
 import { ItemDecision } from "@/components/offboarding/item-decision";
 import { MarkRestButton } from "@/components/offboarding/mark-rest-button";
@@ -47,9 +48,10 @@ export default async function OffboardingWizardPage({
   if (!data) notFound();
 
   const { employee, items, totals, undecided } = data;
+  const itAccess = liveAccessFields(employee.setup).length;
   const step = rawStep
     ? parseStep(rawStep)
-    : defaultStep({ employment: employee.employment, undecided, m365Status: employee.m365Status });
+    : defaultStep({ employment: employee.employment, undecided, m365Status: employee.m365Status, itAccess });
   const today = localDateISO(new Date());
   const canMutate = user.role === "admin" || user.role === "it_staff";
   const active = employee.employment === "OFFBOARDING";
@@ -63,9 +65,10 @@ export default async function OffboardingWizardPage({
     undecided: data.undecided,
     failed: data.failed[0] ?? null,
     m365Status: employee.m365Status,
+    itAccess,
   };
   const next = canMutate ? offboardingNext(state) : null;
-  const readinessInput = { id: employee.id, total: data.items.length, undecided: data.undecided, failed: data.failed, m365Status: employee.m365Status };
+  const readinessInput = { id: employee.id, total: data.items.length, undecided: data.undecided, failed: data.failed, m365Status: employee.m365Status, itAccess };
   // flatMap rather than filter so `decision` is structurally non-null on the
   // rows the report renders — the same reason decisionOf carries the outcome on
   // the surviving row instead of asserting it later
@@ -509,6 +512,7 @@ export default async function OffboardingWizardPage({
                   current status: {employee.m365Status ?? "never had an account"}
                 </p>
               )}
+              <ItAccessSection employeeId={employeeId} setup={employee.setup} canRemove={canDecide} />
             </CardBody>
           </Card>
           <div className="flex justify-end">

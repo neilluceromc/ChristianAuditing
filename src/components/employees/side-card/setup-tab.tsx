@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { setItSetup } from "@/server/modules/employees/setup-actions";
-import { SETUP_LABELS, SETUP_STATE_LABELS, VPN_CHOICES } from "@/lib/it-setup";
+import { SETUP_LABELS, SETUP_STATE_LABELS, VPN_PROFILE_CHOICES } from "@/lib/it-setup";
 import { setupDot } from "@/lib/side-card";
 import { useEmployeeRunner } from "../use-employee-runner";
 import { StatusDot } from "./status-dot";
@@ -33,7 +33,7 @@ const ROWS: StateRow[] = [
   { field: "argus", label: SETUP_LABELS.argus, name: "Argus", key: "argusStatus" },
 ];
 
-const isChoice = (v: string | null): v is (typeof VPN_CHOICES)[number] => (VPN_CHOICES as readonly string[]).includes(v ?? "");
+const isChoice = (v: string | null): v is (typeof VPN_PROFILE_CHOICES)[number] => (VPN_PROFILE_CHOICES as readonly string[]).includes(v ?? "");
 /** The VPN select's value for a stored string: a fixed choice, Other… for any other text, "" for null. */
 const vpnSelectFor = (v: string | null): string => (v === null ? "" : isChoice(v) ? v : OTHER);
 const vpnTextFor = (v: string | null): string => (v !== null && !isChoice(v) ? v : "");
@@ -138,7 +138,7 @@ export function SetupTab({
         {canEdit ? (
           <Select aria-label="VPN in use" className={CONTROL} value={vpnSelect} onChange={(e) => pickVpn(e.target.value)}>
             {values.vpn === null && <option value="" disabled>{NOT_RECORDED}</option>}
-            {VPN_CHOICES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {VPN_PROFILE_CHOICES.map((c) => <option key={c} value={c}>{c}</option>)}
             <option value={OTHER}>Other…</option>
           </Select>
         ) : (

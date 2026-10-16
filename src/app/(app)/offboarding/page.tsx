@@ -146,7 +146,7 @@ export default async function OffboardingPage({
                             const next = canMutate
                               ? offboardingNext({
                                   id: r.id, employment: r.employment, dueAt: r.dueAt, undecided: r.undecided,
-                                  failed: r.failed, m365Status: r.m365,
+                                  failed: r.failed, m365Status: r.m365, itAccess: r.itAccess,
                                 })
                               : null;
                             return next

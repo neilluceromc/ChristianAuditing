@@ -162,7 +162,7 @@ export async function worklist(
   for (const e of orderByOffboardingAttention(leavers, "desc").slice(0, CAP.small)) {
     rows.push(leaverRow({
       id: e.id, name: e.name, employeeNo: e.employeeNo, itemsOut: e.itemsOut,
-      employment: e.employment, dueAt: e.dueAt, undecided: e.undecided, failed: e.failed, m365Status: e.m365,
+      employment: e.employment, dueAt: e.dueAt, undecided: e.undecided, failed: e.failed, m365Status: e.m365, itAccess: e.itAccess,
     }, todayISO));
   }
 

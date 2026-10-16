@@ -65,7 +65,7 @@ export type SetupDot = "done" | "notyet" | "off" | "unrecorded";
 export function setupDot(value: string | null): SetupDot {
   if (value === null) return "unrecorded";
   if (value === "NOT_YET") return "notyet";
-  if (value === "NOT_NEEDED" || value === "None") return "off";
+  if (value === "NOT_NEEDED" || value === "REMOVED" || value === "None" || value === "Removed") return "off";
   return "done"; // DONE, or any VPN name
 }
 

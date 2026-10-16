@@ -108,6 +108,8 @@ describe("setupDot", () => {
     expect(setupDot("NOT_YET")).toBe("notyet");
     expect(setupDot("NOT_NEEDED")).toBe("off");
     expect(setupDot("None")).toBe("off");
+    expect(setupDot("REMOVED")).toBe("off");
+    expect(setupDot("Removed")).toBe("off");
     expect(setupDot(null)).toBe("unrecorded");
     expect(setupDot("Zscaler")).toBe("done");
   });

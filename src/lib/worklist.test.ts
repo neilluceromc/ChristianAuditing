@@ -129,7 +129,7 @@ describe("leaverRow — label and href from offboardingNext", () => {
   const e = (over: Partial<LeaverLike> = {}): LeaverLike => ({
     id: "e1", name: "Dennis Ong", employeeNo: "EMP-0090", itemsOut: 3,
     employment: "OFFBOARDING", dueAt: new Date("2026-09-22T00:00:00+08:00"),
-    undecided: 3, failed: null, m365Status: "offboarding", ...over,
+    undecided: 3, failed: null, m365Status: "offboarding", itAccess: 0, ...over,
   });
   it("undecided items: Collect N items into the Collect step", () => {
     const r = leaverRow(e(), TODAY);
@@ -172,7 +172,7 @@ describe("workRowHref — a viewer's Open goes where a viewer may go", () => {
   const e = (over: Partial<LeaverLike> = {}): LeaverLike => ({
     id: "e1", name: "Dennis Ong", employeeNo: "EMP-0090", itemsOut: 3,
     employment: "OFFBOARDING", dueAt: new Date("2026-09-22T00:00:00+08:00"),
-    undecided: 3, failed: null, m365Status: "offboarding", ...over,
+    undecided: 3, failed: null, m365Status: "offboarding", itAccess: 0, ...over,
   });
   it("a viewer's leaver row with no completion date opens /offboarding/{id}, not the edit page", () => {
     const r = leaverRow(e({ dueAt: null }), TODAY);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { setupStateSchema, vpnSchema } from "./it-setup";
+import { newHireStateSchema, vpnSchema } from "./it-setup";
 
 /**
  * Phase 37 (spec §5): the pieces of Add employee that are not the person's own record — accounts & access,
@@ -9,9 +9,9 @@ export const ASSIGN_DISTINCT = "Each spare can be picked once";
 export const ASSIGN_MAX = 20;
 
 export const newEmployeeExtrasShape = {
-  entraStatus: setupStateSchema,
-  autopilotStatus: setupStateSchema,
-  argusStatus: setupStateSchema,
+  entraStatus: newHireStateSchema,
+  autopilotStatus: newHireStateSchema,
+  argusStatus: newHireStateSchema,
   vpn: vpnSchema,
   /** Empty (after trimming) means no first note. */
   note: z.string().trim().max(2000, "At most 2000 characters"),

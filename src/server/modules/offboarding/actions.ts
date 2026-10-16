@@ -8,6 +8,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
+import { itAccessLive } from "@/lib/it-setup";
 import { OUTCOMES, OUTCOME_LABEL, decisionOf, m365Live, outcomeStatus, reasonRequired, type Outcome } from "@/lib/offboarding";
 import { CLASS_PHRASE, isDirectLifecycle } from "@/lib/asset-class";
 import { cleanReason, reasonOptional } from "@/lib/reason";
@@ -392,6 +393,8 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
     if (m365 !== null && m365 !== "inactive") {
       return conflict(`The M365 account still reads ${employee.m365Status} — close it on Accounts & M365 first.`);
     }
+    // Phase 40 (spec §7, ruling 2): live IT access blocks too — Done, or a named VPN. Not recorded never does.
+    if (itAccessLive(employee)) return conflict("Remove their IT access first");
 
     const written = await tx.employee.updateMany({
       where: { id: employeeId, employment: "OFFBOARDING" },
