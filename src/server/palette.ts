@@ -1,7 +1,8 @@
 "use server";
 
+import { z } from "zod";
 import { prisma } from "./db/client";
-import { requireUser } from "./auth/guards";
+import { actionUser } from "./auth/guards";
 import { pathAllowedForRole } from "@/lib/workspaces";
 import { visibleClassWhere } from "@/lib/asset-class";
 import {
@@ -47,9 +48,14 @@ const ASSET_SELECT = {
   id: true, tag: true, model: true, serial: true, assignee: { select: { name: true } },
 } as const;
 
-export async function paletteSearch(query: string): Promise<PaletteResults> {
-  const user = await requireUser();
-  const q = query.trim();
+const querySchema = z.string().max(100);
+
+export async function paletteSearch(query: unknown): Promise<PaletteResults> {
+  const user = await actionUser();
+  if (!user) return EMPTY;
+  const parsed = querySchema.safeParse(query);
+  if (!parsed.success) return EMPTY;
+  const q = parsed.data.trim();
   if (q.length < 2) return EMPTY;
   const rate = searchRate(user.id);
   if (!rate.allowed) return { ...EMPTY, rateLimited: { retryAfterSec: rate.retryAfterSec } };

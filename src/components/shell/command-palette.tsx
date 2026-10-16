@@ -86,6 +86,8 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
   /** seconds left on a rate-limit refusal (live countdown), and the figure it started from (announced once) */
   const [retryLeft, setRetryLeft] = useState<number | null>(null);
   const [retryFrom, setRetryFrom] = useState<number | null>(null);
+  /** the last search threw (network, server error) */
+  const [failed, setFailed] = useState(false);
   const router = useRouter();
   const listboxId = useId();
   const optionId = (i: number) => `${listboxId}-option-${i}`;
@@ -109,11 +111,18 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
     try {
       res = await paletteSearch(value);
     } catch {
-      if (seq.current.isCurrent(ticket)) enterPending.current = false;
+      // Settle on the failure, so Enter and the empty line never wait on an answer that is not coming.
+      if (seq.current.isCurrent(ticket)) {
+        enterPending.current = false;
+        setResults(EMPTY);
+        setResultsFor(value.trim());
+        setFailed(true);
+      }
       return;
     }
     // Review focus #4: a response for an older query never replaces a newer one.
     if (!seq.current.isCurrent(ticket)) return;
+    setFailed(false);
     setResults(res);
     setResultsFor(value.trim());
     setRetryLeft(res.rateLimited?.retryAfterSec ?? null);
@@ -124,6 +133,7 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
     (value: string, delay: number) => {
       cancelSearch();
       const ticket = seq.current.next();
+      setFailed(false);
       if (value.trim().length < 2) {
         setResults(EMPTY);
         setResultsFor(value.trim());
@@ -150,6 +160,7 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
     setCursor(0);
     setRetryLeft(null);
     setRetryFrom(null);
+    setFailed(false);
   }, [cancelSearch]);
 
   useEffect(() => cancelSearch, [cancelSearch]);
@@ -247,10 +258,10 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setCursor(Math.min(active + 1, flat.length - 1));
+      setCursor(Math.max(0, Math.min(active + 1, flat.length - 1)));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setCursor(Math.max(active - 1, 0));
+      setCursor(Math.max(0, active - 1));
     } else if (e.key === "Enter") {
       e.preventDefault();
       // A row the user arrowed to is a choice; otherwise wait for the typed text's own results
@@ -303,11 +314,15 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
           />
           <Kbd>esc</Kbd>
         </div>
-        <div className="max-h-[320px] overflow-y-auto p-1.5">
+        {/* A press anywhere in the list (an option, a heading, the padding) keeps focus — and the combobox — in the input. */}
+        <div className="max-h-[320px] overflow-y-auto p-1.5" onMouseDown={(e) => e.preventDefault()}>
           {retryLeft !== null && (
             <p className="px-2.5 py-6 text-center text-xs text-fg-muted">{rateLimitMessage(Math.max(retryLeft, 1))}</p>
           )}
-          {retryLeft === null && !expanded && (
+          {retryLeft === null && failed && settled && (
+            <p className="px-2.5 py-6 text-center text-xs text-fg-muted">Search failed — try again.</p>
+          )}
+          {retryLeft === null && !(failed && settled) && !expanded && (
             <p className="px-2.5 py-6 text-center text-xs text-fg-muted">
               {query.trim().length < 2 ? "Type to search." : "No matches."}
             </p>
@@ -337,8 +352,6 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
                         onMouseMove={() => {
                           if (i !== active) setCursor(i);
                         }}
-                        // keep focus (and the combobox) in the input
-                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => go(hit)}
                         className={cn(
                           "flex w-full cursor-pointer items-baseline justify-between gap-3 rounded-(--radius-ctl) px-2.5 py-1.5 text-left",

@@ -427,7 +427,7 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
 /**
  * Phase 40 (spec §4): the palette matches serials and holders and says so, an exact tag leads and opens on Enter,
  * and the input is a combobox whose options are real options. The seed carries no serials, so case 11 gives the
- * seeded BR-LT-0148 (held by EMP-0042, Marites Bautista) a unique one for the test and takes it away again.
+ * seeded BR-LT-0148 (held by EMP-0042, Marites Bautista) a unique one for the test and puts its own back.
  */
 test.describe("phase 40 — palette search", () => {
   async function openPalette(page: Page) {
@@ -443,7 +443,8 @@ test.describe("phase 40 — palette search", () => {
 
   test("11. a serial finds its asset with the \"serial …\" hint; a holder's name finds theirs with \"held by\"", async ({ page }) => {
     const serial = `PH40SN${Date.now()}`;
-    const asset = await db.asset.update({ where: { tag: "BR-LT-0148" }, data: { serial }, select: { id: true } });
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" }, select: { id: true, serial: true } });
+    await db.asset.update({ where: { id: asset.id }, data: { serial } });
     try {
       await login(page, IT);
       const { palette, input } = await openPalette(page);
@@ -481,7 +482,7 @@ test.describe("phase 40 — palette search", () => {
       await person.click();
       await expect(page).toHaveURL(new RegExp(`/employees/${marites.id}$`));
     } finally {
-      await db.asset.update({ where: { id: asset.id }, data: { serial: null } });
+      await db.asset.update({ where: { id: asset.id }, data: { serial: asset.serial } });
     }
   });
 
