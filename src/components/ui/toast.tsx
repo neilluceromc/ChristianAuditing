@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { createPausableTimer, toastLifetime, type PausableTimer, type ToastTone } from "@/lib/toast-timing";
+import { createPausableTimer, firstUsable, toastLifetime, type PausableTimer, type ToastTone } from "@/lib/toast-timing";
 import { StatusDot } from "./status";
 
 type Tone = ToastTone;
@@ -58,6 +58,7 @@ function ToastCard({ toast: t, onDismiss }: { toast: ToastItem; onDismiss: (id: 
 
   return (
     <div
+      data-toast-id={t.id}
       role={t.tone === "fault" ? "alert" : undefined}
       className="pointer-events-auto flex items-center gap-2 rounded-(--radius-card) border border-border bg-surface-raised px-3.5 py-2.5 text-xs text-fg shadow-toast"
       style={{ animation: "toastIn var(--dur-3) var(--ease-std)" }}
@@ -92,7 +93,7 @@ function ToastCard({ toast: t, onDismiss }: { toast: ToastItem; onDismiss: (id: 
       <button
         type="button"
         aria-label="Dismiss"
-        className="-mr-1 ml-1 rounded-[4px] p-1 text-fg-muted hover:bg-surface-subtle hover:text-fg"
+        className="-mr-1.5 ml-1 rounded-[4px] p-1.5 text-fg-muted hover:bg-surface-subtle hover:text-fg"
         onClick={() => onDismiss(t.id)}
       >
         {/* an svg, not a "×" character, so the toast's text stays its message */}
@@ -107,8 +108,29 @@ function ToastCard({ toast: t, onDismiss }: { toast: ToastItem; onDismiss: (id: 
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const region = useRef<HTMLDivElement>(null);
+  /** the element that had focus just before it entered the toasts, so a dismissal can hand focus back to it */
+  const opener = useRef<HTMLElement | null>(null);
 
   const dismiss = useCallback((id: number) => {
+    // If the toast going away holds focus, move it first — to the next toast's Dismiss, else where it came from,
+    // else the page's main region — so it is never dropped on the body. (Auto-expiry only reaches here unfocused.)
+    const root = region.current;
+    const card = root?.querySelector<HTMLElement>(`[data-toast-id="${id}"]`);
+    if (root && card && card.contains(document.activeElement)) {
+      const others = Array.from(root.querySelectorAll<HTMLElement>("[data-toast-id]")).filter((c) => c !== card);
+      const after = others.find((c) => card.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) ?? others[others.length - 1];
+      const target = firstUsable<HTMLElement>(
+        [
+          after?.querySelector<HTMLElement>('button[aria-label="Dismiss"]'),
+          opener.current,
+          document.getElementById("main"),
+        ],
+        (el) =>
+          el.isConnected && !card.contains(el) && !(el as HTMLButtonElement).disabled && el.getClientRects().length > 0,
+      );
+      target?.focus();
+    }
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
@@ -121,7 +143,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={push}>
       {children}
       {/* Live region stays mounted so insertions announce; it must never block clicks. */}
-      <div aria-live="polite" className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
+      <div
+        ref={region}
+        aria-live="polite"
+        className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col gap-2"
+        onFocus={(e) => {
+          // focus coming in from outside the toasts: remember where from
+          const from = e.relatedTarget;
+          if (from instanceof HTMLElement && !e.currentTarget.contains(from)) opener.current = from;
+        }}
+      >
         {toasts.map((t) => (
           <ToastCard key={t.id} toast={t} onDismiss={dismiss} />
         ))}

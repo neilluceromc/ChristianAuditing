@@ -58,3 +58,13 @@ export function createPausableTimer(ms: number, onDone: () => void): PausableTim
     remaining: () => (handle === null ? left : Math.max(0, left - (Date.now() - startedAt))),
   };
 }
+
+/**
+ * Where focus goes when the toast that holds it is removed (house rule: focus is never lost to the body): the first
+ * candidate that is still usable, in the order given — the next toast's Dismiss, the element that had focus before it
+ * entered the toasts, then the page's main region. Null only when none is usable.
+ */
+export function firstUsable<T>(candidates: ReadonlyArray<T | null | undefined>, usable: (candidate: T) => boolean): T | null {
+  for (const c of candidates) if (c != null && usable(c)) return c;
+  return null;
+}

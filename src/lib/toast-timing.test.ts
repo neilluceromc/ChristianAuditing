@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACTION_TOAST_MS, TOAST_MS, createPausableTimer, toastLifetime } from "./toast-timing";
+import { ACTION_TOAST_MS, TOAST_MS, createPausableTimer, firstUsable, toastLifetime } from "./toast-timing";
 
 describe("toastLifetime", () => {
   it("success and neutral toasts leave after 4 s", () => {
@@ -66,5 +66,19 @@ describe("createPausableTimer", () => {
     t.resume();
     vi.advanceTimersByTime(5000);
     expect(done).not.toHaveBeenCalled();
+  });
+});
+
+describe("firstUsable", () => {
+  it("takes the first candidate that passes, skipping null and undefined", () => {
+    expect(firstUsable([null, undefined, "a", "b"], () => true)).toBe("a");
+    expect(firstUsable(["gone", "kept", "main"], (c) => c !== "gone")).toBe("kept");
+  });
+  it("falls through unusable candidates in order, down to the last", () => {
+    expect(firstUsable(["next", "opener", "main"], (c) => c === "main")).toBe("main");
+  });
+  it("is null when nothing is usable", () => {
+    expect(firstUsable([null, "x"], () => false)).toBeNull();
+    expect(firstUsable([], () => true)).toBeNull();
   });
 });
