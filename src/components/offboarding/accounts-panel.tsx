@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -207,19 +207,31 @@ export function ItAccessSection({
   const { pending, error, retryAfter, setRetryAfter, run } = useEmployeeRunner();
   const [busy, setBusy] = useState<SetupField | null>(null);
   const live = new Set(liveAccessFields(setup));
+  const liveKey = [...live].join(",");
+  // A post-commit focus request: set on success, honoured once the refreshed props show the row is no longer
+  // live (the clicked button is gone by then), so focus never falls to <body>.
+  const [focusReq, setFocusReq] = useState<SetupField | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusReq === null || liveKey.split(",").includes(focusReq)) return;
+    const next = sectionRef.current?.querySelector<HTMLButtonElement>("button[data-mark-removed]");
+    (next ?? headingRef.current)?.focus();
+    setFocusReq(null);
+  }, [focusReq, liveKey]);
 
   function remove(field: SetupField) {
     setBusy(field);
     run(
       () => setItSetup(field === "vpn" ? { employeeId, field, value: VPN_REMOVED } : { employeeId, field, value: "REMOVED" }),
       `${SETUP_LABELS[field]} marked removed`,
-      { onFail: () => setBusy(null), onOk: () => setBusy(null) },
+      { onFail: () => setBusy(null), onOk: () => { setBusy(null); setFocusReq(field); } },
     );
   }
 
   return (
-    <section aria-labelledby="it-access-heading" className="flex max-w-[420px] flex-col gap-2 border-t border-line pt-3">
-      <h3 id="it-access-heading" className="text-xs font-semibold text-fg">IT access</h3>
+    <section ref={sectionRef} aria-labelledby="it-access-heading" className="flex max-w-[420px] flex-col gap-2 border-t border-line pt-3">
+      <h3 ref={headingRef} id="it-access-heading" tabIndex={-1} className="text-xs font-semibold text-fg outline-none">IT access</h3>
       {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
       {error && <Banner tone="fault" title={error} />}
       <ul className="flex flex-col gap-1.5">
@@ -235,6 +247,7 @@ export function ItAccessSection({
                   <Button
                     size="sm"
                     variant="secondary"
+                    data-mark-removed=""
                     aria-label={`Mark removed: ${SETUP_LABELS[field]}`}
                     loading={pending && busy === field}
                     disabled={pending}
