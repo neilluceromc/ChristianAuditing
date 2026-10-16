@@ -1,6 +1,6 @@
 # Phase 40 — Fix what's broken, and make the IT basics trustworthy
 
-**Status:** DESIGNED 2026-10-17.
+**Status:** BUILT 2026-10-17 on branch phase-40-it-fixes (808e23a); awaiting merge/push/redeploy.
 - **Origin:** a read-only UX audit of the IT side (three auditors: assets; people lifecycle; shell, Home and approvals) produced about 70 findings. The user chose "All three, in order": Phase 40 (this), then 41 (client staff and people flows), then 42 (deeper asset management), with mockups where screens change and pausing only for merge, push and redeploy.
 - **Mockup:** the "Phase 40 — phone shell" board on https://claude.ai/artifact/XSKxwmMGNTvFpGHdUWujdz.
 - **Migration:** one (the 33rd). It adds a single enum value.
