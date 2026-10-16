@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { cn } from "@/lib/cn";
-import { M365_CANONICAL } from "@/lib/labels";
+import { EMPLOYMENT_LABEL, M365_CANONICAL } from "@/lib/labels";
 import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { SETUP_STATE_LABELS, VPN_CHOICES, setupSummary } from "@/lib/it-setup";
 import { detailsMissing, type DetailsKey } from "@/lib/new-employee";
@@ -128,17 +128,21 @@ export function NewEmployeeWizard({
     const key = linesKey;
     setLoadingLines(true);
     setLinesError(null);
-    void spareOptions({ departmentId: form.departmentId, title: form.title }).then((res) => {
-      setLoadingLines(false);
-      if (res.ok) {
-        setLines(res.data.lines);
-        setLinesFor(key);
-        setPicks({});
-      } else if (res.kind === "rate_limited") {
-        setRetryAfter(res.retryAfterSec ?? 60);
-        setLinesError(res.message);
-      } else setLinesError(res.message);
-    });
+    spareOptions({ departmentId: form.departmentId, title: form.title })
+      .then((res) => {
+        if (res.ok) {
+          setLines(res.data.lines);
+          setLinesFor(key);
+          setPicks({});
+        } else if (res.kind === "rate_limited") {
+          setRetryAfter(res.retryAfterSec ?? 60);
+          setLinesError(res.message);
+        } else setLinesError(res.message);
+      })
+      // A dropped connection or a server throw must not leave step 2 loading forever: the error line
+      // and its "Try again" recover it.
+      .catch(() => setLinesError("Couldn't load their equipment — check the connection and try again."))
+      .finally(() => setLoadingLines(false));
   }, [step, linesKey, linesFor, loadingLines, linesError, form.departmentId, form.title]);
 
   function goTo(next: Step) {
@@ -252,7 +256,7 @@ export function NewEmployeeWizard({
     ["Title", form.title.trim()],
     ["Employee no.", form.employeeNo.trim()],
     ["Start date", form.joinedAt],
-    ...(form.employment !== "ACTIVE" ? [["Employment", form.employment] as [string, string]] : []),
+    ...(form.employment !== "ACTIVE" ? [["Employment", EMPLOYMENT_LABEL[form.employment as keyof typeof EMPLOYMENT_LABEL] ?? form.employment] as [string, string]] : []),
     ...(form.m365Select ? [["Account status", form.m365Select === CUSTOM ? form.m365Custom.trim() : form.m365Select] as [string, string]] : []),
   ];
 
