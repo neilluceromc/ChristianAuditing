@@ -129,7 +129,7 @@ test.describe("Phase 39 — the profile side card and its notes", () => {
     await page.keyboard.press("ArrowLeft");
     await expect(tab("form")).toBeFocused();
     await expect(tab("form")).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("button", { name: "Print form", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Print form", exact: true })).toBeVisible();
     // Only the chosen tab is in the Tab order.
     await expect(tab("form")).toHaveAttribute("tabindex", "0");
     await expect(tab("notes")).toHaveAttribute("tabindex", "-1");

@@ -349,17 +349,16 @@ test.describe("axe sweep", () => {
     // EMP-0042's profile on each side tab (the remembered tab is per browser, so the URL decides each time).
     const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     const tablist = page.getByRole("tablist", { name: "About this person" });
-    const ready: Record<string, () => Promise<void>> = {
-      notes: async () => { await expect(page.locator('[role="tabpanel"]:not([hidden])')).toBeVisible({ timeout: 20_000 }); },
-      setup: async () => { await expect(page.getByRole("combobox", { name: "Argus", exact: true })).toBeVisible({ timeout: 20_000 }); },
-      form: async () => { await expect(page.getByRole("button", { name: "Print form", exact: true })).toBeVisible({ timeout: 20_000 }); },
-      transfers: async () => { await expect(page.locator('[role="tabpanel"]:not([hidden])')).toBeVisible({ timeout: 20_000 }); },
-    };
+    const labels = { notes: "Notes", setup: "IT setup", form: "Form", transfers: "Transfers" } as const;
     for (const side of ["notes", "setup", "form", "transfers"] as const) {
       await page.goto(`/employees/${marites.id}?side=${side}`);
       await expect(tablist).toBeVisible({ timeout: 20_000 });
-      await expect(tablist.getByRole("tab", { selected: true })).toHaveCount(1);
-      await ready[side]();
+      // Notes is the server-rendered default and ?side= applies after hydration: scan only once the intended tab
+      // is the selected one and its panel is on screen.
+      await expect(tablist.getByRole("tab", { name: new RegExp(`^${labels[side]}`), selected: true })).toHaveCount(1, { timeout: 20_000 });
+      await expect(page.locator(`#side-panel-${side}`)).toBeVisible({ timeout: 20_000 });
+      if (side === "setup") await expect(page.getByRole("combobox", { name: "Argus", exact: true })).toBeVisible({ timeout: 20_000 });
+      if (side === "form") await expect(page.getByRole("link", { name: "Print form", exact: true })).toBeVisible({ timeout: 20_000 });
       await scanHere(page, `/employees/[EMP-0042]?side=${side}`);
     }
 
