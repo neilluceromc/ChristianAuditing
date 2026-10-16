@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ApprovalState } from "@prisma/client";
 import { approvalTransition, type QueueAction } from "./approval-flow";
-import { approvalHeader, queueKeyAction, VERB_LABEL, type ApprovalVerb } from "./approval-header";
+import { approvalHeader, queueKeyAction, queueMoveKey, VERB_LABEL, type ApprovalVerb } from "./approval-header";
 import { APPROVAL_KIND_LABEL, PRIORITY_LABEL } from "./labels";
 
 const h = (state: ApprovalState, o: Partial<{ canAct: boolean; mine: boolean; isAdmin: boolean }> = {}) =>
@@ -83,6 +83,34 @@ describe("queueKeyAction — the queue's action keys (Phase 40 fix round 1)", ()
   });
   it("any other key is not an action key", () => {
     expect(press("j")).toBeNull();
+    expect(press("Enter")).toBeNull();
+  });
+});
+
+describe("queueMoveKey — J/K and the arrows move the cursor on a bare press (final review M2)", () => {
+  const press = (key: string, mods: Partial<{ repeat: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>
+    queueMoveKey({ key, repeat: false, ctrlKey: false, metaKey: false, altKey: false, ...mods });
+  it("J and ArrowDown move down, K and ArrowUp move up — either case", () => {
+    expect(press("j")).toBe("down");
+    expect(press("J")).toBe("down");
+    expect(press("ArrowDown")).toBe("down");
+    expect(press("k")).toBe("up");
+    expect(press("K")).toBe("up");
+    expect(press("ArrowUp")).toBe("up");
+  });
+  it("a held key keeps moving (auto-repeat is fine for moving)", () => {
+    expect(press("j", { repeat: true })).toBe("down");
+    expect(press("ArrowUp", { repeat: true })).toBe("up");
+  });
+  it("Ctrl/Cmd/Alt combinations stay the browser's — Ctrl+K opens the palette and never moves the cursor", () => {
+    expect(press("k", { ctrlKey: true })).toBeNull();
+    expect(press("k", { metaKey: true })).toBeNull();
+    expect(press("j", { ctrlKey: true })).toBeNull();
+    expect(press("j", { altKey: true })).toBeNull();
+    expect(press("ArrowDown", { altKey: true })).toBeNull();
+  });
+  it("any other key is not a move", () => {
+    expect(press("a")).toBeNull();
     expect(press("Enter")).toBeNull();
   });
 });

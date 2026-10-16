@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMacPlatform, searchShortcutLabel, slashFocusesSearch, type SlashKey } from "./shortcuts";
+import { isMacPlatform, paletteShortcutOpens, searchShortcutLabel, slashFocusesSearch, type SlashKey } from "./shortcuts";
 
 describe("searchShortcutLabel (spec §2.3 / §4: Ctrl K, or ⌘K on Mac)", () => {
   it("reads ⌘K on Apple platforms", () => {
@@ -63,5 +63,23 @@ describe("slashFocusesSearch (spec §2.3: \"/\" focuses the page's search box, n
 
   it("ignores / that something else already handled", () => {
     expect(slashFocusesSearch({ ...base, defaultPrevented: true })).toBe(false);
+  });
+});
+
+describe("paletteShortcutOpens — Ctrl K / ⌘K opens the palette, never under another modal (final review M1)", () => {
+  const press = (over: Partial<Parameters<typeof paletteShortcutOpens>[0]> = {}) =>
+    paletteShortcutOpens({ key: "k", ctrlKey: true, metaKey: false, otherModalOpen: false, ...over });
+  it("opens on Ctrl K or ⌘K, either case", () => {
+    expect(press()).toBe(true);
+    expect(press({ ctrlKey: false, metaKey: true })).toBe(true);
+    expect(press({ key: "K" })).toBe(true);
+  });
+  it("does nothing for a bare K or another key", () => {
+    expect(press({ ctrlKey: false })).toBe(false);
+    expect(press({ key: "j" })).toBe(false);
+  });
+  it("does nothing while a dialog or drawer other than the palette is open", () => {
+    expect(press({ otherModalOpen: true })).toBe(false);
+    expect(press({ metaKey: true, ctrlKey: false, otherModalOpen: true })).toBe(false);
   });
 });

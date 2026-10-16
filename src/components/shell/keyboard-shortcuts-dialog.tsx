@@ -34,7 +34,7 @@ export function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
     { keys: [search], what: "Search assets, people, requests" },
     { keys: ["/"], what: "Focus this page's search box" },
     { keys: ["J", "K"], what: "Approvals: move down or up the queue" },
-    { keys: ["A"], what: "Approvals: approve the highlighted request" },
+    { keys: ["A"], what: "Approvals: run the main action (approve, or retry a failed one)" },
     { keys: ["Esc"], what: "Close a panel or dialog" },
   ];
   return (

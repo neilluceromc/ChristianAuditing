@@ -14,7 +14,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { DONE, RUN, RejectApprovalDialog } from "@/components/approvals/approval-header";
-import { approvalHeader, queueKeyAction, VERB_LABEL, type ApprovalVerb } from "@/lib/approval-header";
+import { approvalHeader, queueKeyAction, queueMoveKey, VERB_LABEL, type ApprovalVerb } from "@/lib/approval-header";
 import { PRIORITY_LABEL } from "@/lib/labels";
 import {
   claimApproval, escalateApproval, rejectApproval,
@@ -128,14 +128,15 @@ export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; can
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (rows.length === 0) return;
-    const key = e.key.toLowerCase();
     const row = rows[focused];
     const announceRow = (i: number) => {
       const r = rows[i];
       setAnnounce(`${r.refNo} — ${r.line1}, ${r.state}${r.owner ? `, owned by ${r.owner}` : ""}${r.direct ? ", applied directly" : ""}. Row ${i + 1} of ${rows.length}.`);
     };
-    if (key === "j" || e.key === "ArrowDown") { e.preventDefault(); setFocused((i) => { const n = Math.min(i + 1, rows.length - 1); announceRow(n); return n; }); }
-    else if (key === "k" || e.key === "ArrowUp") { e.preventDefault(); setFocused((i) => { const n = Math.max(i - 1, 0); announceRow(n); return n; }); }
+    // Final review M2: moves on a bare press only — Ctrl+K opens the palette and must not also move the cursor.
+    const move = queueMoveKey(e);
+    if (move === "down") { e.preventDefault(); setFocused((i) => { const n = Math.min(i + 1, rows.length - 1); announceRow(n); return n; }); }
+    else if (move === "up") { e.preventDefault(); setFocused((i) => { const n = Math.max(i - 1, 0); announceRow(n); return n; }); }
     else if (e.key === "Enter" && row) { e.preventDefault(); router.push(`/approvals/${row.id}`); }
     else if (!canAct || pending || !row) return;
     else {

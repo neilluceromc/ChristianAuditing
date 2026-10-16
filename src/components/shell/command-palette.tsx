@@ -6,6 +6,7 @@ import type { Role } from "@prisma/client";
 import { cn } from "@/lib/cn";
 import type { NavSection } from "@/lib/workspaces";
 import { createSequence, rateLimitMessage } from "@/lib/palette";
+import { paletteShortcutOpens } from "@/lib/shortcuts";
 import { Kbd } from "@/components/ui/kbd";
 import { Icon } from "@/components/ui/icon";
 import { useFocusTrap } from "@/components/ui/use-focus-trap";
@@ -169,7 +170,13 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      // Final review M1: never under an open Dialog or Drawer — they portal above the palette, which would
+      // open unseen and take the focus. The palette's own aria-modal (already open) does not count.
+      const opens = paletteShortcutOpens({
+        key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey,
+        otherModalOpen: document.querySelector('[aria-modal="true"]:not([data-command-palette])') !== null,
+      });
+      if (opens) {
         e.preventDefault();
         setHint(null);
         setOpen(true);
@@ -290,6 +297,7 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
         ref={setTrapRef}
         role="dialog"
         aria-modal="true"
+        data-command-palette=""
         aria-label="Command palette"
         tabIndex={-1}
         onKeyDown={onKeyDown}

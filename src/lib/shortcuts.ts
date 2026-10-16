@@ -15,6 +15,24 @@ export function currentPlatform(): string {
   return nav.userAgentData?.platform || nav.platform || nav.userAgent || "";
 }
 
+/** The parts of a keydown the Ctrl K / ⌘K shortcut reads. */
+export interface PaletteKey {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  /** an `aria-modal` overlay other than the palette itself (a Dialog or Drawer) is open */
+  otherModalOpen: boolean;
+}
+
+/**
+ * Spec §2.3 / §4 with final review M1: Ctrl K / ⌘K opens the command palette — but not while a Dialog or Drawer
+ * is open. Those portal above the palette, so it would open underneath, take the focus and be typed into unseen.
+ */
+export function paletteShortcutOpens(e: PaletteKey): boolean {
+  if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "k") return false;
+  return !e.otherModalOpen;
+}
+
 /** The parts of a keydown the "/" shortcut reads — plain data, so the rule is testable without a DOM. */
 export interface SlashKey {
   key: string;
