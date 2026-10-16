@@ -8,20 +8,58 @@ import type { NavSection } from "@/lib/workspaces";
 import { Kbd } from "@/components/ui/kbd";
 import { Icon } from "@/components/ui/icon";
 import { useFocusTrap } from "@/components/ui/use-focus-trap";
+import { useSearchShortcutLabel } from "./use-search-shortcut-label";
 import { paletteSearch, type PaletteResults } from "@/server/palette";
 
 const OPEN_EVENT = "br:open-palette";
+const PLACEHOLDER = "Search assets, people, requests…";
 
+/**
+ * Opens the palette from anywhere on the page. `hint` replaces the input's
+ * placeholder for this opening only (spec §3: "Scan a tag" opens it with
+ * "Type or scan a tag"); Ctrl K / ⌘K and the Search trigger open it plain.
+ */
+export function openPalette(hint?: string) {
+  window.dispatchEvent(new CustomEvent<{ hint?: string }>(OPEN_EVENT, { detail: { hint } }));
+}
+
+const ICON_BUTTON =
+  "grid size-[34px] shrink-0 place-items-center rounded-(--radius-btn) text-fg-secondary hover:bg-surface-subtle";
+
+/**
+ * Spec §3: the search trigger shows at every width — the wide bar from `lg`
+ * up, and below `lg` (sidebar hidden, phone top bar) the "Search" icon button.
+ */
 export function CommandPaletteTrigger() {
+  const shortcut = useSearchShortcutLabel();
+  return (
+    <>
+      <button type="button" onClick={() => openPalette()} aria-label="Search" className={cn(ICON_BUTTON, "lg:hidden")}>
+        <Icon name="search" size={16} />
+      </button>
+      <button
+        type="button"
+        onClick={() => openPalette()}
+        className="hidden h-[34px] w-[320px] items-center gap-2 rounded-(--radius-btn) border border-border bg-canvas px-3 text-left text-xs text-fg-muted hover:border-border-strong lg:flex"
+      >
+        <Icon name="search" size={14} />
+        <span className="flex-1">{PLACEHOLDER}</span>
+        <Kbd>{shortcut}</Kbd>
+      </button>
+    </>
+  );
+}
+
+/** Spec §3: below `lg`, "Scan a tag" opens the palette with the hint "Type or scan a tag". */
+export function ScanTagButton() {
   return (
     <button
       type="button"
-      onClick={() => window.dispatchEvent(new CustomEvent(OPEN_EVENT))}
-      className="hidden h-[34px] w-[320px] items-center gap-2 rounded-(--radius-btn) border border-border bg-canvas px-3 text-left text-xs text-fg-muted hover:border-border-strong md:flex"
+      onClick={() => openPalette("Type or scan a tag")}
+      aria-label="Scan a tag"
+      className={cn(ICON_BUTTON, "lg:hidden")}
     >
-      <Icon name="search" size={14} />
-      <span className="flex-1">Search assets, people, requests…</span>
-      <Kbd>⌘K</Kbd>
+      <Icon name="scan" size={16} />
     </button>
   );
 }
@@ -31,6 +69,7 @@ const EMPTY: PaletteResults = { assets: [], people: [], requests: [], suppliers:
 export function CommandPalette({ role, sections }: { role: Role; sections: NavSection[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [hint, setHint] = useState<string | null>(null);
   const [results, setResults] = useState<PaletteResults>(EMPTY);
   const [cursor, setCursor] = useState(0);
   const [, startTransition] = useTransition();
@@ -40,6 +79,7 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
   const close = useCallback(() => {
     setOpen(false);
     setQuery("");
+    setHint(null);
     setResults(EMPTY);
     setCursor(0);
   }, []);
@@ -50,10 +90,12 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        setHint(null);
         setOpen(true);
       }
     }
-    function onOpen() {
+    function onOpen(e: Event) {
+      setHint((e as CustomEvent<{ hint?: string } | null>).detail?.hint ?? null);
       setOpen(true);
     }
     document.addEventListener("keydown", onKey);
@@ -135,7 +177,7 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
           <input
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search assets, people, requests…"
+            placeholder={hint ?? PLACEHOLDER}
             aria-label="Search"
             className="h-11 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-fg-faint"
           />

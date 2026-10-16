@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { RefTable } from "@/components/admin/ref-table";
 import { MANAGEABLE_CLASSES } from "@/lib/asset-class";
+
+export const metadata: Metadata = { title: pageTitle("Asset categories") };
 
 export default async function AssetCategoriesPage() {
   const user = await requireRole("admin", "it_staff", "purchasing_staff");

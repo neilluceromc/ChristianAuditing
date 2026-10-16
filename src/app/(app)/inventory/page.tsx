@@ -33,6 +33,20 @@ import { InventoryMoreMenu } from "@/components/inventory/inventory-more-menu";
 import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/patterns/list-navigation";
 import { REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
 import { RepairChips } from "@/components/inventory/repair-chips";
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+
+/** Spec §5: the tab names the list the heading names — "Inventory", or "{Class} assets" for another class. */
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<Metadata> {
+  const user = await requireUser();
+  const requested = parseCls(toSearchParams(await searchParams).get("cls"));
+  const cls: AssetClass = requested && canSeeClass(user.role, requested) ? requested : defaultClassFor(user.role);
+  return { title: pageTitle(cls === "IT" ? "Inventory" : `${CLASS_LABEL[cls]} assets`) };
+}
 
 export default async function InventoryPage({
   searchParams,

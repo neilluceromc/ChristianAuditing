@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { employeeNameFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
@@ -6,6 +9,11 @@ import { PrintButton } from "@/components/ui/print-button";
 import { heldSinceByAsset } from "@/server/modules/employees/held-since";
 
 const STRIPES = "repeating-linear-gradient(135deg, #EEF1F5 0 6px, #F7F9FB 6px 12px)";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Accountability form", await employeeNameFor(id)) };
+}
 
 export default async function AccountabilityFormPage({ params }: { params: Promise<{ id: string }> }) {
   await requireUser();

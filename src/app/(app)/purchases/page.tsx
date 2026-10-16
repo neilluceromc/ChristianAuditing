@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { toSearchParams } from "@/lib/url-state";
@@ -15,6 +17,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { ChipFilterRow } from "@/components/patterns/chip-filter-row";
 import { PurchasesTable } from "@/components/purchases/purchases-table";
+
+export const metadata: Metadata = { title: pageTitle("Purchase requests") };
 
 export default async function PurchasesPage({
   searchParams,

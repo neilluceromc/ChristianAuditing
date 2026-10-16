@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { supplierNameFor } from "@/server/page-titles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
@@ -19,6 +22,11 @@ import { Pagination } from "@/components/ui/pagination";
 import { ArchiveControls } from "@/components/suppliers/archive-controls";
 import { BankAccountsCard } from "@/components/suppliers/bank-accounts-card";
 import { SupplierDocumentsCard } from "@/components/suppliers/supplier-documents-card";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await supplierNameFor(id)) ?? "Supplier") };
+}
 
 export default async function SupplierProfilePage({
   params,

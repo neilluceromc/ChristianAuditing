@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { cookies } from "next/headers";
 import { requireUser } from "@/server/auth/guards";
 import { resolveWorkspace, WORKSPACE_NAV, type WorkspaceId } from "@/lib/workspaces";
@@ -66,6 +68,8 @@ function TodoList({ rows, empty }: { rows: TodoRow[]; empty: string }) {
     </ol>
   );
 }
+
+export const metadata: Metadata = { title: pageTitle("Home") };
 
 export default async function Home() {
   const user = await requireUser();

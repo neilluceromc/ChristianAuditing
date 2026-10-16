@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
@@ -17,6 +20,11 @@ import { RegistrationBlock } from "@/components/inventory/registration-block";
 import { CreatedNotice } from "@/components/inventory/created-notice";
 import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
 import { statusFamily } from "@/lib/status";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await assetTagFor(id)) ?? "Asset") };
+}
 
 export default async function AssetOverviewPage({
   params,

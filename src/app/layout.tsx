@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { ToastProvider } from "@/components/ui/toast";
+import { APP_NAME } from "@/lib/page-title";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Backroom IT — Inventory",
+  // Spec §5: the fallback when a page sets no title; every page sets "{Page} · Backroom IT".
+  title: APP_NAME,
   description: "IT asset management for The Backroom Offshoring",
 };
 

@@ -39,6 +39,7 @@ export function StockToolbar({
         </span>
         <Input
           type="search"
+          data-page-search
           aria-label="Search stock items"
           placeholder="Search code, name…"
           defaultValue={state.q}

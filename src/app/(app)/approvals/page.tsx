@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
@@ -13,6 +15,8 @@ import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components
 import { QueueTable } from "@/components/approvals/queue-table";
 import { ClosedViaChips } from "@/components/approvals/closed-via-chips";
 import { ApprovalsToolbar } from "@/components/approvals/approvals-toolbar";
+
+export const metadata: Metadata = { title: pageTitle("Approvals") };
 
 export default async function ApprovalsPage({
   searchParams,

@@ -11,6 +11,7 @@ import { filterSectionsForRole, getApprovalsBadge, Sidebar } from "@/components/
 import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
+import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
 import { worklistCount } from "@/server/modules/home/queries";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -50,13 +51,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="contents print:hidden">
-          <Topbar sections={sections} badges={badges} workspaceLabel={WORKSPACE_META[ws].label} />
+          <Topbar
+            sections={sections}
+            badges={badges}
+            workspaceLabel={WORKSPACE_META[ws].label}
+            user={{ name: user.name, role: user.role }}
+            ws={ws}
+            allowed={ROLE_WORKSPACES[user.role]}
+            meta={WORKSPACE_META}
+          />
         </div>
         <main id="main" tabIndex={-1} className="flex-1 p-6 print:p-0">
           {children}
         </main>
       </div>
       <CommandPalette role={user.role} sections={sections} />
+      <PageSearchShortcut />
       <Suspense fallback={null}><NavigationTracker /></Suspense>
     </div>
   );

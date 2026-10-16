@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams, parseListState } from "@/lib/url-state";
 import { STOCK_REPORT_LIST_CONFIG, parseReportRange } from "@/lib/stock-reports";
@@ -19,6 +21,8 @@ function queryFor(params: Record<string, string>): string {
   const s = qs.toString();
   return s ? `?${s}` : "";
 }
+
+export const metadata: Metadata = { title: pageTitle("Consumption by department") };
 
 export default async function StockConsumptionReportPage({
   searchParams,

@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams, parseListState, serializeListState, withFilter } from "@/lib/url-state";
@@ -13,6 +15,8 @@ import { ReportCategoryFacet } from "@/components/stock/report-category-facet";
 import { ReportSearch } from "@/components/stock/report-search";
 import { OnHandTotals } from "@/components/stock/on-hand-totals";
 import { OnHandTable } from "@/components/stock/on-hand-table";
+
+export const metadata: Metadata = { title: pageTitle("On hand and value") };
 
 export default async function StockOnHandReportPage({
   searchParams,

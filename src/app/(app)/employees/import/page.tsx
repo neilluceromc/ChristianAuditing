@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { ImportWizard } from "@/components/import/import-wizard";
 import { EMPLOYEE_KNOWN_UNIMPORTED_COLUMNS } from "@/lib/import-columns";
 import { planEmployeeImport, applyEmployeeImport } from "@/server/modules/import/employee-actions";
+
+export const metadata: Metadata = { title: pageTitle("Import employees") };
 
 export default async function ImportEmployeesPage() {
   // `requireRole("admin", "it_staff")` — a SET, not a floor, matching the

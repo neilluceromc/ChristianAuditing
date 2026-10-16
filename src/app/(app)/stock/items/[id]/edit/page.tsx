@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { stockItemTitleFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -5,6 +8,11 @@ import { activeStockCategories, stockUnits } from "@/server/modules/stock/querie
 import type { ItemInput } from "@/lib/stock-schema";
 import { PageHeader } from "@/components/ui/page-header";
 import { StockItemForm } from "@/components/stock/stock-item-form";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Edit", await stockItemTitleFor(id)) };
+}
 
 export default async function EditStockItemPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole("admin", "purchasing_staff");

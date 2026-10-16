@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { supplierNameFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -7,6 +10,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SupplierForm } from "@/components/suppliers/supplier-form";
 
 const toDateInput = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Edit", await supplierNameFor(id)) };
+}
 
 export default async function EditSupplierPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole("admin", "purchasing_staff");

@@ -17,6 +17,20 @@ import { HoldPill } from "@/components/ui/hold-pill";
 import { DuePill } from "@/components/ui/due-pill";
 import { ScanAction, type ScanActionKind } from "@/components/inventory/scan-action";
 import { ScanRetype } from "@/components/inventory/scan-retype";
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+
+/** Spec §5: the scan card is titled by the tag it was opened for (from the URL — no lookup needed). */
+export async function generateMetadata({ params }: { params: Promise<{ tag: string }> }): Promise<Metadata> {
+  const { tag: raw } = await params;
+  let tag: string | null = null;
+  try {
+    tag = decodeURIComponent(raw).trim().toUpperCase();
+  } catch {
+    // a malformed escape: the page itself answers; the tab just says Scan
+  }
+  return { title: pageTitle(tag || "Scan") };
+}
 
 /**
  * Where a scanned label QR lands. Deliberately NOT the full record: a phone

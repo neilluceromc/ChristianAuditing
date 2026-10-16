@@ -1,6 +1,10 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { redirect } from "next/navigation";
 import { toSearchParams } from "@/lib/url-state";
 import { parseCls } from "@/lib/asset-class";
+
+export const metadata: Metadata = { title: pageTitle("Register assets") };
 
 /**
  * Phase 30 (spec §5.1): one Register flow. `/inventory/new` is kept as a

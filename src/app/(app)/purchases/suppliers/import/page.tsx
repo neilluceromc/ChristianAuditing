@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { ImportWizard } from "@/components/import/import-wizard";
 import { SUPPLIER_KNOWN_UNIMPORTED_COLUMNS } from "@/lib/import-columns";
 import { planSupplierImport, applySupplierImport } from "@/server/modules/import/supplier-actions";
+
+export const metadata: Metadata = { title: pageTitle("Import suppliers") };
 
 export default async function ImportSuppliersPage() {
   // `requireRole("admin", "purchasing_staff")` — the same set

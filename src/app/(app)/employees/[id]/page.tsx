@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { employeeNameFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
@@ -24,6 +27,11 @@ import { TransfersTab } from "@/components/employees/side-card/transfers-tab";
 import { notYetCount } from "@/lib/it-setup";
 import { getTransfers } from "@/server/modules/employees/queries";
 import { loadoutViewFor } from "@/server/loadout-view";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await employeeNameFor(id)) ?? "Employee") };
+}
 
 export default async function EmployeePage({
   params,

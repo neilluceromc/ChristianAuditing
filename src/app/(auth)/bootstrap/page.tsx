@@ -1,6 +1,10 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { BootstrapForm } from "./bootstrap-form";
+
+export const metadata: Metadata = { title: pageTitle("Create the admin account") };
 
 export default async function BootstrapPage() {
   const users = await prisma.user.count();

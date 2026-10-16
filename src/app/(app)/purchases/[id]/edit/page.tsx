@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { purchaseRefFor } from "@/server/page-titles";
 import { notFound, redirect } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -5,6 +8,11 @@ import { DRAFT_ROLES } from "@/lib/purchase-flow";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { DraftForm, type UnitDraft } from "@/components/purchases/draft-form";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Edit", await purchaseRefFor(id)) };
+}
 
 export default async function EditPurchasePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireRole(...DRAFT_ROLES);

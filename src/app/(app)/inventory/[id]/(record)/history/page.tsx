@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
@@ -11,6 +14,11 @@ import { Table, TBody, Th, THead, Tr } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { HistoryEntryRows } from "@/components/inventory/history-entry-rows";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("History", await assetTagFor(id)) };
+}
 
 export default async function AssetHistoryPage({
   params,

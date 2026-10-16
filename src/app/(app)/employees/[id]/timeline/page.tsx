@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { employeeNameFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/server/db/client";
@@ -10,6 +13,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ButtonLink } from "@/components/ui/button-link";
 import { TimelineList, type TimelineItem } from "@/components/patterns/timeline-list";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Timeline", await employeeNameFor(id)) };
+}
 
 export default async function EmployeeTimelinePage({
   params,

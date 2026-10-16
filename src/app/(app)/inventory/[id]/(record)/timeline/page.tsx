@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/server/db/client";
@@ -12,6 +15,11 @@ import { mergeTimeline, parseTimelineCursor, timelineCursorQS, timelineTake, TIM
 import { EmptyState } from "@/components/ui/empty-state";
 import { ButtonLink } from "@/components/ui/button-link";
 import { TimelineList, type TimelineItem } from "@/components/patterns/timeline-list";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Timeline", await assetTagFor(id)) };
+}
 
 export default async function AssetTimelinePage({
   params,

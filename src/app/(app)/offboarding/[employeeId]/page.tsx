@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { employeeNameFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
@@ -31,6 +34,11 @@ import { ScanProvider } from "@/components/offboarding/scan-provider";
 import { WizardMoreMenu } from "@/components/offboarding/wizard-more-menu";
 import { WizardSteps } from "@/components/offboarding/wizard-steps";
 import type { AssetStatus } from "@prisma/client";
+
+export async function generateMetadata({ params }: { params: Promise<{ employeeId: string }> }): Promise<Metadata> {
+  const { employeeId } = await params;
+  return { title: pageTitle("Offboarding", await employeeNameFor(employeeId)) };
+}
 
 export default async function OffboardingWizardPage({
   params,

@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
@@ -24,6 +26,8 @@ function categoryText(life: number | null, pct: number | null): string {
   if (life === null) return "Category: no policy";
   return `Category: ${lifeLabel(life)}, ${pct ?? 0}% salvage`;
 }
+
+export const metadata: Metadata = { title: pageTitle("Assets") };
 
 export default async function FinanceAssetsPage({
   searchParams,

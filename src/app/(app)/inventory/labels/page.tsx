@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { requireRole } from "@/server/auth/guards";
@@ -51,6 +53,8 @@ function StepLink({ to, href, label, children }: { to: number; href: string; lab
   }
   return <Link href={href} aria-label={label} className={`${STEP} hover:bg-surface-subtle`}>{children}</Link>;
 }
+
+export const metadata: Metadata = { title: pageTitle("Print labels") };
 
 export default async function LabelsPage({ searchParams }: { searchParams: Promise<Params> }) {
   // A SET, not a floor — matching both importers. requireRole("it_staff")

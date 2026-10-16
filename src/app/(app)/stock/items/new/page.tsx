@@ -1,7 +1,11 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { activeStockCategories, stockUnits } from "@/server/modules/stock/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { StockItemForm } from "@/components/stock/stock-item-form";
+
+export const metadata: Metadata = { title: pageTitle("New stock item") };
 
 export default async function NewStockItemPage() {
   await requireRole("admin", "purchasing_staff");

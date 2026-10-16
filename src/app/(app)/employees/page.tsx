@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import {
   clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter, withSearch,
@@ -13,6 +15,8 @@ import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filte
 import { EmployeesTable } from "@/components/employees/employees-table";
 import { EmployeesToolbar } from "@/components/employees/employees-toolbar";
 import { EmployeesMoreMenu } from "@/components/employees/employees-more-menu";
+
+export const metadata: Metadata = { title: pageTitle("Employees") };
 
 export default async function EmployeesPage({
   searchParams,

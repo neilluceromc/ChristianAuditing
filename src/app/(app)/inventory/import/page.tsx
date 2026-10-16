@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { ImportWizard } from "@/components/import/import-wizard";
 import { KNOWN_UNIMPORTED_COLUMNS } from "@/lib/import-columns";
 import { planAssetImport, applyAssetImport } from "@/server/modules/import/asset-actions";
+
+export const metadata: Metadata = { title: pageTitle("Import assets") };
 
 export default async function ImportAssetsPage() {
   // `requireRole("admin", "it_staff")` — a SET, not a floor. `requireRole("it_staff")`

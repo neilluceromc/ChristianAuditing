@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { employeeNameFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { decidedItems, getWizard, undecidedHeldItems } from "@/server/modules/offboarding/queries";
@@ -7,6 +10,11 @@ import { offboardingCompletionText } from "@/lib/deadlines";
 import { PrintButton } from "@/components/ui/print-button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { PageHeader } from "@/components/ui/page-header";
+
+export async function generateMetadata({ params }: { params: Promise<{ employeeId: string }> }): Promise<Metadata> {
+  const { employeeId } = await params;
+  return { title: pageTitle("Farewell report", await employeeNameFor(employeeId)) };
+}
 
 export default async function FarewellReportPage({ params }: { params: Promise<{ employeeId: string }> }) {
   await requireUser();

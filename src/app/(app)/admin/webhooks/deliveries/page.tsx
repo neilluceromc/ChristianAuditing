@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
@@ -8,6 +10,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs } from "@/components/ui/tabs";
 import { DeliveryTable } from "@/components/admin/delivery-table";
+
+export const metadata: Metadata = { title: pageTitle("Delivery attempts", "Webhooks") };
 
 export default async function DeliveriesPage({
   searchParams,

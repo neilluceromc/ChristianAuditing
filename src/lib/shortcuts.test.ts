@@ -1,0 +1,57 @@
+import { describe, expect, it } from "vitest";
+import { isMacPlatform, searchShortcutLabel, slashFocusesSearch, type SlashKey } from "./shortcuts";
+
+describe("searchShortcutLabel (spec §2.3 / §4: Ctrl K, or ⌘K on Mac)", () => {
+  it("reads ⌘K on Apple platforms", () => {
+    for (const p of ["MacIntel", "macOS", "iPhone", "iPad", "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5)"]) {
+      expect(isMacPlatform(p)).toBe(true);
+      expect(searchShortcutLabel(p)).toBe("⌘K");
+    }
+  });
+
+  it("reads Ctrl K everywhere else, and when the platform is unknown", () => {
+    for (const p of ["Win32", "Windows", "Linux x86_64", "Android", ""]) {
+      expect(isMacPlatform(p)).toBe(false);
+      expect(searchShortcutLabel(p)).toBe("Ctrl K");
+    }
+  });
+});
+
+const base: SlashKey = {
+  key: "/", ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false,
+  targetTag: "BODY", targetType: null, targetEditable: false,
+};
+
+describe("slashFocusesSearch (spec §2.3: \"/\" focuses the page's search box, never while typing)", () => {
+  it("takes a bare / pressed outside any field", () => {
+    expect(slashFocusesSearch(base)).toBe(true);
+    expect(slashFocusesSearch({ ...base, targetTag: "BUTTON" })).toBe(true);
+    expect(slashFocusesSearch({ ...base, targetTag: "A" })).toBe(true);
+  });
+
+  it("ignores any other key", () => {
+    expect(slashFocusesSearch({ ...base, key: "?" })).toBe(false);
+    expect(slashFocusesSearch({ ...base, key: "k" })).toBe(false);
+  });
+
+  it("ignores / with a modifier held", () => {
+    expect(slashFocusesSearch({ ...base, ctrlKey: true })).toBe(false);
+    expect(slashFocusesSearch({ ...base, metaKey: true })).toBe(false);
+    expect(slashFocusesSearch({ ...base, altKey: true })).toBe(false);
+  });
+
+  it("ignores / while typing in a field", () => {
+    for (const tag of ["INPUT", "TEXTAREA", "SELECT"]) {
+      expect(slashFocusesSearch({ ...base, targetTag: tag, targetType: tag === "INPUT" ? "text" : null })).toBe(false);
+    }
+    expect(slashFocusesSearch({ ...base, targetTag: "DIV", targetEditable: true })).toBe(false);
+  });
+
+  it("ignores / on any input, even a checkbox", () => {
+    expect(slashFocusesSearch({ ...base, targetTag: "INPUT", targetType: "checkbox" })).toBe(false);
+  });
+
+  it("ignores / that something else already handled", () => {
+    expect(slashFocusesSearch({ ...base, defaultPrevented: true })).toBe(false);
+  });
+});

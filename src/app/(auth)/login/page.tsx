@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { signIn } from "@/server/auth";
@@ -8,6 +10,8 @@ import { quickSignIn } from "@/server/auth/actions";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { LoginForm } from "./login-form";
+
+export const metadata: Metadata = { title: pageTitle("Sign in") };
 
 export default async function LoginPage({
   searchParams,

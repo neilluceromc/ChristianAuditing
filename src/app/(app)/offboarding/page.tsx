@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { parseListState, serializeListState, toggleSort, toSearchParams, withFilter, type ListState } from "@/lib/url-state";
@@ -17,6 +19,8 @@ import { DuePill } from "@/components/ui/due-pill";
 import { OffboardingToolbar } from "@/components/offboarding/offboarding-toolbar";
 import { OffboardingMoreMenu } from "@/components/offboarding/offboarding-more-menu";
 import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/patterns/list-navigation";
+
+export const metadata: Metadata = { title: pageTitle("Offboarding") };
 
 export default async function OffboardingPage({
   searchParams,

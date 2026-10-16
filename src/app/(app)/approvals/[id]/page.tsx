@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { approvalRefFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
@@ -19,6 +22,11 @@ import { StatusDot, StatusPill } from "@/components/ui/status";
 import { ApprovalHeaderActions } from "@/components/approvals/approval-header";
 import { NextInQueue } from "@/components/approvals/next-in-queue";
 import { TagRef } from "@/components/inventory/tag-ref";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await approvalRefFor(id)) ?? "Approval") };
+}
 
 export default async function ApprovalPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();

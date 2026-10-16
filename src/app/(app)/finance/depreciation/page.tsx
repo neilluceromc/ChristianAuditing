@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import Link from "next/link";
@@ -15,6 +17,8 @@ import { Pagination } from "@/components/ui/pagination";
 import { Banner } from "@/components/ui/banner";
 import { Table, TBody, THead, Th, Tr } from "@/components/ui/table";
 import { PolicyRow } from "@/components/finance/policy-row";
+
+export const metadata: Metadata = { title: pageTitle("Depreciation") };
 
 export default async function DepreciationPage({
   searchParams,

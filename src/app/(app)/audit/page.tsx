@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -21,6 +23,8 @@ import type { FacetOptionLike } from "@/components/patterns/facet-dropdown";
 // Phase 27 (P-10): "vendor" is what the table is called; "Supplier" is what the operator calls it.
 const ENTITY_LABEL_OVERRIDE: Record<string, string> = { vendor: "Supplier" };
 const humanize = (s: string) => ENTITY_LABEL_OVERRIDE[s] ?? s.charAt(0).toUpperCase() + s.slice(1).replaceAll("-", " ");
+
+export const metadata: Metadata = { title: pageTitle("Audit log") };
 
 export default async function AuditPage({
   searchParams,

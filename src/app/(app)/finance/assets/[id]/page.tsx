@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -17,6 +20,11 @@ import { YearSchedule } from "./year-schedule";
 
 const peso = (c: number | null) => (c === null ? "Not recorded" : fmtMoneyExact(c / 100));
 const text = (v: string | null | undefined) => (v ? v : "Not recorded");
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await assetTagFor(id)) ?? "Asset") };
+}
 
 export default async function FinanceAssetPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole("admin", "finance_staff");

@@ -268,3 +268,110 @@ test.describe("phase 40 — readable asset history", () => {
     }
   });
 });
+
+/**
+ * Phase 40 (spec §2.3, §3, §5): the phone shell, the Keyboard shortcuts dialog that replaced the Help 404, the "/"
+ * shortcut, and page titles.
+ */
+const ADMIN = "admin@thebackroomop.com";
+
+test.describe("phase 40 — phone shell, shortcuts, titles", () => {
+  test("6. at 375 px: menu, Search and Scan a tag in the top bar; the drawer has the workspace switch and Sign out", async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await login(page, ADMIN);
+    const menu = page.getByRole("button", { name: "Open menu", exact: true });
+    await waitForHydration(menu);
+    // the sidebar is hidden below lg; the top bar carries the page name instead
+    await expect(page.getByRole("complementary", { name: "Primary" })).toBeHidden();
+    await expectNoSeriousAxe(page);
+
+    // Search opens the palette plain …
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    const input = palette.getByRole("textbox", { name: "Search" });
+    await expect(input).toBeFocused();
+    await expect(input).toHaveAttribute("placeholder", "Search assets, people, requests…");
+    await page.keyboard.press("Escape");
+    await expect(palette).toHaveCount(0);
+
+    // … and Scan a tag opens it with the scan hint
+    await page.getByRole("button", { name: "Scan a tag", exact: true }).click();
+    await expect(input).toBeFocused();
+    await expect(input).toHaveAttribute("placeholder", "Type or scan a tag");
+    await page.keyboard.press("Escape");
+    await expect(palette).toHaveCount(0);
+
+    // The drawer: workspace switch at the top, the account block (name, role, Sign out) at the bottom
+    await menu.click();
+    const drawer = page.getByRole("dialog", { name: "IT" });
+    await expect(drawer).toBeVisible();
+    const switcher = drawer.getByRole("group", { name: "Switch workspace" });
+    await expect(switcher.getByRole("button")).toHaveCount(4);
+    await expect(switcher.getByRole("button", { name: "IT", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(drawer.getByText("4 workspaces", { exact: true })).toBeVisible();
+    await expect(drawer.getByText("System Admin", { exact: true })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+    await expect(drawer).not.toContainText("br.dept");
+    await expectNoSeriousAxe(page);
+
+    // switching from the drawer lands on that workspace
+    await switcher.getByRole("button", { name: "Purchasing", exact: true }).click();
+    await expect(page).toHaveURL(/\/purchases$/);
+
+    // and Sign out from the drawer signs out
+    const menuAgain = page.getByRole("button", { name: "Open menu", exact: true });
+    await waitForHydration(menuAgain);
+    await menuAgain.click();
+    await page.getByRole("dialog", { name: "Purchasing" }).getByRole("button", { name: "Sign out", exact: true }).click();
+    await page.waitForURL(/\/login/);
+  });
+
+  test("7. Keyboard shortcuts replaces Help and lists \"/\"; \"/\" focuses the page's search box, never while typing", async ({ page }) => {
+    await login(page, IT);
+    await page.goto("/inventory");
+    const button = page.getByRole("button", { name: "Keyboard shortcuts", exact: true });
+    await waitForHydration(button);
+    await expect(page.getByRole("link", { name: "Help" })).toHaveCount(0);
+    await expect(page.locator('a[href="/dev/kitchen-sink"]')).toHaveCount(0);
+
+    await button.click();
+    const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("kbd", { hasText: /^\/$/ })).toBeVisible();
+    await expect(dialog.getByText("Focus this page's search box")).toBeVisible();
+    await expect(dialog.locator("kbd", { hasText: /^(Ctrl K|⌘K)$/ })).toBeVisible();
+    await expect(dialog.locator("kbd", { hasText: /^J$/ })).toBeVisible();
+    await expect(dialog.locator("kbd", { hasText: /^A$/ })).toBeVisible();
+    await expect(dialog.locator("kbd", { hasText: /^Esc$/ })).toBeVisible();
+    await expectNoSeriousAxe(page);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(button).toBeFocused();
+
+    // "/" from outside a field focuses the search box, and the "/" itself is not typed
+    await page.keyboard.press("/");
+    const search = page.getByRole("searchbox", { name: "Search assets" });
+    await expect(search).toBeFocused();
+    await expect(search).toHaveValue("");
+    // inside a field, "/" is just a character
+    await page.keyboard.type("BR/LT");
+    await expect(search).toHaveValue("BR/LT");
+  });
+
+  test("8. every page is titled \"{Page} · Backroom IT\" — records by their tag or name", async ({ page }) => {
+    await login(page, IT);
+    await page.goto("/inventory");
+    await expect(page).toHaveTitle("Inventory · Backroom IT");
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" }, select: { id: true } });
+    await page.goto(`/inventory/${asset.id}`);
+    await expect(page).toHaveTitle("BR-LT-0148 · Backroom IT");
+    await page.goto(`/inventory/${asset.id}/history`);
+    await expect(page).toHaveTitle("History · BR-LT-0148 · Backroom IT");
+    const person = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" }, select: { id: true } });
+    await page.goto(`/employees/${person.id}`);
+    await expect(page).toHaveTitle("Marites Bautista · Backroom IT");
+    await page.goto("/approvals");
+    await expect(page).toHaveTitle("Approvals · Backroom IT");
+  });
+});

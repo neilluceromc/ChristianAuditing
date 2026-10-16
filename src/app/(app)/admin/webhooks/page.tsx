@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireRole } from "@/server/auth/guards";
 import { PageHeader } from "@/components/ui/page-header";
@@ -5,6 +7,8 @@ import { Banner } from "@/components/ui/banner";
 import { EndpointCard, NewEndpointCard } from "@/components/admin/endpoint-editor";
 import { listEndpoints } from "@/server/modules/admin/queries";
 import { MAX_JOB_ATTEMPTS } from "@/lib/jobs";
+
+export const metadata: Metadata = { title: pageTitle("Webhooks") };
 
 export default async function WebhooksPage() {
   await requireRole("admin");

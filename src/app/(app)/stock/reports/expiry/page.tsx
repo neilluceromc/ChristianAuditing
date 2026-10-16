@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams, parseListState } from "@/lib/url-state";
 import { STOCK_REPORT_LIST_CONFIG, parseExpiryTab, parseExpiryWindow, reportHref } from "@/lib/stock-reports";
@@ -23,6 +25,8 @@ function queryFor(params: Record<string, string>): string {
 }
 
 const BASE = "/stock/reports/expiry";
+
+export const metadata: Metadata = { title: pageTitle("Expiring and expired lots") };
 
 export default async function StockExpiryReportPage({
   searchParams,

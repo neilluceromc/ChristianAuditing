@@ -1,9 +1,17 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { fmtDate } from "@/lib/format";
 import { SecretsPanel } from "@/components/inventory/secrets-panel";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Secrets", await assetTagFor(id)) };
+}
 
 export default async function AssetSecretsPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();

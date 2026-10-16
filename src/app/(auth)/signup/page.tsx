@@ -1,7 +1,11 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { flagDomain } from "@/lib/auth-shared";
 import { SignupForm } from "./signup-form";
+
+export const metadata: Metadata = { title: pageTitle("Create account") };
 
 export default async function SignupPage() {
   const domainFlag = await prisma.featureFlag.findUnique({ where: { key: "allowed_domain" } });
