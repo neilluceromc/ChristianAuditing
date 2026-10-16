@@ -323,6 +323,7 @@ async function computeExpiryLots(state: ListState): Promise<ExpiryLotRow[]> {
 
   const lots = await prisma.stockLot.findMany({
     where,
+    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
     select: {
       id: true, itemId: true, lotDate: true, expiresAt: true, reference: true, unitCost: true, quantity: true,
       supplier: { select: { name: true } },

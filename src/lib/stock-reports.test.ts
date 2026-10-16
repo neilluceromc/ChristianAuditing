@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   consumptionGrid, defaultConsumptionRange, expiryBuckets, manilaDayBounds, monthKey, monthsBetween,
-  groupRunsByCategory, matchesSearch, ON_HAND_SUBTOTAL_LIMIT, parseExpiryTab, parseExpiryWindow, parseReportRange,
+  compareByExpiry, groupRunsByCategory, matchesSearch, ON_HAND_SUBTOTAL_LIMIT, parseExpiryTab, parseExpiryWindow, parseReportRange,
   reportHref, STOCK_REPORT_LIST_CONFIG, topSubtotals,
 } from "./stock-reports";
 
@@ -237,5 +237,33 @@ describe("reportHref", () => {
       { days: "90", tab: "expiring", empty: "" },
     );
     expect(href).toBe("/stock/reports/expiry?q=sugar&category=a,b&page=3&days=90&tab=expiring");
+  });
+});
+
+describe("compareByExpiry", () => {
+  const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
+  const lot = (id: string, expiresAt: Date | null, code = "A-1", reference: string | null = null) => ({ id, expiresAt, code, reference });
+  it("orders by expiry first, undated last", () => {
+    const sorted = [lot("c", null), lot("b", d("2026-02-01")), lot("a", d("2026-01-01"))].sort(compareByExpiry);
+    expect(sorted.map((l) => l.id)).toEqual(["a", "b", "c"]);
+  });
+  it("breaks a same-day tie by item code, then reference (none first), then id", () => {
+    const day = d("2026-01-01");
+    const lots = [
+      lot("5", day, "B-1", "R2"), lot("4", day, "B-1", "R1"), lot("3", day, "A-9", "Z"),
+      lot("2", day, "A-9", null), lot("1b", day, "A-1", null), lot("1a", day, "A-1", null),
+    ];
+    expect(lots.sort(compareByExpiry).map((l) => l.id)).toEqual(["1a", "1b", "2", "3", "4", "5"]);
+  });
+  it("gives the same order whatever order the lots arrive in", () => {
+    const day = d("2026-03-03");
+    const lots = Array.from({ length: 6 }, (_, i) => lot(`id${i}`, day, i % 2 ? "A" : "B", `R${i % 3}`));
+    const forward = [...lots].sort(compareByExpiry).map((l) => l.id);
+    expect([...lots].reverse().sort(compareByExpiry).map((l) => l.id)).toEqual(forward);
+  });
+  it("expiryBuckets uses it, so the export and the screen agree", () => {
+    const day = d("2026-01-01");
+    const { expired } = expiryBuckets([lot("2", day, "B-1"), lot("1", day, "A-1")], "2026-06-01", 30);
+    expect(expired.map((l) => l.id)).toEqual(["1", "2"]);
   });
 });

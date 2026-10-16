@@ -121,6 +121,25 @@ export function consumptionGrid(rows: ConsumptionRowInput[]): ConsumptionGrid {
   return { months, rows: gridRows, columnTotals, grandTotal };
 }
 
+export interface ExpirySortable { expiresAt: Date | null; code?: string; reference?: string | null; id?: string }
+
+/**
+ * Soonest expiry first, then item code, then reference, then id — a total order, so lots sharing an expiry date never
+ * swap places between two page loads (the screen pages 50 at a time) and the export lists them the same way the
+ * screen does. A missing field counts as empty; an undated lot sorts last.
+ */
+export function compareByExpiry(a: ExpirySortable, b: ExpirySortable): number {
+  const at = a.expiresAt ? a.expiresAt.getTime() : Infinity;
+  const bt = b.expiresAt ? b.expiresAt.getTime() : Infinity;
+  if (at !== bt) return at < bt ? -1 : 1;
+  const text = (x: string | null | undefined, y: string | null | undefined) => {
+    const xs = x ?? "";
+    const ys = y ?? "";
+    return xs < ys ? -1 : xs > ys ? 1 : 0;
+  };
+  return text(a.code, b.code) || text(a.reference, b.reference) || text(a.id, b.id);
+}
+
 /**
  * Spec §4.2. Generic over whatever lot shape the caller has (`queries.ts`'s
  * real rows carry far more than `expiresAt`) — the caller is trusted to hand
@@ -129,7 +148,7 @@ export function consumptionGrid(rows: ConsumptionRowInput[]): ConsumptionGrid {
  * boundary is inclusive: a lot expiring in exactly `windowDays` days is
  * "expiring within" that window.
  */
-export function expiryBuckets<T extends { expiresAt: Date | null }>(
+export function expiryBuckets<T extends ExpirySortable>(
   lots: T[],
   today: string,
   windowDays: number,
@@ -142,8 +161,7 @@ export function expiryBuckets<T extends { expiresAt: Date | null }>(
     if (isExpired(lot.expiresAt, today)) expired.push(lot);
     else if (lot.expiresAt.getTime() <= windowEndMs) expiring.push(lot);
   }
-  const byExpiry = (a: T, b: T) => a.expiresAt!.getTime() - b.expiresAt!.getTime();
-  return { expired: expired.sort(byExpiry), expiring: expiring.sort(byExpiry) };
+  return { expired: expired.sort(compareByExpiry), expiring: expiring.sort(compareByExpiry) };
 }
 
 /**

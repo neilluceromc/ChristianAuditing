@@ -251,9 +251,10 @@ export const CONSUMPTION_EXPORT_COLUMNS: XlsxColumn<ConsumptionExportRow>[] = [
 ];
 
 /**
- * Phase 22 (spec §4.4): the `/stock/reports/expiry` export — both on-screen
- * blocks (Expired, Expiring within N days) flattened into one sheet, told
- * apart by `status` ("Expired" / "Expiring"). `days` is `expiryLabel`'s own
+ * Phase 22 (spec §4.4): the `/stock/reports/expiry` export — both tabs on
+ * screen (Expired, Expiring within N days; Phase 39 pages each 50 at a time,
+ * the export is not paged) flattened into one sheet, told apart by `status`
+ * ("Expired" / "Expiring"), each in the screen's order (`compareByExpiry`). `days` is `expiryLabel`'s own
  * display string (`stock-allocation.ts`) — "expired 2 days ago" reads
  * better in a downloaded sheet than a bare signed integer, and the screen's
  * own "Days" column shows the same text (spec §6.3).
