@@ -10,7 +10,14 @@ import {
   type ExceptionLike, type PolicyLike, type SlotLike,
 } from "./loadout";
 
-export type MoneyRole = "admin" | "it_staff" | "purchasing_staff" | "finance_staff" | "viewer";
+/**
+ * The share of people with no required gap, as a whole percent. Rounded DOWN and capped at 99 while anyone is missing
+ * something, so a 250-person group with one gap never reads "100% fully equipped".
+ */
+export function fullyEquippedPct(people: number, missing: number): number {
+  const pct = Math.floor((100 * (people - missing)) / Math.max(people, 1));
+  return missing > 0 ? Math.min(pct, 99) : pct;
+}
 
 /** Only Admin and Finance see peso amounts on this report. */
 export function canSeeMoney(role: string): boolean {
@@ -91,7 +98,7 @@ export function summariseGroup(
 
   // Spec §3.2: no policy means no base policy for the group and no rule matching anyone in it.
   const noPolicy = !group.hasBasePolicy && !people.some((p) => p.hasPolicy);
-  const equippedPct = noPolicy ? null : people.length === 0 ? 100 : Math.round((100 * (people.length - missing.length)) / people.length);
+  const equippedPct = noPolicy ? null : people.length === 0 ? 100 : fullyEquippedPct(people.length, missing.length);
 
   const books = new Map<string, { count: number; bookC: number }>();
   let costC = 0;
@@ -174,7 +181,7 @@ export interface EquipmentTotals {
   items: number;
   /** people missing something, summed across the groups */
   missing: number;
-  /** round(100 × (people − missing) ÷ max(people, 1)) */
+  /** floor(100 × (people − missing) ÷ max(people, 1)), 99 at most while anyone is missing something */
   fullyPct: number;
   /** Finance and Admin only — absent, not zero, for everyone else. */
   money?: { costC: number; bookC: number; withoutCost: number };
@@ -186,7 +193,7 @@ export function reportTotals(summaries: GroupSummary[], withMoney: boolean): Equ
   const people = sum((s) => s.people);
   const missing = sum((s) => s.missing.length);
   const totals: EquipmentTotals = {
-    people, items: sum((s) => s.items), missing, fullyPct: Math.round((100 * (people - missing)) / Math.max(people, 1)),
+    people, items: sum((s) => s.items), missing, fullyPct: fullyEquippedPct(people, missing),
   };
   if (withMoney) {
     totals.money = {

@@ -80,7 +80,7 @@ export function EquipmentTable({
       <Card className="px-4 py-8 text-center text-xs text-fg-muted">
         {w.empty} — add them on{" "}
         {canManageGroups ? (
-          <Link href="/admin/departments" className="text-accent hover:underline">Departments &amp; clients</Link>
+          <Link href={tab === "internal" ? "/admin/departments?tab=internal" : "/admin/departments"} className="text-accent hover:underline">Departments &amp; clients</Link>
         ) : (
           "Departments & clients"
         )}

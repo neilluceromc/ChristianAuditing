@@ -49,6 +49,7 @@ export function GroupDetail({
           <p className="text-xs text-fg-secondary">
             {plural(group.people, "person", "people")} · {plural(group.items, "item", "items")}
             {withMoney && group.money && ` · ${fmtMoney(group.money.bookC / 100)}`}
+            {withMoney && group.money && group.money.withoutCost > 0 && ` · ${group.money.withoutCost} without a cost`}
           </p>
         </div>
         <button

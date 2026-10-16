@@ -131,7 +131,7 @@ export function HeldItemPanel({
                     mono: true,
                   },
                   ...(panel.heldSince ? [{ label: "Held since", value: fmtDayMonthYear(panel.heldSince) }] : []),
-                  ...(panel.bookValue ? [{ label: "Book value", value: panel.bookValue, mono: true }] : []),
+                  ...(panel.bookValue ? [{ label: "Value at cost", value: panel.bookValue, mono: true }] : []),
                 ]}
               />
 

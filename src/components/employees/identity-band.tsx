@@ -92,7 +92,7 @@ export function IdentityBand({
         </div>
 
         {held === 0 ? (
-          // Phase 29 (rulings R11/R14): "No items yet" replaces Book value and Oldest item (Items held is
+          // Phase 29 (rulings R11/R14): "No items yet" replaces Value at cost and Oldest item (Items held is
           // implied by the line itself) — never the Open-requests count, which on a day-one hire is the
           // ONLY number the strip has to give.
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -102,7 +102,7 @@ export function IdentityBand({
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label="Items held" value={String(held)} />
-            <Stat label="Book value" value={fmtMoney(bookValue)} />
+            <Stat label="Value at cost" value={fmtMoney(bookValue)} />
             <Stat label="Oldest item" value={oldest ? fmtDate(oldest) : "—"} />
             <Stat label="Open requests" value={String(openApprovals.length)} />
           </div>

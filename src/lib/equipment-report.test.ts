@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { manilaMonth } from "./depreciation";
 import {
-  bookValueC, canSeeMoney, defaultReportSort, equippedTone, filterReportGroups, groupHasBasePolicy, reportFilterCounts, reportPeopleByGroup,
+  bookValueC, canSeeMoney, defaultReportSort, equippedTone, filterReportGroups, fullyEquippedPct, groupHasBasePolicy, reportFilterCounts, reportPeopleByGroup,
   reportTotals, sortReportGroups, summariseGroup,
   type GroupSummary, type ReportAsset, type ReportPerson,
 } from "./equipment-report";
@@ -87,12 +87,24 @@ describe("summariseGroup — a person with no policy", () => {
 });
 
 describe("summariseGroup — equipped %", () => {
-  it("is round(100 x (people - missing) / people)", () => {
+  it("is floor(100 x (people - missing) / people)", () => {
     const ok = (id: string) => person(id, { assets: [asset(`${id}-l`, "t-laptop"), asset(`${id}-m`, "t-monitor")] });
     const s = summariseGroup(group, [ok("1"), ok("2"), person("3")], none);
-    expect(s.equippedPct).toBe(67);
+    expect(s.equippedPct).toBe(66);
     expect(summariseGroup(group, [ok("1"), ok("2")], none).equippedPct).toBe(100);
     expect(summariseGroup(group, [person("1"), person("2")], none).equippedPct).toBe(0);
+  });
+  it("never reads 100 while anyone is missing something: 1 missing of 250 is 99", () => {
+    const ok = (id: string) => person(id, { assets: [asset(`${id}-l`, "t-laptop"), asset(`${id}-m`, "t-monitor")] });
+    const people = [...Array.from({ length: 249 }, (_, i) => ok(`${i}`)), person("gap")];
+    const s = summariseGroup(group, people, none);
+    expect([s.people, s.missing.length, s.equippedPct]).toEqual([250, 1, 99]);
+    expect(fullyEquippedPct(250, 1)).toBe(99);
+    expect(fullyEquippedPct(250, 0)).toBe(100);
+    expect(fullyEquippedPct(1000, 1)).toBe(99);
+  });
+  it("keeps the tone thresholds: 99 is amber, 100 green, below 80 red", () => {
+    expect([equippedTone(99), equippedTone(100), equippedTone(80), equippedTone(79), equippedTone(null)]).toEqual(["attention", "settled", "attention", "fault", null]);
   });
   it("is null when nobody in the group has a policy", () => {
     const s = summariseGroup(group, [person("1", { hasPolicy: false, slots: [] })], none);
@@ -316,10 +328,14 @@ describe("assembling the report from the loaded rows", () => {
     equippedPct: null, byCategory: [], ...(money ? { money } : {}),
   });
 
-  it("sums people, items and missing, and rounds fullyPct", () => {
+  it("sums people, items and missing, and floors fullyPct", () => {
     const t = reportTotals([summary(3, 1), summary(4, 1)], false);
     expect(t).toEqual({ people: 7, items: 14, missing: 2, fullyPct: 71 });
     expect("money" in t).toBe(false);
+  });
+  it("never reads 100% fully equipped while anyone is missing something", () => {
+    expect(reportTotals([summary(250, 1)], false).fullyPct).toBe(99);
+    expect(reportTotals([summary(250, 0)], false).fullyPct).toBe(100);
   });
   it("reads 0% fully equipped, not NaN, with no people", () => {
     expect(reportTotals([], false)).toEqual({ people: 0, items: 0, missing: 0, fullyPct: 0 });

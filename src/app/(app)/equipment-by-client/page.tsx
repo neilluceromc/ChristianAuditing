@@ -84,7 +84,7 @@ export default async function EquipmentByClientPage({
           />
           <StatCard label="Items held" value={totals.items} hint={`${perPerson} per person`} />
           {totals.money && (
-            <StatCard label="Book value today" value={fmtMoney(totals.money.bookC / 100)} hint={`cost ${fmtMoney(totals.money.costC / 100)}`} />
+            <StatCard label="Book value today" value={fmtMoney(totals.money.bookC / 100)} hint={`cost ${fmtMoney(totals.money.costC / 100)}${totals.money.withoutCost > 0 ? ` · ${totals.money.withoutCost} without a cost` : ""}`} />
           )}
           <StatCard
             label="People missing something"
