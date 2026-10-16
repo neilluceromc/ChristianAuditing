@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { historyRows } from "./history";
+import { historyEntries, historyRows } from "./history";
 
 const at = new Date("2026-08-16T09:41:00Z");
 
@@ -23,5 +23,18 @@ describe("historyRows — one row per FIELD, not per save (README 7c)", () => {
   it("stringifies values and blanks nullish to —", () => {
     const rows = historyRows([{ id: "e3", actorLabel: "x", action: "update", createdAt: at, diff: { cost: { from: 55000, to: null } } }]);
     expect(rows[0]).toMatchObject({ from: "55000", to: "—" });
+  });
+});
+
+describe("historyEntries — one group per audit entry, newest first as given", () => {
+  it("keeps each entry's field rows together and in order", () => {
+    const groups = historyEntries([
+      { id: "e1", actorLabel: "A", action: "update", createdAt: at, diff: { a: { from: 1, to: 2 }, b: { from: 1, to: 2 }, c: { from: 1, to: 2 }, d: { from: 1, to: 2 } } },
+      { id: "e2", actorLabel: "B", action: "SECRET_READ", createdAt: at, diff: null },
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(["e1", "e2"]);
+    expect(groups[0].fields.map((f) => f.field)).toEqual(["a", "b", "c", "d"]);
+    expect(groups[1].fields).toHaveLength(1);
+    expect(groups[1]).toMatchObject({ actor: "B", action: "SECRET_READ", at });
   });
 });

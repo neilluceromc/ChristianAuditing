@@ -148,7 +148,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
 
         <RequestDocumentsCard requestId={request.id} docs={request.documents} canUpload={canAttachToRequest(user.role)} />
 
-        <NoteThread requestId={request.id} notes={request.notes} canComment={canComment} />
+        <NoteThread requestId={request.id} refNo={request.refNo} notes={request.notes} canComment={canComment} />
       </div>
     </>
   );

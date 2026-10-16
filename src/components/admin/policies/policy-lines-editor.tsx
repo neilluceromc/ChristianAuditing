@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -39,7 +39,7 @@ export function firstLineOf(categories: CategoryOption[], categoryName: string):
  */
 export function PolicyLinesEditor({
   departmentId, groupName, kind, policyId, title, initialLines, categories, people, canMutate,
-  actions, onSaved, onCancel, untypedNames = [],
+  actions, onSaved, onCancel, onDirtyChange, untypedNames = [],
 }: {
   departmentId: string;
   groupName: string;
@@ -56,6 +56,8 @@ export function PolicyLinesEditor({
   onSaved?: () => void;
   /** an unsaved list (no `policyId`) can be discarded */
   onCancel?: () => void;
+  /** Told whenever this editor's unsaved state changes (false again when it goes away) — a title rule's accordion asks before switching. */
+  onDirtyChange?: (dirty: boolean) => void;
   /** older slots with no type: the editor cannot show them, and Save drops them */
   untypedNames?: string[];
 }) {
@@ -89,6 +91,12 @@ export function PolicyLinesEditor({
   // An unsaved list is unsaved even before it is changed: leaving would lose it.
   const dirty = canMutate && !created && (!policyId || !sameLines(lines, initialLines));
   useDirtyFlag(editorKey, dirty);
+  const told = useRef(onDirtyChange);
+  useEffect(() => { told.current = onDirtyChange; });
+  useEffect(() => {
+    told.current?.(dirty);
+    return () => told.current?.(false);
+  }, [dirty]);
 
   const labels = numberSlotLabels(rows.map((r) => {
     const t = typeById.get(r.assetTypeId);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -11,6 +11,7 @@ import { EntityCombobox } from "@/components/patterns/entity-combobox";
 import type { GroupKindValue } from "@/lib/groups";
 import { deletePolicy } from "@/server/modules/admin/policy-actions";
 import { CopyPolicyDialog, type CopyTarget } from "./copy-policy-dialog";
+import { LEAVE_UNSAVED } from "./dirty-context";
 import { PolicyLinesEditor, firstLineOf, type CategoryOption, type PolicyLineInput } from "./policy-lines-editor";
 
 const strip = (lines: PolicyLineInput[]): PolicyLineInput[] =>
@@ -165,6 +166,8 @@ export function StartPolicy({
   );
 }
 
+const DRAFT_OPEN = "new-rule";
+
 export interface TitleRule {
   policyId: string;
   title: string;
@@ -175,7 +178,11 @@ export interface TitleRule {
   untypedNames: string[];
 }
 
-/** Spec §3.3: "Different for a job title on {group}" — the group's title rules, each with its own editor. */
+/**
+ * Spec §3.3, Phase 39 §5: "Different for a job title on {group}" — the group's title rules as rows
+ * ("{title} · {k} lines · Edit"). One editor is open at a time; opening another (or adding a rule) while the
+ * open one has unsaved changes asks "Leave without saving?".
+ */
 export function TitleRules({
   departmentId, groupName, kind, rules, baseLines, categories, canMutate, titleCounts,
 }: {
@@ -191,14 +198,46 @@ export function TitleRules({
   titleCounts: Array<{ title: string; count: number }>;
 }) {
   const inputId = useId();
+  const panelBase = useId();
   const [adding, setAdding] = useState(false);
   const [typed, setTyped] = useState("");
   const [typedError, setTypedError] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
+  /** the rule whose editor is open (its policyId), or DRAFT_OPEN for the unsaved new rule */
+  const [open, setOpen] = useState<string | null>(null);
+  const openDirty = useRef(false);
   const [removing, setRemoving] = useState<TitleRule | null>(null);
 
   const key = (t: string) => t.trim().toLowerCase();
   const countFor = (t: string) => titleCounts.filter((c) => key(c.title) === key(t)).reduce((n, c) => n + c.count, 0);
+
+  /** True when the open editor may go: nothing unsaved, or they chose to leave it. */
+  function mayLeave(): boolean {
+    if (openDirty.current && !window.confirm(LEAVE_UNSAVED)) return false;
+    openDirty.current = false;
+    return true;
+  }
+
+  function toggle(id: string) {
+    if (!mayLeave()) return;
+    setAdding(false);
+    setTyped("");
+    setTypedError(null);
+    setDraft(null);
+    setOpen(open === id ? null : id);
+  }
+
+  function startAdding() {
+    if (!mayLeave()) return;
+    setOpen(null);
+    setDraft(null);
+    setAdding(true);
+  }
+
+  function closeDraft() {
+    setDraft(null);
+    setOpen(null);
+  }
 
   function add() {
     const title = typed.trim();
@@ -211,6 +250,7 @@ export function TitleRules({
       return;
     }
     setDraft(title);
+    setOpen(DRAFT_OPEN);
     setAdding(false);
     setTyped("");
     setTypedError(null);
@@ -233,36 +273,72 @@ export function TitleRules({
             No title rules. Everyone on {groupName} gets the list above.
           </p>
         )}
-        {rules.map((r) => (
-          <div key={r.policyId} className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <h4 className="text-[12.5px] font-semibold text-fg">{r.title}</h4>
-              {canMutate && (
-                <Button size="sm" variant="ghost" className="ml-auto" aria-label={`Remove the ${r.title} rule`} onClick={() => setRemoving(r)}>
-                  Remove
+        {rules.map((r) => {
+          const isOpen = open === r.policyId;
+          const panelId = `${panelBase}-${r.policyId}`;
+          return (
+            <div key={r.policyId} className="rounded-(--radius-card) border border-border-faint">
+              <div className="flex items-center gap-2 px-3 py-2">
+                <h4 className="text-[12.5px] font-semibold text-fg">{r.title}</h4>
+                <span className="text-xs text-fg-muted">
+                  · {r.lines.length} {r.lines.length === 1 ? "line" : "lines"} ·
+                </span>
+                {/* A disclosure: the visible word never changes ("Edit"/"View", inside the name, WCAG 2.5.3); the
+                    chevron and aria-expanded say open or not, and the same button closes the editor. */}
+                <Button
+                  size="sm" variant="ghost" aria-expanded={isOpen} aria-controls={panelId}
+                  aria-label={`${canMutate ? "Edit" : "View"} the ${r.title} rule`}
+                  onClick={() => toggle(r.policyId)}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {canMutate ? "Edit" : "View"}
+                    <svg
+                      aria-hidden viewBox="0 0 10 10" width="10" height="10"
+                      className={isOpen ? "rotate-180 transition-transform" : "transition-transform"}
+                    >
+                      <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                    </svg>
+                  </span>
                 </Button>
-              )}
+                {canMutate && (
+                  <Button size="sm" variant="ghost" className="ml-auto" aria-label={`Remove the ${r.title} rule`} onClick={() => setRemoving(r)}>
+                    Remove
+                  </Button>
+                )}
+              </div>
+              {/* Always present (hidden while closed) so aria-controls names an element; the editor mounts only when open. */}
+              <div id={panelId} hidden={!isOpen} className="border-t border-border-faint px-3 py-3">
+                {isOpen && (
+                  <PolicyLinesEditor
+                    key={r.editorKey}
+                    departmentId={departmentId} groupName={groupName} kind={kind} policyId={r.policyId} title={r.title}
+                    initialLines={r.lines} categories={categories} people={r.people} canMutate={canMutate}
+                    untypedNames={r.untypedNames}
+                    onDirtyChange={(d) => { openDirty.current = d; }}
+                  />
+                )}
+              </div>
             </div>
-            <PolicyLinesEditor
-              key={r.editorKey}
-              departmentId={departmentId} groupName={groupName} kind={kind} policyId={r.policyId} title={r.title}
-              initialLines={r.lines} categories={categories} people={r.people} canMutate={canMutate}
-              untypedNames={r.untypedNames}
-            />
-          </div>
-        ))}
+          );
+        })}
         {draft !== null && baseLines && (
-          <div className="flex flex-col gap-2">
-            <h4 className="text-[12.5px] font-semibold text-fg">{draft}</h4>
-            <PolicyLinesEditor
-              key={`draft:${draft}`}
-              departmentId={departmentId} groupName={groupName} kind={kind} title={draft}
-              initialLines={strip(baseLines)} categories={categories} people={countFor(draft)} canMutate={canMutate}
-              onSaved={() => setDraft(null)} onCancel={() => setDraft(null)}
-            />
+          <div className="rounded-(--radius-card) border border-border-faint">
+            <div className="flex items-center gap-2 px-3 py-2">
+              <h4 className="text-[12.5px] font-semibold text-fg">{draft}</h4>
+              <span className="text-xs text-fg-muted">· new, not saved yet</span>
+            </div>
+            <div className="border-t border-border-faint px-3 py-3">
+              <PolicyLinesEditor
+                key={`draft:${draft}`}
+                departmentId={departmentId} groupName={groupName} kind={kind} title={draft}
+                initialLines={strip(baseLines)} categories={categories} people={countFor(draft)} canMutate={canMutate}
+                onSaved={closeDraft} onCancel={closeDraft}
+                onDirtyChange={(d) => { openDirty.current = d; }}
+              />
+            </div>
           </div>
         )}
-        {canMutate && baseLines && draft === null && (adding ? (
+        {canMutate && baseLines && (adding ? (
           <div className="flex flex-col gap-1">
             <label htmlFor={inputId} className="text-[11px] font-medium text-fg-secondary">Exact job title</label>
             <div className="flex flex-wrap items-center gap-2">
@@ -282,7 +358,7 @@ export function TitleRules({
           </div>
         ) : (
           <div>
-            <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>+ Add a title rule</Button>
+            <Button size="sm" variant="ghost" onClick={startAdding}>+ Add a title rule</Button>
           </div>
         ))}
       </div>

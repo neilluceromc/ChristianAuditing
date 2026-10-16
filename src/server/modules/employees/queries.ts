@@ -276,8 +276,10 @@ export async function recentPeopleOptions(userId: string): Promise<ComboOption[]
  * "Transferred from X on Y" line's own read — every transfer this person has
  * ever had, newest first. Unpaged by design (spec §7): a person moves
  * departments a handful of times in a career, never enough to need it.
+ * Phase 39 (spec §2.5): the profile asks for only the latest `take` (3); the
+ * Timeline keeps the full history.
  */
-export async function getTransfers(employeeId: string): Promise<Array<{
+export async function getTransfers(employeeId: string, take?: number): Promise<Array<{
   id: string;
   from: string;
   to: string;
@@ -291,6 +293,7 @@ export async function getTransfers(employeeId: string): Promise<Array<{
     where: { employeeId },
     include: { fromDepartment: true, toDepartment: true, actor: { select: { name: true } } },
     orderBy: [{ effectiveAt: "desc" }, { id: "desc" }],
+    take,
   });
   return rows.map((r) => ({
     id: r.id,

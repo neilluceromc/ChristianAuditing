@@ -16,7 +16,7 @@ const SIZE: Record<Size, string> = {
 };
 
 export function ButtonLink({
-  href, variant = "secondary", size = "md", prefetch, native = false, className, children,
+  href, variant = "secondary", size = "md", prefetch, native = false, className, onClick, children,
 }: {
   href: string;
   variant?: Variant;
@@ -28,6 +28,8 @@ export function ButtonLink({
    */
   native?: boolean;
   className?: string;
+  /** Runs before the navigation; `preventDefault()` cancels it (the stocktake count waits for its row saves first). */
+  onClick?: React.MouseEventHandler<HTMLAnchorElement>;
   children: React.ReactNode;
 }) {
   const classes = cn(
@@ -36,10 +38,10 @@ export function ButtonLink({
     VARIANT[variant], SIZE[size], className,
   );
   if (native) {
-    return <a href={href} className={classes}>{children}</a>;
+    return <a href={href} className={classes} onClick={onClick}>{children}</a>;
   }
   return (
-    <Link href={href} prefetch={prefetch} className={classes}>
+    <Link href={href} prefetch={prefetch} className={classes} onClick={onClick}>
       {children}
     </Link>
   );

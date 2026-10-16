@@ -13,6 +13,11 @@ import {
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { manilaDayBounds } from "@/lib/stock-reports";
+import {
+  isDifference, pageSheet, postedReviewRows, sheetLineMatches, varianceRows, type SheetState,
+} from "@/lib/stocktake";
+import type { CountLine } from "@/components/stock/stocktake-count";
+import type { ReviewRow, ReviewSummary } from "@/components/stock/stocktake-review";
 
 /** Spec §5.1/§6.4-6.5: the EXPIRING/EXPIRED pill's tri-state, shared by the item list, the item detail and the reports. */
 export type ExpiringStatus = "expired" | "expiring" | null;
@@ -476,20 +481,11 @@ export async function listStocktakes(page: number): Promise<{
 export interface StocktakeDetail {
   id: string; refNo: string; scope: string; categoryId: string | null; state: StocktakeState;
   openedAt: Date; openedBy: string; postedAt: Date | null; postedBy: string | null; dueAt: Date; note: string | null;
-  lines: Array<{ id: string; itemId: string; code: string; name: string; unit: string; bookQty: number; countedQty: number | null; currentQty: number }>;
-  /** I-4: the stocktake's OWN posted ADJUSTMENT movements, item id -> signed quantity. Always empty for OPEN (nothing posted yet) and for CANCELLED (nothing was ever written). A Map is fine here — this is server-only; the page converts it before any client boundary (R3/D-4). */
-  adjustments: Map<string, number>;
+  /** Phase 39: the categories this stocktake's lines span, each with its line count, for the sheet's Category filter. */
+  categories: FacetOption[];
 }
 
-/**
- * `currentQty` is a live balance — spec §5.1 says it matters "for OPEN ones"
- * only, since a POSTED/CANCELLED review is a frozen record, not today's
- * ledger (I-4); the groupBy that computes it is skipped entirely once the
- * stocktake has left OPEN, and `currentQty` is 0 (never read by the page in
- * that branch). `adjustments` instead reads the stocktake's own `movements`
- * relation — what it actually posted — for the non-OPEN review's
- * "Adjustment" column.
- */
+/** The stocktake's header and the categories its lines span; the lines themselves are paged by the two sheets below. */
 export async function getStocktake(id: string): Promise<StocktakeDetail | null> {
   const st = await prisma.stocktake.findUnique({
     where: { id },
@@ -497,36 +493,136 @@ export async function getStocktake(id: string): Promise<StocktakeDetail | null> 
       category: { select: { name: true } },
       openedBy: { select: { name: true } },
       postedBy: { select: { name: true } },
-      lines: { orderBy: { item: { code: "asc" } }, include: { item: { select: { id: true, code: true, name: true, unit: true } } } },
     },
   });
   if (!st) return null;
-
-  let currentById = new Map<string, number>();
-  let adjustments = new Map<string, number>();
-  if (st.state === "OPEN") {
-    const ids = st.lines.map((l) => l.itemId);
-    const sums = ids.length
-      ? await prisma.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true } })
-      : [];
-    currentById = new Map(sums.map((s) => [s.itemId, s._sum.quantity ?? 0]));
-  } else {
-    const posted = await prisma.stockMovement.findMany({
-      where: { stocktakeId: st.id, kind: "ADJUSTMENT" }, select: { itemId: true, quantity: true },
-    });
-    adjustments = new Map(posted.map((m) => [m.itemId, m.quantity]));
-  }
-
+  const inThis = { stocktakeLines: { some: { stocktakeId: id } } };
+  const categories = await prisma.stockCategory.findMany({
+    where: { items: { some: inThis } },
+    select: { id: true, name: true, _count: { select: { items: { where: inThis } } } },
+    orderBy: { name: "asc" },
+  });
   return {
     id: st.id, refNo: st.refNo, scope: st.category?.name ?? "All", categoryId: st.categoryId, state: st.state,
     openedAt: st.openedAt, openedBy: st.openedBy.name, postedAt: st.postedAt, postedBy: st.postedBy?.name ?? null,
     dueAt: st.dueAt, note: st.note,
-    lines: st.lines.map((l) => ({
-      id: l.id, itemId: l.itemId, code: l.item.code, name: l.item.name, unit: l.item.unit,
-      bookQty: l.bookQty, countedQty: l.countedQty, currentQty: currentById.get(l.itemId) ?? 0,
-    })),
-    adjustments,
+    categories: categories.map((c) => ({ value: c.id, label: c.name, count: c._count.items })),
   };
+}
+
+export interface StocktakeCountSheet {
+  lines: CountLine[];
+  page: number; pageCount: number;
+  /** Lines matching the search, category and Only uncounted. */
+  matching: number;
+  /** Every line in the stocktake, and how many of them nobody has counted yet — never narrowed by the filters. */
+  total: number; stillToCount: number;
+}
+
+/**
+ * Phase 39 (spec §4.1): the blind count sheet, 50 lines a page, filtered in SQL — the search on the item's code or
+ * name (`sheetLineMatches` is the same rule in memory, for the review), the category list, and Only uncounted.
+ */
+export async function stocktakeCountSheet(id: string, s: SheetState): Promise<StocktakeCountSheet> {
+  const q = s.q.trim();
+  const item: Prisma.StockItemWhereInput = {
+    ...(q ? { OR: [{ code: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] } : {}),
+    ...(s.cats.length ? { categoryId: { in: s.cats } } : {}),
+  };
+  const where: Prisma.StocktakeLineWhereInput = {
+    stocktakeId: id,
+    ...(Object.keys(item).length ? { item } : {}),
+    ...(s.only ? { countedQty: null } : {}),
+  };
+  const [{ rows, ...pg }, total, stillToCount] = await Promise.all([
+    pagedSnapshot(
+      LOG_PAGE_SIZE,
+      s.page,
+      (tx) => tx.stocktakeLine.count({ where }),
+      (tx, pg) =>
+        tx.stocktakeLine.findMany({
+          where, orderBy: { item: { code: "asc" } }, skip: pg.skip, take: pg.take,
+          include: { item: { select: { code: true, name: true, unit: true } } },
+        }),
+    ),
+    prisma.stocktakeLine.count({ where: { stocktakeId: id } }),
+    prisma.stocktakeLine.count({ where: { stocktakeId: id, countedQty: null } }),
+  ]);
+  return {
+    page: pg.page, pageCount: pg.pageCount, matching: pg.total, total, stillToCount,
+    lines: rows.map((l) => ({ id: l.id, code: l.item.code, name: l.item.name, unit: l.item.unit, countedQty: l.countedQty })),
+  };
+}
+
+export interface StocktakeReviewSheet {
+  rows: ReviewRow[];
+  /** Over ALL the stocktake's lines — the posting totals never follow the filters. */
+  summary: ReviewSummary;
+  page: number; pageCount: number; matching: number; total: number;
+}
+
+/**
+ * Phase 39 (spec §4.1): the variance review, 50 lines a page. Only differences is derived (an OPEN line's variance
+ * is against today's live balance), so every line is read and the summary is built over all of them before the
+ * search, category and Only differences narrow the page in memory (`pageSheet`).
+ *
+ * I-4: an OPEN review is a live view against today's ledger (`varianceRows`, its balances one groupBy); a
+ * POSTED/CANCELLED review is a frozen record of what was actually posted (`postedReviewRows`, read from the
+ * stocktake's own ADJUSTMENT movements) — the two never mix, picked once here by `state`.
+ */
+export async function stocktakeReviewSheet(id: string, state: StocktakeState, s: SheetState): Promise<StocktakeReviewSheet> {
+  const lines = await prisma.stocktakeLine.findMany({
+    where: { stocktakeId: id },
+    orderBy: { item: { code: "asc" } },
+    select: { itemId: true, bookQty: true, countedQty: true, item: { select: { code: true, name: true, categoryId: true } } },
+  });
+  const inputs = lines.map((l) => ({ itemId: l.itemId, bookQty: l.bookQty, countedQty: l.countedQty }));
+  const info = new Map(lines.map((l) => [l.itemId, l.item]));
+
+  let rows: ReviewRow[];
+  let summary: ReviewSummary;
+  if (state === "OPEN") {
+    const ids = lines.map((l) => l.itemId);
+    const sums = ids.length
+      ? await prisma.stockMovement.groupBy({ by: ["itemId"], where: { itemId: { in: ids } }, _sum: { quantity: true } })
+      : [];
+    const current = new Map(sums.map((x) => [x.itemId, x._sum.quantity ?? 0]));
+    const open = varianceRows(inputs, current).map((v) => {
+      const it = info.get(v.itemId)!;
+      return { kind: "open" as const, ...v, code: it.code, name: it.name };
+    });
+    rows = open;
+    summary = {
+      kind: "open",
+      counted: open.filter((r) => r.countedQty !== null).length,
+      withDiff: open.filter((r) => r.variance !== null && r.variance !== 0).length,
+      notCounted: open.filter((r) => r.countedQty === null).length,
+      moved: open.filter((r) => r.drift !== 0).length,
+    };
+  } else {
+    const posted = await prisma.stockMovement.findMany({
+      where: { stocktakeId: id, kind: "ADJUSTMENT" }, select: { itemId: true, quantity: true },
+    });
+    const adjustments = new Map(posted.map((m) => [m.itemId, m.quantity]));
+    const frozen = postedReviewRows(inputs, adjustments).map((v) => {
+      const it = info.get(v.itemId)!;
+      return { kind: "posted" as const, ...v, code: it.code, name: it.name };
+    });
+    rows = frozen;
+    summary = {
+      kind: "posted",
+      counted: frozen.filter((r) => r.countedQty !== null).length,
+      adjusted: frozen.filter((r) => r.adjustment !== null).length,
+      notCounted: frozen.filter((r) => r.countedQty === null).length,
+    };
+  }
+
+  const pg = pageSheet(
+    rows,
+    (r) => sheetLineMatches({ code: r.code, name: r.name, categoryId: info.get(r.itemId)!.categoryId }, s) && (!s.only || isDifference(r)),
+    s.page,
+  );
+  return { rows: pg.rows, summary, page: pg.page, pageCount: pg.pageCount, matching: pg.matching, total: lines.length };
 }
 
 export interface StockExportRow {

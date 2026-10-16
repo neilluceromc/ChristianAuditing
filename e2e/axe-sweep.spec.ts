@@ -337,4 +337,136 @@ test.describe("axe sweep", () => {
       `/inventory/scan/BR-XX-9999`,
     ]) await scanRoute(page, path);
   });
+
+  // Phase 39 (spec §7.2 case 11): the new surfaces. Each scan waits for the content it is about — a panel loads
+  // its rows after it mounts, and a scan of the skeleton proves nothing.
+  test("Phase 39 — the profile's four side tabs, the notes panel and the purchase conversation panel", async ({ page }) => {
+    test.setTimeout(240_000);
+    const stamp = Date.now();
+    const tag = String(stamp).slice(-6);
+    await login(page, "it@thebackroomop.com");
+
+    // EMP-0042's profile on each side tab (the remembered tab is per browser, so the URL decides each time).
+    const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    const tablist = page.getByRole("tablist", { name: "About this person" });
+    const labels = { notes: "Notes", setup: "IT setup", form: "Form", transfers: "Transfers" } as const;
+    for (const side of ["notes", "setup", "form", "transfers"] as const) {
+      await page.goto(`/employees/${marites.id}?side=${side}`);
+      await expect(tablist).toBeVisible({ timeout: 20_000 });
+      // Notes is the server-rendered default and ?side= applies after hydration: scan only once the intended tab
+      // is the selected one and its panel is on screen.
+      await expect(tablist.getByRole("tab", { name: new RegExp(`^${labels[side]}`), selected: true })).toHaveCount(1, { timeout: 20_000 });
+      await expect(page.locator(`#side-panel-${side}`)).toBeVisible({ timeout: 20_000 });
+      if (side === "setup") await expect(page.getByRole("combobox", { name: "Argus", exact: true })).toBeVisible({ timeout: 20_000 });
+      if (side === "form") await expect(page.getByRole("link", { name: "Print form", exact: true })).toBeVisible({ timeout: 20_000 });
+      await scanHere(page, `/employees/[EMP-0042]?side=${side}`);
+    }
+
+    // A person with 5 notes (over the card's 3), with the Notes panel open on them.
+    const it = await db.user.findUniqueOrThrow({ where: { email: "it@thebackroomop.com" } });
+    const purchasing = await db.user.findUniqueOrThrow({ where: { email: "purchasing@thebackroomop.com" } });
+    const dept = await db.department.findUniqueOrThrow({ where: { name: "Bluepeak Telecom" } });
+    const DAY = 86_400_000;
+    const personName = `Axe Notes ${stamp}`;
+    const person = await db.employee.create({
+      data: {
+        employeeNo: `EMP-${tag}${Math.floor(Math.random() * 10)}`, name: personName, title: "Agent",
+        departmentId: dept.id, joinedAt: new Date(),
+      },
+    });
+    try {
+      await db.employeeNote.createMany({
+        data: Array.from({ length: 5 }, (_, i) => ({
+          employeeId: person.id, authorId: it.id, text: `Axe note ${i} ${tag}`, createdAt: new Date(stamp - i * DAY),
+        })),
+      });
+      await page.goto(`/employees/${person.id}?notes=1`);
+      const notesPanel = page.getByRole("dialog", { name: `Notes — ${personName}`, exact: true });
+      await expect(notesPanel).toBeVisible({ timeout: 20_000 });
+      await expect(notesPanel.getByRole("listitem")).toHaveCount(5, { timeout: 15_000 });
+      await scanHere(page, "/employees/[person with 5 notes]?notes=1 (panel open)");
+    } finally {
+      await db.employeeNote.deleteMany({ where: { employeeId: person.id } });
+      await db.employee.deleteMany({ where: { id: person.id } });
+    }
+
+    // A purchase request with 8 messages (over the page's 5), with the Conversation panel open. NoteEntry is
+    // append-only and Restrict-linked, so the request stays behind; the next reseed truncates it.
+    const request = await db.purchaseRequest.create({
+      data: { refNo: `PR-7${tag}`, state: "DRAFT", requestedById: purchasing.id, departmentId: dept.id },
+    });
+    await db.noteEntry.createMany({
+      data: Array.from({ length: 8 }, (_, i) => ({
+        requestId: request.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: "COMMENT" as const,
+        text: `Axe message ${i} ${tag}`, createdAt: new Date(stamp - (8 - i) * 3_600_000),
+      })),
+    });
+    await page.goto(`/purchases/${request.id}?thread=1`);
+    const thread = page.getByRole("dialog", { name: `Conversation — ${request.refNo}`, exact: true });
+    await expect(thread).toBeVisible({ timeout: 20_000 });
+    await expect(thread.getByRole("listitem")).toHaveCount(8, { timeout: 15_000 });
+    await scanHere(page, "/purchases/[request with 8 messages]?thread=1 (panel open)");
+  });
+
+  test("Phase 39 — the stocktake sheet (count and review) and the On hand and Expiry reports", async ({ page }) => {
+    test.setTimeout(240_000);
+    const stamp = Date.now();
+    const purchasing = await db.user.findUniqueOrThrow({ where: { email: "purchasing@thebackroomop.com" } });
+    // An open stocktake over one seeded category, one line counted so the review has a difference to show.
+    const category = await db.stockCategory.findFirstOrThrow({
+      where: { items: { some: { archivedAt: null } } }, orderBy: { prefix: "asc" },
+    });
+    const items = await db.stockItem.findMany({ where: { categoryId: category.id, archivedAt: null }, orderBy: { code: "asc" } });
+    const st = await db.stocktake.create({
+      data: {
+        refNo: `ST-AXE${String(stamp).slice(-6)}`, categoryId: category.id, state: "OPEN",
+        openedAt: new Date(stamp), dueAt: new Date(stamp + 3 * 86_400_000), openedById: purchasing.id,
+        lines: {
+          create: items.map((item, i) => ({
+            itemId: item.id, bookQty: 0,
+            ...(i === 0 ? { countedQty: 1, countedAt: new Date(stamp), countedById: purchasing.id } : {}),
+          })),
+        },
+      },
+    });
+    try {
+      await login(page, "purchasing@thebackroomop.com");
+
+      // The count sheet: on screen once its first count box is.
+      await page.goto(`/stock/stocktakes/${st.id}`);
+      expect(new URL(page.url()).pathname).toBe(`/stock/stocktakes/${st.id}`);
+      await expect(page.getByRole("spinbutton", { name: /^Counted / }).first()).toBeVisible({ timeout: 30_000 });
+      await scanHere(page, "/stock/stocktakes/[open] (count sheet)");
+
+      // The review sheet, with its totals line and its table.
+      await page.goto(`/stock/stocktakes/${st.id}?view=review`);
+      await expect(page.getByText(/items counted/)).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("table")).toBeVisible();
+      await scanHere(page, "/stock/stocktakes/[open]?view=review (review sheet)");
+
+      // On hand: the totals card and the table.
+      await page.goto("/stock/reports/on-hand");
+      expect(new URL(page.url()).pathname).toBe("/stock/reports/on-hand");
+      await expect(page.getByRole("region", { name: "Totals", exact: true })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("searchbox", { name: "Search the report", exact: true })).toBeVisible();
+      await scanHere(page, "/stock/reports/on-hand");
+
+      // Expiry, on each tab: the tab row and the search box are there on either, and so is the table or its empty text.
+      for (const tab of ["expired", "expiring"] as const) {
+        const path = tab === "expired" ? "/stock/reports/expiry" : "/stock/reports/expiry?tab=expiring";
+        await page.goto(path);
+        expect(new URL(page.url()).pathname).toBe("/stock/reports/expiry");
+        const tabs = page.getByRole("navigation", { name: "Expiry status" });
+        await expect(tabs).toBeVisible({ timeout: 30_000 });
+        await expect(tabs.getByRole("link", { name: tab === "expired" ? /^Expired \(\d+\)$/ : /^Expiring \(\d+\)$/ }))
+          .toHaveAttribute("aria-current", "page");
+        await expect(page.getByRole("searchbox", { name: "Search the lots", exact: true })).toBeVisible();
+        await expect(page.getByRole("table").or(page.getByText(/^Nothing (has expired|expires within)/)).first())
+          .toBeVisible({ timeout: 15_000 });
+        await scanHere(page, path);
+      }
+    } finally {
+      await db.stocktake.deleteMany({ where: { id: st.id } });
+    }
+  });
 });

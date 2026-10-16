@@ -138,8 +138,12 @@ test.describe.serial("Phase 37 — Add an employee in three steps", () => {
     await expect(page.getByText("1 item assigned", { exact: true })).toBeVisible();
     await expect(page.getByRole("group", { name: "Monitor", exact: true })).toContainText("Held", { timeout: 15_000 });
     await expect(page.getByRole("group", { name: "Monitor 2", exact: true })).toContainText("Missing");
-    await expect(page.getByRole("heading", { name: "Notes (1)" })).toBeVisible();
+    // Phase 39 (spec §2.1): the side card's tabs carry the counts; IT setup is its own tab.
+    await expect(page.getByRole("tab", { name: "Notes 1" })).toBeVisible();
     await expect(page.getByText("Starts Monday", { exact: true })).toBeVisible();
+    const setupTab = page.getByRole("tab", { name: /^IT setup/ });
+    await waitForHydration(setupTab);
+    await setupTab.click();
     await expect(page.getByRole("combobox", { name: "Argus" })).toHaveValue("DONE");
 
     const hire = await db.employee.findUniqueOrThrow({ where: { employeeNo }, include: { department: true } });
@@ -248,12 +252,10 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
     const first = `Laptop ordered ${stamp}`;
     const firstEdited = `Laptop arrived ${stamp}`;
     const second = `Badge printed ${stamp}`;
-    // The Notes card: the innermost block holding the "Notes (n)" heading and a note list item — not every
+    // Phase 39 (spec §2.1): the side card's Notes tab panel (its name is the tab's, "Notes {n}") — not every
     // listitem on the page.
-    const card = page.locator("div")
-      .filter({ has: page.getByRole("heading", { name: /^Notes \(\d+\)$/ }) })
-      .filter({ has: page.getByRole("listitem") })
-      .last();
+    const card = page.getByRole("tabpanel", { name: /^Notes \d+$/ });
+    const notesTab = (n: number) => page.getByRole("tab", { name: `Notes ${n}`, exact: true });
     const note = (text: string) => card.getByRole("listitem").filter({ hasText: text });
     const countOf = (action: string) => db.auditEntry.count({ where: { entityType: "employee", entityId: hire.id, action } });
 
@@ -261,18 +263,24 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
     await page.goto(`/employees/${hire.id}`);
     const box = page.getByLabel("New note");
     await waitForHydration(box);
-    await expect(page.getByRole("heading", { name: "Notes (0)" })).toBeVisible();
-    await expect(page.getByText("No notes yet", { exact: true })).toBeVisible();
+    await expect(notesTab(0)).toBeVisible();
+    await expect(card.getByText("No notes yet.", { exact: true })).toBeVisible();
+    // Phase 39 (spec §2.2): the composer's button is "Add"; Edit and Delete sit behind each note's ⋯ menu.
+    const addButton = card.getByRole("button", { name: "Add", exact: true });
+    const fromMenu = async (text: string, action: "Edit" | "Delete") => {
+      await note(text).getByRole("button", { name: "Note actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: action, exact: true }).click();
+    };
 
     // Add.
     await box.fill(first);
-    await page.getByRole("button", { name: "Add note", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Notes (1)" })).toBeVisible({ timeout: 15_000 });
+    await addButton.click();
+    await expect(notesTab(1)).toBeVisible({ timeout: 15_000 });
     await expect(note(first)).toBeVisible();
     await expect(box).toHaveValue("");
 
     // Edit your own note.
-    await note(first).getByRole("button", { name: "Edit", exact: true }).click();
+    await fromMenu(first, "Edit");
     await page.getByLabel("Edited text").fill(firstEdited);
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(note(firstEdited)).toBeVisible({ timeout: 15_000 });
@@ -281,15 +289,15 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
 
     // A second note, so the viewer has something to read after the first is deleted.
     await box.fill(second);
-    await page.getByRole("button", { name: "Add note", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Notes (2)" })).toBeVisible({ timeout: 15_000 });
+    await addButton.click();
+    await expect(notesTab(2)).toBeVisible({ timeout: 15_000 });
 
     // Delete the first, after its confirmation.
-    await note(firstEdited).getByRole("button", { name: "Delete", exact: true }).click();
+    await fromMenu(firstEdited, "Delete");
     const dialog = page.getByRole("dialog", { name: "Delete this note?" });
     await expect(dialog).toContainText(firstEdited);
     await dialog.getByRole("button", { name: "Delete", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Notes (1)" })).toBeVisible({ timeout: 15_000 });
+    await expect(notesTab(1)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(firstEdited)).toHaveCount(0);
     await expect(note(second)).toBeVisible();
     expect({ added: await countOf("note.added"), edited: await countOf("note.edited"), deleted: await countOf("note.deleted") })
@@ -298,10 +306,10 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
     // A viewer reads the note and can do nothing to it.
     await login(page, VIEWER);
     await page.goto(`/employees/${hire.id}`);
-    await expect(page.getByRole("heading", { name: "Notes (1)" })).toBeVisible({ timeout: 20_000 });
+    await expect(notesTab(1)).toBeVisible({ timeout: 20_000 });
     await expect(note(second)).toBeVisible();
     await expect(page.getByLabel("New note")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Add note", exact: true })).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Add", exact: true })).toHaveCount(0);
     await expect(note(second).getByRole("button")).toHaveCount(0);
   });
 
@@ -309,7 +317,8 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
     test.setTimeout(90_000);
     const hire = await makeClientHire(`E2E Setup ${Date.now()}`, { argusStatus: "DONE" });
     await login(page, IT);
-    await page.goto(`/employees/${hire.id}`);
+    // Phase 39 (spec §2.1): ?side=setup opens the side card on IT setup (and survives the reload below).
+    await page.goto(`/employees/${hire.id}?side=setup`);
     const vpn = page.getByLabel("VPN in use", { exact: true });
     await waitForHydration(vpn);
     await expect(page.getByRole("combobox", { name: "Argus" })).toHaveValue("DONE");

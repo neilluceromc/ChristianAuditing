@@ -3,22 +3,25 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { computeLoadout, effectiveSlots, profilePrimary, profileTiles, resolvePolicy, slotLabel } from "@/lib/loadout";
-import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
+import { canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
+import { SPARE_INCLUDE, spareWhere, toSpareOption } from "@/lib/spare-candidates";
 import { fmtDate, fmtRelativeDays, localDateISO } from "@/lib/format";
 import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
 import { isRecentTransfer } from "@/lib/transfer-schema";
 import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { LoadoutView, type HoldingItem, type SpareOption } from "@/components/employees/loadout-view";
+import { LoadoutView, type HoldingItem } from "@/components/employees/loadout-view";
 import type { EquipmentTileData } from "@/components/employees/equipment-tile";
-import { AcknowledgementCard } from "@/components/employees/acknowledgement-card";
 import { EmployeeCreatedNotice } from "@/components/employees/employee-created-notice";
 import { IdentityBand } from "@/components/employees/identity-band";
-import { ItSetupCard } from "@/components/employees/it-setup-card";
-import { NotesCard } from "@/components/employees/notes-card";
 import { ProfileActions } from "@/components/employees/profile-actions";
-import { TransfersCard } from "@/components/employees/transfers-card";
+import { SideCard } from "@/components/employees/side-card/side-card";
+import { NotesTab } from "@/components/employees/side-card/notes-tab";
+import { SetupTab } from "@/components/employees/side-card/setup-tab";
+import { FormTab } from "@/components/employees/side-card/form-tab";
+import { TransfersTab } from "@/components/employees/side-card/transfers-tab";
+import { notYetCount } from "@/lib/it-setup";
 import { getTransfers } from "@/server/modules/employees/queries";
 import { loadoutViewFor } from "@/server/loadout-view";
 
@@ -36,7 +39,7 @@ export default async function EmployeePage({
   if (!employee) notFound();
   const today = localDateISO(new Date());
 
-  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itCategories, acks, transfers, departments, notes, initialView] = await Promise.all([
+  const [held, reservations, openApprovals, policies, reservedSpareRows, exceptions, itCategories, acks, transfers, transferCount, departments, notes, noteCount, initialView] = await Promise.all([
     prisma.asset.findMany({
       where: { assigneeId: id },
       include: { category: { select: { name: true } }, type: { select: { name: true } } },
@@ -49,26 +52,12 @@ export default async function EmployeePage({
     }),
     // Phase 37 (spec §3.2): slots in policy order (the editor's own `id` order), so "Monitor" / "Monitor 2" never swap.
     prisma.equipmentPolicy.findMany({ include: { slots: { include: { assetType: true }, orderBy: { id: "asc" } } }, orderBy: [{ name: "asc" }] }),
+    // Phase 39 (spec §6): the pickers ask `spareCandidates` when they open, so the page no longer sends every
+    // spare — only the ones held for THIS person, which the tiles' "reserved · {tag}" line and Assign reserved
+    // need at first paint. Same pool and same per-asset rows as the pickers (spare-candidates.ts).
     prisma.asset.findMany({
-      // Assignment through /employees is IT's surface in Phase 13 —
-      // Purchasing assets are assigned at create time (spec §5 has no assign
-      // row; recorded as a follow-up). Pinned to the IT class explicitly so
-      // this picker never offers a STORED car by accident.
-      where: { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null },
-      include: {
-        reservations: { where: { state: "ACTIVE" }, include: { employee: true } },
-        // Phase 29 (final review I-1, ruling R7): the pickers' own
-        // `openApprovals` is scoped to THIS employee, so a spare another
-        // person's request is already waiting on read as free here — exactly
-        // the case the pinned "held or queued for someone else" line claims is
-        // excluded. Asked per asset instead, so the scope matches the copy.
-        approvals: {
-          where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
-          select: { refNo: true },
-          orderBy: { createdAt: "asc" },
-          take: 1,
-        },
-      },
+      where: { AND: [spareWhere(), { reservations: { some: { employeeId: id, state: "ACTIVE" } } }] },
+      include: SPARE_INCLUDE,
       orderBy: { tag: "asc" },
     }),
     prisma.employeeSlotException.findMany({
@@ -87,13 +76,18 @@ export default async function EmployeePage({
       orderBy: [{ signedAt: "desc" }, { id: "desc" }],
       take: 20,
     }),
-    getTransfers(id),
+    // Phase 39 (spec §2.5): the side card shows the latest 3; the count is the tab's badge.
+    getTransfers(id, 3),
+    prisma.employeeTransfer.count({ where: { employeeId: id } }),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
+    // Phase 39 (spec §2.2): only the 3 newest notes plus the total, never every note.
     prisma.employeeNote.findMany({
       where: { employeeId: id },
       include: { author: { select: { id: true, name: true } } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 3,
     }),
+    prisma.employeeNote.count({ where: { employeeId: id } }),
     loadoutViewFor(user.id),
   ]);
 
@@ -145,17 +139,6 @@ export default async function EmployeePage({
     .filter((e) => e.kind === "WAIVE")
     .map((e) => ({ id: e.id, slotName: e.slot?.name ?? "removed slot", reason: e.reason }));
 
-  const spares: SpareOption[] = spareAssets.map((a) => ({
-    id: a.id, tag: a.tag, model: a.model, typeId: a.typeId,
-    reservedFor: a.reservations[0]?.employee.name ?? null,
-    reservedForThis: a.reservations[0]?.employeeId === id,
-    // Phase 29 (spec §4.5): a spare an open approval already promises is not
-    // pickable here — the pickers say which request holds it. The asset's own
-    // open approval comes first (any requester, I-1); this person's map is
-    // kept as the fallback so the ref stays the one the rest of the page shows.
-    pendingRef: a.approvals[0]?.refNo ?? pendingByAsset.get(a.id) ?? null,
-  }));
-
   const holding: HoldingItem[] = [
     ...reservations.map((r) => ({
       id: r.assetId, tag: r.asset.tag, model: r.asset.model,
@@ -186,7 +169,7 @@ export default async function EmployeePage({
     latest ? (latest.items as unknown as AckItem[]) : null,
   );
   // Phase 20 (spec §3): `getTransfers` is already newest-first, so the
-  // header line only ever looks at the first row.
+  // header line only ever looks at the first row (still there with take 3).
   const newestTransfer = transfers[0] ?? null;
   const recentTransfer = newestTransfer && isRecentTransfer(newestTransfer.effectiveAt) ? newestTransfer : null;
   const otherDepartments = departments.filter((d) => d.id !== employee.departmentId).map((d) => ({ id: d.id, name: d.name, kind: d.kind, archivedAt: d.archivedAt }));
@@ -247,7 +230,7 @@ export default async function EmployeePage({
             waived={waived}
             itCategories={itCategories}
             currentSlotLabels={loadout.slots.map((s) => s.slot.name)}
-            spares={spares}
+            reservedSpares={reservedSpareRows.map((a) => toSpareOption(a, id))}
             holding={holding}
             frozen={employee.employment !== "ACTIVE"}
             dueAt={employee.employment === "OFFBOARDING" ? employee.offboardingDueAt : null}
@@ -257,32 +240,55 @@ export default async function EmployeePage({
           />
         </div>
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <NotesCard
-            employeeId={id}
-            employeeName={employee.name}
-            notes={notes.map((n) => ({
-              id: n.id, authorId: n.author.id, authorName: n.author.name, text: n.text, createdAt: n.createdAt, editedAt: n.editedAt,
-            }))}
-            viewer={{ id: user.id, role: user.role }}
-            canAdd={canMutate}
-          />
-          <ItSetupCard
-            employeeId={id}
-            canEdit={canMutate}
-            values={{
-              entraStatus: employee.entraStatus, autopilotStatus: employee.autopilotStatus,
-              argusStatus: employee.argusStatus, vpn: employee.vpn,
+        <div className="min-w-0">
+          {/* Phase 39 (spec §2): one card, four tabs — it replaces the stacked Notes, IT setup, form and transfer cards. */}
+          <SideCard
+            counts={{ notes: noteCount, notYet: notYetCount(employee), signed: latest !== null, transfers: transferCount }}
+            panels={{
+              notes: (
+                <NotesTab
+                  employeeId={id}
+                  employeeName={employee.name}
+                  notes={notes.map((n) => ({
+                    id: n.id, authorId: n.author.id, authorName: n.author.name, text: n.text, createdAt: n.createdAt, editedAt: n.editedAt,
+                  }))}
+                  total={noteCount}
+                  viewer={{ id: user.id, role: user.role }}
+                  canAdd={canMutate}
+                />
+              ),
+              setup: (
+                <SetupTab
+                  employeeId={id}
+                  canEdit={canMutate}
+                  values={{
+                    entraStatus: employee.entraStatus, autopilotStatus: employee.autopilotStatus,
+                    argusStatus: employee.argusStatus, vpn: employee.vpn,
+                  }}
+                />
+              ),
+              form: (
+                <FormTab
+                  employeeId={id}
+                  latest={latest}
+                  history={acks.slice(1)}
+                  uncovered={uncovered}
+                  canRecord={canMutate}
+                />
+              ),
+              transfers: (
+                <TransfersTab
+                  employeeId={id}
+                  employeeName={employee.name}
+                  currentTitle={employee.title}
+                  departments={otherDepartments}
+                  transfers={transfers}
+                  total={transferCount}
+                  canTransfer={canMutate && employee.employment === "ACTIVE"}
+                />
+              ),
             }}
           />
-          <AcknowledgementCard
-            employeeId={id}
-            latest={latest}
-            history={acks.slice(1)}
-            uncovered={uncovered}
-            canRecord={canMutate}
-          />
-          <TransfersCard transfers={transfers} />
         </div>
       </div>
       {/* keep an escape hatch for link-followers */}

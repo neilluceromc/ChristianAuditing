@@ -4,16 +4,14 @@ import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { fmtDate, fmtMoneyExact } from "@/lib/format";
 import { unitsLabel } from "@/lib/stock-balance";
 import { ExpiryPill } from "@/components/stock/expiry-pill";
-import type { OnHandCategoryGroup } from "@/server/modules/stock/report-queries";
+import type { OnHandPageGroup } from "@/server/modules/stock/report-queries";
 
-/** Spec §6.1: category groups with a subtotal row each, then one grand total row. 10 columns; subtotal/total rows blank the columns they don't summarize. */
-export function OnHandTable({
-  groups,
-  grandTotal,
-}: {
-  groups: OnHandCategoryGroup[];
-  grandTotal: { units: number; uncostedUnits: number; value: number };
-}) {
+/**
+ * Spec §6.1, Phase 39 §4.2: one page of items (50) with a category heading wherever the category changes on the page.
+ * The subtotals and the grand total are not rows any more — they sit in the totals card above (`OnHandTotals`), over
+ * everything matching the filters. 10 columns.
+ */
+export function OnHandTable({ groups }: { groups: OnHandPageGroup[] }) {
   return (
     <Table>
       <THead>
@@ -61,28 +59,8 @@ export function OnHandTable({
                 </Td>
               </Tr>
             ))}
-            <Tr className="font-medium">
-              <Td colSpan={3} className="text-right font-mono text-[10.5px] uppercase tracking-[0.05em] text-fg-muted">
-                Subtotal
-              </Td>
-              <Td align="right" mono>{g.subtotal.units}</Td>
-              <Td colSpan={2} />
-              <Td align="right" mono>{g.subtotal.uncostedUnits}</Td>
-              <Td align="right" mono>{fmtMoneyExact(g.subtotal.value)}</Td>
-              <Td colSpan={2} />
-            </Tr>
           </Fragment>
         ))}
-        <Tr className="bg-surface-subtle font-semibold hover:bg-surface-subtle">
-          <Td colSpan={3} className="text-right font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-muted">
-            Grand total
-          </Td>
-          <Td align="right" mono>{grandTotal.units}</Td>
-          <Td colSpan={2} />
-          <Td align="right" mono>{grandTotal.uncostedUnits}</Td>
-          <Td align="right" mono>{fmtMoneyExact(grandTotal.value)}</Td>
-          <Td colSpan={2} />
-        </Tr>
       </TBody>
     </Table>
   );

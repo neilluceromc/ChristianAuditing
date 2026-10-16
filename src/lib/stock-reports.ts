@@ -1,5 +1,5 @@
 import { DEFAULT_EXPIRY_WINDOW, EXPIRY_WINDOWS, isExpired } from "./stock-allocation";
-import type { ListConfig } from "./url-state";
+import { serializeListState, type ListConfig, type ListState } from "./url-state";
 
 /**
  * `YYYY-MM` on the Asia/Manila calendar — the house pattern (`format.ts`'s
@@ -121,6 +121,25 @@ export function consumptionGrid(rows: ConsumptionRowInput[]): ConsumptionGrid {
   return { months, rows: gridRows, columnTotals, grandTotal };
 }
 
+export interface ExpirySortable { expiresAt: Date | null; code?: string; reference?: string | null; id?: string }
+
+/**
+ * Soonest expiry first, then item code, then reference, then id — a total order, so lots sharing an expiry date never
+ * swap places between two page loads (the screen pages 50 at a time) and the export lists them the same way the
+ * screen does. A missing field counts as empty; an undated lot sorts last.
+ */
+export function compareByExpiry(a: ExpirySortable, b: ExpirySortable): number {
+  const at = a.expiresAt ? a.expiresAt.getTime() : Infinity;
+  const bt = b.expiresAt ? b.expiresAt.getTime() : Infinity;
+  if (at !== bt) return at < bt ? -1 : 1;
+  const text = (x: string | null | undefined, y: string | null | undefined) => {
+    const xs = x ?? "";
+    const ys = y ?? "";
+    return xs < ys ? -1 : xs > ys ? 1 : 0;
+  };
+  return text(a.code, b.code) || text(a.reference, b.reference) || text(a.id, b.id);
+}
+
 /**
  * Spec §4.2. Generic over whatever lot shape the caller has (`queries.ts`'s
  * real rows carry far more than `expiresAt`) — the caller is trusted to hand
@@ -129,7 +148,7 @@ export function consumptionGrid(rows: ConsumptionRowInput[]): ConsumptionGrid {
  * boundary is inclusive: a lot expiring in exactly `windowDays` days is
  * "expiring within" that window.
  */
-export function expiryBuckets<T extends { expiresAt: Date | null }>(
+export function expiryBuckets<T extends ExpirySortable>(
   lots: T[],
   today: string,
   windowDays: number,
@@ -142,8 +161,7 @@ export function expiryBuckets<T extends { expiresAt: Date | null }>(
     if (isExpired(lot.expiresAt, today)) expired.push(lot);
     else if (lot.expiresAt.getTime() <= windowEndMs) expiring.push(lot);
   }
-  const byExpiry = (a: T, b: T) => a.expiresAt!.getTime() - b.expiresAt!.getTime();
-  return { expired: expired.sort(byExpiry), expiring: expiring.sort(byExpiry) };
+  return { expired: expired.sort(compareByExpiry), expiring: expiring.sort(compareByExpiry) };
 }
 
 /**
@@ -201,4 +219,52 @@ export function parseReportRange(sp: URLSearchParams, today: string): { from: st
 export function parseExpiryWindow(sp: URLSearchParams): number {
   const n = Number(sp.get("days"));
   return (EXPIRY_WINDOWS as readonly number[]).includes(n) ? n : DEFAULT_EXPIRY_WINDOW;
+}
+
+/** Phase 39 (spec §4.2): the on-hand totals card lists this many category subtotals, then "+{n} more". */
+export const ON_HAND_SUBTOTAL_LIMIT = 8;
+
+/** Phase 39: the report searches — every word must appear in at least one of the fields (case-insensitive); an empty search matches everything. */
+export function matchesSearch(q: string, ...fields: Array<string | null | undefined>): boolean {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = fields.filter((f): f is string => !!f).join(" ").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+/** Phase 39 (spec §4.2): the top `limit` category subtotals by value (a tie goes to the name), and how many are left out. */
+export function topSubtotals<T extends { categoryName: string; value: number }>(
+  groups: T[],
+  limit: number = ON_HAND_SUBTOTAL_LIMIT,
+): { top: T[]; more: number } {
+  const sorted = [...groups].sort((a, b) => b.value - a.value || a.categoryName.localeCompare(b.categoryName));
+  return { top: sorted.slice(0, limit), more: Math.max(0, sorted.length - limit) };
+}
+
+/** Phase 39 (spec §4.2): consecutive rows of one category become one run, so a page shows a category heading where the category changes — and at the top, even when the page starts mid-category. */
+export function groupRunsByCategory<T extends { categoryId: string; categoryName: string }>(
+  rows: T[],
+): Array<{ categoryId: string; categoryName: string; items: T[] }> {
+  const runs: Array<{ categoryId: string; categoryName: string; items: T[] }> = [];
+  for (const row of rows) {
+    const last = runs[runs.length - 1];
+    if (last && last.categoryId === row.categoryId) last.items.push(row);
+    else runs.push({ categoryId: row.categoryId, categoryName: row.categoryName, items: [row] });
+  }
+  return runs;
+}
+
+export type ExpiryTab = "expired" | "expiring";
+
+/** Phase 39 (spec §4.3): `?tab=expiring`, else Expired. */
+export function parseExpiryTab(sp: URLSearchParams): ExpiryTab {
+  return sp.get("tab") === "expiring" ? "expiring" : "expired";
+}
+
+/** A report page's own address: the list state (search, Category, uncosted, page) plus the report's non-list params, each left out when empty. */
+export function reportHref(basePath: string, state: ListState, extra: Record<string, string> = {}): string {
+  const params = new URLSearchParams(serializeListState(state, STOCK_REPORT_LIST_CONFIG).slice(1));
+  for (const [key, value] of Object.entries(extra)) if (value) params.set(key, value);
+  const qs = params.toString().replaceAll("%2C", ",");
+  return qs ? `${basePath}?${qs}` : basePath;
 }

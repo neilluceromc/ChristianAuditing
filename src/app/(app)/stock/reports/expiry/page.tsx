@@ -1,14 +1,17 @@
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams, parseListState } from "@/lib/url-state";
-import { STOCK_REPORT_LIST_CONFIG, parseExpiryWindow } from "@/lib/stock-reports";
+import { STOCK_REPORT_LIST_CONFIG, parseExpiryTab, parseExpiryWindow, reportHref } from "@/lib/stock-reports";
 import { localDateISO } from "@/lib/format";
 import { canManageStock } from "@/lib/stock-access";
 import { expiryReport } from "@/server/modules/stock/report-queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
 import { ButtonLink } from "@/components/ui/button-link";
+import { Pagination } from "@/components/ui/pagination";
+import { Tabs } from "@/components/ui/tabs";
 import { ReportTabs } from "@/components/stock/report-tabs";
 import { ReportCategoryFacet } from "@/components/stock/report-category-facet";
+import { ReportSearch } from "@/components/stock/report-search";
 import { ExpiryWindowChips } from "@/components/stock/expiry-window-chips";
 import { ExpiryTable } from "@/components/stock/expiry-table";
 
@@ -19,6 +22,8 @@ function queryFor(params: Record<string, string>): string {
   return s ? `?${s}` : "";
 }
 
+const BASE = "/stock/reports/expiry";
+
 export default async function StockExpiryReportPage({
   searchParams,
 }: {
@@ -28,10 +33,20 @@ export default async function StockExpiryReportPage({
   const sp = toSearchParams(await searchParams);
   const state = parseListState(sp, STOCK_REPORT_LIST_CONFIG);
   const windowDays = parseExpiryWindow(sp);
+  const tab = parseExpiryTab(sp);
   const today = localDateISO();
-  const report = await expiryReport(windowDays, state);
+  const report = await expiryReport(windowDays, state, tab);
   const manage = canManageStock(user.role);
   const categoryParam = state.filters.category?.join(",") ?? "";
+  // The report's own params next to the list state (search, Category, page): the window, and the tab when it is not the default.
+  const extra = { days: String(windowDays), tab: tab === "expiring" ? "expiring" : "" };
+  const tabHref = (t: "expired" | "expiring") =>
+    reportHref(BASE, { ...state, page: 1 }, { days: String(windowDays), tab: t === "expiring" ? "expiring" : "" });
+  const emptyText = state.q
+    ? "No lot matches."
+    : tab === "expired"
+      ? "Nothing has expired."
+      : `Nothing expires within ${windowDays} days.`;
 
   return (
     <>
@@ -46,41 +61,51 @@ export default async function StockExpiryReportPage({
       />
       <div className="flex flex-col gap-4">
         <ReportTabs active="expiry" />
+        <Tabs
+          label="Expiry status"
+          items={[
+            { label: `Expired (${report.counts.expired})`, href: tabHref("expired"), active: tab === "expired" },
+            { label: `Expiring (${report.counts.expiring})`, href: tabHref("expiring"), active: tab === "expiring" },
+          ]}
+        />
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <ExpiryWindowChips
-            active={windowDays}
-            hrefFor={(days) => "/stock/reports/expiry" + queryFor({ category: categoryParam, days: String(days) })}
-          />
-          <div className="flex items-center gap-2">
-            <ReportCategoryFacet
-              basePath="/stock/reports/expiry"
+          <div className="flex flex-wrap items-center gap-2">
+            {tab === "expiring" && (
+              <ExpiryWindowChips
+                active={windowDays}
+                hrefFor={(days) => reportHref(BASE, { ...state, page: 1 }, { days: String(days), tab: "expiring" })}
+              />
+            )}
+            <ReportSearch
+              basePath={BASE}
               state={state}
-              options={report.facets.category}
-              extraParams={{ days: String(windowDays) }}
+              extraParams={extra}
+              label="Search the lots"
+              placeholder="Search item, reference, supplier…"
             />
-            <ButtonLink
-              href={"/stock/reports/expiry/export" + queryFor({ category: categoryParam, days: String(windowDays) })}
-              size="sm"
-            >
-              Export
-            </ButtonLink>
+            <ReportCategoryFacet basePath={BASE} state={state} options={report.facets.category} extraParams={extra} />
           </div>
+          <ButtonLink
+            href={"/stock/reports/expiry/export" + queryFor({ category: categoryParam, days: String(windowDays) })}
+            size="sm"
+          >
+            Export
+          </ButtonLink>
         </div>
 
-        <ExpiryTable
-          title="Expired"
-          rows={report.expired}
-          today={today}
-          emptyText="Nothing has expired."
-          canManage={manage}
-        />
-        <ExpiryTable
-          title={`Expiring within ${windowDays} days`}
-          rows={report.expiring}
-          today={today}
-          emptyText={`Nothing expires within ${windowDays} days.`}
-          canManage={manage}
-        />
+        <ExpiryTable rows={report.rows} today={today} emptyText={emptyText} canManage={manage} />
+        {report.page.total > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-mono text-[11px] text-fg-muted">
+              Showing {report.page.from}–{report.page.to} of {report.page.total} lots
+            </p>
+            <Pagination
+              page={report.page.page}
+              pageCount={report.page.pageCount}
+              hrefFor={(p) => reportHref(BASE, { ...state, page: p }, extra)}
+            />
+          </div>
+        )}
       </div>
     </>
   );

@@ -39,9 +39,12 @@ export function TransferDialog({
   employeeName,
   currentTitle,
   departments,
+  onTransferred,
 }: {
   open: boolean;
   onClose: () => void;
+  /** After a recorded transfer, once the dialog is closing (the side card's empty state moves focus with it). */
+  onTransferred?: () => void;
   employeeId: string;
   employeeName: string;
   currentTitle: string;
@@ -73,7 +76,7 @@ export function TransferDialog({
     run(
       () => transferEmployee({ employeeId, toDepartmentId, toTitle, effectiveAt, reason }),
       `Transferred to ${toDeptName}`,
-      { onOk: () => onClose() },
+      { onOk: () => { onClose(); onTransferred?.(); } },
     );
   }
 
