@@ -17,6 +17,9 @@ import { isExpired, lotRemaining } from "../src/lib/stock-allocation";
  *     and "Written by" narrow; `?notes=1` reopens it; Edit from a note's ⋯ menu saves. The page with 25 notes is
  *     within 40 px of its height with 4 (the card at full size: 3 notes and the footer), and the Notes tab panel
  *     itself within 2 px.
+ *   3 (§2.3) IT setup: a person made for the case (via prisma, deleted afterwards) on ?side=setup has the four
+ *     selects at the same x and the same width (±1 px); changing Argus shows "Saved" and is in the database and
+ *     after a reload.
  *   4 (§3) the purchase conversation: a request with 12 messages shows the 5 newest and "Earlier messages (7) →";
  *     the panel shows all 12 oldest first, "Kind" and the search narrow; `?thread=1` reopens it. A second request
  *     with 31 messages pages 30, then "Load 30 more" gives 31. Both requests stay behind (NoteEntry is
@@ -281,6 +284,57 @@ test.describe("Phase 39 — the profile side card and its notes", () => {
     await expect(items.nth(1)).toContainText("edited");
     const saved = await db.employeeNote.findFirstOrThrow({ where: { employeeId: person.id, text: edited } });
     expect(saved.editedAt).not.toBeNull();
+  });
+});
+
+test.describe("Phase 39 — the IT setup tab", () => {
+  test("3. the four selects share an x position and a width; changing Argus saves", async ({ page }) => {
+    test.setTimeout(90_000);
+    const stamp = Date.now();
+    const dept = await db.department.findUniqueOrThrow({ where: { name: "Bluepeak Telecom" } });
+    // Someone made for this case, so no seeded person is touched: Autopilot not recorded (its option list differs
+    // from the others'), the rest recorded.
+    const person = await db.employee.create({
+      data: {
+        employeeNo: `EMP-${String(stamp).slice(-6)}${Math.floor(Math.random() * 10)}`,
+        name: `E2E Setup ${stamp}`, title: "Agent", departmentId: dept.id, joinedAt: new Date(),
+        entraStatus: "DONE", autopilotStatus: null, argusStatus: "NOT_YET", vpn: "None",
+      },
+    });
+    try {
+      // The desktop two-column layout, where the grid is `1fr 150px`.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await login(page, IT);
+      await page.goto(`/employees/${person.id}?side=setup`);
+      const names = ["Entra / Intune connected", "Autopilot", "Argus", "VPN in use"];
+      const select = (name: string) => page.getByRole("combobox", { name, exact: true });
+      await waitForHydration(select("Argus"));
+      for (const name of names) await expect(select(name)).toBeVisible();
+
+      // One column: every select starts at the same x and is the same width (±1 px).
+      const boxes = [];
+      for (const name of names) {
+        const box = await select(name).boundingBox();
+        expect(box, `${name} has a box`).not.toBeNull();
+        boxes.push(box!);
+      }
+      for (const [i, box] of boxes.entries()) {
+        expect(Math.abs(box.x - boxes[0].x), `${names[i]} x`).toBeLessThanOrEqual(1);
+        expect(Math.abs(box.width - boxes[0].width), `${names[i]} width`).toBeLessThanOrEqual(1);
+      }
+
+      // Argus saves on change: the toast, the database and the select after a reload.
+      await select("Argus").selectOption({ label: "Done" });
+      await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 15_000 });
+      await expect.poll(async () => (await db.employee.findUniqueOrThrow({ where: { id: person.id } })).argusStatus, {
+        timeout: 15_000,
+      }).toBe("DONE");
+      await page.reload();
+      await waitForHydration(select("Argus"));
+      await expect(select("Argus")).toHaveValue("DONE");
+    } finally {
+      await db.employee.deleteMany({ where: { id: person.id } });
+    }
   });
 });
 
