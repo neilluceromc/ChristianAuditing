@@ -22,6 +22,7 @@ import { localDateISO } from "@/lib/format";
 import { nextEmployeeNo as nextNo } from "@/lib/employee-no";
 import { previewPolicyFor, type PolicyLine, type PolicyPreviewResult } from "@/lib/policy-preview";
 import { GROUP_ARCHIVED } from "@/lib/groups";
+import { createAssignments } from "@/lib/loadout";
 import { firstFailure, newEmployeeExtrasShape, refineDistinctAssign, type AssignFailure } from "@/lib/new-employee";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
@@ -490,11 +491,12 @@ export async function createEmployee(
   revalidatePath("/employees");
 
   // After the commit: each picked spare through the Fill dialog's own path for this user — direct for IT,
-  // a request otherwise; standard status (not a loan), no reason typed.
+  // a request otherwise; standard status (not a loan), no reason typed. Someone created not ACTIVE gets none:
+  // any picks sent are ignored (the wizard sends none), never refused by the lifecycle guard.
   const direct = isDirectLifecycle(user.role, "IT");
   let assigned = 0;
   const failed: AssignFailure[] = [];
-  for (const { assetId } of d.assign) {
+  for (const { assetId } of createAssignments(d.employment, d.assign)) {
     const asset = await prisma.asset.findUnique({ where: { id: assetId }, select: { tag: true } });
     if (!asset) {
       failed.push({ tag: assetId, reason: "That asset no longer exists." });

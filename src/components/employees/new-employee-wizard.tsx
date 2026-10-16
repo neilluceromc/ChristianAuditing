@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { cn } from "@/lib/cn";
+import { ASSIGNED_ONCE_ACTIVE, createAssignments } from "@/lib/loadout";
 import { EMPLOYMENT_LABEL, M365_CANONICAL } from "@/lib/labels";
 import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { SETUP_STATE_LABELS, VPN_CHOICES, setupSummary } from "@/lib/it-setup";
@@ -201,7 +202,7 @@ export function NewEmployeeWizard({
         departmentId: form.departmentId, employeeNo: form.employeeNo, joinedAt: form.joinedAt, confirmSameName,
         entraStatus: form.entraStatus, autopilotStatus: form.autopilotStatus, argusStatus: form.argusStatus,
         vpn, note: form.note,
-        assign: linesFor === linesKey ? chosen.map((c) => ({ assetId: c.spare.id })) : [],
+        assign: linesFor === linesKey ? createAssignments(form.employment, chosen.map((c) => ({ assetId: c.spare.id }))) : [],
       });
       if (res.ok) {
         const { id, assigned, failed } = res.data;
@@ -247,6 +248,8 @@ export function NewEmployeeWizard({
   }
 
   const sortedLines = [...(lines ?? [])].sort((a, b) => Number(b.required) - Number(a.required));
+  // Spec §5.4: someone created not ACTIVE gets no equipment — step 2 shows their lines without spare pickers.
+  const active = form.employment === "ACTIVE";
   const pickedElsewhere = (assetId: string, key: string) =>
     Object.entries(picks).some(([k, v]) => k !== key && v === assetId);
 
@@ -459,18 +462,20 @@ export function NewEmployeeWizard({
               ) : sortedLines.length === 0 ? (
                 <p className="text-[12.5px] text-fg-muted">Nothing to assign yet — add equipment from their profile after creating.</p>
               ) : (
+                <>
+                {!active && <p className="text-[12.5px] text-fg-muted">{ASSIGNED_ONCE_ACTIVE}</p>}
                 <ul className="flex flex-col gap-3">
                   {sortedLines.map((line) => {
                     const selectId = `spare-${line.key.replace(":", "-")}`;
                     return (
                       <li key={line.key} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)]">
                         <div className="flex items-center gap-2">
-                          {line.loaner
+                          {line.loaner || !active
                             ? <span className="text-[12.5px] font-medium text-fg">{line.label}</span>
                             : <label htmlFor={selectId} className="text-[12.5px] font-medium text-fg">{line.label}</label>}
                           <Pill tone={line.required ? "accent" : "neutral"}>{line.required ? "Required" : "Optional"}</Pill>
                         </div>
-                        {line.loaner ? (
+                        {!active ? null : line.loaner ? (
                           <p className="text-[12.5px] text-fg-muted">Filled by a loan later</p>
                         ) : (
                           <Select id={selectId} value={picks[line.key] ?? ""}
@@ -485,6 +490,7 @@ export function NewEmployeeWizard({
                     );
                   })}
                 </ul>
+                </>
               )}
             </CardBody>
           </Card>
@@ -515,8 +521,9 @@ export function NewEmployeeWizard({
                   <p className="text-fg-muted">Nothing to assign yet</p>
                 ) : (
                   <ul className="flex flex-col gap-0.5">
+                    {!active && <li className="text-fg-muted">{ASSIGNED_ONCE_ACTIVE}</li>}
                     {sortedLines.map((line) => {
-                      const spare = line.spares.find((s) => s.id === picks[line.key]);
+                      const spare = active ? line.spares.find((s) => s.id === picks[line.key]) : undefined;
                       return (
                         <li key={line.key} className="text-fg">
                           {line.label}: {spare ? `${spare.tag} · ${spare.model}` : line.loaner ? "filled by a loan later" : "gap"}
