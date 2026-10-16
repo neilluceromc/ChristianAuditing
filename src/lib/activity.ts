@@ -28,6 +28,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
   rename: "Renamed", archive: "Ended or archived", restore: "Restored",
   "policy.saved": "Policy saved",
+  "note.added": "Note added", "note.edited": "Note edited", "note.deleted": "Note deleted", "employee.setup": "IT setup changed",
 };
 export function actionLabel(action: string): string { return ACTION_LABELS[action] ?? action; }
 
@@ -439,6 +440,19 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
         return omitEntity ? `${actor}set ${String(to)} as the supplier` : `${actor}set ${String(to)} as the supplier on ${entry.entityLabel}`;
       }
       return omitEntity ? `${actor}cleared the supplier` : `${actor}cleared the supplier on ${entry.entityLabel}`;
+    }
+    // Phase 37 (spec §4.5, §4.6): notes and IT setup are written on the employee; the diff keeps the text / label.
+    case "note.added":
+      return omitEntity ? `${actor}added a note` : `${actor}added a note on ${entry.entityLabel}`;
+    case "note.edited":
+      return omitEntity ? `${actor}edited a note` : `${actor}edited a note on ${entry.entityLabel}`;
+    case "note.deleted":
+      return omitEntity ? `${actor}deleted a note` : `${actor}deleted a note on ${entry.entityLabel}`;
+    case "employee.setup": {
+      // one diff key: the field's label ("Entra / Intune", "VPN" …) → { from, to } with the value as words
+      const label = diff ? Object.keys(diff)[0] ?? "IT setup" : "IT setup";
+      const value = String(diff?.[label]?.to ?? "Not recorded");
+      return omitEntity ? `${actor}set ${label} to ${value}` : `${actor}set ${entry.entityLabel}'s ${label} to ${value}`;
     }
     case "purchase.recorded": {
       // Phase 34 (spec §7.3): one row per Register submit, entityLabel is the tag range.

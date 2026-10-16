@@ -476,3 +476,25 @@ describe("Phase 35 depreciation sentences", () => {
     expect(s("depreciation.override.cleared", null, "BR-LT-0148")).toBe("L. Domingo cleared custom depreciation on BR-LT-0148");
   });
 });
+
+describe("Phase 37 note and IT setup sentences", () => {
+  const s = (action: string, diff: unknown, opts?: { omitEntity?: boolean }) =>
+    auditSentence({ actorLabel: "L. Domingo", action, diff, entityLabel: "Dennis Ong" }, opts);
+  it("notes", () => {
+    expect(s("note.added", { note: { from: null, to: "Asked for a second monitor" } })).toBe("L. Domingo added a note on Dennis Ong");
+    expect(s("note.edited", { note: { from: "a", to: "b" } })).toBe("L. Domingo edited a note on Dennis Ong");
+    expect(s("note.deleted", { note: { from: "b", to: null } })).toBe("L. Domingo deleted a note on Dennis Ong");
+    expect(s("note.added", { note: { from: null, to: "x" } }, { omitEntity: true })).toBe("L. Domingo added a note");
+  });
+  it("IT setup names the label and the value from the single diff key", () => {
+    expect(s("employee.setup", { "Entra / Intune": { from: null, to: "Done" } })).toBe("L. Domingo set Dennis Ong's Entra / Intune to Done");
+    expect(s("employee.setup", { VPN: { from: "None", to: "Cloudflare WARP" } })).toBe("L. Domingo set Dennis Ong's VPN to Cloudflare WARP");
+    expect(s("employee.setup", { Argus: { from: "Done", to: "Not needed" } }, { omitEntity: true })).toBe("L. Domingo set Argus to Not needed");
+  });
+  it("the Action facet words", () => {
+    expect(actionLabel("note.added")).toBe("Note added");
+    expect(actionLabel("note.edited")).toBe("Note edited");
+    expect(actionLabel("note.deleted")).toBe("Note deleted");
+    expect(actionLabel("employee.setup")).toBe("IT setup changed");
+  });
+});
