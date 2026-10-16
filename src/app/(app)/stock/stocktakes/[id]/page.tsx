@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import type { StocktakeState } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
-import { getStocktake } from "@/server/modules/stock/queries";
+import { getStocktake, stocktakeCountSheet, stocktakeReviewSheet } from "@/server/modules/stock/queries";
 import { canManageStock } from "@/lib/stock-access";
-import { postedReviewRows, varianceRows } from "@/lib/stocktake";
+import { parseSheetState } from "@/lib/stocktake";
 import { fmtDate, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -12,7 +12,7 @@ import { DuePill } from "@/components/ui/due-pill";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
 import { StocktakeCount } from "@/components/stock/stocktake-count";
-import { StocktakeReview, type ReviewRow, type ReviewSummary } from "@/components/stock/stocktake-review";
+import { StocktakeReview } from "@/components/stock/stocktake-review";
 
 const STATE_TONE: Record<StocktakeState, "neutral" | "accent"> = { OPEN: "accent", POSTED: "neutral", CANCELLED: "neutral" };
 
@@ -35,41 +35,12 @@ export default async function StocktakeDetailPage({
   // count screen exists solely for a manager mid-count on an OPEN stocktake.
   const showReview = st.state !== "OPEN" || !manage || sp.get("view") === "review";
 
-  // I-4: an OPEN review is a live view against today's ledger (`varianceRows`);
-  // a POSTED/CANCELLED review is a frozen record of what was actually posted
-  // (`postedReviewRows`) — the two never mix, picked once here by `st.state`.
-  let review: { rows: ReviewRow[]; summary: ReviewSummary } | null = null;
-  if (showReview) {
-    const lineInputs = st.lines.map((l) => ({ itemId: l.itemId, bookQty: l.bookQty, countedQty: l.countedQty }));
-    const infoById = new Map(st.lines.map((l) => [l.itemId, { code: l.code, name: l.name }]));
-    if (st.state === "OPEN") {
-      const current = new Map(st.lines.map((l) => [l.itemId, l.currentQty]));
-      const rows: ReviewRow[] = varianceRows(lineInputs, current).map((v) => {
-        const info = infoById.get(v.itemId)!;
-        return { kind: "open", ...v, code: info.code, name: info.name };
-      });
-      const summary: ReviewSummary = {
-        kind: "open",
-        counted: rows.filter((r) => r.countedQty !== null).length,
-        withDiff: rows.filter((r) => r.kind === "open" && r.variance !== null && r.variance !== 0).length,
-        notCounted: rows.filter((r) => r.countedQty === null).length,
-        moved: rows.filter((r) => r.kind === "open" && r.drift !== 0).length,
-      };
-      review = { rows, summary };
-    } else {
-      const rows: ReviewRow[] = postedReviewRows(lineInputs, st.adjustments).map((v) => {
-        const info = infoById.get(v.itemId)!;
-        return { kind: "posted", ...v, code: info.code, name: info.name };
-      });
-      const summary: ReviewSummary = {
-        kind: "posted",
-        counted: rows.filter((r) => r.countedQty !== null).length,
-        adjusted: rows.filter((r) => r.kind === "posted" && r.adjustment !== null).length,
-        notCounted: rows.filter((r) => r.countedQty === null).length,
-      };
-      review = { rows, summary };
-    }
-  }
+  // Phase 39 (spec §4.1): both sheets page 50 lines at a time with the state in the URL; the header counts and the
+  // review's posting totals stay over every line. The I-4 open-vs-posted split lives in `stocktakeReviewSheet`.
+  const mode = showReview ? "review" : "count";
+  const sheet = parseSheetState(sp, mode);
+  const review = showReview ? await stocktakeReviewSheet(st.id, st.state, sheet) : null;
+  const count = showReview ? null : await stocktakeCountSheet(st.id, sheet);
 
   return (
     <>
@@ -103,22 +74,38 @@ export default async function StocktakeDetailPage({
         </Card>
 
         <Card>
-          <CardHeader title={showReview ? "Variance review" : "Count"} />
+          <CardHeader
+            title={showReview ? "Variance review" : "Count"}
+            actions={count && <span className="font-mono text-[11px] text-fg-muted">{count.stillToCount} still to count</span>}
+          />
           <CardBody>
-            {showReview && review ? (
+            {review ? (
               <StocktakeReview
                 stocktakeId={st.id}
                 rows={review.rows}
                 summary={review.summary}
                 state={st.state}
                 canPost={manage && st.state === "OPEN"}
+                sheet={sheet}
+                categories={st.categories}
+                page={review.page}
+                pageCount={review.pageCount}
               />
-            ) : (
+            ) : count ? (
+              // Keyed by the URL: each page or filter starts from the server's values (the row inputs are local
+              // state), while a save's own refresh — same URL — keeps what is being typed.
               <StocktakeCount
+                key={sp.toString()}
                 stocktakeId={st.id}
-                lines={st.lines.map((l) => ({ id: l.id, code: l.code, name: l.name, unit: l.unit, countedQty: l.countedQty }))}
+                lines={count.lines}
+                sheet={sheet}
+                categories={st.categories}
+                page={count.page}
+                pageCount={count.pageCount}
+                counted={count.total - count.stillToCount}
+                total={count.total}
               />
-            )}
+            ) : null}
           </CardBody>
         </Card>
       </div>

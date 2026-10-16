@@ -19,6 +19,11 @@ import { notYetCount } from "../src/lib/it-setup";
  *     the panel shows all 12 oldest first, "Kind" and the search narrow; `?thread=1` reopens it. A second request
  *     with 31 messages pages 30, then "Load 30 more" gives 31. Both requests stay behind (NoteEntry is
  *     append-only and Restrict-linked); the next reseed truncates them.
+ *   5 (§4.1) the stocktake sheet: 55 extra items in a test category (via prisma) under an all-categories stocktake
+ *     page 50 at a time. A count typed on page 1 is in the database the moment "Next page" lands, and one typed
+ *     before ticking "Only uncounted" likewise; Only uncounted then leaves both lines out and "{n} still to count"
+ *     drops by two. The search and Category narrow. The review pages too, keeps its totals over every line, and
+ *     "Only differences" narrows. The stocktake, the items and the category are deleted afterwards.
  *
  * Seed (prisma/seed.ts): J. Sarmiento is it@ (it_staff), System Admin is admin@. Bluepeak Telecom's base policy has
  * four required lines, so a fresh client hire's Equipment card is four tiles tall. Never reference a raw cuid.
@@ -365,5 +370,131 @@ test.describe("Phase 39 — the purchase conversation", () => {
     await expect(longRows.last()).toContainText(`Long thread 30 ${tag}`);
     // Focus moved to the first message the button revealed, not to the page behind the drawer.
     await expect(longRows.last()).toBeFocused();
+  });
+});
+
+test.describe("Phase 39 — the stocktake sheet", () => {
+  test("5. an all-categories stocktake over 60+ items pages 50; typed counts are saved before navigating; Only uncounted, search and Category narrow; the review pages with Only differences", async ({ page }) => {
+    test.setTimeout(150_000);
+    const tag = String(Date.now()).slice(-6);
+    const cat = await db.stockCategory.create({ data: { name: `Bulk ${tag}`, prefix: `B${tag}` } });
+    await db.stockItem.createMany({
+      data: Array.from({ length: 55 }, (_, i) => ({
+        code: `ZZ-${tag}-${String(i + 1).padStart(4, "0")}`, name: `Bulk item ${i + 1} ${tag}`, unit: "pc", categoryId: cat.id,
+      })),
+    });
+    let stocktakeId: string | null = null;
+    try {
+      await login(page, "purchasing@thebackroomop.com");
+      await page.goto("/stock/stocktakes/new");
+      const scope = page.getByLabel("Scope");
+      await waitForHydration(scope);
+      await scope.selectOption({ label: "All categories" });
+      await page.getByRole("button", { name: "Open stocktake" }).click();
+      await page.waitForURL(/\/stock\/stocktakes\/(?!new)[^/?]+$/, { timeout: 20_000 });
+      const st = await db.stocktake.findFirstOrThrow({ where: { state: "OPEN", categoryId: null }, orderBy: { openedAt: "desc" } });
+      stocktakeId = st.id;
+
+      // The app's own order (item code), read the same way.
+      const lines = await db.stocktakeLine.findMany({
+        where: { stocktakeId: st.id }, orderBy: { item: { code: "asc" } },
+        select: { id: true, itemId: true, bookQty: true, item: { select: { code: true, categoryId: true } } },
+      });
+      const total = lines.length;
+      expect(total).toBeGreaterThan(50);
+      const code = (i: number) => lines[i].item.code;
+      const counted = (i: number) => page.getByRole("spinbutton", { name: `Counted ${code(i)}`, exact: true });
+      const inputs = page.getByRole("spinbutton", { name: /^Counted / });
+      const pager = page.getByRole("navigation", { name: "Pagination" });
+
+      // Page 1: 50 lines, the whole stocktake still to count, and a page 2.
+      await waitForHydration(counted(0));
+      await expect(inputs).toHaveCount(50);
+      await expect(page.getByText(`${total} still to count`, { exact: true })).toBeVisible();
+      await expect(page.getByText(`0/${total} counted`, { exact: true })).toBeVisible();
+      await expect(pager.getByRole("link", { name: "2", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Category", exact: true })).toBeVisible();
+
+      // A count typed on page 1, then straight to "Next page" (no blur first): it is saved before the page changes.
+      await counted(0).fill("7");
+      await pager.getByRole("link", { name: "Next page", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]page=2(&|$)/);
+      expect((await db.stocktakeLine.findUniqueOrThrow({ where: { id: lines[0].id } })).countedQty).toBe(7);
+      await expect(inputs).toHaveCount(total - 50);
+      await expect(counted(total - 1)).toBeVisible();
+      await expect(counted(0)).toHaveCount(0);
+
+      // Back on page 1 the count is there. Another typed count, then "Only uncounted": saved before the filter applies.
+      await pager.getByRole("link", { name: "Previous page", exact: true }).click();
+      await expect(counted(0)).toHaveValue("7");
+      await waitForHydration(counted(1));
+      await counted(1).fill("3");
+      await page.getByRole("checkbox", { name: "Only uncounted", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]uncounted=1/);
+      expect((await db.stocktakeLine.findUniqueOrThrow({ where: { id: lines[1].id } })).countedQty).toBe(3);
+      await expect(counted(0)).toHaveCount(0);
+      await expect(counted(1)).toHaveCount(0);
+      await expect(counted(2)).toBeVisible();
+      await expect(page.getByText(`${total - 2} still to count`, { exact: true })).toBeVisible();
+      await expect(page.getByText(`2/${total} counted`, { exact: true })).toBeVisible();
+      await expect(page.getByRole("checkbox", { name: "Only uncounted", exact: true })).toBeChecked();
+
+      // The search (code or name) narrows, keeping Only uncounted.
+      const search = page.getByRole("searchbox", { name: "Search the stocktake", exact: true });
+      await waitForHydration(search);
+      await search.fill(`bulk item 55 ${tag}`);
+      await search.press("Enter");
+      await expect(page).toHaveURL(/[?&]q=/);
+      await expect(inputs).toHaveCount(1);
+      await expect(page.getByRole("spinbutton", { name: `Counted ZZ-${tag}-0055`, exact: true })).toBeVisible();
+      await search.fill("no such item anywhere");
+      await search.press("Enter");
+      await expect(page.getByText("No item matches.", { exact: true })).toBeVisible();
+
+      // Category narrows to that category's lines.
+      await page.goto(`/stock/stocktakes/${st.id}`);
+      const categoryBtn = page.getByRole("button", { name: "Category", exact: true });
+      await waitForHydration(categoryBtn);
+      await categoryBtn.click();
+      const categoryDialog = page.getByRole("dialog", { name: "Filter by Category" });
+      await categoryDialog.locator("label", { hasText: "Pantry" }).click();
+      await categoryDialog.getByRole("button", { name: "Apply", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]cat=/);
+      const pantry = await db.stockCategory.findUniqueOrThrow({ where: { name: "Pantry" } });
+      await expect(inputs).toHaveCount(lines.filter((l) => l.item.categoryId === pantry.id).length);
+      await expect(pager).toHaveCount(0);
+
+      // The review pages the same way; its totals stay over every line; Only differences narrows.
+      const sums = await db.stockMovement.groupBy({
+        by: ["itemId"], where: { itemId: { in: lines.map((l) => l.itemId) } }, _sum: { quantity: true },
+      });
+      const now = new Map(sums.map((x) => [x.itemId, x._sum.quantity ?? 0]));
+      const countedQty = new Map([[lines[0].id, 7], [lines[1].id, 3]]);
+      const withDiff = lines.filter((l) => countedQty.has(l.id) && countedQty.get(l.id) !== (now.get(l.itemId) ?? 0)).length;
+      const moved = lines.filter((l) => (now.get(l.itemId) ?? 0) !== l.bookQty).length;
+      await page.goto(`/stock/stocktakes/${st.id}?view=review`);
+      const summary = page.getByText(/items counted/);
+      await expect(summary).toBeVisible({ timeout: 20_000 });
+      expect((await summary.innerText()).replace(/\s+/g, " ").trim()).toBe(
+        `2 items counted · ${withDiff} with a difference · ${total - 2} not counted · ${moved} moved since opening`,
+      );
+      const reviewRows = page.getByRole("table").getByRole("row");
+      await expect(reviewRows).toHaveCount(51);
+      await expect(pager.getByRole("link", { name: "2", exact: true })).toBeVisible();
+      const onlyDiff = page.getByRole("checkbox", { name: "Only differences", exact: true });
+      await waitForHydration(onlyDiff);
+      await onlyDiff.click();
+      await expect(page).toHaveURL(/[?&]diff=1/);
+      await expect(page).toHaveURL(/[?&]view=review/);
+      if (withDiff > 0) await expect(reviewRows).toHaveCount(withDiff + 1);
+      else await expect(page.getByText("No item matches.", { exact: true })).toBeVisible();
+      await expect(pager).toHaveCount(0);
+      expect((await summary.innerText()).replace(/\s+/g, " ").trim()).toContain(`${total - 2} not counted`);
+    } finally {
+      // The lines go with the stocktake (Cascade); nothing was posted, so the items have no movements.
+      if (stocktakeId) await db.stocktake.delete({ where: { id: stocktakeId } });
+      await db.stockItem.deleteMany({ where: { categoryId: cat.id } });
+      await db.stockCategory.delete({ where: { id: cat.id } });
+    }
   });
 });
