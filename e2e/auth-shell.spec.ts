@@ -145,7 +145,7 @@ test.describe("shell", () => {
     // ⌘K listener. Wait for the page to go quiet before firing the shortcut.
     await page.waitForLoadState("networkidle");
     await page.keyboard.press("ControlOrMeta+k");
-    const input = page.getByRole("dialog", { name: "Command palette" }).getByLabel("Search");
+    const input = page.getByRole("dialog", { name: "Command palette" }).getByRole("combobox", { name: "Search" });
     await expect(input).toBeFocused();
     await input.fill("BR-LT-0148");
     await expect(page.getByRole("option", { name: /BR-LT-0148/ })).toBeVisible();

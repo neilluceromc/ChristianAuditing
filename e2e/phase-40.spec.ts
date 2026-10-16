@@ -289,7 +289,7 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
     // Search opens the palette plain …
     await page.getByRole("button", { name: "Search", exact: true }).click();
     const palette = page.getByRole("dialog", { name: "Command palette" });
-    const input = palette.getByRole("textbox", { name: "Search" });
+    const input = palette.getByRole("combobox", { name: "Search" });
     await expect(input).toBeFocused();
     await expect(input).toHaveAttribute("placeholder", "Search assets, people, requests…");
     await page.keyboard.press("Escape");
@@ -421,5 +421,78 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
     await empty.getByRole("link", { name: "Clear filters" }).click();
     await expect(page).toHaveURL(/\/approvals$/);
     await expect(page.getByText("Your filters matched nothing")).toHaveCount(0);
+  });
+});
+
+/**
+ * Phase 40 (spec §4): the palette matches serials and holders and says so, an exact tag leads and opens on Enter,
+ * and the input is a combobox whose options are real options. The seed carries no serials, so case 11 gives the
+ * seeded BR-LT-0148 (held by EMP-0042, Marites Bautista) a unique one for the test and takes it away again.
+ */
+test.describe("phase 40 — palette search", () => {
+  async function openPalette(page: Page) {
+    await page.goto("/inventory");
+    const trigger = page.getByRole("button", { name: /Search assets, people, requests/ });
+    await waitForHydration(trigger);
+    await trigger.click();
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    const input = palette.getByRole("combobox", { name: "Search" });
+    await expect(input).toBeFocused();
+    return { palette, input };
+  }
+
+  test("11. a serial finds its asset with the \"serial …\" hint; a holder's name finds theirs with \"held by\"", async ({ page }) => {
+    const serial = `PH40SN${Date.now()}`;
+    const asset = await db.asset.update({ where: { tag: "BR-LT-0148" }, data: { serial }, select: { id: true } });
+    try {
+      await login(page, IT);
+      const { palette, input } = await openPalette(page);
+
+      // "/" while the palette is open never pulls focus to the page's own search box
+      await page.keyboard.press("/");
+      await expect(input).toBeFocused();
+
+      await input.fill(serial.slice(0, 12).toLowerCase());
+      const option = palette.getByRole("group", { name: "Assets" }).getByRole("option", { name: /BR-LT-0148/ });
+      await expect(option).toBeVisible({ timeout: 10_000 });
+      await expect(option).toContainText(`serial ${serial}`);
+      await expect(input).toHaveAttribute("aria-expanded", "true");
+      await expect(input).toHaveAttribute("aria-controls", /.+/);
+      // the highlighted option is the combobox's active descendant
+      const activeId = await input.getAttribute("aria-activedescendant");
+      expect(activeId).toBeTruthy();
+      await expect(palette.locator(`[id="${activeId}"]`)).toHaveAttribute("aria-selected", "true");
+
+      // a holder's name: the asset says who holds it, and the person says the first tag they hold
+      await input.fill("Marites Bautista");
+      await expect(option).toContainText("held by Marites Bautista", { timeout: 10_000 });
+      const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" }, select: { id: true } });
+      const first = await db.asset.findFirstOrThrow({
+        where: { assigneeId: marites.id, cls: "IT" }, orderBy: { tag: "asc" }, select: { tag: true },
+      });
+      const person = palette.getByRole("group", { name: "People" }).getByRole("option", { name: /Marites Bautista/ });
+      await expect(person).toContainText(`holds ${first.tag}`);
+
+      // hover moves the highlight
+      await person.hover();
+      await expect(person).toHaveAttribute("aria-selected", "true");
+      await expectNoSeriousAxe(page);
+
+      await person.click();
+      await expect(page).toHaveURL(new RegExp(`/employees/${marites.id}$`));
+    } finally {
+      await db.asset.update({ where: { id: asset.id }, data: { serial: null } });
+    }
+  });
+
+  test("12. typing an exact tag and pressing Enter at once opens that record", async ({ page }) => {
+    const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" }, select: { id: true } });
+    await login(page, IT);
+    const { palette, input } = await openPalette(page);
+    // lower case, and Enter straight after the last key (as a scanner sends it) — before the results are back
+    await input.pressSequentially("br-lt-0148");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`/inventory/${asset.id}$`), { timeout: 10_000 });
+    await expect(palette).toHaveCount(0);
   });
 });

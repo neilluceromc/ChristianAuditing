@@ -1,15 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Role } from "@prisma/client";
 import { cn } from "@/lib/cn";
 import type { NavSection } from "@/lib/workspaces";
+import { createSequence, rateLimitMessage } from "@/lib/palette";
 import { Kbd } from "@/components/ui/kbd";
 import { Icon } from "@/components/ui/icon";
 import { useFocusTrap } from "@/components/ui/use-focus-trap";
 import { useSearchShortcutLabel } from "./use-search-shortcut-label";
-import { paletteSearch, type PaletteResults } from "@/server/palette";
+import { paletteSearch, type PaletteHit, type PaletteResults } from "@/server/palette";
 
 const OPEN_EVENT = "br:open-palette";
 const PLACEHOLDER = "Search assets, people, requests…";
@@ -65,24 +66,93 @@ export function ScanTagButton() {
 }
 
 const EMPTY: PaletteResults = { assets: [], people: [], requests: [], suppliers: [], stock: [] };
+const DEBOUNCE_MS = 150;
+
+interface Group {
+  heading: string;
+  hits: PaletteHit[];
+  /** codes (tags, refs, stock codes) read in mono; names — people, suppliers, pages — in the normal font (spec §4) */
+  mono: boolean;
+}
 
 export function CommandPalette({ role, sections }: { role: Role; sections: NavSection[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hint, setHint] = useState<string | null>(null);
   const [results, setResults] = useState<PaletteResults>(EMPTY);
+  /** the trimmed query `results` answer — when it differs from the input, a search is still in flight */
+  const [resultsFor, setResultsFor] = useState("");
   const [cursor, setCursor] = useState(0);
-  const [, startTransition] = useTransition();
+  /** seconds left on a rate-limit refusal (live countdown), and the figure it started from (announced once) */
+  const [retryLeft, setRetryLeft] = useState<number | null>(null);
+  const [retryFrom, setRetryFrom] = useState<number | null>(null);
   const router = useRouter();
+  const listboxId = useId();
+  const optionId = (i: number) => `${listboxId}-option-${i}`;
+
+  const seq = useRef(createSequence());
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef<{ value: string; ticket: number } | null>(null);
+  /** Enter was pressed before the results for the typed text arrived (a scanner types the tag and Enter at once) */
+  const enterPending = useRef(false);
+  const queryRef = useRef("");
+
+  const cancelSearch = useCallback(() => {
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = null;
+    pending.current = null;
+  }, []);
+
+  const runSearch = useCallback(async (value: string, ticket: number) => {
+    pending.current = null;
+    let res: PaletteResults;
+    try {
+      res = await paletteSearch(value);
+    } catch {
+      if (seq.current.isCurrent(ticket)) enterPending.current = false;
+      return;
+    }
+    // Review focus #4: a response for an older query never replaces a newer one.
+    if (!seq.current.isCurrent(ticket)) return;
+    setResults(res);
+    setResultsFor(value.trim());
+    setRetryLeft(res.rateLimited?.retryAfterSec ?? null);
+    setRetryFrom(res.rateLimited?.retryAfterSec ?? null);
+  }, []);
+
+  const search = useCallback(
+    (value: string, delay: number) => {
+      cancelSearch();
+      const ticket = seq.current.next();
+      if (value.trim().length < 2) {
+        setResults(EMPTY);
+        setResultsFor(value.trim());
+        setRetryLeft(null);
+        setRetryFrom(null);
+        return;
+      }
+      pending.current = { value, ticket };
+      debounce.current = setTimeout(() => void runSearch(value, ticket), delay);
+    },
+    [cancelSearch, runSearch],
+  );
 
   const close = useCallback(() => {
+    cancelSearch();
+    seq.current.next(); // retire anything still in flight
+    enterPending.current = false;
+    queryRef.current = "";
     setOpen(false);
     setQuery("");
     setHint(null);
     setResults(EMPTY);
+    setResultsFor("");
     setCursor(0);
-  }, []);
+    setRetryLeft(null);
+    setRetryFrom(null);
+  }, [cancelSearch]);
+
+  useEffect(() => cancelSearch, [cancelSearch]);
 
   const setTrapRef = useFocusTrap(open, close);
 
@@ -106,6 +176,19 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
     };
   }, []);
 
+  // The countdown; at zero the refused search runs again by itself.
+  useEffect(() => {
+    if (retryLeft === null) return;
+    if (retryLeft <= 0) {
+      setRetryLeft(null);
+      setRetryFrom(null);
+      search(queryRef.current, 0);
+      return;
+    }
+    const t = setTimeout(() => setRetryLeft((n) => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [retryLeft, search]);
+
   const actions = useMemo(
     () =>
       sections
@@ -117,47 +200,77 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
     [sections, role, query],
   );
 
-  const groups = useMemo(
+  const groups = useMemo<Group[]>(
     () =>
       [
-        { heading: "Assets", hits: results.assets },
-        { heading: "People", hits: results.people },
-        { heading: "Requests", hits: results.requests },
-        { heading: "Suppliers", hits: results.suppliers },
-        { heading: "Stock", hits: results.stock },
-        { heading: "Actions", hits: actions },
+        { heading: "Assets", hits: results.assets, mono: true },
+        { heading: "People", hits: results.people, mono: false },
+        { heading: "Requests", hits: results.requests, mono: true },
+        { heading: "Suppliers", hits: results.suppliers, mono: false },
+        { heading: "Stock", hits: results.stock, mono: true },
+        { heading: "Actions", hits: actions, mono: false },
       ].filter((g) => g.hits.length > 0),
     [results, actions],
   );
   const flat = useMemo(() => groups.flatMap((g) => g.hits), [groups]);
+  const active = flat.length > 0 ? Math.min(cursor, flat.length - 1) : -1;
+  const settled = query.trim().length < 2 || resultsFor === query.trim();
+
+  const go = useCallback(
+    (hit: PaletteHit) => {
+      router.push(hit.href);
+      close();
+    },
+    [router, close],
+  );
+
+  // Enter pressed early opens the first result once the answer for the typed text is in.
+  useEffect(() => {
+    if (!enterPending.current || !settled) return;
+    enterPending.current = false;
+    if (results.rateLimited) return;
+    if (flat[0]) go(flat[0]);
+  }, [settled, flat, results, go]);
+
+  useEffect(() => {
+    if (active >= 0) document.getElementById(`${listboxId}-option-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active, listboxId]);
 
   function onQueryChange(value: string) {
+    queryRef.current = value;
     setQuery(value);
     setCursor(0);
-    if (debounce.current) clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => {
-      startTransition(async () => {
-        setResults(await paletteSearch(value));
-      });
-    }, 150);
+    enterPending.current = false;
+    search(value, DEBOUNCE_MS);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setCursor((c) => Math.min(c + 1, flat.length - 1));
+      setCursor(Math.min(active + 1, flat.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setCursor((c) => Math.max(c - 1, 0));
-    } else if (e.key === "Enter" && flat[cursor]) {
+      setCursor(Math.max(active - 1, 0));
+    } else if (e.key === "Enter") {
       e.preventDefault();
-      router.push(flat[cursor].href);
-      close();
+      // A row the user arrowed to is a choice; otherwise wait for the typed text's own results
+      // rather than open whatever an older query left on screen.
+      if (!settled && active <= 0) {
+        enterPending.current = true;
+        const p = pending.current;
+        if (p) {
+          cancelSearch();
+          void runSearch(p.value, p.ticket);
+        }
+        return;
+      }
+      if (active >= 0) go(flat[active]);
     }
   }
 
   if (!open) return null;
 
+  const expanded = flat.length > 0;
   let index = -1;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]">
@@ -179,46 +292,80 @@ export function CommandPalette({ role, sections }: { role: Role; sections: NavSe
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder={hint ?? PLACEHOLDER}
             aria-label="Search"
+            role="combobox"
+            aria-expanded={expanded}
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={active >= 0 ? optionId(active) : undefined}
+            autoComplete="off"
+            spellCheck={false}
             className="h-11 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-fg-faint"
           />
           <Kbd>esc</Kbd>
         </div>
-        <div className="max-h-[320px] overflow-y-auto p-1.5" role="listbox" aria-label="Results">
-          {flat.length === 0 && (
+        <div className="max-h-[320px] overflow-y-auto p-1.5">
+          {retryLeft !== null && (
+            <p className="px-2.5 py-6 text-center text-xs text-fg-muted">{rateLimitMessage(Math.max(retryLeft, 1))}</p>
+          )}
+          {retryLeft === null && !expanded && (
             <p className="px-2.5 py-6 text-center text-xs text-fg-muted">
-              {query.length < 2 ? "Type to search." : "No matches."}
+              {query.trim().length < 2 ? "Type to search." : "No matches."}
             </p>
           )}
-          {groups.map((g) => (
-            <div key={g.heading}>
-              <h3 className="px-2.5 pb-0.5 pt-2 font-mono text-[9.5px] font-medium uppercase tracking-[0.08em] text-fg-muted">
-                {g.heading}
-              </h3>
-              {g.hits.map((hit) => {
-                index += 1;
-                const active = index === cursor;
-                return (
-                  <button
-                    key={g.heading + hit.href + hit.label}
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    onClick={() => {
-                      router.push(hit.href);
-                      close();
-                    }}
-                    className={cn(
-                      "flex w-full items-baseline justify-between gap-3 rounded-(--radius-ctl) px-2.5 py-1.5 text-left",
-                      active ? "bg-accent-tint text-accent" : "text-fg-secondary hover:bg-surface-subtle",
-                    )}
+          {/* Hidden (out of the accessibility tree) while it has no options: an empty listbox is invalid. */}
+          <div role="listbox" id={listboxId} aria-label="Results" hidden={!expanded}>
+            {groups.map((g) => {
+              const headingId = `${listboxId}-${g.heading}`;
+              return (
+                <div key={g.heading} role="group" aria-labelledby={headingId}>
+                  <div
+                    id={headingId}
+                    className="px-2.5 pb-0.5 pt-2 font-mono text-[9.5px] font-medium uppercase tracking-[0.08em] text-fg-muted"
                   >
-                    <span className="truncate font-mono text-xs">{hit.label}</span>
-                    <span className="truncate text-[11px] text-fg-muted">{hit.sub}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+                    {g.heading}
+                  </div>
+                  {g.hits.map((hit) => {
+                    index += 1;
+                    const i = index;
+                    const isActive = i === active;
+                    return (
+                      <div
+                        key={g.heading + hit.href + hit.label}
+                        id={optionId(i)}
+                        role="option"
+                        aria-selected={isActive}
+                        onMouseMove={() => {
+                          if (i !== active) setCursor(i);
+                        }}
+                        // keep focus (and the combobox) in the input
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => go(hit)}
+                        className={cn(
+                          "flex w-full cursor-pointer items-baseline justify-between gap-3 rounded-(--radius-ctl) px-2.5 py-1.5 text-left",
+                          isActive ? "bg-accent-tint text-accent" : "text-fg-secondary",
+                        )}
+                      >
+                        <span className="flex min-w-0 items-baseline gap-2">
+                          <span className={cn("truncate", g.mono ? "font-mono text-xs" : "text-[13px]")}>{hit.label}</span>
+                          {hit.hint && (
+                            <>
+                              {" "}
+                              <span className="truncate text-[11px] text-fg-muted">{hit.hint}</span>
+                            </>
+                          )}
+                        </span>{" "}
+                        <span className="shrink-0 truncate text-[11px] text-fg-muted">{hit.sub}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        {/* Announced once when a search is refused; the visible line above counts down silently. */}
+        <div role="status" className="sr-only">
+          {retryFrom !== null ? rateLimitMessage(retryFrom) : ""}
         </div>
         <div className="flex items-center gap-3 border-t border-border-faint px-3 py-2 font-mono text-[9.5px] uppercase text-fg-muted">
           <span>↑↓ navigate</span>

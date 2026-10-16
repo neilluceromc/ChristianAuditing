@@ -4,11 +4,21 @@ import { prisma } from "./db/client";
 import { requireUser } from "./auth/guards";
 import { pathAllowedForRole } from "@/lib/workspaces";
 import { visibleClassWhere } from "@/lib/asset-class";
+import {
+  PALETTE_LIMIT,
+  assetHint,
+  assetSearchWhere,
+  exactTagFirst,
+  holdsHint,
+  searchRateDecision,
+} from "@/lib/palette";
 
 export interface PaletteHit {
   label: string;
   sub: string;
   href: string;
+  /** Phase 40 (spec §4): why it matched or what they hold — "serial …", "held by {name}", "holds {tag}". */
+  hint?: string;
 }
 
 export interface PaletteResults {
@@ -17,33 +27,32 @@ export interface PaletteResults {
   requests: PaletteHit[];
   suppliers: PaletteHit[];
   stock: PaletteHit[];
+  /** Set when this search was refused by the rate window; every group is then empty. */
+  rateLimited?: { retryAfterSec: number };
 }
 
 const EMPTY: PaletteResults = { assets: [], people: [], requests: [], suppliers: [], stock: [] };
 
-// In-memory sliding window: 30 searches / 10 s per user. A DB RateEvent per
-// keystroke would be write amplification on a read path; process-local is
-// fine on a single-machine deploy.
-const WINDOW_MS = 10_000;
-const MAX_IN_WINDOW = 30;
+// Rule and numbers in src/lib/palette.ts (searchRateDecision). Process-local:
+// a DB RateEvent per keystroke would be write amplification on a read path.
 const recentByUser = new Map<string, number[]>();
 
-function searchAllowed(userId: string): boolean {
-  const now = Date.now();
-  const recent = (recentByUser.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
-  if (recent.length >= MAX_IN_WINDOW) {
-    recentByUser.set(userId, recent);
-    return false;
-  }
-  recent.push(now);
-  recentByUser.set(userId, recent);
-  return true;
+function searchRate(userId: string): { allowed: true } | { allowed: false; retryAfterSec: number } {
+  const decision = searchRateDecision(recentByUser.get(userId) ?? [], Date.now());
+  recentByUser.set(userId, decision.recent);
+  return decision.allowed ? { allowed: true } : { allowed: false, retryAfterSec: decision.retryAfterSec };
 }
+
+const ASSET_SELECT = {
+  id: true, tag: true, model: true, serial: true, assignee: { select: { name: true } },
+} as const;
 
 export async function paletteSearch(query: string): Promise<PaletteResults> {
   const user = await requireUser();
   const q = query.trim();
-  if (q.length < 2 || !searchAllowed(user.id)) return EMPTY;
+  if (q.length < 2) return EMPTY;
+  const rate = searchRate(user.id);
+  if (!rate.allowed) return { ...EMPTY, rateLimited: { retryAfterSec: rate.retryAfterSec } };
 
   // Query-level gating: don't even run the query for groups whose target
   // routes this role can't reach (entry criterion #5).
@@ -52,31 +61,38 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
   const canRequests = pathAllowedForRole("/purchases/x", user.role);
   const canSuppliers = pathAllowedForRole("/purchases/suppliers", user.role);
   const canStock = pathAllowedForRole("/stock", user.role);
+  // The asset class this role may see bounds every asset row AND every tag a person's hint names.
+  const visibleAssets = visibleClassWhere(user.role);
 
-  const [assets, people, requests, suppliers, stock] = await Promise.all([
+  const [assets, exact, people, requests, suppliers, stock] = await Promise.all([
     canAssets
       ? prisma.asset.findMany({
-          where: {
-            AND: [
-              { OR: [{ tag: { contains: q, mode: "insensitive" } }, { model: { contains: q, mode: "insensitive" } }] },
-              visibleClassWhere(user.role),
-            ],
-          },
-          take: 5,
+          where: { AND: [assetSearchWhere(q), visibleAssets] },
+          select: ASSET_SELECT,
+          take: PALETTE_LIMIT,
           orderBy: { tag: "asc" },
         })
       : [],
+    // Spec §4: the exact tag leads, even when the bounded contains query above stopped short of it.
+    canAssets
+      ? prisma.asset.findFirst({
+          where: { AND: [{ tag: { equals: q, mode: "insensitive" } }, visibleAssets] },
+          select: ASSET_SELECT,
+          orderBy: { tag: "asc" },
+        })
+      : null,
     canPeople
       ? prisma.employee.findMany({
           where: { OR: [{ name: { contains: q, mode: "insensitive" } }, { employeeNo: { contains: q, mode: "insensitive" } }] },
-          take: 5,
+          select: { id: true, name: true, employeeNo: true },
+          take: PALETTE_LIMIT,
           orderBy: { name: "asc" },
         })
       : [],
     canRequests
       ? prisma.purchaseRequest.findMany({
           where: { refNo: { contains: q, mode: "insensitive" } },
-          take: 5,
+          take: PALETTE_LIMIT,
           orderBy: { refNo: "desc" },
         })
       : [],
@@ -89,7 +105,7 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
               { registeredName: { contains: q, mode: "insensitive" } },
             ],
           },
-          take: 5,
+          take: PALETTE_LIMIT,
           orderBy: { name: "asc" },
         })
       : [],
@@ -99,15 +115,34 @@ export async function paletteSearch(query: string): Promise<PaletteResults> {
             archivedAt: null,
             OR: [{ code: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }],
           },
-          take: 5,
+          take: PALETTE_LIMIT,
           orderBy: { code: "asc" },
         })
       : [],
   ]);
 
+  // Spec §4: a person's hint is the first tag they hold — one grouped query for
+  // all of them (at most PALETTE_LIMIT rows), never one per person, and only
+  // over assets this role may see.
+  const firstTag = new Map<string, string>();
+  if (canAssets && people.length > 0) {
+    const held = await prisma.asset.groupBy({
+      by: ["assigneeId"],
+      where: { AND: [{ assigneeId: { in: people.map((p) => p.id) } }, visibleAssets] },
+      _min: { tag: true },
+    });
+    for (const h of held) if (h.assigneeId && h._min.tag) firstTag.set(h.assigneeId, h._min.tag);
+  }
+
   return {
-    assets: assets.map((a) => ({ label: a.tag, sub: a.model, href: `/inventory/${a.id}` })),
-    people: people.map((e) => ({ label: e.name, sub: e.employeeNo, href: `/employees/${e.id}` })),
+    assets: exactTagFirst(exact, assets).map((a) => {
+      const hint = assetHint({ ...a, holderName: a.assignee?.name ?? null }, q);
+      return { label: a.tag, sub: a.model, href: `/inventory/${a.id}`, ...(hint ? { hint } : {}) };
+    }),
+    people: people.map((e) => {
+      const tag = firstTag.get(e.id);
+      return { label: e.name, sub: e.employeeNo, href: `/employees/${e.id}`, ...(tag ? { hint: holdsHint(tag) } : {}) };
+    }),
     requests: requests.map((r) => ({ label: r.refNo, sub: r.state, href: `/purchases/${r.id}` })),
     suppliers: suppliers.map((v) => ({
       label: v.name, sub: v.category ?? v.contactPerson ?? "supplier", href: `/purchases/suppliers/${v.id}`,
