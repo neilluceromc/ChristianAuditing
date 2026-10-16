@@ -3,7 +3,8 @@ import { dayFromISO } from "./deadlines";
 import { fmtDate } from "./format";
 import {
   DEFAULT_LOAN_DAYS, SEE_ALL_HREF, WORK_SECTIONS, capLine, groupWork, leaverRow, loanRow,
-  loanSoonEdge, pastSlaCount, summaryChips, workActionLabel, workHeadline, workRowHref, type LeaverLike, type WorkRow,
+  loanSoonEdge, pastSlaCount, purchaseReviewRow, summaryChips, workActionLabel, workHeadline, workRowHref,
+  type LeaverLike, type WorkRow,
 } from "./worklist";
 
 const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>
@@ -11,9 +12,48 @@ const row = (section: WorkRow["section"], key: string, severity = 0, rank?: numb
 
 describe("WORK_SECTIONS", () => {
   it("is the spec's order", () => {
-    expect(WORK_SECTIONS.map((s) => s.id)).toEqual(["triage", "repairs", "check", "hires", "loans", "missing", "queue"]);
+    expect(WORK_SECTIONS.map((s) => s.id)).toEqual(["triage", "repairs", "check", "purchases", "hires", "loans", "missing", "queue"]);
   });
   it("the default loan is 30 days", () => expect(DEFAULT_LOAN_DAYS).toBe(30));
+  it("Phase 40 §6: Purchase reviews links to the requests waiting for IT", () => {
+    const s = WORK_SECTIONS.find((x) => x.id === "purchases");
+    expect(s?.title).toBe("Purchase reviews");
+    expect(s?.href).toBe("/purchases?state=SUBMITTED");
+    expect(WORK_SECTIONS.filter((x) => x.href).map((x) => x.id)).toEqual(["purchases"]);
+  });
+});
+
+describe("purchaseReviewRow (Phase 40 §6)", () => {
+  const NOW = new Date("2026-10-17T10:00:00+08:00");
+  const base = {
+    id: "pr1", refNo: "PR-0198", submittedAt: new Date("2026-10-13T10:00:00+08:00"), createdAt: new Date("2026-10-01T09:00:00+08:00"),
+    requestedBy: "Pia Santos", department: "HR", firstLine: "27-inch monitors", lines: 2,
+  };
+  it("names the request, its first line, who sent it and how long it has waited", () => {
+    const r = purchaseReviewRow(base, NOW);
+    expect(r).toMatchObject({
+      key: "purchases:pr1", section: "purchases", title: "PR-0198 · 27-inch monitors +1 more",
+      meta: "HR · from Pia Santos · 4 d waiting", href: "/purchases/pr1", action: "Review", ageDays: 4,
+    });
+    expect(r.control).toBeUndefined();
+    expect(r.entity).toBeUndefined();
+  });
+  it("one line reads without a count; no line reads the reference alone; no department says so", () => {
+    expect(purchaseReviewRow({ ...base, lines: 1 }, NOW).title).toBe("PR-0198 · 27-inch monitors");
+    expect(purchaseReviewRow({ ...base, firstLine: null, lines: 0 }, NOW).title).toBe("PR-0198");
+    expect(purchaseReviewRow({ ...base, department: null }, NOW).meta).toBe("No department · from Pia Santos · 4 d waiting");
+  });
+  it("falls back to the creation date when it was never stamped as submitted", () => {
+    expect(purchaseReviewRow({ ...base, submittedAt: null }, NOW).ageDays).toBe(16);
+  });
+  it("groups newest first, even within the same day", () => {
+    const older = purchaseReviewRow({ ...base, id: "old", submittedAt: new Date("2026-10-15T08:00:00+08:00") }, NOW);
+    const newer = purchaseReviewRow({ ...base, id: "new", submittedAt: new Date("2026-10-15T17:00:00+08:00") }, NOW);
+    const oldest = purchaseReviewRow({ ...base, id: "oldest", submittedAt: new Date("2026-10-02T08:00:00+08:00") }, NOW);
+    const [g] = groupWork([older, oldest, newer], new Set(), {});
+    expect(g.section.id).toBe("purchases");
+    expect(g.rows.map((r) => r.key)).toEqual(["purchases:new", "purchases:old", "purchases:oldest"]);
+  });
 });
 
 describe("groupWork", () => {
@@ -212,6 +252,7 @@ describe("capLine / SEE_ALL_HREF / summaryChips / pastSlaCount", () => {
       triage: "/inventory?sort=attention", check: "/inventory?sort=attention",
       repairs: "/inventory?status=DEFECTIVE", loans: "/inventory?status=TEMPORARY&sort=attention",
       missing: "/inventory?status=MISSING", hires: "/employees?gaps=1", queue: "/approvals",
+      purchases: "/purchases?state=SUBMITTED",
     });
   });
   it("chips count each non-empty section; past SLA counts rank-0 queue rows", () => {

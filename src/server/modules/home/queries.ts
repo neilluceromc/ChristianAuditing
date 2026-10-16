@@ -15,7 +15,9 @@ import {
   AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
-import { loanRow, loanSoonEdge, leaverRow, groupWork, type WorkGroup, type WorkRow, type WorkSectionId } from "@/lib/worklist";
+import {
+  loanRow, loanSoonEdge, leaverRow, groupWork, purchaseReviewRow, type WorkGroup, type WorkRow, type WorkSectionId,
+} from "@/lib/worklist";
 import { orderByOffboardingAttention } from "@/lib/offboarding";
 import { leaverStates } from "@/server/modules/offboarding/queries";
 
@@ -28,6 +30,9 @@ const WARRANTY_WINDOW_DAYS = 90;
 
 /** Phase 17: per-source read caps, named once so `take` and the saturation check can't drift apart. */
 const CAP = { small: 10, large: 50 };
+
+/** Phase 40 §6 (spec ruling 5): IT reviews SUBMITTED requests only; an IT_REVIEWED one has left IT's hands. */
+const PURCHASE_REVIEW_WHERE = { state: "SUBMITTED" } as const satisfies Prisma.PurchaseRequestWhereInput;
 
 /**
  * The worklist (Phase 15, spec §5): grouped sections in a fixed order, each
@@ -57,7 +62,7 @@ export async function worklist(
         ],
       }
     : { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: now } }, scope] };
-  const [breached, failed, leavers, hireWork, missing, orphaned, awaiting, pref, triage, repairs, loans] = await Promise.all([
+  const [breached, failed, leavers, hireWork, missing, orphaned, awaiting, pref, triage, repairs, loans, reviews] = await Promise.all([
     prisma.approval.findMany({
       where: breachedWhere,
       orderBy: { slaAt: "asc" },
@@ -122,6 +127,19 @@ export async function worklist(
       take: CAP.large,
       select: { id: true, tag: true, model: true, loanDueAt: true, assignee: { select: { name: true } } },
     }),
+    // Phase 40 §6: purchase requests waiting for IT's review, newest first.
+    prisma.purchaseRequest.findMany({
+      where: PURCHASE_REVIEW_WHERE,
+      orderBy: [{ submittedAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }, { id: "desc" }],
+      take: CAP.large,
+      select: {
+        id: true, refNo: true, submittedAt: true, createdAt: true,
+        requestedBy: { select: { name: true } },
+        department: { select: { name: true } },
+        units: { select: { description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 },
+        _count: { select: { units: true } },
+      },
+    }),
   ]);
 
   const rows: WorkRow[] = [];
@@ -172,7 +190,7 @@ export async function worklist(
     rows.push({
       key: `missing:${a.id}`,
       section: "missing",
-      title: `${a.tag} is MISSING`,
+      title: `${a.tag} is missing`,
       meta: `${a.model} · custody lost ${daysSince(a.updatedAt, now)} d ago`,
       href: `/inventory/${a.id}`,
       action: "Investigate",
@@ -186,7 +204,7 @@ export async function worklist(
     rows.push({
       key: `missing:${a.id}`,
       section: "missing",
-      title: `${a.tag} reads DEPLOYED with no holder`,
+      title: `${a.tag} reads Deployed with no holder`,
       meta: `${a.model} · assign it or return it to the pool`,
       href: `/inventory/${a.id}`,
       action: "Fix record",
@@ -256,10 +274,19 @@ export async function worklist(
     if (r) rows.push(r);
   }
 
+  for (const r of reviews) {
+    rows.push(purchaseReviewRow({
+      id: r.id, refNo: r.refNo, submittedAt: r.submittedAt, createdAt: r.createdAt,
+      requestedBy: r.requestedBy.name, department: r.department?.name ?? null,
+      firstLine: r.units[0]?.description ?? null, lines: r._count.units,
+    }, now));
+  }
+
   const saturated = new Set<WorkSectionId>();
   if (triage.length === CAP.large) saturated.add("triage");
   if (repairs.length === CAP.large) saturated.add("repairs");
   if (loans.length === CAP.large) saturated.add("loans");
+  if (reviews.length === CAP.large) saturated.add("purchases");
   if (missing.length === CAP.small || orphaned.length === CAP.small) saturated.add("missing");
   if (awaiting.length === CAP.small) saturated.add("check");
   if (hireWork.saturated) saturated.add("hires");
@@ -340,7 +367,7 @@ export async function worklistCount(userId: string, role: Role, now: Date = new 
   const scope = approvalClassWhere(role);
   // loanRow's edge, on the Manila calendar (see loanSoonEdge).
   const soonEdge = loanSoonEdge(now);
-  const [triage, repairs, check, loans, missing, orphaned, breached, failed, leavers, hires] = await Promise.all([
+  const [triage, repairs, check, loans, missing, orphaned, breached, failed, leavers, hires, reviews] = await Promise.all([
     prisma.asset.count({ where: { cls: "IT", returnedAt: { not: null }, id: { notIn: hiddenIds("triage") } } }),
     prisma.asset.count({ where: { cls: "IT", status: "DEFECTIVE", id: { notIn: hiddenIds("repairs") } } }),
     prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null, id: { notIn: hiddenIds("check") } } }),
@@ -353,9 +380,19 @@ export async function worklistCount(userId: string, role: Role, now: Date = new 
     prisma.approval.count({ where: { AND: [{ state: "EXECUTION_FAILED" }, { id: { notIn: hiddenIds("queue") } }, scope] } }),
     prisma.employee.count({ where: { employment: "OFFBOARDING", id: { notIn: hiddenIds("queue") } } }),
     hireWorkRows(now),
+    prisma.purchaseRequest.count({ where: { ...PURCHASE_REVIEW_WHERE, id: { notIn: hiddenIds("purchases") } } }),
   ]);
   const hireCount = hires.rows.filter((r) => !hidden.has(r.key)).length;
-  return triage + repairs + check + loans + missing + orphaned + breached + failed + leavers + hireCount;
+  return triage + repairs + check + loans + missing + orphaned + breached + failed + leavers + hireCount + reviews;
+}
+
+/**
+ * The IT nav's "Purchase reviews" badge (spec §6): every request waiting for
+ * IT's review — the count of the list the item opens, so it matches its
+ * "Awaiting IT" tab; a row hidden on the worklist is still waiting.
+ */
+export async function purchaseReviewCount(): Promise<number> {
+  return prisma.purchaseRequest.count({ where: PURCHASE_REVIEW_WHERE });
 }
 
 export interface ClaimRow {

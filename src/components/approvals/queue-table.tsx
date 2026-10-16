@@ -17,7 +17,7 @@ import { DONE, RUN, RejectApprovalDialog } from "@/components/approvals/approval
 import { approvalHeader, VERB_LABEL, type ApprovalVerb } from "@/lib/approval-header";
 import { PRIORITY_LABEL } from "@/lib/labels";
 import {
-  approveApproval, claimApproval, escalateApproval, rejectApproval,
+  claimApproval, escalateApproval, rejectApproval,
 } from "@/server/modules/approvals/actions";
 import type { ApprovalRow } from "@/server/modules/approvals/queries";
 import type { ActionResult } from "@/server/action-result";
@@ -25,8 +25,10 @@ import type { ActionResult } from "@/server/action-result";
 /**
  * Keyboard contract (brief §9: "an approver can clear a queue of 20 items
  * using the keyboard"): J/K (or arrows) move, Enter opens, C claim,
- * A approve (mine only), R reject (reason dialog), E escalate. The listener
- * lives on the focusable table wrapper; keys are inert for read-only roles.
+ * A runs the row's primary action (Phase 40 §6: approvalHeader().primary, the
+ * row menu's and the request page's — so a PENDING row approves in one step),
+ * R reject (reason dialog), E escalate. The listener lives on the focusable
+ * table wrapper; keys are inert for read-only roles.
  *
  * Spec §4.2: every row the user can act on also carries a menu (`Actions for
  * {refNo}`) built from approvalHeader — the request page's verbs, so a PENDING
@@ -67,18 +69,20 @@ export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; can
     else setError(res.message);
   }
 
-  function act(action: "claim" | "approve" | "escalate", row: ApprovalRow) {
+  function act(action: "claim" | "escalate", row: ApprovalRow) {
     if (leaving) return; // a row is animating out — don't double-fire into stale state
-    if (action === "approve" && !row.mine) {
-      setError("Claim it first — approval requires ownership.");
-      return;
-    }
     setError(null);
     startTransition(async () => {
       if (action === "claim") handle(await claimApproval({ id: row.id }), "claimed", row.id);
-      else if (action === "approve") handle(await approveApproval({ id: row.id }), "approved", row.id);
       else handle(await escalateApproval({ id: row.id }), "escalated", row.id);
     });
+  }
+
+  /** The A key: the same primary the row menu and the request page offer; a row with none says why. */
+  function actPrimary(row: ApprovalRow) {
+    const { primary } = approvalHeader({ state: row.state as ApprovalState, canAct, mine: row.mine, isAdmin });
+    if (primary) { actVerb(primary, row); return; }
+    if (row.state === "CLAIMED" && !row.mine) setError(`${row.refNo} is claimed by ${row.owner ?? "someone else"} — only they can approve it.`);
   }
 
   /** A row-menu verb: the request page's server action for it, this queue's result handling. */
@@ -135,7 +139,7 @@ export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; can
     else if (e.key === "Enter" && row) { e.preventDefault(); router.push(`/approvals/${row.id}`); }
     else if (!canAct || pending || !row) return;
     else if (key === "c") { e.preventDefault(); act("claim", row); }
-    else if (key === "a") { e.preventDefault(); act("approve", row); }
+    else if (key === "a") { e.preventDefault(); actPrimary(row); }
     else if (key === "e") { e.preventDefault(); act("escalate", row); }
     else if (key === "r") { e.preventDefault(); setRejecting(row); }
   }

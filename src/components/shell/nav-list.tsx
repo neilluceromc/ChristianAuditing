@@ -14,6 +14,8 @@ export interface ApprovalsBadge {
 export interface NavBadges {
   approvals: ApprovalsBadge;
   worklist: number;
+  /** Phase 40 §6: purchase requests waiting for IT's review (0 for roles without the item) */
+  purchaseReviews: number;
 }
 
 export function NavList({
@@ -79,6 +81,14 @@ export function NavList({
                     aria-label={`${badges.worklist} waiting on the worklist`}
                   >
                     {badges.worklist}
+                  </span>
+                )}
+                {item.badge === "purchaseReviews" && badges.purchaseReviews > 0 && (
+                  <span
+                    className="inline-flex items-center rounded-(--radius-ctl) border border-border bg-border-faint px-1.5 font-mono text-[10px] text-fg-secondary"
+                    aria-label={`${badges.purchaseReviews} waiting for IT`}
+                  >
+                    {badges.purchaseReviews}
                   </span>
                 )}
               </Link>

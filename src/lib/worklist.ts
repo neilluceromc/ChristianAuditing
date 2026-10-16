@@ -11,14 +11,24 @@ export { DEFAULT_LOAN_DAYS } from "./lifecycle";
 /** A loan due within this many days is already on the list. */
 export const LOAN_DUE_SOON_DAYS = 7;
 
-export type WorkSectionId = "triage" | "repairs" | "check" | "hires" | "loans" | "missing" | "queue";
+export type WorkSectionId = "triage" | "repairs" | "check" | "purchases" | "hires" | "loans" | "missing" | "queue";
 
-export interface WorkSection { id: WorkSectionId; title: string; blurb: string }
+export interface WorkSection {
+  id: WorkSectionId;
+  title: string;
+  blurb: string;
+  /** the list the whole group opens (Phase 40 §6: Purchase reviews); absent = the heading is not a link */
+  href?: string;
+}
 
 export const WORK_SECTIONS: readonly WorkSection[] = [
   { id: "triage", title: "Triage", blurb: "Back from a person, not yet checked — decide before it is a spare again." },
   { id: "repairs", title: "Repairs to chase", blurb: "Defective devices, longest down first." },
   { id: "check", title: "Awaiting IT check", blurb: "Registered by Purchasing; Finance sees them after you." },
+  {
+    id: "purchases", title: "Purchase reviews", blurb: "Purchase requests waiting for IT's review, newest first.",
+    href: "/purchases?state=SUBMITTED",
+  },
   { id: "hires", title: "New hires", blurb: "Started within 30 days with required slots still empty." },
   { id: "loans", title: "Loans", blurb: "Loans overdue, due this week, or with no due date." },
   { id: "missing", title: "Missing & records", blurb: "Custody lost, or a record that does not add up." },
@@ -97,6 +107,40 @@ export function loanSoonEdge(now: Date): Date {
   return new Date(`${addDays(localDateISO(now), LOAN_DUE_SOON_DAYS + 1)}T00:00:00+08:00`);
 }
 
+export interface PurchaseReviewLike {
+  id: string;
+  refNo: string;
+  /** when it reached IT; null on a request never stamped, which then counts from createdAt */
+  submittedAt: Date | null;
+  createdAt: Date;
+  requestedBy: string;
+  department: string | null;
+  /** the first line's description; null when the request has no lines */
+  firstLine: string | null;
+  lines: number;
+}
+
+/**
+ * Phase 40 §6: a SUBMITTED request waiting for IT's review. Newest first, so
+ * severity is the negative age in ms (groupWork sorts severity descending).
+ */
+export function purchaseReviewRow(r: PurchaseReviewLike, now: Date): WorkRow {
+  const since = r.submittedAt ?? r.createdAt;
+  const ageMs = Math.max(0, now.getTime() - since.getTime());
+  const days = Math.round(ageMs / 86_400_000);
+  const what = r.firstLine ? ` · ${r.firstLine}${r.lines > 1 ? ` +${r.lines - 1} more` : ""}` : "";
+  return {
+    key: `purchases:${r.id}`,
+    section: "purchases",
+    title: `${r.refNo}${what}`,
+    meta: `${r.department ?? "No department"} · from ${r.requestedBy} · ${days} d waiting`,
+    href: `/purchases/${r.id}`,
+    action: "Review",
+    severity: -ageMs,
+    ageDays: days,
+  };
+}
+
 export interface LeaverLike extends LeaverState { name: string; employeeNo: string; itemsOut: number }
 
 /** Spec §3: the leaver row's label and href come from offboardingNext. Key stays `queue:<id>` so existing dismissals hold. */
@@ -166,6 +210,7 @@ export const SEE_ALL_HREF: Record<WorkSectionId, string> = {
   triage: "/inventory?sort=attention", check: "/inventory?sort=attention",
   repairs: "/inventory?status=DEFECTIVE", loans: "/inventory?status=TEMPORARY&sort=attention",
   missing: "/inventory?status=MISSING", hires: "/employees?gaps=1", queue: "/approvals",
+  purchases: "/purchases?state=SUBMITTED",
 };
 
 /** The standalone page's cap line (spec §5.2); null when every row is shown. */
