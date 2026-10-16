@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { NoteKind } from "@prisma/client";
 import {
-  NOTE_CHIP, bounceBack, stepperModel, submittedVisits, unitAnchor, type ThreadNote,
+  NOTE_CHIP, THREAD_PAGE, THREAD_PREVIEW, bounceBack, stepperModel, submittedVisits, threadCountLine, unitAnchor,
+  type ThreadNote,
 } from "./purchase-thread";
 
 let seq = 0;
@@ -147,5 +148,19 @@ describe("stepperModel", () => {
   it("marks IT_REVIEWED current with the earlier stops done", () => {
     const m = stepperModel("IT_REVIEWED", [note("SUBMIT", "P", "x", 0), note("IT_REVIEW", "J", "y", 1)]);
     expect(m.stops.map((s) => s.status)).toEqual(["done", "done", "current", "upcoming"]);
+  });
+});
+
+describe("the conversation panel (Phase 39)", () => {
+  it("shows 5 inline and pages 30 at a time", () => {
+    expect(THREAD_PREVIEW).toBe(5);
+    expect(THREAD_PAGE).toBe(30);
+  });
+
+  it("counts the whole thread, or the matches while filtering", () => {
+    expect(threadCountLine({ total: 12, matching: 12, shown: 12, filtering: false })).toBe("12 messages · oldest first · showing 12");
+    expect(threadCountLine({ total: 1, matching: 1, shown: 1, filtering: false })).toBe("1 message · oldest first · showing 1");
+    expect(threadCountLine({ total: 12, matching: 3, shown: 3, filtering: true })).toBe("3 of 12 messages match");
+    expect(threadCountLine({ total: 12, matching: 0, shown: 0, filtering: true })).toBe("0 of 12 messages match");
   });
 });

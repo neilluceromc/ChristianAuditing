@@ -133,3 +133,16 @@ export function stepperModel(state: PurchaseRequestState, notes: ThreadNote[]): 
 
   return { stops, sentBack: bounce?.from ?? null, cancelled };
 }
+
+/** Phase 39 (spec §3): the request page shows this many of the newest messages; the rest open in a side panel. */
+export const THREAD_PREVIEW = 5;
+/** …and the panel shows this many at a time, oldest first. */
+export const THREAD_PAGE = 30;
+
+/** The panel's count line: "{n} messages · oldest first · showing {k}", or "{m} of {n} messages match" while filtering. */
+export function threadCountLine({
+  total, matching, shown, filtering,
+}: { total: number; matching: number; shown: number; filtering: boolean }): string {
+  const noun = total === 1 ? "message" : "messages";
+  return filtering ? `${matching} of ${total} ${noun} match` : `${total} ${noun} · oldest first · showing ${shown}`;
+}

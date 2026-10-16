@@ -15,6 +15,10 @@ import { notYetCount } from "../src/lib/it-setup";
  *     and "Written by" narrow; `?notes=1` reopens it; Edit from a note's ⋯ menu saves. The page with 25 notes is
  *     within 40 px of its height with 4 (the card at full size: 3 notes and the footer), and the Notes tab panel
  *     itself within 2 px.
+ *   4 (§3) the purchase conversation: a request with 12 messages shows the 5 newest and "Earlier messages (7) →";
+ *     the panel shows all 12 oldest first, "Kind" and the search narrow; `?thread=1` reopens it. A second request
+ *     with 31 messages pages 30, then "Load 30 more" gives 31. Both requests stay behind (NoteEntry is
+ *     append-only and Restrict-linked); the next reseed truncates them.
  *
  * Seed (prisma/seed.ts): J. Sarmiento is it@ (it_staff), System Admin is admin@. Bluepeak Telecom's base policy has
  * four required lines, so a fresh client hire's Equipment card is four tiles tall. Never reference a raw cuid.
@@ -246,5 +250,120 @@ test.describe("Phase 39 — the profile side card and its notes", () => {
     await expect(items.nth(1)).toContainText("edited");
     const saved = await db.employeeNote.findFirstOrThrow({ where: { employeeId: person.id, text: edited } });
     expect(saved.editedAt).not.toBeNull();
+  });
+});
+
+test.describe("Phase 39 — the purchase conversation", () => {
+  test("4. a request with 12 messages shows the newest 5 and Earlier messages (7); the panel shows all 12 and Kind filters; 31 pages 30 then 31", async ({ page }) => {
+    test.setTimeout(120_000);
+    const stamp = Date.now();
+    const tag = String(stamp).slice(-6);
+    const it = await db.user.findUniqueOrThrow({ where: { email: IT } });
+    const purchasing = await db.user.findUniqueOrThrow({ where: { email: "purchasing@thebackroomop.com" } });
+    const dept = await db.department.findUniqueOrThrow({ where: { name: "Bluepeak Telecom" } });
+    const DAY = 86_400_000;
+    const now = Date.now();
+
+    // NoteEntry is append-only (a database trigger) and a request that has notes cannot be deleted
+    // (onDelete: Restrict), so these two requests stay behind; every spec file reseeds, which truncates them.
+    const twelve = await db.purchaseRequest.create({
+      data: {
+        refNo: `PR-9${tag}`, state: "IT_REVIEWED", requestedById: purchasing.id, departmentId: dept.id,
+        submittedAt: new Date(now - 13 * DAY), reviewedAt: new Date(now - 12 * DAY), reviewedById: it.id,
+      },
+    });
+    // Oldest first: SUBMIT, IT_REVIEW, then ten comments (4 and 8 mention the invoice). One note a day, ending yesterday.
+    const kindOf = (i: number) => (i === 0 ? "SUBMIT" : i === 1 ? "IT_REVIEW" : "COMMENT") as "SUBMIT" | "IT_REVIEW" | "COMMENT";
+    const textOf = (i: number) =>
+      i === 0 ? `Submitted for review ${tag}` : i === 1 ? `Specs confirmed ${tag}` : i % 4 === 0 ? `Comment ${i} about the invoice ${tag}` : `Comment ${i} ${tag}`;
+    const dates = Array.from({ length: 12 }, (_, i) => new Date(now - (12 - i) * DAY));
+    await db.noteEntry.createMany({
+      data: dates.map((createdAt, i) => ({
+        requestId: twelve.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: kindOf(i), text: textOf(i), createdAt,
+      })),
+    });
+
+    await login(page, IT);
+    await page.goto(`/purchases/${twelve.id}`);
+    const thread = page.locator("#thread").getByRole("listitem");
+    const earlier = page.getByRole("button", { name: "Earlier messages (7) →", exact: true });
+    await waitForHydration(earlier);
+
+    // The page: the 5 newest, in time order, and the link to the other 7.
+    await expect(thread).toHaveCount(5);
+    await expect(thread.nth(0)).toContainText(`Comment 7 ${tag}`);
+    await expect(thread.nth(4)).toContainText(`Comment 11 ${tag}`);
+    await expect(page.getByLabel("Add a comment", { exact: true })).toBeVisible();
+
+    // The panel: all 12 (under 30), oldest first, under Manila month headings.
+    await earlier.click();
+    const panel = page.getByRole("dialog", { name: `Conversation — ${twelve.refNo}`, exact: true });
+    await expect(panel).toBeVisible();
+    await expect(page).toHaveURL(/[?&]thread=1/);
+    const rows = panel.getByRole("listitem");
+    await expect(rows).toHaveCount(12);
+    await expect(rows.first()).toContainText(`Submitted for review ${tag}`);
+    await expect(rows.last()).toContainText(`Comment 11 ${tag}`);
+    await expect(panel.getByText("12 messages · oldest first · showing 12", { exact: true })).toBeVisible();
+    await expect(panel.getByRole("button", { name: /^Load \d+ more$/ })).toHaveCount(0);
+    const monthFmt = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "Asia/Manila" });
+    for (const m of new Set(dates.map((d) => monthFmt.format(d)))) {
+      await expect(panel.getByRole("heading", { name: m, exact: true })).toBeVisible();
+    }
+
+    // Kind: Status changes (2), Comments (10), back to All; the search narrows within a kind; nothing matching says so.
+    const kind = panel.getByRole("combobox", { name: "Kind", exact: true });
+    await kind.selectOption({ label: "Status changes" });
+    await expect(rows).toHaveCount(2);
+    await expect(panel.getByText("2 of 12 messages match", { exact: true })).toBeVisible();
+    await kind.selectOption({ label: "Comments" });
+    await expect(rows).toHaveCount(10);
+    await expect(panel.getByText("10 of 12 messages match", { exact: true })).toBeVisible();
+    const search = panel.getByLabel("Search the conversation", { exact: true });
+    await search.fill("INVOICE");
+    await expect(rows).toHaveCount(2);
+    await expect(panel.getByText("2 of 12 messages match", { exact: true })).toBeVisible();
+    await kind.selectOption({ label: "Status changes" });
+    await expect(rows).toHaveCount(0);
+    await expect(panel.getByText("No message matches.", { exact: true })).toBeVisible();
+    await search.fill("");
+    await kind.selectOption({ label: "All" });
+    await expect(rows).toHaveCount(12);
+
+    // ?thread=1 reopens the panel after a refresh; Esc closes it, drops the parameter and returns focus.
+    await page.reload();
+    await expect(panel).toBeVisible({ timeout: 20_000 });
+    await expect(rows).toHaveCount(12);
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(page).not.toHaveURL(/[?&]thread=1/);
+    await expect(earlier).toBeFocused();
+
+    // 31 messages: the panel shows 30, then "Load 30 more" gives 31 and the button goes.
+    const long = await db.purchaseRequest.create({
+      data: { refNo: `PR-8${tag}`, state: "DRAFT", requestedById: purchasing.id, departmentId: dept.id },
+    });
+    await db.noteEntry.createMany({
+      data: Array.from({ length: 31 }, (_, i) => ({
+        requestId: long.id, authorId: purchasing.id, kind: "COMMENT" as const, text: `Long thread ${i} ${tag}`,
+        createdAt: new Date(now - (31 - i) * 3_600_000),
+      })),
+    });
+    await page.goto(`/purchases/${long.id}`);
+    const earlierLong = page.getByRole("button", { name: "Earlier messages (26) →", exact: true });
+    await waitForHydration(earlierLong);
+    await expect(page.locator("#thread").getByRole("listitem")).toHaveCount(5);
+    await earlierLong.click();
+    const longPanel = page.getByRole("dialog", { name: `Conversation — ${long.refNo}`, exact: true });
+    await expect(longPanel).toBeVisible();
+    const longRows = longPanel.getByRole("listitem");
+    await expect(longRows).toHaveCount(30);
+    await expect(longPanel.getByText("31 messages · oldest first · showing 30", { exact: true })).toBeVisible();
+    await longPanel.getByRole("button", { name: "Load 30 more", exact: true }).click();
+    await expect(longRows).toHaveCount(31);
+    await expect(longPanel.getByRole("button", { name: "Load 30 more", exact: true })).toHaveCount(0);
+    await expect(longRows.last()).toContainText(`Long thread 30 ${tag}`);
+    // Focus moved to the first message the button revealed, not to the page behind the drawer.
+    await expect(longRows.last()).toBeFocused();
   });
 });
