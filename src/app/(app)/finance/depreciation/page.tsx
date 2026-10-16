@@ -75,6 +75,7 @@ export default async function DepreciationPage({
                 <ButtonLink native size="sm" href={`/finance/depreciation/export?year=${year}&cls=${cls}`}>Export</ButtonLink>
               </div>
             </div>
+            <p className="text-xs text-fg-muted">This month is counted; later months are projected.</p>
             {(sched.notStarted > 0 || sched.noPolicy > 0) && (
               <p className="text-xs text-fg-muted">
                 {sched.notStarted} assets aren&apos;t depreciating yet · {sched.noPolicy} have no policy{" "}

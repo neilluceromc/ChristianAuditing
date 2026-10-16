@@ -391,12 +391,36 @@ describe("IT workspace nav", () => {
 describe("Phase 35 Finance nav", () => {
   it("Finance nav: Assets & depreciation", () => {
     const sec = WORKSPACE_NAV.finance.find((s) => s.heading === "Assets & depreciation");
-    expect(sec?.items.map((i) => i.label)).toEqual(["Assets", "Depreciation", "Activity log"]);
+    expect(sec?.items.map((i) => i.label)).toEqual(["Assets", "Depreciation", "Equipment by client", "Activity log"]);
   });
   it("/finance/depreciation and /finance/assets/<id> are Finance-only", () => {
     for (const p of ["/finance/depreciation", "/finance/assets/abc"]) {
       expect(pathAllowedForRole(p, "finance_staff")).toBe(true);
       expect(pathAllowedForRole(p, "it_staff")).toBe(false);
+      expect(pathAllowedForRole(p, "purchasing_staff")).toBe(false);
+    }
+  });
+});
+
+describe("Phase 38 Equipment by client", () => {
+  it("IT People lifecycle lists it right after Equipment policies", () => {
+    const sec = WORKSPACE_NAV.it.find((s) => s.heading === "People lifecycle");
+    const labels = sec?.items.map((i) => i.label) ?? [];
+    expect(labels[labels.indexOf("Equipment policies") + 1]).toBe("Equipment by client");
+    expect(sec?.items.find((i) => i.label === "Equipment by client")?.href).toBe("/equipment-by-client");
+  });
+  it("Finance lists it right after Depreciation", () => {
+    const sec = WORKSPACE_NAV.finance.find((s) => s.heading === "Assets & depreciation");
+    expect(sec?.items.find((i) => i.label === "Equipment by client")?.href).toBe("/equipment-by-client");
+  });
+  it("every IT-workspace role and Finance see the link", () => {
+    for (const r of ["admin", "it_staff", "viewer"] as const) expect(navFor(r).some((i) => i.href === "/equipment-by-client")).toBe(true);
+    expect(navFor("finance_staff", "finance").some((i) => i.href === "/equipment-by-client")).toBe(true);
+  });
+  it("the page and its export are readable by admin, IT, Finance and viewer, not Purchasing", () => {
+    expect(pathAllowedForRole("/equipment-by-clients", "it_staff")).toBe(false);
+    for (const p of ["/equipment-by-client", "/equipment-by-client/export"]) {
+      for (const r of ["admin", "it_staff", "finance_staff", "viewer"] as const) expect(pathAllowedForRole(p, r)).toBe(true);
       expect(pathAllowedForRole(p, "purchasing_staff")).toBe(false);
     }
   });

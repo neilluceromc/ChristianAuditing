@@ -1,7 +1,7 @@
 import type { AssetClass, AssetStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import {
-  asOfMonth, depreciate, manilaMonth, resolvePolicy, stateNote, sumYearRows, toCentavos, yearGrid,
+  asOfMonth, depStartMonth, depreciate, manilaMonth, resolvePolicy, stateNote, sumYearRows, toCentavos, yearGrid,
   type DepResult, type MonthIndex, type YearRow,
 } from "@/lib/depreciation";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
@@ -13,7 +13,7 @@ export const CAPITALISED: Prisma.AssetWhereInput = { cost: { not: null }, financ
 export interface DepAssetRow {
   id: string; tag: string; model: string; categoryId: string; category: string; cls: AssetClass; status: AssetStatus;
   holder: string | null; reg: RegState; notCapitalised: boolean;
-  costC: number | null; confirmedAt: Date | null; result: DepResult | null; note: string | null; custom: boolean; overrideNote: string | null;
+  costC: number | null; confirmedAt: Date | null; startMonth: MonthIndex | null; result: DepResult | null; note: string | null; custom: boolean; overrideNote: string | null;
   lifeMonths: number | null; salvageC: number | null; categoryLife: number | null; categorySalvagePercent: number | null;
 }
 
@@ -30,7 +30,7 @@ export async function depRows(
     ...(opts.take !== undefined ? { take: opts.take } : {}),
     select: {
       id: true, tag: true, model: true, categoryId: true, cls: true, status: true, cost: true,
-      itVerifiedAt: true, financeConfirmedAt: true, financeReturnedAt: true, financeNotCapitalised: true,
+      itVerifiedAt: true, financeConfirmedAt: true, financeReturnedAt: true, financeNotCapitalised: true, purchasedAt: true,
       depreciationLifeMonths: true, depreciationSalvage: true, depreciationNote: true,
       assignee: { select: { name: true } },
       category: { select: { name: true, depreciationLifeMonths: true, depreciationSalvagePercent: true } },
@@ -39,6 +39,7 @@ export async function depRows(
   return rows.map((r): DepAssetRow => {
     const costC = toCentavos(r.cost);
     const salvageC = toCentavos(r.depreciationSalvage);
+    const startMonth = depStartMonth({ purchasedAt: r.purchasedAt, financeConfirmedAt: r.financeConfirmedAt });
     const categorySalvagePercent = r.category.depreciationSalvagePercent === null ? null : Number(r.category.depreciationSalvagePercent);
     let result: DepResult | null = null;
     let note: string | null;
@@ -48,7 +49,7 @@ export async function depRows(
         { cost: costC, lifeMonths: r.depreciationLifeMonths, salvage: salvageC },
         { lifeMonths: r.category.depreciationLifeMonths, salvagePercent: categorySalvagePercent },
       );
-      result = depreciate(costC, r.financeConfirmedAt, policy, asOf);
+      result = depreciate(costC, startMonth, policy, asOf);
       note = stateNote(result, r.category.name);
       custom = policy?.basis === "custom";
     } else {
@@ -57,7 +58,7 @@ export async function depRows(
     return {
       id: r.id, tag: r.tag, model: r.model, categoryId: r.categoryId, category: r.category.name, cls: r.cls, status: r.status,
       holder: r.assignee?.name ?? null, reg: registrationState(r), notCapitalised: r.financeNotCapitalised,
-      costC, confirmedAt: r.financeConfirmedAt, result, note, custom, overrideNote: r.depreciationNote,
+      costC, confirmedAt: r.financeConfirmedAt, startMonth, result, note, custom, overrideNote: r.depreciationNote,
       lifeMonths: r.depreciationLifeMonths, salvageC, categoryLife: r.category.depreciationLifeMonths, categorySalvagePercent,
     };
   });
@@ -134,8 +135,8 @@ async function gridPass(cls: AssetClass, year: number, now: Date, categoryId?: s
     if (!r.result) continue;
     if (r.result.state === "not-started") notStarted++;
     if (r.result.state === "no-policy") noPolicy++;
-    if (r.confirmedAt) earliest = Math.min(earliest, Math.floor(manilaMonth(r.confirmedAt) / 12));
-    const grid = yearGrid(r.result.cost, r.confirmedAt, r.result.policy, year, asOf);
+    if (r.startMonth !== null) earliest = Math.min(earliest, Math.floor(r.startMonth / 12));
+    const grid = yearGrid(r.result.cost, r.startMonth, r.result.policy, year, asOf);
     if (!grid) continue;
     entries.push({ categoryId: r.categoryId, category: r.category, row: { id: r.id, tag: r.tag, model: r.model, costC: r.result.cost, custom: r.custom, grid } });
   }

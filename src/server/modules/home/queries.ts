@@ -1,7 +1,6 @@
 import type { ApprovalType, Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney, fmtMoneyExact, localDateISO } from "@/lib/format";
-import { monthEndLabel } from "@/lib/depreciation";
 import { regWhere } from "@/lib/registration";
 import { bookValueTotals } from "@/server/modules/finance/depreciation-queries";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
@@ -661,10 +660,9 @@ export interface FinanceHome {
   approvedThisMonth: string;
   capitalized: string;
   capitalizedCount: number;
-  /** Phase 35: book value, depreciation to date (both as of the last completed month) and the review backlog */
+  /** Phase 35: book value, depreciation to date (both as of today) and the review backlog */
   bookValue: string;
   depreciation: string;
-  asOfEnd: string;
   /** registrations waiting for Finance, per class — each is its own link, so a count always matches the page it opens */
   toReview: { it: number; purchasing: number };
   queue: TodoRow[];
@@ -712,7 +710,6 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
     capitalizedCount: capitalized._count._all,
     bookValue: fmtMoneyExact(totals.bookC / 100),
     depreciation: fmtMoneyExact(totals.accumulatedC / 100),
-    asOfEnd: monthEndLabel(totals.asOf),
     toReview: { it: toReviewIt, purchasing: toReviewPurchasing },
     queue: waiting.slice(0, 8).map((r) => ({
       id: r.id,

@@ -63,6 +63,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       items: [
         { label: "Offboarding", href: "/offboarding" },
         { label: "Equipment policies", href: "/admin/equipment-policies" },
+        // Phase 38 (spec §3.1): what each group holds and who is missing something (peso amounts for Admin and Finance only).
+        { label: "Equipment by client", href: "/equipment-by-client" },
         { label: "Reservations", href: "/reservations" },
       ],
     },
@@ -147,6 +149,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       items: [
         { label: "Assets", href: "/finance/assets" },
         { label: "Depreciation", href: "/finance/depreciation" },
+        { label: "Equipment by client", href: "/equipment-by-client" },
         { label: "Activity log", href: "/finance/activity" },
       ],
     },
@@ -269,6 +272,9 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Covers /employees/export too: an export matches its list page's access.
   { test: /^\/employees(\/|$)/, workspaces: ["it", "purchasing"] },
   { test: /^\/(audit|offboarding|reservations)(\/|$)/, workspaces: ["it"] },
+  // Phase 38 (spec §3.1): the Equipment by client report and its export — IT and Finance read it; no broader
+  // rule matches this prefix. Purchasing is excluded. Money is decided by canSeeMoney on the server, not here.
+  { test: /^\/equipment-by-client(\/|$)/, workspaces: ["it", "finance"], roles: ["admin", "it_staff", "finance_staff", "viewer"] },
   // Phase 14: purchasing approves lifecycle changes on its own class.
   { test: /^\/approvals(\/|$)/, workspaces: ["it", "finance", "purchasing"] },
   // Brief §6.1 is a three-party handoff: purchasing drafts, IT specs it,

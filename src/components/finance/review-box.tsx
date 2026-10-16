@@ -30,7 +30,7 @@ export function ReviewBox({
       <h2 className="text-[15px] font-semibold text-fg">Waiting for your review</h2>
       <p className="mt-1 text-[13px] text-fg-secondary">
         {hasCost
-          ? "Check the purchase details and documents below. Approve to start depreciation next month, or send it back with a checklist."
+          ? "Check the purchase details and documents below. Approve to start depreciation from the purchase month, or send it back with a checklist."
           : "No cost recorded. Send it back for the cost, or approve it as not capitalised."}
       </p>
       {reply && <p className="mt-2 text-[13px] text-fg">{deptLabel} replied: “{reply}”</p>}

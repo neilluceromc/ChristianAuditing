@@ -367,7 +367,7 @@ test.describe("it navigation sweep (Phase 25)", () => {
     await login(page, IT);
     await page.goto(`/employees/${nina.id}`);
     // Phase 29 (rulings R11/R14): Nina is day one — she holds nothing, so the
-    // panel reads "No items yet" INSTEAD of Book value and Oldest item, and
+    // panel reads "No items yet" INSTEAD of Value at cost and Oldest item, and
     // the count her one PENDING request (APR-2041) makes must survive that.
     // Stat renders label and value as two spans in one wrapper.
     await expect(page.getByText("No items yet")).toBeVisible();

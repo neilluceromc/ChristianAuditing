@@ -184,7 +184,7 @@ export default async function FinanceAssetsPage({
                           id={a.id}
                           tag={a.tag}
                           costC={a.costC}
-                          confirmedAt={a.confirmedAt ? a.confirmedAt.toISOString() : null}
+                          startMonth={a.startMonth}
                           custom={a.custom}
                           lifeMonths={a.lifeMonths}
                           salvageC={a.salvageC}
@@ -216,7 +216,7 @@ export default async function FinanceAssetsPage({
 
         <p className="font-mono text-[11px] text-fg-muted">
           {totals.count} asset{totals.count === 1 ? "" : "s"} · {totals.costed} with a cost · {totals.cost} at cost · {totals.depreciation} depreciation · {totals.book} book value
-          <span className="ml-3">As of the end of {totals.asOfLabel}</span>
+          <span className="ml-3">As of today ({totals.asOfLabel} counted)</span>
         </p>
       </div>
     </>

@@ -2,7 +2,7 @@ import type { AssetClass, AssetStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { auditSentence } from "@/lib/activity";
 import {
-  asOfMonth, depreciate, lifeYears, monthLabel, resolvePolicy, stateNote, toCentavos, type DepResult, type LifeYear,
+  asOfMonth, depStartMonth, depreciate, lifeYears, monthLabel, resolvePolicy, stateNote, toCentavos, type DepResult, type LifeYear,
 } from "@/lib/depreciation";
 import { lifeLabel } from "@/lib/depreciation-input";
 import { fmtMoneyExact } from "@/lib/format";
@@ -62,7 +62,8 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
         { lifeMonths: a.category.depreciationLifeMonths, salvagePercent: catSalvage },
       )
     : null;
-  const result = capitalised ? depreciate(costC, a.financeConfirmedAt, policy, asOf) : null;
+  const depStart = depStartMonth({ purchasedAt: a.purchasedAt, financeConfirmedAt: a.financeConfirmedAt });
+  const result = capitalised ? depreciate(costC, depStart, policy, asOf) : null;
   const note = result ? stateNote(result, a.category.name) : a.financeNotCapitalised ? "Not capitalised" : "No cost recorded";
 
   let policyText: string;
@@ -136,7 +137,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     feesC: toCentavos(a.purchaseRecord?.fees),
     warrantyUntil: a.warrantyUntil, coveredBy: a.warrantyCoveredBy, contact: a.warrantyContact,
     docs,
-    years: result && costC !== null ? lifeYears(costC, a.financeConfirmedAt, policy, asOf) : [],
+    years: result && costC !== null ? lifeYears(costC, depStart, policy, asOf) : [],
     history,
   };
 }

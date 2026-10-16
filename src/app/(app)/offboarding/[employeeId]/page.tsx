@@ -169,7 +169,7 @@ export default async function OffboardingWizardPage({
             {/* the same set as "Items out" beside it: `items` is held UNION
                 already-returned, so reducing over all of it bills equipment the
                 worker has already put back to the money still in their hands */}
-            <Stat label="Book value out" value={fmtMoney(heldItems.reduce((s, i) => s + (i.cost ?? 0), 0))} />
+            <Stat label="Value out at cost" value={fmtMoney(heldItems.reduce((s, i) => s + (i.cost ?? 0), 0))} />
             <Stat label="M365" value={employee.m365Status ?? "never had an account"} />
           </div>
           {/* keyed on the SLOT COUNT, not the policy: a person with no policy

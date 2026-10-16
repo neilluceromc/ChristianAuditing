@@ -186,7 +186,7 @@ export default async function Home() {
                   <Stat label="Approved this month" value={d.approvedThisMonth} />
                   <Stat label="Capitalized" value={d.capitalized} hint={`${d.capitalizedCount} assets`} />
                   <Link href="/finance/assets" className="hover:opacity-80">
-                    <Stat label="Book value" value={d.bookValue} hint={`after ${d.depreciation} depreciation · as of ${d.asOfEnd}`} />
+                    <Stat label="Book value" value={d.bookValue} hint={`after ${d.depreciation} depreciation · as of today`} />
                   </Link>
                 </div>
                 <TodoList rows={d.queue} empty="Nothing is waiting on finance right now." />
