@@ -43,7 +43,10 @@ export function PrintLabelsButton({ count, waitingAssetIds }: { count: number; w
       window.removeEventListener("afterprint", ask);
       if (done) return;
       done = true;
-      if (waitingAssetIds.length) { setError(null); setConfirming(true); }
+      if (!waitingAssetIds.length) return;
+      // Next frame, not this tick: iOS Safari returns from print() at once, and a dialog rendered in the
+      // same task could reach the print snapshot (the Dialog is also print:hidden).
+      requestAnimationFrame(() => { setError(null); setConfirming(true); });
     };
     window.addEventListener("afterprint", ask);
     window.print();
@@ -89,8 +92,8 @@ export function PrintLabelsButton({ count, waitingAssetIds }: { count: number; w
           {error && <Banner tone="fault" title={error} />}
           <p>
             {waitingAssetIds.length === 1
-              ? "Marked printed, the label leaves the waiting queue."
-              : `Marked printed, the ${waitingAssetIds.length} labels leave the waiting queue.`}
+              ? "Marking it printed takes it out of Waiting to print."
+              : "Marking them printed takes them out of Waiting to print."}
           </p>
         </div>
       </Dialog>

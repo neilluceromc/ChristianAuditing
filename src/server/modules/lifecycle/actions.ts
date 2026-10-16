@@ -22,7 +22,7 @@ import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, defaultClassFor, isAssignable, isDirectLifecycle, isStatusOf, parseCls, statusLabel,
 } from "@/lib/asset-class";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan, triageInputSchema,
+  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan, triageInputSchema, triageNeedsReason,
 } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange } from "./apply";
 import { rememberPicks } from "@/server/recent-picks";
@@ -333,45 +333,58 @@ export async function triageAsset(input: unknown): Promise<ActionResult<{ tag: s
   const d = parsed.data;
   const now = new Date();
   let out: { tag: string; status: string } | null = null;
-  const failure = await prisma.$transaction(async (tx) => {
-    const loaded = await loadDirect(tx, user, d.assetId);
-    if ("failure" in loaded) return loaded.failure;
-    const { asset } = loaded;
-    if (asset.returnedAt === null) return conflict(`${asset.tag} is not waiting for triage.`);
-    const full = await tx.asset.findUniqueOrThrow({ where: { id: asset.id }, select: { notes: true } });
-    const notes = d.note ? (full.notes ? `${full.notes}\n${d.note}` : d.note) : undefined;
-    // The asset has no disposal-reason column: the reason rides the audit entry (`reason`, the key other
-    // reasoned actions use), the EXECUTED approval's payload and the asset's notes, as the note always did.
-    const triageDiff: AuditDiff = {
-      triage: { from: null, to: TRIAGE_LABEL[d.outcome] },
-      ...(d.note ? { reason: { from: null, to: d.note } } : {}),
-    };
-    if (d.outcome === asset.status) {
-      // Keep as spare: only the flag moves. No approval row — nothing about the
-      // asset's lifecycle changed, so there is no decision to record as one.
-      // State-guarded: a second, concurrent triage of the same device finds nothing still waiting.
-      const { count } = await tx.asset.updateMany({
+  let failure: ActionResult<never> | null | undefined;
+  try {
+    failure = await prisma.$transaction(async (tx) => {
+      const loaded = await loadDirect(tx, user, d.assetId);
+      if ("failure" in loaded) return loaded.failure;
+      const { asset } = loaded;
+      const notWaiting = conflict(`${asset.tag} is not waiting for triage.`);
+      if (asset.returnedAt === null) return notWaiting;
+      // Claim first, state-guarded, before anything is recorded: of two concurrent triages of the same
+      // device, the second blocks on the row lock, then finds nothing still waiting and is refused.
+      // `asset` keeps the pre-claim snapshot, so prepareLifecycle still diffs returnedAt → null.
+      const claim = await tx.asset.updateMany({
         where: { id: asset.id, status: asset.status, returnedAt: { not: null } },
-        data: { returnedAt: null, ...(notes !== undefined ? { notes } : {}) },
+        data: { returnedAt: null },
       });
-      if (count === 0) return conflict(`${asset.tag} is not waiting for triage.`);
-      await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
-        action: "lifecycle.triage", diff: { ...triageDiff, returnedAt: { from: asset.returnedAt, to: null } },
-      });
-    } else {
-      const r = await recordDirect(tx, {
-        actor: user, asset, now, type: "lifecycle_change_status", action: "lifecycle.triage",
-        change: { kind: "change-status", status: d.outcome },
-        payload: { from: { status: asset.status }, to: { status: d.outcome }, reason: d.note ?? "triage" },
-        extraDiff: triageDiff,
-      });
-      if (!r.ok) return conflict(r.error);
-      if (notes !== undefined) await tx.asset.update({ where: { id: asset.id }, data: { notes } });
-    }
-    out = { tag: asset.tag, status: d.outcome };
-    return null;
-  });
+      if (claim.count === 0) return notWaiting;
+      const full = await tx.asset.findUniqueOrThrow({ where: { id: asset.id }, select: { notes: true } });
+      const notes = d.note ? (full.notes ? `${full.notes}\n${d.note}` : d.note) : undefined;
+      // The asset has no disposal-reason column. For Dispose/Donate the text is the decision's reason
+      // (`reason`, the key other reasoned actions use); for Keep/Repair it is an optional `note`. Either way
+      // it also rides the EXECUTED approval's payload and the asset's notes, as the note always did.
+      const textKey = triageNeedsReason(d.outcome) ? "reason" : "note";
+      const triageDiff: AuditDiff = {
+        triage: { from: null, to: TRIAGE_LABEL[d.outcome] },
+        ...(d.note ? { [textKey]: { from: null, to: d.note } } : {}),
+      };
+      if (d.outcome === asset.status) {
+        // Keep as spare: only the flag moves (claimed above). No approval row — nothing about the
+        // asset's lifecycle changed, so there is no decision to record as one.
+        if (notes !== undefined) await tx.asset.update({ where: { id: asset.id }, data: { notes } });
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
+          action: "lifecycle.triage", diff: { ...triageDiff, returnedAt: { from: asset.returnedAt, to: null } },
+        });
+      } else {
+        const r = await recordDirect(tx, {
+          actor: user, asset, now, type: "lifecycle_change_status", action: "lifecycle.triage",
+          change: { kind: "change-status", status: d.outcome },
+          payload: { from: { status: asset.status }, to: { status: d.outcome }, reason: d.note || "triage" },
+          extraDiff: triageDiff,
+        });
+        // the claim is already written: throw, so the rollback undoes it (a plain return would commit it)
+        if (!r.ok) throw new DirectRefusal(r.error);
+        if (notes !== undefined) await tx.asset.update({ where: { id: asset.id }, data: { notes } });
+      }
+      out = { tag: asset.tag, status: d.outcome };
+      return null;
+    });
+  } catch (err) {
+    if (err instanceof DirectRefusal) return conflict(err.message);
+    throw err;
+  }
   if (failure) return failure;
   revalidateAsset(d.assetId, []);
   return ok(out!);

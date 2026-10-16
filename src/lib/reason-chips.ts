@@ -12,8 +12,9 @@ export const REASON_CHIPS = {
   "asset.buyout":      ["Bought by employee"],
   "asset.status":      ["For repair", "End of life", "Sold or donated", "Back in service"],
   "asset.assign":      ["New hire kit", "Replacement", "On loan"],
-  // Phase 40 §8: Dispose and Donate in the triage dialog (min 2, triageReasonValid)
-  "asset.triage":      ["Beyond repair", "Obsolete", "Donated to staff/charity"],
+  // Phase 40 §8: the triage dialog's Dispose and Donate (min 2, triageReasonValid) — each offers the chips that fit it
+  "asset.dispose":     ["Beyond repair", "Obsolete"],
+  "asset.donate":      ["Donated to staff/charity", "Obsolete"],
   "employee.transfer": ["Promotion", "Reorganisation", "Requested by department"],
   "policy.exception.add":   ["Role needs it", "Client requirement", "Remote work setup", "Accessibility need"],
   "policy.exception.waive": ["Not needed for this role", "Uses own device", "Client provides it"],
@@ -32,4 +33,21 @@ export function chipsForOutcome(outcome: "MISSING" | "DEFECTIVE" | "BUYOUT" | "T
     case "BUYOUT": return REASON_CHIPS["asset.buyout"];
     default: return [];
   }
+}
+
+/** Phase 40 §8: the triage dialog's chips for a decision — Dispose and Donate have their own; Keep and Repair none. */
+export function chipsForTriage(outcome: "SPARE" | "DEFECTIVE" | "DISPOSE" | "DONATED" | ""): readonly string[] {
+  switch (outcome) {
+    case "DISPOSE": return REASON_CHIPS["asset.dispose"];
+    case "DONATED": return REASON_CHIPS["asset.donate"];
+    default: return [];
+  }
+}
+
+/**
+ * What the reason box holds after the decision changes: a value that is exactly a chip the new decision
+ * does not offer is cleared (it was a pick, not someone's words); anything typed stays.
+ */
+export function reasonAfterSwitch(value: string, from: readonly string[], to: readonly string[]): string {
+  return from.includes(value) && !to.includes(value) ? "" : value;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -14,10 +14,8 @@ import {
   TRIAGE_DECISION_MESSAGE, TRIAGE_OUTCOMES, TRIAGE_LABEL, TRIAGE_REASON_MESSAGE,
   triageNeedsReason, triageReasonValid, type TriageOutcome,
 } from "@/lib/lifecycle";
-import { REASON_CHIPS } from "@/lib/reason-chips";
+import { chipsForTriage, reasonAfterSwitch } from "@/lib/reason-chips";
 import { triageAsset } from "@/server/modules/lifecycle/actions";
-
-const CHIPS = REASON_CHIPS["asset.triage"];
 
 /**
  * Phase 15 (spec §1 rows 6–7): decide what a "back, not checked" device becomes.
@@ -39,6 +37,8 @@ export function TriageDialog({ open, onClose, asset }: {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const decisionRef = useRef<HTMLSelectElement>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -50,10 +50,10 @@ export function TriageDialog({ open, onClose, asset }: {
   const needsReason = outcome !== "" && triageNeedsReason(outcome);
 
   function choose(next: TriageOutcome) {
+    // A chip-only value the new decision does not offer ("Beyond repair" on a Donate, any chip on a Keep) is cleared.
+    setNote(reasonAfterSwitch(note, chipsForTriage(outcome), chipsForTriage(next)));
     setOutcome(next);
     setFieldErrors((fe) => ({ ...fe, outcome: "" }));
-    // A chip is a disposal reason; it does not carry over as a note on a device that stays.
-    if (!triageNeedsReason(next) && (CHIPS as readonly string[]).includes(note)) setNote("");
   }
 
   function submit() {
@@ -62,7 +62,10 @@ export function TriageDialog({ open, onClose, asset }: {
     if (outcome === "") fe.outcome = TRIAGE_DECISION_MESSAGE;
     else if (!triageReasonValid(outcome, note)) fe.note = TRIAGE_REASON_MESSAGE;
     setFieldErrors(fe);
-    if (outcome === "" || fe.note) return;
+    // Focus the field that failed, not wherever the click left it (Save decision).
+    if (fe.outcome) { decisionRef.current?.focus(); return; }
+    if (fe.note) { reasonRef.current?.focus(); return; }
+    if (outcome === "") return;
     startTransition(async () => {
       const res = await triageAsset({ assetId: asset.id, outcome, note });
       if (res.ok) {
@@ -87,7 +90,7 @@ export function TriageDialog({ open, onClose, asset }: {
         {error && <Banner tone="fault" title={error} />}
         <FormField label="Decision" required error={fieldErrors.outcome || undefined}>
           {(p) => (
-            <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={outcome} onChange={(e) => choose(e.target.value as TriageOutcome)}>
+            <Select ref={decisionRef} id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={outcome} onChange={(e) => choose(e.target.value as TriageOutcome)}>
               <option value="" disabled>Choose…</option>
               {TRIAGE_OUTCOMES.map((o) => <option key={o} value={o}>{TRIAGE_LABEL[o]}</option>)}
             </Select>
@@ -96,7 +99,7 @@ export function TriageDialog({ open, onClose, asset }: {
         <ReasonField
           label={needsReason ? "Reason" : "Note"} required={needsReason}
           error={fieldErrors.note || undefined} value={note} onChange={setNote}
-          chips={needsReason ? CHIPS : []} disabled={pending}
+          chips={chipsForTriage(outcome)} disabled={pending} inputRef={reasonRef}
         />
       </div>
     </Dialog>

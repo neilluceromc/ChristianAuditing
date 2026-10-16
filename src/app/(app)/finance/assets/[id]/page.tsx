@@ -7,6 +7,7 @@ import { prisma } from "@/server/db/client";
 import { financeAssetDetail } from "@/server/modules/finance/asset-detail";
 import { CLASS_LABEL, STATUS_LABEL } from "@/lib/asset-class";
 import { lifeLabel } from "@/lib/depreciation-input";
+import { coveredByLabel } from "@/lib/purchase-summary";
 import { fmtDate, fmtDateTime, fmtMoneyExact } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
@@ -149,7 +150,7 @@ export default async function FinanceAssetPage({ params }: { params: Promise<{ i
                 { label: "Purchase date", value: d.purchasedAt ? fmtDate(d.purchasedAt) : "Not recorded" },
                 { label: "Delivery and fees", value: peso(d.feesC) },
                 { label: "Warranty until", value: d.warrantyUntil ? fmtDate(d.warrantyUntil) : "Not recorded" },
-                { label: "Covered by", value: text(d.coveredBy) },
+                { label: "Covered by", value: text(d.coveredBy && coveredByLabel(d.coveredBy)) },
                 { label: "Who to call", value: text(d.contact) },
               ]}
             />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TRIAGE_OUTCOMES, triageInputSchema, triageNeedsReason, triageReasonValid } from "./lifecycle";
-import { REASON_CHIPS } from "./reason-chips";
+import { REASON_CHIPS, chipsForTriage, reasonAfterSwitch } from "./reason-chips";
 
 describe("triage reason (Phase 40 §8)", () => {
   it("only Dispose and Donate need a reason", () => {
@@ -21,10 +21,8 @@ describe("triage reason (Phase 40 §8)", () => {
   it("Dispose and Donate accept 2 characters or a chip", () => {
     expect(triageReasonValid("DISPOSE", "ok")).toBe(true);
     expect(triageReasonValid("DONATED", " ok ")).toBe(true);
-    for (const chip of REASON_CHIPS["asset.triage"]) {
-      expect(triageReasonValid("DISPOSE", chip)).toBe(true);
-      expect(triageReasonValid("DONATED", chip)).toBe(true);
-    }
+    for (const chip of chipsForTriage("DISPOSE")) expect(triageReasonValid("DISPOSE", chip)).toBe(true);
+    for (const chip of chipsForTriage("DONATED")) expect(triageReasonValid("DONATED", chip)).toBe(true);
   });
 
   it("Keep as spare and Send to repair need none", () => {
@@ -32,8 +30,30 @@ describe("triage reason (Phase 40 §8)", () => {
     expect(triageReasonValid("DEFECTIVE", undefined)).toBe(true);
   });
 
-  it("the chips are the spec's three", () => {
-    expect(REASON_CHIPS["asset.triage"]).toEqual(["Beyond repair", "Obsolete", "Donated to staff/charity"]);
+  it("each decision offers the chips that fit it (the spec's three between them)", () => {
+    expect(chipsForTriage("DISPOSE")).toEqual(["Beyond repair", "Obsolete"]);
+    expect(chipsForTriage("DONATED")).toEqual(["Donated to staff/charity", "Obsolete"]);
+    expect(chipsForTriage("SPARE")).toEqual([]);
+    expect(chipsForTriage("DEFECTIVE")).toEqual([]);
+    expect(chipsForTriage("")).toEqual([]);
+    expect(REASON_CHIPS["asset.dispose"]).toBe(chipsForTriage("DISPOSE"));
+  });
+});
+
+describe("reasonAfterSwitch (Phase 40 §8)", () => {
+  const dispose = chipsForTriage("DISPOSE");
+  const donate = chipsForTriage("DONATED");
+  it("clears a chip the new decision does not offer", () => {
+    expect(reasonAfterSwitch("Beyond repair", dispose, donate)).toBe("");
+    expect(reasonAfterSwitch("Donated to staff/charity", donate, dispose)).toBe("");
+    expect(reasonAfterSwitch("Obsolete", dispose, [])).toBe("");
+  });
+  it("keeps a chip both decisions offer", () => {
+    expect(reasonAfterSwitch("Obsolete", dispose, donate)).toBe("Obsolete");
+  });
+  it("keeps anything typed", () => {
+    expect(reasonAfterSwitch("Screen cracked, board dead", dispose, donate)).toBe("Screen cracked, board dead");
+    expect(reasonAfterSwitch("Beyond repair, says vendor", dispose, [])).toBe("Beyond repair, says vendor");
   });
 });
 

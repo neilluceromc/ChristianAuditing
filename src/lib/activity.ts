@@ -44,6 +44,8 @@ export const FIELD_LABELS: Record<string, string> = {
   registeredName: "registered name", contactPerson: "contact person", phone: "phone", address: "address",
   registrationNo: "registration number", contractStatus: "contract status", contractStart: "contract start", contractEnd: "contract end",
   unit: "unit", packSize: "pack size", reorderLevel: "reorder level", expiresAt: "expiry",
+  // Phase 40 §8: triage records Dispose/Donate's `reason` apart from Keep/Repair's optional `note`
+  reason: "reason", note: "note",
 };
 /** Known keys read from the table; unknown ones lose a trailing "Id" and split camelCase: "repairEndedAt" → "repair ended at". */
 export function fieldLabel(key: string): string {

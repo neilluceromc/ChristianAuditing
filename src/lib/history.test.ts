@@ -59,6 +59,10 @@ describe("historyFieldLabel — the shared FIELD_LABELS, capitalised", () => {
   it("calls the lifecycle's assignee the holder", () => {
     expect(historyFieldLabel("assignee")).toBe("Holder");
   });
+  it("labels triage's reason and note apart (Phase 40 §8)", () => {
+    expect(historyFieldLabel("reason")).toBe("Reason");
+    expect(historyFieldLabel("note")).toBe("Note");
+  });
   it("splits an unknown camelCase key into words", () => {
     expect(historyFieldLabel("repairEndedAt")).toBe("Repair ended at");
   });

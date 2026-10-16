@@ -29,7 +29,8 @@ export function Dialog({
   if (!mounted || !open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 grid place-items-center p-4">
+    // print:hidden — a dialog is never part of a printout (iOS Safari returns from print() before it renders)
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 print:hidden">
       <div
         aria-hidden
         onClick={onClose}

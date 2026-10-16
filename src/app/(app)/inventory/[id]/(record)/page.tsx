@@ -20,12 +20,7 @@ import { RegistrationBlock } from "@/components/inventory/registration-block";
 import { CreatedNotice } from "@/components/inventory/created-notice";
 import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
 import { statusFamily } from "@/lib/status";
-import { WARRANTY_COVERED_BY_LABEL } from "@/lib/purchase-summary";
-
-/** A stored value outside the zod set (an older import) reads as itself rather than blank. */
-function coveredByLabel(v: string): string {
-  return (WARRANTY_COVERED_BY_LABEL as Record<string, string>)[v] ?? v;
-}
+import { coveredByLabel } from "@/lib/purchase-summary";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;

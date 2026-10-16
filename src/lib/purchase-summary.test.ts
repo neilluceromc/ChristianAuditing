@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  centavosToDecimalString, formatPeso, moneyToCentavos, purchaseTotal, warrantyOnDate, warrantyOnLength, warrantyOnTyped,
+  centavosToDecimalString, coveredByLabel, formatPeso, moneyToCentavos, purchaseTotal, warrantyOnDate, warrantyOnLength, warrantyOnTyped,
   warrantyUntilFrom, type WarrantyState,
 } from "./purchase-summary";
 
@@ -80,5 +80,16 @@ describe("warranty state on Register (Review Focus 4)", () => {
     s = warrantyOnTyped(s, "");
     expect(s.manual).toBe(false);
     expect(warrantyOnLength(s, "2026-10-12", 6).until).toBe("2027-04-12");
+  });
+});
+
+describe("coveredByLabel (Phase 40)", () => {
+  it("reads the stored value in words", () => {
+    expect(coveredByLabel("manufacturer")).toBe("Manufacturer");
+    expect(coveredByLabel("vendor")).toBe("Vendor");
+    expect(coveredByLabel("both")).toBe("Both");
+  });
+  it("an unknown stored value reads as itself", () => {
+    expect(coveredByLabel("distributor")).toBe("distributor");
   });
 });

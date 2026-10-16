@@ -129,24 +129,33 @@ test.describe.serial("phase 40 — asset record, triage and the print confirmati
     await expect(decision).toHaveValue("");
     await dialog.getByRole("button", { name: "Save decision", exact: true }).click();
     await expect(dialog.getByText("Choose a decision", { exact: true })).toBeVisible();
+    await expect(decision).toBeFocused();
 
     // Keep as spare and Send to repair carry an optional Note and no chips.
     await decision.selectOption("SPARE");
     await expect(dialog.getByRole("textbox", { name: "Note", exact: true })).toBeVisible();
     await expect(dialog.getByRole("group", { name: "Quick picks" })).toHaveCount(0);
 
-    // Dispose: the field becomes a required Reason with the spec's three chips.
-    await decision.selectOption("DISPOSE");
+    // Each decision offers the chips that fit it: Donate has "Donated to staff/charity" and "Obsolete".
     const reason = dialog.getByRole("textbox", { name: "Reason", exact: true });
-    await expect(reason).toBeVisible();
     const picks = dialog.getByRole("group", { name: "Quick picks" });
-    for (const chip of ["Beyond repair", "Obsolete", "Donated to staff/charity"]) {
-      await expect(picks.getByRole("button", { name: chip, exact: true })).toBeVisible();
-    }
+    const chipNames = async () => (await picks.getByRole("button").allTextContents()).map((s) => s.trim());
+    await decision.selectOption("DONATED");
+    await expect(reason).toBeVisible();
+    await expect.poll(chipNames).toEqual(["Donated to staff/charity", "Obsolete"]);
+    // A chip Dispose does not offer is cleared on the switch.
+    await picks.getByRole("button", { name: "Donated to staff/charity", exact: true }).click();
+    await expect(reason).toHaveValue("Donated to staff/charity");
+
+    // Dispose: a required Reason with "Beyond repair" and "Obsolete".
+    await decision.selectOption("DISPOSE");
+    await expect.poll(chipNames).toEqual(["Beyond repair", "Obsolete"]);
+    await expect(reason).toHaveValue("");
     await expectNoSeriousAxe(page);
 
     await dialog.getByRole("button", { name: "Save decision", exact: true }).click();
     await expect(dialog.getByText("Give a reason (at least 2 characters)", { exact: true })).toBeVisible();
+    await expect(reason).toBeFocused();
     await reason.fill("x");
     await dialog.getByRole("button", { name: "Save decision", exact: true }).click();
     await expect(dialog.getByText("Give a reason (at least 2 characters)", { exact: true })).toBeVisible();
