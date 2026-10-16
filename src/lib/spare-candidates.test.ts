@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  SPARE_LIMIT, orderSpareCandidates, spareCandidatesSchema, spareSearchWhere, spareWhere, toSpareOption, type SpareRow,
+  SPARE_LIMIT, SPARE_QUERY_MAX, heldOrQueuedWhere, isUnpickable, orderSpareCandidates, replacePicker, solePick,
+  spareCandidatesSchema, spareSearchWhere, spareWhere, toSpareOption, type SpareOption, type SpareRow,
 } from "./spare-candidates";
 
 const row = (tag: string, typeId: string | null, extra: Partial<SpareRow> = {}): SpareRow => ({
@@ -85,6 +86,69 @@ describe("spareCandidatesSchema", () => {
 
   it("refuses an empty type and text over 60 characters", () => {
     expect(spareCandidatesSchema.safeParse({ employeeId: "e", assetTypeId: "" }).success).toBe(false);
-    expect(spareCandidatesSchema.safeParse({ employeeId: "e", q: "x".repeat(61) }).success).toBe(false);
+    expect(spareCandidatesSchema.safeParse({ employeeId: "e", q: "x".repeat(SPARE_QUERY_MAX + 1) }).success).toBe(false);
+  });
+});
+
+const opt = (id: string, typeId: string | null, extra: Partial<SpareOption> = {}): SpareOption => ({
+  id, tag: id, model: "m", typeId, reservedFor: null, reservedForThis: false, pendingRef: null, ...extra,
+});
+
+describe("isUnpickable", () => {
+  it("free and held-for-them are pickable; held for someone else or queued are not", () => {
+    expect(isUnpickable(opt("a", "t"))).toBe(false);
+    expect(isUnpickable(opt("a", "t", { reservedFor: "Nina", reservedForThis: true }))).toBe(false);
+    expect(isUnpickable(opt("a", "t", { reservedFor: "Carlo" }))).toBe(true);
+    expect(isUnpickable(opt("a", "t", { pendingRef: "APR-1" }))).toBe(true);
+    expect(isUnpickable(opt("a", "t", { reservedFor: "Nina", reservedForThis: true, pendingRef: "APR-1" }))).toBe(true);
+  });
+});
+
+describe("heldOrQueuedWhere", () => {
+  it("a hold for anyone but this person, or an open request", () => {
+    expect(heldOrQueuedWhere("emp")).toEqual({
+      OR: [
+        { reservations: { some: { state: "ACTIVE", employeeId: { not: "emp" } } } },
+        { approvals: { some: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } } } },
+      ],
+    });
+  });
+});
+
+describe("replacePicker", () => {
+  it("nothing in stock", () => {
+    expect(replacePicker({ total: 0, heldOrQueued: 0 })).toEqual({ kind: "empty" });
+  });
+
+  it("all held only when every spare in the pool is held or queued", () => {
+    expect(replacePicker({ total: 3, heldOrQueued: 3 })).toEqual({ kind: "allHeld", count: 3 });
+    expect(replacePicker({ total: 1, heldOrQueued: 1 })).toEqual({ kind: "allHeld", count: 1 });
+    expect(replacePicker({ total: 120, heldOrQueued: 119 })).toEqual({ kind: "pick", hidden: 119 });
+  });
+
+  it("a picker, with how many the pool leaves out — however many rows were loaded", () => {
+    expect(replacePicker({ total: 500, heldOrQueued: 2 })).toEqual({ kind: "pick", hidden: 2 });
+    expect(replacePicker({ total: 5, heldOrQueued: 0 })).toEqual({ kind: "pick", hidden: 0 });
+  });
+});
+
+describe("solePick", () => {
+  it("the one pickable spare of the type, when the pool has exactly one", () => {
+    const rows = [opt("a", "t", { pendingRef: "APR-1" }), opt("b", "t"), opt("c", "other")];
+    expect(solePick(rows, "t", { total: 2, heldOrQueued: 1 })).toBe("b");
+  });
+
+  it("none when the pool has more pickable spares than the rows show", () => {
+    const rows = [opt("a", "t", { reservedFor: "Carlo" }), opt("b", "t")];
+    expect(solePick(rows, "t", { total: 80, heldOrQueued: 1 })).toBeNull();
+  });
+
+  it("none when the pool's one pickable spare is not among the rows loaded", () => {
+    const rows = [opt("a", "t", { reservedFor: "Carlo" })];
+    expect(solePick(rows, "t", { total: 60, heldOrQueued: 59 })).toBeNull();
+  });
+
+  it("a spare held for this person counts as pickable", () => {
+    expect(solePick([opt("a", "t", { reservedFor: "Nina", reservedForThis: true })], "t", { total: 1, heldOrQueued: 0 })).toBe("a");
   });
 });

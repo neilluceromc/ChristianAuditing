@@ -8,6 +8,8 @@ import { ASSIGNABLE_FROM } from "@/lib/asset-class";
  */
 export const SPARE_LIMIT = 50;
 export const SPARE_DEBOUNCE_MS = 250;
+/** The longest text the spare search sends; the inputs stop there, so the schema's cap is never the operator's error. */
+export const SPARE_QUERY_MAX = 60;
 
 export interface SpareOption {
   id: string;
@@ -23,7 +25,7 @@ export interface SpareOption {
 export const spareCandidatesSchema = z.object({
   employeeId: z.string().min(1),
   assetTypeId: z.string().min(1).optional(),
-  q: z.string().trim().max(60).optional(),
+  q: z.string().trim().max(SPARE_QUERY_MAX).optional(),
 });
 
 // The same states approvals/create.ts calls OPEN_APPROVAL_STATES — repeated here because src/lib cannot import src/server.
@@ -35,6 +37,19 @@ const OPEN_APPROVAL = ["PENDING", "CLAIMED", "APPROVED"] as const;
  */
 export function spareWhere(): Prisma.AssetWhereInput {
   return { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null };
+}
+
+/**
+ * The spares a picker cannot offer this person: held for someone else, or promised by an open request — the
+ * server-side twin of `isUnpickable`, for the pool-wide counts.
+ */
+export function heldOrQueuedWhere(employeeId: string): Prisma.AssetWhereInput {
+  return {
+    OR: [
+      { reservations: { some: { state: "ACTIVE", employeeId: { not: employeeId } } } },
+      { approvals: { some: { state: { in: [...OPEN_APPROVAL] } } } },
+    ],
+  };
 }
 
 /** The pool, narrowed by the typed text: a case-insensitive match on the tag or the model. */
@@ -88,4 +103,52 @@ export function orderSpareCandidates<T extends { typeId: string | null; tag: str
 ): T[] {
   const rank = (r: T) => (typeId !== null && r.typeId === typeId ? 0 : 1);
   return [...rows].sort((a, b) => rank(a) - rank(b) || a.tag.localeCompare(b.tag)).slice(0, limit);
+}
+
+/** A spare promised to someone else (held for another person, or queued by an open request) — never pickable. */
+export function isUnpickable(s: Pick<SpareOption, "reservedFor" | "reservedForThis" | "pendingRef">): boolean {
+  return (s.reservedFor !== null && !s.reservedForThis) || !!s.pendingRef;
+}
+
+/** Pool-wide counts, so the dialogs' lines never depend on which 50 rows were loaded. */
+export interface SpareCounts {
+  total: number;
+  heldOrQueued: number;
+}
+
+/** What the untyped call returns beside the rows: the whole pool, and the slot's type when one was asked for. */
+export interface SpareCandidateCounts {
+  all: SpareCounts;
+  sameType: SpareCounts | null;
+}
+
+export interface SpareCandidates {
+  spares: SpareOption[];
+  /** Only on the untyped call — a search answer is about its rows, not the pool. */
+  counts: SpareCandidateCounts | null;
+}
+
+export type ReplacePicker =
+  | { kind: "empty" }
+  | { kind: "allHeld"; count: number }
+  | { kind: "pick"; hidden: number };
+
+/**
+ * Replace (Phase 29 plan P-9): nothing in stock, everything promised to someone else, or a picker with how many
+ * it leaves out — decided on the pool-wide counts. Two counts read a moment apart can cross, hence `>=`.
+ */
+export function replacePicker(c: SpareCounts): ReplacePicker {
+  if (c.total === 0) return { kind: "empty" };
+  if (c.heldOrQueued >= c.total) return { kind: "allHeld", count: c.total };
+  return { kind: "pick", hidden: c.heldOrQueued };
+}
+
+/**
+ * Fill (Phase 29 spec §4.4): the sole pickable spare of the slot's type is preselected — only when the pool has
+ * exactly one, and only when that one is among the rows loaded.
+ */
+export function solePick(rows: SpareOption[], typeId: string | null, c: SpareCounts): string | null {
+  if (c.total - c.heldOrQueued !== 1) return null;
+  const pickable = rows.filter((s) => s.typeId !== null && s.typeId === typeId && !isUnpickable(s));
+  return pickable.length === 1 ? pickable[0].id : null;
 }

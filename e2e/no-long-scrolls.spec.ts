@@ -48,7 +48,7 @@ import { isExpired, lotRemaining } from "../src/lib/stock-allocation";
  *   12 (§6) spares on demand: with 60 extra spare phones (via prisma, deleted afterwards) Nina Robles's profile
  *     HTML carries no spare tag; Fill the Phone slot loads 50 same-type spares when it opens, the search finds the
  *     60th by tag and says "No spare matches." for nonsense, and clearing it brings the 50 back; Reserve's
- *     combobox asks the server as you type.
+ *     combobox asks the server as you type. Each picker holds focus when its dialog opens.
  *
  *
  * Seed (prisma/seed.ts): J. Sarmiento is it@ (it_staff), System Admin is admin@. Bluepeak Telecom's base policy has
@@ -910,13 +910,15 @@ test.describe("Phase 39 — spares on demand", () => {
       await fill.click();
       const dialog = page.getByRole("dialog", { name: "Fill the Phone slot" });
       const group = dialog.getByRole("radiogroup", { name: "Pick a spare" });
+      // The picker is there from the moment the dialog opens, so it holds focus, as before.
+      const search = dialog.getByRole("searchbox", { name: "Search the spares" });
+      await expect(search).toBeFocused();
       // The spares arrive after the dialog opens: at most 50, by tag, so BR-PH-0301 is in and the 60th is not.
       await expect(group.getByRole("radio")).toHaveCount(50, { timeout: 15_000 });
       await expect(group.getByText("BR-PH-0301", { exact: true })).toBeVisible();
       await expect(group.getByText("BR-PH-Z060", { exact: true })).toHaveCount(0);
 
-      // Typing asks the server (case-insensitive, by tag or model).
-      const search = dialog.getByRole("searchbox", { name: "Search the spares" });
+      // Typing asks the server (case-insensitive, by tag or model); the previous rows stay until it answers.
       await search.fill("z060");
       await expect(group.getByRole("radio")).toHaveCount(1, { timeout: 15_000 });
       await expect(group.getByText("BR-PH-Z060", { exact: true })).toBeVisible();
@@ -932,6 +934,7 @@ test.describe("Phase 39 — spares on demand", () => {
       await page.getByRole("menuitem", { name: "Reserve a spare…" }).click();
       const reserve = page.getByRole("dialog", { name: "Reserve a spare for the Phone slot" });
       const combo = reserve.getByRole("combobox", { name: "Spare" });
+      await expect(combo).toBeFocused();
       await combo.fill("Z060");
       await expect(reserve.getByRole("option", { name: /BR-PH-Z060/ })).toBeVisible({ timeout: 15_000 });
       await expect(reserve.getByRole("option")).toHaveCount(1);

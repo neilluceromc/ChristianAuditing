@@ -28,6 +28,8 @@ export function EntityCombobox({
   onQuery,
   serverFiltered,
   emptyText,
+  busy,
+  maxLength,
 }: {
   options: ComboOption[];
   value: string | null;
@@ -46,6 +48,10 @@ export function EntityCombobox({
   serverFiltered?: boolean;
   /** Phase 36: the text shown when no row is listed; the default is "No matches." */
   emptyText?: string;
+  /** Phase 39: a server answer for the typed text is on its way — the rows shown are the previous answer's. */
+  busy?: boolean;
+  /** Phase 39: the longest text the field takes. */
+  maxLength?: number;
 }) {
   const listId = useId();
   const [open, setOpen] = useState(false);
@@ -102,6 +108,7 @@ export function EntityCombobox({
         className={fieldClasses(invalid)}
         placeholder={placeholder}
         autoFocus={autoFocus}
+        maxLength={maxLength}
         value={open ? query : (selected ? `${selected.label}${selected.sub ? ` · ${selected.sub}` : ""}` : "")}
         // Phase 27 (spec §5.5): focus alone never opens the list — a click, typing or ArrowDown does, so an autoFocus field no longer pops a listbox on page load.
         onFocus={() => setActive(0)}
@@ -119,6 +126,7 @@ export function EntityCombobox({
         <ul
           id={listId}
           role="listbox"
+          aria-busy={busy || undefined}
           className="absolute z-40 mt-1 max-h-[220px] w-full overflow-y-auto rounded-(--radius-btn) border border-border bg-surface-raised p-1 shadow-pop"
           style={{ animation: "fade var(--dur-2) var(--ease-std)" }}
         >
