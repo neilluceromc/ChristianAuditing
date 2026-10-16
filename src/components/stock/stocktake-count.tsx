@@ -50,7 +50,7 @@ const INVALID = "A whole number, zero or more";
  *   Enter waits for the Enter's save instead of racing it);
  * - every page, filter or "Review variance" navigation (`go`) first stops on
  *   any box holding something that is not a count (inline message, focus
- *   there), saves any row still holding an unsaved count, waits for all of
+ *   there — see `Bad` for why a blur only marks the box), saves any row still holding an unsaved count, waits for all of
  *   them (`waitForAll`), and only then moves — staying put, with the error
  *   showing, when a save failed and retrying could help (rate limit, the
  *   network). A refusal retrying cannot fix (the stocktake is no longer
@@ -62,6 +62,14 @@ const INVALID = "A whole number, zero or more";
  * under Only uncounted — where a counted row drops out when the save's
  * refresh lands — Enter moves focus on to the next row first.
  */
+/**
+ * A box holding something that is not a count. A blur only "marks" it (red border, aria-invalid): nothing that
+ * changes the row's height may mount then, because the blur happens on the mousedown of the click that caused it —
+ * a row growing under the pointer moves the pagination link before the mouseup, and the click never reaches it.
+ * Enter or a navigation attempt "tells": the message mounts under the box and focus goes there.
+ */
+type Bad = "marked" | "told";
+
 export function StocktakeCount({
   stocktakeId,
   lines,
@@ -87,7 +95,9 @@ export function StocktakeCount({
     Object.fromEntries(lines.map((l) => [l.id, l.countedQty === null ? "" : String(l.countedQty)]));
   const [values, setValues] = useState<Record<string, string>>(initialValues);
   const [saved, setSaved] = useState<Record<string, boolean>>({});
-  const [invalid, setInvalid] = useState<Record<string, boolean>>({});
+  const [invalid, setInvalid] = useState<Record<string, Bad>>({});
+  /** A request to focus a box, honoured after the commit that renders its message (a new object each time). */
+  const [focusReq, setFocusReq] = useState<{ id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // A page or filter change: the rows start again from the server's values. A save's own refresh keeps the same
@@ -117,6 +127,10 @@ export function StocktakeCount({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (focusReq) inputs.current.get(focusReq.id)?.focus();
+  }, [focusReq]);
+
   /** The box's count; a browser-rejected entry in a number box ("1e", "abc") reads as "" but is still not a count. */
   const entry = (l: CountLine) => (inputs.current.get(l.id)?.validity.badInput ? "invalid" : parseCount(values[l.id]));
   const lastSaved = (l: CountLine) => (savedQty.current.has(l.id) ? savedQty.current.get(l.id)! : l.countedQty);
@@ -124,15 +138,22 @@ export function StocktakeCount({
   function setValue(id: string, value: string) {
     setValues((s) => ({ ...s, [id]: value }));
     setSaved((s) => ({ ...s, [id]: false }));
-    setInvalid((s) => ({ ...s, [id]: false }));
+    setInvalid((s) => {
+      const rest = { ...s };
+      delete rest[id];
+      return rest;
+    });
   }
 
-  /** Queues the row's save; false when there is nothing to save (blank, not a count, or the stocktake refused). */
-  function save(line: CountLine): boolean {
+  /**
+   * Queues the row's save; false when there is nothing to save (blank, not a count, or the stocktake refused).
+   * `tell` (Enter) shows the message for a box that is not a count; a blur only marks it (see `Bad`).
+   */
+  function save(line: CountLine, tell: boolean): boolean {
     const countedQty = entry(line);
     if (countedQty === "blank") return false;
     if (countedQty === "invalid") {
-      setInvalid((s) => ({ ...s, [line.id]: true }));
+      setInvalid((s) => ({ ...s, [line.id]: tell || s[line.id] === "told" ? "told" : "marked" }));
       return false;
     }
     if (refused.current) return false;
@@ -173,13 +194,13 @@ export function StocktakeCount({
   async function go(href: string) {
     const bad = lines.filter((l) => entry(l) === "invalid");
     if (bad.length) {
-      setInvalid((s) => ({ ...s, ...Object.fromEntries(bad.map((l) => [l.id, true])) }));
-      inputs.current.get(bad[0].id)?.focus();
+      setInvalid((s) => ({ ...s, ...Object.fromEntries(bad.map((l) => [l.id, "told" as const])) }));
+      setFocusReq({ id: bad[0].id });
       return;
     }
     for (const l of lines) {
       const qty = entry(l);
-      if (typeof qty === "number" && qty !== lastSaved(l)) save(l);
+      if (typeof qty === "number" && qty !== lastSaved(l)) save(l, false);
     }
     if (await waitForAll(pending.current)) router.push(href);
   }
@@ -231,19 +252,19 @@ export function StocktakeCount({
                             else inputs.current.delete(l.id);
                           }}
                           aria-label={`Counted ${l.code}`}
-                          aria-describedby={invalid[l.id] ? `count-invalid-${l.id}` : undefined}
-                          invalid={invalid[l.id]}
+                          aria-describedby={invalid[l.id] === "told" ? `count-invalid-${l.id}` : undefined}
+                          invalid={invalid[l.id] !== undefined}
                           type="number"
                           min={0}
                           step={1}
                           className="w-24 text-right"
                           value={values[l.id] ?? ""}
                           onChange={(e) => setValue(l.id, e.target.value)}
-                          onBlur={() => save(l)}
+                          onBlur={() => save(l, false)}
                           onKeyDown={(e) => {
                             if (e.key !== "Enter") return;
                             e.preventDefault();
-                            if (save(l) && sheet.only) {
+                            if (save(l, true) && sheet.only) {
                               // Under Only uncounted this row drops out once the save's refresh lands: move on
                               // first (the next row, else the previous one, else the search) so focus never falls
                               // to the page.
@@ -259,7 +280,7 @@ export function StocktakeCount({
                           </span>
                         )}
                       </span>
-                      {invalid[l.id] && <FormError id={`count-invalid-${l.id}`}>{INVALID}</FormError>}
+                      {invalid[l.id] === "told" && <FormError id={`count-invalid-${l.id}`}>{INVALID}</FormError>}
                     </span>
                   </Td>
                 </Tr>
