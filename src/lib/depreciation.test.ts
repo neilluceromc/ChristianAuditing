@@ -169,6 +169,10 @@ describe("Phase 38 — depreciation from the purchase month", () => {
   it("uses the Manila calendar month", () => {
     expect(depStartMonth({ purchasedAt: at("2026-09-30T17:00:00Z"), financeConfirmedAt: at("2026-10-01T00:00:00Z") })).toBe(2026 * 12 + 9);
   });
+  it("the approval-date fallback also uses the Manila month boundary", () => {
+    // 2026-09-30T17:00Z is 1 Oct 01:00 in Manila, so with no purchase date the start is October 2026
+    expect(depStartMonth({ purchasedAt: null, financeConfirmedAt: at("2026-09-30T17:00:00Z") })).toBe(2026 * 12 + 9);
+  });
   it("the user's example: bought 12 Oct, viewed 17 Oct → one month taken", () => {
     const start = depStartMonth({ purchasedAt: at("2026-10-12T02:00:00Z"), financeConfirmedAt: at("2026-10-14T02:00:00Z") });
     const r = depreciate(5_200_000, start, policy36, asOfMonth(at("2026-10-17T04:00:00Z")));

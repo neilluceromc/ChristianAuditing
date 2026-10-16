@@ -4,7 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { readSheet } from "read-excel-file/node";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { asOfMonth, depStartMonth, depreciate, manilaMonth, resolvePolicy, type MonthIndex } from "@/lib/depreciation";
+import { asOfMonth, depStartMonth, depreciate, manilaMonth, monthLabel, resolvePolicy, type MonthIndex } from "@/lib/depreciation";
 import { fmtMoneyExact } from "@/lib/format";
 
 /**
@@ -415,12 +415,19 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await page.goto(`/finance/assets/${before.id}`);
       await expect(page.getByRole("heading", { name: "Depreciation schedule" })).toBeVisible();
       const table = page.getByRole("table", { name: "Depreciation by year" });
-      const year = table.getByRole("button").first();
+      // Phase 38: BR-LT-0148 is purchased ~720 days ago, so its life starts about two years back and the EARLIEST year
+      // has no projected months. Expand the CURRENT year, which holds the current (actual) month and later (projected) ones.
+      const now = new Date();
+      const thisMonth = asOfMonth(now);
+      const year = table.getByRole("button", { name: String(Math.floor(thisMonth / 12)), exact: true });
       await waitForHydration(year);
       await year.click();
       await expect(year).toHaveAttribute("aria-expanded", "true");
-      await expect(table.getByRole("cell", { name: /^(January|February|March|April|May|June|July|August|September|October|November|December) \d{4}$/ }).first()).toBeVisible();
-      await expect(table.getByRole("cell", { name: "projected", exact: true }).first()).toBeVisible();
+      const monthRow = (m: number) => table.getByRole("row", { name: new RegExp(`^${monthLabel(m)}`) });
+      await expect(monthRow(thisMonth)).toContainText("done");
+      await expect(monthRow(thisMonth)).not.toContainText("projected");
+      // a later month of the same year reads projected (skipped in December, when the current year has no later month)
+      if (thisMonth % 12 < 11) await expect(monthRow(thisMonth + 1)).toContainText("projected");
     } finally {
       await restore(tag, before);
       await db.assetCategory.update({ where: { id: cat.id }, data: { depreciationLifeMonths: cat.depreciationLifeMonths, depreciationSalvagePercent: cat.depreciationSalvagePercent } });
