@@ -9,6 +9,7 @@ import { isApprover } from "@/lib/approval-access";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilteredEmpty } from "@/components/patterns/filtered-empty";
 import { Pagination } from "@/components/ui/pagination";
 import { Tabs } from "@/components/ui/tabs";
 import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/patterns/list-navigation";
@@ -66,8 +67,8 @@ export default async function ApprovalsPage({
               <QueueTable rows={rows} canAct={canAct} isAdmin={user.role === "admin"} />
             ) : searching ? (
               // The house no-match state (inventory, employees): a search or a Type pick found nothing in this tab.
-              <EmptyState
-                title="Your filters matched nothing"
+              <FilteredEmpty
+                clearHref={approvalsHref({ tab, via })}
                 description={`${(q ? 1 : 0) + types.length} active filter${(q ? 1 : 0) + types.length === 1 ? "" : "s"} — loosen or clear them.`}
               />
             ) : (

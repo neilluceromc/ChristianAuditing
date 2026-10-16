@@ -12,7 +12,7 @@ export default function AuditLoading() {
       </div>
       <div className="overflow-hidden rounded-(--radius-card) border border-border bg-surface shadow-card">
         {Array.from({ length: 10 }).map((_, i) => (
-          <SkeletonRow key={i} columns={5} />
+          <SkeletonRow key={i} columns={4} />
         ))}
       </div>
     </div>

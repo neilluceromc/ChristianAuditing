@@ -4,10 +4,10 @@ import { resolveEntitySearch } from "@/server/modules/audit/search";
 import { ACTIVITY_LIST_CONFIG, type ActivityFeed as Feed } from "@/lib/activity-list";
 import { actionLabel } from "@/lib/activity";
 import { clearFilters, parseListState, serializeListState, toSearchParams, withFilter } from "@/lib/url-state";
-import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
+import { FilteredEmpty } from "@/components/patterns/filtered-empty";
 import { ActivityFeed } from "@/components/patterns/activity-feed";
 import { ActivityToolbar } from "@/components/patterns/activity-toolbar";
 import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filter-row";
@@ -71,10 +71,7 @@ export async function ActivityListPage({
                 </div>
               </>
             ) : filtered ? (
-              <EmptyState
-                title="No entries match this filter"
-                actions={<ButtonLink href={href(clearFilters(state))}>Clear</ButtonLink>}
-              />
+              <FilteredEmpty clearHref={href(clearFilters(state))} />
             ) : (
               <EmptyState title={emptyTitle} description={emptyDescription} />
             )}

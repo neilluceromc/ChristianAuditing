@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilteredEmpty } from "@/components/patterns/filtered-empty";
 import { ButtonLink } from "@/components/ui/button-link";
 import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filter-row";
 import { AuditToolbar } from "@/components/patterns/audit-toolbar";
@@ -131,10 +132,7 @@ export default async function AuditPage({
                 </div>
               </>
             ) : hasFilters ? (
-              <EmptyState
-                title="Your filters matched nothing"
-                actions={<ButtonLink href={href(clearFilters(state))}>Clear filters</ButtonLink>}
-              />
+              <FilteredEmpty clearHref={href(clearFilters(state))} />
             ) : (
               <EmptyState
                 title="Nothing has happened yet"

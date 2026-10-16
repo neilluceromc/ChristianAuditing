@@ -374,4 +374,41 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
     await page.goto("/approvals");
     await expect(page).toHaveTitle("Approvals · Backroom IT");
   });
+
+  test("9. an error toast stays until Dismiss; a success toast leaves on its own", async ({ page }) => {
+    // The kitchen sink's Row actions menu: "Dispose" raises an error toast, "Request return" a success one.
+    await page.goto("/dev/kitchen-sink");
+    const menuButton = page.getByRole("button", { name: "Row actions ⋯" });
+    await waitForHydration(menuButton);
+    const toasts = page.locator('[aria-live="polite"]');
+
+    await menuButton.click();
+    await page.getByRole("menuitem", { name: "Dispose" }).click();
+    await expect(toasts).toContainText("Not allowed");
+    const dismiss = toasts.getByRole("button", { name: "Dismiss" });
+    await expect(dismiss).toBeVisible();
+    // well past the 4 s a success toast gets: the error is still there
+    await page.waitForTimeout(6_000);
+    await expect(toasts).toContainText("Not allowed");
+    await dismiss.click();
+    await expect(toasts).not.toContainText("Not allowed");
+
+    // a success toast carries the same button and goes by itself after ~4 s
+    await menuButton.click();
+    await page.getByRole("menuitem", { name: "Request return" }).click();
+    await expect(toasts).toContainText("Return requested");
+    await expect(toasts.getByRole("button", { name: "Dismiss" })).toBeVisible();
+    await expect(toasts).not.toContainText("Return requested", { timeout: 10_000 });
+  });
+
+  test("10. Approvals' filtered-empty offers Clear filters, and it clears the search", async ({ page }) => {
+    await login(page, IT);
+    await page.goto("/approvals?q=zzzz-nothing-matches-this");
+    const empty = page.getByText("Your filters matched nothing").locator("xpath=..");
+    await expect(empty).toBeVisible({ timeout: 20_000 });
+    // scoped to the empty state: the chip row above it has its own "Clear filters"
+    await empty.getByRole("link", { name: "Clear filters" }).click();
+    await expect(page).toHaveURL(/\/approvals$/);
+    await expect(page.getByText("Your filters matched nothing")).toHaveCount(0);
+  });
 });

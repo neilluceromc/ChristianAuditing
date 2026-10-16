@@ -16,7 +16,7 @@ export function NewEquipmentTabs({ active, cls, waiting }: { active: "register" 
               Labels
               {waiting > 0 && (
                 <>
-                  <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white" aria-hidden>{waiting}</span>
+                  <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-accent-fg" aria-hidden>{waiting}</span>
                   <span className="sr-only">, {waiting} waiting</span>
                 </>
               )}
