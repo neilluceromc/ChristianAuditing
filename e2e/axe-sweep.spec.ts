@@ -238,9 +238,9 @@ test.describe("axe sweep", () => {
     const worksFor = page.getByRole("radiogroup", { name: "Works for" });
     await expect(worksFor).toBeVisible({ timeout: 30_000 });
     await worksFor.getByText("Client staff", { exact: true }).click();
-    await page.getByLabel("Client", { exact: true }).selectOption({ label: "Bluepeak Telecom" });
-    await page.getByLabel("Name", { exact: true }).fill("Axe Sweep");
-    await page.getByLabel("Title", { exact: true }).fill("Agent");
+    await page.getByRole("combobox", { name: "Client", exact: true }).selectOption({ label: "Bluepeak Telecom" });
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Axe Sweep");
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill("Agent");
     await expect(page.getByLabel("Employee no.")).not.toHaveValue("");
     await scanHere(page, "/employees/new (step 1)");
 

@@ -349,9 +349,9 @@ test.describe.serial("new employee", () => {
     await page.getByRole("link", { name: "New employee" }).click();
     await expect(page).toHaveURL(/\/employees\/new$/);
     await page.getByLabel("Employee no.").fill("EMP-9001");
-    await page.getByLabel("Name", { exact: true }).fill("Test Person");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Test Person");
     await page.getByLabel("Title").fill("Analyst");
-    await page.getByLabel("Department", { exact: true }).selectOption({ label: "IT" });
+    await page.getByRole("combobox", { name: "Department", exact: true }).selectOption({ label: "IT" });
     await toCheckAndCreate(page);
     await page.getByRole("button", { name: "Create employee" }).click();
     await expect(page).toHaveURL(/\/employees\/[^/]+$/);
@@ -362,14 +362,14 @@ test.describe.serial("new employee", () => {
 
     await page.goto("/employees/new");
     await page.getByLabel("Employee no.").fill("emp-9001");
-    await page.getByLabel("Name", { exact: true }).fill("Someone Else");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Someone Else");
     await page.getByLabel("Title").fill("Clerk");
     // Phase 23 (D-20): the create form no longer pre-selects the first
     // department — it opens on "Choose a department" so a blank one is refused
     // ("Pick a department", deadlines.spec.ts case 7). Without an explicit pick
     // the form is refused on the department before it ever reaches the
     // duplicate-employee-number check this case exists to prove.
-    await page.getByLabel("Department", { exact: true }).selectOption({ label: "IT" });
+    await page.getByRole("combobox", { name: "Department", exact: true }).selectOption({ label: "IT" });
     await toCheckAndCreate(page);
     await page.getByRole("button", { name: "Create employee" }).click();
     // Phase 37 (spec §5.4): a server field error jumps back to step 1 and shows under its field.

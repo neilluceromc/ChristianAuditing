@@ -432,7 +432,7 @@ test.describe("it navigation sweep (Phase 25)", () => {
       await page.getByLabel("Employee no.").fill("EMP-9902");
       await name.fill("Nav Test");
       await page.getByLabel("Title").fill("Tester");
-      await page.getByLabel("Department", { exact: true }).selectOption({ label: "Operations" });
+      await page.getByRole("combobox", { name: "Department", exact: true }).selectOption({ label: "Operations" });
       await page.getByLabel("Start date").fill(localDateISO(new Date()));
       await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create employee" }).click();

@@ -364,7 +364,7 @@ test.describe.serial("deadlines", () => {
     await login(page, IT);
     await page.goto("/employees/new");
 
-    const department = page.getByLabel("Department", { exact: true });
+    const department = page.getByRole("combobox", { name: "Department", exact: true });
     await waitForHydration(department);
     await expect(department).toHaveValue("");
     await expect(department.locator("option:checked")).toHaveText("Choose a department");
@@ -372,7 +372,7 @@ test.describe.serial("deadlines", () => {
     await expect(page.getByLabel("Start date")).toHaveValue(localDateISO(new Date()));
 
     await page.getByLabel("Employee no.").fill("EMP-E2E-DUE");
-    await page.getByLabel("Name", { exact: true }).fill("Deadline Probe");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Deadline Probe");
     await page.getByLabel("Title").fill("Probe");
     // Phase 37 (spec §5.1): step 1's Next checks in the browser and focuses the first missing field.
     await page.getByRole("button", { name: "Next", exact: true }).click();
