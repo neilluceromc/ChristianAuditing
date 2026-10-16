@@ -42,3 +42,20 @@ export function historyRows(entries: AuditEntryLike[]): HistoryRow[] {
   }
   return rows;
 }
+
+export interface HistoryEntryGroup {
+  key: string;
+  at: Date;
+  actor: string;
+  action: string;
+  /** one per changed field, in the diff's order; a diff-less entry has the single "—" row */
+  fields: HistoryRow[];
+}
+
+/** Phase 39 (spec §5): the page's entries, each with its field rows together, so a long entry can fold. */
+export function historyEntries(entries: AuditEntryLike[]): HistoryEntryGroup[] {
+  return entries.map((entry) => {
+    const fields = historyRows([entry]);
+    return { key: entry.id, at: entry.createdAt, actor: entry.actorLabel, action: entry.action, fields };
+  });
+}

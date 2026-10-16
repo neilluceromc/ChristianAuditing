@@ -33,6 +33,19 @@ import { isExpired, lotRemaining } from "../src/lib/stock-allocation";
  *     between pages, the top 8 subtotals and "+{n} more", and a search that narrows (focus kept, also on "No item
  *     matches."). Expiry has 55 expired lots on one test item: the Expired tab pages 50, the search narrows and
  *     survives a switch to the Expiring tab ("No lot matches."), and the tabs switch. Everything is deleted afterwards.
+ *   7 (§5) title rules: Bluepeak Telecom with two title rules (via prisma) lists them as rows, "{title} · 2 lines ·
+ *     Edit", with no editor open; opening one shows its editor and opening the other closes it; with an unsaved
+ *     change (a removed line) switching asks "Leave without saving?" — cancel keeps the editor, OK switches — and
+ *     "+ Add a title rule" asks the same way. The rules are deleted afterwards.
+ *   8 (§5) holds: BR-HS-0502 with one active and 23 released holds (via prisma) shows the active hold and
+ *     "Show past holds ({n})"; the link opens ?past=1 with 20 past holds, and page 2 has the rest. The holds are
+ *     deleted afterwards.
+ *   9 (§5) history: BR-MN-0911 with a 5-field and a 4-field audit entry (via prisma; AuditEntry is append-only, so
+ *     they stay until the next reseed) shows 3 fields of each and "+2 more fields" / "+1 more fields"; the button
+ *     opens that entry only.
+ *   10 (§5) the import-failures CSV is unit-level (src/lib/long-lists.test.ts); no cheap fixture produces failed
+ *     writes, so no e2e case.
+ *
  *
  * Seed (prisma/seed.ts): J. Sarmiento is it@ (it_staff), System Admin is admin@. Bluepeak Telecom's base policy has
  * four required lines, so a fresh client hire's Equipment card is four tiles tall. Never reference a raw cuid.
@@ -673,5 +686,188 @@ test.describe("Phase 39 — On hand and Expiry", () => {
       await db.stockItem.deleteMany({ where: { categoryId: { in: categoryIds } } });
       await db.stockCategory.deleteMany({ where: { id: { in: categoryIds } } });
     }
+  });
+});
+
+test.describe("Phase 39 — bounded lists", () => {
+  test("7. title rules are rows with one editor open at a time; switching with an unsaved change asks first", async ({ page }) => {
+    test.setTimeout(120_000);
+    const stamp = Date.now();
+    const group = await db.department.findUniqueOrThrow({ where: { name: "Bluepeak Telecom" } });
+    const base = await db.equipmentPolicy.findFirstOrThrow({
+      where: { appliesToDepartmentId: group.id, appliesToTitle: null }, include: { slots: true },
+    });
+    const titles = [`E2E Rule A ${stamp}`, `E2E Rule B ${stamp}`];
+    try {
+      for (const title of titles) {
+        await db.equipmentPolicy.create({
+          data: {
+            name: `${group.name} · ${title}`, appliesToDepartmentId: group.id, appliesToTitle: title,
+            slots: {
+              create: base.slots.slice(0, 2).map((sl) => ({
+                name: sl.name, assetTypeId: sl.assetTypeId, required: true, loaner: false,
+              })),
+            },
+          },
+        });
+      }
+      const [a, b] = titles;
+      const editor = (title: string) => page.getByRole("region", { name: `${title} on ${group.name}`, exact: true });
+      const edit = (title: string) => page.getByRole("button", { name: `Edit the ${title} rule`, exact: true });
+      const kinds = (title: string) => editor(title).getByLabel(/^Line \d+ kind$/);
+
+      await login(page, IT);
+      await page.goto(`/admin/equipment-policies?tab=client&group=${group.id}`);
+      await waitForHydration(edit(a));
+
+      // Two rows, "{title} · 2 lines · Edit", and no editor open yet.
+      await expect(page.getByRole("heading", { name: a, level: 4 })).toBeVisible();
+      await expect(page.getByRole("heading", { name: b, level: 4 })).toBeVisible();
+      await expect(page.getByText("· 2 lines ·", { exact: true })).toHaveCount(2);
+      await expect(editor(a)).toHaveCount(0);
+      await expect(editor(b)).toHaveCount(0);
+
+      // One open at a time; nothing is unsaved, so switching does not ask.
+      let asked: string[] = [];
+      page.on("dialog", (d) => { asked.push(d.message()); void d.dismiss(); });
+      await edit(a).click();
+      await expect(editor(a)).toBeVisible();
+      await expect(page.getByRole("button", { name: `Close the ${a} rule`, exact: true })).toHaveAttribute("aria-expanded", "true");
+      await edit(b).click();
+      await expect(editor(b)).toBeVisible();
+      await expect(editor(a)).toHaveCount(0);
+      expect(asked).toEqual([]);
+
+      // An unsaved change: switching asks; cancelling keeps this editor and its change.
+      await expect(kinds(b)).toHaveCount(2);
+      await editor(b).getByRole("button", { name: "Remove line 2", exact: true }).click();
+      await expect(kinds(b)).toHaveCount(1);
+      await edit(a).click();
+      await expect.poll(() => asked.length).toBe(1);
+      expect(asked[0]).toBe("Leave without saving?");
+      await expect(editor(b)).toBeVisible();
+      await expect(kinds(b)).toHaveCount(1);
+      await expect(editor(a)).toHaveCount(0);
+
+      // "+ Add a title rule" asks the same way.
+      await page.getByRole("button", { name: "+ Add a title rule", exact: true }).click();
+      await expect.poll(() => asked.length).toBe(2);
+      expect(asked[1]).toBe("Leave without saving?");
+      await expect(editor(b)).toBeVisible();
+      await expect(page.getByLabel("Exact job title")).toHaveCount(0);
+
+      // Choosing to leave switches, and the abandoned change is gone.
+      page.removeAllListeners("dialog");
+      asked = [];
+      page.on("dialog", (d) => { asked.push(d.message()); void d.accept(); });
+      await edit(a).click();
+      await expect(editor(a)).toBeVisible();
+      await expect(editor(b)).toHaveCount(0);
+      expect(asked).toEqual(["Leave without saving?"]);
+      await edit(b).click();
+      await expect(kinds(b)).toHaveCount(2);
+
+      // Nothing is unsaved now, so adding a rule opens its box without asking.
+      await page.getByRole("button", { name: "+ Add a title rule", exact: true }).click();
+      await expect(page.getByLabel("Exact job title")).toBeVisible();
+      await expect(editor(b)).toHaveCount(0);
+      expect(asked).toEqual(["Leave without saving?"]);
+    } finally {
+      await db.equipmentPolicy.deleteMany({ where: { appliesToDepartmentId: group.id, appliesToTitle: { in: titles } } });
+    }
+  });
+
+  test("8. past holds are hidden until Show past holds, which opens them 20 to a page", async ({ page }) => {
+    test.setTimeout(90_000);
+    const stamp = Date.now();
+    const asset = await db.asset.findFirstOrThrow({ where: { tag: "BR-HS-0502" } });
+    const nina = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0097" } });
+    const marker = `e2e past ${stamp}`;
+    try {
+      await db.reservation.create({
+        data: { assetId: asset.id, employeeId: nina.id, state: "ACTIVE", reason: `${marker} active`, createdAt: new Date(stamp) },
+      });
+      await db.reservation.createMany({
+        data: Array.from({ length: 23 }, (_, i) => ({
+          assetId: asset.id, employeeId: nina.id, state: "RELEASED" as const, reason: `${marker} ${i + 1}`,
+          resolvedAt: new Date(stamp - 60_000), createdAt: new Date(stamp - (i + 1) * 1000),
+        })),
+      });
+      const past = await db.reservation.count({ where: { assetId: asset.id, state: { not: "ACTIVE" } } });
+      expect(past).toBeGreaterThanOrEqual(23);
+
+      await login(page, IT);
+      await page.goto(`/inventory/${asset.id}/reservations`);
+      const show = page.getByRole("link", { name: `Show past holds (${past})`, exact: true });
+      await expect(show).toBeVisible({ timeout: 20_000 });
+
+      // Closed: the active hold shows, no resolved hold does.
+      await expect(page.getByRole("row").filter({ hasText: `${marker} active` })).toHaveCount(1);
+      await expect(page.getByRole("row").filter({ hasText: "RELEASED" })).toHaveCount(0);
+      await expect(page.getByRole("navigation", { name: "Pagination" })).toHaveCount(0);
+
+      // Open: the active hold still shows, then 20 past holds, and page 2 carries the rest.
+      await show.click();
+      await expect(page).toHaveURL(/[?&]past=1(&|$)/);
+      await expect(page.getByRole("heading", { name: `Past holds (${past})`, level: 3 })).toBeVisible();
+      await expect(page.getByRole("row").filter({ hasText: `${marker} active` })).toHaveCount(1);
+      await expect(page.getByRole("row").filter({ hasText: /RELEASED|EXPIRED|FULFILLED/ })).toHaveCount(20);
+      await page.getByRole("navigation", { name: "Pagination" }).getByRole("link", { name: "Next page", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]past=1&page=2(&|$)/);
+      await expect(page.getByRole("row").filter({ hasText: /RELEASED|EXPIRED|FULFILLED/ })).toHaveCount(Math.min(20, past - 20));
+      await page.getByRole("link", { name: "Hide past holds", exact: true }).click();
+      await expect(page).not.toHaveURL(/past=1/);
+      await expect(page.getByRole("link", { name: `Show past holds (${past})`, exact: true })).toBeVisible();
+    } finally {
+      await db.reservation.deleteMany({ where: { assetId: asset.id, reason: { startsWith: marker } } });
+    }
+  });
+
+  test("9. a history entry with more than 3 fields shows 3 and +N more fields, which opens that entry only", async ({ page }) => {
+    test.setTimeout(90_000);
+    const stamp = Date.now();
+    const asset = await db.asset.findFirstOrThrow({ where: { tag: "BR-MN-0911" } });
+    const diff = (names: string[]) => Object.fromEntries(names.map((n) => [n, { from: "old", to: `new ${n}` }]));
+    // AuditEntry is append-only (the database refuses delete): these stay until the next reseed.
+    await db.auditEntry.create({
+      data: {
+        actorLabel: `E2E Historian ${stamp}`, entityType: "asset", entityId: asset.id, action: "update",
+        diff: diff(["e2eAlpha", "e2eBravo", "e2eCharlie", "e2eDelta", "e2eEcho"]), createdAt: new Date(stamp),
+      },
+    });
+    await db.auditEntry.create({
+      data: {
+        actorLabel: `E2E Historian ${stamp}`, entityType: "asset", entityId: asset.id, action: "update",
+        diff: diff(["e2eFoxtrot", "e2eGolf", "e2eHotel", "e2eIndia"]), createdAt: new Date(stamp - 60_000),
+      },
+    });
+
+    await login(page, IT);
+    await page.goto(`/inventory/${asset.id}/history`);
+    const field = (name: string) => page.getByRole("cell", { name, exact: true });
+    const buttonAfter = (name: string) =>
+      page.getByRole("row").filter({ has: field(name) }).locator("xpath=following-sibling::tr[1]").getByRole("button");
+    await expect(field("e2eCharlie")).toBeVisible({ timeout: 20_000 });
+
+    // Collapsed: 3 of each, with the count left over.
+    for (const n of ["e2eAlpha", "e2eBravo", "e2eCharlie", "e2eFoxtrot", "e2eGolf", "e2eHotel"]) await expect(field(n)).toBeVisible();
+    for (const n of ["e2eDelta", "e2eEcho", "e2eIndia"]) await expect(field(n)).toHaveCount(0);
+    await expect(buttonAfter("e2eCharlie")).toHaveText("+2 more fields");
+    await expect(buttonAfter("e2eHotel")).toHaveText("+1 more fields");
+    await expect(buttonAfter("e2eCharlie")).toHaveAttribute("aria-expanded", "false");
+
+    // Opening the first entry shows its other two fields and leaves the second entry alone.
+    await waitForHydration(buttonAfter("e2eCharlie"));
+    await buttonAfter("e2eCharlie").click();
+    await expect(field("e2eDelta")).toBeVisible();
+    await expect(field("e2eEcho")).toBeVisible();
+    await expect(field("e2eIndia")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Show fewer fields", exact: true })).toHaveAttribute("aria-expanded", "true");
+    await expect(buttonAfter("e2eHotel")).toHaveText("+1 more fields");
+
+    // And it folds back.
+    await page.getByRole("button", { name: "Show fewer fields", exact: true }).click();
+    await expect(field("e2eDelta")).toHaveCount(0);
+    await expect(buttonAfter("e2eCharlie")).toHaveText("+2 more fields");
   });
 });

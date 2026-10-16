@@ -14,9 +14,26 @@ import {
 } from "@/lib/import-vocabulary";
 import { applySummary, hasDiverged } from "@/lib/import-outcome";
 import { splitColumns } from "@/lib/import-columns";
+import { localDateISO } from "@/lib/format";
+import { failuresCsv } from "@/lib/long-lists";
 import type { ActionResult } from "@/server/action-result";
 
 const STEPS = ["Upload", "Validate", "Results"] as const;
+
+/** Phase 39 (spec §5): the result lists this many failed rows; the download carries all of them. */
+const FAILURES_SHOWN = 20;
+
+/** Built in the browser from the rows already on screen: a Blob, a temporary link, then the URL is let go. */
+function downloadFailures(failures: Array<{ row: number; reason: string }>) {
+  const url = URL.createObjectURL(new Blob([failuresCsv(failures)], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `import-failures-${localDateISO()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 /**
  * Task 12, E-8: this wizard used to import `planAssetImport`/
@@ -559,11 +576,21 @@ export function ImportWizard<P extends WizardPlanResult, A extends WizardApplyOu
           {applyOutcome.failures.length > 0 && (
             <div className="flex flex-col gap-1 rounded-(--radius-card) border border-border bg-surface px-3 py-2.5">
               <span className="text-[12px] font-medium text-fg">Rows that failed to write</span>
-              {applyOutcome.failures.map((f) => (
+              {applyOutcome.failures.slice(0, FAILURES_SHOWN).map((f) => (
                 <span key={f.row} className="font-mono text-[11px] text-fg-muted">
                   row {f.row}: {f.reason}
                 </span>
               ))}
+              {applyOutcome.failures.length > FAILURES_SHOWN && (
+                <span className="font-mono text-[11px] text-fg-muted">
+                  and {applyOutcome.failures.length - FAILURES_SHOWN} more
+                </span>
+              )}
+              <span>
+                <Button size="sm" variant="secondary" onClick={() => downloadFailures(applyOutcome.failures)}>
+                  Download all failures (.csv)
+                </Button>
+              </span>
             </div>
           )}
 
