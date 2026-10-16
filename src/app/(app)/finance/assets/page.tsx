@@ -1,7 +1,9 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
-import { ASSET_CLASSES, CLASS_LABEL, parseCls, statusesFor } from "@/lib/asset-class";
+import { ASSET_CLASSES, CLASS_LABEL, STATUS_LABEL, parseCls, statusLabel, statusesFor } from "@/lib/asset-class";
 import { parsePage } from "@/lib/paging";
 import { lifeLabel } from "@/lib/depreciation-input";
 import { REG_LABEL_FINANCE, parseFin } from "@/lib/registration";
@@ -24,6 +26,8 @@ function categoryText(life: number | null, pct: number | null): string {
   if (life === null) return "Category: no policy";
   return `Category: ${lifeLabel(life)}, ${pct ?? 0}% salvage`;
 }
+
+export const metadata: Metadata = { title: pageTitle("Assets") };
 
 export default async function FinanceAssetsPage({
   searchParams,
@@ -95,6 +99,7 @@ export default async function FinanceAssetsPage({
           {fin && <input type="hidden" name="fin" value={fin} />}
           <Input
             name="q"
+            data-page-search
             defaultValue={q}
             placeholder="Tag, model, serial or holder"
             aria-label="Search assets"
@@ -127,7 +132,7 @@ export default async function FinanceAssetsPage({
               )}
             >
               <StatusDot value={s} />
-              {s}
+              {STATUS_LABEL[s]}
             </Link>
           ))}
         </nav>
@@ -164,7 +169,7 @@ export default async function FinanceAssetsPage({
                       {a.holder && <div className="text-xs text-fg-muted">{a.holder}</div>}
                     </Td>
                     <Td mono>{a.category}</Td>
-                    <Td><StatusPill value={a.status} /></Td>
+                    <Td><StatusPill value={a.status} label={statusLabel(a.status)} /></Td>
                     <Td>
                       {a.reg === "registered" && a.notCapitalised ? (
                         <span className="text-xs text-fg-secondary">Not capitalised</span>

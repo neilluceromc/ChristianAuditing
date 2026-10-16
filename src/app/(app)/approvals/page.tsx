@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
@@ -7,12 +9,15 @@ import { isApprover } from "@/lib/approval-access";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilteredEmpty } from "@/components/patterns/filtered-empty";
 import { Pagination } from "@/components/ui/pagination";
 import { Tabs } from "@/components/ui/tabs";
 import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/patterns/list-navigation";
 import { QueueTable } from "@/components/approvals/queue-table";
 import { ClosedViaChips } from "@/components/approvals/closed-via-chips";
 import { ApprovalsToolbar } from "@/components/approvals/approvals-toolbar";
+
+export const metadata: Metadata = { title: pageTitle("Approvals") };
 
 export default async function ApprovalsPage({
   searchParams,
@@ -62,8 +67,8 @@ export default async function ApprovalsPage({
               <QueueTable rows={rows} canAct={canAct} isAdmin={user.role === "admin"} />
             ) : searching ? (
               // The house no-match state (inventory, employees): a search or a Type pick found nothing in this tab.
-              <EmptyState
-                title="Your filters matched nothing"
+              <FilteredEmpty
+                clearHref={approvalsHref({ tab, via })}
                 description={`${(q ? 1 : 0) + types.length} active filter${(q ? 1 : 0) + types.length === 1 ? "" : "s"} — loosen or clear them.`}
               />
             ) : (

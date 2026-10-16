@@ -22,6 +22,7 @@ import { EntityCombobox, type ComboOption } from "@/components/patterns/entity-c
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS, chipsForOutcome } from "@/lib/reason-chips";
+import { statusLabel } from "@/lib/asset-class";
 import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
 import { TagRef } from "@/components/inventory/tag-ref";
 import { EquipmentTile, type EquipmentTileData, type TileAsset } from "@/components/employees/equipment-tile";
@@ -341,7 +342,7 @@ export function LoadoutView({
     startTransition(async () => {
       if (direct) {
         handle(await returnAsset({ assetId: returning.id, outcome, reason: returnReason }), ({ tag, status }) => {
-          toast(`${tag} returned · now ${status}`, "settled");
+          toast(`${tag} returned · now ${statusLabel(status)}`, "settled");
           setReturning(null);
           setReturnReason("");
           setOutcome("TRIAGE");
@@ -769,7 +770,7 @@ export function LoadoutView({
                 <Td mono>{a ? <TagRef id={a.id} tag={a.tag} visible={a.visible} className="text-accent hover:underline" /> : "—"}</Td>
                 <Td>{a ? a.model : "—"}</Td>
                 <Td mono className="text-[10.5px]">{slot}</Td>
-                <Td mono className="text-[10.5px]">{a ? a.status : gap ?? "—"}</Td>
+                <Td mono className="text-[10.5px]">{a ? statusLabel(a.status) : gap ?? "—"}</Td>
                 <Td mono>{a ? a.age : "—"}</Td>
               </Tr>
             ))}
@@ -986,7 +987,7 @@ export function LoadoutView({
             {direct ? (
               "Comes off this loadout now; pick what happens to it."
             ) : (
-              <>Creates a <span className="font-mono">lifecycle.return</span> approval — the item stays on
+              <>Creates a Return request — the item stays on
               this loadout until the return executes.</>
             )}
           </p>

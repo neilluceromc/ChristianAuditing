@@ -82,7 +82,7 @@ test.describe.serial("direct changes", () => {
     await expect(dialog.getByLabel("New status")).toHaveValue("");
     await dialog.getByLabel("New status").selectOption("DEFECTIVE");
     await dialog.getByRole("button", { name: "Change status", exact: true }).click();
-    await expect(page.getByText("BR-MN-0910 is now DEFECTIVE")).toBeVisible();
+    await expect(page.getByText("Success: BR-MN-0910 is now Defective", { exact: true })).toBeVisible();
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).status).toBe("DEFECTIVE");
     expect(await db.approval.count({ where: { assetId: id, state: { in: [...OPEN_STATES] } } })).toBe(0);
     const rec = await db.approval.findFirstOrThrow({ where: { assetId: id, type: "lifecycle_change_status" } });
@@ -134,7 +134,7 @@ test.describe.serial("direct changes", () => {
     const dialog = page.getByRole("dialog", { name: "Return BR-LT-0210 · ThinkPad T14 Gen 4 from Leo Tan?" });
     await expect(dialog.getByLabel("What happens to it")).toHaveValue("TRIAGE"); // default: Back for triage
     await dialog.getByRole("button", { name: "Return", exact: true }).click();
-    await expect(page.getByText("BR-LT-0210 returned · now SPARE")).toBeVisible();
+    await expect(page.getByText("Success: BR-LT-0210 returned · now Spare", { exact: true })).toBeVisible();
 
     let asset = await db.asset.findUniqueOrThrow({ where: { id } });
     expect(asset.status).toBe("SPARE");
@@ -148,7 +148,9 @@ test.describe.serial("direct changes", () => {
 
     await page.getByRole("button", { name: "Triage", exact: true }).click();
     const triageDialog = page.getByRole("dialog", { name: "Triage BR-LT-0210 · ThinkPad T14 Gen 4" });
-    await expect(triageDialog.getByLabel("Decision")).toHaveValue("SPARE"); // default: Keep as spare
+    // Phase 40 §8: no default decision — Keep as spare is chosen, not saved past.
+    await expect(triageDialog.getByLabel("Decision")).toHaveValue("");
+    await triageDialog.getByLabel("Decision").selectOption("SPARE");
     await triageDialog.getByRole("button", { name: "Save decision", exact: true }).click();
     await expect(page.getByText("BR-LT-0210 triaged · Keep as spare")).toBeVisible();
 
@@ -193,9 +195,9 @@ test.describe.serial("direct changes", () => {
     expect(newAsset.assigneeId).toBe(carlo.id);
 
     await page.goto(`/inventory/${oldId}/history`);
-    await expect(page.getByRole("row", { name: /replacedBy/ })).toContainText("BR-LT-0210");
+    await expect(page.getByRole("row", { name: /Replaced by/ })).toContainText("BR-LT-0210");
     await page.goto(`/inventory/${newId}/history`);
-    await expect(page.getByRole("row", { name: /replaces/ })).toContainText("BR-LT-0201");
+    await expect(page.getByRole("row", { name: /Replaces/ })).toContainText("BR-LT-0201");
   });
 
   test("5. Bulk change status applies at once", async ({ page }) => {
@@ -209,7 +211,7 @@ test.describe.serial("direct changes", () => {
     await page.getByRole("button", { name: "Change status…", exact: true }).click();
     await page.getByLabel(/Target status/).selectOption("DISPOSE");
     await page.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByText("2 assets now DISPOSE")).toBeVisible();
+    await expect(page.getByText("Success: 2 assets now Dispose", { exact: true })).toBeVisible();
 
     const [hs, mn] = await Promise.all([
       db.asset.findUniqueOrThrow({ where: { id: hsId } }),

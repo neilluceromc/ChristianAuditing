@@ -163,11 +163,19 @@ export function useFocusTrap(
     onCloseRef.current = onClose;
   });
   const initialFocus = opts?.initialFocus ?? "first";
+  // The element to hand focus back to, read while rendering the open: a child's autoFocus moves focus into the
+  // overlay during commit, before the effect below runs, so reading it there would return to a removed field.
+  const [opener, setOpener] = useState<HTMLElement | null>(() => (active ? focusedElement() : null));
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (active) setOpener(focusedElement());
+  }
 
   useEffect(() => {
     if (!active || !container) return;
 
-    const previous = document.activeElement as HTMLElement | null;
+    const previous = opener && !container.contains(opener) ? opener : (document.activeElement as HTMLElement | null);
     const layer: Layer = {
       container,
       modal: true,
@@ -182,9 +190,13 @@ export function useFocusTrap(
       popLayer(layer);
       if (previous?.isConnected) previous.focus();
     };
-  }, [active, container, initialFocus]);
+  }, [active, container, initialFocus, opener]);
 
   return setContainer as (node: HTMLElement | null) => void;
+}
+
+function focusedElement(): HTMLElement | null {
+  return typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null);
 }
 
 /**

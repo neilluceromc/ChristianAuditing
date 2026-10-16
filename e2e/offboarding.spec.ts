@@ -165,8 +165,10 @@ test.describe.serial("the 4-step wizard", () => {
     await decide("BR-LT-0166", "Defective", "screen cracked in transit");
     await decide("BR-HS-0510", "Returned", "");
 
-    // Every decided item now shows its request and its landing status.
-    await expect(page.getByText("MISSING").first()).toBeVisible();
+    // A direct IT decision takes the item out of their name at once (each toast above named its landing status),
+    // so the step counts all three decided and has nothing left to collect.
+    await expect(page.getByText("3 of 3 decided", { exact: true })).toBeVisible();
+    await expect(page.getByText("Nothing left to collect", { exact: true })).toBeVisible();
     // Two identical "Continue to Accounts & M365" links render at once (a
     // mobile/desktop action-bar duplicate) — .first() disambiguates without
     // weakening the assertion.
@@ -220,7 +222,7 @@ test.describe.serial("the 4-step wizard", () => {
 
     await page.getByRole("button", { name: "Complete offboarding" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Complete" }).click();
-    await expect(page.getByText("Dennis Ong is now OFFBOARDED")).toBeVisible();
+    await expect(page.getByText("Success: Dennis Ong is now Offboarded", { exact: true })).toBeVisible();
 
     // Peak-End (spec §4.4): completing lands on the success card, not a silent
     // refresh — Dennis is the only seeded leaver, so there is no next leaver.
@@ -276,7 +278,7 @@ test.describe.serial("the 4-step wizard", () => {
 
     await login(page, "admin@thebackroomop.com");
     await page.goto(`/inventory/${asset.id}`);
-    await expect(page.getByText("MISSING").first()).toBeVisible();
+    await expect(page.getByText("Missing", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Dennis Ong")).toHaveCount(0);
   });
 });
@@ -319,13 +321,12 @@ test.describe("offboarding — the server gate does not trust the wizard", () =>
     await login(page, "it@thebackroomop.com");
 
     // now mark her offboarding — the anchor lands AFTER that approval
+    // Phase 40: Edit no longer starts an offboarding — its "Start offboarding…" link opens the dialog, which lands
+    // in the wizard (the navigation below is the confirmation the server action finished).
     await page.goto(`/employees/${marites.id}/edit`);
-    await page.getByLabel(/Employment/).selectOption("OFFBOARDING");
-    await page.getByRole("button", { name: /Save/ }).click();
-    // Save is a React transition with no redirect (it stays on /edit and flips
-    // the button to "✓ Saved") — navigating away before that lands can abort
-    // the in-flight server action, so wait for confirmation first.
-    await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible();
+    await page.getByRole("button", { name: "Start offboarding…" }).click();
+    await page.getByRole("dialog", { name: /^Start offboarding / }).getByRole("button", { name: "Start", exact: true }).click();
+    await page.waitForURL(/\/offboarding\//);
 
     await page.goto("/offboarding");
     await page.getByRole("row", { name: /Marites Bautista/ }).getByRole("link", { name: /^Collect \d+ items?$/ }).click();
@@ -363,7 +364,7 @@ test.describe("repairs — a saved view, not an enum", () => {
     await page.getByRole("link", { name: "RETURNED OK" }).click();
     await expect(page).toHaveURL(/stage=returned-ok/);
     const returned = page.getByRole("row", { name: /BR-MN-0911/ });
-    await expect(returned).toContainText("SPARE");
+    await expect(returned).toContainText("Spare");
     await expect(returned).toContainText("RETURNED OK");
   });
 
@@ -387,7 +388,7 @@ test.describe("reservations", () => {
     await expect(active).toContainText("Nina Robles");
     // The point: the hold moved nothing. The Active tab no longer carries a status
     // column (spec §5.2, plan P-12); the hint under the tabs states the same fact.
-    await expect(page.getByText("Held spares still read SPARE · place holds from a record or a profile")).toBeVisible();
+    await expect(page.getByText("Held spares still read Spare · place holds from a record or a profile", { exact: true })).toBeVisible();
 
     await page.getByRole("link", { name: /Closed/ }).click();
     await expect(page).toHaveURL(/state=CLOSED/);
@@ -403,7 +404,7 @@ test.describe("reservations", () => {
     const row = page.getByRole("row", { name: /BR-MN-0910/ });
     await expect(row).toContainText("HOLD");
     await expect(row).toContainText("for Nina Robles");
-    await expect(row).toContainText("SPARE");
+    await expect(row).toContainText("Spare");
   });
 });
 

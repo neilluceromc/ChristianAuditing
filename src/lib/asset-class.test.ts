@@ -10,7 +10,7 @@ import {
   MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, VISIBLE_CLASSES,
   canManageClass, canEditAsset, canRegisterClass, canSeeClass, isAwaitingItCheck, isStatusOf, parseCls, statusesFor, visibleClassWhere, withClsQS,
   DIRECT_LIFECYCLE_CLASSES, isDirectLifecycle, isAssignable, canAttachDocuments,
-  STATUS_LABEL, defaultClassFor, statusTargets, withViewClsQS,
+  STATUS_LABEL, defaultClassFor, statusLabel, statusTargets, withViewClsQS,
 } from "./asset-class";
 
 const sorted = (xs: readonly string[]) => [...xs].sort();
@@ -297,6 +297,20 @@ describe("STATUS_LABEL — the friendly word for every status of both classes", 
     expect(STATUS_LABEL.TEMPORARY).toBe("Loan");
     expect(STATUS_LABEL.SPARE).toBe("Spare");
     expect(STATUS_LABEL.OPERATIONAL).toBe("Operational");
+  });
+});
+
+describe("statusLabel — Phase 40 §6: a status string from a payload, an audit or a row reads as its word", () => {
+  it("every status of both classes reads as STATUS_LABEL", () => {
+    for (const s of Object.values(AssetStatus)) expect(statusLabel(s)).toBe(STATUS_LABEL[s]);
+    expect(statusLabel("TEMPORARY")).toBe("Loan");
+  });
+  it("anything else stays as written, and nothing reads as an em dash", () => {
+    expect(statusLabel("SOMETHING_NEW")).toBe("SOMETHING_NEW");
+    expect(statusLabel("constructor")).toBe("constructor");
+    expect(statusLabel(null)).toBe("—");
+    expect(statusLabel(undefined)).toBe("—");
+    expect(statusLabel("")).toBe("—");
   });
 });
 

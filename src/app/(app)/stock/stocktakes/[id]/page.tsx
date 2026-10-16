@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { stocktakeRefFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import type { StocktakeState } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
@@ -15,6 +18,11 @@ import { StocktakeCount } from "@/components/stock/stocktake-count";
 import { StocktakeReview } from "@/components/stock/stocktake-review";
 
 const STATE_TONE: Record<StocktakeState, "neutral" | "accent"> = { OPEN: "accent", POSTED: "neutral", CANCELLED: "neutral" };
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await stocktakeRefFor(id)) ?? "Stocktake") };
+}
 
 export default async function StocktakeDetailPage({
   params,

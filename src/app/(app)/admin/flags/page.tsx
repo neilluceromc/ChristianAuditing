@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { FlagRows } from "@/components/admin/flag-rows";
 import { listFlags } from "@/server/modules/admin/queries";
+
+export const metadata: Metadata = { title: pageTitle("Feature flags") };
 
 export default async function FlagsPage() {
   await requireRole("admin");

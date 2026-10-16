@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { actionLabel } from "@/lib/activity";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -11,6 +14,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilteredEmpty } from "@/components/patterns/filtered-empty";
 import { ButtonLink } from "@/components/ui/button-link";
 import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filter-row";
 import { AuditToolbar } from "@/components/patterns/audit-toolbar";
@@ -21,6 +25,8 @@ import type { FacetOptionLike } from "@/components/patterns/facet-dropdown";
 // Phase 27 (P-10): "vendor" is what the table is called; "Supplier" is what the operator calls it.
 const ENTITY_LABEL_OVERRIDE: Record<string, string> = { vendor: "Supplier" };
 const humanize = (s: string) => ENTITY_LABEL_OVERRIDE[s] ?? s.charAt(0).toUpperCase() + s.slice(1).replaceAll("-", " ");
+
+export const metadata: Metadata = { title: pageTitle("Audit log") };
 
 export default async function AuditPage({
   searchParams,
@@ -112,8 +118,8 @@ export default async function AuditPage({
                           </span>
                         </Td>
                         <Td>{row.sentence}</Td>
-                        {/* P-14: the raw action slug stays beside the sentence, in mono */}
-                        <Td mono className="text-fg-muted">{row.action}</Td>
+                        {/* Phase 40 §6 (overrides P-14): the action's words; an unmapped code falls back to itself. The CSV keeps the code. */}
+                        <Td className="text-fg-muted">{actionLabel(row.action)}</Td>
                       </Tr>
                     ))}
                   </TBody>
@@ -127,10 +133,7 @@ export default async function AuditPage({
                 </div>
               </>
             ) : hasFilters ? (
-              <EmptyState
-                title="Your filters matched nothing"
-                actions={<ButtonLink href={href(clearFilters(state))}>Clear filters</ButtonLink>}
-              />
+              <FilteredEmpty clearHref={href(clearFilters(state))} />
             ) : (
               <EmptyState
                 title="Nothing has happened yet"

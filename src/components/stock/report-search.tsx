@@ -40,6 +40,7 @@ export function ReportSearch({
       </span>
       <Input
         type="search"
+        data-page-search
         aria-label={label}
         placeholder={placeholder}
         value={q}

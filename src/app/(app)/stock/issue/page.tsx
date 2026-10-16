@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { stockItemBalances, stockItemOptions } from "@/server/modules/stock/queries";
@@ -7,6 +9,8 @@ import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { IssueForm, type DepartmentOption } from "@/components/stock/issue-form";
 import type { StockItemMeta } from "@/components/stock/receive-form";
+
+export const metadata: Metadata = { title: pageTitle("Issue stock") };
 
 export default async function IssueStockPage({
   searchParams,

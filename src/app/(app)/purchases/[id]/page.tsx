@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { purchaseRefFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getPurchase } from "@/server/modules/purchases/queries";
@@ -18,6 +21,11 @@ import { RequestActions } from "@/components/purchases/request-actions";
 import { RequestDocumentsCard } from "@/components/purchases/request-documents-card";
 import { SupplierPicker } from "@/components/purchases/supplier-picker";
 import { UnitEditor } from "@/components/purchases/unit-editor";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await purchaseRefFor(id)) ?? "Purchase request") };
+}
 
 export default async function PurchasePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();

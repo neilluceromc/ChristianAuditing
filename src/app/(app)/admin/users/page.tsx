@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
@@ -6,6 +8,8 @@ import { Banner } from "@/components/ui/banner";
 import { Pagination } from "@/components/ui/pagination";
 import { UserTable } from "@/components/admin/user-table";
 import { listUsers } from "@/server/modules/admin/queries";
+
+export const metadata: Metadata = { title: pageTitle("Users & roles") };
 
 export default async function UsersPage({
   searchParams,

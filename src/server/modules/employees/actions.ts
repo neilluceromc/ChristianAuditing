@@ -13,7 +13,7 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { diffOf } from "@/lib/audit-diff";
-import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass, isAssignable, isDirectLifecycle } from "@/lib/asset-class";
+import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, STATUS_LABEL, canManageClass, isAssignable, isDirectLifecycle } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
 import { reasonRequired, reasonOptional } from "@/lib/reason";
 import { findSameName } from "@/server/modules/employees/queries";
@@ -22,7 +22,7 @@ import { localDateISO } from "@/lib/format";
 import { nextEmployeeNo as nextNo } from "@/lib/employee-no";
 import { previewPolicyFor, type PolicyLine, type PolicyPreviewResult } from "@/lib/policy-preview";
 import { GROUP_ARCHIVED } from "@/lib/groups";
-import { createAssignments } from "@/lib/loadout";
+import { EMPLOYEE_CHANGED, editEmploymentTarget, employmentGuard } from "@/lib/employment-rules";
 import { firstFailure, newEmployeeExtrasShape, refineDistinctAssign, type AssignFailure } from "@/lib/new-employee";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
@@ -60,7 +60,7 @@ export async function requestAssign(input: unknown): Promise<ActionResult<{ refN
       if (!canManageClass(user.role, asset.cls)) return forbidden();
       if (isDirectLifecycle(user.role, asset.cls)) return conflict(DIRECT_REFUSAL);
       if (!isAssignable(asset)) {
-        return conflict(`${asset.tag} is ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — only idle stock can be assigned.`);
+        return conflict(`${asset.tag} is ${STATUS_LABEL[asset.status]}, not ${STATUS_LABEL[ASSIGNABLE_FROM[asset.cls]]} — only idle stock can be assigned.`);
       }
       const hold = asset.reservations[0];
       if (hold && hold.employeeId !== d.employeeId) {
@@ -236,7 +236,8 @@ const employeeSchema = z.object({
   id: z.string().min(1),
   name: z.string().trim().min(2, "Name the person").max(120),
   title: z.string().trim().min(2, "Give a title").max(120),
-  employment: z.enum(["ACTIVE", "OFFBOARDING", "OFFBOARDED"]),
+  /** Final review I1: sent only by a leaver's Edit form (the select); absent means "keep the stored value". */
+  employment: z.enum(["ACTIVE", "OFFBOARDING", "OFFBOARDED"]).optional(),
   /** null = never synced ("no sync yet"); custom strings stored as-is → Neutral family */
   m365Status: z.string().trim().max(60).nullable(),
   offboardingDueAt: z.union([z.literal(""), dateStr]).optional(),
@@ -253,6 +254,12 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
 
   const employee = await prisma.employee.findUnique({ where: { id: d.id } });
   if (!employee) return conflict("That employee no longer exists.");
+  // Phase 40 (spec 2.2): employment moves only through offboarding — Start offboarding opens it, the wizard's
+  // completeOffboarding closes it; Edit may only cancel one (OFFBOARDING → ACTIVE) or leave employment alone.
+  // A missing `employment` keeps the stored value (final review I1).
+  const resolved = editEmploymentTarget(employee.employment, d.employment);
+  if (!resolved.ok) return validationError({ [resolved.field]: resolved.message });
+  const target = resolved.target;
 
   const today = localDateISO(new Date());
   // Ruling R8: the floor guards a CHANGE, not a re-send. An employee whose
@@ -263,7 +270,7 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   // differs from what is stored has to be today or later.
   const storedDueISO = employee.offboardingDueAt ? localDateISO(employee.offboardingDueAt) : null;
   let offboardingDueAt: Date | null;
-  if (d.employment === "OFFBOARDING") {
+  if (target === "OFFBOARDING") {
     if (d.offboardingDueAt) {
       if (d.offboardingDueAt !== storedDueISO && d.offboardingDueAt < minOffboardingDue(today)) {
         return validationError({ offboardingDueAt: "Pick today or later" });
@@ -272,13 +279,13 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
     } else {
       offboardingDueAt = employee.offboardingDueAt ?? dayFromISO(defaultOffboardingDue(today));
     }
-  } else if (d.employment === "ACTIVE") offboardingDueAt = null;
+  } else if (target === "ACTIVE") offboardingDueAt = null;
   else offboardingDueAt = employee.offboardingDueAt; // OFFBOARDED keeps the record
 
   const data = {
     name: d.name,
     title: d.title,
-    employment: d.employment,
+    employment: target,
     m365Status: d.m365Status === "" ? null : d.m365Status,
     // The offboarding wizard reads "this offboarding" as everything decided
     // since this moment, so entering OFFBOARDING is what starts the window —
@@ -286,9 +293,9 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
     // Re-entering ACTIVE clears it; OFFBOARDED keeps it, so the report of what
     // happened stays readable afterwards.
     offboardingAt:
-      d.employment === "OFFBOARDING"
+      target === "OFFBOARDING"
         ? employee.offboardingAt ?? new Date()
-        : d.employment === "ACTIVE"
+        : target === "ACTIVE"
           ? null
           : employee.offboardingAt,
     offboardingDueAt,
@@ -296,14 +303,19 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   const diff = diffOf(employee as unknown as Record<string, unknown>, data);
   if (Object.keys(diff).length === 0) return ok({ id: employee.id });
 
-  await prisma.$transaction(async (tx) => {
-    await tx.employee.update({ where: { id: employee.id }, data });
+  // Final review I1: state-guarded — the write lands only while employment still reads what this edit was read
+  // with, so an offboarding started (or completed) between the read and the write is never overwritten.
+  const saved = await prisma.$transaction(async (tx) => {
+    const res = await tx.employee.updateMany({ where: employmentGuard(employee.id, employee.employment), data });
+    if (res.count === 0) return false;
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
       entityType: "employee", entityId: employee.id,
       action: "update", diff,
     });
+    return true;
   });
+  if (!saved) return validationError({ _form: EMPLOYEE_CHANGED });
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
   // Phase 23/25: the two writers of `offboardingDueAt` are this action and
@@ -381,7 +393,9 @@ export async function startOffboarding(input: unknown): Promise<ActionResult<{ i
   return ok({ id: employee.id });
 }
 
-const createEmployeeSchema = employeeSchema.omit({ id: true }).extend({
+// Phase 40 (spec 2.2): a new person is always ACTIVE. `employment` and `offboardingDueAt` are not part of the
+// create payload — zod drops an unknown key, so a client that still sends one is ignored, never honoured.
+const createEmployeeSchema = employeeSchema.omit({ id: true, employment: true, offboardingDueAt: true }).extend({
   departmentId: z.string().min(1, "Pick a department"),
   // No format rule: Employee.employeeNo has none anywhere and the importer
   // (import-employees.ts, E-2) refuses to invent one. Uniqueness is
@@ -423,10 +437,6 @@ export async function createEmployee(
   const joinedAt = new Date(`${d.joinedAt}T00:00:00Z`);
   if (Number.isNaN(joinedAt.getTime())) errors.joinedAt = "Use the date picker";
   if (!department) errors.departmentId = "Unknown department";
-  const today = localDateISO(new Date());
-  if (d.employment === "OFFBOARDING" && d.offboardingDueAt && d.offboardingDueAt < minOffboardingDue(today)) {
-    errors.offboardingDueAt = "Pick today or later";
-  }
   // Phase 20 (spec §5) → Phase 29 (plan P-3): the same-name warning is one statement, carried under a key no field
   // claims so the form hands it to the banner that holds the checkbox — never under Name.
   if (!d.confirmSameName && !errors.departmentId) {
@@ -444,11 +454,11 @@ export async function createEmployee(
     name: d.name,
     title: d.title,
     departmentId: d.departmentId,
-    employment: d.employment,
+    employment: "ACTIVE" as const,
     m365Status: d.m365Status === "" ? null : d.m365Status,
     joinedAt,
-    offboardingAt: d.employment === "OFFBOARDING" ? new Date() : null,
-    offboardingDueAt: d.employment === "OFFBOARDING" ? dayFromISO(d.offboardingDueAt || defaultOffboardingDue(today)) : null,
+    offboardingAt: null,
+    offboardingDueAt: null,
     entraStatus: d.entraStatus,
     autopilotStatus: d.autopilotStatus,
     argusStatus: d.argusStatus,
@@ -469,7 +479,6 @@ export async function createEmployee(
         action: "create",
         diff: {
           employeeNo: { from: null, to: d.employeeNo }, name: { from: null, to: d.name },
-          ...(data.offboardingDueAt ? { offboardingDueAt: { from: null, to: data.offboardingDueAt } } : {}),
         },
       });
       if (d.note) {
@@ -491,12 +500,11 @@ export async function createEmployee(
   revalidatePath("/employees");
 
   // After the commit: each picked spare through the Fill dialog's own path for this user — direct for IT,
-  // a request otherwise; standard status (not a loan), no reason typed. Someone created not ACTIVE gets none:
-  // any picks sent are ignored (the wizard sends none), never refused by the lifecycle guard.
+  // a request otherwise; standard status (not a loan), no reason typed.
   const direct = isDirectLifecycle(user.role, "IT");
   let assigned = 0;
   const failed: AssignFailure[] = [];
-  for (const { assetId } of createAssignments(d.employment, d.assign)) {
+  for (const { assetId } of d.assign) {
     const asset = await prisma.asset.findUnique({ where: { id: assetId }, select: { tag: true } });
     if (!asset) {
       failed.push({ tag: assetId, reason: "That asset no longer exists." });

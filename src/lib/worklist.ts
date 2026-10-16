@@ -6,19 +6,30 @@
 import { addDays, daysUntil, dueStatus } from "./deadlines";
 import { fmtDate, localDateISO } from "./format";
 import { offboardingNext, type LeaverState } from "./offboarding";
+import { since as waitingSince } from "./purchases-list";
 
 export { DEFAULT_LOAN_DAYS } from "./lifecycle";
 /** A loan due within this many days is already on the list. */
 export const LOAN_DUE_SOON_DAYS = 7;
 
-export type WorkSectionId = "triage" | "repairs" | "check" | "hires" | "loans" | "missing" | "queue";
+export type WorkSectionId = "triage" | "repairs" | "check" | "purchases" | "hires" | "loans" | "missing" | "queue";
 
-export interface WorkSection { id: WorkSectionId; title: string; blurb: string }
+export interface WorkSection {
+  id: WorkSectionId;
+  title: string;
+  blurb: string;
+  /** the list the whole group opens (Phase 40 §6: Purchase reviews); absent = the heading is not a link */
+  href?: string;
+}
 
 export const WORK_SECTIONS: readonly WorkSection[] = [
   { id: "triage", title: "Triage", blurb: "Back from a person, not yet checked — decide before it is a spare again." },
   { id: "repairs", title: "Repairs to chase", blurb: "Defective devices, longest down first." },
   { id: "check", title: "Awaiting IT check", blurb: "Registered by Purchasing; Finance sees them after you." },
+  {
+    id: "purchases", title: "Purchase reviews", blurb: "Purchase requests waiting for IT's review, newest first.",
+    href: "/purchases?state=SUBMITTED",
+  },
   { id: "hires", title: "New hires", blurb: "Started within 30 days with required slots still empty." },
   { id: "loans", title: "Loans", blurb: "Loans overdue, due this week, or with no due date." },
   { id: "missing", title: "Missing & records", blurb: "Custody lost, or a record that does not add up." },
@@ -64,6 +75,8 @@ export interface WorkGroup {
   hidden: WorkRow[];
   /** live SLA breaches (rank-0 queue rows) counted BEFORE Home's per-section limit; 0 for other sections */
   pastSla: number;
+  /** final review I2: the oldest live row's age in days, taken BEFORE Home's per-section limit; 0 when none has an age */
+  oldestDays: number;
 }
 
 export interface LoanLike { id: string; tag: string; model: string; loanDueAt: Date | null; holder: string | null }
@@ -95,6 +108,41 @@ export function loanRow(a: LoanLike, now: Date): WorkRow | null {
  */
 export function loanSoonEdge(now: Date): Date {
   return new Date(`${addDays(localDateISO(now), LOAN_DUE_SOON_DAYS + 1)}T00:00:00+08:00`);
+}
+
+export interface PurchaseReviewLike {
+  id: string;
+  refNo: string;
+  /** when it reached IT; null on a request never stamped, which then counts from updatedAt (the /purchases list's rule) */
+  submittedAt: Date | null;
+  updatedAt: Date;
+  requestedBy: string;
+  department: string | null;
+  /** the first line's description; null when the request has no lines */
+  firstLine: string | null;
+  lines: number;
+}
+
+/**
+ * Phase 40 §6: a SUBMITTED request waiting for IT's review. Newest first, so
+ * severity is the negative age in ms (groupWork sorts severity descending).
+ * The age reads exactly as /purchases' dwell line does: `since()`'s whole days, "today" under one.
+ */
+export function purchaseReviewRow(r: PurchaseReviewLike, now: Date): WorkRow {
+  const from = r.submittedAt ?? r.updatedAt;
+  const ageMs = Math.max(0, now.getTime() - from.getTime());
+  const days = Math.floor(ageMs / 86_400_000);
+  const what = r.firstLine ? ` · ${r.firstLine}${r.lines > 1 ? ` +${r.lines - 1} more` : ""}` : "";
+  return {
+    key: `purchases:${r.id}`,
+    section: "purchases",
+    title: `${r.refNo}${what}`,
+    meta: `${r.department ?? "No department"} · from ${r.requestedBy} · waiting ${waitingSince(r.submittedAt, r.updatedAt, now)}`,
+    href: `/purchases/${r.id}`,
+    action: "Review",
+    severity: -ageMs,
+    ageDays: days,
+  };
 }
 
 export interface LeaverLike extends LeaverState { name: string; employeeNo: string; itemsOut: number }
@@ -155,6 +203,7 @@ export function groupWork(
       rows: opts.limit ? live.slice(0, opts.limit) : live,
       total: live.length,
       pastSla: section.id === "queue" ? live.filter((r) => (r.rank ?? 0) === 0).length : 0,
+      oldestDays: Math.max(0, ...live.map((r) => r.ageDays ?? 0)),
       capped: saturated.has(section.id),
       hidden,
     }];
@@ -166,6 +215,7 @@ export const SEE_ALL_HREF: Record<WorkSectionId, string> = {
   triage: "/inventory?sort=attention", check: "/inventory?sort=attention",
   repairs: "/inventory?status=DEFECTIVE", loans: "/inventory?status=TEMPORARY&sort=attention",
   missing: "/inventory?status=MISSING", hires: "/employees?gaps=1", queue: "/approvals",
+  purchases: "/purchases?state=SUBMITTED",
 };
 
 /** The standalone page's cap line (spec §5.2); null when every row is shown. */
@@ -190,7 +240,8 @@ export function pastSlaCount(groups: WorkGroup[]): number {
 export function workHeadline(groups: WorkGroup[]): string {
   const n = groups.reduce((s, g) => s + g.total, 0);
   if (n === 0) return "";
-  const oldest = Math.max(0, ...groups.flatMap((g) => g.rows.map((r) => r.ageDays ?? 0)));
+  // Final review I2: from every live row, not the shown ones — purchase reviews sort newest first.
+  const oldest = Math.max(0, ...groups.map((g) => g.oldestDays));
   const late = pastSlaCount(groups);
   return [`${n} waiting`, oldest > 0 ? `oldest ${oldest} d` : null, late > 0 ? `${late} past SLA` : null].filter(Boolean).join(" · ");
 }

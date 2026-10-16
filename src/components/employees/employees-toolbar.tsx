@@ -50,6 +50,7 @@ export function EmployeesToolbar({
           // Keyed on the URL's q, the input remounts and takes the new default.
           key={state.q}
           type="search"
+          data-page-search
           aria-label="Search employees"
           placeholder="Search name, number, title, department or client · Enter"
           defaultValue={state.q}

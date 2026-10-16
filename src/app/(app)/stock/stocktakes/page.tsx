@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { listStocktakes } from "@/server/modules/stock/queries";
@@ -15,6 +17,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import type { StocktakeState } from "@prisma/client";
 
 const STATE_TONE: Record<StocktakeState, "neutral" | "accent"> = { OPEN: "accent", POSTED: "neutral", CANCELLED: "neutral" };
+
+export const metadata: Metadata = { title: pageTitle("Stocktakes") };
 
 export default async function StocktakesPage({
   searchParams,

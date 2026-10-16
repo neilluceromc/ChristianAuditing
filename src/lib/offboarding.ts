@@ -75,6 +75,8 @@ export interface LeaverState {
   /** the first held item whose return failed to execute */
   failed: FailedReturn | null;
   m365Status: string | null;
+  /** Phase 40 (spec §7): how many rows of their IT access are live (`liveAccessFields(e).length`). */
+  itAccess: number;
 }
 
 /** Exactly completeOffboarding's M365 gate: trimmed, case-folded, anything but null or "inactive" is live. */
@@ -94,11 +96,12 @@ export function offboardingNext(s: LeaverState): NextStep | null {
     return { step: "collect", label: `Collect ${s.undecided} item${s.undecided === 1 ? "" : "s"}`, href: `/offboarding/${s.id}?step=collect` };
   }
   if (m365Live(s.m365Status)) return { step: "accounts", label: "Close account", href: `/offboarding/${s.id}?step=accounts` };
+  if (s.itAccess > 0) return { step: "accounts", label: "Remove access", href: `/offboarding/${s.id}?step=accounts` };
   return { step: "report", label: "Complete", href: `/offboarding/${s.id}?step=report` };
 }
 
-export interface ReadinessInput { id: string; total: number; undecided: number; failed: FailedReturn[]; m365Status: string | null }
-export interface ReadinessLine { kind: "equipment" | "requests" | "m365"; label: string; ok: boolean; href: string | null }
+export interface ReadinessInput { id: string; total: number; undecided: number; failed: FailedReturn[]; m365Status: string | null; itAccess: number }
+export interface ReadinessLine { kind: "equipment" | "requests" | "m365" | "access"; label: string; ok: boolean; href: string | null }
 
 /** The Finish step's checklist: one line per server gate, in completeOffboarding's order. */
 export function readiness(d: ReadinessInput): ReadinessLine[] {
@@ -118,6 +121,13 @@ export function readiness(d: ReadinessInput): ReadinessLine[] {
     ok: !live,
     href: live ? `/offboarding/${d.id}?step=accounts` : null,
   });
+  // Phase 40 (spec §7): the fourth gate — IT access still live. Not recorded counts as removed (ruling 2).
+  lines.push({
+    kind: "access",
+    label: d.itAccess > 0 ? `IT access · ${d.itAccess} still active` : "IT access · removed",
+    ok: d.itAccess === 0,
+    href: d.itAccess > 0 ? `/offboarding/${d.id}?step=accounts` : null,
+  });
   return lines;
 }
 
@@ -126,7 +136,7 @@ export function completionBlockers(d: ReadinessInput): ReadinessLine[] {
   return readiness(d).filter((l) => !l.ok);
 }
 
-export type OffboardingAttentionKind = "failed" | "overdue" | "no-date" | "undecided" | "m365" | "ready";
+export type OffboardingAttentionKind = "failed" | "overdue" | "no-date" | "undecided" | "m365" | "access" | "ready";
 export interface OffboardingAttention { kind: OffboardingAttentionKind; label: string; severity: number }
 
 /** The one worst reason a leaver needs attention (spec §3), the Phase 30 severity shape. */
@@ -140,6 +150,7 @@ export function offboardingAttention(s: LeaverState, todayISO: string): Offboard
   if (s.dueAt === null) return { kind: "no-date", label: "no completion date", severity: 4000 };
   if (s.undecided > 0) return { kind: "undecided", label: `${s.undecided} to decide`, severity: 3000 + s.undecided };
   if (m365Live(s.m365Status)) return { kind: "m365", label: `account still ${s.m365Status}`, severity: 2000 };
+  if (s.itAccess > 0) return { kind: "access", label: "IT access still active", severity: 1500 };
   return { kind: "ready", label: "ready to complete", severity: 1000 };
 }
 
@@ -159,10 +170,10 @@ export function orderByOffboardingAttention<T extends { attention: OffboardingAt
 }
 
 /** Without ?step=, open where the work is (spec §3). */
-export function defaultStep(s: { employment: string; undecided: number; m365Status: string | null }): StepId {
+export function defaultStep(s: { employment: string; undecided: number; m365Status: string | null; itAccess: number }): StepId {
   if (s.employment !== "OFFBOARDING") return "review";
   if (s.undecided > 0) return "collect";
-  if (m365Live(s.m365Status)) return "accounts";
+  if (m365Live(s.m365Status) || s.itAccess > 0) return "accounts";
   return "report";
 }
 

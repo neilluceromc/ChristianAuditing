@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { supplierNameFor } from "@/server/page-titles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
@@ -6,6 +9,7 @@ import { canManageSuppliers, canRevealBank } from "@/lib/supplier-access";
 import { CONTRACT_STATUS_LABEL } from "@/lib/supplier-schema";
 import { PROVENANCE_LABEL } from "@/lib/provenance";
 import { fmtDate } from "@/lib/format";
+import { statusLabel } from "@/lib/asset-class";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
@@ -19,6 +23,11 @@ import { Pagination } from "@/components/ui/pagination";
 import { ArchiveControls } from "@/components/suppliers/archive-controls";
 import { BankAccountsCard } from "@/components/suppliers/bank-accounts-card";
 import { SupplierDocumentsCard } from "@/components/suppliers/supplier-documents-card";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await supplierNameFor(id)) ?? "Supplier") };
+}
 
 export default async function SupplierProfilePage({
   params,
@@ -181,7 +190,7 @@ export default async function SupplierProfilePage({
                       <Tr key={a.id}>
                         <Td><Link href={`/inventory/${a.id}`} className="text-accent hover:underline">{a.tag}</Link></Td>
                         <Td>{a.model}</Td>
-                        <Td><StatusPill value={a.status} /></Td>
+                        <Td><StatusPill value={a.status} label={statusLabel(a.status)} /></Td>
                         <Td mono>{fmtDate(a.purchasedAt)}</Td>
                         <Td><Pill>{PROVENANCE_LABEL[a.provenance]}</Pill></Td>
                       </Tr>

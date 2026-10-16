@@ -391,13 +391,13 @@ test.describe("it navigation sweep (Phase 25)", () => {
   test("9. the fleet bar's legend links into the inventory filtered to that status", async ({ page }) => {
     await login(page, IT);
     await page.goto("/");
-    // exact — the segment beside it names itself "DEPLOYED: N assets" (sr-only).
-    const legend = page.getByRole("link", { name: "DEPLOYED", exact: true });
+    // exact — the segment beside it names itself "Deployed: N assets" (sr-only). Phase 40 §6: words, not the enum.
+    const legend = page.getByRole("link", { name: "Deployed", exact: true });
     await expect(legend).toHaveAttribute("href", "/inventory?status=DEPLOYED");
     // The SEGMENT is the control this phase actually invented (percentage
     // width, sr-only name, inside an overflow-hidden wrapper), so it is the one
     // asserted and clicked; the legend copy only has to agree with it (I-4b).
-    const segment = page.getByRole("link", { name: /^DEPLOYED: \d+ assets$/ });
+    const segment = page.getByRole("link", { name: /^Deployed: \d+ assets$/ });
     await expect(segment).toHaveAttribute("href", "/inventory?status=DEPLOYED");
     expect(await legend.getAttribute("href")).toBe(await segment.getAttribute("href"));
     await segment.click();
@@ -410,12 +410,12 @@ test.describe("it navigation sweep (Phase 25)", () => {
     expect(rowCount).toBeGreaterThan(0);
     // Phase 30 (spec §6.3): the Status cell may carry the row's attention reason under the word
     // ("queued APR-…", "awaiting IT check"), so the cell starts with the status rather than equalling it.
-    await expect(rows.locator("td").filter({ hasText: /^DEPLOYED/ })).toHaveCount(rowCount);
+    await expect(rows.locator("td").filter({ hasText: /^Deployed/ })).toHaveCount(rowCount);
     // A dropdown read, not `toContainText("1")` on the facet trigger — that
     // would also pass on a badge reading "11" or "21" (M-P25-5). The Status
     // facet counts WITHOUT its own selection (`facetOptions`' `without(facet)`),
     // so DEPLOYED's option count is exactly what the filtered list shows.
-    expect((await facetCounts(page, "Status")).DEPLOYED).toBe(String(rowCount));
+    expect((await facetCounts(page, "Status")).Deployed).toBe(String(rowCount));
     await expectNoSeriousAxe(page);
   });
 
@@ -557,7 +557,7 @@ test.describe("it navigation sweep (Phase 25)", () => {
       await page.goto("/audit");
       const newest = page.locator("tbody tr").first();
       await expect(newest).toContainText("department");
-      await expect(newest).toContainText("rename");
+      await expect(newest).toContainText("Renamed"); // Phase 40 §6: the action's words, not "rename"
       await expect(newest).toContainText("Operations X");
       await expectNoSeriousAxe(page);
     } finally {

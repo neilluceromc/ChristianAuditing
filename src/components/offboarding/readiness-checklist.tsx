@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReadinessLine } from "@/lib/offboarding";
 
-/** Spec §4.4: the three server gates, shown before anyone clicks Complete. */
+/** Spec §4.4 (Phase 40 adds IT access): one line per server gate, shown before anyone clicks Complete. */
 export function ReadinessChecklist({ lines }: { lines: ReadinessLine[] }) {
   return (
     <ul aria-label="Ready to complete" className="flex flex-col gap-1.5">

@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import { notFound, redirect } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -6,6 +9,11 @@ import { AssetForm } from "@/components/inventory/asset-form";
 import { updateAsset } from "@/server/modules/inventory/actions";
 import { recentPicks } from "@/server/recent-picks";
 import { canEditAsset, canSeeClass, defaultClassFor, withViewClsQS } from "@/lib/asset-class";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Edit", await assetTagFor(id)) };
+}
 
 export default async function EditAssetPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireRole("admin", "it_staff", "purchasing_staff");

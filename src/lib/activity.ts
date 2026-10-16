@@ -1,5 +1,7 @@
 import { fmtDate, fmtMoneyExact } from "./format";
 import { lifeLabel } from "./depreciation-input";
+import { statusLabel } from "./asset-class";
+import { EMPLOYMENT_LABEL } from "./labels";
 
 /** Phase 27 (spec §3.5): the facet's words for each action a feed can show; an unmapped action shows its raw name. */
 export const ACTION_LABELS: Record<string, string> = {
@@ -29,19 +31,40 @@ export const ACTION_LABELS: Record<string, string> = {
   rename: "Renamed", archive: "Ended or archived", restore: "Restored",
   "policy.saved": "Policy saved",
   "note.added": "Note added", "note.edited": "Note edited", "note.deleted": "Note deleted", "employee.setup": "IT setup changed",
+  // Final review M5: every other code the server and worker write (AUDIT_ACTIONS, audit-actions.test.ts keeps it whole).
+  delete: "Deleted",
+  claim: "Claimed", release: "Released", approve: "Approved", reject: "Rejected", escalate: "Escalated", retry: "Retried",
+  executed: "Request carried out", "execution.failed": "Request failed",
+  "stock.received": "Stock received", "stock.issued": "Stock issued", "stock.adjusted": "Stock adjusted",
+  "stock.written-off": "Stock written off", "stock.lot-cost-set": "Lot cost set", "stock.document-added": "Stock document attached",
+  "stock.item.created": "Stock item added", "stock.item.updated": "Stock item updated",
+  "stock.item.archived": "Stock item archived", "stock.item.restored": "Stock item restored",
+  "stock.category.created": "Stock category added", "stock.category.updated": "Stock category updated",
+  "stock.category.archived": "Stock category archived", "stock.category.restored": "Stock category restored",
+  "stocktake.opened": "Stocktake started", "stocktake.posted": "Stocktake posted", "stocktake.cancelled": "Stocktake cancelled",
+  "supplier.created": "Supplier added", "supplier.updated": "Supplier updated",
+  "supplier.archived": "Supplier archived", "supplier.restored": "Supplier restored",
+  "supplier.bank.added": "Bank details added", "supplier.bank.removed": "Bank details removed", "supplier.bank.revealed": "Bank details viewed",
+  signup: "Signed up", bootstrap: "First admin set up", "role-change": "Role changed",
+  disable: "Account disabled", enable: "Account enabled",
+  "flag-enable": "Flag turned on", "flag-disable": "Flag turned off", "flag-value": "Flag value changed",
+  "endpoint-enable": "Webhook turned on", "endpoint-disable": "Webhook turned off", "endpoint-delete": "Webhook removed",
+  "rotate-secret": "Webhook secret rotated", replay: "Delivery resent",
 };
 export function actionLabel(action: string): string { return ACTION_LABELS[action] ?? action; }
 
 /** Phase 27 (spec §3.5): raw diff keys → words, shared by the `update` and `import-update` sentences. */
 export const FIELD_LABELS: Record<string, string> = {
   name: "name", model: "model", serial: "serial", cost: "cost", location: "location", notes: "notes",
-  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", vendorId: "supplier",
+  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", assignee: "holder", vendorId: "supplier",
   purchasedAt: "purchase date", warrantyUntil: "warranty end", loanDueAt: "loan due date",
   employeeNo: "employee number", email: "email", title: "title", employment: "employment", joinedAt: "join date",
   offboardingAt: "offboarding start", offboardingDueAt: "complete-by date",
   registeredName: "registered name", contactPerson: "contact person", phone: "phone", address: "address",
   registrationNo: "registration number", contractStatus: "contract status", contractStart: "contract start", contractEnd: "contract end",
   unit: "unit", packSize: "pack size", reorderLevel: "reorder level", expiresAt: "expiry",
+  // Phase 40 §8: triage records Dispose/Donate's `reason` apart from Keep/Repair's optional `note`
+  reason: "reason", note: "note",
 };
 /** Known keys read from the table; unknown ones lose a trailing "Id" and split camelCase: "repairEndedAt" → "repair ended at". */
 export function fieldLabel(key: string): string {
@@ -227,13 +250,14 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
     }
     case "lifecycle.return": {
       const to = diff?.status?.to;
-      const tail = diff?.returnedAt?.to ? `for triage${suffix}` : `as ${String(to ?? "?")}${suffix}`;
+      const tail = diff?.returnedAt?.to ? `for triage${suffix}` : `as ${to ? statusLabel(String(to)) : "?"}${suffix}`;
       return omitEntity ? `${actor}returned ${tail}` : `${actor}returned ${entry.entityLabel} ${tail}`;
     }
-    case "lifecycle.change-status":
-      return omitEntity
-        ? `${actor}changed to ${String(diff?.status?.to ?? "?")}${suffix}`
-        : `${actor}changed ${entry.entityLabel} to ${String(diff?.status?.to ?? "?")}${suffix}`;
+    case "lifecycle.change-status": {
+      // Phase 40 §6: the status's word ("Loan"), never the enum.
+      const to = diff?.status?.to ? statusLabel(String(diff.status.to)) : "?";
+      return omitEntity ? `${actor}changed to ${to}${suffix}` : `${actor}changed ${entry.entityLabel} to ${to}${suffix}`;
+    }
     case "lifecycle.replace": {
       if (diff?.replacedBy) {
         const tail = `with ${String(diff.replacedBy.to)}${suffix}`;
@@ -283,8 +307,9 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
       const status = diff?.status?.to;
       const employment = diff?.employment?.to;
       const suffix =
-        typeof status === "string" && status !== "SPARE" ? ` as ${status}`
-        : typeof employment === "string" && employment !== "ACTIVE" ? ` as ${employment}`
+        typeof status === "string" && status !== "SPARE" ? ` as ${statusLabel(status)}`
+        : typeof employment === "string" && employment !== "ACTIVE"
+          ? ` as ${Object.hasOwn(EMPLOYMENT_LABEL, employment) ? EMPLOYMENT_LABEL[employment as keyof typeof EMPLOYMENT_LABEL] : employment}`
         : "";
       return omitEntity ? `${actor}imported${suffix}` : `${actor}imported ${entry.entityLabel}${suffix}`;
     }

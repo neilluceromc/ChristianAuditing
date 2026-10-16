@@ -542,9 +542,11 @@ test.describe("register — the Labels tab", () => {
 
     const print = page.getByRole("button", { name: "Print 2 labels", exact: true });
     await waitForHydration(print);
-    // Ruling R16: Print marks the queue as soon as window.print() returns.
+    // Phase 40 §2.6 (replacing ruling R16): once window.print() returns, Print asks; only Yes marks the queue.
     await page.evaluate(() => { window.print = () => {}; });
     await print.click();
+    await page.getByRole("dialog", { name: "Did the labels print correctly?" })
+      .getByRole("button", { name: "Yes, mark printed", exact: true }).click();
     await expect(async () => {
       expect(await db.asset.count({ where: { id: { in: ids }, labelPrintedAt: { not: null } } })).toBe(2);
     }).toPass({ timeout: 20_000 });
@@ -632,6 +634,9 @@ test.describe("register — final-review fix wave", () => {
     await waitForHydration(print);
     await page.evaluate(() => { window.print = () => {}; });
     await print.click();
+    // Phase 40 §2.6: the stamp waits for Yes.
+    await page.getByRole("dialog", { name: "Did the labels print correctly?" })
+      .getByRole("button", { name: "Yes, mark printed", exact: true }).click();
     await expect(async () => {
       expect((await db.asset.findUniqueOrThrow({ where: { id }, select: { labelPrintedAt: true } })).labelPrintedAt).not.toBeNull();
     }).toPass({ timeout: 20_000 });

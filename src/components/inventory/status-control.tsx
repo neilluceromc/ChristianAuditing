@@ -12,7 +12,7 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS } from "@/lib/reason-chips";
 import type { AssetClass, AssetStatus } from "@prisma/client";
-import { STATUS_LABEL, statusTargets } from "@/lib/asset-class";
+import { STATUS_LABEL, statusLabel, statusTargets } from "@/lib/asset-class";
 import { requestStatusChange } from "@/server/modules/inventory/actions";
 import { changeStatus } from "@/server/modules/lifecycle/actions";
 
@@ -60,7 +60,7 @@ export function ChangeStatusDialog({
       if (res.ok) {
         toast(
           direct
-            ? `${asset.tag} is now ${to}`
+            ? `${asset.tag} is now ${statusLabel(to)}`
             : `${(res.data as { refNo: string }).refNo} created — waiting in the approval queue`,
           "settled",
         );
@@ -95,8 +95,8 @@ export function ChangeStatusDialog({
             <>Applies now and is recorded in the audit trail under your name.</>
           ) : (
             <>
-              This files a request for approval. Creates a <span className="font-mono">lifecycle.change-status</span> approval; the asset
-              stays <span className="font-mono">{asset.status}</span> until it executes.
+              This files a request for approval. Creates a Change status request; the asset
+              stays {STATUS_LABEL[asset.status]} until it executes.
             </>
           )}
         </p>

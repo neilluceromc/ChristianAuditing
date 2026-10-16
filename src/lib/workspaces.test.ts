@@ -305,6 +305,12 @@ describe("WORKSPACE_NAV shape", () => {
     const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking");
     expect(tracking?.items.find((i) => i.label === "Approvals")?.badge).toBe("approvals");
   });
+  it("Phase 40 §6: the IT Purchase reviews item carries its own count badge", () => {
+    const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking");
+    expect(tracking?.items.find((i) => i.label === "Purchase reviews")).toMatchObject({
+      href: "/purchases?state=SUBMITTED", badge: "purchaseReviews",
+    });
+  });
   it("Phase 14: the Purchasing Assets section carries Approvals (with badge) and Employees", () => {
     const assets = WORKSPACE_NAV.purchasing.find((s) => s.heading === "Assets");
     expect(assets?.items.find((i) => i.label === "Approvals")?.badge).toBe("approvals");

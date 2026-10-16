@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams, parseListState, serializeListState, type ListState } from "@/lib/url-state";
 import { STOCK_LIST_CONFIG } from "@/lib/stock-list";
@@ -10,6 +12,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { StockToolbar } from "@/components/stock/stock-toolbar";
 import { StockItemsTable } from "@/components/stock/stock-items-table";
+
+export const metadata: Metadata = { title: pageTitle("Stock items") };
 
 export default async function StockPage({
   searchParams,

@@ -1,9 +1,18 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { employeeNameFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { localDateISO } from "@/lib/format";
+import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmployeeForm } from "@/components/employees/employee-form";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("Edit", await employeeNameFor(id)) };
+}
 
 export default async function EditEmployeePage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole("admin", "it_staff");
@@ -12,6 +21,7 @@ export default async function EditEmployeePage({ params }: { params: Promise<{ i
   // (that is Transfer's job), so the query and the prop went with the select.
   const employee = await prisma.employee.findUnique({ where: { id } });
   if (!employee) notFound();
+  const today = localDateISO(new Date());
 
   return (
     <>
@@ -26,6 +36,9 @@ export default async function EditEmployeePage({ params }: { params: Promise<{ i
       <EmployeeForm
         mode="edit"
         employeeId={id}
+        employeeName={employee.name}
+        defaultDue={defaultOffboardingDue(today)}
+        minDue={minOffboardingDue(today)}
         initial={{
           name: employee.name,
           title: employee.title,

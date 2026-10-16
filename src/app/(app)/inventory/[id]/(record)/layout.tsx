@@ -3,9 +3,9 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset, lastLifecycleChange, spareOptions } from "@/server/modules/inventory/queries";
 import { activeHoldFor } from "@/server/modules/reservations/queries";
-import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { APPROVAL_KIND_LABEL, APPROVAL_STATE_LABEL } from "@/lib/labels";
 import { fmtDate, localDateISO } from "@/lib/format";
-import { canManageClass, defaultClassFor, isAwaitingItCheck, isDirectLifecycle, withViewClsQS } from "@/lib/asset-class";
+import { STATUS_LABEL, canManageClass, defaultClassFor, isAwaitingItCheck, isDirectLifecycle, withViewClsQS } from "@/lib/asset-class";
 import { recordActions, type RecordAction, type RecordState } from "@/lib/record-actions";
 import { defaultHoldExpiry, minHoldExpiry } from "@/lib/holds";
 import { PageHeader } from "@/components/ui/page-header";
@@ -82,7 +82,7 @@ export default async function AssetRecordLayout({
           // Phase 37 (spec §4.4): the profile side panel's "Change status" lands here (`#status`); the change itself
           // is the actions' "Change status…" beside it.
           <span id="status" className="inline-flex scroll-mt-4 items-center gap-2">
-            <StatusPill value={asset.status} />
+            <StatusPill value={asset.status} label={STATUS_LABEL[asset.status]} />
             {ask && <Pill tone="accent">{ask}</Pill>}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
@@ -148,10 +148,10 @@ export default async function AssetRecordLayout({
         <div className="pb-3">
           <Banner
             tone="inflight"
-            title={`${pending.refNo} · ${APPROVAL_TYPE_LABEL[pending.type]} is ${pending.state.toLowerCase()}`}
+            title={`${pending.refNo} · ${APPROVAL_KIND_LABEL[pending.type]} request is ${APPROVAL_STATE_LABEL[pending.state].toLowerCase()}`}
           >
             Queued in the approval pipeline — until it executes, this asset still reads{" "}
-            <span className="font-mono">{asset.status}</span> everywhere.{" "}
+            {STATUS_LABEL[asset.status]} everywhere.{" "}
             <Link href={`/approvals/${pending.id}`} className="text-accent underline hover:text-accent-hover">Open request</Link>
           </Banner>
         </div>

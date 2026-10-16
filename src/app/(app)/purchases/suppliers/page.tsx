@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import { toSearchParams, parseListState, serializeListState, type ListState } from "@/lib/url-state";
 import { SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
@@ -10,6 +12,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { SuppliersToolbar } from "@/components/suppliers/suppliers-toolbar";
 import { SuppliersTable } from "@/components/suppliers/suppliers-table";
+
+export const metadata: Metadata = { title: pageTitle("Suppliers") };
 
 export default async function SuppliersPage({
   searchParams,

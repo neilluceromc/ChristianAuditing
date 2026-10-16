@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { GroupsPage } from "@/components/admin/groups-page";
 import type { GroupRow } from "@/lib/groups";
+
+export const metadata: Metadata = { title: pageTitle("Departments & clients") };
 
 export default async function DepartmentsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   await requireRole("admin", "it_staff");

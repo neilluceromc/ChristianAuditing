@@ -209,7 +209,7 @@ test.describe("inventory list", () => {
     await expect(page).toHaveURL(/status=DEFECTIVE/);
     // Phase 30 (spec §6.2): a chip reads as the value alone; its link name carries the
     // sr-only " — remove filter" suffix, which scopes it to the chip row.
-    await expect(page.getByRole("link", { name: "DEFECTIVE — remove filter" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Defective — remove filter", exact: true })).toBeVisible();
   });
 
   test("an exact tag search opens the record (scanner contract)", async ({ page }) => {
@@ -276,7 +276,7 @@ test.describe("inventory list", () => {
     await page.getByRole("button", { name: "Change status…", exact: true }).click();
     await page.getByLabel(/Target status/).selectOption("DISPOSE");
     await page.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByText("2 assets now DISPOSE")).toBeVisible();
+    await expect(page.getByText("Success: 2 assets now Dispose", { exact: true })).toBeVisible();
     const [mn, ph] = await Promise.all([
       db.asset.findUniqueOrThrow({ where: { tag: "BR-MN-0911" } }),
       db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0301" } }),
@@ -386,7 +386,7 @@ test.describe("asset record", () => {
     // First hit of /inventory/[id]/history in this file — the default 5s had
     // to cover a cold compile of that route and did not, in the same batch
     // that surfaced the hydration race above.
-    await expect(page.getByRole("row", { name: /model/ }).first()).toContainText("LG 27UL500-W", {
+    await expect(page.getByRole("row", { name: /model/i }).first()).toContainText("LG 27UL500-W", {
       timeout: 20_000,
     });
   });
@@ -423,7 +423,7 @@ test.describe("asset record", () => {
     await secretRow.getByRole("button", { name: "Copy", exact: true }).click();
     await expect(secretRow.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
     await page.goto(`${recordUrl}/history`);
-    await expect(page.getByRole("row", { name: /SECRET_READ/ }).first()).toBeVisible();
+    await expect(page.getByRole("row", { name: /Secret read/ }).first()).toBeVisible();
 
     await login(page, "viewer@thebackroomop.com");
     await page.goto(`${recordUrl}/secrets`);

@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
@@ -5,6 +7,8 @@ import { NewEmployeeWizard } from "@/components/employees/new-employee-wizard";
 import { groupPickerOptions } from "@/lib/groups";
 import { nextEmployeeNo } from "@/lib/employee-no";
 import { localDateISO } from "@/lib/format";
+
+export const metadata: Metadata = { title: pageTitle("New employee") };
 
 /** Phase 37 (spec §5): Add an employee in three steps; only active departments and clients are offered. */
 export default async function NewEmployeePage() {

@@ -477,7 +477,7 @@ test.describe("queues-records-ux — reservations", () => {
     try {
       await login(page, IT);
       await page.goto("/reservations?state=ACTIVE");
-      await expect(page.getByText("Held spares still read SPARE · place holds from a record or a profile")).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText("Held spares still read Spare · place holds from a record or a profile", { exact: true })).toBeVisible({ timeout: 20_000 });
       await expect(page.getByRole("columnheader", { name: "Expires" })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "Reads" })).toHaveCount(0);
       // The seeded +7 d hold and this one (tomorrow): two live, one within two days.
@@ -525,12 +525,12 @@ test.describe("queues-records-ux — audit and feeds", () => {
     await expect(entries).toHaveText(`${tagTotal} entries`);
     await expect(rows).toHaveCount(tagTotal);
     for (const row of await rows.all()) await expect(row.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
-    // A sentence, and the raw slug beside it in mono.
+    // A sentence, and the action's words beside it (Phase 40 §6: never the raw slug).
     const seeded = page.getByRole("row", { name: new RegExp(`${IT_NAME.replace(".", "\\.")} updated`) });
     await expect(seeded).toHaveCount(1);
-    const slug = seeded.locator("td").nth(3);
-    await expect(slug).toHaveText("update");
-    await expect(slug).toHaveClass(/font-mono/);
+    const action = seeded.locator("td").nth(3);
+    await expect(action).toHaveText("Updated");
+    await expect(action).not.toHaveClass(/font-mono/);
     await expect(page.getByRole("row", { name: /e2e phase 33 \(older\)/ })).toHaveCount(1);
     await expectNoSeriousAxe(page);
 

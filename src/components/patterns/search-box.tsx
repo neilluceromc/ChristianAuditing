@@ -14,6 +14,7 @@ export function SearchBox({ value, ariaLabel, placeholder, onSubmit }: {
         // input ignores a new defaultValue once typed in.
         key={value}
         type="search"
+        data-page-search
         aria-label={ariaLabel}
         placeholder={placeholder}
         defaultValue={value}

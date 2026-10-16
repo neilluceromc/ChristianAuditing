@@ -32,6 +32,7 @@ export function SuppliersToolbar({
         </span>
         <Input
           type="search"
+          data-page-search
           aria-label="Search suppliers"
           placeholder="Search name, contact, email…"
           defaultValue={state.q}

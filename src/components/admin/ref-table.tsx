@@ -93,7 +93,7 @@ export function RefTable({
       <div className="max-w-[320px]">
         <label htmlFor={`${entity}-find`} className="sr-only">{findLabel}</label>
         <Input
-          id={`${entity}-find`} type="search" value={q} placeholder={findLabel} className="py-1.5 text-xs"
+          id={`${entity}-find`} type="search" data-page-search value={q} placeholder={findLabel} className="py-1.5 text-xs"
           onChange={(e) => setQ(e.target.value)}
         />
       </div>

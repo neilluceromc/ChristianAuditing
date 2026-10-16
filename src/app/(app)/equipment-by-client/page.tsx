@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { equipmentByGroup } from "@/server/modules/reports/equipment";
 import { canSeeMoney } from "@/lib/equipment-report";
@@ -25,6 +27,8 @@ function StatCard({ label, value, hint, color }: { label: string; value: React.R
     </Card>
   );
 }
+
+export const metadata: Metadata = { title: pageTitle("Equipment by client") };
 
 /**
  * Phase 38 (spec §3): what each client's team (or internal department) holds, what it is worth, and who is still

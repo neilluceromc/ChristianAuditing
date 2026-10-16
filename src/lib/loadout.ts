@@ -188,17 +188,6 @@ export function computeLoadout<A extends HeldAssetLike>(slots: SlotLike[], held:
   };
 }
 
-/** Phase 37 (spec §5.4): the copy step 2 of Add employee shows instead of spare pickers for someone not ACTIVE. */
-export const ASSIGNED_ONCE_ACTIVE = "Equipment is assigned once they are active.";
-
-/**
- * Phase 37 (spec §5.4): the spares a new person's create assigns — the picks for someone ACTIVE, none otherwise
- * (equipment is never assigned to a leaver; the wizard hides the pickers and the server ignores any sent).
- */
-export function createAssignments<T>(employment: string, picks: T[]): T[] {
-  return employment === "ACTIVE" ? picks : [];
-}
-
 /** Phase 29 (spec §4.1): the header's one state-chosen primary; null when Edit should lead. */
 export function profilePrimary(input: { employment: string; totalSlots: number; filled: number; missingRequired: number }): { kind: "assign-kit" | "fill-gaps" | "wizard"; label: string } | null {
   if (input.employment === "OFFBOARDING") return { kind: "wizard", label: "Open the offboarding wizard" };

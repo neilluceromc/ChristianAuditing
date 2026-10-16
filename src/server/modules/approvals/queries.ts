@@ -2,12 +2,12 @@ import { cache } from "react";
 import type { ApprovalType, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { summarizeApproval } from "@/lib/approval-execution";
-import { RETURN_TARGETS, isAssignable } from "@/lib/asset-class";
+import { RETURN_TARGETS, isAssignable, statusLabel } from "@/lib/asset-class";
 import { approvalClassWhere, isApprover } from "@/lib/approval-access";
 import {
   approvalsSearchWhere, slaLabel, tabWhere, viaWhere, CLOSED_VIA, QUEUE_TABS, type QueueTab, type ClosedVia,
 } from "@/lib/approvals-list";
-import { APPROVAL_KIND_LABEL } from "@/lib/labels";
+import { APPROVAL_KIND_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
 import { LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 
@@ -172,7 +172,7 @@ export async function systemChecks(
 
   const assetCheck: SystemCheck = approval.assetId
     ? asset
-      ? { label: "Asset exists", pass: true, detail: `${asset.tag} · ${asset.status}` }
+      ? { label: "Asset exists", pass: true, detail: `${asset.tag} · ${statusLabel(asset.status)}` }
       : { label: "Asset exists", pass: false, detail: "the referenced asset is gone" }
     : { label: "Asset attached", pass: false, detail: "no asset on this approval — execution will refuse" };
 
@@ -186,10 +186,10 @@ export async function systemChecks(
       return [
         assetCheck,
         asset
-          ? { label: "Asset is assignable", pass: isAssignable(asset), detail: `reads ${asset.status} right now` }
+          ? { label: "Asset is assignable", pass: isAssignable(asset), detail: `reads ${statusLabel(asset.status)} right now` }
           : { label: "Asset is assignable", pass: false, detail: "—" },
         employee
-          ? { label: "Recipient is active", pass: employee.employment === "ACTIVE", detail: `${employee.employeeNo} · ${employee.employment}` }
+          ? { label: "Recipient is active", pass: employee.employment === "ACTIVE", detail: `${employee.employeeNo} · ${EMPLOYMENT_LABEL[employee.employment]}` }
           : { label: "Recipient is active", pass: false, detail: "the referenced employee is gone" },
       ];
     }
@@ -212,7 +212,7 @@ export async function systemChecks(
           detail: !approval.assetId
             ? "—"
             : asset
-              ? (target ? `returns as ${target}` : "no target status in the payload")
+              ? (target ? `returns as ${statusLabel(target)}` : "no target status in the payload")
               : "asset is gone — target not checked",
         },
       ];
@@ -222,9 +222,9 @@ export async function systemChecks(
       return [
         assetCheck,
         asset && expectedFrom
-          ? { label: "Status unchanged since request", pass: asset.status === expectedFrom, detail: `payload expected ${expectedFrom}, reads ${asset.status}` }
+          ? { label: "Status unchanged since request", pass: asset.status === expectedFrom, detail: `request expected ${statusLabel(expectedFrom)}, reads ${statusLabel(asset.status)}` }
           : { label: "Status unchanged since request", pass: true, detail: "no from-status recorded" },
-        { label: "Target status", pass: typeof to?.status === "string", detail: String(to?.status ?? "missing") },
+        { label: "Target status", pass: typeof to?.status === "string", detail: typeof to?.status === "string" ? statusLabel(to.status) : "missing" },
       ];
     }
     default:

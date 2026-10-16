@@ -249,7 +249,7 @@ test.describe.serial("custody", () => {
     await page.getByRole("button", { name: "Return", exact: true }).click();
     const returnDialog = page.getByRole("dialog", { name: `Return BR-MN-0910 · LG 27UL500 from ${nina.name}?` });
     await returnDialog.getByRole("button", { name: "Return", exact: true }).click();
-    await expect(page.getByText("BR-MN-0910 returned · now SPARE")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Success: BR-MN-0910 returned · now Spare", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     asset = await db.asset.findUniqueOrThrow({ where: { id } });
     expect(asset.loanDueAt).toBeNull();
@@ -261,7 +261,9 @@ test.describe.serial("custody", () => {
     // round trip an operator would actually complete.
     await page.getByRole("button", { name: "Triage", exact: true }).click();
     const triageDialog = page.getByRole("dialog", { name: "Triage BR-MN-0910 · LG 27UL500" });
-    await expect(triageDialog.getByLabel("Decision")).toHaveValue("SPARE");
+    // Phase 40 §8: no default decision — Keep as spare is chosen, not saved past.
+    await expect(triageDialog.getByLabel("Decision")).toHaveValue("");
+    await triageDialog.getByLabel("Decision").selectOption("SPARE");
     await triageDialog.getByRole("button", { name: "Save decision", exact: true }).click();
     await expect(page.getByText("BR-MN-0910 triaged · Keep as spare")).toBeVisible({ timeout: 15_000 });
 

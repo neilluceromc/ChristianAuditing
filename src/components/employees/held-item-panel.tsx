@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusPill } from "@/components/ui/status";
 import { useFocusTrap } from "@/components/ui/use-focus-trap";
 import { fmtDayMonth, fmtDayMonthYear } from "@/lib/format";
+import { statusLabel } from "@/lib/asset-class";
 import { heldItemPanel, type HeldItemPanel as PanelData } from "@/server/modules/employees/panel-actions";
 
 type Load =
@@ -88,7 +89,7 @@ export function HeldItemPanel({
             <h2 id={titleId} className="text-[15px] font-semibold text-fg">
               <span className="font-mono">{asset.tag}</span> · {panel?.model ?? asset.model}
             </h2>
-            <span><StatusPill value={panel?.status ?? asset.status} /></span>
+            <span><StatusPill value={panel?.status ?? asset.status} label={statusLabel(panel?.status ?? asset.status)} /></span>
           </div>
           <button
             type="button"
@@ -127,8 +128,7 @@ export function HeldItemPanel({
                   { label: "Serial", value: panel.serial ?? "—", mono: true },
                   {
                     label: "Status",
-                    value: panel.loanDueAt ? `${panel.status} · due ${fmtDayMonthYear(panel.loanDueAt)}` : panel.status,
-                    mono: true,
+                    value: panel.loanDueAt ? `${statusLabel(panel.status)} · due ${fmtDayMonthYear(panel.loanDueAt)}` : statusLabel(panel.status),
                   },
                   ...(panel.heldSince ? [{ label: "Held since", value: fmtDayMonthYear(panel.heldSince) }] : []),
                   ...(panel.bookValue ? [{ label: "Value at cost", value: panel.bookValue, mono: true }] : []),

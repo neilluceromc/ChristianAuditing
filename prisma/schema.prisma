@@ -98,6 +98,8 @@ enum SetupState {
   DONE
   NOT_YET
   NOT_NEEDED
+  /// Phase 40 (spec §7): access taken away by offboarding.
+  REMOVED
 }
 
 enum Priority {

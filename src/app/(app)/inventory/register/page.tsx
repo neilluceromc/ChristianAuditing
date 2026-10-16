@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/ui/page-header";
@@ -13,6 +15,8 @@ import {
   ASSET_CLASSES, MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, defaultClassFor, isDirectLifecycle, parseCls,
   withViewClsQS,
 } from "@/lib/asset-class";
+
+export const metadata: Metadata = { title: pageTitle("Register assets") };
 
 /**
  * Phase 34 (spec §3, §4): the Register tab of New equipment. Phase 30's one

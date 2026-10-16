@@ -218,8 +218,9 @@ test.describe("home — fleet coverage, age distribution and warranty runway", (
     // ("Fleet of 25 assets by status") no longer exists. The legend link
     // carries the bare status as its name; the segment carries sr-only text.
     // The age histogram two assertions below is untouched — it is still an img.
-    await expect(page.getByRole("link", { name: "DEPLOYED", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /^DEPLOYED: \d+ assets$/ })).toBeVisible();
+    // Phase 40 §6: the legend and the segment name the status in words.
+    await expect(page.getByRole("link", { name: "Deployed", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Deployed: \d+ assets$/ })).toBeVisible();
     await expect(page.getByText("spare pool covers 4 of the 10 slots the incoming hires need")).toBeVisible();
 
     // Note the EN DASH (–) in the bucket labels, not a hyphen.
@@ -250,7 +251,7 @@ test.describe("home — /finance/assets, the register", () => {
     await expect(page.getByRole("heading", { name: "Assets", level: 1 })).toBeVisible();
     await expect(page.getByText(/\d+ assets? · \d+ with a cost · ₱[\d,.]+ at cost/)).toBeVisible();
 
-    const chip = page.getByRole("link", { name: "DEFECTIVE" });
+    const chip = page.getByRole("link", { name: "Defective", exact: true });
     await chip.click();
     await expect(page).toHaveURL(/status=DEFECTIVE/, { timeout: 15_000 });
     await expect(chip).toHaveAttribute("aria-current", "page");

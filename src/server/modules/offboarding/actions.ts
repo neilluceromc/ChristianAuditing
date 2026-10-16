@@ -8,10 +8,11 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
+import { itAccessRefusal, setupGuard } from "@/lib/it-setup";
 import { OUTCOMES, OUTCOME_LABEL, decisionOf, m365Live, outcomeStatus, reasonRequired, type Outcome } from "@/lib/offboarding";
 import { CLASS_PHRASE, isDirectLifecycle } from "@/lib/asset-class";
 import { cleanReason, reasonOptional } from "@/lib/reason";
-import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { APPROVAL_KIND_LABEL } from "@/lib/labels";
 import { candidatesFor } from "@/server/modules/offboarding/queries";
 import { emitWebhook } from "@/server/webhooks/emit";
 import { prepareLifecycle, commitLifecycle } from "@/server/modules/lifecycle/apply";
@@ -132,7 +133,7 @@ async function decideOne(
     return { failure: conflict(
       open.type === "lifecycle_return" && inWindow
         ? `${asset.tag} already has an open request — that decision is already recorded.`
-        : `${asset.tag} is held by ${open.refNo} (${APPROVAL_TYPE_LABEL[open.type]}) — resolve that in Approvals first, then decide this item.`,
+        : `${asset.tag} is held by ${open.refNo} (${APPROVAL_KIND_LABEL[open.type]} request) — resolve that in Approvals first, then decide this item.`,
     ) };
   }
   // Phase 15 (spec §2.1): IT confirms and it's done — no queue. The asset
@@ -392,12 +393,17 @@ export async function completeOffboarding(input: unknown): Promise<ActionResult<
     if (m365 !== null && m365 !== "inactive") {
       return conflict(`The M365 account still reads ${employee.m365Status} — close it on Accounts & M365 first.`);
     }
+    // Phase 40 (spec §7, ruling 2): live IT access blocks too — Done, or a named VPN. Not recorded never does.
+    const accessRefusal = itAccessRefusal(employee);
+    if (accessRefusal) return conflict(accessRefusal);
 
+    // Final review M3: state-guarded on what the two gates above read as well — the M365 status and the four
+    // IT-access values — so access recorded as live between the read and this write matches nothing here.
     const written = await tx.employee.updateMany({
-      where: { id: employeeId, employment: "OFFBOARDING" },
+      where: { id: employeeId, employment: "OFFBOARDING", m365Status: employee.m365Status, ...setupGuard(employee) },
       data: { employment: "OFFBOARDED" },
     });
-    if (written.count === 0) return conflict("Someone else just completed this offboarding.");
+    if (written.count === 0) return conflict("This person changed while you were looking — reload and try again.");
     // AuditEntry is the only immutable artifact in the system, so the moment
     // worth snapshotting is this one. Everything else about a completed
     // offboarding is derived from mutable rows: reject one of these returns

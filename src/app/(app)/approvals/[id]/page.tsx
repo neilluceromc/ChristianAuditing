@@ -1,15 +1,19 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { approvalRefFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { getApproval, nextInQueue, systemChecks } from "@/server/modules/approvals/queries";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { slaLabel } from "@/lib/approvals-list";
-import { APPROVAL_TYPE_LABEL, PRIORITY_LABEL } from "@/lib/labels";
+import { APPROVAL_KIND_LABEL, PRIORITY_LABEL } from "@/lib/labels";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { canActOnApproval, isApprover } from "@/lib/approval-access";
 import { approvalHeader } from "@/lib/approval-header";
 import { failureCause } from "@/lib/approval-failure";
 import { canSeeClass } from "@/lib/asset-class";
+import { cn } from "@/lib/cn";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -19,6 +23,11 @@ import { StatusDot, StatusPill } from "@/components/ui/status";
 import { ApprovalHeaderActions } from "@/components/approvals/approval-header";
 import { NextInQueue } from "@/components/approvals/next-in-queue";
 import { TagRef } from "@/components/inventory/tag-ref";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await approvalRefFor(id)) ?? "Approval") };
+}
 
 export default async function ApprovalPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -67,12 +76,12 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
       />
       {approval.appliedDirectly ? (
         <p className="-mt-2 pb-4 font-mono text-[11px] text-fg-muted">
-          {APPROVAL_TYPE_LABEL[approval.type]} · applied directly by{" "}
+          {APPROVAL_KIND_LABEL[approval.type]} request · applied directly by{" "}
           {approval.claimedBy?.name ?? approval.requestedBy.name} · {fmtDateTime(approval.resolvedAt)}
         </p>
       ) : (
         <p className="-mt-2 pb-4 font-mono text-[11px] text-fg-muted">
-          {APPROVAL_TYPE_LABEL[approval.type]} · requested by {approval.requestedBy.name} · {fmtDate(approval.createdAt)} · SLA{" "}
+          {APPROVAL_KIND_LABEL[approval.type]} request · requested by {approval.requestedBy.name} · {fmtDate(approval.createdAt)} · SLA{" "}
           <span className={sla.overdue ? "font-semibold text-[color:var(--st-fault-text)]" : undefined}>{sla.text}</span>
         </p>
       )}
@@ -168,6 +177,15 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
               {checks!.map((c) => (
                 <div key={c.label} className="flex items-baseline gap-2 text-xs">
                   <StatusDot value={c.pass ? "DEPLOYED" : "DEFECTIVE"} />
+                  {/* Phase 40 §6: the dot is no longer the only signal. */}
+                  <span
+                    className={cn(
+                      "w-[42px] shrink-0 font-mono text-[10.5px] font-medium",
+                      c.pass ? "text-[color:var(--st-settled-text)]" : "text-[color:var(--st-fault-text)]",
+                    )}
+                  >
+                    {c.pass ? "Passed" : "Failed"}
+                  </span>
                   <span className="font-medium text-fg">{c.label}</span>
                   <span className="ml-auto font-mono text-[10.5px] text-fg-muted">{c.detail}</span>
                 </div>

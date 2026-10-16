@@ -1,5 +1,8 @@
 import type { AssetStatus } from "@prisma/client";
-import { HOLDER_STATUSES } from "./asset-class";
+import { HOLDER_STATUSES, statusLabel } from "./asset-class";
+import { EMPLOYMENT_LABEL } from "./labels";
+import { z } from "zod";
+import { REASON_MAX, cleanReason } from "./reason";
 
 /**
  * Phase 15 (spec §1 rows 6–7). The words IT picks from when a device comes back
@@ -30,6 +33,34 @@ export const TRIAGE_LABEL: Record<TriageOutcome, string> = {
 };
 
 /**
+ * Phase 40 (spec §8): a device leaving the fleet for good needs a sentence on the record; keeping it or
+ * sending it to repair does not. The bar is 2 characters after `cleanReason` — lower than the house
+ * min 3, as the spec sets it — and a chip always clears it.
+ */
+export const TRIAGE_REASON_MIN = 2;
+export const TRIAGE_REASON_MESSAGE = `Give a reason (at least ${TRIAGE_REASON_MIN} characters)`;
+export const TRIAGE_DECISION_MESSAGE = "Choose a decision";
+
+export function triageNeedsReason(outcome: TriageOutcome): boolean {
+  return outcome === "DISPOSE" || outcome === "DONATED";
+}
+
+export function triageReasonValid(outcome: TriageOutcome, reason: string | null | undefined): boolean {
+  return !triageNeedsReason(outcome) || cleanReason(reason).length >= TRIAGE_REASON_MIN;
+}
+
+/** `triageAsset`'s input. No outcome has a default; the reason rule is enforced here, on `note`. */
+export const triageInputSchema = z
+  .object({
+    assetId: z.string().min(1),
+    outcome: z.enum(TRIAGE_OUTCOMES, { error: TRIAGE_DECISION_MESSAGE }),
+    note: z.string().overwrite(cleanReason).max(REASON_MAX).optional(),
+  })
+  .superRefine((d, ctx) => {
+    if (!triageReasonValid(d.outcome, d.note)) ctx.addIssue({ code: "custom", path: ["note"], message: TRIAGE_REASON_MESSAGE });
+  });
+
+/**
  * Spec §3. A replacement retires the old device by the chosen outcome and hands
  * the new one the SAME holder status the old one had (a loaner is replaced by a
  * loaner). Throws on a device nobody holds: there is nothing to replace.
@@ -47,10 +78,13 @@ export function replacePlan(old: { status: AssetStatus }, outcome: ReturnOutcome
  * dialogs are a different audience: no queue, no retry, just IT telling IT
  * what refused. Strip the worker framing so the same guard reads as a normal
  * sentence there, without touching the stored `workerError` text at all.
+ * Phase 40 §6: a guard's statuses and employment read as words ("reads Loan, not Spare").
  */
 export function humanizeGuard(error: string): string {
   const PREFIX = "Execution guard: ";
   let out = error.startsWith(PREFIX) ? error.slice(PREFIX.length) : error;
+  out = out.replace(/reads ([A-Z_]+), not ([A-Z_]+)/, (_, a: string, b: string) => `reads ${statusLabel(a)}, not ${statusLabel(b)}`);
+  out = out.replace(/ is (ACTIVE|OFFBOARDING|OFFBOARDED) /, (_, e: keyof typeof EMPLOYMENT_LABEL) => ` is ${EMPLOYMENT_LABEL[e]} `);
   out = out.replace(
     "— request a lifecycle.return first, then change its status",
     "— return it first, then change its status",

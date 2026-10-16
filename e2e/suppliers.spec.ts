@@ -370,8 +370,9 @@ test.describe.serial("suppliers", () => {
     // section heading and this very page's own <h1> — both still on screen
     // behind the palette veil.
     const palette = page.getByRole("dialog", { name: "Command palette" });
-    await palette.getByRole("textbox", { name: "Search" }).fill("bayside");
-    await expect(palette.getByRole("heading", { name: "Suppliers" })).toBeVisible({ timeout: 10_000 });
+    // Phase 40 (spec §4): the input is a combobox, and each result group is a listbox group named by its heading.
+    await palette.getByRole("combobox", { name: "Search" }).fill("bayside");
+    await expect(palette.getByRole("group", { name: "Suppliers" })).toBeVisible({ timeout: 10_000 });
     await expect(palette.getByRole("option", { name: /Bayside Networks/ })).toBeVisible();
 
     await page.keyboard.press("Enter");

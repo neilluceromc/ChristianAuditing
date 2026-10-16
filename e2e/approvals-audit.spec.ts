@@ -173,12 +173,12 @@ test.describe.serial("approvals lifecycle — it@", () => {
     // comment in e2e/it-core.spec.ts's secrets test.
     await page.waitForURL(/\/inventory\/[^/?]+$/);
     const header = page.locator("main header").first();
-    await expect(header).toContainText("DEPLOYED");
+    await expect(header).toContainText("Deployed"); // Phase 40 §6: STATUS_LABEL, not the enum
     await expect(page.getByText("held by Nina Robles")).toBeVisible();
 
     await page.goto(`${page.url()}/history`);
     // One row per changed field (status, assignee) for the worker's single audit entry.
-    await expect(page.getByRole("row", { name: /lifecycle\.assign executed/ })).toHaveCount(2);
+    await expect(page.getByRole("row", { name: /Assigned \(approved request\)/ })).toHaveCount(2);
 
     await page.goto("/approvals?tab=failed");
     const tabsNav = page.getByRole("navigation", { name: "Queue tabs" });
@@ -244,7 +244,9 @@ test.describe("audit log", () => {
     await page.getByLabel("Search audit log").press("Enter");
     await expect(page).toHaveURL(/q=SECRET_READ/);
     await expect(page.getByText("1 entry")).toBeVisible();
-    await expect(page.getByRole("row", { name: /SECRET_READ/ })).toBeVisible();
+    // Phase 40 §6: the search still finds the code, but the row reads the action's words.
+    await expect(page.getByRole("row", { name: /Secret read/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /SECRET_READ/ })).toHaveCount(0);
   });
 
   /**

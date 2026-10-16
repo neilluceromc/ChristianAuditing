@@ -46,6 +46,7 @@ export function StocktakeSheetToolbar({
         <Input
           ref={searchRef}
           type="search"
+          data-page-search
           aria-label="Search the stocktake"
           placeholder="Search code, name…"
           value={q}

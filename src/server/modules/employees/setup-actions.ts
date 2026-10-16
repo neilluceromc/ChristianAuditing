@@ -53,5 +53,8 @@ export async function setItSetup(input: unknown): Promise<ActionResult<null>> {
   });
   if (!saved) return validationError({ _form: "That setting changed — reload and try again" });
   revalidatePath(`/employees/${d.employeeId}`);
+  // Phase 40 (spec §7): Mark removed on the offboarding wizard saves through here too.
+  revalidatePath(`/offboarding/${d.employeeId}`);
+  revalidatePath("/offboarding");
   return ok(null);
 }

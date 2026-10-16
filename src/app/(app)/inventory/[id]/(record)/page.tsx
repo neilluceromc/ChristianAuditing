@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
@@ -17,6 +20,12 @@ import { RegistrationBlock } from "@/components/inventory/registration-block";
 import { CreatedNotice } from "@/components/inventory/created-notice";
 import { REPAIR_STAGE_LABEL, downDays, quoteWarning } from "@/lib/repairs";
 import { statusFamily } from "@/lib/status";
+import { coveredByLabel } from "@/lib/purchase-summary";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await assetTagFor(id)) ?? "Asset") };
+}
 
 export default async function AssetOverviewPage({
   params,
@@ -105,6 +114,12 @@ export default async function AssetOverviewPage({
               { label: "Cost", value: fmtMoney(asset.cost === null ? null : Number(asset.cost)), mono: true },
               { label: "Vendor", value: asset.vendor?.name ?? "—" },
               { label: "Invoice / receipt no.", value: asset.invoiceRef ?? "—", mono: true },
+              // Phase 40 §8: the Phase 34 purchase fields, each shown only when set
+              ...(asset.receiptRef ? [{ label: "OR no.", value: asset.receiptRef, mono: true }] : []),
+              ...(asset.warrantyCoveredBy
+                ? [{ label: "Covered by", value: coveredByLabel(asset.warrantyCoveredBy) }]
+                : []),
+              ...(asset.warrantyContact ? [{ label: "Who to call for repairs", value: asset.warrantyContact }] : []),
               {
                 label: "Warranty",
                 value: warranty ? (

@@ -1,7 +1,11 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { activeStockCategories } from "@/server/modules/stock/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { StocktakeOpenForm } from "@/components/stock/stocktake-open-form";
+
+export const metadata: Metadata = { title: pageTitle("New stocktake") };
 
 export default async function NewStocktakePage() {
   await requireRole("admin", "purchasing_staff");

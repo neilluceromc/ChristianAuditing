@@ -65,3 +65,8 @@ export const WARRANTY_COVERED_BY = ["manufacturer", "vendor", "both"] as const;
 export const WARRANTY_COVERED_BY_LABEL: Record<(typeof WARRANTY_COVERED_BY)[number], string> = {
   manufacturer: "Manufacturer", vendor: "Vendor", both: "Both",
 };
+
+/** Phase 40: a stored `warrantyCoveredBy` in words. A value outside the zod set (an older import) reads as itself. */
+export function coveredByLabel(v: string): string {
+  return (WARRANTY_COVERED_BY_LABEL as Record<string, string>)[v] ?? v;
+}

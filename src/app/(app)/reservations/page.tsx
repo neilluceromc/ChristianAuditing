@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
 import { isDirectLifecycle } from "@/lib/asset-class";
 import { clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, type ListState } from "@/lib/url-state";
@@ -16,6 +18,8 @@ import { Tabs } from "@/components/ui/tabs";
 import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/patterns/list-navigation";
 import { HoldsTable } from "@/components/reservations/holds-table";
 import { HoldsToolbar } from "@/components/reservations/holds-toolbar";
+
+export const metadata: Metadata = { title: pageTitle("Reservations") };
 
 export default async function ReservationsPage({
   searchParams,
@@ -65,7 +69,7 @@ export default async function ReservationsPage({
             className="pb-1"
           />
           {/* Spec §5.2: the old banner's one fact, as a muted hint — a hold never changes an asset's status. */}
-          <p className="text-[11.5px] text-fg-muted">Held spares still read SPARE · place holds from a record or a profile</p>
+          <p className="text-[11.5px] text-fg-muted">Held spares still read Spare · place holds from a record or a profile</p>
 
           <HoldsToolbar tab={tab} state={state} total={total} soon={soon} facets={facets} />
 

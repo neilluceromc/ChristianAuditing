@@ -172,7 +172,7 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     await search.fill(vehicle.tag);
     await search.press("Enter");
     await expect(page).toHaveURL(new RegExp(`q=${vehicle.tag}`));
-    await expect(page.getByText("No entries match this filter")).toBeVisible();
+    await expect(page.getByText("Your filters matched nothing")).toBeVisible();
     await login(page, ADMIN);
     await page.goto("/inventory/activity");
     await expect(page.locator("ol").getByText(`e2e phase 27 updated location on ${vehicle.tag}`)).toBeVisible();

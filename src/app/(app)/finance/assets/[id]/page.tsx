@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { financeAssetDetail } from "@/server/modules/finance/asset-detail";
-import { CLASS_LABEL } from "@/lib/asset-class";
+import { CLASS_LABEL, STATUS_LABEL } from "@/lib/asset-class";
 import { lifeLabel } from "@/lib/depreciation-input";
+import { coveredByLabel } from "@/lib/purchase-summary";
 import { fmtDate, fmtDateTime, fmtMoneyExact } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status";
@@ -17,6 +21,11 @@ import { YearSchedule } from "./year-schedule";
 
 const peso = (c: number | null) => (c === null ? "Not recorded" : fmtMoneyExact(c / 100));
 const text = (v: string | null | undefined) => (v ? v : "Not recorded");
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await assetTagFor(id)) ?? "Asset") };
+}
 
 export default async function FinanceAssetPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole("admin", "finance_staff");
@@ -71,7 +80,7 @@ export default async function FinanceAssetPage({ params }: { params: Promise<{ i
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2 text-[13px] text-fg-secondary">
           <span>{subtitle}</span>
-          <StatusPill value={d.status} />
+          <StatusPill value={d.status} label={STATUS_LABEL[d.status]} />
           {d.reg === "registered" && d.notCapitalised ? (
             <span className="text-xs text-fg-secondary">Not capitalised</span>
           ) : (
@@ -141,7 +150,7 @@ export default async function FinanceAssetPage({ params }: { params: Promise<{ i
                 { label: "Purchase date", value: d.purchasedAt ? fmtDate(d.purchasedAt) : "Not recorded" },
                 { label: "Delivery and fees", value: peso(d.feesC) },
                 { label: "Warranty until", value: d.warrantyUntil ? fmtDate(d.warrantyUntil) : "Not recorded" },
-                { label: "Covered by", value: text(d.coveredBy) },
+                { label: "Covered by", value: text(d.coveredBy && coveredByLabel(d.coveredBy)) },
                 { label: "Who to call", value: text(d.contact) },
               ]}
             />

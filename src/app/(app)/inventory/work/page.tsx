@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { canManageClass, isDirectLifecycle } from "@/lib/asset-class";
@@ -7,6 +9,8 @@ import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Worklist } from "@/components/home/worklist";
 import { WorkSummary } from "@/components/home/work-summary";
+
+export const metadata: Metadata = { title: pageTitle("Worklist") };
 
 export default async function WorklistPage() {
   const user = await requireUser();

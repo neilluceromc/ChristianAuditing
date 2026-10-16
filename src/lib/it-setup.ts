@@ -13,13 +13,20 @@ export const SETUP_COLUMN: Record<(typeof SETUP_FIELDS)[number], "entraStatus" |
   entra: "entraStatus", autopilot: "autopilotStatus", argus: "argusStatus",
 };
 
-export const SETUP_STATE_LABELS = { DONE: "Done", NOT_YET: "Not yet", NOT_NEEDED: "Not needed" } as const;
+export const SETUP_STATE_LABELS = { DONE: "Done", NOT_YET: "Not yet", NOT_NEEDED: "Not needed", REMOVED: "Removed" } as const;
 
 /** The VPN select's fixed choices; "Other…" (a free-text box) is the UI's own. */
 export const VPN_CHOICES = ["None", "Cloudflare WARP", "OpenVPN"] as const;
 
+/** Phase 40 (spec §7): the VPN value offboarding writes once the VPN is taken away. */
+export const VPN_REMOVED = "Removed";
+/** The profile's VPN select also offers Removed; Add employee does not (nobody starts with access already removed). */
+export const VPN_PROFILE_CHOICES = [...VPN_CHOICES, VPN_REMOVED] as const;
+
 export const vpnSchema = z.string().trim().min(1, "Name the VPN").max(40, "At most 40 characters");
-export const setupStateSchema = z.enum(["DONE", "NOT_YET", "NOT_NEEDED"]);
+export const setupStateSchema = z.enum(["DONE", "NOT_YET", "NOT_NEEDED", "REMOVED"]);
+/** Add employee's three states: a new hire cannot start with access already Removed. */
+export const newHireStateSchema = setupStateSchema.exclude(["REMOVED"]);
 
 const NOT_RECORDED = "Not recorded";
 const stateLabel = (v: string | null): string => (v === null ? NOT_RECORDED : (SETUP_STATE_LABELS as Record<string, string>)[v] ?? v);
@@ -39,4 +46,46 @@ export function setupSummary(e: {
 /** The header chip's number: rows marked NOT_YET (null is "not recorded", not "not yet"). */
 export function notYetCount(e: { entraStatus: string | null; autopilotStatus: string | null; argusStatus: string | null }): number {
   return [e.entraStatus, e.autopilotStatus, e.argusStatus].filter((v) => v === "NOT_YET").length;
+}
+
+/** A person's four IT-setup values as stored; null is "Not recorded". */
+export interface SetupRecord {
+  entraStatus: string | null; autopilotStatus: string | null; argusStatus: string | null; vpn: string | null;
+}
+
+const VPN_NOT_A_NAME = new Set(["", "none", "removed"]);
+
+/**
+ * Phase 40 (spec §7, ruling 2): which rows of a person's IT access are live, in the card's order. Entra / Intune,
+ * Autopilot and Argus are live only when Done; the VPN when it names a VPN (not none, "None" or "Removed").
+ * Not recorded, Not yet, Not needed and Removed are not live, so a person from before Phase 37 never blocks.
+ */
+export function liveAccessFields(e: SetupRecord): SetupField[] {
+  const live: SetupField[] = [];
+  if (e.entraStatus === "DONE") live.push("entra");
+  if (e.autopilotStatus === "DONE") live.push("autopilot");
+  if (e.argusStatus === "DONE") live.push("argus");
+  if (e.vpn !== null && !VPN_NOT_A_NAME.has(e.vpn.trim().toLowerCase())) live.push("vpn");
+  return live;
+}
+
+/** True while any IT access is live — offboarding cannot complete until it is removed. */
+export function itAccessLive(e: SetupRecord): boolean {
+  return liveAccessFields(e).length > 0;
+}
+
+/** Phase 40 (spec §7): completeOffboarding's refusal while any IT access is live. */
+export const IT_ACCESS_REFUSAL = "Remove their IT access first";
+
+/** completeOffboarding's IT-access gate: the refusal while access is live, otherwise null. */
+export function itAccessRefusal(e: SetupRecord): string | null {
+  return itAccessLive(e) ? IT_ACCESS_REFUSAL : null;
+}
+
+/**
+ * Final review M3: the four IT-access values a gate read, for a write's `where` — so access recorded as live
+ * between the gate and the write (Mark removed undone, or Done saved in another tab) makes the write match nothing.
+ */
+export function setupGuard<T extends SetupRecord>(e: T): Pick<T, keyof SetupRecord> {
+  return { entraStatus: e.entraStatus, autopilotStatus: e.autopilotStatus, argusStatus: e.argusStatus, vpn: e.vpn };
 }

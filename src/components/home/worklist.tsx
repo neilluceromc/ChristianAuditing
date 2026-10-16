@@ -42,7 +42,10 @@ export function Worklist({
         <section key={g.section.id} id={g.section.id} aria-labelledby={`work-${g.section.id}`}>
           <div className="flex items-baseline justify-between">
             <Heading id={`work-${g.section.id}`} className="text-[13px] font-semibold text-fg">
-              {g.section.title}{" "}
+              {/* Phase 40 §6: a group with its own list (Purchase reviews) opens it from the heading. */}
+              {g.section.href
+                ? <Link href={g.section.href} className="text-accent hover:underline">{g.section.title}</Link>
+                : g.section.title}{" "}
               <span className="font-mono text-[10.5px] text-fg-muted">
                 {g.capped ? `${g.total}+` : g.total}
                 {g.hidden.length > 0 && ` · ${g.hidden.length} hidden today`}

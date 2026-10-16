@@ -167,11 +167,11 @@ test.describe("it gaps", () => {
       // The toast (bulk-drawer.tsx): count, destination, then the skip suffix.
       // "Success: " is toast.tsx's own tone label for "settled" (TONE_LABEL),
       // the same prefix e2e/transfers.spec.ts's own toast assertions include.
-      await expect(page.getByText("Success: 1 asset now DISPOSE · 1 skipped", { exact: true })).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText("Success: 1 asset now Dispose · 1 skipped", { exact: true })).toBeVisible({ timeout: 10_000 });
       // The drawer stays open on the skipped banner rather than auto-closing.
       await expect(drawer.getByText("1 skipped", { exact: true })).toBeVisible();
       const skippedRow = drawer.getByRole("listitem").filter({ hasText: "BR-LT-0075" });
-      await expect(skippedRow).toContainText("closed status DONATED — cannot change");
+      await expect(skippedRow).toContainText("closed status Donated — cannot change");
 
       const [hs, lt] = await Promise.all([
         db.asset.findUniqueOrThrow({ where: { tag: "BR-HS-0502" } }),
@@ -367,7 +367,7 @@ test.describe("it gaps", () => {
     // Default outcome is "Back for triage" (TRIAGE -> SPARE), reason optional.
     await dialog.getByRole("button", { name: "Return", exact: true }).click();
     // "Success: " is toast.tsx's own tone label for "settled" (TONE_LABEL).
-    await expect(page.getByText("Success: BR-DK-0071 returned · now SPARE", { exact: true })).toBeVisible({
+    await expect(page.getByText("Success: BR-DK-0071 returned · now Spare", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
     await expect(dialog).toBeHidden();

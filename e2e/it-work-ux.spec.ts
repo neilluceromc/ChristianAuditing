@@ -348,6 +348,8 @@ test.describe("it-work-ux — the worklist", () => {
       const dialog = page.getByRole("dialog", { name: `Triage ${spare.tag} · ${spare.model}` });
       await expect(dialog).toBeVisible();
       await expectNoSeriousAxe(page);
+      // Phase 40 §8: no default decision.
+      await dialog.getByLabel("Decision").selectOption("SPARE");
       await dialog.getByRole("button", { name: "Save decision" }).click();
 
       await expect(page.getByText(`${spare.tag} triaged · Keep as spare`)).toBeVisible();

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { dayFromISO } from "./deadlines";
 import { fmtDate } from "./format";
+import { dwellLine } from "./purchases-list";
 import {
   DEFAULT_LOAN_DAYS, SEE_ALL_HREF, WORK_SECTIONS, capLine, groupWork, leaverRow, loanRow,
-  loanSoonEdge, pastSlaCount, summaryChips, workActionLabel, workHeadline, workRowHref, type LeaverLike, type WorkRow,
+  loanSoonEdge, pastSlaCount, purchaseReviewRow, summaryChips, workActionLabel, workHeadline, workRowHref,
+  type LeaverLike, type WorkRow,
 } from "./worklist";
 
 const row = (section: WorkRow["section"], key: string, severity = 0, rank?: number): WorkRow =>
@@ -11,9 +13,60 @@ const row = (section: WorkRow["section"], key: string, severity = 0, rank?: numb
 
 describe("WORK_SECTIONS", () => {
   it("is the spec's order", () => {
-    expect(WORK_SECTIONS.map((s) => s.id)).toEqual(["triage", "repairs", "check", "hires", "loans", "missing", "queue"]);
+    expect(WORK_SECTIONS.map((s) => s.id)).toEqual(["triage", "repairs", "check", "purchases", "hires", "loans", "missing", "queue"]);
   });
   it("the default loan is 30 days", () => expect(DEFAULT_LOAN_DAYS).toBe(30));
+  it("Phase 40 §6: Purchase reviews links to the requests waiting for IT", () => {
+    const s = WORK_SECTIONS.find((x) => x.id === "purchases");
+    expect(s?.title).toBe("Purchase reviews");
+    expect(s?.href).toBe("/purchases?state=SUBMITTED");
+    expect(WORK_SECTIONS.filter((x) => x.href).map((x) => x.id)).toEqual(["purchases"]);
+  });
+});
+
+describe("purchaseReviewRow (Phase 40 §6)", () => {
+  const NOW = new Date("2026-10-17T10:00:00+08:00");
+  const base = {
+    id: "pr1", refNo: "PR-0198", submittedAt: new Date("2026-10-13T10:00:00+08:00"), updatedAt: new Date("2026-10-01T09:00:00+08:00"),
+    requestedBy: "Pia Santos", department: "HR", firstLine: "27-inch monitors", lines: 2,
+  };
+  it("names the request, its first line, who sent it and how long it has waited", () => {
+    const r = purchaseReviewRow(base, NOW);
+    expect(r).toMatchObject({
+      key: "purchases:pr1", section: "purchases", title: "PR-0198 · 27-inch monitors +1 more",
+      meta: "HR · from Pia Santos · waiting 4 d", href: "/purchases/pr1", action: "Review", ageDays: 4,
+    });
+    expect(r.control).toBeUndefined();
+    expect(r.entity).toBeUndefined();
+  });
+  it("one line reads without a count; no line reads the reference alone; no department says so", () => {
+    expect(purchaseReviewRow({ ...base, lines: 1 }, NOW).title).toBe("PR-0198 · 27-inch monitors");
+    expect(purchaseReviewRow({ ...base, firstLine: null, lines: 0 }, NOW).title).toBe("PR-0198");
+    expect(purchaseReviewRow({ ...base, department: null }, NOW).meta).toBe("No department · from Pia Santos · waiting 4 d");
+  });
+  it("falls back to the last update when it was never stamped as submitted — the /purchases list's rule", () => {
+    expect(purchaseReviewRow({ ...base, submittedAt: null }, NOW).ageDays).toBe(16);
+  });
+  it("Fix round 1: the age reads like /purchases' dwell line — whole days floored, under a day \"today\"", () => {
+    const at = (iso: string) => purchaseReviewRow({ ...base, submittedAt: new Date(iso) }, NOW);
+    expect(at("2026-10-17T07:00:00+08:00").meta).toBe("HR · from Pia Santos · waiting today");
+    expect(at("2026-10-17T07:00:00+08:00").ageDays).toBe(0);
+    // 1.9 days: the list says "1 d" (floor), so the worklist does too — never a rounded "2 d"
+    expect(at("2026-10-15T12:24:00+08:00").meta).toBe("HR · from Pia Santos · waiting 1 d");
+    expect(at("2026-10-15T12:24:00+08:00").ageDays).toBe(1);
+    expect(dwellLine({
+      state: "SUBMITTED", updatedAt: base.updatedAt, submittedAt: new Date("2026-10-15T12:24:00+08:00"),
+      reviewedAt: null, completedAt: null, cancelledAt: null, bounced: false,
+    }, NOW)).toBe("awaiting IT · 1 d");
+  });
+  it("groups newest first, even within the same day", () => {
+    const older = purchaseReviewRow({ ...base, id: "old", submittedAt: new Date("2026-10-15T08:00:00+08:00") }, NOW);
+    const newer = purchaseReviewRow({ ...base, id: "new", submittedAt: new Date("2026-10-15T17:00:00+08:00") }, NOW);
+    const oldest = purchaseReviewRow({ ...base, id: "oldest", submittedAt: new Date("2026-10-02T08:00:00+08:00") }, NOW);
+    const [g] = groupWork([older, oldest, newer], new Set(), {});
+    expect(g.section.id).toBe("purchases");
+    expect(g.rows.map((r) => r.key)).toEqual(["purchases:new", "purchases:old", "purchases:oldest"]);
+  });
 });
 
 describe("groupWork", () => {
@@ -122,6 +175,24 @@ describe("workHeadline", () => {
     expect(workHeadline(groupWork([row({ key: "triage:1" })], new Set(), {}))).toBe("1 waiting");
     expect(workHeadline([])).toBe("");
   });
+  it("final review I2: the oldest age counts every live row, not only the ones Home shows", () => {
+    // Purchase reviews sort newest first, so with limit 2 the shown rows are the two youngest.
+    const groups = groupWork([
+      row({ key: "purchases:a", section: "purchases", severity: -1, ageDays: 1 }),
+      row({ key: "purchases:b", section: "purchases", severity: -2, ageDays: 2 }),
+      row({ key: "purchases:c", section: "purchases", severity: -15, ageDays: 15 }),
+    ], new Set(), { limit: 2 });
+    expect(groups[0].rows.map((r) => r.ageDays)).toEqual([1, 2]);
+    expect(groups[0].oldestDays).toBe(15);
+    expect(workHeadline(groups)).toBe("3 waiting · oldest 15 d");
+  });
+  it("a hidden (dismissed) row's age does not count", () => {
+    const groups = groupWork([
+      row({ key: "triage:1", ageDays: 3 }),
+      row({ key: "triage:2", ageDays: 30 }),
+    ], new Set(["triage:2"]), { limit: 1 });
+    expect(workHeadline(groups)).toBe("1 waiting · oldest 3 d");
+  });
 });
 
 describe("leaverRow — label and href from offboardingNext", () => {
@@ -129,7 +200,7 @@ describe("leaverRow — label and href from offboardingNext", () => {
   const e = (over: Partial<LeaverLike> = {}): LeaverLike => ({
     id: "e1", name: "Dennis Ong", employeeNo: "EMP-0090", itemsOut: 3,
     employment: "OFFBOARDING", dueAt: new Date("2026-09-22T00:00:00+08:00"),
-    undecided: 3, failed: null, m365Status: "offboarding", ...over,
+    undecided: 3, failed: null, m365Status: "offboarding", itAccess: 0, ...over,
   });
   it("undecided items: Collect N items into the Collect step", () => {
     const r = leaverRow(e(), TODAY);
@@ -172,7 +243,7 @@ describe("workRowHref — a viewer's Open goes where a viewer may go", () => {
   const e = (over: Partial<LeaverLike> = {}): LeaverLike => ({
     id: "e1", name: "Dennis Ong", employeeNo: "EMP-0090", itemsOut: 3,
     employment: "OFFBOARDING", dueAt: new Date("2026-09-22T00:00:00+08:00"),
-    undecided: 3, failed: null, m365Status: "offboarding", ...over,
+    undecided: 3, failed: null, m365Status: "offboarding", itAccess: 0, ...over,
   });
   it("a viewer's leaver row with no completion date opens /offboarding/{id}, not the edit page", () => {
     const r = leaverRow(e({ dueAt: null }), TODAY);
@@ -203,15 +274,16 @@ describe("groupWork — hidden rows are kept, not dropped", () => {
 describe("capLine / SEE_ALL_HREF / summaryChips / pastSlaCount", () => {
   const section = WORK_SECTIONS.find((s) => s.id === "repairs")!;
   it("a capped section says how many of how many", () => {
-    expect(capLine({ section, rows: new Array(50).fill(null) as WorkRow[], total: 50, capped: true, hidden: [], pastSla: 0 }))
+    expect(capLine({ section, rows: new Array(50).fill(null) as WorkRow[], total: 50, capped: true, hidden: [], pastSla: 0, oldestDays: 0 }))
       .toBe("Showing 50 of 50+ · See all");
-    expect(capLine({ section, rows: [], total: 0, capped: false, hidden: [], pastSla: 0 })).toBeNull();
+    expect(capLine({ section, rows: [], total: 0, capped: false, hidden: [], pastSla: 0, oldestDays: 0 })).toBeNull();
   });
   it("every section has a list that holds the rest", () => {
     expect(SEE_ALL_HREF).toEqual({
       triage: "/inventory?sort=attention", check: "/inventory?sort=attention",
       repairs: "/inventory?status=DEFECTIVE", loans: "/inventory?status=TEMPORARY&sort=attention",
       missing: "/inventory?status=MISSING", hires: "/employees?gaps=1", queue: "/approvals",
+      purchases: "/purchases?state=SUBMITTED",
     });
   });
   it("chips count each non-empty section; past SLA counts rank-0 queue rows", () => {

@@ -19,10 +19,10 @@ import { parseListState, type ListState } from "@/lib/url-state";
 import { ASSET_STATUSES, BULK_MAX, INVENTORY_LIST_CONFIG, buildAssetWhere, parsePurchaseYear } from "@/lib/inventory-list";
 import { statusFamily } from "@/lib/status";
 import {
-  ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, defaultClassFor, isAssignable, isDirectLifecycle, isStatusOf, parseCls,
+  ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, defaultClassFor, isAssignable, isDirectLifecycle, isStatusOf, parseCls, statusLabel,
 } from "@/lib/asset-class";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
+  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan, triageInputSchema, triageNeedsReason,
 } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange } from "./apply";
 import { rememberPicks } from "@/server/recent-picks";
@@ -150,7 +150,7 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
     const { asset } = loaded;
     const status: AssetStatus = d.status ?? DEFAULT_ASSIGN_STATUS[asset.cls];
     if (!(ASSIGN_TARGETS[asset.cls] as readonly string[]).includes(status)) {
-      return validationError({ status: `${status} is not an assign target for ${CLASS_PHRASE[asset.cls]} asset.` });
+      return validationError({ status: `${statusLabel(status)} is not an assign target for ${CLASS_PHRASE[asset.cls]} asset.` });
     }
     const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { name: true } });
     if (!employee) return validationError({ employeeId: "Unknown employee" });
@@ -194,7 +194,7 @@ export async function setLoanDue(input: unknown): Promise<ActionResult<{ tag: st
     const asset = await tx.asset.findUnique({ where: { id: d.assetId }, select: assetSelect });
     if (!asset) return conflict("That asset no longer exists.");
     if (!isDirectLifecycle(user.role, asset.cls)) return forbidden();
-    if (asset.status !== "TEMPORARY") return conflict(`${asset.tag} is not on loan — it reads ${asset.status}.`);
+    if (asset.status !== "TEMPORARY") return conflict(`${asset.tag} is not on loan — it reads ${statusLabel(asset.status)}.`);
     await tx.asset.update({ where: { id: asset.id }, data: { loanDueAt: due.value } });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
@@ -280,11 +280,11 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
       if (!isAssignable(newAsset)) {
         return conflict(newAsset.returnedAt
           ? `${newAsset.tag} is back but not yet triaged — triage it first.`
-          : `${newAsset.tag} is ${newAsset.status}, not a spare.`);
+          : `${newAsset.tag} is ${statusLabel(newAsset.status)}, not a spare.`);
       }
       let plan: ReturnType<typeof replacePlan>;
       try { plan = replacePlan({ status: oldAsset.status }, d.outcome); }
-      catch { return conflict(`${oldAsset.tag} is ${oldAsset.status} — nothing to replace.`); }
+      catch { return conflict(`${oldAsset.tag} is ${statusLabel(oldAsset.status)} — nothing to replace.`); }
 
       // From here on, the old asset's return may already have written to the
       // database (asset row, approval, audit, webhook). If the new asset's
@@ -320,47 +320,71 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
 }
 
 // ── triageAsset ─────────────────────────────────────────────────────────────
-const triageSchema = z.object({ assetId: z.string().min(1), outcome: z.enum(TRIAGE_OUTCOMES), note: z.string().trim().max(500).optional() });
+// Phase 40 (spec §8): the schema lives in lib/lifecycle (triageInputSchema) so its reason rule is unit-tested;
+// a missing decision, or Dispose/Donate without a reason of at least 2 characters, is refused before any write.
 
 export async function triageAsset(input: unknown): Promise<ActionResult<{ tag: string; status: string }>> {
   const user = await actionUser();
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
-  const parsed = triageSchema.safeParse(input);
+  const parsed = triageInputSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
   const now = new Date();
   let out: { tag: string; status: string } | null = null;
-  const failure = await prisma.$transaction(async (tx) => {
-    const loaded = await loadDirect(tx, user, d.assetId);
-    if ("failure" in loaded) return loaded.failure;
-    const { asset } = loaded;
-    if (asset.returnedAt === null) return conflict(`${asset.tag} is not waiting for triage.`);
-    const full = await tx.asset.findUniqueOrThrow({ where: { id: asset.id }, select: { notes: true } });
-    const notes = d.note ? (full.notes ? `${full.notes}\n${d.note}` : d.note) : undefined;
-    const triageDiff: AuditDiff = { triage: { from: null, to: TRIAGE_LABEL[d.outcome] } };
-    if (d.outcome === asset.status) {
-      // Keep as spare: only the flag moves. No approval row — nothing about the
-      // asset's lifecycle changed, so there is no decision to record as one.
-      await tx.asset.update({ where: { id: asset.id }, data: { returnedAt: null, ...(notes !== undefined ? { notes } : {}) } });
-      await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
-        action: "lifecycle.triage", diff: { ...triageDiff, returnedAt: { from: asset.returnedAt, to: null } },
+  let failure: ActionResult<never> | null | undefined;
+  try {
+    failure = await prisma.$transaction(async (tx) => {
+      const loaded = await loadDirect(tx, user, d.assetId);
+      if ("failure" in loaded) return loaded.failure;
+      const { asset } = loaded;
+      const notWaiting = conflict(`${asset.tag} is not waiting for triage.`);
+      if (asset.returnedAt === null) return notWaiting;
+      // Claim first, state-guarded, before anything is recorded: of two concurrent triages of the same
+      // device, the second blocks on the row lock, then finds nothing still waiting and is refused.
+      // `asset` keeps the pre-claim snapshot, so prepareLifecycle still diffs returnedAt → null.
+      const claim = await tx.asset.updateMany({
+        where: { id: asset.id, status: asset.status, returnedAt: { not: null } },
+        data: { returnedAt: null },
       });
-    } else {
-      const r = await recordDirect(tx, {
-        actor: user, asset, now, type: "lifecycle_change_status", action: "lifecycle.triage",
-        change: { kind: "change-status", status: d.outcome },
-        payload: { from: { status: asset.status }, to: { status: d.outcome }, reason: d.note ?? "triage" },
-        extraDiff: triageDiff,
-      });
-      if (!r.ok) return conflict(r.error);
-      if (notes !== undefined) await tx.asset.update({ where: { id: asset.id }, data: { notes } });
-    }
-    out = { tag: asset.tag, status: d.outcome };
-    return null;
-  });
+      if (claim.count === 0) return notWaiting;
+      const full = await tx.asset.findUniqueOrThrow({ where: { id: asset.id }, select: { notes: true } });
+      const notes = d.note ? (full.notes ? `${full.notes}\n${d.note}` : d.note) : undefined;
+      // The asset has no disposal-reason column. For Dispose/Donate the text is the decision's reason
+      // (`reason`, the key other reasoned actions use); for Keep/Repair it is an optional `note`. Either way
+      // it also rides the EXECUTED approval's payload and the asset's notes, as the note always did.
+      const textKey = triageNeedsReason(d.outcome) ? "reason" : "note";
+      const triageDiff: AuditDiff = {
+        triage: { from: null, to: TRIAGE_LABEL[d.outcome] },
+        ...(d.note ? { [textKey]: { from: null, to: d.note } } : {}),
+      };
+      if (d.outcome === asset.status) {
+        // Keep as spare: only the flag moves (claimed above). No approval row — nothing about the
+        // asset's lifecycle changed, so there is no decision to record as one.
+        if (notes !== undefined) await tx.asset.update({ where: { id: asset.id }, data: { notes } });
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
+          action: "lifecycle.triage", diff: { ...triageDiff, returnedAt: { from: asset.returnedAt, to: null } },
+        });
+      } else {
+        const r = await recordDirect(tx, {
+          actor: user, asset, now, type: "lifecycle_change_status", action: "lifecycle.triage",
+          change: { kind: "change-status", status: d.outcome },
+          payload: { from: { status: asset.status }, to: { status: d.outcome }, reason: d.note || "triage" },
+          extraDiff: triageDiff,
+        });
+        // the claim is already written: throw, so the rollback undoes it (a plain return would commit it)
+        if (!r.ok) throw new DirectRefusal(r.error);
+        if (notes !== undefined) await tx.asset.update({ where: { id: asset.id }, data: { notes } });
+      }
+      out = { tag: asset.tag, status: d.outcome };
+      return null;
+    });
+  } catch (err) {
+    if (err instanceof DirectRefusal) return conflict(err.message);
+    throw err;
+  }
   if (failure) return failure;
   revalidateAsset(d.assetId, []);
   return ok(out!);
@@ -434,10 +458,10 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
     const blocked = new Set(open.map((o) => o.assetId));
     const targets: typeof assets = [];
     for (const asset of assets) {
-      if (asset.status === to) { skipped.push({ tag: asset.tag, reason: `already ${to}` }); continue; }
+      if (asset.status === to) { skipped.push({ tag: asset.tag, reason: `already ${statusLabel(to)}` }); continue; }
       if (blocked.has(asset.id)) { skipped.push({ tag: asset.tag, reason: "held by an open request" }); continue; }
       if (statusFamily(asset.status) === "closed") {
-        skipped.push({ tag: asset.tag, reason: `closed status ${asset.status} — cannot change` });
+        skipped.push({ tag: asset.tag, reason: `closed status ${statusLabel(asset.status)} — cannot change` });
         continue;
       }
       targets.push(asset);
@@ -506,7 +530,7 @@ export async function bulkAssign(input: unknown): Promise<ActionResult<{ assigne
     const cls = assets[0].cls;
     if (!isDirectLifecycle(user.role, cls)) return forbidden();
     if (!(ASSIGN_TARGETS[cls] as readonly string[]).includes(d.status)) {
-      return validationError({ status: `${d.status} is not an assign target for ${CLASS_PHRASE[cls]} asset.` });
+      return validationError({ status: `${statusLabel(d.status)} is not an assign target for ${CLASS_PHRASE[cls]} asset.` });
     }
     for (const asset of assets) {
       const open = await openApprovalForAsset(tx, asset.id);

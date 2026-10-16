@@ -87,7 +87,8 @@ test.describe("workspace gating", () => {
 
   test("admin switches workspaces; the cookie sticks", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
-    await page.getByRole("button", { name: /br\.dept/ }).click();
+    // Phase 40 (spec §3): the switcher reads "{n} workspaces", never the cookie name.
+    await page.getByRole("button", { name: /4 workspaces/ }).click();
     await page.getByRole("menuitem", { name: "Purchasing" }).click();
     await expect(page).toHaveURL(/\/purchases$/);
     await expect(page.getByRole("navigation", { name: "Workspace" })).toContainText("Procurement");
@@ -97,8 +98,9 @@ test.describe("workspace gating", () => {
 
   test("single-workspace roles get a static label, no switcher", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await expect(page.getByText("br.dept · 1 available")).toBeVisible();
-    await expect(page.getByRole("button", { name: /br\.dept/ })).toHaveCount(0);
+    await expect(page.getByText("1 workspace", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /workspaces?$/ })).toHaveCount(0);
+    await expect(page.getByText(/br\.dept/)).toHaveCount(0);
   });
 });
 
@@ -127,11 +129,11 @@ test.describe("shell", () => {
   test("mobile drawer opens, traps, and closes on ESC", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await login(page, "it@thebackroomop.com");
-    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("button", { name: "Open menu" }).click();
     await expect(page.getByRole("dialog", { name: "IT" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open navigation" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Open menu" })).toBeFocused();
     expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
   });
 
@@ -143,7 +145,7 @@ test.describe("shell", () => {
     // ⌘K listener. Wait for the page to go quiet before firing the shortcut.
     await page.waitForLoadState("networkidle");
     await page.keyboard.press("ControlOrMeta+k");
-    const input = page.getByRole("dialog", { name: "Command palette" }).getByLabel("Search");
+    const input = page.getByRole("dialog", { name: "Command palette" }).getByRole("combobox", { name: "Search" });
     await expect(input).toBeFocused();
     await input.fill("BR-LT-0148");
     await expect(page.getByRole("option", { name: /BR-LT-0148/ })).toBeVisible();

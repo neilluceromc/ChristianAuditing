@@ -1,9 +1,13 @@
-import type { ApprovalType, EmploymentStatus, Priority } from "@prisma/client";
+import type { ApprovalState, ApprovalType, EmploymentStatus, Priority } from "@prisma/client";
 
 /** Canonical M365 sync states; a `"use server"` file can't export a const, so it lives here. */
 export const M365_CANONICAL = ["pending", "active", "offboarding", "inactive"] as const;
 
-/** Prisma maps the dotted enum values to underscored names; the UI shows the dotted originals. */
+/**
+ * Prisma maps the dotted enum values to underscored names; these are the dotted originals, kept for the
+ * worker's audit action codes and its stored errors. Phase 40 §6: never shown as copy — the UI names a
+ * kind with APPROVAL_KIND_LABEL.
+ */
 export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   lifecycle_assign: "lifecycle.assign",
   lifecycle_replace: "lifecycle.replace",
@@ -20,7 +24,13 @@ export const EMPLOYMENT_LABEL: Record<EmploymentStatus, string> = {
 /** Friendly priority words (Phase 33); the queue shows High and Urgent as a pill. */
 export const PRIORITY_LABEL: Record<Priority, string> = { NORMAL: "Normal", HIGH: "High", URGENT: "Urgent" };
 
-/** Friendly request kinds for the approvals Type facet (Phase 33); line 1 of a row still prints APPROVAL_TYPE_LABEL. */
+/** Friendly approval states (Phase 40 §2.4) for places that read as prose; the enum value stays the status dot's key. */
+export const APPROVAL_STATE_LABEL: Record<ApprovalState, string> = {
+  PENDING: "Pending", CLAIMED: "Claimed", APPROVED: "Approved", REJECTED: "Rejected",
+  EXECUTED: "Executed", EXECUTION_FAILED: "Failed",
+};
+
+/** Friendly request kinds: the approvals Type facet (Phase 33) and, since Phase 40 §6, every place the UI names a kind. */
 export const APPROVAL_KIND_LABEL: Record<ApprovalType, string> = {
   lifecycle_assign: "Assign", lifecycle_return: "Return", lifecycle_change_status: "Change status",
   lifecycle_replace: "Replace", lifecycle_transfer: "Transfer",

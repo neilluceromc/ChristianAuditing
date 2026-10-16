@@ -232,6 +232,15 @@ export const STATUS_LABEL: Record<AssetStatus, string> = {
 };
 
 /**
+ * Phase 40 §6: STATUS_LABEL for a status that arrives as a plain string (a payload, an audit diff, a row) —
+ * so "Loan", never TEMPORARY. An unknown value stays as written; nothing at all reads "—".
+ */
+export function statusLabel(value: string | null | undefined): string {
+  if (!value) return "—";
+  return Object.hasOwn(STATUS_LABEL, value) ? STATUS_LABEL[value as AssetStatus] : value;
+}
+
+/**
  * Phase 30 (spec §4.2): the statuses a direct Change status may pick — never the current one; no holder
  * status without a holder (Assign does that); while held, only the other holder statuses (Return does the rest).
  */

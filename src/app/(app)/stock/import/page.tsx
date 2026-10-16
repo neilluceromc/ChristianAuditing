@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { ImportWizard } from "@/components/import/import-wizard";
 import { STOCK_KNOWN_UNIMPORTED_COLUMNS, STOCK_UNIT_COST_NOTICE } from "@/lib/import-columns";
 import { planStockImport, applyStockImport } from "@/server/modules/import/stock-actions";
+
+export const metadata: Metadata = { title: pageTitle("Import stock items") };
 
 export default async function ImportStockPage() {
   // `requireRole("admin", "purchasing_staff")` — the same set

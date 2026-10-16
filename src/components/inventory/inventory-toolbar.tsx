@@ -128,6 +128,7 @@ export function InventoryToolbar({
             // navigation, and an uncontrolled input ignores a new defaultValue once typed in.
             key={state.q}
             type="search"
+            data-page-search
             aria-label="Search assets"
             placeholder="Search tag, model, serial, holder · Enter"
             defaultValue={state.q}

@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -27,6 +29,8 @@ const editorKeyOf = (policyId: string, slots: SlotRow[]) =>
   `${policyId}:${slots.map((s) => `${s.id}.${s.assetTypeId}.${+s.required}${+s.loaner}`).join(",")}`;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export const metadata: Metadata = { title: pageTitle("Equipment policies") };
 
 /**
  * Phase 37 (spec §3.3): one equipment policy per client and per internal department, master-detail. The list

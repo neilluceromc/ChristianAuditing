@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { assetTagFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { pagedSnapshot } from "@/server/paged";
 import { historyEntries } from "@/lib/history";
+import { resolveHistoryNames } from "@/server/modules/inventory/history-names";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { LOG_PAGE_SIZE, parsePage } from "@/lib/paging";
@@ -10,6 +14,11 @@ import { Table, TBody, Th, THead, Tr } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { HistoryEntryRows } from "@/components/inventory/history-entry-rows";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle("History", await assetTagFor(id)) };
+}
 
 export default async function AssetHistoryPage({
   params,
@@ -36,7 +45,7 @@ export default async function AssetHistoryPage({
         take: pg.take,
       }),
   );
-  const groups = historyEntries(entries);
+  const groups = historyEntries(entries, await resolveHistoryNames(entries));
 
   if (groups.length === 0) {
     return <EmptyState title="No changes recorded" description="Every field change lands here, one row per field." />;

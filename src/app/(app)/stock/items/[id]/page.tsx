@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-title";
+import { stockItemTitleFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getStockItem, itemLots } from "@/server/modules/stock/queries";
@@ -17,6 +20,11 @@ import { ItemArchiveControls } from "@/components/stock/item-archive-controls";
 import { ExpiryPill } from "@/components/stock/expiry-pill";
 import { LotsCard } from "@/components/stock/lots-card";
 import { MovementHistory } from "@/components/stock/movement-history";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return { title: pageTitle((await stockItemTitleFor(id)) ?? "Stock item") };
+}
 
 export default async function StockItemPage({
   params,

@@ -284,7 +284,7 @@ test.describe("inventory list", () => {
       await expect(dialog).toBeVisible();
       await dialog.getByRole("button", { name: "Return", exact: true }).click();
 
-      await expect(page.getByText("BR-DK-0071 returned · now SPARE")).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText("Success: BR-DK-0071 returned · now Spare", { exact: true })).toBeVisible({ timeout: 15_000 });
       await expect(dialog).toBeHidden();
       await expect(await cellOf(page, row, "Assigned")).toHaveText("—", { timeout: 15_000 });
       const after = await db.asset.findUniqueOrThrow({ where: { id: before.id } });

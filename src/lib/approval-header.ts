@@ -28,3 +28,29 @@ export function approvalHeader(c: HeaderCtx): { primary: ApprovalVerb | null; re
     default: return NONE;
   }
 }
+
+/** The queue's action keys (C, A, E, R). J/K/Enter only move or open and are handled apart. */
+export type QueueKeyAction = "claim" | "primary" | "escalate" | "reject";
+
+const ACTION_KEYS: Record<string, QueueKeyAction> = { c: "claim", a: "primary", e: "escalate", r: "reject" };
+
+/**
+ * Phase 40 fix round 1: an action key fires once, on a bare press — never on a held key's
+ * auto-repeat, and never under Ctrl/Cmd/Alt (Ctrl+A is select-all, not "approve").
+ */
+export function queueKeyAction(e: { key: string; repeat: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): QueueKeyAction | null {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return null;
+  return Object.hasOwn(ACTION_KEYS, e.key.toLowerCase()) ? ACTION_KEYS[e.key.toLowerCase()] : null;
+}
+
+/**
+ * Final review M2: J/K and the arrow keys move the queue's cursor on a bare press only — under Ctrl/Cmd/Alt the
+ * key stays the browser's or the app's (Ctrl+K opens the palette and must not also move a row). A held key's
+ * auto-repeat keeps moving, which is what a held J is for.
+ */
+export function queueMoveKey(e: { key: string; repeat: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): "down" | "up" | null {
+  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+  if (e.key === "ArrowDown" || e.key.toLowerCase() === "j") return "down";
+  if (e.key === "ArrowUp" || e.key.toLowerCase() === "k") return "up";
+  return null;
+}

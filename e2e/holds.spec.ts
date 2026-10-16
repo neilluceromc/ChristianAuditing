@@ -6,6 +6,7 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 import { addDays, dayFromISO } from "@/lib/deadlines";
 import { fmtDate, localDateISO } from "@/lib/format";
 import { defaultHoldExpiry } from "@/lib/holds";
+import { statusLabel } from "@/lib/asset-class";
 
 /**
  * Phase 26 (spec §7) — holds that work, and the repair end date. Eleven cases,
@@ -48,12 +49,10 @@ import { defaultHoldExpiry } from "@/lib/holds";
  *
  * Two deviations from the task brief's letter, both recorded rather than
  * quietly dropped:
- *   - cases 1 and 5 assert the hold's audit SENTENCE on `/inventory/activity`,
- *     not on the asset's own `/inventory/<id>/timeline`. The timeline renders
- *     `actorLabel — action · N fields` (timeline/page.tsx) and never calls
- *     `auditSentence`; `/inventory/activity` is the surface that does. Both are
- *     asserted: the timeline for the `reservation.placed` / `.released` point,
- *     the activity feed for the sentence the brief pinned.
+ *   - cases 1 and 5 assert the hold's audit SENTENCE on `/inventory/activity`
+ *     (with the entity label) as well as on the asset's own
+ *     `/inventory/<id>/timeline`, which since Phase 40 renders the same
+ *     `auditSentence` without the actor and the tag ("reserved for EMP-0097 …").
  *   - case 8's `npm run worker:once` also drains whatever jobs are PENDING,
  *     which after a reseed is the seeded EXECUTE_APPROVAL for APR-2035 (an
  *     approval with no asset — it terminalises as EXECUTION_FAILED) plus the
@@ -185,9 +184,8 @@ test.describe("holds", () => {
 
       // The asset's own timeline carries the audit POINT…
       await page.goto(`/inventory/${headset.id}/timeline`);
-      await expect(page.getByText("reservation.placed").first()).toBeVisible();
-      // …and the inventory activity feed carries the SENTENCE (auditSentence
-      // lives there; the timeline prints the raw action — see the file header).
+      await expect(page.getByText(new RegExp(`reserved for ${nina.name}`)).first()).toBeVisible();
+      // …and the inventory activity feed carries the SENTENCE with the tag (see the file header).
       await page.goto("/inventory/activity");
       await expect(page.getByText(/reserved BR-HS-0502 for EMP-0097 until/)).toBeVisible();
 
@@ -196,7 +194,7 @@ test.describe("holds", () => {
       await expect(row).toContainText("HOLD");
       await expect(row.getByRole("link", { name: nina.name })).toHaveAttribute("href", `/employees/${nina.id}`);
       await expect(row).toContainText("expires in 7 d");
-      await expect(row).toContainText("SPARE");
+      await expect(row).toContainText("Spare");
 
       // spareOptions filters `reservations: { none: { state: "ACTIVE" } }` —
       // a promised spare must not be offered as somebody else's replacement.
@@ -367,7 +365,7 @@ test.describe("holds", () => {
       await expect(page.getByRole("status").filter({ hasText: "Held for" })).toHaveCount(0);
 
       await page.goto(`/inventory/${headset.id}/timeline`);
-      await expect(page.getByText("reservation.released").first()).toBeVisible();
+      await expect(page.getByText("released the hold").first()).toBeVisible();
       await page.goto("/inventory/activity");
       await expect(page.getByText(/released the hold on BR-HS-0502/)).toBeVisible();
 
@@ -623,7 +621,7 @@ test.describe("holds", () => {
       await dialog.getByLabel("New status").selectOption(to);
       await dialog.getByRole("group", { name: "Quick picks" }).getByRole("button", { name: chip, exact: true }).click();
       await dialog.getByRole("button", { name: "Change status", exact: true }).click();
-      await expect(page.getByText(`BR-MN-0911 is now ${to}`)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(`Success: BR-MN-0911 is now ${statusLabel(to)}`, { exact: true })).toBeVisible({ timeout: 15_000 });
     };
 
     try {
