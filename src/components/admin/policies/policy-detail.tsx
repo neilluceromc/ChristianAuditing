@@ -283,13 +283,22 @@ export function TitleRules({
                 <span className="text-xs text-fg-muted">
                   · {r.lines.length} {r.lines.length === 1 ? "line" : "lines"} ·
                 </span>
-                {/* A disclosure: its name stays put ("Edit"/"View the … rule") while aria-expanded says open or not. */}
+                {/* A disclosure: the visible word never changes ("Edit"/"View", inside the name, WCAG 2.5.3); the
+                    chevron and aria-expanded say open or not, and the same button closes the editor. */}
                 <Button
                   size="sm" variant="ghost" aria-expanded={isOpen} aria-controls={panelId}
                   aria-label={`${canMutate ? "Edit" : "View"} the ${r.title} rule`}
                   onClick={() => toggle(r.policyId)}
                 >
-                  {isOpen ? "Close" : canMutate ? "Edit" : "View"}
+                  <span className="inline-flex items-center gap-1">
+                    {canMutate ? "Edit" : "View"}
+                    <svg
+                      aria-hidden viewBox="0 0 10 10" width="10" height="10"
+                      className={isOpen ? "rotate-180 transition-transform" : "transition-transform"}
+                    >
+                      <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                    </svg>
+                  </span>
                 </Button>
                 {canMutate && (
                   <Button size="sm" variant="ghost" className="ml-auto" aria-label={`Remove the ${r.title} rule`} onClick={() => setRemoving(r)}>

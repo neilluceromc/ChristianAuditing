@@ -790,13 +790,19 @@ test.describe("Phase 39 — bounded lists", () => {
       page.on("dialog", (d) => { asked.push(d.message()); void d.dismiss(); });
       await edit(a).click();
       await expect(editor(a)).toBeVisible();
-      // A disclosure: the name stays "Edit the … rule" (the visible text reads Close), aria-expanded flips, and
-      // aria-controls names the panel holding the editor.
-      await expect(edit(a)).toHaveText("Close");
+      // A disclosure: the name stays "Edit the … rule" and the visible text stays "Edit" (inside the name, WCAG
+      // 2.5.3); aria-expanded flips, and aria-controls names the panel holding the editor.
+      await expect(edit(a)).toHaveText("Edit");
       await expect(edit(a)).toHaveAttribute("aria-expanded", "true");
       await expect(edit(b)).toHaveAttribute("aria-expanded", "false");
       const panelId = await edit(a).getAttribute("aria-controls");
       await expect(page.locator(`[id="${panelId}"]`).getByRole("region", { name: `${a} on ${group.name}`, exact: true })).toBeVisible();
+      // The same button closes it, then opens it again.
+      await edit(a).click();
+      await expect(editor(a)).toHaveCount(0);
+      await expect(edit(a)).toHaveAttribute("aria-expanded", "false");
+      await edit(a).click();
+      await expect(editor(a)).toBeVisible();
       await edit(b).click();
       await expect(editor(b)).toBeVisible();
       await expect(editor(a)).toHaveCount(0);
