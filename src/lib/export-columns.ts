@@ -415,3 +415,46 @@ export const SCHEDULE_EXPORT_COLUMNS: XlsxColumn<ScheduleSheetRow>[] = [
   { label: "Year total", width: 14, cell: (r) => peso(r.grid.total) },
   { label: "Book value 31 Dec", width: 16, cell: (r) => peso(r.grid.closing) },
 ];
+
+/**
+ * Phase 38 (spec §3.5): one row per IT-class item held by a counted person. `costC` and `bookC` (centavos) exist only
+ * when the export was built for a money role — for anyone else the rows never carry them and the two columns are absent.
+ */
+export interface EquipmentExportRow {
+  worksFor: string; kind: "INTERNAL" | "CLIENT"; person: string; employeeNo: string;
+  category: string; type: string | null; tag: string; model: string; serial: string | null; status: string;
+  purchasedAt: Date | null; heldSince: Date | null; loanDueAt: Date | null;
+  costC?: number | null; bookC?: number;
+}
+
+export const EQUIPMENT_EXPORT_COLUMNS: XlsxColumn<EquipmentExportRow>[] = [
+  { label: "Works for", width: 22, cell: (r) => ({ value: r.worksFor }) },
+  { label: "Staff", width: 10, cell: (r) => ({ value: r.kind === "CLIENT" ? "Client" : "Internal" }) },
+  { label: "Person", width: 26, cell: (r) => ({ value: r.person }) },
+  { label: "Employee no.", width: 14, cell: (r) => ({ value: r.employeeNo }) },
+  { label: "Category", width: 18, cell: (r) => ({ value: r.category }) },
+  { label: "Type", width: 18, cell: (r) => ({ value: r.type }) },
+  { label: "Tag", width: 16, cell: (r) => ({ value: r.tag }) },
+  { label: "Model", width: 28, cell: (r) => ({ value: r.model }) },
+  { label: "Serial", width: 20, cell: (r) => ({ value: r.serial }) },
+  { label: "Status", width: 14, cell: (r) => ({ value: r.status }) },
+  { label: "Purchased", width: 13, cell: (r) => ({ value: r.purchasedAt, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "Held since", width: 13, cell: (r) => ({ value: r.heldSince, type: Date, format: "yyyy-mm-dd" }) },
+  { label: "On loan until", width: 14, cell: (r) => ({ value: r.loanDueAt, type: Date, format: "yyyy-mm-dd" }) },
+];
+
+/** Appended for Finance and Admin only. An item with no cost is a blank Cost and a ₱0 Book value. */
+export const EQUIPMENT_MONEY_COLUMNS: XlsxColumn<EquipmentExportRow>[] = [
+  { label: "Cost", width: 13, cell: (r) => peso(r.costC) },
+  { label: "Book value", width: 13, cell: (r) => peso(r.bookC) },
+];
+
+export const equipmentExportColumns = (withMoney: boolean): XlsxColumn<EquipmentExportRow>[] =>
+  withMoney ? [...EQUIPMENT_EXPORT_COLUMNS, ...EQUIPMENT_MONEY_COLUMNS] : EQUIPMENT_EXPORT_COLUMNS;
+
+/** `Bluepeak Telecom` -> `equipment-bluepeak-telecom`; the whole-report file is `equipment-by-client`. */
+export function equipmentFilePrefix(groupName?: string): string {
+  if (groupName === undefined) return "equipment-by-client";
+  const slug = groupName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `equipment-${slug || "group"}`;
+}

@@ -56,7 +56,8 @@ export interface GroupSummary {
   money?: { costC: number; bookC: number; perPersonC: number; withoutCost: number };
 }
 
-function bookValueC(a: ReportAsset, asOf: MonthIndex): number {
+/** Book value today in centavos; an item with no cost counts as 0. Shared by the page's summaries and the export. */
+export function bookValueC(a: ReportAsset, asOf: MonthIndex): number {
   const cost = a.costC ?? 0;
   const policy = resolveDepPolicy(
     { cost, lifeMonths: a.dep.lifeMonths, salvage: a.dep.salvage },

@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, CONSUMPTION_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS,
   EXPIRY_EXPORT_COLUMNS, EXPORT_CAP, FAREWELL_EXPORT_COLUMNS, HOLDINGS_EXPORT_COLUMNS, IDS_CAP,
-  OFFBOARDING_EXPORT_COLUMNS, ON_HAND_EXPORT_COLUMNS, capRefusalText, idsRefusalText,
-  type ConsumptionExportRow, type ExpiryExportRow, type HoldingsExportRow, type OffboardingExportRow,
+  OFFBOARDING_EXPORT_COLUMNS, ON_HAND_EXPORT_COLUMNS, capRefusalText, equipmentExportColumns, equipmentFilePrefix,
+  idsRefusalText,
+  type ConsumptionExportRow, type EquipmentExportRow, type ExpiryExportRow, type HoldingsExportRow, type OffboardingExportRow,
   type OnHandExportRow,
 } from "./export-columns";
 
@@ -310,5 +311,45 @@ describe("OFFBOARDING_EXPORT_COLUMNS (Phase 25, spec §6.5)", () => {
     expect(cells[4]).toEqual({ value: null, type: Date, format: "yyyy-mm-dd" });
     expect(cells[5]).toEqual({ value: 3, type: Number });
     expect(cells[6]).toEqual({ value: "Open" });
+  });
+});
+
+// Phase 38 (spec §3.5): the Equipment by client sheet.
+describe("equipment export columns", () => {
+  const BASE = [
+    "Works for", "Staff", "Person", "Employee no.", "Category", "Type", "Tag", "Model", "Serial", "Status",
+    "Purchased", "Held since", "On loan until",
+  ];
+  const row: EquipmentExportRow = {
+    worksFor: "Bluepeak Telecom", kind: "CLIENT", person: "Ana Reyes", employeeNo: "EMP-1", category: "Laptops",
+    type: "Laptop", tag: "BR-LT-1", model: "T14", serial: "S1", status: "TEMPORARY",
+    purchasedAt: new Date("2026-10-12T00:00:00Z"), heldSince: null, loanDueAt: null,
+  };
+
+  it("lists the headers in the agreed order, with no money columns for a non-money role", () => {
+    expect(equipmentExportColumns(false).map((c) => c.label)).toEqual(BASE);
+  });
+
+  it("appends Cost then Book value for a money role", () => {
+    expect(equipmentExportColumns(true).map((c) => c.label)).toEqual([...BASE, "Cost", "Book value"]);
+  });
+
+  it("writes dates as yyyy-mm-dd cells and money as pesos", () => {
+    const cols = equipmentExportColumns(true);
+    const cell = (label: string, r: EquipmentExportRow) => cols.find((c) => c.label === label)!.cell(r);
+    expect(cell("Purchased", row)).toMatchObject({ value: row.purchasedAt, format: "yyyy-mm-dd" });
+    expect(cell("Held since", row).value).toBeNull();
+    expect(cell("Staff", row)).toEqual({ value: "Client" });
+    expect(cell("Cost", { ...row, costC: 5_200_000, bookC: 5_055_556 })).toMatchObject({ value: 52_000, format: "#,##0.00" });
+    expect(cell("Book value", { ...row, costC: 5_200_000, bookC: 5_055_556 }).value).toBeCloseTo(50_555.56, 2);
+    expect(cell("Cost", { ...row, costC: null, bookC: 0 }).value).toBeNull();
+    expect(cell("Book value", { ...row, costC: null, bookC: 0 }).value).toBe(0);
+  });
+
+  it("names the file after the report or a slug of the group", () => {
+    expect(equipmentFilePrefix()).toBe("equipment-by-client");
+    expect(equipmentFilePrefix("Bluepeak Telecom")).toBe("equipment-bluepeak-telecom");
+    expect(equipmentFilePrefix("  R&D / QA (Cebu)! ")).toBe("equipment-r-d-qa-cebu");
+    expect(equipmentFilePrefix("日本")).toBe("equipment-group");
   });
 });

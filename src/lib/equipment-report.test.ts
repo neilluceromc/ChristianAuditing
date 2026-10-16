@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { manilaMonth } from "./depreciation";
 import {
-  canSeeMoney, defaultReportSort, equippedTone, filterReportGroups, groupHasBasePolicy, reportFilterCounts, reportPeopleByGroup,
+  bookValueC, canSeeMoney, defaultReportSort, equippedTone, filterReportGroups, groupHasBasePolicy, reportFilterCounts, reportPeopleByGroup,
   reportTotals, sortReportGroups, summariseGroup,
   type GroupSummary, type ReportAsset, type ReportPerson,
 } from "./equipment-report";
@@ -332,5 +332,18 @@ describe("assembling the report from the loaded rows", () => {
     ];
     expect(reportTotals(rows, true).money).toEqual({ costC: 150, bookC: 120, withoutCost: 3 });
     expect("money" in reportTotals(rows, false)).toBe(false);
+  });
+});
+
+describe("bookValueC — the export's Book value column", () => {
+  const dep = { lifeMonths: 36, salvage: 0, catLifeMonths: null, catSalvagePercent: null };
+  const approved = new Date("2026-10-13T02:00:00Z");
+  it("is the user's example: 52,000 over 36 months, bought 12 Oct, viewed 17 Oct = 50,555.56", () => {
+    const a = asset("a", null, { costC: 5_200_000, purchasedAt: new Date("2026-10-12T02:00:00Z"), financeConfirmedAt: approved, dep });
+    expect(bookValueC(a, asOf)).toBe(5_055_556);
+  });
+  it("an item with no cost is 0, and an unapproved item keeps its full cost", () => {
+    expect(bookValueC(asset("a", null, { costC: null, financeConfirmedAt: approved, dep }), asOf)).toBe(0);
+    expect(bookValueC(asset("b", null, { costC: 100_000, dep }), asOf)).toBe(100_000);
   });
 });

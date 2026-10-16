@@ -1,7 +1,6 @@
 "use server";
 
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -9,6 +8,7 @@ import { forbidden, ok, rateLimited, validationError, zodFieldErrors, type Actio
 import { canSeeClass } from "@/lib/asset-class";
 import { auditSentence } from "@/lib/activity";
 import { fmtMoney } from "@/lib/format";
+import { heldSinceByAsset } from "./held-since";
 
 /** Phase 37 (spec §4.4): what the held-item side panel shows. Dates are ISO strings; the panel formats them. */
 export interface HeldItemPanel {
@@ -48,25 +48,15 @@ export async function heldItemPanel(input: unknown): Promise<ActionResult<{ pane
     take: 5,
     select: { actorLabel: true, action: true, diff: true, createdAt: true },
   });
-  // How an assignment is audited: lifecycle writes `assignee: { to: <employee number> }` (the id when the number is
-  // unknown); a plain edit writes `assigneeId: { to: <id> }`. Any of those naming this person marks "held since".
-  const becameHolder: Prisma.AuditEntryWhereInput[] = [
-    { diff: { path: ["assignee", "to"], equals: employeeId } },
-    { diff: { path: ["assigneeId", "to"], equals: employeeId } },
-    ...(asset.assignee ? [{ diff: { path: ["assignee", "to"], equals: asset.assignee.employeeNo } }] : []),
-  ];
-  const since = await prisma.auditEntry.findFirst({
-    where: { ...onAsset, OR: becameHolder },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
+  // "Held since" is the shared rule (held-since.ts), here for the one item.
+  const since = (await heldSinceByAsset(asset.assignee ? [{ assetId, employeeId, employeeNo: asset.assignee.employeeNo }] : [])).get(assetId) ?? null;
 
   return ok({
     panel: {
       id: asset.id, tag: asset.tag, model: asset.model, status: asset.status, serial: asset.serial,
       categoryName: asset.category?.name ?? null, typeName: asset.type?.name ?? null,
       loanDueAt: asset.loanDueAt ? asset.loanDueAt.toISOString() : null,
-      heldSince: since ? since.createdAt.toISOString() : null,
+      heldSince: since ? since.toISOString() : null,
       // the profile's Book value stat is the sum of cost over the items held; for one item that is its cost
       bookValue: asset.cost === null ? null : fmtMoney(Number(asset.cost)),
       history: recent.map((e) => ({
