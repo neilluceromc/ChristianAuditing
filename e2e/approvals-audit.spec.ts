@@ -244,7 +244,9 @@ test.describe("audit log", () => {
     await page.getByLabel("Search audit log").press("Enter");
     await expect(page).toHaveURL(/q=SECRET_READ/);
     await expect(page.getByText("1 entry")).toBeVisible();
-    await expect(page.getByRole("row", { name: /SECRET_READ/ })).toBeVisible();
+    // Phase 40 §6: the search still finds the code, but the row reads the action's words.
+    await expect(page.getByRole("row", { name: /Secret read/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /SECRET_READ/ })).toHaveCount(0);
   });
 
   /**

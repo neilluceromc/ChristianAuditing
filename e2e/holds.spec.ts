@@ -621,7 +621,7 @@ test.describe("holds", () => {
       await dialog.getByLabel("New status").selectOption(to);
       await dialog.getByRole("group", { name: "Quick picks" }).getByRole("button", { name: chip, exact: true }).click();
       await dialog.getByRole("button", { name: "Change status", exact: true }).click();
-      await expect(page.getByText(`BR-MN-0911 is now ${statusLabel(to)}`)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(`Success: BR-MN-0911 is now ${statusLabel(to)}`, { exact: true })).toBeVisible({ timeout: 15_000 });
     };
 
     try {

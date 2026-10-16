@@ -207,7 +207,7 @@ test.describe.serial("deadlines", () => {
       const entry = page.getByRole("row", { name: /Dennis Ong/ }).first();
       await expect(entry).toBeVisible({ timeout: 20_000 });
       await expect(entry).toContainText("updated complete-by date");
-      await expect(entry).toContainText("update");
+      await expect(entry.locator("td").nth(3)).toHaveText("Updated"); // Phase 40 §6: the action's words, not "update"
     } finally {
       // Cases 3 and 6 read the seeded "2 d overdue"; the audit row above is
       // append-only and is unaffected by putting the date back.

@@ -28,3 +28,17 @@ export function approvalHeader(c: HeaderCtx): { primary: ApprovalVerb | null; re
     default: return NONE;
   }
 }
+
+/** The queue's action keys (C, A, E, R). J/K/Enter only move or open and are handled apart. */
+export type QueueKeyAction = "claim" | "primary" | "escalate" | "reject";
+
+const ACTION_KEYS: Record<string, QueueKeyAction> = { c: "claim", a: "primary", e: "escalate", r: "reject" };
+
+/**
+ * Phase 40 fix round 1: an action key fires once, on a bare press — never on a held key's
+ * auto-repeat, and never under Ctrl/Cmd/Alt (Ctrl+A is select-all, not "approve").
+ */
+export function queueKeyAction(e: { key: string; repeat: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): QueueKeyAction | null {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return null;
+  return Object.hasOwn(ACTION_KEYS, e.key.toLowerCase()) ? ACTION_KEYS[e.key.toLowerCase()] : null;
+}

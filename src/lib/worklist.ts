@@ -6,6 +6,7 @@
 import { addDays, daysUntil, dueStatus } from "./deadlines";
 import { fmtDate, localDateISO } from "./format";
 import { offboardingNext, type LeaverState } from "./offboarding";
+import { since as waitingSince } from "./purchases-list";
 
 export { DEFAULT_LOAN_DAYS } from "./lifecycle";
 /** A loan due within this many days is already on the list. */
@@ -110,9 +111,9 @@ export function loanSoonEdge(now: Date): Date {
 export interface PurchaseReviewLike {
   id: string;
   refNo: string;
-  /** when it reached IT; null on a request never stamped, which then counts from createdAt */
+  /** when it reached IT; null on a request never stamped, which then counts from updatedAt (the /purchases list's rule) */
   submittedAt: Date | null;
-  createdAt: Date;
+  updatedAt: Date;
   requestedBy: string;
   department: string | null;
   /** the first line's description; null when the request has no lines */
@@ -123,17 +124,18 @@ export interface PurchaseReviewLike {
 /**
  * Phase 40 §6: a SUBMITTED request waiting for IT's review. Newest first, so
  * severity is the negative age in ms (groupWork sorts severity descending).
+ * The age reads exactly as /purchases' dwell line does: `since()`'s whole days, "today" under one.
  */
 export function purchaseReviewRow(r: PurchaseReviewLike, now: Date): WorkRow {
-  const since = r.submittedAt ?? r.createdAt;
-  const ageMs = Math.max(0, now.getTime() - since.getTime());
-  const days = Math.round(ageMs / 86_400_000);
+  const from = r.submittedAt ?? r.updatedAt;
+  const ageMs = Math.max(0, now.getTime() - from.getTime());
+  const days = Math.floor(ageMs / 86_400_000);
   const what = r.firstLine ? ` · ${r.firstLine}${r.lines > 1 ? ` +${r.lines - 1} more` : ""}` : "";
   return {
     key: `purchases:${r.id}`,
     section: "purchases",
     title: `${r.refNo}${what}`,
-    meta: `${r.department ?? "No department"} · from ${r.requestedBy} · ${days} d waiting`,
+    meta: `${r.department ?? "No department"} · from ${r.requestedBy} · waiting ${waitingSince(r.submittedAt, r.updatedAt, now)}`,
     href: `/purchases/${r.id}`,
     action: "Review",
     severity: -ageMs,

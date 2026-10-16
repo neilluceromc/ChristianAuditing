@@ -130,10 +130,10 @@ export async function worklist(
     // Phase 40 §6: purchase requests waiting for IT's review, newest first.
     prisma.purchaseRequest.findMany({
       where: PURCHASE_REVIEW_WHERE,
-      orderBy: [{ submittedAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }, { id: "desc" }],
+      orderBy: [{ submittedAt: { sort: "desc", nulls: "last" } }, { updatedAt: "desc" }, { id: "desc" }],
       take: CAP.large,
       select: {
-        id: true, refNo: true, submittedAt: true, createdAt: true,
+        id: true, refNo: true, submittedAt: true, updatedAt: true,
         requestedBy: { select: { name: true } },
         department: { select: { name: true } },
         units: { select: { description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 },
@@ -276,7 +276,7 @@ export async function worklist(
 
   for (const r of reviews) {
     rows.push(purchaseReviewRow({
-      id: r.id, refNo: r.refNo, submittedAt: r.submittedAt, createdAt: r.createdAt,
+      id: r.id, refNo: r.refNo, submittedAt: r.submittedAt, updatedAt: r.updatedAt,
       requestedBy: r.requestedBy.name, department: r.department?.name ?? null,
       firstLine: r.units[0]?.description ?? null, lines: r._count.units,
     }, now));

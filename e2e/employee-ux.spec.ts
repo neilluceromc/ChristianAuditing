@@ -281,7 +281,7 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await returnPhone.getByLabel("Reason").fill("returned from the tile menu (e2e)");
       await returnPhone.getByRole("button", { name: "Confirm" }).click();
 
-      await expect(page.getByText("BR-PH-0301 returned · now Spare")).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText("Success: BR-PH-0301 returned · now Spare", { exact: true })).toBeVisible({ timeout: 15_000 });
       // The slot is a gap again…
       await expect(page.getByRole("group", { name: "Phone", exact: true })).toContainText("Nothing assigned", { timeout: 15_000 });
       await expect(page.getByRole("button", { name: "Fill the Phone slot" })).toBeVisible();

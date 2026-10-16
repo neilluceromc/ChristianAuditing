@@ -14,7 +14,7 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { DONE, RUN, RejectApprovalDialog } from "@/components/approvals/approval-header";
-import { approvalHeader, VERB_LABEL, type ApprovalVerb } from "@/lib/approval-header";
+import { approvalHeader, queueKeyAction, VERB_LABEL, type ApprovalVerb } from "@/lib/approval-header";
 import { PRIORITY_LABEL } from "@/lib/labels";
 import {
   claimApproval, escalateApproval, rejectApproval,
@@ -138,10 +138,16 @@ export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; can
     else if (key === "k" || e.key === "ArrowUp") { e.preventDefault(); setFocused((i) => { const n = Math.max(i - 1, 0); announceRow(n); return n; }); }
     else if (e.key === "Enter" && row) { e.preventDefault(); router.push(`/approvals/${row.id}`); }
     else if (!canAct || pending || !row) return;
-    else if (key === "c") { e.preventDefault(); act("claim", row); }
-    else if (key === "a") { e.preventDefault(); actPrimary(row); }
-    else if (key === "e") { e.preventDefault(); act("escalate", row); }
-    else if (key === "r") { e.preventDefault(); setRejecting(row); }
+    else {
+      // Fix round 1: a bare press only — no auto-repeat, no Ctrl/Cmd/Alt (Ctrl+A stays select-all).
+      const action = queueKeyAction(e);
+      if (!action) return;
+      e.preventDefault();
+      if (action === "claim") act("claim", row);
+      else if (action === "primary") actPrimary(row);
+      else if (action === "escalate") act("escalate", row);
+      else setRejecting(row);
+    }
   }
 
   return (

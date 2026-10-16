@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { decidedItems, getWizard, undecidedHeldItems } from "@/server/modules/offboarding/queries";
 import { OUTCOME_LABEL } from "@/lib/offboarding";
+import { statusLabel } from "@/lib/asset-class";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { offboardingCompletionText } from "@/lib/deadlines";
 import { PrintButton } from "@/components/ui/print-button";
@@ -100,7 +101,7 @@ export default async function FarewellReportPage({ params }: { params: Promise<{
                 <td className="py-1.5 pr-3">{i.model}</td>
                 <td className="py-1.5 pr-3">
                   {OUTCOME_LABEL[i.decision.outcome]}
-                  <span className="pl-1 font-mono text-[9.5px] text-[#667085]">{i.decision.toStatus ?? "?"}</span>
+                  <span className="pl-1 font-mono text-[9.5px] text-[#667085]">{i.decision.toStatus ? statusLabel(i.decision.toStatus) : "?"}</span>
                 </td>
                 <td className="py-1.5 pr-3">{i.decision.reason ?? "—"}</td>
                 <td className="py-1.5 pr-3 text-right font-mono">{i.costLabel}</td>

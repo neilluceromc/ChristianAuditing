@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
+import { actionLabel } from "@/lib/activity";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
@@ -117,8 +118,8 @@ export default async function AuditPage({
                           </span>
                         </Td>
                         <Td>{row.sentence}</Td>
-                        {/* P-14: the raw action slug stays beside the sentence, in mono */}
-                        <Td mono className="text-fg-muted">{row.action}</Td>
+                        {/* Phase 40 §6 (overrides P-14): the action's words; an unmapped code falls back to itself. The CSV keeps the code. */}
+                        <Td className="text-fg-muted">{actionLabel(row.action)}</Td>
                       </Tr>
                     ))}
                   </TBody>

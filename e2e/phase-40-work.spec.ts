@@ -122,28 +122,45 @@ test.describe.serial("phase 40 — work and approvals", () => {
     }
   });
 
-  test("3. the A key on a PENDING row approves it — no Claim it first", async ({ page }) => {
+  test("3. the A key on a PENDING row approves it — no Claim it first; Ctrl+A never does", async ({ page }) => {
     test.setTimeout(90_000);
     const it = await db.user.findUniqueOrThrow({ where: { email: IT } });
     const before = await db.approval.findUniqueOrThrow({ where: { refNo: "APR-2041" } });
     expect(before.state).toBe("PENDING");
 
-    await login(page, IT);
-    await page.goto("/approvals?q=APR-2041");
-    const queue = page.getByRole("group", { name: /Approval queue/ });
-    await expect(queue.getByRole("row", { name: /APR-2041/ })).toBeVisible({ timeout: 20_000 });
-    // The queue's change cell reads in words too.
-    await expect(queue.getByRole("row", { name: /APR-2041/ })).toContainText("Assign · BR-LT-0181");
-    await waitForHydration(queue);
-    await queue.focus();
-    await queue.press("a");
+    try {
+      await login(page, IT);
+      await page.goto("/approvals?q=APR-2041");
+      const queue = page.getByRole("group", { name: /Approval queue/ });
+      await expect(queue.getByRole("row", { name: /APR-2041/ })).toBeVisible({ timeout: 20_000 });
+      // The queue's change cell reads in words too.
+      await expect(queue.getByRole("row", { name: /APR-2041/ })).toContainText("Assign · BR-LT-0181");
+      await waitForHydration(queue);
+      await queue.focus();
 
-    await expect(page.getByText("APR-2041 approved")).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(/Claim it first/)).toHaveCount(0);
-    await expect(async () => {
-      const after = await db.approval.findUniqueOrThrow({ where: { refNo: "APR-2041" } });
-      expect(after.state).not.toBe("PENDING");
-      expect(after.claimedById).toBe(it.id);
-    }).toPass({ timeout: 15_000 });
+      // Fix round 1: Ctrl+A is the browser's select-all, never "approve" — the request stays PENDING.
+      await queue.press("Control+a");
+      await page.waitForTimeout(1_000);
+      await expect(page.getByText("APR-2041 approved")).toHaveCount(0);
+      expect((await db.approval.findUniqueOrThrow({ where: { refNo: "APR-2041" } })).state).toBe("PENDING");
+
+      await queue.focus();
+      await queue.press("a");
+      await expect(page.getByText("APR-2041 approved")).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(/Claim it first/)).toHaveCount(0);
+      await expect(async () => {
+        const after = await db.approval.findUniqueOrThrow({ where: { refNo: "APR-2041" } });
+        expect(after.state).not.toBe("PENDING");
+        expect(after.claimedById).toBe(it.id);
+      }).toPass({ timeout: 15_000 });
+    } finally {
+      // House style (queues-records-ux closeApprovals): drop the job an approve enqueued and put the request back
+      // by state; the claim/approve audit rows stay (append-only, R3).
+      await db.job.deleteMany({ where: { type: "EXECUTE_APPROVAL", payload: { path: ["approvalId"], equals: before.id } } });
+      await db.approval.update({
+        where: { id: before.id },
+        data: { state: "PENDING", claimedById: null, claimedAt: null, resolvedAt: null, resolutionReason: null },
+      });
+    }
   });
 });

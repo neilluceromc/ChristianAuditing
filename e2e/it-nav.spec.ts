@@ -557,7 +557,7 @@ test.describe("it navigation sweep (Phase 25)", () => {
       await page.goto("/audit");
       const newest = page.locator("tbody tr").first();
       await expect(newest).toContainText("department");
-      await expect(newest).toContainText("rename");
+      await expect(newest).toContainText("Renamed"); // Phase 40 §6: the action's words, not "rename"
       await expect(newest).toContainText("Operations X");
       await expectNoSeriousAxe(page);
     } finally {

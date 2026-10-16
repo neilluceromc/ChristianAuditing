@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ApprovalState } from "@prisma/client";
 import { approvalTransition, type QueueAction } from "./approval-flow";
-import { approvalHeader, VERB_LABEL, type ApprovalVerb } from "./approval-header";
+import { approvalHeader, queueKeyAction, VERB_LABEL, type ApprovalVerb } from "./approval-header";
 import { APPROVAL_KIND_LABEL, PRIORITY_LABEL } from "./labels";
 
 const h = (state: ApprovalState, o: Partial<{ canAct: boolean; mine: boolean; isAdmin: boolean }> = {}) =>
@@ -60,4 +60,29 @@ describe("approvalHeader never offers a verb approvalTransition refuses", () => 
       if (r.reject) expect(approvalTransition(state, "reject", { isOwner: mine, isAdmin }).ok).toBe(true);
     });
   }
+});
+
+describe("queueKeyAction — the queue's action keys (Phase 40 fix round 1)", () => {
+  const press = (key: string, mods: Partial<{ repeat: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>
+    queueKeyAction({ key, repeat: false, ctrlKey: false, metaKey: false, altKey: false, ...mods });
+  it("C claims, A runs the primary, E escalates, R rejects — either case", () => {
+    expect(press("c")).toBe("claim");
+    expect(press("A")).toBe("primary");
+    expect(press("a")).toBe("primary");
+    expect(press("e")).toBe("escalate");
+    expect(press("r")).toBe("reject");
+  });
+  it("a held key's auto-repeat never fires an action again", () => {
+    expect(press("a", { repeat: true })).toBeNull();
+  });
+  it("Ctrl/Cmd/Alt combinations stay the browser's (Ctrl+A selects all, it never approves)", () => {
+    expect(press("a", { ctrlKey: true })).toBeNull();
+    expect(press("a", { metaKey: true })).toBeNull();
+    expect(press("r", { altKey: true })).toBeNull();
+    expect(press("c", { ctrlKey: true })).toBeNull();
+  });
+  it("any other key is not an action key", () => {
+    expect(press("j")).toBeNull();
+    expect(press("Enter")).toBeNull();
+  });
 });

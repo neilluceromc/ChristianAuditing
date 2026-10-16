@@ -161,13 +161,13 @@ test.describe("Finance sees two tabs", () => {
     await page.goto("/finance/assets?cls=PURCHASING");
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
     // Phase 40 §6: the status chips read as their words.
-    await expect(page.getByRole("link", { name: "Operational" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Deployed" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Operational", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Deployed", exact: true })).toHaveCount(0);
 
     await page.goto("/finance/assets");
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Deployed" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Operational" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Deployed", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Operational", exact: true })).toHaveCount(0);
   });
 });
 
@@ -311,7 +311,7 @@ test.describe("a leaver who holds a car", () => {
 
     await outcomeGroup.getByText("Returned").click();
     await group.getByRole("button", { name: "Confirm decision" }).click();
-    await expect(page.getByText(`${car.tag} → Stored`)).toBeVisible();
+    await expect(page.getByText(new RegExp(`${car.tag} → Stored$`))).toBeVisible();
 
     const approval = await db.approval.findFirstOrThrow({ where: { assetId: car.id, type: "lifecycle_return" } });
     expect((approval.payload as { to: { status: string } }).to.status).toBe("STORED");
@@ -392,7 +392,7 @@ test.describe("the inventory view", () => {
     // Switching class clears the facet filters — none of them can apply to the other class (D-12).
     // Phase 30: chips read as the value alone, and Purchasing is this role's default (no cls=).
     await page.goto("/inventory?cls=IT&status=SPARE");
-    const spareChip = page.getByRole("link", { name: "Spare — remove filter" });
+    const spareChip = page.getByRole("link", { name: "Spare — remove filter", exact: true });
     await expect(spareChip).toBeVisible();
     await page.getByRole("navigation", { name: "Asset class" }).getByRole("link", { name: "Purchasing" }).click();
     await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });

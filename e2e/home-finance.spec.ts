@@ -251,7 +251,7 @@ test.describe("home — /finance/assets, the register", () => {
     await expect(page.getByRole("heading", { name: "Assets", level: 1 })).toBeVisible();
     await expect(page.getByText(/\d+ assets? · \d+ with a cost · ₱[\d,.]+ at cost/)).toBeVisible();
 
-    const chip = page.getByRole("link", { name: "Defective" });
+    const chip = page.getByRole("link", { name: "Defective", exact: true });
     await chip.click();
     await expect(page).toHaveURL(/status=DEFECTIVE/, { timeout: 15_000 });
     await expect(chip).toHaveAttribute("aria-current", "page");

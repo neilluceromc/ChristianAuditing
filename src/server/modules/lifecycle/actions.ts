@@ -445,7 +445,7 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
     const blocked = new Set(open.map((o) => o.assetId));
     const targets: typeof assets = [];
     for (const asset of assets) {
-      if (asset.status === to) { skipped.push({ tag: asset.tag, reason: `already ${to}` }); continue; }
+      if (asset.status === to) { skipped.push({ tag: asset.tag, reason: `already ${statusLabel(to)}` }); continue; }
       if (blocked.has(asset.id)) { skipped.push({ tag: asset.tag, reason: "held by an open request" }); continue; }
       if (statusFamily(asset.status) === "closed") {
         skipped.push({ tag: asset.tag, reason: `closed status ${statusLabel(asset.status)} — cannot change` });

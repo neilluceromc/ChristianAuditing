@@ -249,7 +249,7 @@ test.describe.serial("custody", () => {
     await page.getByRole("button", { name: "Return", exact: true }).click();
     const returnDialog = page.getByRole("dialog", { name: `Return BR-MN-0910 · LG 27UL500 from ${nina.name}?` });
     await returnDialog.getByRole("button", { name: "Return", exact: true }).click();
-    await expect(page.getByText("BR-MN-0910 returned · now Spare")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Success: BR-MN-0910 returned · now Spare", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     asset = await db.asset.findUniqueOrThrow({ where: { id } });
     expect(asset.loanDueAt).toBeNull();

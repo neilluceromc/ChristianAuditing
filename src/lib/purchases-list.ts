@@ -52,8 +52,8 @@ export function purchaseWhere(
 
 const DAY_MS = 86_400_000;
 
-/** "today" under a day, "N d" after — the waiting-on form. */
-function since(from: Date | null, fallback: Date, now: Date): string {
+/** "today" under a day, "N d" after — the waiting-on form. Shared with the worklist's Purchase reviews rows (Phase 40). */
+export function since(from: Date | null, fallback: Date, now: Date): string {
   const d = from ?? fallback;
   const days = Math.floor((now.getTime() - d.getTime()) / DAY_MS);
   return days < 1 ? "today" : `${days} d`;

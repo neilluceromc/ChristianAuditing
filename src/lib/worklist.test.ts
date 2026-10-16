@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { dayFromISO } from "./deadlines";
 import { fmtDate } from "./format";
+import { dwellLine } from "./purchases-list";
 import {
   DEFAULT_LOAN_DAYS, SEE_ALL_HREF, WORK_SECTIONS, capLine, groupWork, leaverRow, loanRow,
   loanSoonEdge, pastSlaCount, purchaseReviewRow, summaryChips, workActionLabel, workHeadline, workRowHref,
@@ -26,14 +27,14 @@ describe("WORK_SECTIONS", () => {
 describe("purchaseReviewRow (Phase 40 §6)", () => {
   const NOW = new Date("2026-10-17T10:00:00+08:00");
   const base = {
-    id: "pr1", refNo: "PR-0198", submittedAt: new Date("2026-10-13T10:00:00+08:00"), createdAt: new Date("2026-10-01T09:00:00+08:00"),
+    id: "pr1", refNo: "PR-0198", submittedAt: new Date("2026-10-13T10:00:00+08:00"), updatedAt: new Date("2026-10-01T09:00:00+08:00"),
     requestedBy: "Pia Santos", department: "HR", firstLine: "27-inch monitors", lines: 2,
   };
   it("names the request, its first line, who sent it and how long it has waited", () => {
     const r = purchaseReviewRow(base, NOW);
     expect(r).toMatchObject({
       key: "purchases:pr1", section: "purchases", title: "PR-0198 · 27-inch monitors +1 more",
-      meta: "HR · from Pia Santos · 4 d waiting", href: "/purchases/pr1", action: "Review", ageDays: 4,
+      meta: "HR · from Pia Santos · waiting 4 d", href: "/purchases/pr1", action: "Review", ageDays: 4,
     });
     expect(r.control).toBeUndefined();
     expect(r.entity).toBeUndefined();
@@ -41,10 +42,22 @@ describe("purchaseReviewRow (Phase 40 §6)", () => {
   it("one line reads without a count; no line reads the reference alone; no department says so", () => {
     expect(purchaseReviewRow({ ...base, lines: 1 }, NOW).title).toBe("PR-0198 · 27-inch monitors");
     expect(purchaseReviewRow({ ...base, firstLine: null, lines: 0 }, NOW).title).toBe("PR-0198");
-    expect(purchaseReviewRow({ ...base, department: null }, NOW).meta).toBe("No department · from Pia Santos · 4 d waiting");
+    expect(purchaseReviewRow({ ...base, department: null }, NOW).meta).toBe("No department · from Pia Santos · waiting 4 d");
   });
-  it("falls back to the creation date when it was never stamped as submitted", () => {
+  it("falls back to the last update when it was never stamped as submitted — the /purchases list's rule", () => {
     expect(purchaseReviewRow({ ...base, submittedAt: null }, NOW).ageDays).toBe(16);
+  });
+  it("Fix round 1: the age reads like /purchases' dwell line — whole days floored, under a day \"today\"", () => {
+    const at = (iso: string) => purchaseReviewRow({ ...base, submittedAt: new Date(iso) }, NOW);
+    expect(at("2026-10-17T07:00:00+08:00").meta).toBe("HR · from Pia Santos · waiting today");
+    expect(at("2026-10-17T07:00:00+08:00").ageDays).toBe(0);
+    // 1.9 days: the list says "1 d" (floor), so the worklist does too — never a rounded "2 d"
+    expect(at("2026-10-15T12:24:00+08:00").meta).toBe("HR · from Pia Santos · waiting 1 d");
+    expect(at("2026-10-15T12:24:00+08:00").ageDays).toBe(1);
+    expect(dwellLine({
+      state: "SUBMITTED", updatedAt: base.updatedAt, submittedAt: new Date("2026-10-15T12:24:00+08:00"),
+      reviewedAt: null, completedAt: null, cancelledAt: null, bounced: false,
+    }, NOW)).toBe("awaiting IT · 1 d");
   });
   it("groups newest first, even within the same day", () => {
     const older = purchaseReviewRow({ ...base, id: "old", submittedAt: new Date("2026-10-15T08:00:00+08:00") }, NOW);

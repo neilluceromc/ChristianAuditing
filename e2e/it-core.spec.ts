@@ -209,7 +209,7 @@ test.describe("inventory list", () => {
     await expect(page).toHaveURL(/status=DEFECTIVE/);
     // Phase 30 (spec §6.2): a chip reads as the value alone; its link name carries the
     // sr-only " — remove filter" suffix, which scopes it to the chip row.
-    await expect(page.getByRole("link", { name: "Defective — remove filter" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Defective — remove filter", exact: true })).toBeVisible();
   });
 
   test("an exact tag search opens the record (scanner contract)", async ({ page }) => {
@@ -276,7 +276,7 @@ test.describe("inventory list", () => {
     await page.getByRole("button", { name: "Change status…", exact: true }).click();
     await page.getByLabel(/Target status/).selectOption("DISPOSE");
     await page.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByText("2 assets now Dispose")).toBeVisible();
+    await expect(page.getByText("Success: 2 assets now Dispose", { exact: true })).toBeVisible();
     const [mn, ph] = await Promise.all([
       db.asset.findUniqueOrThrow({ where: { tag: "BR-MN-0911" } }),
       db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0301" } }),
