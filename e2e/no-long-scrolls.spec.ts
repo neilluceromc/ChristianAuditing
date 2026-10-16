@@ -4,6 +4,8 @@ import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 import { SIDE_TAB_KEY, sideBadges } from "../src/lib/side-card";
 import { notYetCount } from "../src/lib/it-setup";
+import { localDateISO } from "../src/lib/format";
+import { isExpired, lotRemaining } from "../src/lib/stock-allocation";
 
 /**
  * Phase 39 — no long scrolls (spec §7.2).
@@ -26,6 +28,11 @@ import { notYetCount } from "../src/lib/it-setup";
  *     count under Only uncounted moves focus to the next row before the counted one drops out. The search (focus
  *     kept, also on "No item matches.") and Category narrow. The review pages too, keeps its totals over every line, and
  *     "Only differences" narrows. The stocktake, the items and the category are deleted afterwards.
+ *   6 (§4.2, §4.3) On hand and Expiry: 56 extra items in a test category plus 8 one-item categories (via prisma).
+ *     On hand pages 50 with the category heading repeated at the top of page 2, a totals card that does not change
+ *     between pages, the top 8 subtotals and "+{n} more", and a search that narrows (focus kept, also on "No item
+ *     matches."). Expiry has 55 expired lots on one test item: the Expired tab pages 50, the search narrows and
+ *     survives a switch to the Expiring tab ("No lot matches."), and the tabs switch. Everything is deleted afterwards.
  *
  * Seed (prisma/seed.ts): J. Sarmiento is it@ (it_staff), System Admin is admin@. Bluepeak Telecom's base policy has
  * four required lines, so a fresh client hire's Equipment card is four tiles tall. Never reference a raw cuid.
@@ -517,6 +524,154 @@ test.describe("Phase 39 — the stocktake sheet", () => {
       await db.stocktake.deleteMany({ where: { lines: { some: { item: { categoryId: cat.id } } } } });
       await db.stockItem.deleteMany({ where: { categoryId: cat.id } });
       await db.stockCategory.delete({ where: { id: cat.id } });
+    }
+  });
+});
+
+test.describe("Phase 39 — On hand and Expiry", () => {
+  test("6. On hand pages 50 with headings, totals over everything, top-8 subtotals and search; Expiry pages 50 per tab, searches, and the tabs switch", async ({ page }) => {
+    test.setTimeout(150_000);
+    const tag = String(Date.now()).slice(-6);
+    const purchasing = await db.user.findUniqueOrThrow({ where: { email: "purchasing@thebackroomop.com" } });
+    const bulk = await db.stockCategory.create({ data: { name: `Bulk ${tag}`, prefix: `B${tag}` } });
+    const smalls = await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        db.stockCategory.create({ data: { name: `Sub ${tag} ${i + 1}`, prefix: `S${tag}${i + 1}` } })),
+    );
+    const categoryIds = [bulk.id, ...smalls.map((c) => c.id)];
+    try {
+      await db.stockItem.createMany({
+        data: [
+          ...Array.from({ length: 55 }, (_, i) => ({
+            code: `ZZ-${tag}-${String(i + 1).padStart(4, "0")}`, name: `Bulk item ${i + 1} ${tag}`, unit: "pc", categoryId: bulk.id,
+          })),
+          { code: `ZE-${tag}`, name: `Expiring item ${tag}`, unit: "pc", categoryId: bulk.id },
+          ...smalls.map((c, i) => ({ code: `ZY-${tag}-${i + 1}`, name: `Small item ${i + 1} ${tag}`, unit: "pc", categoryId: c.id })),
+        ],
+      });
+      const expiryItem = await db.stockItem.findUniqueOrThrow({ where: { code: `ZE-${tag}` } });
+      const DAY = 86_400_000;
+      await db.stockLot.createMany({
+        data: Array.from({ length: 55 }, (_, i) => ({
+          itemId: expiryItem.id, lotDate: new Date(Date.now() - 30 * DAY), expiresAt: new Date(Date.now() - 10 * DAY),
+          quantity: 1, reference: `ZR-${tag}-${String(i + 1).padStart(4, "0")}`, receivedById: purchasing.id,
+        })),
+      });
+      await login(page, "purchasing@thebackroomop.com");
+
+      // ---- On hand ----
+      const itemCount = await db.stockItem.count({ where: { archivedAt: null } });
+      const categoryCount = (await db.stockItem.groupBy({ by: ["categoryId"], where: { archivedAt: null } })).length;
+      expect(itemCount).toBeGreaterThan(50);
+      expect(categoryCount).toBeGreaterThan(8);
+      await page.goto("/stock/reports/on-hand");
+      const totals = page.getByRole("region", { name: "Totals", exact: true });
+      const stat = (label: string) => totals.getByText(label, { exact: true }).locator("xpath=following-sibling::dd");
+      const itemLinks = page.getByRole("table").getByRole("link", { name: /^[A-Z]{2}-/ });
+      const pager = page.getByRole("navigation", { name: "Pagination" });
+      const bulkHeading = page.getByRole("row", { name: `Bulk ${tag}`, exact: true });
+      await expect(totals).toBeVisible({ timeout: 20_000 });
+
+      // Page 1: 50 items under the first category's heading; the card counts every item.
+      await expect(itemLinks).toHaveCount(50);
+      await expect(bulkHeading).toBeVisible();
+      await expect(stat("Items")).toHaveText(String(itemCount));
+      await expect(page.getByText(`Showing 1–50 of ${itemCount} items`, { exact: true })).toBeVisible();
+      await expect(pager.getByRole("link", { name: "2", exact: true })).toBeVisible();
+      const valueOnPage1 = await stat("Value on hand").innerText();
+      const uncostedOnPage1 = await stat("Uncosted units").innerText();
+
+      // Top 8 subtotals, then "+{n} more".
+      await expect(totals.getByRole("list", { name: "Subtotals by category" }).getByRole("listitem")).toHaveCount(9);
+      await expect(totals.getByText(`+${categoryCount - 8} more`, { exact: true })).toBeVisible();
+
+      // Page 2: the Bulk category continues, so its heading is repeated at the top; the totals do not change.
+      await pager.getByRole("link", { name: "Next page", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]page=2(&|$)/);
+      await expect(itemLinks).toHaveCount(itemCount - 50);
+      await expect(bulkHeading).toBeVisible();
+      await expect(page.getByText(`Showing 51–${itemCount} of ${itemCount} items`, { exact: true })).toBeVisible();
+      await expect(stat("Items")).toHaveText(String(itemCount));
+      await expect(stat("Value on hand")).toHaveText(valueOnPage1);
+      await expect(stat("Uncosted units")).toHaveText(uncostedOnPage1);
+
+      // Search narrows (to page 1), the totals follow it, and focus stays in the box — also on "No item matches.".
+      const search = page.getByRole("searchbox", { name: "Search the report", exact: true });
+      await waitForHydration(search);
+      await search.fill(`bulk item 55 ${tag}`);
+      await search.press("Enter");
+      await expect(page).toHaveURL(/[?&]q=/);
+      await expect(page).not.toHaveURL(/[?&]page=/);
+      await expect(itemLinks).toHaveCount(1);
+      await expect(stat("Items")).toHaveText("1");
+      await expect(search).toBeFocused();
+      await expect(pager).toHaveCount(0);
+      await search.fill("no such item anywhere");
+      await search.press("Enter");
+      await expect(page.getByText("No item matches.", { exact: true })).toBeVisible();
+      await expect(search).toBeFocused();
+      await search.fill("");
+      await search.press("Enter");
+      await expect(itemLinks).toHaveCount(50);
+      await expect(stat("Items")).toHaveText(String(itemCount));
+
+      // ---- Expiry ----
+      const today = localDateISO();
+      const lots = await db.stockLot.findMany({
+        where: { expiresAt: { not: null }, item: { archivedAt: null } },
+        select: { expiresAt: true, quantity: true, allocations: { select: { quantity: true } } },
+      });
+      const expiredCount = lots.filter(
+        (l) => lotRemaining(l.quantity, l.allocations.reduce((n, a) => n + a.quantity, 0)) > 0 && isExpired(l.expiresAt, today),
+      ).length;
+      expect(expiredCount).toBeGreaterThan(50);
+      await page.goto("/stock/reports/expiry");
+      const tabs = page.getByRole("navigation", { name: "Expiry status" });
+      const expiredTab = (n: number) => tabs.getByRole("link", { name: `Expired (${n})`, exact: true });
+      const expiringTab = tabs.getByRole("link", { name: /^Expiring \(\d+\)$/ });
+      const lotRows = page.getByRole("table").getByRole("row");
+      await expect(expiredTab(expiredCount)).toHaveAttribute("aria-current", "page", { timeout: 20_000 });
+      await expect(lotRows).toHaveCount(51);
+      await expect(page.getByText(`Showing 1–50 of ${expiredCount} lots`, { exact: true })).toBeVisible();
+      await pager.getByRole("link", { name: "Next page", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]page=2(&|$)/);
+      await expect(lotRows).toHaveCount(expiredCount - 50 + 1);
+
+      // Search narrows the Expired tab, lands on page 1, keeps focus, and shows in the tab's count.
+      const lotSearch = page.getByRole("searchbox", { name: "Search the lots", exact: true });
+      await waitForHydration(lotSearch);
+      await lotSearch.fill(`ZR-${tag}-0007`);
+      await lotSearch.press("Enter");
+      await expect(page).toHaveURL(/[?&]q=/);
+      await expect(page).not.toHaveURL(/[?&]page=/);
+      await expect(lotRows).toHaveCount(2);
+      await expect(expiredTab(1)).toHaveAttribute("aria-current", "page");
+      await expect(lotSearch).toBeFocused();
+
+      // The tabs switch and keep the search: nothing expiring matches. The window chips appear on this tab only.
+      await expiringTab.click();
+      await expect(page).toHaveURL(/[?&]tab=expiring(&|$)/);
+      await expect(page).toHaveURL(/[?&]q=/);
+      await expect(expiringTab).toHaveAttribute("aria-current", "page");
+      await expect(page.getByRole("group", { name: "Expiry window" })).toBeVisible();
+      await expect(page.getByText("No lot matches.", { exact: true })).toBeVisible();
+      await expect(page.getByRole("table")).toHaveCount(0);
+      await expect(lotSearch).toHaveValue(`ZR-${tag}-0007`);
+
+      // Clearing the search and going back to Expired shows the first page again.
+      await lotSearch.fill("");
+      await lotSearch.press("Enter");
+      await expect(page).not.toHaveURL(/[?&]q=/);
+      await expiredTab(expiredCount).click();
+      await expect(expiredTab(expiredCount)).toHaveAttribute("aria-current", "page");
+      await expect(page.getByRole("group", { name: "Expiry window" })).toHaveCount(0);
+      await expect(lotRows).toHaveCount(51);
+    } finally {
+      // Lots first (they Restrict their item), then the items, then the categories. Nothing was ever received or
+      // issued through the app, so no movement or allocation holds on to them.
+      await db.stockLot.deleteMany({ where: { item: { categoryId: { in: categoryIds } } } });
+      await db.stockItem.deleteMany({ where: { categoryId: { in: categoryIds } } });
+      await db.stockCategory.deleteMany({ where: { id: { in: categoryIds } } });
     }
   });
 });

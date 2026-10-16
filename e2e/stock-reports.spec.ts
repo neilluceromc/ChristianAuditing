@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { readSheet } from "read-excel-file/node";
@@ -65,15 +65,10 @@ async function expectNoSeriousAxe(page: Page) {
 const PURCHASING = "purchasing@thebackroomop.com";
 
 /**
- * `expiry-table.tsx` wraps each block (Expired / Expiring within N days) in
- * its own `<section>` with a plain `<h2>{title}</h2>` sibling to the table —
- * one level up from the heading is that section, which is as far as this
- * needs to go (contrast `stock-lots.spec.ts`'s `cardSection`, which goes up
- * two levels because `Card` wraps its `<h2>` in a `CardHeader` div).
+ * Phase 39 (spec §4.3): the Expiry report is two tabs — "Expired ({n})" and "Expiring ({n})", `?tab=` — each paged 50
+ * at a time, and the window chips show on the Expiring tab only. This is the tab row's name (`expiry/page.tsx`).
  */
-function reportSection(page: Page, name: string | RegExp, exact = false): Locator {
-  return page.getByRole("heading", { level: 2, name, exact }).locator("xpath=..");
-}
+const EXPIRY_TABS = "Expiry status";
 
 /** `consumption-grid.tsx`'s own month-label formatting, mirrored here only to find the right column — never used to compute an expected VALUE. */
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -115,18 +110,19 @@ test.describe("stock reports", () => {
     await page.goto("/stock/reports/on-hand");
     await expect(page.getByRole("heading", { name: "On hand and value", level: 1 })).toBeVisible({ timeout: 10_000 });
 
-    const grandRow = page.getByRole("row", { name: /Grand total/ });
-    await expect(grandRow).toBeVisible();
-    const grandCells = grandRow.getByRole("cell");
-    // Column order (on-hand-table.tsx): Grand total (colSpan 3), Balance,
-    // blank (colSpan 2), Uncosted units, Value on hand, blank (colSpan 2).
-    await expect(grandCells.nth(3)).toHaveText(String(grandUncosted));
-    await expect(grandCells.nth(4)).toHaveText(fmtMoneyExact(grandValue));
+    // Phase 39 (spec §4.2): the grand total is the totals card above the table (over everything matching the
+    // filters, never just the page); the table has no subtotal or grand-total rows any more.
+    const totals = page.getByRole("region", { name: "Totals", exact: true });
+    await expect(totals).toBeVisible();
+    const stat = (label: string) => totals.getByText(label, { exact: true }).locator("xpath=following-sibling::dd");
+    await expect(stat("Uncosted units")).toHaveText(String(grandUncosted));
+    await expect(stat("Value on hand")).toHaveText(fmtMoneyExact(grandValue));
+    await expect(page.getByRole("row", { name: /Grand total/ })).toHaveCount(0);
 
     await page.getByRole("link", { name: "Uncosted only" }).click();
     await expect(page.getByRole("link", { name: "Show all" })).toBeVisible({ timeout: 10_000 });
     if (uncostedCodes.size === 0) {
-      await expect(page.getByText("No stock items yet.", { exact: true })).toBeVisible();
+      await expect(page.getByText("No item matches.", { exact: true })).toBeVisible();
     } else {
       const codeLinks = page.getByRole("table").getByRole("link", { name: /^[A-Z]{2}-\d{4}$/ });
       const visibleCodes = (await codeLinks.allTextContents()).map((t) => t.trim()).sort();
@@ -196,47 +192,70 @@ test.describe("stock reports", () => {
     expect(grid[0]).toEqual(CONSUMPTION_EXPORT_COLUMNS.map((c) => c.label));
   });
 
-  test("3. Expiry: Expired lists PN-0003 and Expiring within 30 lists PN-0002; the 7-day chip empties Expiring while Expired is unaffected; the 90-day chip keeps both; aria-current moves", async ({
+  test("3. Expiry: the Expired tab lists PN-0003 and the Expiring tab PN-0002, with counts in the tab names; the window chips show on Expiring only — 7 days empties it while Expired is unaffected, 90 days keeps PN-0002; aria-current moves", async ({
     page,
   }) => {
     test.setTimeout(60_000); // first hit of /stock/reports/expiry in this file — cold JIT
+    const today = localDateISO();
+    // The tab counts, computed from the ledger the way expiryReport does: open, dated lots of active items — Expired
+    // once the day has passed, Expiring while it is within the window.
+    const lots = await db.stockLot.findMany({
+      where: { expiresAt: { not: null }, item: { archivedAt: null } },
+      select: { expiresAt: true, quantity: true, allocations: { select: { quantity: true } } },
+    });
+    const open = lots.filter((l) => lotRemaining(l.quantity, l.allocations.reduce((s, a) => s + a.quantity, 0)) > 0);
+    const expiredCount = open.filter((l) => isExpired(l.expiresAt, today)).length;
+    const expiringCount = (days: number) => {
+      const endMs = Date.parse(`${today}T00:00:00.000Z`) + days * 86_400_000;
+      return open.filter((l) => !isExpired(l.expiresAt, today) && l.expiresAt!.getTime() <= endMs).length;
+    };
+
     await login(page, PURCHASING);
     await page.goto("/stock/reports/expiry");
     await expect(page.getByRole("heading", { name: "Expiring and expired lots", level: 1 })).toBeVisible({
       timeout: 10_000,
     });
 
+    const tabs = page.getByRole("navigation", { name: EXPIRY_TABS });
     const chips = page.getByRole("group", { name: "Expiry window" });
-    const expiredSection = reportSection(page, "Expired", true);
-    const expiringSection = reportSection(page, /^Expiring within/);
+    const expiredTab = (n = expiredCount) => tabs.getByRole("link", { name: `Expired (${n})`, exact: true });
+    const expiringTab = (days: number) => tabs.getByRole("link", { name: `Expiring (${expiringCount(days)})`, exact: true });
 
-    // Default window is 30 days (DEFAULT_EXPIRY_WINDOW).
+    // Default: the Expired tab (no window chips there); PN-0003's lot arrived already expired.
+    await expect(expiredTab()).toHaveAttribute("aria-current", "page");
+    await expect(expiringTab(DEFAULT_EXPIRY_WINDOW)).not.toHaveAttribute("aria-current", "page");
+    await expect(chips).toHaveCount(0);
+    await expect(page.getByRole("row", { name: /PN-0003/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /PN-0002/ })).toHaveCount(0);
+
+    // Expiring tab, default window of 30 days: PN-0002's lot is 20 days out.
+    await expiringTab(DEFAULT_EXPIRY_WINDOW).click();
+    await expect(page).toHaveURL(/[?&]tab=expiring(&|$)/);
+    await expect(expiringTab(DEFAULT_EXPIRY_WINDOW)).toHaveAttribute("aria-current", "page");
     await expect(chips.getByRole("link", { name: "30 days" })).toHaveAttribute("aria-current", "true");
-    await expect(expiredSection.getByRole("row", { name: /PN-0003/ })).toBeVisible();
-    await expect(expiringSection.getByRole("row", { name: /PN-0002/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /PN-0002/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /PN-0003/ })).toHaveCount(0);
 
-    // 7 days: PN-0002's lot is 20 days out, so nothing qualifies — but the
-    // Expired block (never window-bounded) is unaffected.
+    // 7 days: nothing qualifies — but the Expired tab (never window-bounded) is unaffected.
     await chips.getByRole("link", { name: "7 days" }).click();
-    await expect(page.getByRole("heading", { name: "Expiring within 7 days", level: 2 })).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(page).toHaveURL(/[?&]days=7(&|$)/);
     await expect(chips.getByRole("link", { name: "7 days" })).toHaveAttribute("aria-current", "true");
     await expect(chips.getByRole("link", { name: "30 days" })).not.toHaveAttribute("aria-current", "true");
+    await expect(expiringTab(7)).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("Nothing expires within 7 days.", { exact: true })).toBeVisible();
-    await expect(expiredSection.getByRole("row", { name: /PN-0003/ })).toBeVisible();
+    await expiredTab().click();
+    await expect(expiredTab()).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("row", { name: /PN-0003/ })).toBeVisible();
+    await expect(chips).toHaveCount(0);
 
-    // 90 days: keeps both blocks exactly as the 30-day window did — CM-0001's
-    // own lot (+200 days) never qualifies for any window.
+    // 90 days: keeps PN-0002 — CM-0001's own lot (+200 days) never qualifies for any window.
+    await expiringTab(7).click();
     await chips.getByRole("link", { name: "90 days" }).click();
-    await expect(page.getByRole("heading", { name: "Expiring within 90 days", level: 2 })).toBeVisible({
-      timeout: 10_000,
-    });
     await expect(chips.getByRole("link", { name: "90 days" })).toHaveAttribute("aria-current", "true");
     await expect(chips.getByRole("link", { name: "7 days" })).not.toHaveAttribute("aria-current", "true");
-    await expect(expiredSection.getByRole("row", { name: /PN-0003/ })).toBeVisible();
-    await expect(expiringSection.getByRole("row", { name: /PN-0002/ })).toBeVisible();
-    await expect(expiringSection.getByRole("row", { name: /CM-0001/ })).toHaveCount(0);
+    await expect(expiringTab(90)).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("row", { name: /PN-0002/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /CM-0001/ })).toHaveCount(0);
   });
 
   test("4. /stock: PN-0002 and PN-0003 carry EXPIRING/EXPIRED pills, and 'Show expiring only' lists exactly the items with such lots", async ({

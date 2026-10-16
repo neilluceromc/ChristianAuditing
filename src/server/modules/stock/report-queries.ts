@@ -4,9 +4,10 @@ import type { ListState } from "@/lib/url-state";
 import { localDateISO } from "@/lib/format";
 import { DEFAULT_EXPIRY_WINDOW, expiryLabel, isExpired, lotRemaining, onHand, type LotState } from "@/lib/stock-allocation";
 import {
-  consumptionGrid, expiryBuckets, manilaDayBounds, monthKey, monthsBetween,
-  type ConsumptionCell, type ConsumptionGrid,
+  consumptionGrid, expiryBuckets, groupRunsByCategory, manilaDayBounds, matchesSearch, monthKey, monthsBetween,
+  topSubtotals, type ConsumptionCell, type ConsumptionGrid, type ExpiryTab,
 } from "@/lib/stock-reports";
+import { LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
 import { EXPORT_CAP } from "@/lib/export-columns";
 import type { ConsumptionExportRow, ExpiryExportRow, OnHandExportRow } from "@/lib/export-columns";
 import type { FacetOption } from "@/server/modules/inventory/queries";
@@ -42,14 +43,23 @@ export interface OnHandItemRow {
 
 interface OnHandRow extends OnHandItemRow { categoryId: string; categoryName: string }
 
-export interface OnHandCategoryGroup {
+/** One run of consecutive rows on a page that share a category — the table's category heading. */
+export interface OnHandPageGroup {
   categoryId: string; categoryName: string; items: OnHandItemRow[];
-  subtotal: { units: number; uncostedUnits: number; value: number };
+}
+
+export interface OnHandSubtotal {
+  categoryId: string; categoryName: string; items: number; units: number; uncostedUnits: number; value: number;
 }
 
 export interface OnHandReport {
-  groups: OnHandCategoryGroup[];
-  grandTotal: { units: number; uncostedUnits: number; value: number };
+  /** Only this page's rows (50), grouped by category run. */
+  groups: OnHandPageGroup[];
+  /** Over every item matching the filters and the search — never just the page. */
+  grandTotal: { items: number; units: number; uncostedUnits: number; value: number };
+  /** Top 8 categories by value over the same set, and how many more there are. */
+  subtotals: { top: OnHandSubtotal[]; more: number };
+  page: { page: number; pageCount: number; total: number; from: number; to: number };
   facets: { category: FacetOption[] };
 }
 
@@ -112,37 +122,51 @@ async function computeOnHandRows(state: ListState, today: string): Promise<OnHan
   });
 }
 
-/** Spec §5.1/§6.1: category groups with subtotals and a grand total; `state.filters.uncosted` (`["1"]`) narrows to items still carrying uncosted stock. Two round trips: `computeOnHandRows` (3 queries) and `categoryFacets` (2 queries), run together. */
+/**
+ * Spec §5.1/§6.1, Phase 39 §4.2: the whole matching set is computed (the totals, the subtotals and the order all need
+ * every item), and only a page of it — 50 items, ordered by category then code — is sent to the table.
+ * `state.filters.uncosted` (`["1"]`) narrows to items still carrying uncosted stock; `state.q` to items whose code or
+ * name has every word. Two round trips: `computeOnHandRows` (3 queries) and `categoryFacets` (2 queries), run together.
+ */
 export async function onHandReport(state: ListState = EMPTY_LIST_STATE): Promise<OnHandReport> {
   const today = localDateISO();
   const uncostedOnly = state.filters.uncosted?.includes("1") ?? false;
   const [rows, facetOptions] = await Promise.all([computeOnHandRows(state, today), categoryFacets()]);
-  const filtered = uncostedOnly ? rows.filter((r) => r.uncostedUnits > 0) : rows;
-
-  const byCategory = new Map<string, OnHandRow[]>();
-  for (const r of filtered) {
-    const arr = byCategory.get(r.categoryId) ?? [];
-    arr.push(r);
-    byCategory.set(r.categoryId, arr);
-  }
-  const groups: OnHandCategoryGroup[] = [...byCategory.values()]
-    .map((items): OnHandCategoryGroup => ({
-      categoryId: items[0].categoryId, categoryName: items[0].categoryName, items,
-      subtotal: {
-        units: items.reduce((s, r) => s + r.balance, 0),
-        uncostedUnits: items.reduce((s, r) => s + r.uncostedUnits, 0),
-        value: items.reduce((s, r) => s + (r.valueOnHand ?? 0), 0),
-      },
-    }))
+  const filtered = rows
+    .filter((r) => (uncostedOnly ? r.uncostedUnits > 0 : true) && matchesSearch(state.q, r.code, r.name))
+    // Stable: items keep their code order within a category.
     .sort((a, b) => a.categoryName.localeCompare(b.categoryName));
 
+  const byCategory = new Map<string, OnHandSubtotal>();
+  for (const r of filtered) {
+    const cur = byCategory.get(r.categoryId)
+      ?? { categoryId: r.categoryId, categoryName: r.categoryName, items: 0, units: 0, uncostedUnits: 0, value: 0 };
+    cur.items += 1;
+    cur.units += r.balance;
+    cur.uncostedUnits += r.uncostedUnits;
+    cur.value += r.valueOnHand ?? 0;
+    byCategory.set(r.categoryId, cur);
+  }
+
   const grandTotal = {
+    items: filtered.length,
     units: filtered.reduce((s, r) => s + r.balance, 0),
     uncostedUnits: filtered.reduce((s, r) => s + r.uncostedUnits, 0),
     value: filtered.reduce((s, r) => s + (r.valueOnHand ?? 0), 0),
   };
 
-  return { groups, grandTotal, facets: { category: facetOptions } };
+  const pg = pageOf(filtered.length, state.page, LOG_PAGE_SIZE);
+  const pageRows = filtered.slice(pg.skip, pg.skip + pg.take);
+  return {
+    groups: groupRunsByCategory(pageRows),
+    grandTotal,
+    subtotals: topSubtotals([...byCategory.values()]),
+    page: {
+      page: pg.page, pageCount: pg.pageCount, total: pg.total,
+      from: pageRows.length ? pg.skip + 1 : 0, to: pg.skip + pageRows.length,
+    },
+    facets: { category: facetOptions },
+  };
 }
 
 /** The flat twin of `onHandReport` — one row per item, `EXPORT_CAP`-checked on the same (possibly uncosted-only) filtered set the screen shows. */
@@ -325,17 +349,44 @@ async function computeExpiryLots(state: ListState): Promise<ExpiryLotRow[]> {
 }
 
 export interface ExpiryReport {
-  expired: ExpiryLotRow[];
-  expiring: ExpiryLotRow[];
+  tab: ExpiryTab;
+  /** This page (50) of the current tab's lots, soonest expiry first. */
+  rows: ExpiryLotRow[];
+  /** Both tabs' sizes over the same Category and search, so each tab can say how many lots wait behind it. */
+  counts: { expired: number; expiring: number };
+  page: { page: number; pageCount: number; total: number; from: number; to: number };
   facets: { category: FacetOption[] };
 }
 
-/** Spec §5.1/§6.3: `expiryBuckets` splits the window's open, dated lots into Expired / Expiring within N days. Two round trips: `computeExpiryLots` (2 queries) and `categoryFacets` (2 queries), run together. */
-export async function expiryReport(windowDays: number, state: ListState = EMPTY_LIST_STATE): Promise<ExpiryReport> {
+/**
+ * Spec §5.1/§6.3, Phase 39 §4.3: `expiryBuckets` splits the open, dated lots into Expired / Expiring within N days;
+ * `state.q` keeps lots whose item code, item name, reference or supplier has every word. The lots whose remaining
+ * units are not zero are only known after the allocations are summed, so the buckets are built in memory and only
+ * the current tab's page of 50 is sent on. Two round trips: `computeExpiryLots` (2 queries) and `categoryFacets`
+ * (2 queries), run together.
+ */
+export async function expiryReport(
+  windowDays: number,
+  state: ListState = EMPTY_LIST_STATE,
+  tab: ExpiryTab = "expired",
+): Promise<ExpiryReport> {
   const today = localDateISO();
   const [lots, facetOptions] = await Promise.all([computeExpiryLots(state), categoryFacets()]);
-  const { expired, expiring } = expiryBuckets(lots, today, windowDays);
-  return { expired, expiring, facets: { category: facetOptions } };
+  const matching = lots.filter((l) => matchesSearch(state.q, l.code, l.item, l.reference, l.supplier));
+  const { expired, expiring } = expiryBuckets(matching, today, windowDays);
+  const current = tab === "expiring" ? expiring : expired;
+  const pg = pageOf(current.length, state.page, LOG_PAGE_SIZE);
+  const rows = current.slice(pg.skip, pg.skip + pg.take);
+  return {
+    tab,
+    rows,
+    counts: { expired: expired.length, expiring: expiring.length },
+    page: {
+      page: pg.page, pageCount: pg.pageCount, total: pg.total,
+      from: rows.length ? pg.skip + 1 : 0, to: pg.skip + rows.length,
+    },
+    facets: { category: facetOptions },
+  };
 }
 
 /** The flat twin of both blocks, told apart by `status`; `EXPORT_CAP`-checked on their combined count. */

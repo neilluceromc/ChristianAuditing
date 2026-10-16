@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   consumptionGrid, defaultConsumptionRange, expiryBuckets, manilaDayBounds, monthKey, monthsBetween,
-  parseExpiryWindow, parseReportRange, STOCK_REPORT_LIST_CONFIG,
+  groupRunsByCategory, matchesSearch, ON_HAND_SUBTOTAL_LIMIT, parseExpiryTab, parseExpiryWindow, parseReportRange,
+  reportHref, STOCK_REPORT_LIST_CONFIG, topSubtotals,
 } from "./stock-reports";
 
 describe("monthKey", () => {
@@ -165,5 +166,76 @@ describe("parseExpiryWindow", () => {
   });
   it("falls back to the default for a value outside the fixed set", () => {
     expect(parseExpiryWindow(new URLSearchParams("days=45"))).toBe(30);
+  });
+});
+
+describe("matchesSearch", () => {
+  it("matches every word, in any field, ignoring case", () => {
+    expect(matchesSearch("sugar", "PN-0003", "Sugar sachet")).toBe(true);
+    expect(matchesSearch("pn-0003 SUG", "PN-0003", "Sugar sachet")).toBe(true);
+    expect(matchesSearch("sugar tea", "PN-0003", "Sugar sachet")).toBe(false);
+  });
+  it("is always true for an empty search and skips null fields", () => {
+    expect(matchesSearch("", "x")).toBe(true);
+    expect(matchesSearch("   ", null)).toBe(true);
+    expect(matchesSearch("ref", "Item", null, "REF-1", undefined)).toBe(true);
+  });
+});
+
+describe("topSubtotals", () => {
+  const g = (name: string, value: number) => ({ categoryId: name, categoryName: name, value });
+  it("keeps the top 8 by value and counts the rest", () => {
+    const groups = Array.from({ length: 11 }, (_, i) => g(`C${i}`, i * 10));
+    const { top, more } = topSubtotals(groups);
+    expect(ON_HAND_SUBTOTAL_LIMIT).toBe(8);
+    expect(top.map((t) => t.categoryName)).toEqual(["C10", "C9", "C8", "C7", "C6", "C5", "C4", "C3"]);
+    expect(more).toBe(3);
+  });
+  it("breaks a tie by name and has no 'more' when everything fits", () => {
+    const { top, more } = topSubtotals([g("Zed", 5), g("Alpha", 5), g("Mid", 9)]);
+    expect(top.map((t) => t.categoryName)).toEqual(["Mid", "Alpha", "Zed"]);
+    expect(more).toBe(0);
+  });
+  it("does not change the list it is given", () => {
+    const groups = [g("B", 1), g("A", 2)];
+    topSubtotals(groups);
+    expect(groups.map((x) => x.categoryName)).toEqual(["B", "A"]);
+  });
+});
+
+describe("groupRunsByCategory", () => {
+  const r = (id: string, cat: string) => ({ id, categoryId: cat, categoryName: cat.toUpperCase() });
+  it("starts a heading wherever the category changes, including at the top of the page", () => {
+    const runs = groupRunsByCategory([r("1", "a"), r("2", "a"), r("3", "b"), r("4", "b")]);
+    expect(runs.map((x) => [x.categoryName, x.items.map((i) => i.id)])).toEqual([["A", ["1", "2"]], ["B", ["3", "4"]]]);
+  });
+  it("a page that begins mid-category still opens with that category's heading", () => {
+    expect(groupRunsByCategory([r("5", "b"), r("6", "c")]).map((x) => x.categoryName)).toEqual(["B", "C"]);
+  });
+  it("is empty for no rows", () => {
+    expect(groupRunsByCategory([])).toEqual([]);
+  });
+});
+
+describe("parseExpiryTab", () => {
+  it("is Expired unless ?tab=expiring", () => {
+    expect(parseExpiryTab(new URLSearchParams(""))).toBe("expired");
+    expect(parseExpiryTab(new URLSearchParams("tab=nonsense"))).toBe("expired");
+    expect(parseExpiryTab(new URLSearchParams("tab=expiring"))).toBe("expiring");
+  });
+});
+
+describe("reportHref", () => {
+  const base = { q: "", page: 1, sort: [], filters: {} };
+  it("is the bare path for the default state", () => {
+    expect(reportHref("/stock/reports/on-hand", base)).toBe("/stock/reports/on-hand");
+  });
+  it("carries search, category, uncosted and page, then the extras that are set", () => {
+    const href = reportHref(
+      "/stock/reports/expiry",
+      { ...base, q: "sugar", page: 3, filters: { category: ["a", "b"] } },
+      { days: "90", tab: "expiring", empty: "" },
+    );
+    expect(href).toBe("/stock/reports/expiry?q=sugar&category=a,b&page=3&days=90&tab=expiring");
   });
 });

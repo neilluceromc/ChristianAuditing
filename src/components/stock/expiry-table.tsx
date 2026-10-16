@@ -6,15 +6,13 @@ import { expiryLabel } from "@/lib/stock-allocation";
 import { WriteOffDialog } from "@/components/stock/write-off-dialog";
 import type { ExpiryLotRow } from "@/server/modules/stock/report-queries";
 
-/** Spec §6.3: one block (Expired or Expiring within N days) as a table, or the block's own empty copy. */
+/** Spec §6.3, Phase 39 §4.3: the current tab's page of lots as a table, or the tab's own empty copy. The tabs and the page's pagination sit around it. */
 export function ExpiryTable({
-  title,
   rows,
   today,
   emptyText,
   canManage,
 }: {
-  title: string;
   rows: ExpiryLotRow[];
   today: string;
   emptyText: string;
@@ -22,7 +20,6 @@ export function ExpiryTable({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-[13px] font-semibold text-fg">{title}</h2>
       {rows.length === 0 ? (
         <EmptyState title={emptyText} />
       ) : (
