@@ -48,9 +48,17 @@ function csvCell(v: string): string {
   return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
-/** The import-failures download: header "Row,Reason", RFC 4180 quoting, CRLF line ends. */
+/** A cell a spreadsheet would read as a formula (it starts with = + - @) gets a leading apostrophe, so it stays text. */
+function textCell(v: string): string {
+  return /^[=+\-@]/.test(v) ? `'${v}` : v;
+}
+
+/**
+ * The import-failures download: header "Row,Reason", RFC 4180 quoting, CRLF line ends. A reason starting with
+ * = + - @ is prefixed with an apostrophe, so opening the file in a spreadsheet never runs it as a formula.
+ */
 export function failuresCsv(rows: Array<{ row: number; reason: string }>): string {
-  return ["Row,Reason", ...rows.map((r) => `${r.row},${csvCell(r.reason)}`)].join("\r\n");
+  return ["Row,Reason", ...rows.map((r) => `${r.row},${csvCell(textCell(r.reason))}`)].join("\r\n");
 }
 
 /** The first `max` fields, and how many were left out ("+{more} more fields"). */

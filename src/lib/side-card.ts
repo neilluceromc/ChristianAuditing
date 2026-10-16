@@ -13,8 +13,13 @@ function asTab(v: string | null): SideTab | null {
   return v !== null && (SIDE_TABS as readonly string[]).includes(v) ? (v as SideTab) : null;
 }
 
-/** The link parameter wins, then the remembered tab, else Notes. Unknown values are ignored. */
-export function pickSideTab(param: string | null, stored: string | null): SideTab {
+/**
+ * The link parameter wins, then the remembered tab, else Notes. Unknown values are ignored. `?notes=1` (the notes
+ * panel left open across a refresh, §2.2) means Notes whatever else the link or the memory says: the panel belongs
+ * to that tab.
+ */
+export function pickSideTab(param: string | null, stored: string | null, notesParam: string | null = null): SideTab {
+  if (notesParam === "1") return "notes";
   return asTab(param) ?? asTab(stored) ?? "notes";
 }
 

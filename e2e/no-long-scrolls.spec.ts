@@ -45,7 +45,7 @@ import { isExpired, lotRemaining } from "../src/lib/stock-allocation";
  *     deleted afterwards.
  *   9 (§5) history: BR-MN-0911 with a 5-field and a 4-field audit entry (via prisma; AuditEntry is append-only, so
  *     they stay until the next reseed) shows 3 fields of each and "+2 more fields" / "+1 more fields"; the button
- *     opens that entry only.
+ *     opens that entry only, keeping its name, with aria-expanded and aria-controls naming the opened rows.
  *   10 (§5) the import-failures CSV is unit-level (src/lib/long-lists.test.ts); no cheap fixture produces failed
  *     writes, so no e2e case.
  *   12 (§6) spares on demand: with 60 extra spare phones (via prisma, deleted afterwards) Nina Robles's profile
@@ -790,7 +790,13 @@ test.describe("Phase 39 — bounded lists", () => {
       page.on("dialog", (d) => { asked.push(d.message()); void d.dismiss(); });
       await edit(a).click();
       await expect(editor(a)).toBeVisible();
-      await expect(page.getByRole("button", { name: `Close the ${a} rule`, exact: true })).toHaveAttribute("aria-expanded", "true");
+      // A disclosure: the name stays "Edit the … rule" (the visible text reads Close), aria-expanded flips, and
+      // aria-controls names the panel holding the editor.
+      await expect(edit(a)).toHaveText("Close");
+      await expect(edit(a)).toHaveAttribute("aria-expanded", "true");
+      await expect(edit(b)).toHaveAttribute("aria-expanded", "false");
+      const panelId = await edit(a).getAttribute("aria-controls");
+      await expect(page.locator(`[id="${panelId}"]`).getByRole("region", { name: `${a} on ${group.name}`, exact: true })).toBeVisible();
       await edit(b).click();
       await expect(editor(b)).toBeVisible();
       await expect(editor(a)).toHaveCount(0);
@@ -905,8 +911,9 @@ test.describe("Phase 39 — bounded lists", () => {
     await login(page, IT);
     await page.goto(`/inventory/${asset.id}/history`);
     const field = (name: string) => page.getByRole("cell", { name, exact: true });
+    // The extra rows are rendered `hidden` while closed, so "the next row" is the next one not hidden.
     const buttonAfter = (name: string) =>
-      page.getByRole("row").filter({ has: field(name) }).locator("xpath=following-sibling::tr[1]").getByRole("button");
+      page.getByRole("row").filter({ has: field(name) }).locator("xpath=following-sibling::tr[not(@hidden)][1]").getByRole("button");
     await expect(field("e2eF3")).toBeVisible({ timeout: 20_000 });
 
     // Collapsed: the first 3 of each, in order, with the count left over.
@@ -923,13 +930,23 @@ test.describe("Phase 39 — bounded lists", () => {
     await expect(field("e2eF4")).toBeVisible();
     await expect(field("e2eF5")).toBeVisible();
     await expect(field("e2eG4")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Show fewer fields", exact: true })).toHaveAttribute("aria-expanded", "true");
+    // A disclosure: the name stays "+2 more fields", aria-expanded flips, and aria-controls names the opened rows.
+    const opened = buttonAfter("e2eF5");
+    await expect(opened).toHaveAccessibleName("+2 more fields");
+    await expect(opened).toHaveAttribute("aria-expanded", "true");
+    const controls = (await opened.getAttribute("aria-controls"))!.split(" ");
+    expect(controls).toHaveLength(2);
+    for (const [i, n] of ["e2eF4", "e2eF5"].entries()) {
+      await expect(page.locator(`[id="${controls[i]}"]`)).toContainText(n);
+    }
     await expect(buttonAfter("e2eG3")).toHaveText("+1 more fields");
+    await expect(buttonAfter("e2eG3")).toHaveAttribute("aria-expanded", "false");
 
     // And it folds back.
-    await page.getByRole("button", { name: "Show fewer fields", exact: true }).click();
+    await opened.click();
     await expect(field("e2eF4")).toHaveCount(0);
     await expect(buttonAfter("e2eF3")).toHaveText("+2 more fields");
+    await expect(buttonAfter("e2eF3")).toHaveAttribute("aria-expanded", "false");
   });
 });
 

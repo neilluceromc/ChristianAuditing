@@ -26,6 +26,8 @@ export const spareCandidatesSchema = z.object({
   employeeId: z.string().min(1),
   assetTypeId: z.string().min(1).optional(),
   q: z.string().trim().max(SPARE_QUERY_MAX).optional(),
+  /** Replace and Reserve: leave out, server-side, what this person may not pick (`heldOrQueuedWhere`). */
+  pickable: z.literal(true).optional(),
 });
 
 // The same states approvals/create.ts calls OPEN_APPROVAL_STATES — repeated here because src/lib cannot import src/server.
@@ -62,6 +64,16 @@ export function spareSearchWhere(q?: string): Prisma.AssetWhereInput {
       { OR: [{ tag: { contains: term, mode: "insensitive" } }, { model: { contains: term, mode: "insensitive" } }] },
     ],
   };
+}
+
+/**
+ * The rows' pool: `spareSearchWhere`, and with `pickable` without the spares held or queued for someone else — so a
+ * picker that cannot offer those (Replace, Reserve) never gets 50 rows it must hide while free spares exist. The
+ * counts are never narrowed by it: they stay pool-wide.
+ */
+export function spareCandidatesWhere(employeeId: string, q?: string, pickable?: boolean): Prisma.AssetWhereInput {
+  const pool = spareSearchWhere(q);
+  return pickable ? { AND: [pool, { NOT: heldOrQueuedWhere(employeeId) }] } : pool;
 }
 
 /** What each candidate row carries, so the pickers can say who holds it and which request promises it. */

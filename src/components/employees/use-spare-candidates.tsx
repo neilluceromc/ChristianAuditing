@@ -11,9 +11,11 @@ export type SpareLoad =
 
 const LOADING: SpareLoad = { status: "loading" };
 
-async function fetchSpares(employeeId: string, typeId: string | null, q: string): Promise<SpareLoad> {
+async function fetchSpares(employeeId: string, typeId: string | null, q: string, pickable: boolean): Promise<SpareLoad> {
   try {
-    const res = await spareCandidates({ employeeId, assetTypeId: typeId ?? undefined, q: q || undefined });
+    const res = await spareCandidates({
+      employeeId, assetTypeId: typeId ?? undefined, q: q || undefined, pickable: pickable || undefined,
+    });
     return res.ok ? { status: "ready", items: res.data.spares, counts: res.data.counts } : { status: "error" };
   } catch {
     return { status: "error" };
@@ -27,8 +29,12 @@ async function fetchSpares(employeeId: string, typeId: string | null, q: string)
  * (`base` when it is empty). `rows` keeps the previous answer on screen while the next one loads (`busy`), so a
  * keystroke never flickers the list; it is null only before the first answer or after a failure.
  * A new `openKey` starts over; answers for an older key or older text are dropped.
+ * `pickable` (Replace, Reserve): the rows leave out spares held or queued for someone else, server-side.
  */
-export function useSpareCandidates(employeeId: string, openKey: string | null, typeId: string | null) {
+export function useSpareCandidates(
+  employeeId: string, openKey: string | null, typeId: string | null, opts?: { pickable?: boolean },
+) {
+  const pickable = opts?.pickable ?? false;
   const [seenKey, setSeenKey] = useState(openKey);
   const [q, setQRaw] = useState("");
   const [base, setBase] = useState<SpareLoad>(LOADING);
@@ -52,18 +58,18 @@ export function useSpareCandidates(employeeId: string, openKey: string | null, t
   useEffect(() => {
     if (openKey === null) return;
     let live = true;
-    void fetchSpares(employeeId, typeId, "").then((load) => { if (live) setBase(load); });
+    void fetchSpares(employeeId, typeId, "", pickable).then((load) => { if (live) setBase(load); });
     return () => { live = false; };
-  }, [employeeId, openKey, typeId, baseTry]);
+  }, [employeeId, openKey, typeId, baseTry, pickable]);
 
   useEffect(() => {
     if (openKey === null || !term) return;
     let live = true;
     const timer = setTimeout(() => {
-      void fetchSpares(employeeId, typeId, term).then((load) => { if (live) setFound({ q: term, load }); });
+      void fetchSpares(employeeId, typeId, term, pickable).then((load) => { if (live) setFound({ q: term, load }); });
     }, SPARE_DEBOUNCE_MS);
     return () => { live = false; clearTimeout(timer); };
-  }, [employeeId, openKey, typeId, term, searchTry]);
+  }, [employeeId, openKey, typeId, term, searchTry, pickable]);
 
   const rows = shown.status === "ready" ? shown.items : shown.status === "loading" ? lastRows : null;
   const busy = shown.status === "loading" && lastRows !== null;

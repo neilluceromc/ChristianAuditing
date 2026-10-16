@@ -54,8 +54,21 @@ export function RefTable({
   const shown = filterRef(rows, q);
   const findLabel = `Find a ${entity}…`;
   const columns = 3 + (isCategory || isType ? 1 : 0);
+  // A new row always shows: the search is cleared after an add (it may not match what was typed in the search).
+  const create = () =>
+    run(
+      () => createRefRow({ entity, name: newName, categoryId: isType ? newCategory : undefined, cls: isCategory ? newCls : undefined }),
+      "Added",
+      () => setQ(""),
+    );
+  // A renamed row that no longer matches the search would vanish: the search is cleared then.
+  const rename = (id: string, name: string) =>
+    run(() => renameRefRow({ entity, id, name }), "Renamed", () => {
+      if (filterRef([{ name }], q).length === 0) setQ("");
+    });
 
-  function run(fn: () => Promise<{ ok: boolean } & Record<string, unknown>>, okMsg: string) {
+  /** `onOk` runs after a success, before the refresh (the create and the rename use it to clear the search). */
+  function run(fn: () => Promise<{ ok: boolean } & Record<string, unknown>>, okMsg: string, onOk?: () => void) {
     setError(null);
     setFieldError(null);
     startTransition(async () => {
@@ -64,6 +77,7 @@ export function RefTable({
         toast(okMsg, "settled");
         setNewName("");
         setRenaming(null);
+        onOk?.();
         router.refresh();
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else if (res.kind === "validation") setFieldError(Object.values(res.fieldErrors ?? {})[0] ?? res.message);
@@ -94,10 +108,9 @@ export function RefTable({
               <Th width={200}>In use by</Th>
               <Th width={60} aria-label="Row actions" />
             </Tr>
-          </THead>
-          <TBody>
-            {/* Inline add row — reference data is entered in batches, not through dialogs. */}
-            <Tr className="bg-surface-subtle">
+            {/* Inline add row — reference data is entered in batches, not through dialogs. It sits in the sticky
+                header, so it stays in view while the box scrolls. */}
+            <Tr className="bg-surface-subtle hover:bg-surface-subtle">
               <Td>
                 <div className="flex flex-col gap-1 py-1.5">
                   <Input
@@ -110,7 +123,7 @@ export function RefTable({
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        run(() => createRefRow({ entity, name: newName, categoryId: isType ? newCategory : undefined, cls: isCategory ? newCls : undefined }), "Added");
+                        create();
                       }
                     }}
                   />
@@ -139,12 +152,13 @@ export function RefTable({
               )}
               <Td className="text-fg-faint">—</Td>
               <Td>
-                <Button size="sm" variant="primary" loading={pending}
-                  onClick={() => run(() => createRefRow({ entity, name: newName, categoryId: isType ? newCategory : undefined, cls: isCategory ? newCls : undefined }), "Added")}>
+                <Button size="sm" variant="primary" loading={pending} onClick={create}>
                   Add
                 </Button>
               </Td>
             </Tr>
+          </THead>
+          <TBody>
             {shown.map((row) => (
               <Tr key={row.id}>
                 <Td>
@@ -156,7 +170,7 @@ export function RefTable({
                       className="py-1.5 text-xs"
                       onChange={(e) => setRenaming({ id: row.id, name: e.target.value })}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") run(() => renameRefRow({ entity, id: row.id, name: renaming.name }), "Renamed");
+                        if (e.key === "Enter") rename(row.id, renaming.name);
                         if (e.key === "Escape") setRenaming(null);
                       }}
                       onBlur={() => setRenaming(null)}
@@ -198,7 +212,7 @@ export function RefTable({
           </TBody>
         </table>
       </div>
-      <p className="text-xs text-fg-muted">Showing {shown.length} of {rows.length}.</p>
+      <p role="status" className="text-xs text-fg-muted">Showing {shown.length} of {rows.length}.</p>
       {isCategory && (
         <p className="text-xs text-fg-faint">A category&apos;s class is fixed once it has assets.</p>
       )}

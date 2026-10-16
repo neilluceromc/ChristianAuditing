@@ -7,7 +7,7 @@ import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { pagedSnapshot } from "@/server/paged";
 import { fmtDate, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { parsePage } from "@/lib/paging";
+import { pageOf, parsePage } from "@/lib/paging";
 import { DEFAULT_STATUS, isDirectLifecycle } from "@/lib/asset-class";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { StatusDot } from "@/components/ui/status";
@@ -82,22 +82,23 @@ export default async function AssetReservationsPage({
       include: { employee: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     }),
-    // The count is always read (the link says how many); the rows only when the past is open.
-    pagedSnapshot(
-      PAST_PAGE_SIZE,
-      showPast ? parsePage(sp) : 1,
-      (tx) => tx.reservation.count({ where: pastWhere }),
-      (tx, pg) =>
-        showPast
-          ? tx.reservation.findMany({
+    // Open: the count and the page in one snapshot, most recently resolved first. Hidden: only the count (the link
+    // says how many), a plain read with no transaction.
+    showPast
+      ? pagedSnapshot(
+          PAST_PAGE_SIZE,
+          parsePage(sp),
+          (tx) => tx.reservation.count({ where: pastWhere }),
+          (tx, pg) =>
+            tx.reservation.findMany({
               where: pastWhere,
               include: { employee: true },
-              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              orderBy: [{ resolvedAt: { sort: "desc", nulls: "last" } }, { id: "desc" }],
               skip: pg.skip,
               take: pg.take,
-            })
-          : Promise.resolve([] as HoldRow[]),
-    ),
+            }),
+        )
+      : prisma.reservation.count({ where: pastWhere }).then((total) => ({ rows: [] as HoldRow[], ...pageOf(total, 1, PAST_PAGE_SIZE) })),
   ]);
   const today = localDateISO(new Date());
   const canRelease = isDirectLifecycle(user.role, asset.cls);
@@ -120,9 +121,9 @@ export default async function AssetReservationsPage({
       )}
       {past.total > 0 && (
         showPast ? (
-          <section aria-label="Past holds" className="flex flex-col gap-2">
+          <section aria-labelledby="past-holds-heading" className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-[12.5px] font-semibold text-fg">Past holds ({past.total})</h3>
+              <h3 id="past-holds-heading" className="text-[12.5px] font-semibold text-fg">Past holds ({past.total})</h3>
               <Link href="?" className="text-xs text-accent hover:underline">Hide past holds</Link>
             </div>
             <HoldsTable holds={past.rows} today={today} canRelease={canRelease} tag={asset.tag} />

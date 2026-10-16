@@ -30,6 +30,15 @@ describe("pickSideTab", () => {
   it("ignores an unknown parameter and uses the stored tab", () => {
     expect(pickSideTab("bogus", "transfers")).toBe("transfers");
   });
+  it("?notes=1 means the Notes tab, over the link parameter and the stored tab", () => {
+    expect(pickSideTab(null, "transfers", "1")).toBe("notes");
+    expect(pickSideTab("form", "setup", "1")).toBe("notes");
+  });
+  it("any other notes value changes nothing", () => {
+    expect(pickSideTab(null, "transfers", "0")).toBe("transfers");
+    expect(pickSideTab("form", null, "")).toBe("form");
+    expect(pickSideTab(null, "setup", null)).toBe("setup");
+  });
   it("gives notes when both are unknown", () => {
     expect(pickSideTab("bogus", "also-bogus")).toBe("notes");
     expect(pickSideTab("", "")).toBe("notes");

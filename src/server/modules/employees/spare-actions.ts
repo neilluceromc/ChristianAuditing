@@ -7,7 +7,7 @@ import { checkRate } from "@/server/rate-limit";
 import { forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
 import { canSeeClass } from "@/lib/asset-class";
 import {
-  SPARE_INCLUDE, SPARE_LIMIT, heldOrQueuedWhere, orderSpareCandidates, spareCandidatesSchema, spareSearchWhere, spareWhere,
+  SPARE_INCLUDE, SPARE_LIMIT, heldOrQueuedWhere, orderSpareCandidates, spareCandidatesSchema, spareCandidatesWhere, spareWhere,
   toSpareOption, type SpareCandidateCounts, type SpareCandidates,
 } from "@/lib/spare-candidates";
 
@@ -17,6 +17,7 @@ import {
  * the slot's type first, then by tag, at most SPARE_LIMIT. The untyped call also counts the whole pool (and the
  * slot's type): how many spares there are and how many are held or queued for someone else, so the dialogs'
  * "nothing in stock", "all held", "{n} more…" and sole-spare preselect never depend on which rows were loaded.
+ * `pickable` (Replace, Reserve) leaves the held-or-queued spares out of the rows only; the counts stay pool-wide.
  * Nothing is written.
  */
 export async function spareCandidates(input: unknown): Promise<ActionResult<SpareCandidates>> {
@@ -27,9 +28,9 @@ export async function spareCandidates(input: unknown): Promise<ActionResult<Spar
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = spareCandidatesSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { employeeId, assetTypeId, q } = parsed.data;
+  const { employeeId, assetTypeId, q, pickable } = parsed.data;
 
-  const pool = spareSearchWhere(q);
+  const pool = spareCandidatesWhere(employeeId, q, pickable);
   const find = (narrow: Prisma.AssetWhereInput) => prisma.asset.findMany({
     where: { AND: [pool, narrow] },
     include: SPARE_INCLUDE,

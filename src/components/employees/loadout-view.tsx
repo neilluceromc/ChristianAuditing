@@ -201,8 +201,12 @@ export function LoadoutView({
   const replacingTypeId = replacing ? tiles.find((t) => t.asset?.id === replacing.id)?.typeId ?? null : null;
   const fillTypeId = fillSlot?.typeId ?? null;
   const fillSpares = useSpareCandidates(employeeId, fillSlot && fillTypeId ? fillSlot.key : null, fillTypeId);
-  const replaceSpares = useSpareCandidates(employeeId, replacing ? replacing.id : null, replacingTypeId);
-  const reserveSpares = useSpareCandidates(employeeId, reservingSlot ? reservingSlot.key : null, reservingSlot?.typeId ?? null);
+  // Replace and Reserve cannot offer a spare held or queued for someone else: the server leaves those out of the
+  // rows (`pickable`), so 50 of them never fill the list while a free spare exists. The counts stay pool-wide.
+  const replaceSpares = useSpareCandidates(employeeId, replacing ? replacing.id : null, replacingTypeId, { pickable: true });
+  const reserveSpares = useSpareCandidates(
+    employeeId, reservingSlot ? reservingSlot.key : null, reservingSlot?.typeId ?? null, { pickable: true },
+  );
 
   // Phase 29 (spec §4.4): opening Fill preselects the sole pickable spare — one less decision. Now that the
   // spares arrive after the dialog opens, the pick is made when they do (and never over one already made),

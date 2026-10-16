@@ -7,6 +7,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useOverlayLayer } from "@/components/ui/use-focus-trap";
 import { canDeleteNote, canEditNote, notesCountLine } from "@/lib/employee-notes";
 import { monthGroups } from "@/lib/long-lists";
 import { listEmployeeNotes, type NoteListPage, type NoteListRow } from "@/server/modules/employees/note-actions";
@@ -62,6 +63,15 @@ export function NotesPanel({
   const seq = useRef(0);
   /** After an edit or delete: how many rows to load back, so the reader keeps their place. */
   const keep = useRef(0);
+
+  function cancelEdit() {
+    if (editingId === null) return;
+    setFocusReq(editId(editingId));
+    setEditingId(null);
+  }
+  // Esc while a note is being edited cancels the edit, not the whole panel: the edit is a layer above the Drawer
+  // on the shared overlay stack, whose capture listener hands Esc to the top layer only (use-focus-trap.ts).
+  useOverlayLayer(editingId !== null, cancelEdit);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(q), DEBOUNCE_MS);
@@ -220,10 +230,7 @@ export function NotesPanel({
                           {editingId === n.id ? (
                             <NoteEditor
                               note={n}
-                              onClose={() => {
-                                setEditingId(null);
-                                setFocusReq(editId(n.id));
-                              }}
+                              onClose={cancelEdit}
                               onSaved={reload}
                             />
                           ) : (

@@ -198,6 +198,7 @@ export function TitleRules({
   titleCounts: Array<{ title: string; count: number }>;
 }) {
   const inputId = useId();
+  const panelBase = useId();
   const [adding, setAdding] = useState(false);
   const [typed, setTyped] = useState("");
   const [typedError, setTypedError] = useState<string | null>(null);
@@ -274,6 +275,7 @@ export function TitleRules({
         )}
         {rules.map((r) => {
           const isOpen = open === r.policyId;
+          const panelId = `${panelBase}-${r.policyId}`;
           return (
             <div key={r.policyId} className="rounded-(--radius-card) border border-border-faint">
               <div className="flex items-center gap-2 px-3 py-2">
@@ -281,9 +283,10 @@ export function TitleRules({
                 <span className="text-xs text-fg-muted">
                   · {r.lines.length} {r.lines.length === 1 ? "line" : "lines"} ·
                 </span>
+                {/* A disclosure: its name stays put ("Edit"/"View the … rule") while aria-expanded says open or not. */}
                 <Button
-                  size="sm" variant="ghost" aria-expanded={isOpen}
-                  aria-label={`${isOpen ? "Close" : canMutate ? "Edit" : "View"} the ${r.title} rule`}
+                  size="sm" variant="ghost" aria-expanded={isOpen} aria-controls={panelId}
+                  aria-label={`${canMutate ? "Edit" : "View"} the ${r.title} rule`}
                   onClick={() => toggle(r.policyId)}
                 >
                   {isOpen ? "Close" : canMutate ? "Edit" : "View"}
@@ -294,8 +297,9 @@ export function TitleRules({
                   </Button>
                 )}
               </div>
-              {isOpen && (
-                <div className="border-t border-border-faint px-3 py-3">
+              {/* Always present (hidden while closed) so aria-controls names an element; the editor mounts only when open. */}
+              <div id={panelId} hidden={!isOpen} className="border-t border-border-faint px-3 py-3">
+                {isOpen && (
                   <PolicyLinesEditor
                     key={r.editorKey}
                     departmentId={departmentId} groupName={groupName} kind={kind} policyId={r.policyId} title={r.title}
@@ -303,8 +307,8 @@ export function TitleRules({
                     untypedNames={r.untypedNames}
                     onDirtyChange={(d) => { openDirty.current = d; }}
                   />
-                </div>
-              )}
+                )}
+              </div>
             </div>
           );
         })}

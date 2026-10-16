@@ -85,6 +85,22 @@ describe("failuresCsv", () => {
   it("quotes a reason with a carriage return", () => {
     expect(failuresCsv([{ row: 1, reason: "a\rb" }])).toBe('Row,Reason\r\n1,"a\rb"');
   });
+  it("prefixes a reason a spreadsheet would read as a formula with an apostrophe", () => {
+    expect(
+      failuresCsv([
+        { row: 1, reason: "=SUM(A1)" },
+        { row: 2, reason: "+1" },
+        { row: 3, reason: "-2" },
+        { row: 4, reason: "@cmd" },
+        { row: 5, reason: "Total = 3" },
+      ]),
+    ).toBe("Row,Reason\r\n1,'=SUM(A1)\r\n2,'+1\r\n3,'-2\r\n4,'@cmd\r\n5,Total = 3");
+  });
+  it("guards the formula before quoting, so the apostrophe sits inside the quotes", () => {
+    expect(failuresCsv([{ row: 6, reason: '=HYPERLINK("x","y")' }])).toBe(
+      `Row,Reason\r\n6,"'=HYPERLINK(""x"",""y"")"`,
+    );
+  });
 });
 
 describe("sliceFields", () => {

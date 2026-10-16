@@ -50,7 +50,8 @@ export function SideCard({
   const badges = sideBadges(counts);
 
   useEffect(() => {
-    setTab(pickSideTab(new URLSearchParams(window.location.search).get("side"), readStoredTab(store())));
+    const params = new URLSearchParams(window.location.search);
+    setTab(pickSideTab(params.get("side"), readStoredTab(store()), params.get("notes")));
   }, []);
 
   function choose(next: SideTab) {

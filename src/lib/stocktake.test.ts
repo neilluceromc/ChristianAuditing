@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  isDifference, pageSheet, parseCount, parseSheetState, planStocktakePost, postedReviewRows, sheetHref, sheetLineMatches, varianceRows,
+  isDifference, pageSheet, parseCount, parseSheetState, planStocktakePost, postedReviewRows, sheetHref, sheetLineMatches,
+  staleSavedLines, varianceRows,
   type StocktakeLineInput,
 } from "./stocktake";
 
@@ -133,5 +134,25 @@ describe("parseCount — what a count box holds", () => {
     expect(parseCount("1.5")).toBe("invalid");
     expect(parseCount("-2")).toBe("invalid");
     expect(parseCount("abc")).toBe("invalid");
+  });
+});
+
+describe("staleSavedLines — what the count screen must forget it saved", () => {
+  const prev = new Map<string, number | null>([["a", 5], ["b", null], ["c", 7], ["d", 3]]);
+  const none = () => false;
+
+  it("is every line whose server count changed since the last look", () => {
+    expect(
+      staleSavedLines(prev, [{ id: "a", countedQty: 6 }, { id: "b", countedQty: 2 }, { id: "c", countedQty: 7 }, { id: "d", countedQty: null }], none),
+    ).toEqual(["a", "b", "d"]);
+  });
+
+  it("skips a line with a save in flight (its own refresh, or one about to overwrite)", () => {
+    expect(staleSavedLines(prev, [{ id: "a", countedQty: 6 }, { id: "b", countedQty: 2 }], (id) => id === "a")).toEqual(["b"]);
+  });
+
+  it("never counts a line it had not seen as a change", () => {
+    expect(staleSavedLines(prev, [{ id: "z", countedQty: 1 }], none)).toEqual([]);
+    expect(staleSavedLines(new Map(), [{ id: "a", countedQty: 1 }], none)).toEqual([]);
   });
 });

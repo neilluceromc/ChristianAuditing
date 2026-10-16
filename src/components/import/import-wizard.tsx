@@ -23,16 +23,20 @@ const STEPS = ["Upload", "Validate", "Results"] as const;
 /** Phase 39 (spec §5): the result lists this many failed rows; the download carries all of them. */
 const FAILURES_SHOWN = 20;
 
-/** Built in the browser from the rows already on screen: a Blob, a temporary link, then the URL is let go. */
+/**
+ * Built in the browser from the rows already on screen: a Blob, a temporary link, then the URL is let go — on a
+ * timer, since a browser may start reading the Blob only after the click handler returns. The UTF-8 byte order
+ * mark makes a spreadsheet read the file as UTF-8.
+ */
 function downloadFailures(failures: Array<{ row: number; reason: string }>) {
-  const url = URL.createObjectURL(new Blob([failuresCsv(failures)], { type: "text/csv;charset=utf-8" }));
+  const url = URL.createObjectURL(new Blob(["﻿", failuresCsv(failures)], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url;
   a.download = `import-failures-${localDateISO()}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /**

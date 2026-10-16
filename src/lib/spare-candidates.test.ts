@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SPARE_LIMIT, SPARE_QUERY_MAX, heldOrQueuedWhere, isUnpickable, orderSpareCandidates, replacePicker, solePick,
-  spareCandidatesSchema, spareSearchWhere, spareWhere, toSpareOption, type SpareOption, type SpareRow,
+  spareCandidatesSchema, spareCandidatesWhere, spareSearchWhere, spareWhere, toSpareOption, type SpareOption, type SpareRow,
 } from "./spare-candidates";
 
 const row = (tag: string, typeId: string | null, extra: Partial<SpareRow> = {}): SpareRow => ({
@@ -77,11 +77,34 @@ describe("spareSearchWhere", () => {
   });
 });
 
+describe("spareCandidatesWhere", () => {
+  it("is the search pool unless pickable is asked for", () => {
+    expect(spareCandidatesWhere("emp")).toEqual(spareSearchWhere());
+    expect(spareCandidatesWhere("emp", "lt", false)).toEqual(spareSearchWhere("lt"));
+  });
+
+  it("with pickable, leaves out what is held or queued for someone else", () => {
+    expect(spareCandidatesWhere("emp", undefined, true)).toEqual({
+      AND: [spareWhere(), { NOT: heldOrQueuedWhere("emp") }],
+    });
+    expect(spareCandidatesWhere("emp", "lt", true)).toEqual({
+      AND: [spareSearchWhere("lt"), { NOT: heldOrQueuedWhere("emp") }],
+    });
+  });
+});
+
 describe("spareCandidatesSchema", () => {
   it("needs the person; the type and the text are optional", () => {
     expect(spareCandidatesSchema.safeParse({}).success).toBe(false);
     expect(spareCandidatesSchema.safeParse({ employeeId: "e" }).success).toBe(true);
     expect(spareCandidatesSchema.safeParse({ employeeId: "e", assetTypeId: "t", q: " x " }).data?.q).toBe("x");
+  });
+
+  it("takes pickable only as true", () => {
+    expect(spareCandidatesSchema.safeParse({ employeeId: "e", pickable: true }).data?.pickable).toBe(true);
+    expect(spareCandidatesSchema.safeParse({ employeeId: "e" }).data?.pickable).toBeUndefined();
+    expect(spareCandidatesSchema.safeParse({ employeeId: "e", pickable: false }).success).toBe(false);
+    expect(spareCandidatesSchema.safeParse({ employeeId: "e", pickable: "yes" }).success).toBe(false);
   });
 
   it("refuses an empty type and text over 60 characters", () => {

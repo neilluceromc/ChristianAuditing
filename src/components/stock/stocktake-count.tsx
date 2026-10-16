@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Pagination, type PaginationLinkProps } from "@/components/ui/pagination";
 import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { waitForAll } from "@/lib/pending-saves";
-import { parseCount, sheetHref, type SheetState } from "@/lib/stocktake";
+import { parseCount, sheetHref, staleSavedLines, type SheetState } from "@/lib/stocktake";
 import { countStocktakeLine } from "@/server/modules/stock/stocktake-actions";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import { StocktakeSheetToolbar } from "./stocktake-sheet-toolbar";
@@ -99,9 +99,28 @@ export function StocktakeCount({
   /** A request to focus a box, honoured after the commit that renders its message (a new object each time). */
   const [focusReq, setFocusReq] = useState<{ id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The last message shown. Once a banner has appeared its space is kept (invisible) until the page changes, so a
+   * banner clearing — which a save does on the blur, i.e. on the mousedown of a pagination click — never moves the
+   * pagination before the mouseup. The banner sits below the pagination, so one appearing moves nothing either.
+   */
+  const [lastError, setLastError] = useState<string | null>(null);
+  const fail = (message: string) => {
+    setError(message);
+    setLastError(message);
+  };
 
-  // A page or filter change: the rows start again from the server's values. A save's own refresh keeps the same
-  // URL, so it keeps what is being typed.
+  const pending = useRef(new Set<Promise<boolean>>());
+  const chains = useRef(new Map<string, Promise<boolean>>());
+  /** What this session saved, per line; the server's `countedQty` otherwise. Forgotten when that goes stale. */
+  const savedQty = useRef(new Map<string, number>());
+  /** Set once the server refuses a count for good (no longer open): saving stops and navigation is let through. */
+  const refused = useRef(false);
+  /** The server's `countedQty` per line as last rendered, to see another counter's change land. */
+  const serverQty = useRef(new Map<string, number | null>());
+
+  // A page or filter change: the rows start again from the server's values, and what this session remembers saving
+  // (or being refused) is forgotten. A save's own refresh keeps the same URL, so it keeps what is being typed.
   const urlKey = sheetHref(stocktakeId, "count", sheet);
   const [shownKey, setShownKey] = useState(urlKey);
   if (urlKey !== shownKey) {
@@ -110,14 +129,17 @@ export function StocktakeCount({
     setSaved({});
     setInvalid({});
     setError(null);
+    setLastError(null);
+    savedQty.current.clear();
+    refused.current = false;
   }
 
-  const pending = useRef(new Set<Promise<boolean>>());
-  const chains = useRef(new Map<string, Promise<boolean>>());
-  /** What this session saved, per line; the server's `countedQty` otherwise. */
-  const savedQty = useRef(new Map<string, number>());
-  /** Set once the server refuses a count for good (no longer open): saving stops and navigation is let through. */
-  const refused = useRef(false);
+  // Another counter changed a line after this session saved it: forget this session's value for it, or re-typing
+  // that value would be skipped as "already saved" and theirs would stand. A line with a save in flight keeps it.
+  useEffect(() => {
+    for (const id of staleSavedLines(serverQty.current, lines, (id) => chains.current.has(id))) savedQty.current.delete(id);
+    serverQty.current = new Map(lines.map((l) => [l.id, l.countedQty]));
+  }, [lines]);
   const inputs = useRef(new Map<string, HTMLInputElement>());
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -165,7 +187,7 @@ export function StocktakeCount({
       try {
         const res = await countStocktakeLine({ lineId: line.id, countedQty });
         if (!res.ok) {
-          setError(`${line.code}: ${res.message}`);
+          fail(`${line.code}: ${res.message}`);
           // A conflict (no longer open) or forbidden never succeeds on a retry: don't trap the user on this page.
           if (res.kind === "conflict" || res.kind === "forbidden") {
             refused.current = true;
@@ -174,7 +196,7 @@ export function StocktakeCount({
           return false;
         }
       } catch {
-        setError(`The count for ${line.code} didn't save — try again.`);
+        fail(`The count for ${line.code} didn't save — try again.`);
         return false;
       }
       savedQty.current.set(line.id, countedQty);
@@ -224,7 +246,6 @@ export function StocktakeCount({
           onChange={(next) => void go(sheetHref(stocktakeId, "count", next))}
           searchRef={searchRef}
         />
-        {error && <Banner tone="fault" title={error} />}
         {lines.length === 0 && filtered ? (
           <p className="py-6 text-center text-[12px] text-fg-muted">No item matches.</p>
         ) : (
@@ -298,6 +319,14 @@ export function StocktakeCount({
           />
           <ButtonLink href={reviewHref} variant="primary" onClick={(e) => gate(e, reviewHref)}>Review variance</ButtonLink>
         </div>
+        {/* Keyed, so a message coming back mounts a fresh alert (announced); the spacer is hidden from everyone. */}
+        {error ? (
+          <Banner key="error" tone="fault" title={error} />
+        ) : lastError ? (
+          <div key="spacer" aria-hidden className="invisible">
+            <Banner tone="fault" title={lastError} />
+          </div>
+        ) : null}
       </div>
     </GateContext.Provider>
   );

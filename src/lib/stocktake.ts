@@ -150,3 +150,19 @@ export function parseCount(raw: string | undefined): number | "blank" | "invalid
   const n = Number(t);
   return Number.isInteger(n) && n >= 0 ? n : "invalid";
 }
+
+/**
+ * The count screen remembers what this session last saved per line, so Enter-then-blur saves once. That memory goes
+ * stale when someone else changes the line: these are the lines whose server count differs from the one seen
+ * before (`prev`) and that have no save of this session in flight — their remembered value must be forgotten, or
+ * re-typing it would be skipped as "already saved". A line `prev` never saw is not a change.
+ */
+export function staleSavedLines(
+  prev: ReadonlyMap<string, number | null>,
+  lines: ReadonlyArray<{ id: string; countedQty: number | null }>,
+  inFlight: (id: string) => boolean,
+): string[] {
+  return lines
+    .filter((l) => prev.has(l.id) && prev.get(l.id) !== l.countedQty && !inFlight(l.id))
+    .map((l) => l.id);
+}
