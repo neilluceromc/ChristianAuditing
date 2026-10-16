@@ -31,6 +31,25 @@ export const ACTION_LABELS: Record<string, string> = {
   rename: "Renamed", archive: "Ended or archived", restore: "Restored",
   "policy.saved": "Policy saved",
   "note.added": "Note added", "note.edited": "Note edited", "note.deleted": "Note deleted", "employee.setup": "IT setup changed",
+  // Final review M5: every other code the server and worker write (AUDIT_ACTIONS, audit-actions.test.ts keeps it whole).
+  delete: "Deleted",
+  claim: "Claimed", release: "Released", approve: "Approved", reject: "Rejected", escalate: "Escalated", retry: "Retried",
+  executed: "Request carried out", "execution.failed": "Request failed",
+  "stock.received": "Stock received", "stock.issued": "Stock issued", "stock.adjusted": "Stock adjusted",
+  "stock.written-off": "Stock written off", "stock.lot-cost-set": "Lot cost set", "stock.document-added": "Stock document attached",
+  "stock.item.created": "Stock item added", "stock.item.updated": "Stock item updated",
+  "stock.item.archived": "Stock item archived", "stock.item.restored": "Stock item restored",
+  "stock.category.created": "Stock category added", "stock.category.updated": "Stock category updated",
+  "stock.category.archived": "Stock category archived", "stock.category.restored": "Stock category restored",
+  "stocktake.opened": "Stocktake started", "stocktake.posted": "Stocktake posted", "stocktake.cancelled": "Stocktake cancelled",
+  "supplier.created": "Supplier added", "supplier.updated": "Supplier updated",
+  "supplier.archived": "Supplier archived", "supplier.restored": "Supplier restored",
+  "supplier.bank.added": "Bank details added", "supplier.bank.removed": "Bank details removed", "supplier.bank.revealed": "Bank details viewed",
+  signup: "Signed up", bootstrap: "First admin set up", "role-change": "Role changed",
+  disable: "Account disabled", enable: "Account enabled",
+  "flag-enable": "Flag turned on", "flag-disable": "Flag turned off", "flag-value": "Flag value changed",
+  "endpoint-enable": "Webhook turned on", "endpoint-disable": "Webhook turned off", "endpoint-delete": "Webhook removed",
+  "rotate-secret": "Webhook secret rotated", replay: "Delivery resent",
 };
 export function actionLabel(action: string): string { return ACTION_LABELS[action] ?? action; }
 

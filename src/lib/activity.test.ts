@@ -417,7 +417,7 @@ describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sent
   it("actionLabel names the facet options and falls back to the raw action", () => {
     expect(actionLabel("lifecycle.assign")).toBe("Assigned");
     expect(actionLabel("import-update")).toBe("Imported (update)");
-    expect(actionLabel("stock.received")).toBe("stock.received");
+    expect(actionLabel("made.up-code")).toBe("made.up-code");
     expect(Object.keys(ACTION_LABELS).length).toBeGreaterThanOrEqual(42);
   });
   it("the worker's approved-request executions read like the direct action, marked as approved", () => {
