@@ -1,6 +1,6 @@
 # Phase 38 — Equipment by client, and depreciation from the purchase month
 
-**Status:** CODE-COMPLETE 2026-10-17 on branch `phase-38-equipment-by-client` (final code tree `649767f`), MERGED to `main` via `1b16921` (`--no-ff`, merged tree = tested tip) and PUSHED 2026-10-17. Designed 2026-10-17 with the user on the mockup canvas
+**Status:** CODE-COMPLETE 2026-10-17 on branch `phase-38-equipment-by-client` (final code tree `649767f`), MERGED to `main` via `1b16921` (`--no-ff`, merged tree = tested tip) and PUSHED 2026-10-17; on staging 2026-10-17 at `a3cb693`. Designed 2026-10-17 with the user on the mockup canvas
 (https://claude.ai/artifact/XSKxwmMGNTvFpGHdUWujdz, board "Equipment by client"). The user approved and said
 to proceed through development. Merge, push and redeploy stay the user's calls. **No migration.**
 
