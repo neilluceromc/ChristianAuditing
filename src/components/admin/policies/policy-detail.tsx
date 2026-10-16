@@ -183,7 +183,8 @@ export function TitleRules({
   groupName: string;
   kind: GroupKindValue;
   rules: TitleRule[];
-  baseLines: PolicyLineInput[];
+  /** the base list a new rule starts from; null = the group has no base list, so no rule can be added */
+  baseLines: PolicyLineInput[] | null;
   categories: CategoryOption[];
   canMutate: boolean;
   /** the group's active people per job title, for a new rule's impact line */
@@ -222,6 +223,11 @@ export function TitleRules({
         <span className="font-mono text-[11px] text-fg-muted">({rules.length})</span>
       </summary>
       <div className="flex flex-col gap-4 border-t border-border-faint px-4 py-3">
+        {baseLines === null && (
+          <p className="text-xs text-fg-muted">
+            {groupName} has no list of its own yet, so no new title rule can be added; these still apply.
+          </p>
+        )}
         {rules.length === 0 && draft === null && (
           <p className="text-xs text-fg-muted">
             No title rules. Everyone on {groupName} gets the list above.
@@ -245,7 +251,7 @@ export function TitleRules({
             />
           </div>
         ))}
-        {draft !== null && (
+        {draft !== null && baseLines && (
           <div className="flex flex-col gap-2">
             <h4 className="text-[12.5px] font-semibold text-fg">{draft}</h4>
             <PolicyLinesEditor
@@ -256,7 +262,7 @@ export function TitleRules({
             />
           </div>
         )}
-        {canMutate && draft === null && (adding ? (
+        {canMutate && baseLines && draft === null && (adding ? (
           <div className="flex flex-col gap-1">
             <label htmlFor={inputId} className="text-[11px] font-medium text-fg-secondary">Exact job title</label>
             <div className="flex flex-wrap items-center gap-2">

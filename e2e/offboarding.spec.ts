@@ -1,10 +1,22 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 
 const db = new PrismaClient();
+
+// Copied from e2e/admin.spec.ts (itself from e2e/it-nav.spec.ts:88-97) — house rule: never import
+// helpers across spec files.
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(
+      true,
+    );
+  }).toPass({ timeout: 20_000 });
+}
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login, which keeps this
@@ -415,10 +427,9 @@ test.describe("equipment policies", () => {
     await expect(editor.getByLabel("Line 6 needed")).not.toBeChecked();
 
     const add = editor.getByRole("button", { name: "+ Add slot" });
-    await expect(async () => {
-      await add.click();
-      await expect(editor.getByLabel(/^Line \d+ kind$/)).toHaveCount(7, { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    await waitForHydration(add);
+    await add.click();
+    await expect(editor.getByLabel(/^Line \d+ kind$/)).toHaveCount(7);
     await editor.getByLabel("Line 7 kind", { exact: true }).selectOption({ label: "Webcam" });
     await editor.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });

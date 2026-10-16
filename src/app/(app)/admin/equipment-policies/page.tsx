@@ -119,9 +119,13 @@ export default async function EquipmentPoliciesPage({
 
         <PolicyDirtyProvider>
           <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,320px)_1fr]">
-            <GroupList tab={tab} rows={tabRows} counts={counts} selectedId={selected?.id ?? null} />
+            {/* keyed by tab: a tab switch starts the search and the check-box afresh */}
+            <GroupList key={tab} tab={tab} rows={tabRows} counts={counts} selectedId={selected?.id ?? null} />
             {selected ? (
+              // Keyed by group: the page is not remounted on a ?group= change (search params are not part of
+              // Next's segment key), so without this a draft list or title rule would carry over to the next group.
               <GroupDetail
+                key={selected.id}
                 group={selected}
                 base={baseByGroup.get(selected.id) ?? null}
                 categories={categoryOptions}
@@ -223,13 +227,16 @@ async function GroupDetail({
         />
       ) : (
         <StartPolicy
+          key={group.id}
           departmentId={group.id} groupName={group.name} kind={group.kind}
           staff={group.people} people={uncovered} sources={sources} categories={categories} canMutate={canMutate}
         />
       )}
 
-      {base && (
+      {/* Title rules render even without a base list (older data can have them); only adding one needs a base. */}
+      {(base || titleRules.length > 0) && (
         <TitleRules
+          key={group.id}
           departmentId={group.id} groupName={group.name} kind={group.kind}
           rules={titleRules.map((p) => ({
             policyId: p.id,
@@ -239,7 +246,7 @@ async function GroupDetail({
             editorKey: editorKeyOf(p.id, p.slots),
             untypedNames: untypedOf(p.slots),
           }))}
-          baseLines={linesOf(base.slots)} categories={categories} canMutate={canMutate} titleCounts={titleCounts}
+          baseLines={base ? linesOf(base.slots) : null} categories={categories} canMutate={canMutate} titleCounts={titleCounts}
         />
       )}
     </Card>

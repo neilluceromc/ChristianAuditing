@@ -481,10 +481,11 @@ test.describe.serial("paging", () => {
     await expect(row).toHaveAttribute("aria-current", "page");
     await expect(row).toContainText(String(expectedCount));
     await expect(page.getByRole("heading", { name: "Finance", level: 2 }).locator("..")).toContainText(
-      new RegExp(`${expectedCount} (person|people) · `),
+      // anchored: "2 people" must not match inside "12 people"
+      new RegExp(`(^|[^0-9])${expectedCount} (person|people) · `),
     );
     await expect(page.getByRole("region", { name: "What their staff should have" })).toContainText(
-      new RegExp(`${expectedCount} (person gets|people get) `),
+      new RegExp(`(^|[^0-9])${expectedCount} (person gets|people get) `),
     );
   });
 

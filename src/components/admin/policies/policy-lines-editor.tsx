@@ -66,6 +66,9 @@ export function PolicyLinesEditor({
   const [rows, setRows] = useState(() => initialLines.map((l, i) => ({ ...l, key: i })));
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  // A new list, once created, stays locked until the refresh replaces this editor: a second Save would
+  // try to create it again.
+  const [created, setCreated] = useState(false);
 
   const typeById = useMemo(() => {
     const m = new Map<string, { category: CategoryOption; name: string }>();
@@ -75,7 +78,7 @@ export function PolicyLinesEditor({
 
   const lines: PolicyLineInput[] = rows.map((r) => ({ slotId: r.slotId, assetTypeId: r.assetTypeId, required: r.required, loaner: r.loaner }));
   // An unsaved list is unsaved even before it is changed: leaving would lose it.
-  const dirty = canMutate && (!policyId || !sameLines(lines, initialLines));
+  const dirty = canMutate && !created && (!policyId || !sameLines(lines, initialLines));
   useDirtyFlag(editorKey, dirty);
 
   const labels = numberSlotLabels(rows.map((r) => {
@@ -101,6 +104,7 @@ export function PolicyLinesEditor({
     startTransition(async () => {
       const res = await savePolicy({ departmentId, title, policyId, lines });
       if (res.ok) {
+        if (!policyId) setCreated(true);
         toast("Saved", "settled");
         onSaved?.();
         router.refresh();
@@ -225,7 +229,7 @@ export function PolicyLinesEditor({
       </div>
       <p className="text-[11px] text-fg-muted">
         Each line becomes a tile on the person&apos;s profile, named after its category (or its type, for Other). A
-        second line of the same kind shows as &ldquo;Monitor 2&rdquo;.
+        second line of the same kind shows as {'"Monitor 2"'}.
       </p>
       {untypedNames.length > 0 && (
         <p className="text-[11px] text-fg-muted">
@@ -247,7 +251,7 @@ export function PolicyLinesEditor({
           <Button size="sm" variant="ghost" disabled={pending} onClick={onCancel}>Discard</Button>
         )}
         <Button
-          size="sm" variant="primary" loading={pending} disabled={!!policyId && !dirty}
+          size="sm" variant="primary" loading={pending} disabled={created || (!!policyId && !dirty)}
           aria-label={title ? `Save the ${title} rule` : undefined}
           onClick={save}
         >
