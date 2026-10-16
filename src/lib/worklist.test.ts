@@ -175,6 +175,24 @@ describe("workHeadline", () => {
     expect(workHeadline(groupWork([row({ key: "triage:1" })], new Set(), {}))).toBe("1 waiting");
     expect(workHeadline([])).toBe("");
   });
+  it("final review I2: the oldest age counts every live row, not only the ones Home shows", () => {
+    // Purchase reviews sort newest first, so with limit 2 the shown rows are the two youngest.
+    const groups = groupWork([
+      row({ key: "purchases:a", section: "purchases", severity: -1, ageDays: 1 }),
+      row({ key: "purchases:b", section: "purchases", severity: -2, ageDays: 2 }),
+      row({ key: "purchases:c", section: "purchases", severity: -15, ageDays: 15 }),
+    ], new Set(), { limit: 2 });
+    expect(groups[0].rows.map((r) => r.ageDays)).toEqual([1, 2]);
+    expect(groups[0].oldestDays).toBe(15);
+    expect(workHeadline(groups)).toBe("3 waiting · oldest 15 d");
+  });
+  it("a hidden (dismissed) row's age does not count", () => {
+    const groups = groupWork([
+      row({ key: "triage:1", ageDays: 3 }),
+      row({ key: "triage:2", ageDays: 30 }),
+    ], new Set(["triage:2"]), { limit: 1 });
+    expect(workHeadline(groups)).toBe("1 waiting · oldest 3 d");
+  });
 });
 
 describe("leaverRow — label and href from offboardingNext", () => {
@@ -256,9 +274,9 @@ describe("groupWork — hidden rows are kept, not dropped", () => {
 describe("capLine / SEE_ALL_HREF / summaryChips / pastSlaCount", () => {
   const section = WORK_SECTIONS.find((s) => s.id === "repairs")!;
   it("a capped section says how many of how many", () => {
-    expect(capLine({ section, rows: new Array(50).fill(null) as WorkRow[], total: 50, capped: true, hidden: [], pastSla: 0 }))
+    expect(capLine({ section, rows: new Array(50).fill(null) as WorkRow[], total: 50, capped: true, hidden: [], pastSla: 0, oldestDays: 0 }))
       .toBe("Showing 50 of 50+ · See all");
-    expect(capLine({ section, rows: [], total: 0, capped: false, hidden: [], pastSla: 0 })).toBeNull();
+    expect(capLine({ section, rows: [], total: 0, capped: false, hidden: [], pastSla: 0, oldestDays: 0 })).toBeNull();
   });
   it("every section has a list that holds the rest", () => {
     expect(SEE_ALL_HREF).toEqual({

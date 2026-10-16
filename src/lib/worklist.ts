@@ -75,6 +75,8 @@ export interface WorkGroup {
   hidden: WorkRow[];
   /** live SLA breaches (rank-0 queue rows) counted BEFORE Home's per-section limit; 0 for other sections */
   pastSla: number;
+  /** final review I2: the oldest live row's age in days, taken BEFORE Home's per-section limit; 0 when none has an age */
+  oldestDays: number;
 }
 
 export interface LoanLike { id: string; tag: string; model: string; loanDueAt: Date | null; holder: string | null }
@@ -201,6 +203,7 @@ export function groupWork(
       rows: opts.limit ? live.slice(0, opts.limit) : live,
       total: live.length,
       pastSla: section.id === "queue" ? live.filter((r) => (r.rank ?? 0) === 0).length : 0,
+      oldestDays: Math.max(0, ...live.map((r) => r.ageDays ?? 0)),
       capped: saturated.has(section.id),
       hidden,
     }];
@@ -237,7 +240,8 @@ export function pastSlaCount(groups: WorkGroup[]): number {
 export function workHeadline(groups: WorkGroup[]): string {
   const n = groups.reduce((s, g) => s + g.total, 0);
   if (n === 0) return "";
-  const oldest = Math.max(0, ...groups.flatMap((g) => g.rows.map((r) => r.ageDays ?? 0)));
+  // Final review I2: from every live row, not the shown ones — purchase reviews sort newest first.
+  const oldest = Math.max(0, ...groups.map((g) => g.oldestDays));
   const late = pastSlaCount(groups);
   return [`${n} waiting`, oldest > 0 ? `oldest ${oldest} d` : null, late > 0 ? `${late} past SLA` : null].filter(Boolean).join(" · ");
 }
