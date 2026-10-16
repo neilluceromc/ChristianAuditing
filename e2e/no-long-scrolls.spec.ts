@@ -10,10 +10,11 @@ import { notYetCount } from "../src/lib/it-setup";
  *   1 (§2.1) the profile's right column is one card with four tabs: EMP-0042's badges match the database; the
  *     tab row moves with ←/→ (wrapping) and Home/End; the remembered tab survives a reload; `?side=setup`
  *     overrides the memory.
- *   2 (§2.2) notes: a person with 1 note, then 25 (made via prisma). The card shows the 3 newest, "3 newest of
- *     25" and "View all 25 →"; the panel shows 20, then "Load 20 older" gives 25; the search and "Written by"
- *     narrow; `?notes=1` reopens it; Edit from a note's ⋯ menu saves. The page with 25 notes is within 40 px of
- *     its height with 1 note.
+ *   2 (§2.2) notes: a person with 1 note (no footer), then 4, then 25 (made via prisma). The card shows the 3
+ *     newest, "3 newest of 25" and "View all 25 →"; the panel shows 20, then "Load 20 older" gives 25; the search
+ *     and "Written by" narrow; `?notes=1` reopens it; Edit from a note's ⋯ menu saves. The page with 25 notes is
+ *     within 40 px of its height with 4 (the card at full size: 3 notes and the footer), and the Notes tab panel
+ *     itself within 2 px.
  *
  * Seed (prisma/seed.ts): J. Sarmiento is it@ (it_staff), System Admin is admin@. Bluepeak Telecom's base policy has
  * four required lines, so a fresh client hire's Equipment card is four tiles tall. Never reference a raw cuid.
@@ -131,8 +132,21 @@ test.describe("Phase 39 — the profile side card and its notes", () => {
     const notesTab = (n: number) => tablist.getByRole("tab", { name: `Notes ${n}`, exact: true });
     const card = page.getByRole("tabpanel", { name: /^Notes \d+$/ });
     const pageHeight = () => page.evaluate(() => document.documentElement.scrollHeight);
+    const cardHeight = () => card.evaluate((el) => el.getBoundingClientRect().height);
+    // Short, same-length texts, so no note wraps differently from another and the two heights compare like for like.
+    const tag = String(stamp).slice(-6);
+    const text = (i: number) => (i % 5 === 0 ? `Needs a new charger, note ${i} ${tag}` : `Routine check, note ${i} ${tag}`);
+    const addNotes = (from: number, to: number) =>
+      db.employeeNote.createMany({
+        data: Array.from({ length: to - from + 1 }, (_, k) => from + k).map((i) => ({
+          employeeId: person.id,
+          authorId: i % 6 === 0 ? admin.id : it.id,
+          text: text(i),
+          createdAt: new Date(now - i * DAY),
+        })),
+      });
 
-    // One note: the baseline height.
+    // One note: no footer, no View all.
     await db.employeeNote.create({
       data: { employeeId: person.id, authorId: it.id, text: `Oldest note ${stamp}`, createdAt: new Date(now - 40 * DAY) },
     });
@@ -142,19 +156,21 @@ test.describe("Phase 39 — the profile side card and its notes", () => {
     await expect(card.getByRole("listitem")).toHaveCount(1);
     await expect(card.getByText(/newest of/)).toHaveCount(0);
     await expect(card.getByRole("button", { name: /^View all/ })).toHaveCount(0);
-    const oneNoteHeight = await pageHeight();
 
-    // 24 more, one a day back from today: admin wrote every 6th (4), every 5th mentions a charger (5), and the
-    // newest is both.
-    const text = (i: number) => (i % 5 === 0 ? `Needs a new charger, note ${i} ${stamp}` : `Routine check, note ${i} ${stamp}`);
-    await db.employeeNote.createMany({
-      data: Array.from({ length: 24 }, (_, i) => ({
-        employeeId: person.id,
-        authorId: i % 6 === 0 ? admin.id : it.id,
-        text: text(i),
-        createdAt: new Date(now - i * DAY),
-      })),
-    });
+    // Four notes: the card at its full size (3 notes and the footer) — the height baseline. Notes i = 21..23 are
+    // 21–23 days old, so the ones added next are all newer.
+    await addNotes(21, 23);
+    await page.reload();
+    await waitForHydration(notesTab(4));
+    await expect(card.getByRole("listitem")).toHaveCount(3);
+    await expect(card.getByText("3 newest of 4", { exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "View all 4 →", exact: true })).toBeVisible();
+    const fourNotesPage = await pageHeight();
+    const fourNotesCard = await cardHeight();
+
+    // 21 more (25 in all), one a day back from today. Over the 24 dated notes admin wrote every 6th (4), every 5th
+    // mentions a charger (5), and the newest is both.
+    await addNotes(0, 20);
     await page.reload();
     await waitForHydration(notesTab(25));
 
@@ -170,9 +186,9 @@ test.describe("Phase 39 — the profile side card and its notes", () => {
     await expect(items.nth(0).getByRole("button", { name: "Note actions", exact: true })).toHaveCount(0);
     await expect(items.nth(1).getByRole("button", { name: "Note actions", exact: true })).toBeVisible();
 
-    // The page does not grow with the log.
-    const manyNotesHeight = await pageHeight();
-    expect(Math.abs(manyNotesHeight - oneNoteHeight)).toBeLessThanOrEqual(40);
+    // The page does not grow with the log, and neither does the card.
+    expect(Math.abs((await pageHeight()) - fourNotesPage)).toBeLessThanOrEqual(40);
+    expect(Math.abs((await cardHeight()) - fourNotesCard)).toBeLessThanOrEqual(2);
 
     // The panel: 20, then Load 20 older gives 25, under Manila month headings.
     await viewAll.click();

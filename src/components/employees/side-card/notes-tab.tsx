@@ -66,11 +66,13 @@ export function NotesTab({
   }, []);
 
   // The drawer's trap hands focus back as it unmounts; this runs after that and lands on "View all" — also when
-  // the panel was opened from `?notes=1` and nothing on the page had focus before it.
+  // the panel was opened from `?notes=1` and nothing on the page had focus before it. Deletes in the panel can
+  // take the total to 3 or fewer, and "View all" goes with them: then the Notes tab panel (side-card.tsx's
+  // `side-panel-notes`, tabIndex 0) takes focus.
   useEffect(() => {
     if (panelOpen || !returnFocus.current) return;
     returnFocus.current = false;
-    viewAll.current?.focus();
+    (viewAll.current ?? document.getElementById("side-panel-notes"))?.focus();
   }, [panelOpen]);
 
   return (
@@ -177,7 +179,8 @@ function NoteItem({
 
   return (
     <li className="flex flex-col gap-1 py-2.5 first:pt-0 last:pb-0">
-      <div className="flex items-start justify-between gap-2">
+      {/* min-h-5: the same height with or without the ⋯ button, so the card is one size whoever wrote the notes */}
+      <div className="flex min-h-5 items-start justify-between gap-2">
         <NoteByline note={note} />
         {items.length > 0 && !editing && (
           <Menu

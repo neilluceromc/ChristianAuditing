@@ -14,7 +14,8 @@ import type { ActionResult } from "@/server/action-result";
 import { DeleteNoteDialog, NoteByline, NoteEditor } from "./note-parts";
 
 type Author = { id: string; name: string };
-type Loaded = { rows: NoteListRow[]; hasMore: boolean; total: number; matching: number };
+/** `filtering` is the filter state these rows were loaded under, so the count line never mixes old and new. */
+type Loaded = { rows: NoteListRow[]; hasMore: boolean; total: number; matching: number; filtering: boolean };
 
 /** The search box waits this long after the last keystroke before asking the server. */
 const DEBOUNCE_MS = 300;
@@ -25,6 +26,10 @@ function failure(res: Extract<ActionResult<NoteListPage>, { ok: false }>): strin
 }
 
 const cursorOf = (row: NoteListRow) => ({ at: row.createdAt, id: row.id });
+
+const COUNT_ID = "notes-panel-count";
+const rowId = (id: string) => `notes-panel-${id}`;
+const editId = (id: string) => `notes-panel-edit-${id}`;
 
 /**
  * Phase 39 (spec §2.2): the notes side panel — the Drawer (focus trap, Esc, backdrop, focus return). Mounted only
@@ -51,7 +56,8 @@ export function NotesPanel({
   const [reloadKey, setReloadKey] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<NoteListRow | null>(null);
-  const [focusId, setFocusId] = useState<string | null>(null);
+  /** The element id focus should land on after the next commit (an Edit button, a row, the count line). */
+  const [focusReq, setFocusReq] = useState<string | null>(null);
   /** Bumped by every first-page load, so a slower older answer is dropped. */
   const seq = useRef(0);
   /** After an edit or delete: how many rows to load back, so the reader keeps their place. */
@@ -89,7 +95,10 @@ export function NotesPanel({
       setAuthors(list);
       // The chosen author's last note went: back to Anyone (which reloads).
       if (authorId && !list.some((a) => a.id === authorId)) setAuthorId("");
-      setData({ rows, hasMore, total: first.data.total, matching: first.data.matching });
+      setData({
+        rows, hasMore, total: first.data.total, matching: first.data.matching,
+        filtering: query.trim() !== "" || authorId !== "",
+      });
       setLoading(false);
     })().catch(() => {
       if (mine !== seq.current) return;
@@ -98,12 +107,20 @@ export function NotesPanel({
     });
   }, [employeeId, query, authorId, reloadKey]);
 
-  // When "Load 20 older" goes away under the keyboard, focus moves to the first note it loaded.
+  // Focus never drops to the page behind the open drawer: a requested target (the Edit button after an edit, the
+  // next row after a delete, the first loaded row when "Load 20 older" goes away) wins; failing that, when focus
+  // fell to body because its element was removed, the count line takes it. Waits while a reload is in flight.
   useEffect(() => {
-    if (!focusId) return;
-    document.getElementById(`notes-panel-${focusId}`)?.focus();
-    setFocusId(null);
-  }, [focusId]);
+    if (loading) return;
+    const target = focusReq ? document.getElementById(focusReq) : null;
+    if (focusReq) setFocusReq(null);
+    if (target) {
+      target.focus();
+      return;
+    }
+    const active = document.activeElement;
+    if (!active || active === document.body) document.getElementById(COUNT_ID)?.focus();
+  }, [focusReq, data, loading]);
 
   async function loadOlder() {
     if (!data?.hasMore || data.rows.length === 0) return;
@@ -118,9 +135,9 @@ export function NotesPanel({
         return;
       }
       setData((d) => d && {
-        rows: [...d.rows, ...res.data.notes], hasMore: res.data.hasMore, total: res.data.total, matching: res.data.matching,
+        ...d, rows: [...d.rows, ...res.data.notes], hasMore: res.data.hasMore, total: res.data.total, matching: res.data.matching,
       });
-      if (!res.data.hasMore && res.data.notes[0]) setFocusId(res.data.notes[0].id);
+      if (!res.data.hasMore && res.data.notes[0]) setFocusReq(rowId(res.data.notes[0].id));
     } catch {
       if (mine === seq.current) setError("The notes could not be loaded.");
     } finally {
@@ -133,7 +150,14 @@ export function NotesPanel({
     setReloadKey((k) => k + 1);
   }
 
-  const filtering = query.trim() !== "" || authorId !== "";
+  /** After a delete: the row below the deleted one, else the one above, else the count line. */
+  function afterDelete(id: string) {
+    const rows = data?.rows ?? [];
+    const i = rows.findIndex((r) => r.id === id);
+    const next = rows[i + 1] ?? rows[i - 1];
+    setFocusReq(i >= 0 && next ? rowId(next.id) : COUNT_ID);
+    reload();
+  }
   const groups = data ? monthGroups(data.rows, (r) => new Date(r.createdAt)) : [];
 
   return (
@@ -160,8 +184,8 @@ export function NotesPanel({
             </label>
           </div>
 
-          <p className="text-[11.5px] text-fg-muted" aria-live="polite">
-            {data ? notesCountLine({ total: data.total, matching: data.matching, shown: data.rows.length, filtering }) : " "}
+          <p id={COUNT_ID} tabIndex={-1} className="text-[11.5px] text-fg-muted outline-none" aria-live="polite">
+            {data ? notesCountLine({ total: data.total, matching: data.matching, shown: data.rows.length, filtering: data.filtering }) : " "}
           </p>
 
           {error && <Banner tone="fault" title={error} />}
@@ -175,7 +199,7 @@ export function NotesPanel({
               <Skeleton className="h-3 w-4/5" />
             </div>
           ) : data && data.rows.length === 0 ? (
-            <p className="text-[12.5px] text-fg-muted">{filtering ? "No note matches." : "No notes yet."}</p>
+            <p className="text-[12.5px] text-fg-muted">{data.filtering ? "No note matches." : "No notes yet."}</p>
           ) : (
             <div className="flex flex-col gap-4" aria-busy={loading || undefined}>
               {groups.map((g) => (
@@ -188,20 +212,27 @@ export function NotesPanel({
                       return (
                         <li
                           key={n.id}
-                          id={`notes-panel-${n.id}`}
+                          id={rowId(n.id)}
                           tabIndex={-1}
                           className="flex flex-col gap-1 py-2.5 outline-none"
                         >
                           <NoteByline note={n} />
                           {editingId === n.id ? (
-                            <NoteEditor note={n} onClose={() => setEditingId(null)} onSaved={reload} />
+                            <NoteEditor
+                              note={n}
+                              onClose={() => {
+                                setEditingId(null);
+                                setFocusReq(editId(n.id));
+                              }}
+                              onSaved={reload}
+                            />
                           ) : (
                             <>
                               <p className="whitespace-pre-wrap break-words text-[13px] text-fg">{n.text}</p>
                               {(mayEdit || mayDelete) && (
                                 <div className="flex gap-3">
                                   {mayEdit && (
-                                    <button type="button" onClick={() => setEditingId(n.id)} className="text-[11.5px] text-accent hover:underline">
+                                    <button id={editId(n.id)} type="button" onClick={() => setEditingId(n.id)} className="text-[11.5px] text-accent hover:underline">
                                       Edit
                                     </button>
                                   )}
@@ -229,7 +260,7 @@ export function NotesPanel({
           )}
         </div>
       </Drawer>
-      <DeleteNoteDialog key={deleting?.id ?? "none"} note={deleting} onClose={() => setDeleting(null)} onDeleted={reload} />
+      <DeleteNoteDialog key={deleting?.id ?? "none"} note={deleting} onClose={() => setDeleting(null)} onDeleted={() => deleting && afterDelete(deleting.id)} />
     </>
   );
 }
