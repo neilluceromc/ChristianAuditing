@@ -45,7 +45,14 @@ const BLANK = "—";
 /** Which name map each id-carrying diff key reads. `assignee` is the lifecycle's spelling of the holder. */
 const ID_KIND: Record<string, keyof HistoryNames> = {
   categoryId: "category", typeId: "type", vendorId: "vendor", assigneeId: "employee", assignee: "employee",
+  // a reservation audits `hold` as the employee number (reservations/actions.ts)
+  hold: "employee",
 };
+/** Keys whose value is an employee number or a name already when it does not resolve: shown as written, not "(removed)". */
+const KEEPS_UNRESOLVED = new Set(["assignee", "hold"]);
+
+// Only these keys hold dates: a serial or a name that happens to look like one is left alone.
+const DATE_KEY = /(?:At|Until|Since|Due|Date)$/;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -77,13 +84,12 @@ export function formatHistoryValue(key: string, value: unknown, names: HistoryNa
   if (kind && typeof value === "string") {
     const name = names[kind].get(value);
     if (name !== undefined) return name;
-    // a lifecycle assignee that is not (or no longer) an employee is an employee number or a name: readable as it is
-    return key === "assignee" ? value : REMOVED;
+    return KEEPS_UNRESOLVED.has(key) ? value : REMOVED;
   }
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (value instanceof Date) return formatDate(value) ?? String(value);
   if (typeof value === "string") {
-    if (ISO.test(value)) return formatDate(new Date(value)) ?? value;
+    if (DATE_KEY.test(key) && ISO.test(value)) return formatDate(new Date(value)) ?? value;
     return value;
   }
   if (Array.isArray(value)) {
@@ -103,12 +109,9 @@ export function formatHistoryValue(key: string, value: unknown, names: HistoryNa
   return String(value);
 }
 
-// The shared table says "holder" for `assigneeId`; the lifecycle audits spell the same field `assignee`.
-const FIELD_OVERRIDES: Record<string, string> = { assignee: "holder" };
-
 /** Phase 40: the shared FIELD_LABELS (an unknown key splits its camelCase), capitalised for a column cell. */
 export function historyFieldLabel(key: string): string {
-  const label = FIELD_OVERRIDES[key] ?? fieldLabel(key);
+  const label = fieldLabel(key);
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
@@ -174,12 +177,16 @@ export function historyEntries(entries: AuditEntryLike[], names: HistoryNames): 
   });
 }
 
-/** The lifecycle's `assignee` is an employee number (or id); swap in the name when the page resolved it. */
+/** A lifecycle `assignee` or a reservation `hold` is an employee number (or id); swap in the name when the page resolved it. */
 function withHolderNamed(diff: unknown, employees: Map<string, string>): unknown {
-  if (!isRecord(diff) || !isRecord(diff.assignee)) return diff;
-  const { from, to } = diff.assignee;
+  if (!isRecord(diff)) return diff;
   const named = (v: unknown) => (typeof v === "string" ? (employees.get(v) ?? v) : v);
-  return { ...diff, assignee: { from: named(from), to: named(to) } };
+  const out: Record<string, unknown> = { ...diff };
+  for (const key of ["assignee", "hold"]) {
+    const change = diff[key];
+    if (isRecord(change)) out[key] = { from: named(change.from), to: named(change.to) };
+  }
+  return out;
 }
 
 /**

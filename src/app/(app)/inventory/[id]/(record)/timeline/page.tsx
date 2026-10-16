@@ -3,7 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
-import { APPROVAL_STATE_LABEL, APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { APPROVAL_KIND_LABEL, APPROVAL_STATE_LABEL } from "@/lib/labels";
 import { timelinePhrase } from "@/lib/history";
 import { resolveHistoryNames } from "@/server/modules/inventory/history-names";
 import { fmtDate } from "@/lib/format";
@@ -67,7 +67,7 @@ export default async function AssetTimelinePage({
       status: a.state,
       title: (
         <>
-          <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link> · {APPROVAL_TYPE_LABEL[a.type]} —{" "}
+          <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link> · {APPROVAL_KIND_LABEL[a.type]} request —{" "}
           {APPROVAL_STATE_LABEL[a.state]}
         </>
       ),

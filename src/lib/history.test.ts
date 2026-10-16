@@ -77,6 +77,11 @@ describe("formatHistoryValue", () => {
     expect(f("assignee", "EMP-0097")).toBe("Nina Robles");
     expect(f("assignee", "emp1")).toBe("Nina Robles");
   });
+  it("names a reservation's hold, and keeps an unresolved one as written", () => {
+    expect(f("hold", "EMP-0097")).toBe("Nina Robles");
+    expect(f("hold", "EMP-0001")).toBe("EMP-0001");
+    expect(f("hold", null)).toBe("—");
+  });
   it("shows (removed) for an id that no longer exists", () => {
     expect(f("categoryId", "gone")).toBe("(removed)");
     expect(f("typeId", "gone")).toBe("(removed)");
@@ -109,7 +114,14 @@ describe("formatHistoryValue", () => {
     // 20:00Z is already the next day in Manila
     expect(f("returnedAt", "2026-08-16T20:00:00Z")).toBe("17 Aug 2026 04:00");
   });
+  it("only reads dates under date-like keys: a serial or name that equals a date is left as written", () => {
+    expect(f("serial", "2026-01-05")).toBe("2026-01-05");
+    expect(f("model", "2026-01-05T09:41:00Z")).toBe("2026-01-05T09:41:00Z");
+    expect(f("loanDueAt", "2026-01-05")).toBe("5 Jan 2026");
+    expect(f("defectiveSince", "2026-01-05")).toBe("5 Jan 2026");
+  });
   it("leaves a string that only looks a little like a date alone", () => {
+    expect(f("purchasedAt", "2026-13-45")).toBe("2026-13-45");
     expect(f("serial", "2026-13-45")).toBe("2026-13-45");
     expect(f("serial", "SN-2026-01-05")).toBe("SN-2026-01-05");
   });
@@ -127,7 +139,7 @@ describe("formatHistoryValue", () => {
   });
   it("shows any other object as key: value pairs and never [object Object]", () => {
     expect(f("lines", { qty: 2, ready: true })).toBe("qty: 2; ready: Yes");
-    expect(f("lines", { when: "2026-01-05T00:00:00Z", who: null })).toBe("when: 5 Jan 2026; who: —");
+    expect(f("lines", { startsAt: "2026-01-05T00:00:00Z", who: null })).toBe("startsAt: 5 Jan 2026; who: —");
     expect(f("lines", { inner: { a: 1 } })).not.toContain("[object Object]");
     expect(f("lines", {})).toBe("—");
   });
@@ -152,6 +164,13 @@ describe("historyNameIds — the ids a page has to resolve", () => {
     expect(ids.vendor).toEqual(["v1"]);
     expect(ids.employee.sort()).toEqual(["EMP-0097", "m1", "m2"]);
   });
+  it("collects a reservation's hold as an employee", () => {
+    const ids = historyNameIds([
+      { id: "e1", actorLabel: "A", action: "reservation.placed", createdAt: at, diff: { hold: { from: null, to: "EMP-0097" } } },
+      { id: "e2", actorLabel: "A", action: "reservation.released", createdAt: at, diff: { hold: { from: "EMP-0097", to: null } } },
+    ]);
+    expect(ids.employee).toEqual(["EMP-0097"]);
+  });
   it("ignores non-string values, diff-less entries and unrelated keys", () => {
     const ids = historyNameIds([
       { id: "e1", actorLabel: "A", action: "SECRET_READ", createdAt: at, diff: null },
@@ -167,6 +186,10 @@ describe("timelinePhrase — a timeline row's words", () => {
   it("reads an assignment with the holder's name, without the actor or the tag", () => {
     expect(timelinePhrase(e("lifecycle.assign", { assignee: { from: null, to: "EMP-0097" } }), "BR-LT-0148", emps))
       .toBe("assigned to Nina Robles");
+  });
+  it("names the person a hold was placed for", () => {
+    expect(timelinePhrase(e("reservation.placed", { hold: { from: null, to: "EMP-0097" }, expiresAt: { from: null, to: "2026-08-23T00:00:00.000Z" } }), "BR-HS-0502", emps))
+      .toMatch(/^reserved for Nina Robles until /);
   });
   it("keeps an unresolved holder as written", () => {
     expect(timelinePhrase(e("lifecycle.assign", { assignee: { from: null, to: "EMP-0001" } }), "BR-LT-0148", emps))

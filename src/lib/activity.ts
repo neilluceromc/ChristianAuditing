@@ -35,7 +35,7 @@ export function actionLabel(action: string): string { return ACTION_LABELS[actio
 /** Phase 27 (spec §3.5): raw diff keys → words, shared by the `update` and `import-update` sentences. */
 export const FIELD_LABELS: Record<string, string> = {
   name: "name", model: "model", serial: "serial", cost: "cost", location: "location", notes: "notes",
-  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", vendorId: "supplier",
+  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", assignee: "holder", vendorId: "supplier",
   purchasedAt: "purchase date", warrantyUntil: "warranty end", loanDueAt: "loan due date",
   employeeNo: "employee number", email: "email", title: "title", employment: "employment", joinedAt: "join date",
   offboardingAt: "offboarding start", offboardingDueAt: "complete-by date",

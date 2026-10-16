@@ -9,7 +9,7 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
   // is alphabetical rather than the order this object literal happens to use.
   it("update names the fields", () => {
     expect(auditSentence({ ...base, diff: { status: { from: "SPARE", to: "DEPLOYED" }, assignee: { from: null, to: "EMP-0042" } } }))
-      .toBe("J. Sarmiento updated assignee, status on BR-LT-0148");
+      .toBe("J. Sarmiento updated holder, status on BR-LT-0148");
   });
   it("create reads as registration", () => {
     expect(auditSentence({ ...base, action: "create" })).toBe("J. Sarmiento created BR-LT-0148");

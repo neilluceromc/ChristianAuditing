@@ -183,7 +183,7 @@ test.describe("holds", () => {
 
       // The asset's own timeline carries the audit POINT…
       await page.goto(`/inventory/${headset.id}/timeline`);
-      await expect(page.getByText(/reserved for EMP-0097/).first()).toBeVisible();
+      await expect(page.getByText(new RegExp(`reserved for ${nina.name}`)).first()).toBeVisible();
       // …and the inventory activity feed carries the SENTENCE with the tag (see the file header).
       await page.goto("/inventory/activity");
       await expect(page.getByText(/reserved BR-HS-0502 for EMP-0097 until/)).toBeVisible();
