@@ -140,6 +140,20 @@ const IT = "it@thebackroomop.com";
 const ADMIN = "admin@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
+/**
+ * Phase 37 (spec §5): Add employee is three steps — Next past Details, wait for Equipment to load its
+ * lines, Next again to Check & create. Copied per file (house rule: no helpers across spec files).
+ */
+async function toCheckAndCreate(page: Page) {
+  const next = page.getByRole("button", { name: "Next", exact: true });
+  await next.click();
+  await expect(page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: "Equipment" }))
+    .toHaveAttribute("aria-current", "step", { timeout: 15_000 });
+  await expect(next).toBeEnabled({ timeout: 15_000 });
+  await next.click();
+  await expect(page.getByRole("button", { name: "Create employee" })).toBeVisible({ timeout: 15_000 });
+}
+
 test.describe("it navigation sweep (Phase 25)", () => {
   test("1. Start offboarding: IT sees the button on an active employee, the dialog is prefilled, submit lands in the wizard and writes one audit row", async ({ page }) => {
     const carlo = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0099" } });
@@ -415,16 +429,18 @@ test.describe("it navigation sweep (Phase 25)", () => {
       // any fill moves the caret somewhere else.
       await expect(name).toBeFocused();
 
-      await page.getByLabel("Employee number").fill("EMP-9902");
+      await page.getByLabel("Employee no.").fill("EMP-9902");
       await name.fill("Nav Test");
       await page.getByLabel("Title").fill("Tester");
-      await page.getByLabel("Department").selectOption({ label: "Operations" });
-      await page.getByLabel("Joined").fill(localDateISO(new Date()));
+      await page.getByLabel("Department", { exact: true }).selectOption({ label: "Operations" });
+      await page.getByLabel("Start date").fill(localDateISO(new Date()));
+      await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create employee" }).click();
-      await page.waitForURL(/\/employees\/[^/?]+\?created=1$/);
+      // Phase 37 (spec §5.4): the redirect carries how many spares were assigned (none picked here).
+      await page.waitForURL(/\/employees\/[^/?]+\?created=1&assigned=0$/);
 
       const hire = await db.employee.findFirstOrThrow({ where: { employeeNo: "EMP-9902" } });
-      await expect(page).toHaveURL(new RegExp(`/employees/${hire.id}\\?created=1$`));
+      await expect(page).toHaveURL(new RegExp(`/employees/${hire.id}\\?created=1&assigned=0$`));
       await expect(page.getByText("Nav Test added · EMP-9902")).toBeVisible();
       await expect(page.getByRole("link", { name: "Assign devices" })).toHaveAttribute("href", "#loadout");
       // The banner renders above the PageHeader, whose actions repeat the same

@@ -130,6 +130,20 @@ const dayFloor = (d: Date) => dayFromISO(localDateISO(d));
 const IT = "it@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
+/**
+ * Phase 37 (spec §5): Add employee is three steps — Next past Details, wait for Equipment to load its
+ * lines, Next again to Check & create. Copied per file (house rule: no helpers across spec files).
+ */
+async function toCheckAndCreate(page: Page) {
+  const next = page.getByRole("button", { name: "Next", exact: true });
+  await next.click();
+  await expect(page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: "Equipment" }))
+    .toHaveAttribute("aria-current", "step", { timeout: 15_000 });
+  await expect(next).toBeEnabled({ timeout: 15_000 });
+  await next.click();
+  await expect(page.getByRole("button", { name: "Create employee" })).toBeVisible({ timeout: 15_000 });
+}
+
 test.describe("Phase 29 — the employee area obeys the laws", () => {
   test("1. a filled tile's ⋯ opens its menu; Return… confirms with model and holder; Escape refocuses", async ({ page }) => {
     const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
@@ -373,7 +387,7 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     await expect(search).toHaveValue("");
   });
 
-  test("8. the New form: Name focused, the live number check, Next free, the policy preview, one same-name refusal, Create and add another", async ({ page }) => {
+  test("8. Add employee: Name focused, the prefilled number and its live check, the policy panel, one same-name refusal, Create and add another", async ({ page }) => {
     const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     const carlo = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0099" } });
     try {
@@ -386,9 +400,12 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       // any fill moves the caret somewhere else.
       await expect(name).toBeFocused();
 
-      // Empty number → the next free one, suggested and never prefilled.
-      // EMP-0099 (Carlo Dizon) is the seed's highest.
-      const number = page.getByLabel(/^Employee number\b/);
+      // Phase 37 (spec §5.2): the number is prefilled with the next free one —
+      // EMP-0099 (Carlo Dizon) is the seed's highest. Emptied, the field offers
+      // it again with "Use it".
+      const number = page.getByLabel(/^Employee no\./);
+      await expect(number).toHaveValue("EMP-0100");
+      await number.fill("");
       await expect(page.getByText(/^Next free: EMP-0100/)).toBeVisible({ timeout: 15_000 });
       await page.getByRole("button", { name: "Use it" }).click();
       await expect(number).toHaveValue("EMP-0100");
@@ -403,14 +420,15 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await number.fill("EMP-9301");
       await expect(page.getByText(/is already/)).toHaveCount(0, { timeout: 15_000 });
 
-      // The policy preview under Title: silent until the check resolves, then
-      // one line or the other, never both. No department yet → no match.
+      // Phase 37 (spec §5.1): the right panel — nothing to show before a
+      // group is picked, then the matched policy and its numbered lines.
+      const panel = page.getByRole("complementary", { name: "Equipment policy" });
       await page.getByLabel(/^Title\b/).fill("Accountant");
-      await expect(page.getByText("no policy matches this title yet")).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByText("Pick who they work for to see their equipment.")).toBeVisible();
       await page.getByLabel(/^Department\b/).selectOption({ label: "Finance" });
-      // "Finance standard" is a DEPARTMENT policy with six slots, so the line
-      // says which way it matched.
-      await expect(page.getByText("matches Finance standard · 6 slots (department)")).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByText("Finance standard", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByText("Monitor", { exact: true })).toBeVisible();
+      await expect(panel.getByText("Monitor 2", { exact: true })).toBeVisible();
 
       // The same-name nudge fires on name + department together: Carlo Dizon is
       // Operations, so it only lights up once the department moves there.
@@ -422,7 +440,9 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await expect(page.getByRole("link", { name: carlo.employeeNo })).toHaveAttribute("href", `/employees/${carlo.id}`);
 
       // Plan P-3: the server's refusal is ONE sentence, in that banner, above
-      // the checkbox it names — never a second copy under Name.
+      // the checkbox it names — never a second copy under Name. Phase 37: it is
+      // sent from step 3 and lands back on step 1, where the banner lives.
+      await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create employee" }).click();
       const refusal = page.getByText(/tick 'This is a different person'/);
       await expect(refusal).toBeVisible({ timeout: 15_000 });
@@ -430,36 +450,40 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await expect(page).toHaveURL(/\/employees\/new$/);
       expect(await db.employee.count({ where: { employeeNo: "EMP-9301" } })).toBe(0);
 
-      // Ticked, and through "Create and add another": a toast, the fields
-      // cleared except Department, focus back on Name, and the URL unmoved.
+      // Ticked, and through "Create and add another": a toast, back on step 1
+      // with the fields cleared except Works for and Department, focus back on
+      // Name, and the URL unmoved.
       await page.getByRole("checkbox", { name: "This is a different person" }).check();
       const operations = await page.getByLabel(/^Department\b/).inputValue();
+      await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create and add another" }).click();
       await expect(page.getByText("Added Carlo Dizon")).toBeVisible({ timeout: 15_000 });
       await expect(page).toHaveURL(/\/employees\/new$/);
+      await expect(page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: "Details" }))
+        .toHaveAttribute("aria-current", "step");
       await expect(name).toHaveValue("");
-      await expect(number).toHaveValue("");
       await expect(page.getByLabel(/^Department\b/)).toHaveValue(operations);
       await expect(name).toBeFocused();
       const first = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-9301" } });
       expect(first.name).toBe("Carlo Dizon");
 
-      // Final review I-3: the emptied field asks again, so the suggestion has
-      // MOVED ON — EMP-9301 is now the highest EMP-####, making EMP-9302 the
-      // next free. The mount-time answer (EMP-0100, read before any of these
-      // creates) must not come back, or "Use it" would offer a number the
-      // live check refuses 400 ms later.
-      await expect(page.getByText(/^Next free: EMP-9302/)).toBeVisible({ timeout: 15_000 });
+      // Final review I-3: the number is asked for again, so it has MOVED ON —
+      // EMP-9301 is now the highest EMP-####, making EMP-9302 the next free,
+      // prefilled. The mount-time answer (EMP-0100, read before any of these
+      // creates) must not come back, or the field would hold a number the live
+      // check refuses 400 ms later.
+      await expect(number).toHaveValue("EMP-9302", { timeout: 15_000 });
       await expect(page.getByText(/^Next free: EMP-0100/)).toHaveCount(0);
 
       // …and the other submit still lands on the new profile.
       await name.fill("Ux Probe Two");
       await page.getByLabel(/^Title\b/).fill("Tester");
       await number.fill("EMP-9302");
+      await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create employee" }).click();
-      await page.waitForURL(/\/employees\/[^/?]+\?created=1$/);
+      await page.waitForURL(/\/employees\/[^/?]+\?created=1&assigned=0$/);
       const second = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-9302" } });
-      await expect(page).toHaveURL(new RegExp(`/employees/${second.id}\\?created=1$`));
+      await expect(page).toHaveURL(new RegExp(`/employees/${second.id}\\?created=1&assigned=0$`));
       await expect(page.getByText("Ux Probe Two added · EMP-9302")).toBeVisible();
     } finally {
       // The audit rows these creates wrote stay (append-only); the employees go.

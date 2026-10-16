@@ -372,7 +372,7 @@ test.describe.serial("quick forms", () => {
     expect(await db.purchaseRequest.count()).toBe(draftsBefore);
   });
 
-  test("6. the new-employee form starts with no department chosen and the server names the refusal", async ({
+  test("6. the new-employee form starts with no department chosen and Next names what is missing", async ({
     page,
   }) => {
     test.setTimeout(60_000); // first hit of /employees/new in this file
@@ -384,12 +384,13 @@ test.describe.serial("quick forms", () => {
     await expect(department).toHaveValue("");
     await expect(department.locator("option:checked")).toHaveText("Choose a department");
 
-    await page.getByLabel(/^Employee number\b/).fill("EMP-E2E-QF");
+    await page.getByLabel(/^Employee no\./).fill("EMP-E2E-QF");
     await page.getByLabel(/^Name\b/).fill("Quick Forms Probe");
     await page.getByLabel(/^Title\b/).fill("Probe");
-    await page.getByRole("button", { name: "Create employee" }).click();
+    // Phase 37 (spec §5.1): step 1's Next checks in the browser before anything reaches the server.
+    await page.getByRole("button", { name: "Next", exact: true }).click();
 
-    await expect(page.getByText("Pick a department", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Fill in the department", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page).toHaveURL(/\/employees\/new$/);
     expect(await db.employee.count({ where: { employeeNo: "EMP-E2E-QF" } })).toBe(0);
   });

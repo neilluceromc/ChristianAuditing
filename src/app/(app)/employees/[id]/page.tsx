@@ -193,7 +193,12 @@ export default async function EmployeePage({
 
   return (
     <>
-      {sp.get("created") === "1" && <EmployeeCreatedNotice name={employee.name} employeeNo={employee.employeeNo} id={id} />}
+      {sp.get("created") === "1" && (
+        <EmployeeCreatedNotice
+          name={employee.name} employeeNo={employee.employeeNo} id={id}
+          assigned={sp.get("assigned")} failed={sp.get("failed")}
+        />
+      )}
       <PageHeader breadcrumb={[{ label: "Employees", href: "/employees" }, { label: employee.employeeNo }]} />
       <IdentityBand
         employeeId={id}
