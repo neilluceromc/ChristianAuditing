@@ -71,8 +71,9 @@ async function chooseClientStaff(page: Page) {
   await waitForHydration(worksFor);
   await expect(worksFor).toBeVisible();
   await worksFor.getByText("Client staff", { exact: true }).click();
-  // exact: the "Client staff" radio's own label also contains the word
-  return page.getByLabel("Client", { exact: true });
+  // A required FormField's label carries an aria-hidden "*": getByLabel's exact match sees it, the role's
+  // accessible name does not — so required fields are found by role (exact: the radio is "Client staff").
+  return page.getByRole("combobox", { name: "Client", exact: true });
 }
 
 /** Step 1 up to the group: Works for → Client staff, then the client by name. */
@@ -99,8 +100,8 @@ test.describe.serial("Phase 37 — Add an employee in three steps", () => {
     await login(page, IT);
     await page.goto("/employees/new");
     await pickClient(page, "Bluepeak Telecom");
-    await page.getByLabel("Name", { exact: true }).fill(name);
-    await page.getByLabel("Title", { exact: true }).fill("Agent");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill("Agent");
     const number = page.getByLabel("Employee no.");
     await expect(number).not.toHaveValue("");
     const employeeNo = await number.inputValue();
@@ -158,8 +159,8 @@ test.describe.serial("Phase 37 — Add an employee in three steps", () => {
       await login(page, IT);
       await page.goto("/employees/new");
       await pickClient(page, "Harborline Billing");
-      await page.getByLabel("Name", { exact: true }).fill(name);
-      await page.getByLabel("Title", { exact: true }).fill("Agent");
+      await page.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+      await page.getByRole("textbox", { name: "Title", exact: true }).fill("Agent");
       await expect(page.getByLabel("Employee no.")).not.toHaveValue("");
 
       // Meanwhile, in another tab of the same session, the client account is ended.
@@ -201,8 +202,8 @@ test.describe.serial("Phase 37 — Add an employee in three steps", () => {
     await login(page, IT);
     await page.goto("/employees/new");
     await pickClient(page, "Bluepeak Telecom");
-    await page.getByLabel("Name", { exact: true }).fill(name);
-    await page.getByLabel("Title", { exact: true }).fill("Agent");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill("Agent");
     await page.getByRole("button", { name: "Next", exact: true }).click();
 
     const headset = page.getByLabel("Headset", { exact: true });
@@ -236,7 +237,10 @@ test.describe.serial("Phase 37 — Add an employee in three steps", () => {
     expect((await db.asset.findUniqueOrThrow({ where: { id: assetId } })).assigneeId).toBe(ramon.id);
     expect(await db.asset.count({ where: { assigneeId: hire.id } })).toBe(0);
   });
+});
 
+// Cases 4–7 each make what they need, so they are not serial: a failure in 1–3 must not skip them.
+test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", () => {
   test("4. notes: add, edit and delete as IT, then a viewer sees them with no textarea and no Edit or Delete", async ({ page }) => {
     test.setTimeout(120_000);
     const stamp = Date.now();
@@ -244,7 +248,13 @@ test.describe.serial("Phase 37 — Add an employee in three steps", () => {
     const first = `Laptop ordered ${stamp}`;
     const firstEdited = `Laptop arrived ${stamp}`;
     const second = `Badge printed ${stamp}`;
-    const note = (text: string) => page.getByRole("listitem").filter({ hasText: text });
+    // The Notes card: the innermost block holding the "Notes (n)" heading and a note list item — not every
+    // listitem on the page.
+    const card = page.locator("div")
+      .filter({ has: page.getByRole("heading", { name: /^Notes \(\d+\)$/ }) })
+      .filter({ has: page.getByRole("listitem") })
+      .last();
+    const note = (text: string) => card.getByRole("listitem").filter({ hasText: text });
     const countOf = (action: string) => db.auditEntry.count({ where: { entityType: "employee", entityId: hire.id, action } });
 
     await login(page, IT);
