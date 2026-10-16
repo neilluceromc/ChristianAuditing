@@ -4,8 +4,8 @@ import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 
 /**
- * Phase 37 — client staff and the profile (spec §7.2). Task 10 adds the three cases of Add employee
- * (spec §5); Task 11 extends this file.
+ * Phase 37 — client staff and the profile (spec §7.2). Task 10 added cases 1–3 (Add employee, spec §5);
+ * Task 11 adds cases 4–7 (notes, IT setup, ending a client, the Works for column and filter).
  *   1 (§5.2–§5.4) client staff on "Bluepeak Telecom": Works for, accounts & access, a first note; step 2
  *     lists the policy's four lines with "Monitor" / "Monitor 2", a spare picked on Monitor is disabled on
  *     Monitor 2; step 3 sums it up; the profile shows "1 item assigned", the Monitor tile Held, Monitor 2
@@ -14,6 +14,15 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *     "That department or client is archived" on step 1 and nobody is added. The client is restored.
  *   3 (Review Focus 4) a spare picked in step 2 is assigned to someone else before Create: the person
  *     still exists and the notice says "{tag} could not be assigned: …".
+ *   4 (§4.5) notes on a profile: add, edit, delete as IT; a viewer then sees the notes with no textarea and
+ *     no Edit or Delete.
+ *   5 (§4.6) IT setup: VPN "Other…" with "Zscaler" saves, survives a reload; Argus keeps its value.
+ *   6 (§2.2, §5) ending a client on /admin/departments takes it off Client staff on /employees/new; restoring
+ *     it puts it back.
+ *   7 (§2.3) /employees?kind=CLIENT lists the client hire with the "Client" pill and not EMP-0042.
+ *
+ * Cases 4–7 do not depend on case 1's hire or on each other: each makes the person (or client) it needs
+ * straight in the database, so any of them can run alone.
  *
  * Seed (prisma/seed.ts): Bluepeak Telecom's base policy is Workstation (PC)/Mini PC, Monitor/24-inch twice
  * and Headset/Wired, all required. The free 24-inch monitor is BR-MN-0911 (BR-MN-0910 is held for Nina by
@@ -51,18 +60,36 @@ async function waitForHydration(target: Locator) {
 }
 
 const IT = "it@thebackroomop.com";
+const VIEWER = "viewer@thebackroomop.com";
 
 const stepItem = (page: Page, label: string) =>
   page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: label });
 
-/** Step 1 up to the group: Works for → Client staff, then the client by name. */
-async function pickClient(page: Page, client: string) {
+/** Step 1: Works for → Client staff; returns the Client select. */
+async function chooseClientStaff(page: Page) {
   const worksFor = page.getByRole("radiogroup", { name: "Works for" });
   await waitForHydration(worksFor);
   await expect(worksFor).toBeVisible();
   await worksFor.getByText("Client staff", { exact: true }).click();
   // exact: the "Client staff" radio's own label also contains the word
-  await page.getByLabel("Client", { exact: true }).selectOption({ label: client });
+  return page.getByLabel("Client", { exact: true });
+}
+
+/** Step 1 up to the group: Works for → Client staff, then the client by name. */
+async function pickClient(page: Page, client: string) {
+  await (await chooseClientStaff(page)).selectOption({ label: client });
+}
+
+/**
+ * A client-staff person straight in the database (Bluepeak Telecom), so a case needs nothing from another
+ * case. The number is unique per call; the cuid is read back, never hardcoded.
+ */
+async function makeClientHire(name: string, data: { argusStatus?: "DONE" | "NOT_YET" | "NOT_NEEDED"; vpn?: string } = {}) {
+  const dept = await db.department.findUniqueOrThrow({ where: { name: "Bluepeak Telecom" } });
+  const employeeNo = `EMP-${String(Date.now()).slice(-6)}${Math.floor(Math.random() * 10)}`;
+  return db.employee.create({
+    data: { employeeNo, name, title: "Agent", departmentId: dept.id, joinedAt: new Date(), ...data },
+  });
 }
 
 test.describe.serial("Phase 37 — Add an employee in three steps", () => {
@@ -208,5 +235,148 @@ test.describe.serial("Phase 37 — Add an employee in three steps", () => {
     const hire = await db.employee.findFirstOrThrow({ where: { name } });
     expect((await db.asset.findUniqueOrThrow({ where: { id: assetId } })).assigneeId).toBe(ramon.id);
     expect(await db.asset.count({ where: { assigneeId: hire.id } })).toBe(0);
+  });
+
+  test("4. notes: add, edit and delete as IT, then a viewer sees them with no textarea and no Edit or Delete", async ({ page }) => {
+    test.setTimeout(120_000);
+    const stamp = Date.now();
+    const hire = await makeClientHire(`E2E Notes ${stamp}`);
+    const first = `Laptop ordered ${stamp}`;
+    const firstEdited = `Laptop arrived ${stamp}`;
+    const second = `Badge printed ${stamp}`;
+    const note = (text: string) => page.getByRole("listitem").filter({ hasText: text });
+    const countOf = (action: string) => db.auditEntry.count({ where: { entityType: "employee", entityId: hire.id, action } });
+
+    await login(page, IT);
+    await page.goto(`/employees/${hire.id}`);
+    const box = page.getByLabel("New note");
+    await waitForHydration(box);
+    await expect(page.getByRole("heading", { name: "Notes (0)" })).toBeVisible();
+    await expect(page.getByText("No notes yet", { exact: true })).toBeVisible();
+
+    // Add.
+    await box.fill(first);
+    await page.getByRole("button", { name: "Add note", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Notes (1)" })).toBeVisible({ timeout: 15_000 });
+    await expect(note(first)).toBeVisible();
+    await expect(box).toHaveValue("");
+
+    // Edit your own note.
+    await note(first).getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByLabel("Edited text").fill(firstEdited);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(note(firstEdited)).toBeVisible({ timeout: 15_000 });
+    await expect(note(firstEdited)).toContainText("edited");
+    await expect(note(first)).toHaveCount(0);
+
+    // A second note, so the viewer has something to read after the first is deleted.
+    await box.fill(second);
+    await page.getByRole("button", { name: "Add note", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Notes (2)" })).toBeVisible({ timeout: 15_000 });
+
+    // Delete the first, after its confirmation.
+    await note(firstEdited).getByRole("button", { name: "Delete", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Delete this note?" });
+    await expect(dialog).toContainText(firstEdited);
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Notes (1)" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(firstEdited)).toHaveCount(0);
+    await expect(note(second)).toBeVisible();
+    expect({ added: await countOf("note.added"), edited: await countOf("note.edited"), deleted: await countOf("note.deleted") })
+      .toEqual({ added: 2, edited: 1, deleted: 1 });
+
+    // A viewer reads the note and can do nothing to it.
+    await login(page, VIEWER);
+    await page.goto(`/employees/${hire.id}`);
+    await expect(page.getByRole("heading", { name: "Notes (1)" })).toBeVisible({ timeout: 20_000 });
+    await expect(note(second)).toBeVisible();
+    await expect(page.getByLabel("New note")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Add note", exact: true })).toHaveCount(0);
+    await expect(note(second).getByRole("button")).toHaveCount(0);
+  });
+
+  test("5. IT setup: VPN Other… with Zscaler saves, and after a reload it is still there and Argus keeps its value", async ({ page }) => {
+    test.setTimeout(90_000);
+    const hire = await makeClientHire(`E2E Setup ${Date.now()}`, { argusStatus: "DONE" });
+    await login(page, IT);
+    await page.goto(`/employees/${hire.id}`);
+    const vpn = page.getByLabel("VPN in use", { exact: true });
+    await waitForHydration(vpn);
+    await expect(page.getByRole("combobox", { name: "Argus" })).toHaveValue("DONE");
+
+    await vpn.selectOption({ label: "Other…" });
+    await page.getByLabel("VPN name", { exact: true }).fill("Zscaler");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    // The "Saved" toast is short-lived; the row is the truth.
+    await expect.poll(async () => (await db.employee.findUniqueOrThrow({ where: { id: hire.id } })).vpn, { timeout: 15_000 })
+      .toBe("Zscaler");
+
+    await page.reload();
+    const after = page.getByLabel("VPN in use", { exact: true });
+    await waitForHydration(after);
+    await expect(after.locator("option:checked")).toHaveText("Other…");
+    await expect(page.getByLabel("VPN name", { exact: true })).toHaveValue("Zscaler");
+    await expect(page.getByRole("combobox", { name: "Argus" })).toHaveValue("DONE");
+    const row = await db.employee.findUniqueOrThrow({ where: { id: hire.id } });
+    expect({ argus: row.argusStatus, vpn: row.vpn }).toEqual({ argus: "DONE", vpn: "Zscaler" });
+  });
+
+  test("6. ending a client takes it off Client staff on Add employee, and restoring it puts it back", async ({ page }) => {
+    test.setTimeout(120_000);
+    const name = `E2E Client ${Date.now()}`;
+    const client = await db.department.create({ data: { name, kind: "CLIENT" } });
+    const option = (select: Locator) => select.locator("option").filter({ hasText: name });
+    await login(page, IT);
+
+    // The new client is offered while it is active.
+    await page.goto("/employees/new");
+    await expect(option(await chooseClientStaff(page))).toHaveCount(1);
+
+    // End it.
+    await page.goto(`/admin/departments?tab=client&q=${encodeURIComponent(name)}`);
+    const end = page.getByRole("button", { name: `End the ${name} account` });
+    await waitForHydration(end);
+    await end.click();
+    await expect(page.getByText(`Ended ${name}`)).toBeVisible({ timeout: 15_000 });
+    expect((await db.department.findUniqueOrThrow({ where: { id: client.id } })).archivedAt).not.toBeNull();
+
+    // Client staff no longer lists it; the seeded active client is still there.
+    await page.goto("/employees/new");
+    const ended = await chooseClientStaff(page);
+    await expect(ended.locator("option").filter({ hasText: "Bluepeak Telecom" })).toHaveCount(1);
+    await expect(option(ended)).toHaveCount(0);
+
+    // Restore it from the Ended filter.
+    await page.goto(`/admin/departments?tab=client&show=ended&q=${encodeURIComponent(name)}`);
+    const restore = page.getByRole("button", { name: `Restore ${name}`, exact: true });
+    await waitForHydration(restore);
+    await restore.click();
+    await expect(page.getByText(`Restored ${name}`)).toBeVisible({ timeout: 15_000 });
+    expect((await db.department.findUniqueOrThrow({ where: { id: client.id } })).archivedAt).toBeNull();
+
+    await page.goto("/employees/new");
+    await expect(option(await chooseClientStaff(page))).toHaveCount(1);
+  });
+
+  test("7. the Works for column and the Staff filter: ?kind=CLIENT lists the client hire with the Client pill, not EMP-0042", async ({ page }) => {
+    test.setTimeout(90_000);
+    const name = `E2E Listed ${Date.now()}`;
+    await makeClientHire(name);
+    await login(page, IT);
+
+    await page.goto("/employees?kind=CLIENT");
+    await expect(page.getByRole("heading", { name: "Employees", level: 1 })).toBeVisible({ timeout: 20_000 });
+    const row = page.getByRole("row", { name: new RegExp(name) });
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(row).toContainText("Bluepeak Telecom");
+    await expect(row.getByText("Client", { exact: true })).toBeVisible();
+    await expect(page.getByRole("row", { name: /EMP-0042/ })).toHaveCount(0);
+
+    // EMP-0042 is Finance, an internal department: it shows under no filter with no pill.
+    await page.goto(`/employees?q=${encodeURIComponent("Marites")}`);
+    const marites = page.getByRole("row", { name: /EMP-0042/ });
+    await expect(marites).toBeVisible({ timeout: 20_000 });
+    await expect(marites).toContainText("Finance");
+    await expect(marites.getByText("Client", { exact: true })).toHaveCount(0);
   });
 });
