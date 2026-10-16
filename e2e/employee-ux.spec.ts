@@ -35,6 +35,8 @@ import { localDateISO } from "@/lib/format";
  *  10 (Phase 37 §4.3/§4.4) equal tiles, "Monitor" / "Monitor 2", and the side
  *     panel: the Laptop tile opens it, Escape closes it back onto the tile,
  *     and `?item=` reopens it after a reload.
+ *  11 (Phase 37 §4.7) Add a slot asks the category, then the type, names the
+ *     slot itself ("Shows as"), and a second Monitor is numbered "Monitor 2".
  *
  * Seeded fixtures this file depends on (prisma/seed.ts), read off the seed
  * rather than assumed from the brief:
@@ -525,5 +527,49 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     // A refresh with ?item= reopens the panel on that held item.
     await page.goto(`/employees/${marites.id}?item=${laptop.id}`);
     await expect(page.getByRole("dialog", { name: `BR-LT-0148 · ${laptop.model}` })).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("11. Add a slot asks the category then the type, shows what it will be called, and numbers a second Monitor", async ({ page }) => {
+    // Ramon (EMP-0051, Sales) has no policy, so every Monitor tile here is one this case adds.
+    const ramon = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0051" } });
+    await login(page, IT);
+    try {
+      await page.goto(`/employees/${ramon.id}`);
+      const addButton = page.getByRole("button", { name: "Add a slot for this person…" });
+      await waitForHydration(addButton);
+
+      async function addMonitor(kind: string) {
+        await addButton.click();
+        const dialog = page.getByRole("dialog", { name: `Add a slot for ${ramon.name}` });
+        await expect(dialog).toBeVisible();
+        await dialog.getByLabel("What").selectOption({ label: "Monitor" });
+        // Monitor has two types, so the second question appears (and a category change would reset it).
+        const which = dialog.getByLabel("Which kind");
+        await expect(which).toBeVisible();
+        await expect(which.locator("option", { hasText: "24-inch" })).toHaveCount(1);
+        await expect(which.locator("option", { hasText: "27-inch" })).toHaveCount(1);
+        await which.selectOption({ label: kind });
+        return dialog;
+      }
+
+      const first = await addMonitor("27-inch");
+      await expect(first.getByText("Shows as “Monitor”")).toBeVisible();
+      await first.getByRole("button", { name: "Client requirement", exact: true }).click();
+      await first.getByRole("button", { name: "Add", exact: true }).click();
+      await expect(page.getByText("Monitor added for this person")).toBeVisible({ timeout: 10_000 });
+      const monitor = page.getByRole("group", { name: "Monitor", exact: true });
+      await expect(monitor).toBeVisible();
+      await expect(monitor).toContainText("Missing");
+
+      // The second Monitor reads "Monitor 2" in the dialog and then on the grid.
+      const second = await addMonitor("24-inch");
+      await expect(second.getByText("Shows as “Monitor 2”")).toBeVisible();
+      await second.getByRole("button", { name: "Client requirement", exact: true }).click();
+      await second.getByRole("button", { name: "Add", exact: true }).click();
+      await expect(page.getByRole("group", { name: "Monitor 2", exact: true })).toBeVisible({ timeout: 10_000 });
+    } finally {
+      // The audit rows stay (append-only); the exceptions this case added go.
+      await db.employeeSlotException.deleteMany({ where: { employeeId: ramon.id } });
+    }
   });
 });

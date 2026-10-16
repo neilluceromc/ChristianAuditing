@@ -26,7 +26,7 @@ import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
 import { TagRef } from "@/components/inventory/tag-ref";
 import { EquipmentTile, type EquipmentTileData, type TileAsset } from "@/components/employees/equipment-tile";
 import { HeldItemPanel } from "@/components/employees/held-item-panel";
-import { AddSlotDialog, RemoveExceptionButton, WaiveSlotDialog } from "@/components/employees/slot-exception-controls";
+import { AddSlotDialog, RemoveExceptionButton, WaiveSlotDialog, type ItCategoryOption } from "@/components/employees/slot-exception-controls";
 import { requestAssign, requestAssignReserved, requestReturn } from "@/server/modules/employees/actions";
 import { reserveAsset } from "@/server/modules/reservations/actions";
 import { assignAsset, assignReserved, replaceAsset, returnAsset } from "@/server/modules/lifecycle/actions";
@@ -104,7 +104,8 @@ export function LoadoutView({
   unslotted,
   onLoan,
   waived,
-  itTypes,
+  itCategories,
+  currentSlotLabels,
   spares,
   holding,
   frozen,
@@ -128,8 +129,10 @@ export function LoadoutView({
   onLoan: TileAsset[];
   /** Phase 16: this person's own WAIVE exceptions. */
   waived: Array<{ id: string; slotName: string; reason: string }>;
-  /** Phase 16: IT asset types offered by the "Add a slot" dialog. */
-  itTypes: Array<{ id: string; name: string }>;
+  /** Phase 37 (spec §4.7): IT categories with their types, offered by the "Add a slot" dialog. */
+  itCategories: ItCategoryOption[];
+  /** The slot labels this person's tiles already carry, un-numbered, in policy order — the dialog's "Shows as" line numbers against them. */
+  currentSlotLabels: string[];
   spares: SpareOption[];
   holding: HoldingItem[];
   frozen: boolean;
@@ -1008,7 +1011,9 @@ export function LoadoutView({
 
       <AddSlotDialog
         employeeId={employeeId}
-        itTypes={itTypes}
+        employeeName={employeeName}
+        itCategories={itCategories}
+        currentLabels={currentSlotLabels}
         open={addingSlot}
         onClose={() => setAddingSlot(false)}
       />

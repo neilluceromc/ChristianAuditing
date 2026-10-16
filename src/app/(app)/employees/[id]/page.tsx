@@ -36,7 +36,7 @@ export default async function EmployeePage({
   if (!employee) notFound();
   const today = localDateISO(new Date());
 
-  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes, acks, transfers, departments, notes, initialView] = await Promise.all([
+  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itCategories, acks, transfers, departments, notes, initialView] = await Promise.all([
     prisma.asset.findMany({
       where: { assigneeId: id },
       include: { category: { select: { name: true } }, type: { select: { name: true } } },
@@ -76,9 +76,10 @@ export default async function EmployeePage({
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       include: { assetType: { select: { name: true } }, slot: { select: { name: true } } },
     }),
-    prisma.assetType.findMany({
-      where: { category: { cls: "IT" } },
-      select: { id: true, name: true },
+    // Phase 37 (spec §4.7): "Add a slot" asks the category first, then the type.
+    prisma.assetCategory.findMany({
+      where: { cls: "IT", types: { some: {} } },
+      select: { id: true, name: true, types: { select: { id: true, name: true }, orderBy: [{ name: "asc" }, { id: "asc" }] } },
       orderBy: [{ name: "asc" }, { id: "asc" }],
     }),
     prisma.acknowledgement.findMany({
@@ -239,7 +240,8 @@ export default async function EmployeePage({
             unslotted={loadout.unslotted.map(toTileAsset)}
             onLoan={loadout.onLoan.map(toTileAsset)}
             waived={waived}
-            itTypes={itTypes}
+            itCategories={itCategories}
+            currentSlotLabels={loadout.slots.map((s) => s.slot.name)}
             spares={spares}
             holding={holding}
             frozen={employee.employment !== "ACTIVE"}

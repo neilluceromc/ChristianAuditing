@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
 import { FormError, FormField } from "@/components/ui/form-field";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
+import { slotLabel, numberSlotLabels } from "@/lib/loadout";
 import { REASON_CHIPS } from "@/lib/reason-chips";
 import { addSlotException, removeSlotException, waiveSlot } from "@/server/modules/employees/exception-actions";
 import type { ActionResult } from "@/server/action-result";
@@ -101,52 +101,82 @@ export function WaiveSlotDialog({
         </p>
         <ReasonField
           required error={fieldErrors.reason} value={reason} onChange={setReason}
-          chips={REASON_CHIPS["policy.exception"]} disabled={pending}
+          chips={REASON_CHIPS["policy.exception.waive"]} disabled={pending}
         />
       </div>
     </Dialog>
   );
 }
 
+export interface ItCategoryOption {
+  id: string;
+  name: string;
+  types: Array<{ id: string; name: string }>;
+}
+
+/**
+ * Phase 37 (spec §4.7): the category first, then the type when the category has
+ * more than one; the slot names itself from them (`slotLabel`), numbered
+ * against the labels this person's tiles already carry.
+ */
 export function AddSlotDialog({
   employeeId,
-  itTypes,
+  employeeName,
+  itCategories,
+  currentLabels,
   open,
   onClose,
 }: {
   employeeId: string;
-  itTypes: Array<{ id: string; name: string }>;
+  employeeName: string;
+  itCategories: ItCategoryOption[];
+  /** This person's tile labels, un-numbered, in policy order. */
+  currentLabels: string[];
   open: boolean;
   onClose: () => void;
 }) {
   const { router, pending, startTransition, error, fieldErrors, retryAfter, setRetryAfter, handle, reset } =
     useExceptionAction();
   const toast = useToast();
-  const [name, setName] = useState("");
-  const [assetTypeId, setAssetTypeId] = useState(itTypes[0]?.id ?? "");
+  const [categoryId, setCategoryId] = useState("");
+  const [typeId, setTypeId] = useState("");
   const [required, setRequired] = useState(true);
   const [loaner, setLoaner] = useState(false);
   const [reason, setReason] = useState("");
 
-  function close() {
-    reset();
-    setName("");
-    setAssetTypeId(itTypes[0]?.id ?? "");
+  const category = itCategories.find((c) => c.id === categoryId) ?? null;
+  const type = category?.types.find((t) => t.id === typeId) ?? null;
+  const showsAs = category && type
+    ? numberSlotLabels([...currentLabels, slotLabel(category.name, type.name)]).at(-1) ?? null
+    : null;
+
+  function pickCategory(id: string) {
+    setCategoryId(id);
+    // A category with one type needs no second question; otherwise the type is asked again.
+    const types = itCategories.find((c) => c.id === id)?.types ?? [];
+    setTypeId(types.length === 1 ? types[0].id : "");
+  }
+
+  function clear() {
+    setCategoryId("");
+    setTypeId("");
     setRequired(true);
     setLoaner(false);
     setReason("");
+  }
+
+  function close() {
+    reset();
+    clear();
     onClose();
   }
 
   function submit() {
     reset();
     startTransition(async () => {
-      handle(await addSlotException({ employeeId, name, assetTypeId, required, loaner, reason }), () => {
-        toast(`${name} added for this person`, "settled");
-        setName("");
-        setRequired(true);
-        setLoaner(false);
-        setReason("");
+      handle(await addSlotException({ employeeId, assetTypeId: typeId, required, loaner, reason }), () => {
+        toast(`${showsAs ?? "Slot"} added for this person`, "settled");
+        clear();
         onClose();
         router.refresh();
       });
@@ -157,11 +187,11 @@ export function AddSlotDialog({
     <Dialog
       open={open}
       onClose={close}
-      title="Add a slot for this person"
+      title={`Add a slot for ${employeeName}`}
       footer={
         <>
           <Button variant="ghost" onClick={close}>Cancel</Button>
-          <Button variant="primary" loading={pending} disabled={itTypes.length === 0} onClick={submit}>Add</Button>
+          <Button variant="primary" loading={pending} disabled={itCategories.length === 0} onClick={submit}>Add</Button>
         </>
       }
     >
@@ -171,39 +201,49 @@ export function AddSlotDialog({
         <p className="text-xs text-fg-muted">
           Only this person gets it — the policy itself is untouched.
         </p>
-        <FormField label="Slot name" required error={fieldErrors.name}>
-          {(p) => (
-            <Input
-              id={p.id}
-              aria-describedby={p["aria-describedby"]}
-              invalid={p.invalid}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. loaner laptop"
-            />
-          )}
-        </FormField>
-        {itTypes.length === 0 ? (
+        {itCategories.length === 0 ? (
           <div className="flex flex-col gap-1.5">
-            <p className="text-xs text-fg-muted">No IT asset types exist yet — create one before adding a slot.</p>
+            <p className="text-xs text-fg-muted">No IT categories with types exist yet — create one before adding a slot.</p>
             <FormError>{fieldErrors.assetTypeId}</FormError>
           </div>
         ) : (
-          <FormField label="Asset type" required error={fieldErrors.assetTypeId}>
-            {(p) => (
-              <Select
-                id={p.id}
-                aria-describedby={p["aria-describedby"]}
-                invalid={p.invalid}
-                value={assetTypeId}
-                onChange={(e) => setAssetTypeId(e.target.value)}
-              >
-                {itTypes.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </Select>
+          <>
+            <FormField label="What" required error={category && category.types.length >= 2 ? undefined : fieldErrors.assetTypeId}>
+              {(p) => (
+                <Select
+                  id={p.id}
+                  aria-describedby={p["aria-describedby"]}
+                  invalid={p.invalid}
+                  value={categoryId}
+                  onChange={(e) => pickCategory(e.target.value)}
+                >
+                  <option value="">Choose…</option>
+                  {itCategories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+            {category && category.types.length >= 2 && (
+              <FormField label="Which kind" required error={fieldErrors.assetTypeId}>
+                {(p) => (
+                  <Select
+                    id={p.id}
+                    aria-describedby={p["aria-describedby"]}
+                    invalid={p.invalid}
+                    value={typeId}
+                    onChange={(e) => setTypeId(e.target.value)}
+                  >
+                    <option value="">Choose…</option>
+                    {category.types.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
             )}
-          </FormField>
+            {showsAs && <p className="text-sm text-fg-secondary">Shows as &ldquo;{showsAs}&rdquo;</p>}
+          </>
         )}
         <label className="flex items-center gap-2 text-xs text-fg-secondary">
           <Checkbox checked={required} onChange={(e) => setRequired(e.target.checked)} />
@@ -215,7 +255,7 @@ export function AddSlotDialog({
         </label>
         <ReasonField
           required error={fieldErrors.reason} value={reason} onChange={setReason}
-          chips={REASON_CHIPS["policy.exception"]} disabled={pending}
+          chips={REASON_CHIPS["policy.exception.add"]} disabled={pending}
         />
       </div>
     </Dialog>

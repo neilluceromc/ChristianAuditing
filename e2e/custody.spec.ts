@@ -189,17 +189,19 @@ test.describe.serial("custody", () => {
     expect(waives).toHaveLength(0);
     expect(await db.auditEntry.count({ where: { entityType: "employee", entityId: emp.id, action: "policy.exception.removed" } })).toBe(1);
 
-    // Add a "tablet" slot for this person only.
+    // Add a "Speaker" slot for this person only (Phase 37 §4.7: category Other, type Speaker — it shows as the type).
     await page.getByRole("button", { name: "Add a slot for this person…" }).click();
-    const addDialog = page.getByRole("dialog", { name: "Add a slot for this person" });
+    const addDialog = page.getByRole("dialog", { name: `Add a slot for ${emp.name}` });
     await expect(addDialog).toBeVisible();
+    await addDialog.getByLabel("What").selectOption({ label: "Other" });
+    await addDialog.getByLabel("Which kind").selectOption({ label: "Speaker" });
+    await expect(addDialog.getByText("Shows as “Speaker”")).toBeVisible();
     await expectNoSeriousAxe(page); // D-20: the Add-a-slot dialog, open
-    await addDialog.getByLabel("Slot name").fill("tablet");
     await addDialog.getByLabel("Reason").fill("pilot device for field staff");
-    await addDialog.getByRole("button", { name: "Add" }).click();
-    await expect(page.getByText("tablet added for this person")).toBeVisible({ timeout: 10_000 });
+    await addDialog.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByText("Speaker added for this person")).toBeVisible({ timeout: 10_000 });
 
-    const tabletTile = page.getByRole("group", { name: "tablet", exact: true });
+    const tabletTile = page.getByRole("group", { name: "Speaker", exact: true });
     await expect(tabletTile).toBeVisible();
     const exceptionPill = tabletTile.getByText("EXCEPTION");
     await expect(exceptionPill).toBeVisible();
@@ -207,7 +209,7 @@ test.describe.serial("custody", () => {
 
     const adds = await db.employeeSlotException.findMany({ where: { employeeId: emp.id, kind: "ADD" } });
     expect(adds).toHaveLength(1);
-    expect(adds[0].name).toBe("tablet");
+    expect(adds[0].name).toBe("Speaker");
     expect(adds[0].reason).toBe("pilot device for field staff");
     expect(await db.auditEntry.count({ where: { entityType: "employee", entityId: emp.id, action: "policy.exception.added" } })).toBe(1);
   });
