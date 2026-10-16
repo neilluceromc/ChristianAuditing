@@ -112,6 +112,7 @@ export function SideCard({
           id={`side-panel-${t}`}
           role="tabpanel"
           aria-labelledby={`side-tab-${t}`}
+          tabIndex={0}
           hidden={t !== tab}
           className="px-4 py-3"
         >

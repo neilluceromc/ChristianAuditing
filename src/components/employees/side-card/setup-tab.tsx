@@ -99,7 +99,8 @@ export function SetupTab({
     });
   }
 
-  const vpnDot = setupDot(values.vpn);
+  // The dot follows what the select shows, like the other rows: Other… with no name yet reads "Not recorded".
+  const vpnDot = setupDot(vpnSelect === "" ? null : vpnSelect === OTHER ? vpnText.trim() || null : vpnSelect);
 
   return (
     <div className="flex flex-col gap-3">

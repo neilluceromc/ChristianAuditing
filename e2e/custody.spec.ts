@@ -407,8 +407,10 @@ test.describe.serial("custody", () => {
     await expect(page.getByText(`BR-HS-0502 assigned to ${finance.name}`)).toBeVisible({ timeout: 15_000 });
 
     await page.goto(`/employees/${finance.id}?side=form`);
-    const since = page.getByText("1 issued since", { exact: true });
-    await expect(since).toBeVisible();
-    await expect(since).toHaveAttribute("title", "BR-HS-0502");
+    // Phase 39 (spec §2.4): "{k} issued since", with the tags on a muted line under it.
+    // Scoped to the Form panel: the equipment tiles print the same tag.
+    const formPanel = page.getByRole("tabpanel", { name: /^Form/ });
+    await expect(formPanel.getByText("1 issued since", { exact: true })).toBeVisible();
+    await expect(formPanel.getByText("BR-HS-0502", { exact: true })).toBeVisible();
   });
 });

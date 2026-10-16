@@ -3,6 +3,7 @@ import {
   formStatus,
   pickSideTab,
   tabAfterKey,
+  tagLine,
   readStoredTab,
   SIDE_TAB_KEY,
   SIDE_TABS,
@@ -117,6 +118,19 @@ describe("tabAfterKey", () => {
   it("any other key is not a tab move", () => {
     expect(tabAfterKey("notes", "Enter")).toBeNull();
     expect(tabAfterKey("notes", "ArrowDown")).toBeNull();
+  });
+});
+
+describe("tagLine", () => {
+  it("lists up to five tags", () => {
+    expect(tagLine(["BR-HS-0502", "BR-MN-0911"])).toBe("BR-HS-0502, BR-MN-0911");
+    expect(tagLine(["A", "B", "C", "D", "E"])).toBe("A, B, C, D, E");
+  });
+  it("past five, the rest read +{n} more", () => {
+    expect(tagLine(["A", "B", "C", "D", "E", "F", "G"])).toBe("A, B, C, D, E +2 more");
+  });
+  it("nothing to list is empty", () => {
+    expect(tagLine([])).toBe("");
   });
 });
 

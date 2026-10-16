@@ -13,7 +13,7 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { recordAcknowledgement } from "@/server/modules/employees/acknowledgement-actions";
 import { fmtDate } from "@/lib/format";
 import { latestSigningDate, type AckItem } from "@/lib/acknowledgement";
-import { formStatus } from "@/lib/side-card";
+import { formStatus, tagLine } from "@/lib/side-card";
 import { StatusDot } from "./status-dot";
 
 export interface AckRow {
@@ -65,16 +65,15 @@ export function FormTab({
         {status.since && (
           <>
             <span aria-hidden>·</span>
-            <span
-              className="font-medium"
-              style={{ color: "var(--st-attention-text)" }}
-              title={uncovered.map((u) => u.tag).join(", ")}
-            >
+            <span className="font-medium" style={{ color: "var(--st-attention-text)" }}>
               {status.since}
             </span>
           </>
         )}
       </p>
+      {status.since && (
+        <p className="-mt-2 pl-3.5 font-mono text-[11px] text-fg-muted">{tagLine(uncovered.map((u) => u.tag))}</p>
+      )}
       <p className="text-[11.5px] text-fg-muted">Print it, have them sign, then record it here.</p>
 
       <div className="flex gap-2">

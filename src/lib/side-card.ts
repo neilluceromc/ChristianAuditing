@@ -75,6 +75,12 @@ export function tabAfterKey(current: SideTab, key: string): SideTab | null {
   return null;
 }
 
+/** The Form tab's muted line under "{k} issued since": the tags, five at most, then "+{n} more". */
+export function tagLine(tags: string[], max = 5): string {
+  const shown = tags.slice(0, max).join(", ");
+  return tags.length > max ? `${shown} +${tags.length - max} more` : shown;
+}
+
 /**
  * The Form tab's status line (§2.4): amber "No signed form on file", or green "Signed {d MMM yyyy} · covers {n}
  * items", plus "{k} issued since" when held items are not on the latest signed form.
