@@ -165,8 +165,10 @@ test.describe.serial("the 4-step wizard", () => {
     await decide("BR-LT-0166", "Defective", "screen cracked in transit");
     await decide("BR-HS-0510", "Returned", "");
 
-    // Every decided item now shows its request and its landing status.
-    await expect(page.getByText("Missing", { exact: true }).first()).toBeVisible();
+    // A direct IT decision takes the item out of their name at once (each toast above named its landing status),
+    // so the step counts all three decided and has nothing left to collect.
+    await expect(page.getByText("3 of 3 decided", { exact: true })).toBeVisible();
+    await expect(page.getByText("Nothing left to collect", { exact: true })).toBeVisible();
     // Two identical "Continue to Accounts & M365" links render at once (a
     // mobile/desktop action-bar duplicate) — .first() disambiguates without
     // weakening the assertion.
