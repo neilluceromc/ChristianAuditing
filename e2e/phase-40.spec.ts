@@ -160,6 +160,9 @@ test.describe.serial("phase 40 — offboarding removes IT access", () => {
     await start.click();
     await expect(page.getByRole("dialog", { name: `Start offboarding ${NAME2}` })).toBeVisible();
     await page.keyboard.press("Escape");
+    // Focus is never lost to body: closing the dialog hands it back to its trigger.
+    await expect(page.getByRole("dialog", { name: `Start offboarding ${NAME2}` })).toHaveCount(0);
+    await expect(start).toBeFocused();
 
     // OFFBOARDING: exactly two options, and neither is Offboarded.
     await page.goto(`/employees/${leaver.id}/edit`);
