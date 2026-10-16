@@ -20,6 +20,7 @@ import {
 } from "@/lib/inventory-list";
 import {
   ASSET_CLASSES, CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, defaultClassFor, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
+  statusLabel,
 } from "@/lib/asset-class";
 import { reasonOptional, reasonRequired } from "@/lib/reason";
 import { parseListState, type ListState } from "@/lib/url-state";
@@ -244,7 +245,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   const plan = category ? creationPlan(d.requestedStatus, d.assigneeId || null, category.cls) : null;
   if (category && plan && !plan.ok) {
     if (plan.error === "assignee_required") errors.assigneeId = "Pick who this deploys to";
-    else errors.requestedStatus = `${d.requestedStatus} is not an initial state for ${CLASS_PHRASE[category.cls]} asset.`;
+    else errors.requestedStatus = `${statusLabel(d.requestedStatus)} is not an initial state for ${CLASS_PHRASE[category.cls]} asset.`;
   }
   // A loan's due date rides only on the direct path; the approval path's payload carries none, so a
   // registrant who does not manage the class cannot register a loan (the form already hides it, R4).

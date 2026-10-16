@@ -5,7 +5,7 @@ import { activeHoldFor } from "@/server/modules/reservations/queries";
 import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { fmtDate, localDateISO } from "@/lib/format";
 import { CLASS_PHRASE, STATUS_LABEL, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
-import { APPROVAL_TYPE_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
+import { APPROVAL_KIND_LABEL, APPROVAL_STATE_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
 import { recordPrimary, type RecordState } from "@/lib/record-actions";
 import { attentionOf } from "@/lib/inventory-attention";
 import { pathAllowedForRole } from "@/lib/workspaces";
@@ -183,7 +183,7 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
       <PageHeader
         title={asset.tag}
         breadcrumb={[{ label: "Inventory", href: "/inventory" }, { label: "Scan" }]}
-        badge={<StatusPill value={asset.status} />}
+        badge={<StatusPill value={asset.status} label={STATUS_LABEL[asset.status]} />}
       />
       <p className="-mt-2 pb-4 text-[13px] text-fg-secondary">{asset.model}</p>
 
@@ -230,7 +230,7 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
         <div className="pt-3">
           <Banner
             tone="inflight"
-            title={`${pending.refNo} · ${APPROVAL_TYPE_LABEL[pending.type]} is ${pending.state.toLowerCase()}`}
+            title={`${pending.refNo} · ${APPROVAL_KIND_LABEL[pending.type]} request is ${APPROVAL_STATE_LABEL[pending.state].toLowerCase()}`}
           >
             Queued in the approval pipeline — until it executes, this asset still reads{" "}
             {STATUS_LABEL[asset.status]} everywhere.{" "}

@@ -9,8 +9,8 @@ import { liveAccessFields } from "@/lib/it-setup";
 import { canContinue, completionBlockers, decisionStateLabel, defaultStep, offboardingNext, OUTCOME_LABEL, parseStep, readiness } from "@/lib/offboarding";
 import { fmtDate, fmtMoney, localDateISO } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
-import { APPROVAL_TYPE_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
-import { canSeeClass, isDirectLifecycle, STATUS_LABEL } from "@/lib/asset-class";
+import { APPROVAL_KIND_LABEL, EMPLOYMENT_LABEL } from "@/lib/labels";
+import { canSeeClass, isDirectLifecycle, STATUS_LABEL, statusLabel } from "@/lib/asset-class";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -210,7 +210,7 @@ export default async function OffboardingWizardPage({
                         <span className="font-mono text-[11px] text-accent">{s.tag}</span>
                         <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-fg-muted">
                           <StatusDot value={s.status ?? "SPARE"} />
-                          {s.status}
+                          {statusLabel(s.status)}
                         </span>
                       </>
                     ) : (
@@ -405,7 +405,7 @@ export default async function OffboardingWizardPage({
                         </Link>{" "}
                         {/* the same label decideItem's refusal uses — one block
                             explained two different ways is two bugs waiting */}
-                        ({APPROVAL_TYPE_LABEL[i.blockedBy!.type]}) — resolve that request
+                        ({APPROVAL_KIND_LABEL[i.blockedBy!.type]} request) — resolve that request
                         first, then decide this item.
                       </p>
                     </CardBody>
@@ -456,7 +456,7 @@ export default async function OffboardingWizardPage({
                           <span className="font-mono text-[11px]">
                             <Link href={`/approvals/${i.decision!.id}`} className="text-accent underline hover:text-accent-hover">{i.decision!.refNo}</Link>
                             {" · "}
-                            {i.status} → {i.decision!.toStatus ?? "?"}
+                            {statusLabel(i.status)} → {i.decision!.toStatus ? statusLabel(i.decision!.toStatus) : "?"}
                           </span>
                           {i.decision!.reason && <span>{i.decision!.reason}</span>}
                           {i.decision!.state === "EXECUTION_FAILED" && (
@@ -581,7 +581,7 @@ export default async function OffboardingWizardPage({
                           label={OUTCOME_LABEL[i.decision.outcome]}
                         />
                       </Td>
-                      <Td mono className="text-[10.5px]">{i.decision.toStatus ?? "?"}</Td>
+                      <Td mono className="text-[10.5px]">{i.decision.toStatus ? statusLabel(i.decision.toStatus) : "?"}</Td>
                       <Td>{i.decision.reason ?? "—"}</Td>
                       <Td align="right" mono>{i.costLabel}</Td>
                       {/* linked like the collect step's copy of the same refNo —

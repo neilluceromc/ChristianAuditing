@@ -19,7 +19,7 @@ import { actionLabel, recordActions, type RecordAction, type RecordState } from 
 import type { ListState } from "@/lib/url-state";
 import type { AssetRow } from "@/server/modules/inventory/queries";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
-import { canEditAsset } from "@/lib/asset-class";
+import { canEditAsset, statusLabel } from "@/lib/asset-class";
 import { RegistrationCell } from "./registration-cell";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { AssignDialog, ReturnDialog } from "./holder-control";
@@ -349,7 +349,7 @@ export function InventoryTable({
                         {/* spec §6.3: the dot beside the word, and the row's one attention reason under it */}
                         <span className="inline-flex items-center gap-1.5">
                           <StatusDot value={row.status} />
-                          {row.status}
+                          {statusLabel(row.status)}
                         </span>
                         {/* the reason sits on its own line visually; a screen reader hears a pause, not "DEPLOYEDoverdue" */}
                         {row.attention && <span className="sr-only"> · </span>}

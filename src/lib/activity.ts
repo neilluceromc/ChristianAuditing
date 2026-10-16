@@ -1,5 +1,7 @@
 import { fmtDate, fmtMoneyExact } from "./format";
 import { lifeLabel } from "./depreciation-input";
+import { statusLabel } from "./asset-class";
+import { EMPLOYMENT_LABEL } from "./labels";
 
 /** Phase 27 (spec §3.5): the facet's words for each action a feed can show; an unmapped action shows its raw name. */
 export const ACTION_LABELS: Record<string, string> = {
@@ -227,13 +229,14 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
     }
     case "lifecycle.return": {
       const to = diff?.status?.to;
-      const tail = diff?.returnedAt?.to ? `for triage${suffix}` : `as ${String(to ?? "?")}${suffix}`;
+      const tail = diff?.returnedAt?.to ? `for triage${suffix}` : `as ${to ? statusLabel(String(to)) : "?"}${suffix}`;
       return omitEntity ? `${actor}returned ${tail}` : `${actor}returned ${entry.entityLabel} ${tail}`;
     }
-    case "lifecycle.change-status":
-      return omitEntity
-        ? `${actor}changed to ${String(diff?.status?.to ?? "?")}${suffix}`
-        : `${actor}changed ${entry.entityLabel} to ${String(diff?.status?.to ?? "?")}${suffix}`;
+    case "lifecycle.change-status": {
+      // Phase 40 §6: the status's word ("Loan"), never the enum.
+      const to = diff?.status?.to ? statusLabel(String(diff.status.to)) : "?";
+      return omitEntity ? `${actor}changed to ${to}${suffix}` : `${actor}changed ${entry.entityLabel} to ${to}${suffix}`;
+    }
     case "lifecycle.replace": {
       if (diff?.replacedBy) {
         const tail = `with ${String(diff.replacedBy.to)}${suffix}`;
@@ -283,8 +286,9 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
       const status = diff?.status?.to;
       const employment = diff?.employment?.to;
       const suffix =
-        typeof status === "string" && status !== "SPARE" ? ` as ${status}`
-        : typeof employment === "string" && employment !== "ACTIVE" ? ` as ${employment}`
+        typeof status === "string" && status !== "SPARE" ? ` as ${statusLabel(status)}`
+        : typeof employment === "string" && employment !== "ACTIVE"
+          ? ` as ${Object.hasOwn(EMPLOYMENT_LABEL, employment) ? EMPLOYMENT_LABEL[employment as keyof typeof EMPLOYMENT_LABEL] : employment}`
         : "";
       return omitEntity ? `${actor}imported${suffix}` : `${actor}imported ${entry.entityLabel}${suffix}`;
     }

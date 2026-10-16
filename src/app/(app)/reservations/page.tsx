@@ -69,7 +69,7 @@ export default async function ReservationsPage({
             className="pb-1"
           />
           {/* Spec §5.2: the old banner's one fact, as a muted hint — a hold never changes an asset's status. */}
-          <p className="text-[11.5px] text-fg-muted">Held spares still read SPARE · place holds from a record or a profile</p>
+          <p className="text-[11.5px] text-fg-muted">Held spares still read Spare · place holds from a record or a profile</p>
 
           <HoldsToolbar tab={tab} state={state} total={total} soon={soon} facets={facets} />
 

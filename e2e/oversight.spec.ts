@@ -169,7 +169,7 @@ test.describe.serial("oversight", () => {
     // "Success: Transferred to HR" toast assertion). A generous timeout: the
     // first hit of /inventory/[id] and the lifecycle action in this file, on
     // a cold dev server.
-    await expect(page.getByText("Success: BR-MN-0910 is now DEFECTIVE", { exact: true })).toBeVisible({
+    await expect(page.getByText("Success: BR-MN-0910 is now Defective", { exact: true })).toBeVisible({
       timeout: 15_000,
     });
 

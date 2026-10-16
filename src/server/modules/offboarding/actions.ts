@@ -12,7 +12,7 @@ import { itAccessLive } from "@/lib/it-setup";
 import { OUTCOMES, OUTCOME_LABEL, decisionOf, m365Live, outcomeStatus, reasonRequired, type Outcome } from "@/lib/offboarding";
 import { CLASS_PHRASE, isDirectLifecycle } from "@/lib/asset-class";
 import { cleanReason, reasonOptional } from "@/lib/reason";
-import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { APPROVAL_KIND_LABEL } from "@/lib/labels";
 import { candidatesFor } from "@/server/modules/offboarding/queries";
 import { emitWebhook } from "@/server/webhooks/emit";
 import { prepareLifecycle, commitLifecycle } from "@/server/modules/lifecycle/apply";
@@ -133,7 +133,7 @@ async function decideOne(
     return { failure: conflict(
       open.type === "lifecycle_return" && inWindow
         ? `${asset.tag} already has an open request — that decision is already recorded.`
-        : `${asset.tag} is held by ${open.refNo} (${APPROVAL_TYPE_LABEL[open.type]}) — resolve that in Approvals first, then decide this item.`,
+        : `${asset.tag} is held by ${open.refNo} (${APPROVAL_KIND_LABEL[open.type]} request) — resolve that in Approvals first, then decide this item.`,
     ) };
   }
   // Phase 15 (spec §2.1): IT confirms and it's done — no queue. The asset

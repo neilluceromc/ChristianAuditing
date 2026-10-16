@@ -13,7 +13,7 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { diffOf } from "@/lib/audit-diff";
-import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, canManageClass, isAssignable, isDirectLifecycle } from "@/lib/asset-class";
+import { ASSIGNABLE_FROM, DEFAULT_ASSIGN_STATUS, DEFAULT_STATUS, STATUS_LABEL, canManageClass, isAssignable, isDirectLifecycle } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
 import { reasonRequired, reasonOptional } from "@/lib/reason";
 import { findSameName } from "@/server/modules/employees/queries";
@@ -60,7 +60,7 @@ export async function requestAssign(input: unknown): Promise<ActionResult<{ refN
       if (!canManageClass(user.role, asset.cls)) return forbidden();
       if (isDirectLifecycle(user.role, asset.cls)) return conflict(DIRECT_REFUSAL);
       if (!isAssignable(asset)) {
-        return conflict(`${asset.tag} is ${asset.status}, not ${ASSIGNABLE_FROM[asset.cls]} — only idle stock can be assigned.`);
+        return conflict(`${asset.tag} is ${STATUS_LABEL[asset.status]}, not ${STATUS_LABEL[ASSIGNABLE_FROM[asset.cls]]} — only idle stock can be assigned.`);
       }
       const hold = asset.reservations[0];
       if (hold && hold.employeeId !== d.employeeId) {

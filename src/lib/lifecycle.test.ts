@@ -41,6 +41,12 @@ describe("humanizeGuard", () => {
     expect(humanizeGuard("Execution guard: BR-LT-0201 is not held by anyone — return refused"))
       .toBe("BR-LT-0201 is not held by anyone");
   });
+  it("Phase 40 §6: names statuses and employment in words, never the enum", () => {
+    expect(humanizeGuard("Execution guard: BR-LT-0201 reads TEMPORARY, not SPARE — assignment refused"))
+      .toBe("BR-LT-0201 reads Loan, not Spare");
+    expect(humanizeGuard("Execution guard: target employee EMP-0093 is OFFBOARDED — assignment refused"))
+      .toBe("target employee EMP-0093 is Offboarded");
+  });
   it("passes through text that isn't a worker guard unchanged", () => {
     expect(humanizeGuard("Already DEPLOYED.")).toBe("Already DEPLOYED.");
   });

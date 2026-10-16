@@ -19,7 +19,7 @@ import { parseListState, type ListState } from "@/lib/url-state";
 import { ASSET_STATUSES, BULK_MAX, INVENTORY_LIST_CONFIG, buildAssetWhere, parsePurchaseYear } from "@/lib/inventory-list";
 import { statusFamily } from "@/lib/status";
 import {
-  ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, defaultClassFor, isAssignable, isDirectLifecycle, isStatusOf, parseCls,
+  ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, defaultClassFor, isAssignable, isDirectLifecycle, isStatusOf, parseCls, statusLabel,
 } from "@/lib/asset-class";
 import {
   RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, TRIAGE_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan,
@@ -150,7 +150,7 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
     const { asset } = loaded;
     const status: AssetStatus = d.status ?? DEFAULT_ASSIGN_STATUS[asset.cls];
     if (!(ASSIGN_TARGETS[asset.cls] as readonly string[]).includes(status)) {
-      return validationError({ status: `${status} is not an assign target for ${CLASS_PHRASE[asset.cls]} asset.` });
+      return validationError({ status: `${statusLabel(status)} is not an assign target for ${CLASS_PHRASE[asset.cls]} asset.` });
     }
     const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { name: true } });
     if (!employee) return validationError({ employeeId: "Unknown employee" });
@@ -194,7 +194,7 @@ export async function setLoanDue(input: unknown): Promise<ActionResult<{ tag: st
     const asset = await tx.asset.findUnique({ where: { id: d.assetId }, select: assetSelect });
     if (!asset) return conflict("That asset no longer exists.");
     if (!isDirectLifecycle(user.role, asset.cls)) return forbidden();
-    if (asset.status !== "TEMPORARY") return conflict(`${asset.tag} is not on loan — it reads ${asset.status}.`);
+    if (asset.status !== "TEMPORARY") return conflict(`${asset.tag} is not on loan — it reads ${statusLabel(asset.status)}.`);
     await tx.asset.update({ where: { id: asset.id }, data: { loanDueAt: due.value } });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
@@ -280,11 +280,11 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
       if (!isAssignable(newAsset)) {
         return conflict(newAsset.returnedAt
           ? `${newAsset.tag} is back but not yet triaged — triage it first.`
-          : `${newAsset.tag} is ${newAsset.status}, not a spare.`);
+          : `${newAsset.tag} is ${statusLabel(newAsset.status)}, not a spare.`);
       }
       let plan: ReturnType<typeof replacePlan>;
       try { plan = replacePlan({ status: oldAsset.status }, d.outcome); }
-      catch { return conflict(`${oldAsset.tag} is ${oldAsset.status} — nothing to replace.`); }
+      catch { return conflict(`${oldAsset.tag} is ${statusLabel(oldAsset.status)} — nothing to replace.`); }
 
       // From here on, the old asset's return may already have written to the
       // database (asset row, approval, audit, webhook). If the new asset's
@@ -437,7 +437,7 @@ export async function bulkChangeStatus(input: unknown): Promise<ActionResult<{ c
       if (asset.status === to) { skipped.push({ tag: asset.tag, reason: `already ${to}` }); continue; }
       if (blocked.has(asset.id)) { skipped.push({ tag: asset.tag, reason: "held by an open request" }); continue; }
       if (statusFamily(asset.status) === "closed") {
-        skipped.push({ tag: asset.tag, reason: `closed status ${asset.status} — cannot change` });
+        skipped.push({ tag: asset.tag, reason: `closed status ${statusLabel(asset.status)} — cannot change` });
         continue;
       }
       targets.push(asset);
@@ -506,7 +506,7 @@ export async function bulkAssign(input: unknown): Promise<ActionResult<{ assigne
     const cls = assets[0].cls;
     if (!isDirectLifecycle(user.role, cls)) return forbidden();
     if (!(ASSIGN_TARGETS[cls] as readonly string[]).includes(d.status)) {
-      return validationError({ status: `${d.status} is not an assign target for ${CLASS_PHRASE[cls]} asset.` });
+      return validationError({ status: `${statusLabel(d.status)} is not an assign target for ${CLASS_PHRASE[cls]} asset.` });
     }
     for (const asset of assets) {
       const open = await openApprovalForAsset(tx, asset.id);

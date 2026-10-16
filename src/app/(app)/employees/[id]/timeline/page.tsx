@@ -5,7 +5,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
-import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { APPROVAL_KIND_LABEL, APPROVAL_STATE_LABEL } from "@/lib/labels";
+import { actionLabel } from "@/lib/activity";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { mergeTimeline, parseTimelineCursor, timelineCursorQS, timelineTake, TIMELINE_PAGE_SIZE, type TimelinePoint } from "@/lib/timeline";
@@ -70,7 +71,8 @@ export default async function EmployeeTimelinePage({
     when: e.createdAt,
     item: {
       id: `audit-${e.id}`, at: fmtDate(e.createdAt),
-      title: (<><span className="font-medium text-fg">{e.actorLabel}</span> — <span className="font-mono text-xs">{e.action}</span></>),
+      // Phase 40 §6: the action's words ("Transferred"), never its code.
+      title: (<><span className="font-medium text-fg">{e.actorLabel}</span> — {actionLabel(e.action)}</>),
     } satisfies TimelineItem,
   }));
   const approvalPts = approvals.map((a) => ({
@@ -79,9 +81,9 @@ export default async function EmployeeTimelinePage({
     item: {
       id: `approval-${a.id}`, at: fmtDate(a.createdAt), status: a.state,
       title: (<>
-        <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link> · {APPROVAL_TYPE_LABEL[a.type]}
+        <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link> · {APPROVAL_KIND_LABEL[a.type]} request
         {a.asset ? <> · <Link href={`/inventory/${a.asset.id}`} className="font-mono text-xs hover:underline">{a.asset.tag}</Link></> : null} —{" "}
-        <span className="font-mono text-xs">{a.state}</span>
+        {APPROVAL_STATE_LABEL[a.state]}
       </>),
     } satisfies TimelineItem,
   }));

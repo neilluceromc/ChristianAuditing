@@ -16,6 +16,7 @@ import { PeopleCombobox } from "@/components/patterns/people-combobox";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS, chipsForOutcome } from "@/lib/reason-chips";
 import { fmtDate } from "@/lib/format";
+import { statusLabel } from "@/lib/asset-class";
 import { requestAssign, requestReturn } from "@/server/modules/employees/actions";
 import { assignAsset, returnAsset } from "@/server/modules/lifecycle/actions";
 import { reserveAsset } from "@/server/modules/reservations/actions";
@@ -149,7 +150,7 @@ export function AssignDialog({
           {direct ? (
             <>Applies now and is recorded in the audit trail under your name.</>
           ) : (
-            <>This files a request for approval. Creates a <span className="font-mono">lifecycle.assign</span> approval; {asset.tag} stays where it is until it executes.</>
+            <>This files a request for approval. Creates an Assign request; {asset.tag} stays where it is until it executes.</>
           )}
         </p>
         <Refusals error={error} retryAfter={retryAfter} onExpire={() => setRetryAfter(null)} />
@@ -215,7 +216,7 @@ export function ReturnDialog({
     if (direct) {
       run(
         () => returnAsset({ assetId: asset.id, outcome, reason }),
-        (d) => `${asset.tag} returned · now ${d.status}`,
+        (d) => `${asset.tag} returned · now ${statusLabel(d.status)}`,
         onClose,
       );
     } else {
@@ -240,7 +241,7 @@ export function ReturnDialog({
           {direct ? (
             <>Applies now and is recorded in the audit trail under your name.</>
           ) : (
-            <>This files a request for approval. Creates a <span className="font-mono">lifecycle.return</span> approval; {asset.tag} stays with {holder.name} until it executes.</>
+            <>This files a request for approval. Creates a Return request; {asset.tag} stays with {holder.name} until it executes.</>
           )}
         </p>
         <Refusals error={error} retryAfter={retryAfter} onExpire={() => setRetryAfter(null)} />
@@ -311,7 +312,7 @@ export function ReserveDialog({
     >
       <div className="flex flex-col gap-3">
         <p className="text-xs text-fg-muted">
-          Promises this spare to one person. It still reads SPARE and marked HOLD until it is assigned, released or the hold expires.
+          Promises this spare to one person. It still reads Spare and marked HOLD until it is assigned, released or the hold expires.
         </p>
         <Refusals error={error} retryAfter={retryAfter} onExpire={() => setRetryAfter(null)} />
         <FormField label="For" required error={fieldErrors.employeeId}>

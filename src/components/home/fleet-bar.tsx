@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { StatusDot } from "@/components/ui/status";
 import { statusFamily } from "@/lib/status";
+import { statusLabel } from "@/lib/asset-class";
 import type { Fleet } from "@/server/modules/home/queries";
 
 /**
@@ -24,7 +25,7 @@ export function FleetBar({ fleet }: { fleet: Fleet }) {
           <Link
             key={s.status}
             href={s.href}
-            title={`${s.status} ${s.count}`}
+            title={`${statusLabel(s.status)} ${s.count}`}
             className="block h-full hover:opacity-80 focus-visible:[outline-offset:-2px]"
             style={{
               width: `${s.share}%`,
@@ -32,7 +33,7 @@ export function FleetBar({ fleet }: { fleet: Fleet }) {
               animation: "grow var(--dur-3) var(--ease-std)",
             }}
           >
-            <span className="sr-only">{`${s.status}: ${s.count} assets`}</span>
+            <span className="sr-only">{`${statusLabel(s.status)}: ${s.count} assets`}</span>
           </Link>
         ))}
       </div>
@@ -40,7 +41,7 @@ export function FleetBar({ fleet }: { fleet: Fleet }) {
         {fleet.slices.map((s) => (
           <li key={s.status} className="inline-flex items-center gap-1.5">
             <StatusDot value={s.status} />
-            <Link href={s.href} className="font-mono text-[10.5px] text-fg-secondary hover:underline">{s.status}</Link>
+            <Link href={s.href} className="font-mono text-[10.5px] text-fg-secondary hover:underline">{statusLabel(s.status)}</Link>
             <span className="font-mono text-[10.5px] font-semibold text-fg">{s.count}</span>
             <span className="font-mono text-[10px] text-fg-muted">{s.share}%</span>
           </li>

@@ -82,7 +82,7 @@ test.describe.serial("direct changes", () => {
     await expect(dialog.getByLabel("New status")).toHaveValue("");
     await dialog.getByLabel("New status").selectOption("DEFECTIVE");
     await dialog.getByRole("button", { name: "Change status", exact: true }).click();
-    await expect(page.getByText("BR-MN-0910 is now DEFECTIVE")).toBeVisible();
+    await expect(page.getByText("BR-MN-0910 is now Defective")).toBeVisible();
     expect((await db.asset.findUniqueOrThrow({ where: { id } })).status).toBe("DEFECTIVE");
     expect(await db.approval.count({ where: { assetId: id, state: { in: [...OPEN_STATES] } } })).toBe(0);
     const rec = await db.approval.findFirstOrThrow({ where: { assetId: id, type: "lifecycle_change_status" } });
@@ -134,7 +134,7 @@ test.describe.serial("direct changes", () => {
     const dialog = page.getByRole("dialog", { name: "Return BR-LT-0210 · ThinkPad T14 Gen 4 from Leo Tan?" });
     await expect(dialog.getByLabel("What happens to it")).toHaveValue("TRIAGE"); // default: Back for triage
     await dialog.getByRole("button", { name: "Return", exact: true }).click();
-    await expect(page.getByText("BR-LT-0210 returned · now SPARE")).toBeVisible();
+    await expect(page.getByText("BR-LT-0210 returned · now Spare")).toBeVisible();
 
     let asset = await db.asset.findUniqueOrThrow({ where: { id } });
     expect(asset.status).toBe("SPARE");
@@ -209,7 +209,7 @@ test.describe.serial("direct changes", () => {
     await page.getByRole("button", { name: "Change status…", exact: true }).click();
     await page.getByLabel(/Target status/).selectOption("DISPOSE");
     await page.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByText("2 assets now DISPOSE")).toBeVisible();
+    await expect(page.getByText("2 assets now Dispose")).toBeVisible();
 
     const [hs, mn] = await Promise.all([
       db.asset.findUniqueOrThrow({ where: { id: hsId } }),

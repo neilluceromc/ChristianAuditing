@@ -477,7 +477,7 @@ test.describe("queues-records-ux — reservations", () => {
     try {
       await login(page, IT);
       await page.goto("/reservations?state=ACTIVE");
-      await expect(page.getByText("Held spares still read SPARE · place holds from a record or a profile")).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText("Held spares still read Spare · place holds from a record or a profile")).toBeVisible({ timeout: 20_000 });
       await expect(page.getByRole("columnheader", { name: "Expires" })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "Reads" })).toHaveCount(0);
       // The seeded +7 d hold and this one (tomorrow): two live, one within two days.

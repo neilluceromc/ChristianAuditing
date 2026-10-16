@@ -17,7 +17,7 @@ describe("historyRows — one row per FIELD, not per save (README 7c)", () => {
       diff: { status: { from: "SPARE", to: "DEPLOYED" }, assignee: { from: null, to: "EMP-0097" } },
     }], names);
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({ field: "Status", from: "SPARE", to: "DEPLOYED", first: true, action: "Updated" });
+    expect(rows[0]).toMatchObject({ field: "Status", from: "Spare", to: "Deployed", first: true, action: "Updated" });
     expect(rows[1]).toMatchObject({ field: "Holder", from: "—", to: "Nina Robles", first: false });
     expect(rows[0].at).toEqual(at);
   });
@@ -127,8 +127,15 @@ describe("formatHistoryValue", () => {
   });
   it("shows numbers and plain strings as written", () => {
     expect(f("cost", 55000)).toBe("55000");
-    expect(f("status", "DEPLOYED")).toBe("DEPLOYED");
+    expect(f("model", "DEPLOYED")).toBe("DEPLOYED");
     expect(f("cost", 0)).toBe("0");
+  });
+  it("Phase 40 §6: a status reads as its word (Loan, not TEMPORARY), employment as its word; unknown values as written", () => {
+    expect(f("status", "DEPLOYED")).toBe("Deployed");
+    expect(f("status", "TEMPORARY")).toBe("Loan");
+    expect(f("status", "SOMETHING_NEW")).toBe("SOMETHING_NEW");
+    expect(f("employment", "OFFBOARDING")).toBe("Leaving");
+    expect(f("employment", "ACTIVE")).toBe("Active");
   });
   it("shows the Finance send-back as its checklist labels, a dash, then the note", () => {
     expect(f("financeReturn", { fields: ["Cost", "Sales invoice"], note: "Invoice is for another PO" }))

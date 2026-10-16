@@ -3,7 +3,7 @@ import { pageTitle } from "@/lib/page-title";
 import Link from "next/link";
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
-import { ASSET_CLASSES, CLASS_LABEL, parseCls, statusesFor } from "@/lib/asset-class";
+import { ASSET_CLASSES, CLASS_LABEL, STATUS_LABEL, parseCls, statusLabel, statusesFor } from "@/lib/asset-class";
 import { parsePage } from "@/lib/paging";
 import { lifeLabel } from "@/lib/depreciation-input";
 import { REG_LABEL_FINANCE, parseFin } from "@/lib/registration";
@@ -132,7 +132,7 @@ export default async function FinanceAssetsPage({
               )}
             >
               <StatusDot value={s} />
-              {s}
+              {STATUS_LABEL[s]}
             </Link>
           ))}
         </nav>
@@ -169,7 +169,7 @@ export default async function FinanceAssetsPage({
                       {a.holder && <div className="text-xs text-fg-muted">{a.holder}</div>}
                     </Td>
                     <Td mono>{a.category}</Td>
-                    <Td><StatusPill value={a.status} /></Td>
+                    <Td><StatusPill value={a.status} label={statusLabel(a.status)} /></Td>
                     <Td>
                       {a.reg === "registered" && a.notCapitalised ? (
                         <span className="text-xs text-fg-secondary">Not capitalised</span>

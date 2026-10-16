@@ -109,7 +109,7 @@ test.describe("rate limits", () => {
     // "Success: Transferred to HR" toast assertion). A generous timeout: a
     // cold dev-server compile can eat into the toast's 4s auto-dismiss
     // window on the first hit of this route in the file.
-    await expect(page.getByText("Success: BR-MN-0910 is now DEFECTIVE", { exact: true })).toBeVisible({
+    await expect(page.getByText("Success: BR-MN-0910 is now Defective", { exact: true })).toBeVisible({
       timeout: 15_000,
     });
     expect((await db.asset.findUniqueOrThrow({ where: { id: asset.id } })).status).toBe("DEFECTIVE");

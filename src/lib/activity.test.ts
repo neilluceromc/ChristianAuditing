@@ -40,9 +40,9 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     expect(auditSentence({ ...base, action: "lifecycle.return", diff: { status: { from: "DEPLOYED", to: "SPARE" }, returnedAt: { from: null, to: "x" } } }))
       .toBe("J. Sarmiento returned BR-LT-0148 for triage");
     expect(auditSentence({ ...base, action: "lifecycle.return", diff: { status: { from: "DEPLOYED", to: "MISSING" } } }))
-      .toBe("J. Sarmiento returned BR-LT-0148 as MISSING");
+      .toBe("J. Sarmiento returned BR-LT-0148 as Missing");
     expect(auditSentence({ ...base, action: "lifecycle.change-status", diff: { status: { from: "SPARE", to: "DEFECTIVE" } } }))
-      .toBe("J. Sarmiento changed BR-LT-0148 to DEFECTIVE");
+      .toBe("J. Sarmiento changed BR-LT-0148 to Defective");
     expect(auditSentence({ ...base, action: "lifecycle.replace", diff: { replacedBy: { from: null, to: "BR-LT-0201" } } }))
       .toBe("J. Sarmiento replaced BR-LT-0148 with BR-LT-0201");
     expect(auditSentence({
@@ -89,7 +89,7 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     // supposed to close but didn't, on its own, actually close.
     expect(
       auditSentence({ ...base, action: "import-create", diff: { status: { from: null, to: "DEPLOYED" } } }),
-    ).toBe("J. Sarmiento imported BR-LT-0148 as DEPLOYED");
+    ).toBe("J. Sarmiento imported BR-LT-0148 as Deployed");
   });
   it("import-create names a non-ACTIVE employment the same way it names a non-SPARE status (Task 12)", () => {
     expect(
@@ -97,7 +97,7 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
         ...base, action: "import-create", entityLabel: "Nina Robles",
         diff: { employment: { from: null, to: "OFFBOARDING" } },
       }),
-    ).toBe("J. Sarmiento imported Nina Robles as OFFBOARDING");
+    ).toBe("J. Sarmiento imported Nina Robles as Leaving");
   });
 
   it("import-create names an employee created ACTIVE silently (no suffix)", () => {
@@ -424,7 +424,7 @@ describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sent
     expect(auditSentence({ ...base, action: "lifecycle.assign executed", actorLabel: "worker", diff: { assignee: { from: null, to: "EMP-0042" } } }))
       .toBe("worker assigned BR-LT-0148 to EMP-0042 (approved request)");
     expect(auditSentence({ ...base, action: "lifecycle.change-status executed", actorLabel: "worker", diff: { status: { from: "SPARE", to: "RETIRED" } } }))
-      .toBe("worker changed BR-LT-0148 to RETIRED (approved request)");
+      .toBe("worker changed BR-LT-0148 to Retired (approved request)");
     expect(auditSentence({ ...base, action: "lifecycle.transfer", diff: { assignee: { from: "EMP-0001", to: "EMP-0002" } } }))
       .toBe("J. Sarmiento transferred BR-LT-0148 to EMP-0002");
     expect(actionLabel("lifecycle.assign executed")).toBe("Assigned (approved request)");

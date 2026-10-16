@@ -1,5 +1,6 @@
 import type { AssetStatus } from "@prisma/client";
-import { HOLDER_STATUSES } from "./asset-class";
+import { HOLDER_STATUSES, statusLabel } from "./asset-class";
+import { EMPLOYMENT_LABEL } from "./labels";
 
 /**
  * Phase 15 (spec §1 rows 6–7). The words IT picks from when a device comes back
@@ -47,10 +48,13 @@ export function replacePlan(old: { status: AssetStatus }, outcome: ReturnOutcome
  * dialogs are a different audience: no queue, no retry, just IT telling IT
  * what refused. Strip the worker framing so the same guard reads as a normal
  * sentence there, without touching the stored `workerError` text at all.
+ * Phase 40 §6: a guard's statuses and employment read as words ("reads Loan, not Spare").
  */
 export function humanizeGuard(error: string): string {
   const PREFIX = "Execution guard: ";
   let out = error.startsWith(PREFIX) ? error.slice(PREFIX.length) : error;
+  out = out.replace(/reads ([A-Z_]+), not ([A-Z_]+)/, (_, a: string, b: string) => `reads ${statusLabel(a)}, not ${statusLabel(b)}`);
+  out = out.replace(/ is (ACTIVE|OFFBOARDING|OFFBOARDED) /, (_, e: keyof typeof EMPLOYMENT_LABEL) => ` is ${EMPLOYMENT_LABEL[e]} `);
   out = out.replace(
     "— request a lifecycle.return first, then change its status",
     "— return it first, then change its status",

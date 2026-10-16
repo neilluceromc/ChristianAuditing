@@ -173,7 +173,7 @@ test.describe.serial("approvals lifecycle — it@", () => {
     // comment in e2e/it-core.spec.ts's secrets test.
     await page.waitForURL(/\/inventory\/[^/?]+$/);
     const header = page.locator("main header").first();
-    await expect(header).toContainText("DEPLOYED");
+    await expect(header).toContainText("Deployed"); // Phase 40 §6: STATUS_LABEL, not the enum
     await expect(page.getByText("held by Nina Robles")).toBeVisible();
 
     await page.goto(`${page.url()}/history`);

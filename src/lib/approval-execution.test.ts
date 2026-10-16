@@ -96,23 +96,23 @@ describe("executionPlan — payload → asset updates (Phase 3 payload shapes)",
 describe("summarizeApproval — the queue's two-line change cell", () => {
   it("assign", () => {
     const s = summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "DEPLOYED" }, reason: "slot fill" }, { assetTag: "BR-HS-0502", employeeName: "M. Bautista", cls: "IT" });
-    expect(s.line1).toBe("lifecycle.assign · BR-HS-0502");
-    expect(s.line2).toBe("→ DEPLOYED · M. Bautista — slot fill");
+    expect(s.line1).toBe("Assign · BR-HS-0502");
+    expect(s.line2).toBe("→ Deployed · M. Bautista — slot fill");
   });
   it("change-status shows from → to", () => {
     const s = summarizeApproval("lifecycle_change_status", { from: { status: "SPARE" }, to: { status: "DISPOSE" }, reason: "EOL" }, { assetTag: "BR-LT-0031", cls: "IT" });
-    expect(s.line1).toBe("lifecycle.change-status · BR-LT-0031");
-    expect(s.line2).toBe("SPARE → DISPOSE — EOL");
+    expect(s.line1).toBe("Change status · BR-LT-0031");
+    expect(s.line2).toBe("Spare → Dispose — EOL");
   });
   it("return", () => {
     const s = summarizeApproval("lifecycle_return", { from: { assigneeId: "e" }, to: { assigneeId: null, status: "SPARE" }, reason: "offboarding" }, { assetTag: "BR-LT-0148", employeeName: "D. Ong", cls: "IT" });
-    expect(s.line1).toBe("lifecycle.return · BR-LT-0148");
-    expect(s.line2).toBe("D. Ong → SPARE — offboarding");
+    expect(s.line1).toBe("Return · BR-LT-0148");
+    expect(s.line2).toBe("D. Ong → Spare — offboarding");
   });
   it("degrades without names and without reason", () => {
     const s = summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "DEPLOYED" } }, { cls: undefined });
-    expect(s.line1).toBe("lifecycle.assign");
-    expect(s.line2).toBe("→ DEPLOYED");
+    expect(s.line1).toBe("Assign");
+    expect(s.line2).toBe("→ Deployed");
   });
   it("return: the summary names the outcome the payload actually asks for", () => {
     const s = summarizeApproval(
@@ -120,8 +120,8 @@ describe("summarizeApproval — the queue's two-line change cell", () => {
       { from: { assigneeId: "e" }, to: { assigneeId: null, status: "MISSING" }, reason: "not returned at offboarding" },
       { assetTag: "BR-PH-0301", employeeName: "D. Ong", cls: "IT" },
     );
-    expect(s.line1).toBe("lifecycle.return · BR-PH-0301");
-    expect(s.line2).toBe("D. Ong → MISSING — not returned at offboarding");
+    expect(s.line1).toBe("Return · BR-PH-0301");
+    expect(s.line2).toBe("D. Ong → Missing — not returned at offboarding");
   });
   it("return: a payload with no target renders '?', not an invented SPARE (seeded APR-2040 shape)", () => {
     // The detail page shows this line beside a system check reading "no target
@@ -131,12 +131,20 @@ describe("summarizeApproval — the queue's two-line change cell", () => {
   });
   it("assign summary defaults to the CLASS's assign status when the payload omits one", () => {
     expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e" } }, { assetTag: "BR-VH-0001", cls: "PURCHASING" }).line2)
-      .toBe("→ OPERATIONAL");
+      .toBe("→ Operational");
     expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e" } }, { assetTag: "BR-LT-0001", cls: "IT" }).line2)
-      .toBe("→ DEPLOYED");
+      .toBe("→ Deployed");
   });
   it("assign summary prints an explicit status even when it differs from the class fallback", () => {
     expect(summarizeApproval("lifecycle_assign", { to: { assigneeId: "e", status: "STORED" } }, { assetTag: "BR-VH-0001", cls: "PURCHASING" }).line2)
-      .toBe("→ STORED");
+      .toBe("→ Stored");
+  });
+  it("Phase 40 §6: never an internal code — every kind reads as its word, a loan as Loan", () => {
+    const s = summarizeApproval("lifecycle_change_status", { from: { status: "DEPLOYED" }, to: { status: "TEMPORARY" } }, { assetTag: "BR-LT-0031", cls: "IT" });
+    expect(s.line1).toBe("Change status · BR-LT-0031");
+    expect(s.line2).toBe("Deployed → Loan");
+    for (const type of ["lifecycle_assign", "lifecycle_return", "lifecycle_change_status", "lifecycle_replace", "lifecycle_transfer"] as const) {
+      expect(summarizeApproval(type, {}, { assetTag: "BR-LT-0031", cls: "IT" }).line1).not.toMatch(/lifecycle/);
+    }
   });
 });

@@ -9,6 +9,7 @@ import { canManageSuppliers, canRevealBank } from "@/lib/supplier-access";
 import { CONTRACT_STATUS_LABEL } from "@/lib/supplier-schema";
 import { PROVENANCE_LABEL } from "@/lib/provenance";
 import { fmtDate } from "@/lib/format";
+import { statusLabel } from "@/lib/asset-class";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pill } from "@/components/ui/pill";
@@ -189,7 +190,7 @@ export default async function SupplierProfilePage({
                       <Tr key={a.id}>
                         <Td><Link href={`/inventory/${a.id}`} className="text-accent hover:underline">{a.tag}</Link></Td>
                         <Td>{a.model}</Td>
-                        <Td><StatusPill value={a.status} /></Td>
+                        <Td><StatusPill value={a.status} label={statusLabel(a.status)} /></Td>
                         <Td mono>{fmtDate(a.purchasedAt)}</Td>
                         <Td><Pill>{PROVENANCE_LABEL[a.provenance]}</Pill></Td>
                       </Tr>

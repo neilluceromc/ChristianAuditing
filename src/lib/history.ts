@@ -1,5 +1,7 @@
 import { actionLabel, auditSentence, fieldLabel } from "./activity";
 import { fmtDayMonthYear } from "./format";
+import { statusLabel } from "./asset-class";
+import { EMPLOYMENT_LABEL } from "./labels";
 
 export interface AuditEntryLike {
   id: string;
@@ -90,6 +92,9 @@ export function formatHistoryValue(key: string, value: unknown, names: HistoryNa
   if (value instanceof Date) return formatDate(value) ?? String(value);
   if (typeof value === "string") {
     if (DATE_KEY.test(key) && ISO.test(value)) return formatDate(new Date(value)) ?? value;
+    // Phase 40 §6: statuses and employment read as their words ("Loan", "Leaving"), never the enum.
+    if (key === "status") return statusLabel(value);
+    if (key === "employment") return Object.hasOwn(EMPLOYMENT_LABEL, value) ? EMPLOYMENT_LABEL[value as keyof typeof EMPLOYMENT_LABEL] : value;
     return value;
   }
   if (Array.isArray(value)) {

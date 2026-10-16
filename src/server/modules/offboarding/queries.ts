@@ -321,7 +321,7 @@ export interface WizardItem {
    * operator gets a refusal that points nowhere.
    */
   // ApprovalType, not string: it comes straight off the Approval row, and the
-  // wizard renders it through APPROVAL_TYPE_LABEL the same way decideItem's
+  // wizard renders it through APPROVAL_KIND_LABEL the same way decideItem's
   // refusal does
   // Phase 25: carries `id` so the wizard can link the blocker's refNo to /approvals/{id}.
   blockedBy: { id: string; refNo: string; type: ApprovalType } | null;

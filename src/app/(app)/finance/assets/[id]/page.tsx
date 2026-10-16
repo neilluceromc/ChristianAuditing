@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { financeAssetDetail } from "@/server/modules/finance/asset-detail";
-import { CLASS_LABEL } from "@/lib/asset-class";
+import { CLASS_LABEL, STATUS_LABEL } from "@/lib/asset-class";
 import { lifeLabel } from "@/lib/depreciation-input";
 import { fmtDate, fmtDateTime, fmtMoneyExact } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
@@ -79,7 +79,7 @@ export default async function FinanceAssetPage({ params }: { params: Promise<{ i
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2 text-[13px] text-fg-secondary">
           <span>{subtitle}</span>
-          <StatusPill value={d.status} />
+          <StatusPill value={d.status} label={STATUS_LABEL[d.status]} />
           {d.reg === "registered" && d.notCapitalised ? (
             <span className="text-xs text-fg-secondary">Not capitalised</span>
           ) : (

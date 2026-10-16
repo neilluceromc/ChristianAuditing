@@ -1,7 +1,7 @@
 import type { ApprovalType, AssetClass, AssetStatus } from "@prisma/client";
-import { APPROVAL_TYPE_LABEL } from "./labels";
+import { APPROVAL_KIND_LABEL, APPROVAL_TYPE_LABEL } from "./labels";
 import {
-  ASSIGN_TARGETS, CLASS_LABEL, DEFAULT_ASSIGN_STATUS, RETURN_TARGETS, isStatusOf,
+  ASSIGN_TARGETS, CLASS_LABEL, DEFAULT_ASSIGN_STATUS, RETURN_TARGETS, isStatusOf, statusLabel,
 } from "./asset-class";
 
 /**
@@ -78,7 +78,10 @@ export function executionPlan(type: ApprovalType, payload: unknown, cls: AssetCl
   }
 }
 
-/** The queue's two-line change cell: line1 = type · tag, line2 = the movement — reason. */
+/**
+ * The queue's two-line change cell: line1 = kind · tag, line2 = the movement — reason.
+ * Phase 40 §6: words only — "Assign", "Deployed → Loan" — never `lifecycle.assign` or an enum.
+ */
 export function summarizeApproval(
   type: ApprovalType,
   payload: unknown,
@@ -88,7 +91,7 @@ export function summarizeApproval(
   const from = obj(p.from);
   const to = obj(p.to);
   const reason = str(p.reason);
-  const line1 = names.assetTag ? `${APPROVAL_TYPE_LABEL[type]} · ${names.assetTag}` : APPROVAL_TYPE_LABEL[type];
+  const line1 = names.assetTag ? `${APPROVAL_KIND_LABEL[type]} · ${names.assetTag}` : APPROVAL_KIND_LABEL[type];
   const withReason = (core: string) => (reason ? `${core} — ${reason}` : core);
 
   switch (type) {
@@ -96,7 +99,7 @@ export function summarizeApproval(
       const fallback = DEFAULT_ASSIGN_STATUS[names.cls ?? "IT"];
       const status = to ? str(to.status) ?? fallback : fallback;
       const who = names.employeeName ? ` · ${names.employeeName}` : "";
-      return { line1, line2: withReason(`→ ${status}${who}`) };
+      return { line1, line2: withReason(`→ ${statusLabel(status)}${who}`) };
     }
     case "lifecycle_return": {
       const who = names.employeeName ? `${names.employeeName} ` : "";
@@ -105,13 +108,14 @@ export function summarizeApproval(
       // (seeded APR-2040) gets "?", not an invented SPARE: the detail page shows
       // this line beside a system check that says the target is missing, and the
       // two panes must not contradict each other.
-      const status = (to ? str(to.status) : null) ?? "?";
+      const target = to ? str(to.status) : null;
+      const status = target ? statusLabel(target) : "?";
       return { line1, line2: withReason(`${who}→ ${status}`) };
     }
     case "lifecycle_change_status": {
       const f = from ? str(from.status) : null;
       const t = to ? str(to.status) : null;
-      return { line1, line2: withReason(f && t ? `${f} → ${t}` : t ? `→ ${t}` : "status change") };
+      return { line1, line2: withReason(f && t ? `${statusLabel(f)} → ${statusLabel(t)}` : t ? `→ ${statusLabel(t)}` : "status change") };
     }
     default:
       return { line1, line2: withReason(str(p.note) ?? "") };

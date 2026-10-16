@@ -5,7 +5,7 @@ import { fmtDate } from "@/lib/format";
 import {
   buildAssetOrderBy, buildAssetWhere, UNASSIGNED, type PurchaseYearValue,
 } from "@/lib/inventory-list";
-import { ASSET_CLASSES, ASSIGNABLE_FROM, canSeeClass, statusesFor } from "@/lib/asset-class";
+import { ASSET_CLASSES, ASSIGNABLE_FROM, STATUS_LABEL, canSeeClass, statusesFor } from "@/lib/asset-class";
 import { primarySortOf, type ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
 import {
@@ -390,7 +390,7 @@ export async function facetOptions(
 
   return {
     status: statusesFor(cls).map((s) => ({
-      value: s, label: s, count: statusG.find((g) => g.status === s)?._count ?? 0,
+      value: s, label: STATUS_LABEL[s], count: statusG.find((g) => g.status === s)?._count ?? 0,
     })),
     category: categories.map((c) => ({
       value: c.id, label: c.name, count: categoryG.find((g) => g.categoryId === c.id)?._count ?? 0,

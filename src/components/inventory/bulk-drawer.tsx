@@ -16,7 +16,7 @@ import { PeopleCombobox } from "@/components/patterns/people-combobox";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS } from "@/lib/reason-chips";
-import { DEFAULT_STATUS, HOLDER_STATUSES, STATUS_LABEL, statusesFor } from "@/lib/asset-class";
+import { DEFAULT_STATUS, HOLDER_STATUSES, STATUS_LABEL, statusLabel, statusesFor } from "@/lib/asset-class";
 import { DEFAULT_LOAN_DAYS, defaultLoanDue, minLoanDue } from "@/lib/lifecycle";
 import { bulkRequestStatusChange } from "@/server/modules/inventory/actions";
 import { bulkAssign, bulkChangeStatus } from "@/server/modules/lifecycle/actions";
@@ -166,7 +166,7 @@ export function BulkDrawer({
           // Count first, then the destination status — the file's toast
           // house style, and the operator sees what the assets became.
           toast(
-            `${changed} asset${changed === 1 ? "" : "s"} now ${effectiveTo}` +
+            `${changed} asset${changed === 1 ? "" : "s"} now ${statusLabel(effectiveTo)}` +
             (skipped.length > 0 ? ` · ${skipped.length} skipped` : ""),
             "settled",
           );
@@ -230,7 +230,7 @@ export function BulkDrawer({
             skipped and listed — return or handle those one at a time.</>
           ) : (
             <>Acting on <span className="font-medium text-fg-secondary">{scope}</span>. Each asset gets its
-            own <span className="font-mono">lifecycle.change-status</span> approval — nothing changes until
+            own Change status request — nothing changes until
             it&apos;s approved and executed.</>
           )}
         </p>

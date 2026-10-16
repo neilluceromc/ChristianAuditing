@@ -6,6 +6,7 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 import { addDays, dayFromISO } from "@/lib/deadlines";
 import { fmtDate, localDateISO } from "@/lib/format";
 import { defaultHoldExpiry } from "@/lib/holds";
+import { statusLabel } from "@/lib/asset-class";
 
 /**
  * Phase 26 (spec §7) — holds that work, and the repair end date. Eleven cases,
@@ -193,7 +194,7 @@ test.describe("holds", () => {
       await expect(row).toContainText("HOLD");
       await expect(row.getByRole("link", { name: nina.name })).toHaveAttribute("href", `/employees/${nina.id}`);
       await expect(row).toContainText("expires in 7 d");
-      await expect(row).toContainText("SPARE");
+      await expect(row).toContainText("Spare");
 
       // spareOptions filters `reservations: { none: { state: "ACTIVE" } }` —
       // a promised spare must not be offered as somebody else's replacement.
@@ -620,7 +621,7 @@ test.describe("holds", () => {
       await dialog.getByLabel("New status").selectOption(to);
       await dialog.getByRole("group", { name: "Quick picks" }).getByRole("button", { name: chip, exact: true }).click();
       await dialog.getByRole("button", { name: "Change status", exact: true }).click();
-      await expect(page.getByText(`BR-MN-0911 is now ${to}`)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(`BR-MN-0911 is now ${statusLabel(to)}`)).toBeVisible({ timeout: 15_000 });
     };
 
     try {

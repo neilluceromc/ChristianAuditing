@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { chipsForOutcome } from "@/lib/reason-chips";
+import { statusLabel } from "@/lib/asset-class";
 import type { AssetClass } from "@prisma/client";
 import { OUTCOME_LABEL, outcomeStatus, outcomesFor, reasonRequired, type Outcome } from "@/lib/offboarding";
 import { useScan } from "./scan-provider";
@@ -112,8 +113,8 @@ export function ItemDecision({
       if (res.ok) {
         toast(
           res.data.applied
-            ? `${tag} → ${res.data.applied}`
-            : `${res.data.refNo} created — ${tag} → ${outcomeStatus(cls, picked)}`,
+            ? `${tag} → ${statusLabel(res.data.applied)}`
+            : `${res.data.refNo} created — ${tag} → ${statusLabel(outcomeStatus(cls, picked))}`,
           "settled",
         );
         setChanged(true);
@@ -181,10 +182,10 @@ export function ItemDecision({
         <span className="font-mono text-[10px] text-fg-muted">
           {direct
             ? picked
-              ? `applies now → ${outcomeStatus(cls, picked)}`
+              ? `applies now → ${statusLabel(outcomeStatus(cls, picked))}`
               : "applies the moment you confirm"
             : picked
-              ? `creates a lifecycle.return → ${outcomeStatus(cls, picked)}`
+              ? `creates a Return request → ${statusLabel(outcomeStatus(cls, picked))}`
               : "creates its own request the moment you confirm"}
         </span>
       </div>
