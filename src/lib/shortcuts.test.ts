@@ -19,7 +19,7 @@ describe("searchShortcutLabel (spec §2.3 / §4: Ctrl K, or ⌘K on Mac)", () =>
 
 const base: SlashKey = {
   key: "/", ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false,
-  targetTag: "BODY", targetType: null, targetEditable: false,
+  targetTag: "BODY", targetType: null, targetEditable: false, overlayOpen: false, targetInOverlay: false,
 };
 
 describe("slashFocusesSearch (spec §2.3: \"/\" focuses the page's search box, never while typing)", () => {
@@ -49,6 +49,16 @@ describe("slashFocusesSearch (spec §2.3: \"/\" focuses the page's search box, n
 
   it("ignores / on any input, even a checkbox", () => {
     expect(slashFocusesSearch({ ...base, targetTag: "INPUT", targetType: "checkbox" })).toBe(false);
+  });
+
+  it("ignores / while a dialog, drawer, palette, menu or popup is open (review I1, M2)", () => {
+    expect(slashFocusesSearch({ ...base, overlayOpen: true })).toBe(false);
+    expect(slashFocusesSearch({ ...base, targetTag: "BUTTON", overlayOpen: true })).toBe(false);
+  });
+
+  it("ignores / pressed inside a dialog, menu or listbox", () => {
+    expect(slashFocusesSearch({ ...base, targetTag: "BUTTON", targetInOverlay: true })).toBe(false);
+    expect(slashFocusesSearch({ ...base, targetTag: "DIV", targetInOverlay: true })).toBe(false);
   });
 
   it("ignores / that something else already handled", () => {

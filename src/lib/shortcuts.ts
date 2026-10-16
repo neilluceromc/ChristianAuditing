@@ -26,16 +26,24 @@ export interface SlashKey {
   targetTag: string | null;
   targetType: string | null;
   targetEditable: boolean;
+  /** a dialog, drawer, palette, menu, listbox or filter popup is open anywhere on the page */
+  overlayOpen: boolean;
+  /** the event target sits inside a dialog, menu or listbox */
+  targetInOverlay: boolean;
 }
 
 /**
  * Spec §2.3: "/" focuses the page's search box, and does nothing while typing
  * in a field — any input, textarea, select or contenteditable target — or
- * with a modifier held (so Ctrl / and browser shortcuts keep working).
+ * with a modifier held (so Ctrl / and browser shortcuts keep working). It
+ * also stands aside while any overlay is open — the command palette is not
+ * portalled, so the page behind it stays live, and "/" must never pull focus
+ * out of a dialog, a menu or a filter popup.
  */
 export function slashFocusesSearch(e: SlashKey): boolean {
   if (e.key !== "/" || e.defaultPrevented) return false;
   if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  if (e.overlayOpen || e.targetInOverlay) return false;
   if (e.targetEditable) return false;
   return e.targetTag !== "INPUT" && e.targetTag !== "TEXTAREA" && e.targetTag !== "SELECT";
 }

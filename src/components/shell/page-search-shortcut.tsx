@@ -4,25 +4,35 @@ import { useEffect } from "react";
 import { slashFocusesSearch } from "@/lib/shortcuts";
 
 /**
- * The page's search box: a field marked `data-page-search` (the shared
- * SearchBox and the list toolbars), else the first search input in <main>.
- * Hidden, disabled and inert fields are skipped — while a modal is open the
- * page behind it is inert, so "/" never reaches past the dialog.
+ * Every overlay that "/" must stand aside for. Each is rendered only while
+ * open: modal dialogs, drawers and the command palette (`aria-modal`), the
+ * non-modal filter popups (FacetDropdown, the people facet and the column
+ * chooser are `role="dialog"`), Menu popups (`role="menu"`) and combobox
+ * lists (`role="listbox"`).
+ */
+const OVERLAY = '[aria-modal="true"], [role="dialog"], [role="menu"], [role="listbox"]';
+
+/**
+ * The page's search box: only a field explicitly marked `data-page-search`
+ * (the shared SearchBox and the list toolbars). Panel searches (spares,
+ * notes, a thread) are never targeted. Hidden, disabled and inert fields are
+ * skipped.
  */
 function pageSearchBox(): HTMLInputElement | null {
   const main = document.getElementById("main");
   if (!main) return null;
-  const candidates = [
-    ...main.querySelectorAll<HTMLInputElement>("input[data-page-search]"),
-    ...main.querySelectorAll<HTMLInputElement>('input[type="search"]'),
-  ];
-  return candidates.find((el) => !el.disabled && el.getClientRects().length > 0 && !el.closest("[inert]")) ?? null;
+  return (
+    Array.from(main.querySelectorAll<HTMLInputElement>("input[data-page-search]")).find(
+      (el) => !el.disabled && el.getClientRects().length > 0 && !el.closest("[inert]"),
+    ) ?? null
+  );
 }
 
 /** Spec §2.3: "/" focuses the page's search box. It does nothing while typing in a field. */
 export function PageSearchShortcut() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "/") return; // cheap exit before any DOM query
       const target = e.target instanceof HTMLElement ? e.target : null;
       const handled = slashFocusesSearch({
         key: e.key,
@@ -33,6 +43,8 @@ export function PageSearchShortcut() {
         targetTag: target?.tagName ?? null,
         targetType: target instanceof HTMLInputElement ? target.type : null,
         targetEditable: target?.isContentEditable ?? false,
+        overlayOpen: document.querySelector(OVERLAY) !== null,
+        targetInOverlay: target?.closest(OVERLAY) != null,
       });
       if (!handled) return;
       const box = pageSearchBox();

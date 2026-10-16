@@ -64,15 +64,19 @@ export function WorkspaceSwitcher({
  * Spec §3: the menu drawer's workspace switch — the same choice as the
  * sidebar's switcher, shown as a row of options (one tap, no nested menu
  * inside the drawer). A single-workspace role gets the static label.
+ * `onSwitch` runs before the switch so the drawer can close itself (its focus
+ * trap hands focus back to the menu button, never to body).
  */
 export function WorkspaceOptions({
   current,
   allowed,
   meta,
+  onSwitch,
 }: {
   current: WorkspaceId;
   allowed: WorkspaceId[];
   meta: WorkspaceMeta;
+  onSwitch?: () => void;
 }) {
   if (allowed.length === 1) {
     return (
@@ -97,7 +101,9 @@ export function WorkspaceOptions({
             type="button"
             aria-pressed={ws === current}
             onClick={() => {
-              if (ws !== current) void switchWorkspace(ws);
+              if (ws === current) return;
+              onSwitch?.();
+              void switchWorkspace(ws);
             }}
             className={cn(
               "flex-1 rounded-[5px] px-2.5 py-1.5 text-xs font-medium transition-colors duration-(--dur-1)",

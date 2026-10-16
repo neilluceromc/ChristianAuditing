@@ -99,6 +99,7 @@ export default async function FinanceAssetsPage({
           {fin && <input type="hidden" name="fin" value={fin} />}
           <Input
             name="q"
+            data-page-search
             defaultValue={q}
             placeholder="Tag, model, serial or holder"
             aria-label="Search assets"

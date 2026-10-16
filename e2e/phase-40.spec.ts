@@ -311,13 +311,24 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
     await expect(switcher.getByRole("button", { name: "IT", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(drawer.getByText("4 workspaces", { exact: true })).toBeVisible();
     await expect(drawer.getByText("System Admin", { exact: true })).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+    // the role line reads the role's label (a <p>, so the "Admin" workspace button does not match)
+    await expect(drawer.locator("p", { hasText: /^Admin$/ })).toBeVisible();
+    const signOut = drawer.getByRole("button", { name: "Sign out", exact: true });
+    await expect(signOut).toBeVisible();
     await expect(drawer).not.toContainText("br.dept");
     await expectNoSeriousAxe(page);
 
-    // switching from the drawer lands on that workspace
+    // the focus trap holds: Tab from Sign out (the last control) wraps to the drawer's Close, never out of it
+    await signOut.focus();
+    await page.keyboard.press("Tab");
+    await expect(drawer.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+    expect(await drawer.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+
+    // switching from the drawer closes it, hands focus back to the menu button, and lands on that workspace
     await switcher.getByRole("button", { name: "Purchasing", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page).toHaveURL(/\/purchases$/);
+    await expect(page.getByRole("button", { name: "Open menu", exact: true })).toBeFocused();
 
     // and Sign out from the drawer signs out
     const menuAgain = page.getByRole("button", { name: "Open menu", exact: true });

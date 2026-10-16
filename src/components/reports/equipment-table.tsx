@@ -96,7 +96,7 @@ export function EquipmentTable({
         <div className="min-w-[200px] flex-1 sm:max-w-[280px]">
           <label htmlFor="equipment-groups-find" className="sr-only">{w.find}</label>
           <Input
-            id="equipment-groups-find" type="search" value={q} placeholder={`${w.find}…`} className="py-1.5 text-xs"
+            id="equipment-groups-find" type="search" data-page-search value={q} placeholder={`${w.find}…`} className="py-1.5 text-xs"
             onChange={(e) => setQ(e.target.value)}
           />
         </div>

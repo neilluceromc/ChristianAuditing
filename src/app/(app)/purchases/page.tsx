@@ -99,6 +99,7 @@ export default async function PurchasesPage({
           {supplier && <input type="hidden" name="supplier" value={supplier} />}
           <Input
             name="q"
+            data-page-search
             defaultValue={q}
             placeholder="Search PR number or line description…"
             aria-label="Search purchase requests"

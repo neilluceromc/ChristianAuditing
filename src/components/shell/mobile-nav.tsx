@@ -55,7 +55,7 @@ export function MobileNav({
       {open && (
         <Drawer open onClose={() => setOpen(false)} title={workspaceLabel} side="left" width={280}>
           <div className="flex min-h-full flex-col gap-3">
-            <WorkspaceOptions current={ws} allowed={allowed} meta={meta} />
+            <WorkspaceOptions current={ws} allowed={allowed} meta={meta} onSwitch={() => setOpen(false)} />
             <NavList sections={sections} badges={badges} onNavigate={() => setOpen(false)} />
             <div className="mt-auto flex items-center gap-2.5 border-t border-border-faint pt-3">
               <Avatar name={user.name} size="lg" />

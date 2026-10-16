@@ -67,7 +67,7 @@ export function GroupList({
       <div>
         <label htmlFor="policy-groups-find" className="sr-only">{find}</label>
         <Input
-          id="policy-groups-find" type="search" value={q} placeholder={`${find}…`} className="py-1.5 text-xs"
+          id="policy-groups-find" type="search" data-page-search value={q} placeholder={`${find}…`} className="py-1.5 text-xs"
           onChange={(e) => setQ(e.target.value)}
         />
       </div>
