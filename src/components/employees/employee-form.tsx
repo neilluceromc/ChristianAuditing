@@ -88,10 +88,17 @@ export function EmployeeForm(props: Props) {
         form.m365Select === "" ? null : form.m365Select === CUSTOM ? form.m365Custom.trim() || null : form.m365Select;
       // departmentId is NOT part of the payload — a department change goes
       // through Transfer, never a side effect of any other edit.
+      // Final review I1: employment (and its completion date) is sent only when the select is shown — a leaver's
+      // form. Anyone else's form leaves it out, which the server reads as "keep", so a page loaded while the
+      // person was ACTIVE can never cancel an offboarding started meanwhile.
+      const leaver = initial.employment === "OFFBOARDING";
       const res = await updateEmployee({
         id: props.employeeId,
-        name: form.name, title: form.title, employment: form.employment, m365Status,
-        offboardingDueAt: form.employment === "OFFBOARDING" ? form.offboardingDueAt : "",
+        name: form.name, title: form.title, m365Status,
+        ...(leaver ? {
+          employment: form.employment,
+          offboardingDueAt: form.employment === "OFFBOARDING" ? form.offboardingDueAt : "",
+        } : {}),
       });
       if (res.ok) {
         setSaved(true); setTimeout(() => setSaved(false), 3000); router.refresh();

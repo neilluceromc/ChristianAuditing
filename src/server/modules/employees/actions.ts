@@ -22,7 +22,7 @@ import { localDateISO } from "@/lib/format";
 import { nextEmployeeNo as nextNo } from "@/lib/employee-no";
 import { previewPolicyFor, type PolicyLine, type PolicyPreviewResult } from "@/lib/policy-preview";
 import { GROUP_ARCHIVED } from "@/lib/groups";
-import { EMPLOYMENT_CHANGE_REFUSAL, employmentChangeAllowed } from "@/lib/employment-rules";
+import { EMPLOYEE_CHANGED, editEmploymentTarget, employmentGuard } from "@/lib/employment-rules";
 import { firstFailure, newEmployeeExtrasShape, refineDistinctAssign, type AssignFailure } from "@/lib/new-employee";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
@@ -236,7 +236,8 @@ const employeeSchema = z.object({
   id: z.string().min(1),
   name: z.string().trim().min(2, "Name the person").max(120),
   title: z.string().trim().min(2, "Give a title").max(120),
-  employment: z.enum(["ACTIVE", "OFFBOARDING", "OFFBOARDED"]),
+  /** Final review I1: sent only by a leaver's Edit form (the select); absent means "keep the stored value". */
+  employment: z.enum(["ACTIVE", "OFFBOARDING", "OFFBOARDED"]).optional(),
   /** null = never synced ("no sync yet"); custom strings stored as-is → Neutral family */
   m365Status: z.string().trim().max(60).nullable(),
   offboardingDueAt: z.union([z.literal(""), dateStr]).optional(),
@@ -255,9 +256,10 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   if (!employee) return conflict("That employee no longer exists.");
   // Phase 40 (spec 2.2): employment moves only through offboarding — Start offboarding opens it, the wizard's
   // completeOffboarding closes it; Edit may only cancel one (OFFBOARDING → ACTIVE) or leave employment alone.
-  if (!employmentChangeAllowed(employee.employment, d.employment)) {
-    return validationError({ employment: EMPLOYMENT_CHANGE_REFUSAL });
-  }
+  // A missing `employment` keeps the stored value (final review I1).
+  const resolved = editEmploymentTarget(employee.employment, d.employment);
+  if (!resolved.ok) return validationError({ [resolved.field]: resolved.message });
+  const target = resolved.target;
 
   const today = localDateISO(new Date());
   // Ruling R8: the floor guards a CHANGE, not a re-send. An employee whose
@@ -268,7 +270,7 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   // differs from what is stored has to be today or later.
   const storedDueISO = employee.offboardingDueAt ? localDateISO(employee.offboardingDueAt) : null;
   let offboardingDueAt: Date | null;
-  if (d.employment === "OFFBOARDING") {
+  if (target === "OFFBOARDING") {
     if (d.offboardingDueAt) {
       if (d.offboardingDueAt !== storedDueISO && d.offboardingDueAt < minOffboardingDue(today)) {
         return validationError({ offboardingDueAt: "Pick today or later" });
@@ -277,13 +279,13 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
     } else {
       offboardingDueAt = employee.offboardingDueAt ?? dayFromISO(defaultOffboardingDue(today));
     }
-  } else if (d.employment === "ACTIVE") offboardingDueAt = null;
+  } else if (target === "ACTIVE") offboardingDueAt = null;
   else offboardingDueAt = employee.offboardingDueAt; // OFFBOARDED keeps the record
 
   const data = {
     name: d.name,
     title: d.title,
-    employment: d.employment,
+    employment: target,
     m365Status: d.m365Status === "" ? null : d.m365Status,
     // The offboarding wizard reads "this offboarding" as everything decided
     // since this moment, so entering OFFBOARDING is what starts the window —
@@ -291,9 +293,9 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
     // Re-entering ACTIVE clears it; OFFBOARDED keeps it, so the report of what
     // happened stays readable afterwards.
     offboardingAt:
-      d.employment === "OFFBOARDING"
+      target === "OFFBOARDING"
         ? employee.offboardingAt ?? new Date()
-        : d.employment === "ACTIVE"
+        : target === "ACTIVE"
           ? null
           : employee.offboardingAt,
     offboardingDueAt,
@@ -301,14 +303,19 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
   const diff = diffOf(employee as unknown as Record<string, unknown>, data);
   if (Object.keys(diff).length === 0) return ok({ id: employee.id });
 
-  await prisma.$transaction(async (tx) => {
-    await tx.employee.update({ where: { id: employee.id }, data });
+  // Final review I1: state-guarded — the write lands only while employment still reads what this edit was read
+  // with, so an offboarding started (or completed) between the read and the write is never overwritten.
+  const saved = await prisma.$transaction(async (tx) => {
+    const res = await tx.employee.updateMany({ where: employmentGuard(employee.id, employee.employment), data });
+    if (res.count === 0) return false;
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
       entityType: "employee", entityId: employee.id,
       action: "update", diff,
     });
+    return true;
   });
+  if (!saved) return validationError({ _form: EMPLOYEE_CHANGED });
   revalidatePath(`/employees/${employee.id}`);
   revalidatePath("/employees");
   // Phase 23/25: the two writers of `offboardingDueAt` are this action and

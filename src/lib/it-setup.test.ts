@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { itAccessLive, liveAccessFields, newHireStateSchema, notYetCount, setupStateSchema, setupSummary, vpnSchema } from "./it-setup";
+import { IT_ACCESS_REFUSAL, itAccessLive, itAccessRefusal, liveAccessFields, setupGuard, newHireStateSchema, notYetCount, setupStateSchema, setupSummary, vpnSchema } from "./it-setup";
 
 describe("setupSummary", () => {
   it("reads Not recorded for every null", () => {
@@ -67,5 +67,24 @@ describe("itAccessLive — access is live when it is actually there (spec §7)",
   it("names every live row, in card order", () => {
     expect(liveAccessFields({ entraStatus: "DONE", autopilotStatus: "NOT_YET", argusStatus: "DONE", vpn: "OpenVPN" }))
       .toEqual(["entra", "argus", "vpn"]);
+  });
+});
+
+describe("itAccessRefusal — completeOffboarding's IT-access gate (final review M10)", () => {
+  it("refuses with the spec's sentence while any access is live", () => {
+    expect(itAccessRefusal({ entraStatus: "DONE", autopilotStatus: null, argusStatus: null, vpn: null })).toBe(IT_ACCESS_REFUSAL);
+    expect(itAccessRefusal({ entraStatus: "REMOVED", autopilotStatus: "REMOVED", argusStatus: "REMOVED", vpn: "OpenVPN" })).toBe(IT_ACCESS_REFUSAL);
+    expect(IT_ACCESS_REFUSAL).toBe("Remove their IT access first");
+  });
+  it("lets completion through once everything is removed, not needed or never recorded", () => {
+    expect(itAccessRefusal({ entraStatus: "REMOVED", autopilotStatus: "NOT_NEEDED", argusStatus: null, vpn: "Removed" })).toBeNull();
+    expect(itAccessRefusal({ entraStatus: null, autopilotStatus: null, argusStatus: null, vpn: null })).toBeNull();
+  });
+});
+
+describe("setupGuard — the state guard on completeOffboarding's write (final review M3)", () => {
+  it("carries exactly the four IT-access values the gate read, so a change in between matches nothing", () => {
+    const read = { id: "e1", name: "Sam", entraStatus: "REMOVED", autopilotStatus: null, argusStatus: "NOT_NEEDED", vpn: "None" };
+    expect(setupGuard(read)).toEqual({ entraStatus: "REMOVED", autopilotStatus: null, argusStatus: "NOT_NEEDED", vpn: "None" });
   });
 });

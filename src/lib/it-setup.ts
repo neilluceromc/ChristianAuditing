@@ -73,3 +73,19 @@ export function liveAccessFields(e: SetupRecord): SetupField[] {
 export function itAccessLive(e: SetupRecord): boolean {
   return liveAccessFields(e).length > 0;
 }
+
+/** Phase 40 (spec §7): completeOffboarding's refusal while any IT access is live. */
+export const IT_ACCESS_REFUSAL = "Remove their IT access first";
+
+/** completeOffboarding's IT-access gate: the refusal while access is live, otherwise null. */
+export function itAccessRefusal(e: SetupRecord): string | null {
+  return itAccessLive(e) ? IT_ACCESS_REFUSAL : null;
+}
+
+/**
+ * Final review M3: the four IT-access values a gate read, for a write's `where` — so access recorded as live
+ * between the gate and the write (Mark removed undone, or Done saved in another tab) makes the write match nothing.
+ */
+export function setupGuard<T extends SetupRecord>(e: T): Pick<T, keyof SetupRecord> {
+  return { entraStatus: e.entraStatus, autopilotStatus: e.autopilotStatus, argusStatus: e.argusStatus, vpn: e.vpn };
+}
