@@ -45,6 +45,10 @@ import { isExpired, lotRemaining } from "../src/lib/stock-allocation";
  *     opens that entry only.
  *   10 (§5) the import-failures CSV is unit-level (src/lib/long-lists.test.ts); no cheap fixture produces failed
  *     writes, so no e2e case.
+ *   12 (§6) spares on demand: with 60 extra spare phones (via prisma, deleted afterwards) Nina Robles's profile
+ *     HTML carries no spare tag; Fill the Phone slot loads 50 same-type spares when it opens, the search finds the
+ *     60th by tag and says "No spare matches." for nonsense, and clearing it brings the 50 back; Reserve's
+ *     combobox asks the server as you type.
  *
  *
  * Seed (prisma/seed.ts): J. Sarmiento is it@ (it_staff), System Admin is admin@. Bluepeak Telecom's base policy has
@@ -869,5 +873,71 @@ test.describe("Phase 39 — bounded lists", () => {
     await page.getByRole("button", { name: "Show fewer fields", exact: true }).click();
     await expect(field("e2eDelta")).toHaveCount(0);
     await expect(buttonAfter("e2eCharlie")).toHaveText("+2 more fields");
+  });
+});
+
+test.describe("Phase 39 — spares on demand", () => {
+  test("12. the profile sends no spares; Fill loads 50 on open and the search finds the rest; Reserve searches the server", async ({ page }) => {
+    const nina = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0097" } });
+    const phone = await db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0301" } });
+    expect(phone.typeId).not.toBeNull();
+    const now = new Date();
+    await db.asset.createMany({
+      data: Array.from({ length: 60 }, (_, i) => ({
+        tag: `BR-PH-Z${String(i + 1).padStart(3, "0")}`,
+        model: "ZP Spare Handset",
+        categoryId: phone.categoryId,
+        typeId: phone.typeId,
+        cls: "IT" as const,
+        status: "SPARE" as const,
+        itVerifiedAt: now,
+      })),
+    });
+    try {
+      await login(page, IT);
+
+      // Spec §6: the page itself (its HTML and RSC payload) carries no spare — neither the seed's free phone
+      // nor any of the 60 new ones. Nina holds neither and has no hold on either.
+      const res = await page.request.get(`/employees/${nina.id}`);
+      expect(res.ok()).toBe(true);
+      const html = await res.text();
+      expect(html).not.toContain("BR-PH-0301");
+      expect(html).not.toContain("BR-PH-Z0");
+
+      await page.goto(`/employees/${nina.id}`);
+      const fill = page.getByRole("button", { name: "Fill the Phone slot" });
+      await waitForHydration(fill);
+      await fill.click();
+      const dialog = page.getByRole("dialog", { name: "Fill the Phone slot" });
+      const group = dialog.getByRole("radiogroup", { name: "Pick a spare" });
+      // The spares arrive after the dialog opens: at most 50, by tag, so BR-PH-0301 is in and the 60th is not.
+      await expect(group.getByRole("radio")).toHaveCount(50, { timeout: 15_000 });
+      await expect(group.getByText("BR-PH-0301", { exact: true })).toBeVisible();
+      await expect(group.getByText("BR-PH-Z060", { exact: true })).toHaveCount(0);
+
+      // Typing asks the server (case-insensitive, by tag or model).
+      const search = dialog.getByRole("searchbox", { name: "Search the spares" });
+      await search.fill("z060");
+      await expect(group.getByRole("radio")).toHaveCount(1, { timeout: 15_000 });
+      await expect(group.getByText("BR-PH-Z060", { exact: true })).toBeVisible();
+      await search.fill("no-such-spare");
+      await expect(dialog.getByText("No spare matches.", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await search.fill("");
+      await expect(group.getByRole("radio")).toHaveCount(50, { timeout: 15_000 });
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+
+      // Reserve: the combobox asks the server as you type, too.
+      await page.getByRole("button", { name: "More for Phone", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Reserve a spare…" }).click();
+      const reserve = page.getByRole("dialog", { name: "Reserve a spare for the Phone slot" });
+      const combo = reserve.getByRole("combobox", { name: "Spare" });
+      await combo.fill("Z060");
+      await expect(reserve.getByRole("option", { name: /BR-PH-Z060/ })).toBeVisible({ timeout: 15_000 });
+      await expect(reserve.getByRole("option")).toHaveCount(1);
+      await reserve.getByRole("button", { name: "Cancel" }).click();
+    } finally {
+      await db.asset.deleteMany({ where: { tag: { startsWith: "BR-PH-Z" } } });
+    }
   });
 });

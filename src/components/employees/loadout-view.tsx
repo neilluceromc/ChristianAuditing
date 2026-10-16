@@ -38,18 +38,9 @@ import {
   type ReturnOutcome,
 } from "@/lib/lifecycle";
 import { defaultHoldExpiry, minHoldExpiry } from "@/lib/holds";
+import type { SpareOption } from "@/lib/spare-candidates";
+import { SpareLoadRow, useSpareCandidates, type SpareLoad } from "@/components/employees/use-spare-candidates";
 import type { ActionResult } from "@/server/action-result";
-
-export interface SpareOption {
-  id: string;
-  tag: string;
-  model: string;
-  typeId: string | null;
-  reservedFor: string | null; // employee name, or null
-  reservedForThis: boolean;
-  /** Phase 29 (spec §4.5): an open approval already promises this spare — unpickable, and it says which request. */
-  pendingRef: string | null;
-}
 
 export interface HoldingItem {
   id: string;
@@ -73,8 +64,8 @@ const openSlot = (t: EquipmentTileData) => t.kind === "slot" && (!t.asset || t.c
  * tile that never changed). This consumes each reserved-for-this-person spare
  * into the first empty tile of its type, in the order the grid renders.
  */
-function reservationsBySlot(ordered: EquipmentTileData[], spares: SpareOption[]): Map<string, SpareOption> {
-  const pool = spares.filter((s) => s.reservedForThis && s.typeId !== null && !s.pendingRef);
+function reservationsBySlot(ordered: EquipmentTileData[], reserved: SpareOption[]): Map<string, SpareOption> {
+  const pool = reserved.filter((s) => s.reservedForThis && s.typeId !== null && !s.pendingRef);
   const out = new Map<string, SpareOption>();
   for (const tile of ordered) {
     if (!openSlot(tile)) continue;
@@ -85,6 +76,21 @@ function reservationsBySlot(ordered: EquipmentTileData[], spares: SpareOption[])
   }
   return out;
 }
+
+// A spare promised to someone else: unpickable here, and it has to LOOK unpickable (final review M-6).
+const isHeld = (s: { reservedFor: string | null; reservedForThis: boolean }) => s.reservedFor !== null && !s.reservedForThis;
+// Phase 29 (spec §4.5): a queued approval promises a spare just as firmly as a hold does.
+const unpickable = (s: SpareOption) => isHeld(s) || !!s.pendingRef;
+/** The one line a picker row shows on the right — shared by Fill and Replace so they never drift. */
+const spareNote = (s: SpareOption) =>
+  s.pendingRef ? `assignment queued · ${s.pendingRef}`
+    : s.reservedForThis ? "reserved for them"
+      : s.reservedFor ? `reserved for ${s.reservedFor}`
+        : "spare";
+/** Fill only ever offers the slot's own type. */
+const ofType = (list: SpareOption[], typeId: string | null) => list.filter((s) => s.typeId && s.typeId === typeId);
+/** A load's rows, or none while it is loading or failed. */
+const itemsOf = (load: SpareLoad) => (load.status === "ready" ? load.items : []);
 
 /** Phase 37 (spec §4.4): `?item=<assetId>` keeps the open side panel across a refresh. */
 function setItemParam(assetId: string | null) {
@@ -106,7 +112,7 @@ export function LoadoutView({
   waived,
   itCategories,
   currentSlotLabels,
-  spares,
+  reservedSpares,
   holding,
   frozen,
   dueAt,
@@ -133,7 +139,11 @@ export function LoadoutView({
   itCategories: ItCategoryOption[];
   /** The slot labels this person's tiles already carry, un-numbered, in policy order — the dialog's "Shows as" line numbers against them. */
   currentSlotLabels: string[];
-  spares: SpareOption[];
+  /**
+   * Phase 39 (spec §6): only the spares held for THIS person ship with the page — the tiles' "reserved · {tag}"
+   * line and Assign reserved need them at first paint. The pickers ask `spareCandidates` when they open.
+   */
+  reservedSpares: SpareOption[];
   holding: HoldingItem[];
   frozen: boolean;
   /** Phase 25: the leaver's complete-by date (OFFBOARDING only; null otherwise) and the Asia/Manila today for the pill. */
@@ -158,6 +168,9 @@ export function LoadoutView({
   const [addingSlot, setAddingSlot] = useState(false);
   const [reservingSlot, setReservingSlot] = useState<EquipmentTileData | null>(null);
   const [reserveSpare, setReserveSpare] = useState<string | null>(null);
+  // The picked combobox rows, so the field still names a pick the current answer no longer lists.
+  const [replacementPick, setReplacementPick] = useState<ComboOption | null>(null);
+  const [reservePick, setReservePick] = useState<ComboOption | null>(null);
   const [reserveExpiry, setReserveExpiry] = useState(defaultHoldExpiry(today));
   const [reserveReason, setReserveReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -182,7 +195,31 @@ export function LoadoutView({
   const reservedCount = holding.filter((h) => h.kind === "reserved").length;
   const slotTiles = tiles.filter((t) => t.kind === "slot");
   // Ruling R8: resolved once for the whole grid, so a hold cannot mark two tiles.
-  const reservedBySlot = reservationsBySlot(tiles, spares);
+  const reservedBySlot = reservationsBySlot(tiles, reservedSpares);
+
+  // Phase 39 (spec §6): each picker asks for its spares when its dialog opens, with the slot's type.
+  // The tile a Replace dialog opened for isn't self-describing its slot's
+  // type — look it up from the tiles so the picker can rank same-type
+  // spares first.
+  const replacingTypeId = replacing ? tiles.find((t) => t.asset?.id === replacing.id)?.typeId ?? null : null;
+  const fillTypeId = fillSlot?.typeId ?? null;
+  const fillSpares = useSpareCandidates(employeeId, fillSlot && fillTypeId ? fillSlot.key : null, fillTypeId);
+  const replaceSpares = useSpareCandidates(employeeId, replacing ? replacing.id : null, replacingTypeId);
+  const reserveSpares = useSpareCandidates(employeeId, reservingSlot ? reservingSlot.key : null, reservingSlot?.typeId ?? null);
+
+  // Phase 29 (spec §4.4): opening Fill preselects the sole pickable spare — one less decision. Now that the
+  // spares arrive after the dialog opens, the pick is made when they do (and never over one already made).
+  useEffect(() => {
+    if (fillSpares.base.status !== "ready") return;
+    const eligible = ofType(fillSpares.base.items, fillTypeId).filter((s) => !unpickable(s));
+    if (eligible.length === 1) setPickedSpare((p) => p ?? eligible[0].id);
+  }, [fillSpares.base, fillTypeId]);
+
+  // A pick the search has just hidden is dropped, so Confirm never assigns a spare the dialog no longer shows.
+  useEffect(() => {
+    if (fillSpares.shown.status !== "ready" || !pickedSpare) return;
+    if (!fillSpares.shown.items.some((s) => s.id === pickedSpare)) setPickedSpare(null);
+  }, [fillSpares.shown, pickedSpare]);
 
   const refFor = (key: string) => (el: HTMLButtonElement | null) => {
     if (el) tileRefs.current.set(key, el);
@@ -405,24 +442,14 @@ export function LoadoutView({
     else if (e.key === "ArrowUp") { e.preventDefault(); move(idx - cols); }
   }
 
-  // A spare promised to someone else: unpickable here, and it has to LOOK unpickable (final review M-6).
-  const isHeld = (s: { reservedFor: string | null; reservedForThis: boolean }) => s.reservedFor !== null && !s.reservedForThis;
-  // Phase 29 (spec §4.5): a queued approval promises a spare just as firmly as a hold does.
-  const unpickable = (s: SpareOption) => isHeld(s) || !!s.pendingRef;
-  /** The one line a picker row shows on the right — shared by Fill and Replace so they never drift. */
-  const spareNote = (s: SpareOption) =>
-    s.pendingRef ? `assignment queued · ${s.pendingRef}`
-      : s.reservedForThis ? "reserved for them"
-        : s.reservedFor ? `reserved for ${s.reservedFor}`
-          : "spare";
+  // Phase 39 (spec §6): `base` decides "nothing in stock"; the rows follow the search box.
+  const fillBase = fillSpares.base.status === "ready" ? ofType(fillSpares.base.items, fillTypeId) : null;
+  const sparesForSlot = fillSpares.shown.status === "ready" ? ofType(fillSpares.shown.items, fillTypeId) : null;
 
-  const sparesForSlot = fillSlot ? spares.filter((s) => s.typeId && s.typeId === fillSlot.typeId) : [];
-
-  /** Phase 29 (spec §4.4): opening Fill preselects the sole pickable spare — one less decision. */
+  /** The sole pickable spare is preselected once the spares arrive (the effect above). */
   function openFill(tile: EquipmentTileData) {
-    const eligible = spares.filter((s) => s.typeId && s.typeId === tile.typeId && !unpickable(s));
     setFillSlot(tile);
-    setPickedSpare(eligible.length === 1 ? eligible[0].id : null);
+    setPickedSpare(null);
     setFieldErrors({});
     setError(null);
     setLoanDueAt(defaultLoanDue(new Date()));
@@ -446,6 +473,7 @@ export function LoadoutView({
   function startReplace(a: TileAsset) {
     setReplacing(a);
     setReplacementId(null);
+    setReplacementPick(null);
     setFieldErrors({});
     setError(null);
   }
@@ -466,6 +494,7 @@ export function LoadoutView({
             onSelect: () => {
               setReservingSlot(tile);
               setReserveSpare(null);
+              setReservePick(null);
               setReserveExpiry(defaultHoldExpiry(today));
               setReserveReason("");
               setFieldErrors({});
@@ -532,7 +561,6 @@ export function LoadoutView({
     }
     window.addEventListener("br:loadout", onLoadout);
     return () => window.removeEventListener("br:loadout", onLoadout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tiles, mayAct]);
 
   // The focus itself waits for the commit that mounts the grid: refs are set
@@ -550,11 +578,6 @@ export function LoadoutView({
     setPendingFocusKey(null);
   }, [pendingFocusKey, view, tiles]);
 
-  // The tile a Replace dialog opened for isn't self-describing its slot's
-  // type — look it up from the tiles so the picker can rank same-type
-  // spares first.
-  const replacingTypeId = replacing ? tiles.find((t) => t.asset?.id === replacing.id)?.typeId ?? null : null;
-
   // Phase 26 (spec §5.2) / Phase 29 (plan P-9): both comboboxes rank same-type
   // spares first and group them under "Same type" / "Other spares".
   const sameTypeFirstFor = (typeId: string | null) => (a: SpareOption, b: SpareOption) => {
@@ -566,15 +589,20 @@ export function LoadoutView({
   // Phase 29 (plan P-9): EntityCombobox has no disabled options, so a spare
   // held for someone else or already promised by an approval is left OUT of
   // Replace — the count under the field says how many that was.
-  const replaceable = replacing ? spares.filter((s) => !unpickable(s)) : [];
-  const excludedCount = replacing ? spares.length - replaceable.length : 0;
-  const replaceOptions: ComboOption[] = replaceable
+  // Phase 39 (spec §6): the count and the "nothing in stock" lines read the
+  // untyped answer (`base`); the listed rows follow the typed text.
+  const toReplaceOptions = (list: SpareOption[]): ComboOption[] => list
+    .filter((s) => !unpickable(s))
     .sort(sameTypeFirstFor(replacingTypeId))
     .map((s) => ({
       value: s.id, label: s.tag,
       sub: s.reservedForThis ? `${s.model} · reserved for them` : s.model,
       group: s.typeId === replacingTypeId ? "Same type" : "Other spares",
     }));
+  const replaceBase = itemsOf(replaceSpares.base);
+  const replaceable = toReplaceOptions(replaceBase);
+  const excludedCount = replaceBase.length - replaceable.length;
+  const replaceOptions = toReplaceOptions(itemsOf(replaceSpares.shown));
 
   // Phase 26 (spec §5.2): the Reserve dialog's own picker — unlike Fill/Replace,
   // an already-held spare is excluded outright (reserving one out from under
@@ -583,7 +611,7 @@ export function LoadoutView({
   // Phase 29 (final review I-1): a spare an open approval already promises is
   // excluded here too — the same `pendingRef` rule Fill and Replace apply.
   const reserveOptions: ComboOption[] = reservingSlot
-    ? spares
+    ? itemsOf(reserveSpares.shown)
         .filter((s) => s.reservedFor === null && !s.pendingRef)
         .sort(sameTypeFirstFor(reservingSlot.typeId))
         .map((s) => ({
@@ -591,6 +619,12 @@ export function LoadoutView({
           group: s.typeId === reservingSlot.typeId ? "Same type" : "Other spares",
         }))
     : [];
+
+  /** The combobox's empty row while a typed search is out, failed, or found nothing. */
+  const comboEmpty = (load: SpareLoad) =>
+    load.status === "loading" ? "Loading spares…"
+      : load.status === "error" ? "Couldn't load the spares — try again in a moment."
+        : "No spare matches.";
 
   const panelTile = panel ? tiles.find((t) => t.key === panel.key) ?? null : null;
   const panelKinds = panelTile ? kindsFor(panelTile) : [];
@@ -807,40 +841,55 @@ export function LoadoutView({
         }
       >
         <div className="flex flex-col gap-3">
-          {sparesForSlot.length === 0 ? (
+          {fillSlot && fillTypeId && fillBase === null ? (
+            <SpareLoadRow load={fillSpares.base} onRetry={fillSpares.retry} />
+          ) : !fillBase || fillBase.length === 0 ? (
             <p className="text-xs text-fg-muted">
               No spare {fillSlot?.typeName} in stock —{" "}
               <Link href="/inventory/register" className="text-accent underline hover:text-accent-hover">register one</Link> or{" "}
               <Link href="/purchases/new" className="text-accent underline hover:text-accent-hover">route a purchase</Link>.
             </p>
           ) : (
-            // Plan P-9: Fill keeps its radiogroup — a row that cannot be picked
-            // still has to SAY why, which a combobox has no room for.
-            <div role="radiogroup" aria-label="Pick a spare" className="flex flex-col gap-1">
+            <>
+              {/* Phase 39 (spec §6): at most 50 rows arrive — the box finds the rest by tag or model. */}
+              <Input
+                type="search" aria-label="Search the spares" placeholder="Type a tag or model…" className="py-1.5 text-xs"
+                value={fillSpares.q} onChange={(e) => fillSpares.setQ(e.target.value)}
+              />
               {fieldErrors.spare && <p role="alert" className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{fieldErrors.spare}</p>}
-              {sparesForSlot.map((s) => (
-                <label
-                  key={s.id}
-                  className={cn(
-                    "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
-                    unpickable(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
-                    pickedSpare === s.id ? "border-accent bg-accent-tint" : cn("border-border", !unpickable(s) && "hover:bg-surface-subtle"),
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="spare"
-                    className="sr-only"
-                    checked={pickedSpare === s.id}
-                    disabled={unpickable(s)}
-                    onChange={() => setPickedSpare(s.id)}
-                  />
-                  <span className="font-mono text-accent">{s.tag}</span>
-                  <span className="text-fg-secondary">{s.model}</span>
-                  <span className="ml-auto font-mono text-[10px] text-fg-muted">{spareNote(s)}</span>
-                </label>
-              ))}
-            </div>
+              {sparesForSlot === null ? (
+                <SpareLoadRow load={fillSpares.shown} onRetry={fillSpares.retry} />
+              ) : sparesForSlot.length === 0 ? (
+                <p className="text-xs text-fg-muted">No spare matches.</p>
+              ) : (
+                // Plan P-9: Fill keeps its radiogroup — a row that cannot be picked
+                // still has to SAY why, which a combobox has no room for.
+                <div role="radiogroup" aria-label="Pick a spare" className="flex flex-col gap-1">
+                  {sparesForSlot.map((s) => (
+                    <label
+                      key={s.id}
+                      className={cn(
+                        "flex items-center gap-2 rounded-(--radius-ctl) border px-2 py-1.5 text-xs",
+                        unpickable(s) ? "cursor-not-allowed opacity-55" : "cursor-pointer",
+                        pickedSpare === s.id ? "border-accent bg-accent-tint" : cn("border-border", !unpickable(s) && "hover:bg-surface-subtle"),
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="spare"
+                        className="sr-only"
+                        checked={pickedSpare === s.id}
+                        disabled={unpickable(s)}
+                        onChange={() => setPickedSpare(s.id)}
+                      />
+                      <span className="font-mono text-accent">{s.tag}</span>
+                      <span className="text-fg-secondary">{s.model}</span>
+                      <span className="ml-auto font-mono text-[10px] text-fg-muted">{spareNote(s)}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </>
           )}
           {fillSlot?.loaner && direct && (
             <FormField label="Loan until" required error={fieldErrors.loanDueAt} hint={`Defaults to ${DEFAULT_LOAN_DAYS} days.`}>
@@ -871,20 +920,28 @@ export function LoadoutView({
         }
       >
         <div className="flex flex-col gap-3">
-          <FormField label="Spare" required error={fieldErrors.assetId}>
-            {(p) => (
-              <EntityCombobox
-                id={p.id}
-                aria-describedby={p["aria-describedby"]}
-                invalid={p.invalid}
-                options={reserveOptions}
-                value={reserveSpare}
-                onChange={setReserveSpare}
-                placeholder="Type a tag…"
-                autoFocus
-              />
-            )}
-          </FormField>
+          {reserveSpares.base.status !== "ready" ? (
+            <SpareLoadRow load={reserveSpares.base} onRetry={reserveSpares.retry} />
+          ) : (
+            <FormField label="Spare" required error={fieldErrors.assetId}>
+              {(p) => (
+                <EntityCombobox
+                  id={p.id}
+                  aria-describedby={p["aria-describedby"]}
+                  invalid={p.invalid}
+                  options={reserveOptions}
+                  value={reserveSpare}
+                  valueOption={reservePick}
+                  onChange={(v, o) => { setReserveSpare(v); setReservePick(o ?? null); }}
+                  onQuery={reserveSpares.setQ}
+                  serverFiltered
+                  emptyText={comboEmpty(reserveSpares.shown)}
+                  placeholder="Type a tag…"
+                  autoFocus
+                />
+              )}
+            </FormField>
+          )}
           <FormField label="Expires" required error={fieldErrors.expiresAt}>
             {(p) => (
               <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} type="date"
@@ -954,13 +1011,15 @@ export function LoadoutView({
               one muted line rather than shown as unpickable rows. "There is
               nothing to buy" and "everything there is is promised" are
               different problems and must not share a sentence. */}
-          {spares.length === 0 ? (
+          {replaceSpares.base.status !== "ready" ? (
+            <SpareLoadRow load={replaceSpares.base} onRetry={replaceSpares.retry} />
+          ) : replaceBase.length === 0 ? (
             <p className="text-xs text-fg-muted">
               No spares in stock —{" "}
               <Link href="/inventory/register" className="text-accent underline hover:text-accent-hover">register one</Link> or{" "}
               <Link href="/purchases/new" className="text-accent underline hover:text-accent-hover">route a purchase</Link>.
             </p>
-          ) : replaceOptions.length === 0 ? (
+          ) : replaceable.length === 0 ? (
             <p className="text-xs text-fg-muted">
               {excludedCount === 1
                 ? "The only spare is held or queued for someone else"
@@ -980,7 +1039,11 @@ export function LoadoutView({
                   invalid={p.invalid}
                   options={replaceOptions}
                   value={replacementId}
-                  onChange={setReplacementId}
+                  valueOption={replacementPick}
+                  onChange={(v, o) => { setReplacementId(v); setReplacementPick(o ?? null); }}
+                  onQuery={replaceSpares.setQ}
+                  serverFiltered
+                  emptyText={comboEmpty(replaceSpares.shown)}
                   placeholder="Type a tag…"
                   autoFocus
                 />

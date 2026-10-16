@@ -3,14 +3,15 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { computeLoadout, effectiveSlots, profilePrimary, profileTiles, resolvePolicy, slotLabel } from "@/lib/loadout";
-import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
+import { canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
+import { SPARE_INCLUDE, spareWhere, toSpareOption } from "@/lib/spare-candidates";
 import { fmtDate, fmtRelativeDays, localDateISO } from "@/lib/format";
 import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
 import { isRecentTransfer } from "@/lib/transfer-schema";
 import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { LoadoutView, type HoldingItem, type SpareOption } from "@/components/employees/loadout-view";
+import { LoadoutView, type HoldingItem } from "@/components/employees/loadout-view";
 import type { EquipmentTileData } from "@/components/employees/equipment-tile";
 import { EmployeeCreatedNotice } from "@/components/employees/employee-created-notice";
 import { IdentityBand } from "@/components/employees/identity-band";
@@ -38,7 +39,7 @@ export default async function EmployeePage({
   if (!employee) notFound();
   const today = localDateISO(new Date());
 
-  const [held, reservations, openApprovals, policies, spareAssets, exceptions, itCategories, acks, transfers, transferCount, departments, notes, noteCount, initialView] = await Promise.all([
+  const [held, reservations, openApprovals, policies, reservedSpareRows, exceptions, itCategories, acks, transfers, transferCount, departments, notes, noteCount, initialView] = await Promise.all([
     prisma.asset.findMany({
       where: { assigneeId: id },
       include: { category: { select: { name: true } }, type: { select: { name: true } } },
@@ -51,26 +52,12 @@ export default async function EmployeePage({
     }),
     // Phase 37 (spec §3.2): slots in policy order (the editor's own `id` order), so "Monitor" / "Monitor 2" never swap.
     prisma.equipmentPolicy.findMany({ include: { slots: { include: { assetType: true }, orderBy: { id: "asc" } } }, orderBy: [{ name: "asc" }] }),
+    // Phase 39 (spec §6): the pickers ask `spareCandidates` when they open, so the page no longer sends every
+    // spare — only the ones held for THIS person, which the tiles' "reserved · {tag}" line and Assign reserved
+    // need at first paint. Same pool and same per-asset rows as the pickers (spare-candidates.ts).
     prisma.asset.findMany({
-      // Assignment through /employees is IT's surface in Phase 13 —
-      // Purchasing assets are assigned at create time (spec §5 has no assign
-      // row; recorded as a follow-up). Pinned to the IT class explicitly so
-      // this picker never offers a STORED car by accident.
-      where: { cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null },
-      include: {
-        reservations: { where: { state: "ACTIVE" }, include: { employee: true } },
-        // Phase 29 (final review I-1, ruling R7): the pickers' own
-        // `openApprovals` is scoped to THIS employee, so a spare another
-        // person's request is already waiting on read as free here — exactly
-        // the case the pinned "held or queued for someone else" line claims is
-        // excluded. Asked per asset instead, so the scope matches the copy.
-        approvals: {
-          where: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
-          select: { refNo: true },
-          orderBy: { createdAt: "asc" },
-          take: 1,
-        },
-      },
+      where: { AND: [spareWhere(), { reservations: { some: { employeeId: id, state: "ACTIVE" } } }] },
+      include: SPARE_INCLUDE,
       orderBy: { tag: "asc" },
     }),
     prisma.employeeSlotException.findMany({
@@ -151,17 +138,6 @@ export default async function EmployeePage({
   const waived = exceptions
     .filter((e) => e.kind === "WAIVE")
     .map((e) => ({ id: e.id, slotName: e.slot?.name ?? "removed slot", reason: e.reason }));
-
-  const spares: SpareOption[] = spareAssets.map((a) => ({
-    id: a.id, tag: a.tag, model: a.model, typeId: a.typeId,
-    reservedFor: a.reservations[0]?.employee.name ?? null,
-    reservedForThis: a.reservations[0]?.employeeId === id,
-    // Phase 29 (spec §4.5): a spare an open approval already promises is not
-    // pickable here — the pickers say which request holds it. The asset's own
-    // open approval comes first (any requester, I-1); this person's map is
-    // kept as the fallback so the ref stays the one the rest of the page shows.
-    pendingRef: a.approvals[0]?.refNo ?? pendingByAsset.get(a.id) ?? null,
-  }));
 
   const holding: HoldingItem[] = [
     ...reservations.map((r) => ({
@@ -254,7 +230,7 @@ export default async function EmployeePage({
             waived={waived}
             itCategories={itCategories}
             currentSlotLabels={loadout.slots.map((s) => s.slot.name)}
-            spares={spares}
+            reservedSpares={reservedSpareRows.map((a) => toSpareOption(a, id))}
             holding={holding}
             frozen={employee.employment !== "ACTIVE"}
             dueAt={employee.employment === "OFFBOARDING" ? employee.offboardingDueAt : null}
