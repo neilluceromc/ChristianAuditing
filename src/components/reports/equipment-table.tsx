@@ -41,12 +41,14 @@ export const NO_POLICY_LINE = "No equipment policy — gaps not tracked";
  * `rows` carry `money` only when the server computed it for a money role; `withMoney` only shows the columns.
  */
 export function EquipmentTable({
-  tab, rows, withMoney, selectedId,
+  tab, rows, withMoney, selectedId, canManageGroups,
 }: {
   tab: ReportTab;
   rows: GroupSummary[];
   withMoney: boolean;
   selectedId: string | null;
+  /** the empty state links to Departments & clients only for roles that can open it */
+  canManageGroups: boolean;
 }) {
   const router = useRouter();
   const w = WORDS[tab];
@@ -77,7 +79,12 @@ export function EquipmentTable({
     return (
       <Card className="px-4 py-8 text-center text-xs text-fg-muted">
         {w.empty} — add them on{" "}
-        <Link href="/admin/departments" className="text-accent hover:underline">Departments &amp; clients</Link>.
+        {canManageGroups ? (
+          <Link href="/admin/departments" className="text-accent hover:underline">Departments &amp; clients</Link>
+        ) : (
+          "Departments & clients"
+        )}
+        .
       </Card>
     );
   }

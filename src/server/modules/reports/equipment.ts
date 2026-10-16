@@ -1,21 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { asOfMonth, toCentavos } from "@/lib/depreciation";
-import { effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
-import { summariseGroup, type GroupSummary, type ReportAsset, type ReportPerson } from "@/lib/equipment-report";
+import {
+  groupHasBasePolicy, reportPeopleByGroup, reportTotals, summariseGroup,
+  type EquipmentTotals, type GroupSummary, type LoadedPerson, type ReportAsset,
+} from "@/lib/equipment-report";
 
+export type { EquipmentTotals } from "@/lib/equipment-report";
 export type GroupKind = "INTERNAL" | "CLIENT";
-
-export interface EquipmentTotals {
-  people: number;
-  items: number;
-  /** people missing something, summed across the groups */
-  missing: number;
-  /** round(100 × (people − missing) ÷ max(people, 1)) */
-  fullyPct: number;
-  /** Finance and Admin only — absent, not zero, for everyone else. */
-  money?: { costC: number; bookC: number; withoutCost: number };
-}
 
 export interface EquipmentByGroup {
   groups: GroupSummary[];
@@ -30,29 +22,76 @@ const countedPeople = (kind: GroupKind): Prisma.EmployeeWhereInput => ({
   department: { kind, archivedAt: null },
 });
 
+const PERSON = { id: true, name: true, employeeNo: true, title: true, departmentId: true } as const;
+const ASSET = { id: true, tag: true, typeId: true, status: true, loanDueAt: true } as const;
+/** Read only for Finance and Admin: the cost, the dates depreciation starts from, and both depreciation policies. */
+const MONEY = {
+  cost: true, purchasedAt: true, financeConfirmedAt: true, depreciationLifeMonths: true, depreciationSalvage: true,
+} as const;
+const IT_ONLY = { cls: "IT" } as const;
+
+const NO_DEP: ReportAsset["dep"] = { lifeMonths: null, salvage: null, catLifeMonths: null, catSalvagePercent: null };
+
 /**
- * Phase 38 (spec §3.4): the Equipment by client page's one query set. Every active group of `kind`, its
- * non-offboarded people and their IT-class assets, the policies (slots in `id` order, as the profile reads them)
- * and those people's slot exceptions — a fixed number of queries whatever the group count, reduced in memory by
- * `summariseGroup`. Cost, purchase date, approval date and depreciation fields are read by a separate query that
- * only runs when `withMoney`, so a viewer's or IT user's request never selects them.
+ * The counted people with their IT-class assets, in one read. With `withMoney` the money fields are selected inside
+ * the same nested asset select (one scan, one snapshot, so no asset can lose its cost to a race); without it they are
+ * never selected, and every ReportAsset carries null cost, dates and depreciation fields.
  */
-export async function equipmentByGroup({ kind, withMoney, now }: { kind: GroupKind; withMoney: boolean; now: Date }): Promise<EquipmentByGroup> {
-  const people = countedPeople(kind);
-  const [groups, kindCounts, employees, policies, exceptions, moneyRows] = await Promise.all([
-    prisma.department.findMany({ where: { kind, archivedAt: null }, select: { id: true, name: true, kind: true } }),
-    prisma.department.groupBy({ by: ["kind"], where: { archivedAt: null }, _count: true }),
-    prisma.employee.findMany({
-      where: people,
+async function loadPeople(where: Prisma.EmployeeWhereInput, withMoney: boolean): Promise<LoadedPerson[]> {
+  const orderBy: Prisma.EmployeeOrderByWithRelationInput[] = [{ name: "asc" }, { id: "asc" }];
+  if (withMoney) {
+    const rows = await prisma.employee.findMany({
+      where, orderBy,
       select: {
-        id: true, name: true, employeeNo: true, title: true, departmentId: true,
+        ...PERSON,
         assets: {
-          where: { cls: "IT" },
-          select: { id: true, tag: true, typeId: true, status: true, loanDueAt: true, category: { select: { name: true } } },
+          where: IT_ONLY,
+          select: {
+            ...ASSET, ...MONEY,
+            category: { select: { name: true, depreciationLifeMonths: true, depreciationSalvagePercent: true } },
+          },
         },
       },
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-    }),
+    });
+    return rows.map(({ assets, ...p }) => ({
+      ...p,
+      assets: assets.map((a): ReportAsset => ({
+        id: a.id, tag: a.tag, typeId: a.typeId, categoryName: a.category.name, status: a.status, loanDueAt: a.loanDueAt,
+        costC: toCentavos(a.cost), purchasedAt: a.purchasedAt, financeConfirmedAt: a.financeConfirmedAt,
+        dep: {
+          lifeMonths: a.depreciationLifeMonths,
+          salvage: toCentavos(a.depreciationSalvage),
+          catLifeMonths: a.category.depreciationLifeMonths,
+          catSalvagePercent: a.category.depreciationSalvagePercent === null ? null : Number(a.category.depreciationSalvagePercent),
+        },
+      })),
+    }));
+  }
+  const rows = await prisma.employee.findMany({
+    where, orderBy,
+    select: { ...PERSON, assets: { where: IT_ONLY, select: { ...ASSET, category: { select: { name: true } } } } },
+  });
+  return rows.map(({ assets, ...p }) => ({
+    ...p,
+    assets: assets.map((a): ReportAsset => ({
+      id: a.id, tag: a.tag, typeId: a.typeId, categoryName: a.category.name, status: a.status, loanDueAt: a.loanDueAt,
+      costC: null, purchasedAt: null, financeConfirmedAt: null, dep: NO_DEP,
+    })),
+  }));
+}
+
+/**
+ * Phase 38 (spec §3.4): the Equipment by client page's one query set — every active group of `kind`, its
+ * non-offboarded people and their IT-class assets, the policies (slots in `id` order, as the profile reads them) and
+ * those people's slot exceptions. A fixed number of queries whatever the group count; the pure assembly and
+ * reduction live in `src/lib/equipment-report.ts`.
+ */
+export async function equipmentByGroup({ kind, withMoney, now }: { kind: GroupKind; withMoney: boolean; now: Date }): Promise<EquipmentByGroup> {
+  const where = countedPeople(kind);
+  const [groups, kindCounts, people, policies, exceptions] = await Promise.all([
+    prisma.department.findMany({ where: { kind, archivedAt: null }, select: { id: true, name: true, kind: true } }),
+    prisma.department.groupBy({ by: ["kind"], where: { archivedAt: null }, _count: true }),
+    loadPeople(where, withMoney),
     prisma.equipmentPolicy.findMany({
       select: {
         id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
@@ -61,85 +100,26 @@ export async function equipmentByGroup({ kind, withMoney, now }: { kind: GroupKi
       orderBy: [{ name: "asc" }],
     }),
     prisma.employeeSlotException.findMany({
-      where: { employee: people },
+      where: { employee: where },
       select: { id: true, employeeId: true, kind: true, slotId: true, name: true, assetTypeId: true, required: true, loaner: true },
       orderBy: [{ employeeId: "asc" }, { id: "asc" }],
     }),
-    withMoney
-      ? prisma.asset.findMany({
-          where: { cls: "IT", assignee: people },
-          select: {
-            id: true, cost: true, purchasedAt: true, financeConfirmedAt: true,
-            depreciationLifeMonths: true, depreciationSalvage: true,
-            category: { select: { depreciationLifeMonths: true, depreciationSalvagePercent: true } },
-          },
-        })
-      : Promise.resolve([]),
   ]);
 
-  const moneyById = new Map(moneyRows.map((m) => [m.id, m]));
-  const exceptionsByEmployee = groupExceptionsByEmployee(exceptions);
-
-  const toAsset = (a: (typeof employees)[number]["assets"][number]): ReportAsset => {
-    const m = moneyById.get(a.id);
-    return {
-      id: a.id, tag: a.tag, typeId: a.typeId, categoryName: a.category.name, status: a.status, loanDueAt: a.loanDueAt,
-      costC: m ? toCentavos(m.cost) : null,
-      purchasedAt: m?.purchasedAt ?? null,
-      financeConfirmedAt: m?.financeConfirmedAt ?? null,
-      dep: {
-        lifeMonths: m?.depreciationLifeMonths ?? null,
-        salvage: m ? toCentavos(m.depreciationSalvage) : null,
-        catLifeMonths: m?.category.depreciationLifeMonths ?? null,
-        catSalvagePercent: m?.category.depreciationSalvagePercent == null ? null : Number(m.category.depreciationSalvagePercent),
-      },
-    };
-  };
-
-  const byGroup = new Map<string, ReportPerson[]>();
-  for (const e of employees) {
-    const policy = resolvePolicy(e, policies);
-    const ex = exceptionsByEmployee.get(e.id) ?? [];
-    const person: ReportPerson = {
-      id: e.id, name: e.name, employeeNo: e.employeeNo, title: e.title,
-      // the profile's slot list: its resolved policy's slots (stored names are the profile labels) plus exceptions
-      slots: effectiveSlots(policy?.slots ?? [], ex),
-      // as on the employees list: no policy and no added slot means gaps are not tracked for them
-      hasPolicy: policy !== null || ex.some((x) => x.kind === "ADD"),
-      assets: e.assets.map(toAsset),
-    };
-    const list = byGroup.get(e.departmentId);
-    if (list) list.push(person);
-    else byGroup.set(e.departmentId, [person]);
-  }
-
+  const byGroup = reportPeopleByGroup(people, policies, exceptions);
   const asOf = asOfMonth(now);
   const summaries = groups.map((g) =>
     summariseGroup(
-      // the same base-policy test resolvePolicy uses: the group's own policy with no title
-      { id: g.id, name: g.name, kind: g.kind, hasBasePolicy: policies.some((p) => p.appliesToDepartmentId === g.id && !p.appliesToTitle) },
+      { id: g.id, name: g.name, kind: g.kind, hasBasePolicy: groupHasBasePolicy(g.id, policies) },
       byGroup.get(g.id) ?? [],
       { withMoney, asOf },
     ),
   );
 
-  const sum = (f: (s: GroupSummary) => number) => summaries.reduce((n, s) => n + f(s), 0);
-  const totalPeople = sum((s) => s.people);
-  const missing = sum((s) => s.missing.length);
-  const totals: EquipmentTotals = {
-    people: totalPeople,
-    items: sum((s) => s.items),
-    missing,
-    fullyPct: Math.round((100 * (totalPeople - missing)) / Math.max(totalPeople, 1)),
-  };
-  if (withMoney) {
-    totals.money = {
-      costC: sum((s) => s.money?.costC ?? 0),
-      bookC: sum((s) => s.money?.bookC ?? 0),
-      withoutCost: sum((s) => s.money?.withoutCost ?? 0),
-    };
-  }
-
   const countOf = (k: GroupKind) => kindCounts.find((c) => c.kind === k)?._count ?? 0;
-  return { groups: summaries, counts: { client: countOf("CLIENT"), internal: countOf("INTERNAL") }, totals };
+  return {
+    groups: summaries,
+    counts: { client: countOf("CLIENT"), internal: countOf("INTERNAL") },
+    totals: reportTotals(summaries, withMoney),
+  };
 }

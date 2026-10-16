@@ -1,6 +1,7 @@
 import { requireRole } from "@/server/auth/guards";
 import { equipmentByGroup } from "@/server/modules/reports/equipment";
 import { canSeeMoney } from "@/lib/equipment-report";
+import { pathAllowedForRole } from "@/lib/workspaces";
 import { fmtMoney } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { cn } from "@/lib/cn";
@@ -37,6 +38,10 @@ export default async function EquipmentByClientPage({
 }) {
   const user = await requireRole("admin", "it_staff", "finance_staff", "viewer");
   const withMoney = canSeeMoney(user.role);
+  // Links are drawn only where the middleware would let this role through (admin, it_staff, viewer for staff;
+  // admin, it_staff for Departments & clients) — only these booleans reach the client.
+  const canOpenStaff = pathAllowedForRole("/employees", user.role);
+  const canManageGroups = pathAllowedForRole("/admin/departments", user.role);
   const params = toSearchParams(await searchParams);
   const tab: ReportTab = params.get("tab") === "internal" ? "internal" : "client";
 
@@ -91,8 +96,10 @@ export default async function EquipmentByClientPage({
 
         <div className={cn("grid items-start gap-4", selected && "lg:grid-cols-[minmax(0,1fr)_340px]")}>
           {/* keyed by tab: a tab switch starts the search, filter and sort afresh */}
-          <EquipmentTable key={tab} tab={tab} rows={groups} withMoney={withMoney} selectedId={selected?.id ?? null} />
-          {selected && <GroupDetail key={selected.id} group={selected} tab={tab} withMoney={withMoney} />}
+          <EquipmentTable
+            key={tab} tab={tab} rows={groups} withMoney={withMoney} selectedId={selected?.id ?? null} canManageGroups={canManageGroups}
+          />
+          {selected && <GroupDetail key={selected.id} group={selected} tab={tab} withMoney={withMoney} canOpenStaff={canOpenStaff} />}
         </div>
       </div>
     </>

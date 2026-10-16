@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { manilaMonth } from "./depreciation";
 import {
-  canSeeMoney, defaultReportSort, equippedTone, filterReportGroups, reportFilterCounts, sortReportGroups, summariseGroup,
+  canSeeMoney, defaultReportSort, equippedTone, filterReportGroups, groupHasBasePolicy, reportFilterCounts, reportPeopleByGroup,
+  reportTotals, sortReportGroups, summariseGroup,
   type GroupSummary, type ReportAsset, type ReportPerson,
 } from "./equipment-report";
 
@@ -263,5 +264,73 @@ describe("the table's filters, counts and sort", () => {
     expect(equippedTone(79)).toBe("fault");
     expect(equippedTone(0)).toBe("fault");
     expect(equippedTone(null)).toBeNull();
+  });
+});
+
+describe("assembling the report from the loaded rows", () => {
+  const slot = (id: string, name: string) => ({ id, name, assetTypeId: `t-${id}`, required: true, loaner: false });
+  const policies = [
+    { id: "base-g1", name: "G1", appliesToTitle: null, appliesToDepartmentId: "g1", slots: [slot("s1", "Laptop"), slot("s2", "Monitor")] },
+    { id: "rule-g1", name: "G1 leads", appliesToTitle: "Lead", appliesToDepartmentId: "g1", slots: [slot("s3", "Headset")] },
+    { id: "global", name: "Designers", appliesToTitle: "Designer", appliesToDepartmentId: null, slots: [slot("s4", "Tablet")] },
+  ];
+  const loaded = (id: string, departmentId: string, title: string) => ({ id, name: `P ${id}`, employeeNo: `E-${id}`, title, departmentId, assets: [] });
+  const ex = (id: string, employeeId: string, kind: "ADD" | "WAIVE", over = {}) => ({
+    id, employeeId, kind, slotId: null, name: null, assetTypeId: null, required: true, loaner: false, ...over,
+  });
+
+  it("a group has a base policy only when its own title-less policy exists", () => {
+    expect(groupHasBasePolicy("g1", policies)).toBe(true);
+    expect(groupHasBasePolicy("g2", policies)).toBe(false);
+    expect(groupHasBasePolicy("g2", [{ id: "r", name: "r", appliesToTitle: "Agent", appliesToDepartmentId: "g2" }])).toBe(false);
+  });
+
+  it("gives each person the profile's slots and the employees-list policy rule, grouped by their group", () => {
+    const people = [
+      loaded("1", "g1", "Agent"), // base policy
+      loaded("2", "g1", "lead "), // the group's title rule (trimmed, case-insensitive)
+      loaded("3", "g2", "Designer"), // a global title policy
+      loaded("4", "g2", "Agent"), // nothing, but an ADD exception
+      loaded("5", "g2", "Agent"), // nothing, only a WAIVE
+      loaded("6", "g2", "Agent"), // nothing at all
+    ];
+    const exceptions = [
+      ex("x1", "1", "WAIVE", { slotId: "s2" }),
+      ex("x2", "4", "ADD", { name: "Phone", assetTypeId: "t-phone" }),
+      ex("x3", "5", "WAIVE", { slotId: "s1" }),
+    ];
+    const byGroup = reportPeopleByGroup(people, policies, exceptions);
+    expect([...byGroup.keys()].sort()).toEqual(["g1", "g2"]);
+    const get = (id: string) => [...byGroup.values()].flat().find((p) => p.id === id)!;
+    expect(get("1").slots.map((x) => x.name)).toEqual(["Laptop"]);
+    expect(get("2").slots.map((x) => x.name)).toEqual(["Headset"]);
+    expect(get("3").slots.map((x) => x.name)).toEqual(["Tablet"]);
+    expect(get("4").slots.map((x) => x.name)).toEqual(["Phone"]);
+    expect(["1", "2", "3", "4", "5", "6"].map((id) => get(id).hasPolicy)).toEqual([true, true, true, true, false, false]);
+    expect(byGroup.get("g2")!.map((p) => p.id)).toEqual(["3", "4", "5", "6"]);
+  });
+
+  const summary = (people: number, missing: number, money?: GroupSummary["money"]): GroupSummary => ({
+    id: "x", name: "x", kind: "CLIENT", people, items: people * 2, loans: 0, nextLoanDue: null, noPolicy: false,
+    missing: Array.from({ length: missing }, (_, i) => ({ id: `${i}`, name: "", employeeNo: "", labels: [] })),
+    equippedPct: null, byCategory: [], ...(money ? { money } : {}),
+  });
+
+  it("sums people, items and missing, and rounds fullyPct", () => {
+    const t = reportTotals([summary(3, 1), summary(4, 1)], false);
+    expect(t).toEqual({ people: 7, items: 14, missing: 2, fullyPct: 71 });
+    expect("money" in t).toBe(false);
+  });
+  it("reads 0% fully equipped, not NaN, with no people", () => {
+    expect(reportTotals([], false)).toEqual({ people: 0, items: 0, missing: 0, fullyPct: 0 });
+    expect(reportTotals([summary(0, 0)], false).fullyPct).toBe(0);
+  });
+  it("sums money only with withMoney", () => {
+    const rows = [
+      summary(1, 0, { costC: 100, bookC: 80, perPersonC: 80, withoutCost: 1 }),
+      summary(2, 0, { costC: 50, bookC: 40, perPersonC: 20, withoutCost: 2 }),
+    ];
+    expect(reportTotals(rows, true).money).toEqual({ costC: 150, bookC: 120, withoutCost: 3 });
+    expect("money" in reportTotals(rows, false)).toBe(false);
   });
 });

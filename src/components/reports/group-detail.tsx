@@ -26,8 +26,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * Phase 38 (spec §3.3): the selected group's detail — what it holds by category, who is missing what (the profile's
  * numbered labels), its loans, and the links to its staff and its export. Values per category and the header's book
  * value appear only when the server sent them (Finance and Admin). × clears `?group`, keeping the tab.
+ * The staff links render only when `canOpenStaff` (roles that can open /employees); otherwise the same words are
+ * plain text and the staff button is left out.
  */
-export function GroupDetail({ group, tab, withMoney }: { group: GroupSummary; tab: ReportTab; withMoney: boolean }) {
+export function GroupDetail({
+  group, tab, withMoney, canOpenStaff,
+}: { group: GroupSummary; tab: ReportTab; withMoney: boolean; canOpenStaff: boolean }) {
   const router = useRouter();
   const staffHref = `/employees?department=${group.id}`;
   const maxCount = Math.max(1, ...group.byCategory.map((c) => c.count));
@@ -87,7 +91,11 @@ export function GroupDetail({ group, tab, withMoney }: { group: GroupSummary; ta
             {shown.map((p) => (
               <li key={p.id} className="flex flex-col text-xs">
                 <span className="flex items-baseline gap-2">
-                  <Link href={`/employees/${p.id}`} className="text-accent hover:underline">{p.name}</Link>
+                  {canOpenStaff ? (
+                    <Link href={`/employees/${p.id}`} className="text-accent hover:underline">{p.name}</Link>
+                  ) : (
+                    <span className="text-fg">{p.name}</span>
+                  )}
                   <span className="font-mono text-[11px] text-fg-muted">{p.employeeNo}</span>
                 </span>
                 <span className="text-fg-secondary">{p.labels.join(", ")}</span>
@@ -95,7 +103,11 @@ export function GroupDetail({ group, tab, withMoney }: { group: GroupSummary; ta
             ))}
             {more > 0 && (
               <li className="text-xs">
-                <Link href={staffHref} className="text-accent hover:underline">and {more} more — see their staff</Link>
+                {canOpenStaff ? (
+                  <Link href={staffHref} className="text-accent hover:underline">and {more} more — see their staff</Link>
+                ) : (
+                  <span className="text-fg-secondary">and {more} more — see their staff</span>
+                )}
               </li>
             )}
           </ul>
@@ -111,7 +123,7 @@ export function GroupDetail({ group, tab, withMoney }: { group: GroupSummary; ta
       </Section>
 
       <div className="flex flex-wrap gap-2 border-t border-border-faint pt-3">
-        <ButtonLink href={staffHref} size="sm">See their staff →</ButtonLink>
+        {canOpenStaff && <ButtonLink href={staffHref} size="sm">See their staff →</ButtonLink>}
         <ButtonLink href={`/equipment-by-client/export?tab=${tab}&group=${group.id}`} size="sm" native>
           Export {group.name} (.xlsx)
         </ButtonLink>
