@@ -228,12 +228,13 @@ test.describe("holds", () => {
       await page.goto(`/employees/${nina.id}`);
       // Plan P-5: the empty tile is already the Assign affordance, so Reserve
       // is a ⋯ menu item beside it, never a second click target on the tile.
-      const trigger = page.getByRole("button", { name: "Actions for the phone slot" });
+      // Phase 37 (spec §4.3): the ⋯ is "More for {label}" and the label is the derived "Phone".
+      const trigger = page.getByRole("button", { name: "More for Phone", exact: true });
       await waitForHydration(trigger);
       await trigger.click();
       await page.getByRole("menuitem", { name: "Reserve a spare…" }).click();
 
-      const dialog = page.getByRole("dialog", { name: "Reserve a spare for the phone slot" });
+      const dialog = page.getByRole("dialog", { name: "Reserve a spare for the Phone slot" });
       await waitForHydration(dialog);
       await dialog.getByLabel("Spare").fill("BR-PH-0301");
       await dialog.getByRole("option", { name: /BR-PH-0301/ }).click();

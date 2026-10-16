@@ -173,7 +173,8 @@ test.describe.serial("equipment policies per group", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${marites.id}`);
-    const actions = page.getByRole("button", { name: "Actions for the Headset slot" });
+    // Phase 37 (spec §4.3): the tile's ⋯ is "More for {label}".
+    const actions = page.getByRole("button", { name: "More for Headset", exact: true });
     await waitForHydration(actions);
     await actions.click();
     await page.getByRole("menuitem", { name: "Waive this slot…" }).click();
@@ -201,7 +202,7 @@ test.describe.serial("equipment policies per group", () => {
     await expect(kindSelects(editor)).toHaveCount(5);
 
     await page.goto(`/employees/${marites.id}`);
-    await expect(page.getByRole("button", { name: "Actions for the Headset slot" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "More for Headset", exact: true })).toHaveCount(0);
     await expect(page.getByText(/Waived for this person/)).toHaveCount(0);
     expect(await db.employeeSlotException.count({ where: { employeeId: marites.id, kind: "WAIVE" } })).toBe(0);
   });

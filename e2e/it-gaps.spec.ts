@@ -268,10 +268,12 @@ test.describe("it gaps", () => {
 
       await login(page, IT);
       await page.goto(`/employees/${leo.id}`);
-      const tile = page.getByRole("button", { name: /^laptop slot, on loan, required$/ });
-      await expect(tile).toBeVisible({ timeout: 15_000 });
-      await expect(tile.getByText("LOAN", { exact: true })).toBeVisible();
-      await expect(tile.getByText("policy gap")).toHaveCount(0);
+      // Phase 37 (spec §4.3): the covered slot's tile shows the loan standing in for it, and its chip says
+      // "On loan", never "Missing". The label is the slot's own name, "laptop".
+      const tile = page.getByRole("group", { name: "laptop", exact: true });
+      await expect(tile.getByRole("button", { name: /^laptop: .+ BR-LT-0210$/ })).toBeVisible({ timeout: 15_000 });
+      await expect(tile).toContainText("On loan");
+      await expect(tile).not.toContainText("Missing");
 
       // src/app/(app)/employees/page.tsx: `missingRequired === 0` renders
       // "complete" — the per-employee progress line the brief names. Verified

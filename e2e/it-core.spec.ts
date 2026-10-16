@@ -513,7 +513,9 @@ test.describe("employees & loadout", () => {
     // outruns the default 5s timeout on a cold cache. Every later visit to
     // this same route in this file resolves quickly once it's warm — give
     // just this first one more headroom rather than loosening the rest.
-    await expect(page.getByRole("button", { name: /headset slot, empty, required/ })).toBeVisible({ timeout: 20_000 });
+    // Phase 37 (spec §4.3): the gap is the "Headset" tile reading "Missing", with its own Fill button.
+    await expect(page.getByRole("button", { name: "Fill the Headset slot" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("group", { name: "Headset", exact: true })).toContainText("Missing");
   });
 
   // FIXED, twice — kept as the record of how, because the two fixes are a
@@ -545,17 +547,15 @@ test.describe("employees & loadout", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees");
     await page.getByRole("link", { name: /Marites Bautista/ }).click();
-    await page.getByRole("button", { name: /headset slot, empty, required/ }).click();
+    await page.getByRole("button", { name: "Fill the Headset slot" }).click();
     await page.getByRole("radiogroup", { name: "Pick a spare" }).getByText("BR-HS-0502").click();
     // Phase 15: direct — the fill dialog's button is "Confirm", not "Request
     // assign", and the assignment lands the moment it's clicked.
     await page.getByRole("button", { name: "Confirm" }).click();
     await expect(page.getByText("BR-HS-0502 assigned to Marites Bautista")).toBeVisible();
-    // Anchored: Phase 16 added a per-tile "Actions for the headset slot" ⋯
-    // menu button, whose own aria-label also contains "headset slot" as a
-    // substring — an unanchored match now resolves to both.
-    const tile = page.getByRole("button", { name: /^headset slot,/ });
-    await expect(tile).toContainText("BR-HS-0502");
+    // Phase 37 (spec §4.3): the tile is a group named by its label; its opener reads "{label}: {model} {tag}".
+    const tile = page.getByRole("group", { name: "Headset", exact: true });
+    await expect(tile.getByRole("button", { name: /^Headset: .+ BR-HS-0502$/ })).toBeVisible({ timeout: 15_000 });
     await expect(tile.getByText("PENDING")).toHaveCount(0);
   });
 

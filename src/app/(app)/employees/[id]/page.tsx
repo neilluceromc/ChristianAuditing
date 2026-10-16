@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
-import { computeLoadout, effectiveSlots, profilePrimary, resolvePolicy } from "@/lib/loadout";
+import { computeLoadout, effectiveSlots, profilePrimary, profileTiles, resolvePolicy, slotLabel } from "@/lib/loadout";
 import { ASSIGNABLE_FROM, canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
 import { fmtDate, fmtRelativeDays, localDateISO } from "@/lib/format";
 import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
@@ -10,8 +10,8 @@ import { isRecentTransfer } from "@/lib/transfer-schema";
 import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { LoadoutView, type HoldingItem, type SlotTile, type SpareOption } from "@/components/employees/loadout-view";
+import { LoadoutView, type HoldingItem, type SpareOption } from "@/components/employees/loadout-view";
+import type { EquipmentTileData } from "@/components/employees/equipment-tile";
 import { AcknowledgementCard } from "@/components/employees/acknowledgement-card";
 import { EmployeeCreatedNotice } from "@/components/employees/employee-created-notice";
 import { IdentityBand } from "@/components/employees/identity-band";
@@ -37,13 +37,18 @@ export default async function EmployeePage({
   const today = localDateISO(new Date());
 
   const [held, reservations, openApprovals, policies, spareAssets, exceptions, itTypes, acks, transfers, departments, notes, initialView] = await Promise.all([
-    prisma.asset.findMany({ where: { assigneeId: id }, orderBy: { tag: "asc" } }),
+    prisma.asset.findMany({
+      where: { assigneeId: id },
+      include: { category: { select: { name: true } }, type: { select: { name: true } } },
+      orderBy: { tag: "asc" },
+    }),
     prisma.reservation.findMany({ where: { employeeId: id, state: "ACTIVE" }, include: { asset: true } }),
     prisma.approval.findMany({
       where: { employeeId: id, state: { in: ["PENDING", "CLAIMED", "APPROVED"] } },
       include: { asset: true },
     }),
-    prisma.equipmentPolicy.findMany({ include: { slots: { include: { assetType: true } } }, orderBy: [{ name: "asc" }] }),
+    // Phase 37 (spec §3.2): slots in policy order (the editor's own `id` order), so "Monitor" / "Monitor 2" never swap.
+    prisma.equipmentPolicy.findMany({ include: { slots: { include: { assetType: true }, orderBy: { id: "asc" } } }, orderBy: [{ name: "asc" }] }),
     prisma.asset.findMany({
       // Assignment through /employees is IT's surface in Phase 13 —
       // Purchasing assets are assigned at create time (spec §5 has no assign
@@ -104,28 +109,34 @@ export default async function EmployeePage({
     age: a.purchasedAt ? fmtRelativeDays(a.purchasedAt).replace(" ago", " old") : "age unknown",
     pendingRef: pendingByAsset.get(a.id) ?? null,
     visible: canSeeClass(user.role, a.cls),
+    loanDueAt: a.loanDueAt ? a.loanDueAt.toISOString() : null,
   });
+  // Phase 37 (spec §4.3): extras and loans are labelled by what they are — the category, or the type inside Other (§3.2).
+  const categoryOf = (a: (typeof held)[number]) =>
+    a.category ? (a.type ? slotLabel(a.category.name, a.type.name) : a.category.name) : "Item";
 
-  const slots: SlotTile[] = loadout.slots.map(({ slot, asset, coveredByLoan }) => {
+  const tiles: EquipmentTileData[] = profileTiles(loadout, (s) => s.name, categoryOf).map((t) => {
+    const slot = t.slot;
     // An ADD-exception slot's id isn't a real PolicySlot id, so `typeName`
     // (keyed on policy slot ids) never has it — fall back to the exception
     // row's own assetType.name, which the query above included for exactly
     // this reason.
-    const exception = exceptions.find((e) => e.id === slot.exceptionId);
+    const exception = slot?.exceptionId ? exceptions.find((e) => e.id === slot.exceptionId) : undefined;
     return {
-      slotId: slot.id,
-      name: slot.name,
-      typeId: slot.assetTypeId,
-      typeName: typeName.get(slot.id) ?? exception?.assetType?.name ?? "any",
-      required: slot.required,
-      asset: asset ? toTileAsset(asset) : null,
-      loaner: slot.loaner,
-      exceptionId: slot.exceptionId ?? null,
+      key: t.key,
+      kind: t.kind,
+      label: t.label,
+      slotId: slot?.id ?? null,
+      typeId: slot ? slot.assetTypeId : t.asset?.typeId ?? null,
+      typeName: slot ? typeName.get(slot.id) ?? exception?.assetType?.name ?? "any" : t.asset?.type?.name ?? "any",
+      required: t.required,
+      loaner: slot?.loaner ?? false,
+      exceptionId: slot?.exceptionId ?? null,
       exceptionReason: exception?.reason ?? null,
-      // Phase 20 (spec §6.3, gap 3): a standard slot left empty because its
-      // type has a remaining TEMPORARY device on loan — the tile reads "on
-      // loan" instead of "policy gap".
-      coveredByLoan,
+      // Phase 20 (spec §6.3, gap 3): a standard slot a remaining TEMPORARY
+      // device stands in for — the tile shows that loan, not a gap.
+      coveredByLoan: t.coveredByLoan,
+      asset: t.asset ? toTileAsset(t.asset) : null,
     };
   });
 
@@ -217,32 +228,26 @@ export default async function EmployeePage({
         progress={policy ? { filled: loadout.filled, total: loadout.totalSlots, policyName: policy.name } : null}
       />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="min-w-0">
-          <Card>
-            <CardHeader title="Equipment" />
-            <CardBody>
-              <div id="loadout" tabIndex={-1} className="outline-none">
-                <LoadoutView
-                  employeeId={id}
-                  employeeName={employee.name}
-                  initialView={initialView}
-                  canLinkPolicies={user.role === "admin" || user.role === "it_staff"}
-                  slots={slots}
-                  unslotted={loadout.unslotted.map(toTileAsset)}
-                  onLoan={loadout.onLoan.map(toTileAsset)}
-                  waived={waived}
-                  itTypes={itTypes}
-                  spares={spares}
-                  holding={holding}
-                  frozen={employee.employment !== "ACTIVE"}
-                  dueAt={employee.employment === "OFFBOARDING" ? employee.offboardingDueAt : null}
-                  today={today}
-                  canMutate={canMutate}
-                  direct={direct}
-                />
-              </div>
-            </CardBody>
-          </Card>
+        <div id="loadout" tabIndex={-1} className="min-w-0 outline-none">
+          {/* Phase 37 (spec §4.3): the Equipment card is the view's own, so its header can carry the switch. */}
+          <LoadoutView
+            employeeId={id}
+            employeeName={employee.name}
+            initialView={initialView}
+            canLinkPolicies={user.role === "admin" || user.role === "it_staff"}
+            tiles={tiles}
+            unslotted={loadout.unslotted.map(toTileAsset)}
+            onLoan={loadout.onLoan.map(toTileAsset)}
+            waived={waived}
+            itTypes={itTypes}
+            spares={spares}
+            holding={holding}
+            frozen={employee.employment !== "ACTIVE"}
+            dueAt={employee.employment === "OFFBOARDING" ? employee.offboardingDueAt : null}
+            today={today}
+            canMutate={canMutate}
+            direct={direct}
+          />
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">

@@ -299,7 +299,8 @@ test.describe("own tags and real types — data", () => {
     const policy = await db.equipmentPolicy.findUniqueOrThrow({
       where: { name: "Finance standard" }, include: { slots: { include: { assetType: true } } },
     });
-    expect(policy.slots.find((sl) => sl.name === "laptop")?.assetType?.name).toBe("Standard");
+    // Phase 37 (spec §3.2): the seed derives slot names from the line's kind — the Laptop line is "Laptop".
+    expect(policy.slots.find((sl) => sl.name === "Laptop")?.assetType?.name).toBe("Standard");
   });
 });
 

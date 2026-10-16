@@ -157,14 +157,17 @@ test.describe.serial("transfers", () => {
     await page.goto(`/employees/${leo.id}`);
     // Before: Operations has no equipment policy at all — the "Equipment
     // slots" grid still renders (it's the view's own container, shown
-    // regardless), but empty: the "No equipment policy applies" banner is
-    // up, and it holds no slot tiles.
+    // regardless): the "No equipment policy applies" banner is up, and it
+    // holds no SLOT tiles. Phase 37 (spec §4.3): Leo's loan BR-LT-0210 is a
+    // tile of its own there ("Laptop", kind loan) — loans are a status now.
     // Phase 37: the identity band's progress line says it too, so the banner is
     // picked by its role and the band line by its own test id.
     await expect(page.getByRole("status").filter({ hasText: "No equipment policy applies" })).toBeVisible();
     await expect(page.getByTestId("identity-band").getByText("No equipment policy applies")).toBeVisible();
     const slotGroup = page.getByRole("group", { name: "Equipment slots" });
-    await expect(slotGroup.getByRole("button")).toHaveCount(0);
+    await expect(slotGroup.locator('[data-kind="slot"]')).toHaveCount(0);
+    await expect(slotGroup.locator('[data-kind="loan"]')).toHaveCount(1);
+    await expect(slotGroup.getByRole("group", { name: "Laptop", exact: true })).toContainText("On loan");
 
     await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
@@ -178,7 +181,12 @@ test.describe.serial("transfers", () => {
     // (TEMPORARY) covers it, so it reads "on loan" rather than a bare
     // policy gap (spec §6.3, gap 3).
     await expect(page.getByText("No equipment policy applies")).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.getByRole("button", { name: /^laptop slot, on loan, required$/ })).toBeVisible();
+    // Phase 37 (spec §4.3): the Laptop SLOT tile now shows the loan covering it, and the loan is not repeated.
+    const laptop = slotGroup.getByRole("group", { name: "Laptop", exact: true });
+    await expect(laptop).toHaveAttribute("data-kind", "slot");
+    await expect(laptop.getByRole("button", { name: /^Laptop: .+ BR-LT-0210$/ })).toBeVisible();
+    await expect(laptop).toContainText("On loan");
+    await expect(slotGroup.locator('[data-kind="loan"]')).toHaveCount(0);
   });
 
   test("3. a stale dialog cannot transfer into the employee's now-current department", async ({ page }) => {

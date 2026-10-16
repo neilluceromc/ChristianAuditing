@@ -11,17 +11,17 @@ import { localDateISO } from "@/lib/format";
  * nine cases, each independent: its own fixtures, no serial dependency, and a
  * `finally` that puts back every MUTABLE field it changed, so a failure in one
  * never cascades into the next.
- *   1 (§4.4/§4.6) a filled tile IS its menu's trigger — Replace…/Return…/Open
- *     record, a Return dialog that names tag, model AND holder, Enter reopens
- *     the menu from the keyboard and Escape hands focus back to the tile.
- *   2 (§4.4, plan P-8) the tag inside a tile is text, not a link: "Open record"
- *     in the menu is the route to the asset.
+ *   1 (§4.4/§4.6) a filled tile's ⋯ ("More for {label}") offers Replace…/
+ *     Return…/Open record, a Return dialog that names tag, model AND holder,
+ *     Enter reopens the menu from the keyboard and Escape hands focus back.
+ *   2 (Phase 37 §4.3) the tag inside a tile is a link to the record, and
+ *     "Open record" in the menu lands there too.
  *   3 (§4.1) a leaver's header: the due pill on the badge, "Open the
  *     offboarding wizard" as the one primary, Edit still beside it, and a More
  *     menu with no Transfer…/Start offboarding… in it.
  *   4 (§4.1, plan P-6) the state-chosen primary drives the grid — "Assign kit"
  *     on a day-one hire opens the first Fill dialog; one assignment later the
- *     same button reads "Fill N gaps" and focuses the first gap tile.
+ *     same button reads "Fill N gaps" and focuses the first gap tile's Fill.
  *   5 (§4.4, ruling R8) the hold sitting on an empty tile says so, and "Assign
  *     reserved" fulfils it in one click.
  *   6 (§6, plan P-4) the list's Loadout column sorts: most required gaps
@@ -30,14 +30,17 @@ import { localDateISO } from "@/lib/format";
  *   8 (§5) the New form: Name focused, the live number check (next free /
  *     already taken), the policy preview, ONE same-name refusal, and "Create
  *     and add another" keeping the department and the URL.
- *   9 (ruling R2) a viewer's tiles are inert — groups, not buttons, and no
- *     header actions at all.
+ *   9 (ruling R2) a viewer's tiles carry no actions — no ⋯, no Fill, no
+ *     header actions — though the read-only side panel still opens.
+ *  10 (Phase 37 §4.3/§4.4) equal tiles, "Monitor" / "Monitor 2", and the side
+ *     panel: the Laptop tile opens it, Escape closes it back onto the tile,
+ *     and `?item=` reopens it after a reload.
  *
  * Seeded fixtures this file depends on (prisma/seed.ts), read off the seed
  * rather than assumed from the brief:
  *   Marites Bautista EMP-0042 — Finance/Accountant, so "Finance standard"
- *     (laptop/monitor/dock/headset/phone required, second monitor optional)
- *     applies. Holds BR-LT-0148 (Dell Latitude 5420, the laptop slot),
+ *     (Laptop/Monitor/Docking Station/Headset/Phone required, a second
+ *     Monitor optional — the tiles read "Monitor" and "Monitor 2") applies. Holds BR-LT-0148 (Dell Latitude 5420, the laptop slot),
  *     BR-MN-0902, BR-DK-0071 and BR-PH-0287 (TEMPORARY). APR-2039 names
  *     BR-LT-0148 but carries NO employeeId, so the profile's `openApprovals`
  *     (employee-scoped) never sees it and the laptop tile is not "pending" —
@@ -126,11 +129,12 @@ const IT = "it@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
 test.describe("Phase 29 — the employee area obeys the laws", () => {
-  test("1. a filled tile opens its menu; Return… confirms with model and holder; Escape refocuses", async ({ page }) => {
+  test("1. a filled tile's ⋯ opens its menu; Return… confirms with model and holder; Escape refocuses", async ({ page }) => {
     const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     await login(page, IT);
     await page.goto(`/employees/${marites.id}`);
-    const tile = page.getByRole("button", { name: /^laptop slot, / });
+    // Phase 37 (spec §4.3): the tile body opens the side panel (case 10); the ⋯ beside the label is the menu.
+    const tile = page.getByRole("button", { name: "More for Laptop", exact: true });
     await waitForHydration(tile);
     await tile.click();
 
@@ -146,8 +150,7 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
 
-    // Plan P-7: the tile is the Menu's trigger, so Enter on it opens the menu
-    // and Escape closes it and hands focus straight back.
+    // Enter on the ⋯ opens the menu, and Escape closes it and hands focus straight back.
     await tile.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("menu")).toBeVisible();
@@ -163,14 +166,14 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${marites.id}`);
-    const tile = page.getByRole("button", { name: /^laptop slot, / });
-    await waitForHydration(tile);
-    // Plan P-8: the tag inside the tile is plain text now (a link nested in the
-    // tile's own button is axe's nested-interactive) — this menu item is the
-    // only route from the tile to the record.
-    await expect(tile.getByRole("link")).toHaveCount(0);
+    // Phase 37 (spec §4.3): the tag is a link again — the side panel's opener is a sibling stretched over the
+    // card, never the link's parent, so nothing interactive nests.
+    const tile = page.getByRole("group", { name: "Laptop", exact: true });
+    await expect(tile.getByRole("link", { name: "BR-LT-0148" })).toHaveAttribute("href", `/inventory/${laptop.id}`);
 
-    await tile.click();
+    const more = tile.getByRole("button", { name: "More for Laptop", exact: true });
+    await waitForHydration(more);
+    await more.click();
     await page.getByRole("menu").getByRole("menuitem", { name: "Open record" }).click();
     await page.waitForURL(`**/inventory/${laptop.id}`);
     await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 20_000 });
@@ -223,9 +226,10 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       // One real assignment, through the phone tile — the only slot whose
       // spare is neither held for Nina (BR-MN-0910, case 5's fixture) nor
       // promised by an open approval (BR-LT-0181 / APR-2041).
-      const phoneTile = page.getByRole("button", { name: /^phone slot, empty, required$/ });
-      await phoneTile.click();
-      const fillPhone = page.getByRole("dialog", { name: "Fill the phone slot" });
+      // Phase 37 (spec §4.3): a required gap reads "Missing" and carries its own Fill button.
+      await expect(page.getByRole("group", { name: "Phone", exact: true })).toContainText("Missing");
+      await page.getByRole("button", { name: "Fill the Phone slot" }).click();
+      const fillPhone = page.getByRole("dialog", { name: "Fill the Phone slot" });
       await waitForHydration(fillPhone);
       await fillPhone.getByRole("radiogroup", { name: "Pick a spare" }).getByText("BR-PH-0301").click();
       await fillPhone.getByRole("button", { name: "Confirm" }).click();
@@ -238,21 +242,19 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await expect(fillGaps).toHaveText(/^Fill 4 gaps$/);
       await waitForHydration(fillGaps);
       await fillGaps.click();
-      // Focus, not just a scroll: the first EMPTY REQUIRED tile takes it.
+      // Focus, not just a scroll: the first EMPTY REQUIRED tile's Fill takes it.
       // Asserted on whatever tile that is, so the grid's own slot order is not
       // silently pinned here as well.
-      await expect(page.locator(":focus")).toHaveAttribute("aria-label", /, empty, required$/);
+      await expect(page.locator(":focus")).toHaveAttribute("aria-label", /^Fill the .+ slot$/);
 
-      // …and back out again THROUGH THE NEW PATH, driven to submission: plan
-      // P-7's filled tile IS its menu's trigger, and "Return…" behind it is the
-      // only way off a loadout from this screen now. Case 1 opens that dialog
-      // and cancels; this is the case that commits it, so the phase's own
-      // trigger → menu → dialog → write chain is covered end to end. (The
-      // `finally` below still runs: a DB restore is the idempotent safety net
-      // for a run that dies before reaching here, not this assertion's job.)
-      const filledPhoneTile = page.getByRole("button", { name: /^phone slot, Samsung A54, required$/ });
-      await expect(filledPhoneTile).toBeVisible({ timeout: 15_000 });
-      await filledPhoneTile.click();
+      // …and back out again through the tile's ⋯, driven to submission. Case 1
+      // opens that dialog and cancels; this is the case that commits it, so the
+      // ⋯ → menu → dialog → write chain is covered end to end. (The `finally`
+      // below still runs: a DB restore is the idempotent safety net for a run
+      // that dies before reaching here, not this assertion's job.)
+      await expect(page.getByRole("button", { name: "Phone: Samsung A54 BR-PH-0301" })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("group", { name: "Phone", exact: true })).toContainText("Held");
+      await page.getByRole("button", { name: "More for Phone", exact: true }).click();
       await page.getByRole("menu").getByRole("menuitem", { name: "Return…" }).click();
       // Spec §4.6: the dialog names tag · model · holder, not just the tag.
       const returnPhone = page.getByRole("dialog", { name: "Return BR-PH-0301 · Samsung A54 from Nina Robles?" });
@@ -265,8 +267,8 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
 
       await expect(page.getByText("BR-PH-0301 returned · now SPARE")).toBeVisible({ timeout: 15_000 });
       // The slot is a gap again…
-      await expect(page.getByRole("button", { name: /^phone slot, .*, required$/ }))
-        .toHaveAttribute("aria-label", /, empty, /, { timeout: 15_000 });
+      await expect(page.getByRole("group", { name: "Phone", exact: true })).toContainText("Nothing assigned", { timeout: 15_000 });
+      await expect(page.getByRole("button", { name: "Fill the Phone slot" })).toBeVisible();
       // …and the state-chosen primary has followed it all the way back.
       await expect(page.getByRole("button", { name: "Assign kit" })).toBeVisible({ timeout: 15_000 });
       expect((await db.asset.findUniqueOrThrow({ where: { id: phone.id } })).assigneeId).toBeNull();
@@ -286,20 +288,18 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await page.goto(`/employees/${nina.id}`);
 
       // Ruling R8: the hold is consumed by the FIRST empty tile of its type —
-      // the required "monitor", never also "second monitor".
-      const monitorTile = page.getByRole("button", { name: /^monitor slot, empty, required$/ });
-      await waitForHydration(monitorTile);
+      // the required "Monitor", never also "Monitor 2".
+      const monitorTile = page.getByRole("group", { name: "Monitor", exact: true });
+      await waitForHydration(monitorTile.getByRole("button", { name: "Assign reserved" }));
       await expect(monitorTile).toContainText("reserved · BR-MN-0910");
-      await expect(page.getByRole("button", { name: /^second monitor slot,/ })).not.toContainText("reserved ·");
+      await expect(page.getByRole("group", { name: "Monitor 2", exact: true })).not.toContainText("reserved ·");
       // The batch affordance states the same count the grid shows.
       await expect(page.getByRole("button", { name: "Assign all 1 reserved" })).toBeVisible();
 
-      // Scoped to the tile's own wrapper: "Assign reserved" is a SIBLING of the
-      // tile button (a button inside a button is axe's nested-interactive), and
-      // more than one tile can carry one.
-      await monitorTile.locator("..").getByRole("button", { name: "Assign reserved" }).click();
+      // Scoped to the tile: more than one tile can carry an "Assign reserved".
+      await monitorTile.getByRole("button", { name: "Assign reserved" }).click();
       await expect(page.getByText("BR-MN-0910 assigned to Nina Robles")).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByRole("button", { name: /^monitor slot, LG 27UL500, required$/ }))
+      await expect(page.getByRole("button", { name: "Monitor: LG 27UL500 BR-MN-0910" }))
         .toBeVisible({ timeout: 15_000 });
 
       // commitLifecycle settles the hold the assignment answers.
@@ -465,19 +465,65 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     }
   });
 
-  test("9. a viewer's tiles are inert", async ({ page }) => {
+  test("9. a viewer's tiles carry no actions", async ({ page }) => {
     const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     await login(page, VIEWER);
     await page.goto(`/employees/${marites.id}`);
 
-    // Ruling R2: the inert branch is the VIEWER — the tile is a <div
-    // role="group"> carrying the same accessible name, with no menu behind it…
-    await expect(page.getByRole("group", { name: /^laptop slot,/ })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("button", { name: /slot,/ })).toHaveCount(0);
-    // …and no ⋯ beside it.
-    await expect(page.getByRole("button", { name: /^Actions for the/ })).toHaveCount(0);
+    // Ruling R2: the VIEWER gets no ⋯ and no Fill on any tile…
+    const laptop = page.getByRole("group", { name: "Laptop", exact: true });
+    await expect(laptop).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: /^More for / })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Fill the / })).toHaveCount(0);
+    // …but Phase 37 (spec §4.4): the side panel is read-only, so the tile body still opens it.
+    await expect(laptop.getByRole("button", { name: /^Laptop: / })).toBeVisible();
     // ProfileActions renders nothing at all for a viewer.
     await expect(page.getByRole("button", { name: "More actions" })).toHaveCount(0);
     await expectNoSeriousAxe(page);
+  });
+
+  test("10. side panel: equal tiles, Monitor / Monitor 2, the Laptop tile opens the panel, Escape refocuses it, ?item= reopens it", async ({ page }) => {
+    const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    const laptop = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
+    await login(page, IT);
+    await page.goto(`/employees/${marites.id}`);
+
+    const opener = page.getByRole("button", { name: /^Laptop: / });
+    await waitForHydration(opener);
+    await expect(opener).toHaveAccessibleName(`Laptop: ${laptop.model} BR-LT-0148`);
+
+    // Spec §4.3: grid-auto-rows 1fr, so every tile is the same height whatever it holds.
+    const heights = await page.locator("[data-tile]").evaluateAll((els) =>
+      els.map((el) => Math.round(el.getBoundingClientRect().height)));
+    expect(heights.length).toBeGreaterThan(1);
+    expect(new Set(heights).size).toBe(1);
+    // Spec §3.2: the policy's two Monitor lines are numbered in policy order.
+    await expect(page.getByRole("group", { name: "Monitor", exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Monitor 2", exact: true })).toBeVisible();
+
+    await opener.click();
+    const panel = page.getByRole("dialog", { name: `BR-LT-0148 · ${laptop.model}` });
+    await expect(panel).toBeVisible();
+    // Focus lands on the close button; the URL remembers the item.
+    await expect(panel.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+    await expect(page).toHaveURL(new RegExp(`[?&]item=${laptop.id}`));
+    await expect(panel.getByRole("heading", { name: "Recent history" })).toBeVisible({ timeout: 15_000 });
+    await expect(panel.getByRole("link", { name: "Open full record" })).toHaveAttribute("href", `/inventory/${laptop.id}`);
+    // The seed's own audit row assigned BR-LT-0148 to EMP-0042 (`assignee.to` = the employee number) — the
+    // heldItemPanel JSON filter finds it.
+    await expect(panel.getByText("Held since", { exact: true })).toBeVisible();
+    // IT is on the direct path and the laptop is not pending: the tile menu's Replace and Return are here too.
+    await expect(panel.getByRole("button", { name: "Replace…" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Return…" })).toBeVisible();
+    await expectNoSeriousAxe(page);
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(page).not.toHaveURL(/[?&]item=/);
+
+    // A refresh with ?item= reopens the panel on that held item.
+    await page.goto(`/employees/${marites.id}?item=${laptop.id}`);
+    await expect(page.getByRole("dialog", { name: `BR-LT-0148 · ${laptop.model}` })).toBeVisible({ timeout: 20_000 });
   });
 });

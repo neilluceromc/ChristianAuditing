@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, numberSlotLabels, orderTiles, profilePrimary, resolvePolicy, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, numberSlotLabels, orderTiles, profilePrimary, profileTiles, resolvePolicy, tileChip, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
 
 const policies = [
   { id: "p-dept", name: "Finance standard", appliesToTitle: null, appliesToDepartmentId: "dept-fin", slots: [] },
@@ -275,5 +275,62 @@ describe("resolvePolicy order (Phase 37)", () => {
   });
   it("falls back to null", () => {
     expect(resolvePolicy({ title: "Agent", departmentId: "none" }, [base, rule])).toBeNull();
+  });
+});
+
+describe("profileTiles — the profile's equal tiles (spec §4.3)", () => {
+  const monitor = { id: "m1", name: "Monitor", assetTypeId: "t-monitor", required: true, loaner: false };
+  const monitor2 = { id: "m2", name: "Monitor", assetTypeId: "t-monitor", required: false, loaner: false };
+  const headset = { id: "h1", name: "Headset", assetTypeId: "t-headset", required: true, loaner: false };
+  const held = [asset("a-mon", "t-monitor"), asset("a-extra", "t-mouse"), asset("a-loan", "t-tablet", "TEMPORARY")];
+  const category: Record<string, string> = { "t-monitor": "Monitor", "t-mouse": "Mouse", "t-tablet": "Tablet" };
+  const tiles = profileTiles(computeLoadout([monitor, monitor2, headset], held), (s) => s.name, (a) => category[a.typeId ?? ""] ?? "Other");
+
+  it("numbers repeats in policy order, then sorts: required gap, filled, optional gap, extras, loans", () => {
+    expect(tiles.map((t) => t.label)).toEqual(["Headset", "Monitor", "Monitor 2", "Mouse", "Tablet"]);
+    expect(tiles.map((t) => t.kind)).toEqual(["slot", "slot", "slot", "extra", "loan"]);
+    expect(tiles.map((t) => t.asset?.id ?? null)).toEqual([null, "a-mon", null, "a-extra", "a-loan"]);
+  });
+  it("keys are unique and say what each tile is", () => {
+    expect(tiles.map((t) => t.key)).toEqual(["slot:h1", "slot:m1", "slot:m2", "extra:a-extra", "loan:a-loan"]);
+    expect(new Set(tiles.map((t) => t.key)).size).toBe(tiles.length);
+  });
+  it("extras and loans carry no slot and are never required", () => {
+    expect(tiles.slice(3).map((t) => [t.slot, t.required])).toEqual([[null, false], [null, false]]);
+  });
+  it("a slot covered by a loan shows that device and the device is not repeated as a loan tile", () => {
+    const laptop = { id: "l1", name: "Laptop", assetTypeId: "t-laptop", required: true, loaner: false };
+    const covered = profileTiles(
+      computeLoadout([laptop], [asset("a-lent", "t-laptop", "TEMPORARY"), asset("a-other", "t-tablet", "TEMPORARY")]),
+      (s) => s.name, () => "Tablet",
+    );
+    expect(covered.map((t) => [t.key, t.asset?.id ?? null, t.coveredByLoan])).toEqual([
+      ["slot:l1", "a-lent", true],
+      ["loan:a-other", "a-other", false],
+    ]);
+  });
+});
+
+describe("tileChip — one status chip per tile (spec §4.3)", () => {
+  const today = "2026-10-16";
+  const base = { kind: "slot" as const, filled: false, required: true, loaner: false, coveredByLoan: false, loanDueAt: null };
+  it("a required gap is Missing (danger); an optional gap is Optional (neutral)", () => {
+    expect(tileChip(base, today)).toEqual({ text: "Missing", tone: "danger" });
+    expect(tileChip({ ...base, required: false }, today)).toEqual({ text: "Optional", tone: "neutral" });
+  });
+  it("a filled slot is Held (success); an extra is Not in policy (neutral)", () => {
+    expect(tileChip({ ...base, filled: true }, today)).toEqual({ text: "Held", tone: "success" });
+    expect(tileChip({ ...base, kind: "extra", filled: true, required: false }, today)).toEqual({ text: "Not in policy", tone: "neutral" });
+  });
+  it("a loan reads On loan · due d MMM: warning, danger once overdue, and says when there is no date", () => {
+    const loan = { ...base, kind: "loan" as const, filled: true, required: false };
+    expect(tileChip({ ...loan, loanDueAt: "2026-10-20T00:00:00.000Z" }, today)).toEqual({ text: "On loan · due 20 Oct", tone: "warning" });
+    expect(tileChip({ ...loan, loanDueAt: "2026-10-16T00:00:00.000Z" }, today)).toEqual({ text: "On loan · due 16 Oct", tone: "warning" });
+    expect(tileChip({ ...loan, loanDueAt: "2026-10-15T00:00:00.000Z" }, today)).toEqual({ text: "On loan · due 15 Oct", tone: "danger" });
+    expect(tileChip(loan, today)).toEqual({ text: "On loan · no due date", tone: "warning" });
+  });
+  it("a loaner slot's device and a loan-covered slot are loans too", () => {
+    expect(tileChip({ ...base, filled: true, loaner: true, loanDueAt: "2026-11-01T00:00:00.000Z" }, today).text).toBe("On loan · due 1 Nov");
+    expect(tileChip({ ...base, filled: true, coveredByLoan: true }, today).text).toBe("On loan · no due date");
   });
 });

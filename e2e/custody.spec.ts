@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { fmtDate, localDateISO } from "../src/lib/format";
+import { fmtDate, fmtDayMonth, localDateISO } from "../src/lib/format";
 import { dueStatus } from "../src/lib/deadlines";
 
 /**
@@ -96,7 +96,7 @@ test.describe.serial("custody", () => {
     // Phase 37 (spec §3.3): a policy belongs to a department or client and is edited on the Equipment
     // policies page. EMP-0095 is Operations, which the seed leaves without one, so Operations gets one
     // here: Start empty (one Laptop line), pin it to this laptop's own type, then a second line of the
-    // SAME type marked Loan. Both lines show as "Laptop" tiles (numbered "Laptop 2" once Task 8 lands).
+    // SAME type marked Loan. Phase 37 (spec §3.2): the lines are numbered in policy order, "Laptop" then "Laptop 2".
     const ops = await db.department.findFirstOrThrow({ where: { name: "Operations" } });
     await login(page, ADMIN);
     await page.goto(`/admin/equipment-policies?tab=internal&group=${ops.id}`);
@@ -123,17 +123,18 @@ test.describe.serial("custody", () => {
     expect(await db.policySlot.count({ where: { policy: { appliesToDepartmentId: ops.id, appliesToTitle: null } } })).toBe(2);
 
     await page.goto(`/employees/${emp.id}`);
-    const laptopTiles = page.getByRole("button", { name: /^Laptop( 2)? slot,/ });
-    await expect(laptopTiles).toHaveCount(2);
-    const loanerTile = laptopTiles.filter({ hasText: "BR-LT-0210" });
-    await expect(loanerTile).toHaveCount(1);
-    await expect(loanerTile.getByText("LOAN", { exact: true })).toBeVisible();
+    // Phase 37 (spec §4.3): each tile is a group named by its label; a tile with a device opens the side panel
+    // through a button named "{label}: {model} {tag}", and a loan is the tile's status chip.
+    const loanerTile = page.getByRole("group", { name: "Laptop 2", exact: true });
+    await expect(loanerTile.getByRole("button", { name: /^Laptop 2: .+ BR-LT-0210$/ })).toBeVisible({ timeout: 20_000 });
+    await expect(loanerTile).toContainText("On loan");
 
     // The plain line (same type, not loaner) stays empty — Leo Tan holds nothing else of this type, and
     // BR-LT-0210 is TEMPORARY so the non-loaner slot's own predicate excludes it.
-    const standardTile = laptopTiles.filter({ hasNotText: "BR-LT-0210" });
-    await expect(standardTile).toHaveCount(1);
-    await expect(standardTile.getByText("policy gap")).toBeVisible();
+    const standardTile = page.getByRole("group", { name: "Laptop", exact: true });
+    await expect(standardTile).toContainText("Nothing assigned");
+    await expect(standardTile).toContainText("Missing");
+    await expect(standardTile).not.toContainText("BR-LT-0210");
   });
 
   test("8. waiving a slot updates the progress line and can be restored; adding a slot shows an EXCEPTION pill", async ({ page }) => {
@@ -153,17 +154,18 @@ test.describe.serial("custody", () => {
       .exec((await progress.textContent())!)!
       .map(Number);
 
-    await page.getByRole("button", { name: "Actions for the headset slot" }).click();
+    // Phase 37 (spec §4.3): the ⋯ is "More for {label}", and the label is the derived "Headset".
+    await page.getByRole("button", { name: "More for Headset", exact: true }).click();
     // Phase 29 (spec §4.4, ruling R4): the pinned menu label is now the shorter
     // "Waive this slot…" — the menu is already this slot's, so naming the
     // person again said nothing.
     await page.getByRole("menuitem", { name: "Waive this slot…" }).click();
-    const waiveDialog = page.getByRole("dialog", { name: "Waive the headset slot?" });
+    const waiveDialog = page.getByRole("dialog", { name: "Waive the Headset slot?" });
     await expect(waiveDialog).toBeVisible();
     await expectNoSeriousAxe(page); // D-20: the Waive dialog, open
     await waiveDialog.getByLabel("Reason").fill("piloting a BYOD headset policy");
     await waiveDialog.getByRole("button", { name: "Waive" }).click();
-    await expect(page.getByText("headset waived for this person")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Headset waived for this person")).toBeVisible({ timeout: 10_000 });
 
     // Waiving removes the slot from effectiveSlots entirely — totalSlots
     // drops by one and filled is unchanged (headset was never filled), so
@@ -197,7 +199,7 @@ test.describe.serial("custody", () => {
     await addDialog.getByRole("button", { name: "Add" }).click();
     await expect(page.getByText("tablet added for this person")).toBeVisible({ timeout: 10_000 });
 
-    const tabletTile = page.getByRole("button", { name: /^tablet slot,/ });
+    const tabletTile = page.getByRole("group", { name: "tablet", exact: true });
     await expect(tabletTile).toBeVisible();
     const exceptionPill = tabletTile.getByText("EXCEPTION");
     await expect(exceptionPill).toBeVisible();
@@ -282,6 +284,19 @@ test.describe.serial("custody", () => {
     // Phase 32 (spec §5.1): the loan row opens the record's own Set loan date dialog in place.
     await expect(rows.nth(0).getByRole("button", { name: "Set loan date…" })).toBeVisible();
     await expect(rows.nth(1)).toContainText("BR-PH-0287 overdue by 1 d");
+
+    // Phase 37 (spec §4.3): loans are a status, not a card. Marites's Phone slot is covered by BR-PH-0287 (a
+    // TEMPORARY iPhone), so the Phone tile shows that loan and its chip carries the due date — now red, overdue.
+    const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    await page.goto(`/employees/${marites.id}`);
+    const phone = page.getByRole("group", { name: "Phone", exact: true });
+    await expect(phone.getByRole("button", { name: /^Phone: .+ BR-PH-0287$/ })).toBeVisible({ timeout: 20_000 });
+    await expect(phone).toContainText(`On loan · due ${fmtDayMonth(yesterday)}`);
+    await expect(phone.locator('[data-tone="danger"]')).toHaveText(/^On loan/);
+    // …and the device is not repeated as a tile of its own, nor in the old cards.
+    await expect(page.getByRole("button", { name: /BR-PH-0287$/ })).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: "On loan", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Also holding", exact: true })).toHaveCount(0);
   });
 
   test("11. bulk-assigning three spares assigns two and skips the untriaged one by name", async ({ page }) => {

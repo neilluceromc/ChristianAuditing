@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtDate, fmtDateTime, fmtMoney, fmtRelativeDays, localDateISO } from "./format";
+import { fmtDate, fmtDateTime, fmtDayMonth, fmtDayMonthYear, fmtMoney, fmtRelativeDays, localDateISO } from "./format";
 
 describe("format", () => {
   it("localDateISO is the Asia/Manila calendar date, not the UTC one", () => {
@@ -13,6 +13,13 @@ describe("format", () => {
     expect(fmtDate(new Date("2026-08-16T00:00:00Z"))).toBe("16 Aug 2026");
     expect(fmtDate(null)).toBe("—");
     expect(fmtDate("2026-01-05T00:00:00Z")).toBe("05 Jan 2026");
+  });
+  it("fmtDayMonth / fmtDayMonthYear render d MMM [yyyy] in Asia/Manila (Phase 37 tiles and side panel)", () => {
+    expect(fmtDayMonth("2026-01-05T00:00:00Z")).toBe("5 Jan");
+    // 17:00Z on the 14th is already the 15th in Manila
+    expect(fmtDayMonth(new Date("2026-03-14T17:00:00Z"))).toBe("15 Mar");
+    expect(fmtDayMonthYear("2026-10-16T00:00:00Z")).toBe("16 Oct 2026");
+    expect(fmtDayMonth(null)).toBe("—");
   });
   it("fmtMoney renders whole pesos and — for empty", () => {
     expect(fmtMoney(55000)).toBe("₱55,000");

@@ -37,6 +37,22 @@ export function fmtDate(value: Date | string | null | undefined): string {
   return dateFmt.format(typeof value === "string" ? new Date(value) : value);
 }
 
+// Phase 37 (spec §4.3/§4.4): the profile tiles' "due 5 Jan" and the side panel's "Held since 5 Jan 2026".
+const dayMonthFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Manila" });
+const dayMonthYearFmt = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Manila",
+});
+
+export function fmtDayMonth(value: Date | string | null | undefined): string {
+  if (!value) return "—";
+  return dayMonthFmt.format(typeof value === "string" ? new Date(value) : value);
+}
+
+export function fmtDayMonthYear(value: Date | string | null | undefined): string {
+  if (!value) return "—";
+  return dayMonthYearFmt.format(typeof value === "string" ? new Date(value) : value);
+}
+
 export function fmtDateTime(value: Date | string | null | undefined): string {
   if (!value) return "—";
   // en-GB renders "16 Aug 2026, 09:41" — the comma reads as table noise
