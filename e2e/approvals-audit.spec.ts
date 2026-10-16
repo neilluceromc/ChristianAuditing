@@ -178,7 +178,7 @@ test.describe.serial("approvals lifecycle — it@", () => {
 
     await page.goto(`${page.url()}/history`);
     // One row per changed field (status, assignee) for the worker's single audit entry.
-    await expect(page.getByRole("row", { name: /lifecycle\.assign executed/ })).toHaveCount(2);
+    await expect(page.getByRole("row", { name: /Assigned \(approved request\)/ })).toHaveCount(2);
 
     await page.goto("/approvals?tab=failed");
     const tabsNav = page.getByRole("navigation", { name: "Queue tabs" });

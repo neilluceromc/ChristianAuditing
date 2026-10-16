@@ -3,6 +3,7 @@ import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
 import { pagedSnapshot } from "@/server/paged";
 import { historyEntries } from "@/lib/history";
+import { resolveHistoryNames } from "@/server/modules/inventory/history-names";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { LOG_PAGE_SIZE, parsePage } from "@/lib/paging";
@@ -36,7 +37,7 @@ export default async function AssetHistoryPage({
         take: pg.take,
       }),
   );
-  const groups = historyEntries(entries);
+  const groups = historyEntries(entries, await resolveHistoryNames(entries));
 
   if (groups.length === 0) {
     return <EmptyState title="No changes recorded" description="Every field change lands here, one row per field." />;

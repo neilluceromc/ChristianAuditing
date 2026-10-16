@@ -193,9 +193,9 @@ test.describe.serial("direct changes", () => {
     expect(newAsset.assigneeId).toBe(carlo.id);
 
     await page.goto(`/inventory/${oldId}/history`);
-    await expect(page.getByRole("row", { name: /replacedBy/ })).toContainText("BR-LT-0210");
+    await expect(page.getByRole("row", { name: /Replaced by/ })).toContainText("BR-LT-0210");
     await page.goto(`/inventory/${newId}/history`);
-    await expect(page.getByRole("row", { name: /replaces/ })).toContainText("BR-LT-0201");
+    await expect(page.getByRole("row", { name: /Replaces/ })).toContainText("BR-LT-0201");
   });
 
   test("5. Bulk change status applies at once", async ({ page }) => {

@@ -916,7 +916,9 @@ test.describe("Phase 39 — bounded lists", () => {
 
     await login(page, IT);
     await page.goto(`/inventory/${asset.id}/history`);
-    const field = (name: string) => page.getByRole("cell", { name, exact: true });
+    // The Field column reads the key in words (Phase 40): "e2eF1" shows as "E2e f1".
+    const label = (n: string) => `E2e ${n.slice(3).toLowerCase()}`;
+    const field = (name: string) => page.getByRole("cell", { name: label(name), exact: true });
     // The extra rows are rendered `hidden` while closed, so "the next row" is the next one not hidden.
     const buttonAfter = (name: string) =>
       page.getByRole("row").filter({ has: field(name) }).locator("xpath=following-sibling::tr[not(@hidden)][1]").getByRole("button");
@@ -925,7 +927,7 @@ test.describe("Phase 39 — bounded lists", () => {
     // Collapsed: the first 3 of each, in order, with the count left over.
     for (const n of ["e2eF1", "e2eF2", "e2eF3", "e2eG1", "e2eG2", "e2eG3"]) await expect(field(n)).toBeVisible();
     for (const n of ["e2eF4", "e2eF5", "e2eG4"]) await expect(field(n)).toHaveCount(0);
-    await expect(page.getByRole("cell", { name: /^e2eF\d$/ })).toHaveText(["e2eF1", "e2eF2", "e2eF3"]);
+    await expect(page.getByRole("cell", { name: /^E2e f\d$/ })).toHaveText(["E2e f1", "E2e f2", "E2e f3"]);
     await expect(buttonAfter("e2eF3")).toHaveText("+2 more fields");
     await expect(buttonAfter("e2eG3")).toHaveText("+1 more fields");
     await expect(buttonAfter("e2eF3")).toHaveAttribute("aria-expanded", "false");
@@ -943,7 +945,7 @@ test.describe("Phase 39 — bounded lists", () => {
     const controls = (await opened.getAttribute("aria-controls"))!.split(" ");
     expect(controls).toHaveLength(2);
     for (const [i, n] of ["e2eF4", "e2eF5"].entries()) {
-      await expect(page.locator(`[id="${controls[i]}"]`)).toContainText(n);
+      await expect(page.locator(`[id="${controls[i]}"]`)).toContainText(label(n));
     }
     await expect(buttonAfter("e2eG3")).toHaveText("+1 more fields");
     await expect(buttonAfter("e2eG3")).toHaveAttribute("aria-expanded", "false");

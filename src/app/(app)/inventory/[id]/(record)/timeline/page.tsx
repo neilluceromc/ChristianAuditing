@@ -3,7 +3,9 @@ import Link from "next/link";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
-import { APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { APPROVAL_STATE_LABEL, APPROVAL_TYPE_LABEL } from "@/lib/labels";
+import { timelinePhrase } from "@/lib/history";
+import { resolveHistoryNames } from "@/server/modules/inventory/history-names";
 import { fmtDate } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { mergeTimeline, parseTimelineCursor, timelineCursorQS, timelineTake, TIMELINE_PAGE_SIZE, type TimelinePoint } from "@/lib/timeline";
@@ -40,6 +42,8 @@ export default async function AssetTimelinePage({
     }),
   ]);
 
+  // Phase 40 (spec §2.4): a holder is named, not numbered — "assigned to Nina Robles", not "to EMP-0097"
+  const names = await resolveHistoryNames(entries);
   const auditPts = entries.map((e) => ({
     id: `audit-${e.id}`,
     when: e.createdAt,
@@ -48,8 +52,8 @@ export default async function AssetTimelinePage({
       at: fmtDate(e.createdAt),
       title: (
         <>
-          <span className="font-medium text-fg">{e.actorLabel}</span> — <span className="font-mono text-xs">{e.action}</span>
-          {e.diff ? ` · ${Object.keys(e.diff as object).length} field${Object.keys(e.diff as object).length === 1 ? "" : "s"}` : ""}
+          <span className="font-medium text-fg">{e.actorLabel}</span>{" "}
+          {timelinePhrase(e, asset.tag, names.employee)}
         </>
       ),
     } satisfies TimelineItem,
@@ -64,7 +68,7 @@ export default async function AssetTimelinePage({
       title: (
         <>
           <Link href={`/approvals/${a.id}`} className="font-mono text-xs text-accent hover:underline">{a.refNo}</Link> · {APPROVAL_TYPE_LABEL[a.type]} —{" "}
-          <span className="font-mono text-xs">{a.state}</span>
+          {APPROVAL_STATE_LABEL[a.state]}
         </>
       ),
     } satisfies TimelineItem,

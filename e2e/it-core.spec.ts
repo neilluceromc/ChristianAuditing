@@ -386,7 +386,7 @@ test.describe("asset record", () => {
     // First hit of /inventory/[id]/history in this file — the default 5s had
     // to cover a cold compile of that route and did not, in the same batch
     // that surfaced the hydration race above.
-    await expect(page.getByRole("row", { name: /model/ }).first()).toContainText("LG 27UL500-W", {
+    await expect(page.getByRole("row", { name: /model/i }).first()).toContainText("LG 27UL500-W", {
       timeout: 20_000,
     });
   });
@@ -423,7 +423,7 @@ test.describe("asset record", () => {
     await secretRow.getByRole("button", { name: "Copy", exact: true }).click();
     await expect(secretRow.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
     await page.goto(`${recordUrl}/history`);
-    await expect(page.getByRole("row", { name: /SECRET_READ/ }).first()).toBeVisible();
+    await expect(page.getByRole("row", { name: /Secret read/ }).first()).toBeVisible();
 
     await login(page, "viewer@thebackroomop.com");
     await page.goto(`${recordUrl}/secrets`);

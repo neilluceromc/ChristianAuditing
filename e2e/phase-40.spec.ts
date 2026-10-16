@@ -11,12 +11,16 @@ import { fmtDate } from "@/lib/format";
  * Complete button is withheld (the server gate refuses with "Remove their IT access first" behind it) until
  * "Mark removed" on the Accounts step writes Removed.
  *
+ * Also (spec 2.4): the asset History and Timeline read in words — names for ids, labels for actions and fields,
+ * and never "[object Object]" for the Finance send-back's object value.
+ *
  * Also (spec 2.1, 2.2): employment moves only through offboarding — Edit offers no "Offboarded" and starts nothing — and
  * the accountability form's Issued column prints the date the item was assigned to this person, not its purchase date.
  */
 
 const db = new PrismaClient();
 const IT = "it@thebackroomop.com";
+const FINANCE = "finance@thebackroomop.com";
 const NO = "EMP-0401";
 const NAME = "Phase Forty Leaver";
 const NO2 = "EMP-0402";
@@ -185,5 +189,82 @@ test.describe.serial("phase 40 — offboarding removes IT access", () => {
     await expect(row).toBeVisible({ timeout: 20_000 });
     await expect(row).toContainText(fmtDate(assigned));
     await expect(row).not.toContainText(fmtDate(purchased));
+  });
+});
+
+test.describe("phase 40 — readable asset history", () => {
+  test("5. History and Timeline show names, labels and the send-back's words — never ids or [object Object]", async ({ page }) => {
+    test.setTimeout(120_000);
+    const tag = "BR-HS-0502";
+    const before = await db.asset.findUniqueOrThrow({
+      where: { tag },
+      select: {
+        id: true, financeConfirmedAt: true, financeConfirmedById: true, financeReturnedAt: true, financeReturnedById: true,
+        financeReturnReason: true, financeReturnFields: true, financeResubmitNote: true, financeNotCapitalised: true,
+      },
+    });
+    const { id, ...saved } = before;
+    try {
+      // "IT-checked, with Finance, nothing flagged" — the state Finance's Send back needs
+      await db.asset.update({
+        where: { id },
+        data: {
+          financeConfirmedAt: null, financeConfirmedById: null, financeReturnedAt: null, financeReturnedById: null,
+          financeReturnReason: null, financeReturnFields: [], financeResubmitNote: null, financeNotCapitalised: false,
+        },
+      });
+
+      // The real send-back: its audit value is an OBJECT ({ fields, note }), the thing that printed "[object Object]".
+      await login(page, FINANCE);
+      await page.goto(`/finance/assets/${id}`);
+      const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back to IT…" });
+      await waitForHydration(sendBack);
+      await sendBack.click();
+      const dialog = page.getByRole("dialog", { name: `Send ${tag} back to IT` });
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel("Cost", { exact: true }).check();
+      await dialog.getByLabel("Sales invoice").check();
+      await dialog.getByLabel("Note for IT").fill("Invoice is for another PO");
+      await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+      await expect(page.getByText(`${tag} sent back to IT`)).toBeVisible();
+
+      // An edit records ids (categoryId, assigneeId) — written as updateAsset does — plus one id that no longer exists.
+      const [fromCat, toCat] = await db.assetCategory.findMany({ where: { cls: "IT" }, orderBy: { name: "asc" }, take: 2 });
+      const nina = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0097" } });
+      await db.auditEntry.create({
+        data: {
+          actorLabel: "E2E Phase 40", entityType: "asset", entityId: id, action: "update",
+          diff: {
+            categoryId: { from: fromCat.id, to: toCat.id },
+            assigneeId: { from: "cgone00000000000000000000", to: nina.id },
+            purchasedAt: { from: null, to: "2026-01-05T00:00:00.000Z" },
+          },
+        },
+      });
+
+      await login(page, IT);
+      await page.goto(`/inventory/${id}/history`);
+      const rowOf = (field: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name: field, exact: true }) }).first();
+      await expect(rowOf("Category")).toContainText(toCat.name, { timeout: 20_000 });
+      await expect(rowOf("Category")).toContainText(fromCat.name);
+      await expect(rowOf("Holder")).toContainText(nina.name);
+      await expect(rowOf("Holder")).toContainText("(removed)");
+      await expect(rowOf("Purchase date")).toContainText("5 Jan 2026");
+      await expect(rowOf("Finance return")).toContainText("Cost, Sales invoice — Invoice is for another PO");
+      await expect(page.getByRole("cell", { name: "Returned by Finance" }).first()).toBeVisible();
+      const main = page.getByRole("main");
+      await expect(main).not.toContainText("[object Object]");
+      await expect(main).not.toContainText(toCat.id);
+      await expect(main).not.toContainText(nina.id);
+      await expect(main).not.toContainText("finance.return");
+
+      await page.goto(`/inventory/${id}/timeline`);
+      await expect(page.getByText("sent back: Cost, Sales invoice", { exact: false }).first()).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText("updated category, holder, purchase date").first()).toBeVisible();
+      await expect(page.getByRole("main")).not.toContainText("finance.return");
+      await expect(page.getByRole("main")).not.toContainText("[object Object]");
+    } finally {
+      await db.asset.update({ where: { id }, data: saved });
+    }
   });
 });
