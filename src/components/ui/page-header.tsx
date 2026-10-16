@@ -7,7 +7,8 @@ export function PageHeader({
   badge,
   actions,
 }: {
-  title: string;
+  /** Omitted when the page draws its own h1 (the employee profile's identity band). */
+  title?: string;
   breadcrumb?: Array<{ label: string; href?: string }>;
   /** e.g. the READ-ONLY · VIEWER pill */
   badge?: React.ReactNode;
@@ -24,12 +25,16 @@ export function PageHeader({
             <Breadcrumb items={breadcrumb} />
           </div>
         )}
-        <div className="flex items-center gap-2.5">
-          <h1 className="text-xl font-semibold leading-tight tracking-[-0.015em] text-fg">
-            {title}
-          </h1>
-          {badge}
-        </div>
+        {(title || badge) && (
+          <div className="flex items-center gap-2.5">
+            {title && (
+              <h1 className="text-xl font-semibold leading-tight tracking-[-0.015em] text-fg">
+                {title}
+              </h1>
+            )}
+            {badge}
+          </div>
+        )}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </header>

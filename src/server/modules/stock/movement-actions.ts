@@ -10,6 +10,7 @@ import {
 } from "@/lib/stock-schema";
 import { canIssue, signedQuantity } from "@/lib/stock-movement-rules";
 import { unitsLabel } from "@/lib/stock-balance";
+import { GROUP_ARCHIVED } from "@/lib/groups";
 import { localDateISO } from "@/lib/format";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
@@ -114,8 +115,10 @@ export async function issueStock(input: unknown): Promise<ActionResult<{ balance
       if (!check.ok) {
         throw new ActionFailure(conflict(`Only ${unitsLabel(check.left, item.unit)} left of ${item.code} — issue at most that many`));
       }
-      const dept = await tx.department.findUnique({ where: { id: d.departmentId }, select: { id: true, name: true } });
+      const dept = await tx.department.findUnique({ where: { id: d.departmentId }, select: { id: true, name: true, archivedAt: true } });
       if (!dept) throw new ActionFailure(validationError({ departmentId: "Unknown department" }));
+      // Phase 37 (spec §2.1): stock is never issued to an archived department or client.
+      if (dept.archivedAt) throw new ActionFailure(validationError({ departmentId: GROUP_ARCHIVED }));
       let employeeId: string | null = null;
       if (d.employeeId) {
         const employee = await tx.employee.findUnique({ where: { id: d.employeeId }, select: { id: true } });

@@ -26,6 +26,9 @@ export const ACTION_LABELS: Record<string, string> = {
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
+  rename: "Renamed", archive: "Ended or archived", restore: "Restored",
+  "policy.saved": "Policy saved",
+  "note.added": "Note added", "note.edited": "Note edited", "note.deleted": "Note deleted", "employee.setup": "IT setup changed",
 };
 export function actionLabel(action: string): string { return ACTION_LABELS[action] ?? action; }
 
@@ -95,8 +98,29 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
   const action = viaApproval ? entry.action.slice(0, -EXECUTED.length) : entry.action;
   const suffix = viaApproval ? " (approved request)" : "";
   switch (action) {
-    case "create":
+    case "create": {
+      // Phase 37: a policy copied from another group's reads as the copy, not as a bare create.
+      if (diff?.copiedFrom?.to) return `${actor}copied ${String(diff.copiedFrom.to)} to ${entry.entityLabel}`;
+      // Phase 37: a department/client create carries `kind` in its diff; older department entries (no kind) read as before.
+      const kind = diff?.kind?.to;
+      if (kind === "CLIENT" || kind === "INTERNAL") {
+        const name = String(diff?.name?.to ?? entry.entityLabel);
+        return `${actor}added ${kind === "CLIENT" ? "client" : "department"} ${name}`;
+      }
       return omitEntity ? `${actor}created` : `${actor}created ${entry.entityLabel}`;
+    }
+    case "policy.saved":
+      return diff?.copiedFrom?.to
+        ? `${actor}copied ${String(diff.copiedFrom.to)} to ${entry.entityLabel}`
+        : `${actor}saved ${entry.entityLabel}'s equipment list`;
+    case "rename":
+      return `${actor}renamed ${String(diff?.name?.from ?? entry.entityLabel)} to ${String(diff?.name?.to ?? "?")}`;
+    case "archive": {
+      const name = String(diff?.name?.to ?? entry.entityLabel);
+      return diff?.kind?.to === "CLIENT" ? `${actor}ended the ${name} account` : `${actor}archived ${name}`;
+    }
+    case "restore":
+      return `${actor}restored ${String(diff?.name?.to ?? entry.entityLabel)}`;
     case "update":
       return omitEntity ? `${actor}updated ${fieldList(diff)}` : `${actor}updated ${fieldList(diff)} on ${entry.entityLabel}`;
     case "SECRET_READ": {
@@ -416,6 +440,19 @@ export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boo
         return omitEntity ? `${actor}set ${String(to)} as the supplier` : `${actor}set ${String(to)} as the supplier on ${entry.entityLabel}`;
       }
       return omitEntity ? `${actor}cleared the supplier` : `${actor}cleared the supplier on ${entry.entityLabel}`;
+    }
+    // Phase 37 (spec §4.5, §4.6): notes and IT setup are written on the employee; the diff keeps the text / label.
+    case "note.added":
+      return omitEntity ? `${actor}added a note` : `${actor}added a note on ${entry.entityLabel}`;
+    case "note.edited":
+      return omitEntity ? `${actor}edited a note` : `${actor}edited a note on ${entry.entityLabel}`;
+    case "note.deleted":
+      return omitEntity ? `${actor}deleted a note` : `${actor}deleted a note on ${entry.entityLabel}`;
+    case "employee.setup": {
+      // one diff key: the field's label ("Entra / Intune", "VPN" …) → { from, to } with the value as words
+      const label = diff ? Object.keys(diff)[0] ?? "IT setup" : "IT setup";
+      const value = String(diff?.[label]?.to ?? "Not recorded");
+      return omitEntity ? `${actor}set ${label} to ${value}` : `${actor}set ${entry.entityLabel}'s ${label} to ${value}`;
     }
     case "purchase.recorded": {
       // Phase 34 (spec §7.3): one row per Register submit, entityLabel is the tag range.

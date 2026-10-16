@@ -99,7 +99,7 @@ test.describe.serial("transfers", () => {
     await waitForHydration(dialog);
     await expect(dialog.getByRole("heading", { name: "Transfer Marites Bautista" })).toBeVisible();
 
-    await dialog.getByLabel(/^New department\b/).selectOption({ label: "HR" });
+    await dialog.getByLabel(/^Moves to\b/).selectOption({ label: "HR" });
     await dialog.getByLabel("Reason").fill("Reorg");
     await dialog.getByRole("button", { name: "Record transfer" }).click();
 
@@ -157,16 +157,22 @@ test.describe.serial("transfers", () => {
     await page.goto(`/employees/${leo.id}`);
     // Before: Operations has no equipment policy at all — the "Equipment
     // slots" grid still renders (it's the view's own container, shown
-    // regardless), but empty: the "No equipment policy applies" banner is
-    // up, and it holds no slot tiles.
-    await expect(page.getByText("No equipment policy applies")).toBeVisible();
+    // regardless): the "No equipment policy applies" banner is up, and it
+    // holds no SLOT tiles. Phase 37 (spec §4.3): Leo's loan BR-LT-0210 is a
+    // tile of its own there ("Laptop", kind loan) — loans are a status now.
+    // Phase 37: the identity band's progress line says it too, so the banner is
+    // picked by its role and the band line by its own test id.
+    await expect(page.getByRole("status").filter({ hasText: "No equipment policy applies" })).toBeVisible();
+    await expect(page.getByTestId("identity-band").getByText("No equipment policy applies")).toBeVisible();
     const slotGroup = page.getByRole("group", { name: "Equipment slots" });
-    await expect(slotGroup.getByRole("button")).toHaveCount(0);
+    await expect(slotGroup.locator('[data-kind="slot"]')).toHaveCount(0);
+    await expect(slotGroup.locator('[data-kind="loan"]')).toHaveCount(1);
+    await expect(slotGroup.getByRole("group", { name: "Laptop", exact: true })).toContainText("On loan");
 
     await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
-    await dialog.getByLabel(/^New department\b/).selectOption({ label: "Finance" });
+    await dialog.getByLabel(/^Moves to\b/).selectOption({ label: "Finance" });
     await dialog.getByRole("button", { name: "Record transfer" }).click();
     await expect(dialog).toBeHidden();
 
@@ -175,7 +181,12 @@ test.describe.serial("transfers", () => {
     // (TEMPORARY) covers it, so it reads "on loan" rather than a bare
     // policy gap (spec §6.3, gap 3).
     await expect(page.getByText("No equipment policy applies")).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.getByRole("button", { name: /^laptop slot, on loan, required$/ })).toBeVisible();
+    // Phase 37 (spec §4.3): the Laptop SLOT tile now shows the loan covering it, and the loan is not repeated.
+    const laptop = slotGroup.getByRole("group", { name: "Laptop", exact: true });
+    await expect(laptop).toHaveAttribute("data-kind", "slot");
+    await expect(laptop.getByRole("button", { name: /^Laptop: .+ BR-LT-0210$/ })).toBeVisible();
+    await expect(laptop).toContainText("On loan");
+    await expect(slotGroup.locator('[data-kind="loan"]')).toHaveCount(0);
   });
 
   test("3. a stale dialog cannot transfer into the employee's now-current department", async ({ page }) => {
@@ -190,7 +201,7 @@ test.describe.serial("transfers", () => {
 
     // R8: the picker excludes the employee's CURRENT department (IT) — the
     // UI alone can never produce this refusal.
-    const deptSelect = dialog.getByLabel(/^New department\b/);
+    const deptSelect = dialog.getByLabel(/^Moves to\b/);
     const optionLabels = await deptSelect.locator("option").allTextContents();
     expect(optionLabels).not.toContain("IT");
     expect(optionLabels).toContain("HR");
@@ -202,7 +213,7 @@ test.describe.serial("transfers", () => {
 
     await dialog.getByRole("button", { name: "Record transfer" }).click();
     // The server's own guard (transferEmployee: toDepartmentId ===
-    // employee.departmentId), surfaced under "New department".
+    // employee.departmentId), surfaced under "Moves to".
     await expect(dialog.getByText("Already in this department")).toBeVisible({ timeout: 10_000 });
     await expect(dialog).toBeVisible();
   });
@@ -215,7 +226,7 @@ test.describe.serial("transfers", () => {
     await openProfileAction(page, "Transfer…");
     const dialog = page.getByRole("dialog");
     await waitForHydration(dialog);
-    await dialog.getByLabel(/^New department\b/).selectOption({ label: "HR" });
+    await dialog.getByLabel(/^Moves to\b/).selectOption({ label: "HR" });
 
     // Tomorrow on the app's own Asia/Manila calendar (Phase 21 D-15): the UTC
     // date is still "today" in Manila before 08:00, and the schema would

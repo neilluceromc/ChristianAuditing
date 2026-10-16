@@ -40,7 +40,7 @@ export function EmployeesTable({
       <THead>
         <Tr>
           <Th {...sortProps("name")}>Employee</Th>
-          <Th width={110}>Department</Th>
+          <Th width={110}>Works for</Th>
           <Th width={100} {...sortProps("loadout")}>Loadout</Th>
           <Th width={60} align="right">Items</Th>
           <Th width={110}>Employment</Th>
@@ -69,7 +69,16 @@ export function EmployeesTable({
                 </span>
               </Link>
             </Td>
-            <Td>{row.department}</Td>
+            <Td>
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                {row.department}
+                {row.departmentKind === "CLIENT" && (
+                  <span className="rounded-full border border-border-strong bg-surface-subtle px-1.5 py-px text-[10px] font-medium leading-tight text-fg-secondary">
+                    Client
+                  </span>
+                )}
+              </span>
+            </Td>
             <Td>
               {row.missingRequired === null ? (
                 <span className="text-fg-faint">no policy</span>

@@ -90,6 +90,23 @@ describe("audit and employee column specs", () => {
 
   // Checked against prisma/schema.prisma's Employee — no email column exists,
   // so an Email header here would name a column nothing could ever fill.
+  // Phase 37 (spec §2.3): "Department" becomes "Works for", and "Staff" follows it.
+  it("the employee sheet names Works for, immediately followed by Staff", () => {
+    const labels = EMPLOYEE_EXPORT_COLUMNS.map((c) => c.label);
+    expect(labels).not.toContain("Department");
+    expect(labels[labels.indexOf("Works for") + 1]).toBe("Staff");
+  });
+
+  it("the Staff column reads Client for a client's person and Internal for a department's", () => {
+    const staff = EMPLOYEE_EXPORT_COLUMNS.find((c) => c.label === "Staff")!;
+    const base = {
+      employeeNo: "EMP-1", name: "A B", department: "Bluepeak Telecom", title: "Agent",
+      employment: "ACTIVE", m365Status: null, joinedAt: new Date("2026-01-01T00:00:00Z"), itemsHeld: 0,
+    };
+    expect(staff.cell({ ...base, kind: "CLIENT" })).toEqual({ value: "Client" });
+    expect(staff.cell({ ...base, department: "Finance", kind: "INTERNAL" })).toEqual({ value: "Internal" });
+  });
+
   it("the employee sheet does not claim an email column that the schema has no data for", () => {
     const labels = EMPLOYEE_EXPORT_COLUMNS.map((c) => c.label);
     expect(labels.some((l) => /email/i.test(l))).toBe(false);

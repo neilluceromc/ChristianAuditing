@@ -19,7 +19,7 @@ export default async function IssueStockPage({
 
   const [items, departmentRows, metaRows, recentPeople, recentItems] = await Promise.all([
     stockItemOptions(),
-    prisma.department.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.department.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, kind: true, archivedAt: true } }),
     prisma.stockItem.findMany({
       where: { archivedAt: null }, select: { id: true, code: true, unit: true, packSize: true },
     }),

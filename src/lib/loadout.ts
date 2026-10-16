@@ -1,9 +1,13 @@
 /**
  * The loadout view's brain: equipment policies define expected slots per
  * role/department, so "what do they have" and "what's missing" are the same
- * glance. Role (title) policy beats department policy; policy edits never
+ * glance. Phase 37 (spec §3.1) order: a group's own title rule beats a global
+ * title policy, which beats the group's base policy; policy edits never
  * touch existing assignments.
  */
+import { dueStatus } from "./deadlines";
+import { fmtDayMonth } from "./format";
+
 export interface PolicyLike {
   id: string;
   name: string;
@@ -45,11 +49,29 @@ export function resolvePolicy<P extends PolicyLike>(
   policies: P[],
 ): P | null {
   const title = employee.title.trim().toLowerCase();
+  const titleMatch = (p: P) => p.appliesToTitle?.trim().toLowerCase() === title;
   return (
-    policies.find((p) => p.appliesToTitle?.trim().toLowerCase() === title) ??
-    policies.find((p) => p.appliesToDepartmentId === employee.departmentId) ??
+    policies.find((p) => p.appliesToDepartmentId === employee.departmentId && titleMatch(p)) ??
+    policies.find((p) => p.appliesToDepartmentId === null && titleMatch(p)) ??
+    policies.find((p) => p.appliesToDepartmentId === employee.departmentId && !p.appliesToTitle) ??
     null
   );
+}
+
+/** Phase 37 (spec §3.2): the label a slot shows — the type inside "Other", else the category. */
+export function slotLabel(categoryName: string, typeName: string): string {
+  return categoryName.trim().toLowerCase() === "other" ? typeName : categoryName;
+}
+
+/** Phase 37 (spec §3.2): repeats become "Monitor 2", "Monitor 3" … in order; counted case-insensitively. */
+export function numberSlotLabels(labels: string[]): string[] {
+  const seen = new Map<string, number>();
+  return labels.map((label) => {
+    const key = label.trim().toLowerCase();
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    return n === 1 ? label : `${label} ${n}`;
+  });
 }
 
 /**
@@ -166,6 +188,17 @@ export function computeLoadout<A extends HeldAssetLike>(slots: SlotLike[], held:
   };
 }
 
+/** Phase 37 (spec §5.4): the copy step 2 of Add employee shows instead of spare pickers for someone not ACTIVE. */
+export const ASSIGNED_ONCE_ACTIVE = "Equipment is assigned once they are active.";
+
+/**
+ * Phase 37 (spec §5.4): the spares a new person's create assigns — the picks for someone ACTIVE, none otherwise
+ * (equipment is never assigned to a leaver; the wizard hides the pickers and the server ignores any sent).
+ */
+export function createAssignments<T>(employment: string, picks: T[]): T[] {
+  return employment === "ACTIVE" ? picks : [];
+}
+
 /** Phase 29 (spec §4.1): the header's one state-chosen primary; null when Edit should lead. */
 export function profilePrimary(input: { employment: string; totalSlots: number; filled: number; missingRequired: number }): { kind: "assign-kit" | "fill-gaps" | "wizard"; label: string } | null {
   if (input.employment === "OFFBOARDING") return { kind: "wizard", label: "Open the offboarding wizard" };
@@ -179,6 +212,75 @@ export function profilePrimary(input: { employment: string; totalSlots: number; 
 export function orderTiles<T extends { asset: unknown | null; required: boolean; coveredByLoan: boolean }>(tiles: T[]): T[] {
   const band = (t: T) => (!t.asset && !t.coveredByLoan ? (t.required ? 0 : 2) : 1);
   return [...tiles].sort((a, b) => band(a) - band(b));
+}
+
+export type TileKind = "slot" | "extra" | "loan";
+
+export interface ProfileTile<A> {
+  key: string;
+  kind: TileKind;
+  label: string;
+  asset: A | null;
+  required: boolean;
+  coveredByLoan: boolean;
+  slot: SlotLike | null;
+}
+
+/**
+ * Phase 37 (spec §4.3): every tile the profile's equal grid shows, in order —
+ * `orderTiles(slots)` with numbered labels, then extras (`unslotted`), then
+ * unclaimed loans (`onLoan`); extras and loans are labelled by `categoryOf`.
+ * Labels are numbered over the slots in POLICY order, before sorting, so the
+ * first Monitor line stays "Monitor" wherever the gap bands move it.
+ *
+ * A slot covered by a loan (computeLoadout's second pass) shows the device
+ * covering it, found by the same greedy in-order walk over `onLoan`; that
+ * device is then not repeated as a loan tile of its own.
+ */
+export function profileTiles<A extends HeldAssetLike>(
+  loadout: Loadout<A>,
+  labelOf: (slot: SlotLike) => string,
+  categoryOf: (a: A) => string,
+): ProfileTile<A>[] {
+  const labels = numberSlotLabels(loadout.slots.map((s) => labelOf(s.slot)));
+  const loanPool = [...loadout.onLoan];
+  const slotTiles = loadout.slots.map<ProfileTile<A>>(({ slot, asset, coveredByLoan }, i) => {
+    let shown = asset;
+    if (!asset && coveredByLoan) {
+      const j = loanPool.findIndex((a) => a.typeId === slot.assetTypeId);
+      if (j >= 0) shown = loanPool.splice(j, 1)[0];
+    }
+    return { key: `slot:${slot.id}`, kind: "slot", label: labels[i], asset: shown, required: slot.required, coveredByLoan, slot };
+  });
+  const loose = (kind: "extra" | "loan") => (a: A): ProfileTile<A> => ({
+    key: `${kind}:${a.id}`, kind, label: categoryOf(a), asset: a, required: false, coveredByLoan: false, slot: null,
+  });
+  return [...orderTiles(slotTiles), ...loadout.unslotted.map(loose("extra")), ...loanPool.map(loose("loan"))];
+}
+
+export type ChipTone = "danger" | "warning" | "success" | "neutral";
+
+/**
+ * Phase 37 (spec §4.3): the one status chip at the bottom of a tile. Loans are a
+ * status, not a card: a loaner slot's device, a loan-covered slot and an
+ * unclaimed loan all read "On loan · due {d MMM}" — amber within 3 days, red
+ * once overdue, neutral further out (amber when no due date is set).
+ */
+export function tileChip(
+  tile: { kind: TileKind; filled: boolean; required: boolean; loaner: boolean; coveredByLoan: boolean; loanDueAt: string | null },
+  today: string,
+): { text: string; tone: ChipTone } {
+  const onLoan = tile.kind === "loan" || tile.coveredByLoan || (tile.loaner && tile.filled);
+  if (onLoan) {
+    if (!tile.loanDueAt) return { text: "On loan · no due date", tone: "warning" };
+    const due = new Date(tile.loanDueAt);
+    const s = dueStatus(due, today);
+    // Spec §4.3: amber when due within 3 days, red when overdue, quiet otherwise.
+    return { text: `On loan · due ${fmtDayMonth(due)}`, tone: s.overdue ? "danger" : s.days <= 3 ? "warning" : "neutral" };
+  }
+  if (tile.kind === "extra") return { text: "Not in policy", tone: "neutral" };
+  if (tile.filled) return { text: "Held", tone: "success" };
+  return tile.required ? { text: "Missing", tone: "danger" } : { text: "Optional", tone: "neutral" };
 }
 
 export type TileMenuItem = "replace" | "return" | "open" | "reserve" | "waive" | "remove-exception";
@@ -213,4 +315,23 @@ export function tileMenuItems(
   if (tile.exceptionId) items.push("remove-exception");
   else if (tile.waivable) items.push("waive");
   return items;
+}
+
+/**
+ * Phase 37 (spec §4.3): the ⋯ items for ANY profile tile. A policy slot asks
+ * `tileMenuItems`. A slot a loan stands in for is still an empty slot (Reserve
+ * on the direct path, Waive / Remove exception) and also holds the loan
+ * (Return unless pending, Open record) — never Replace, since replacing a loan
+ * lends another. Extras and loans offer Return and Open record, or only Open
+ * record when the user may not act or the item is pending.
+ */
+export function profileTileMenuItems(
+  tile: { kind: TileKind; filled: boolean; pending: boolean; exceptionId: string | null; waivable: boolean; coveredByLoan: boolean },
+  ctx: { mayAct: boolean; direct: boolean },
+): TileMenuItem[] {
+  const device: TileMenuItem[] = ctx.mayAct && !tile.pending ? ["return", "open"] : ["open"];
+  if (tile.kind !== "slot") return device;
+  if (!tile.coveredByLoan) return tileMenuItems(tile, ctx);
+  const empty = tileMenuItems({ ...tile, filled: false }, ctx);
+  return [...empty.filter((k) => k === "reserve"), ...device, ...empty.filter((k) => k !== "reserve")];
 }

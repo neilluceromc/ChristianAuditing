@@ -357,26 +357,28 @@ test.describe.serial("deadlines", () => {
       .toBeVisible();
   });
 
-  test("7. the new-employee form starts with no department chosen and the server names the refusal", async ({
+  test("7. the new-employee form starts with no department chosen and Next names what is missing", async ({
     page,
   }) => {
     test.setTimeout(60_000); // first hit of /employees/new in this file
     await login(page, IT);
     await page.goto("/employees/new");
 
-    const department = page.getByLabel("Department");
+    const department = page.getByRole("combobox", { name: "Department", exact: true });
     await waitForHydration(department);
     await expect(department).toHaveValue("");
     await expect(department.locator("option:checked")).toHaveText("Choose a department");
-    // P-9: the Joined default is Manila's today, not UTC's.
-    await expect(page.getByLabel("Joined")).toHaveValue(localDateISO(new Date()));
+    // P-9: the Start date default is Manila's today, not UTC's.
+    await expect(page.getByLabel("Start date")).toHaveValue(localDateISO(new Date()));
 
-    await page.getByLabel("Employee number").fill("EMP-E2E-DUE");
-    await page.getByLabel("Name").fill("Deadline Probe");
+    await page.getByLabel("Employee no.").fill("EMP-E2E-DUE");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Deadline Probe");
     await page.getByLabel("Title").fill("Probe");
-    await page.getByRole("button", { name: "Create employee" }).click();
+    // Phase 37 (spec §5.1): step 1's Next checks in the browser and focuses the first missing field.
+    await page.getByRole("button", { name: "Next", exact: true }).click();
 
-    await expect(page.getByText("Pick a department", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Fill in the department", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(department).toBeFocused();
     await expect(page).toHaveURL(/\/employees\/new$/);
     expect(await db.employee.count({ where: { employeeNo: "EMP-E2E-DUE" } })).toBe(0);
   });

@@ -10,11 +10,13 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/ui/pill";
 import { Select } from "@/components/ui/select";
+import { GroupSelectOptions } from "@/components/ui/group-select-options";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { useToast } from "@/components/ui/toast";
 import { createDraft, saveDraft } from "@/server/modules/purchases/draft-actions";
 import { submitRequest } from "@/server/modules/purchases/actions";
 import type { PolicyLoadout } from "@/server/modules/purchases/queries";
+import type { PickerGroup } from "@/lib/groups";
 import type { ActionResult } from "@/server/action-result";
 
 export interface UnitDraft {
@@ -55,7 +57,7 @@ export function DraftForm({
   initial,
 }: {
   loadouts: PolicyLoadout[];
-  departments: Array<{ id: string; name: string }>;
+  departments: PickerGroup[];
   initial?: { id: string; refNo: string; units: UnitDraft[]; departmentId: string | null };
 }) {
   const router = useRouter();
@@ -228,7 +230,7 @@ export function DraftForm({
                 onChange={(e) => setDepartmentId(e.target.value)}
               >
                 <option value="">Choose a department…</option>
-                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                <GroupSelectOptions groups={departments} keepId={initial?.departmentId} />
               </Select>
             )}
           </FormField>

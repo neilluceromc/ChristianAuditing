@@ -210,8 +210,15 @@ const empRow = (over: Partial<{
 
 describe("buildEmployeeRefs", () => {
   it("resolves a department name to its id when there is exactly one match", () => {
-    const refs = buildEmployeeRefs([{ id: "dept-1", name: "Finance" }], []);
-    expect(refs.departments.get(refKey("Finance"))).toBe("dept-1");
+    const refs = buildEmployeeRefs([{ id: "dept-1", name: "Finance", archivedAt: null }], []);
+    expect(refs.departments.get(refKey("Finance"))).toEqual({ id: "dept-1", archivedAt: null });
+  });
+
+  // Phase 37 (spec §2.1): the ref carries archivedAt, so the importer can block an archived group.
+  it("carries archivedAt on the department ref", () => {
+    const ended = new Date("2026-10-01T00:00:00Z");
+    const refs = buildEmployeeRefs([{ id: "dept-9", name: "Bluepeak Telecom", archivedAt: ended }], []);
+    expect(refs.departments.get(refKey("Bluepeak Telecom"))).toEqual({ id: "dept-9", archivedAt: ended });
   });
 
   // E-6: the same R-1 guard categories/types/vendors already have —
@@ -219,7 +226,7 @@ describe("buildEmployeeRefs", () => {
   // createRefRow never checks case, so "Finance"/"finance" can coexist.
   it("resolves a case-colliding department name to null, not silently to one of the two ids", () => {
     const refs = buildEmployeeRefs(
-      [{ id: "dept-1", name: "Finance" }, { id: "dept-2", name: "finance" }],
+      [{ id: "dept-1", name: "Finance", archivedAt: null }, { id: "dept-2", name: "finance", archivedAt: null }],
       [],
     );
     expect(refs.departments.get(refKey("Finance"))).toBeNull();
@@ -270,7 +277,7 @@ describe("buildEmployeeRefs", () => {
   // that actually turns the guard on").
   it("keys byNameDept by name+department, mapping to the existing employee's employeeNo", () => {
     const refs = buildEmployeeRefs(
-      [{ id: "dept-1", name: "Finance" }],
+      [{ id: "dept-1", name: "Finance", archivedAt: null }],
       [empRow({ id: "e-1", employeeNo: "EMP-0042", name: "Maria Santos", departmentId: "dept-1" })],
     );
     expect(refs.byNameDept.get(nameDeptKey("Maria Santos", "Finance"))).toBe("EMP-0042");
@@ -278,7 +285,7 @@ describe("buildEmployeeRefs", () => {
 
   it("normalises through nameDeptKey, so whitespace/case differences still match", () => {
     const refs = buildEmployeeRefs(
-      [{ id: "dept-1", name: "finance" }],
+      [{ id: "dept-1", name: "finance", archivedAt: null }],
       [empRow({ id: "e-1", employeeNo: "EMP-0042", name: "Maria  Santos", departmentId: "dept-1" })],
     );
     expect(refs.byNameDept.get(nameDeptKey("maria santos", "Finance"))).toBe("EMP-0042");
@@ -286,7 +293,7 @@ describe("buildEmployeeRefs", () => {
 
   it("does not key byNameDept for a different department", () => {
     const refs = buildEmployeeRefs(
-      [{ id: "dept-1", name: "Finance" }, { id: "dept-2", name: "HR" }],
+      [{ id: "dept-1", name: "Finance", archivedAt: null }, { id: "dept-2", name: "HR", archivedAt: null }],
       [empRow({ id: "e-1", employeeNo: "EMP-0042", name: "Maria Santos", departmentId: "dept-1" })],
     );
     expect(refs.byNameDept.get(nameDeptKey("Maria Santos", "HR"))).toBeUndefined();

@@ -1,10 +1,12 @@
-import type { EmploymentStatus, Prisma } from "@prisma/client";
+import type { EmploymentStatus, GroupKind, Prisma } from "@prisma/client";
 import type { ListConfig, ListState, SortKey } from "./url-state";
 
 export const EMPLOYMENT_STATUSES = ["ACTIVE", "OFFBOARDING", "OFFBOARDED"] as const satisfies readonly EmploymentStatus[];
 
+const GROUP_KINDS = ["INTERNAL", "CLIENT"] as const satisfies readonly GroupKind[];
+
 export const EMPLOYEES_LIST_CONFIG: ListConfig = {
-  facets: ["department", "employment", "leavers"],
+  facets: ["department", "kind", "employment", "leavers"],
   sortable: ["name", "employeeNo", "joinedAt", "loadout"],
   defaultSort: [{ key: "name", dir: "asc" }],
 };
@@ -20,6 +22,9 @@ export function buildEmployeeWhere(state: ListState): Prisma.EmployeeWhereInput 
     ];
   }
   if (state.filters.department?.length) where.departmentId = { in: state.filters.department };
+  // Phase 37 (spec §2.3): the Staff facet — Internal | Client staff — filters on the group's kind.
+  const kind = (state.filters.kind ?? []).filter((v): v is GroupKind => (GROUP_KINDS as readonly string[]).includes(v));
+  if (kind.length) where.department = { kind: { in: kind } };
   const employment = (state.filters.employment ?? []).filter((v): v is EmploymentStatus =>
     (EMPLOYMENT_STATUSES as readonly string[]).includes(v));
   if (employment.length) {

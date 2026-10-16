@@ -20,6 +20,21 @@ const db = new PrismaClient();
 const P = "purchasing@thebackroomop.com";
 const IT = "it@thebackroomop.com";
 const ADMIN = "admin@thebackroomop.com";
+
+/**
+ * Phase 37 (spec §5): Add employee is three steps — Next past Details, wait for Equipment to load its
+ * lines, Next again to Check & create. Copied per file (house rule: no helpers across spec files).
+ */
+async function toCheckAndCreate(page: Page) {
+  const next = page.getByRole("button", { name: "Next", exact: true });
+  await next.click();
+  await expect(page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: "Equipment" }))
+    .toHaveAttribute("aria-current", "step", { timeout: 15_000 });
+  await expect(next).toBeEnabled({ timeout: 15_000 });
+  await next.click();
+  await expect(page.getByRole("button", { name: "Create employee" })).toBeVisible({ timeout: 15_000 });
+}
+
 const FIN = "finance@thebackroomop.com";
 
 test.beforeAll(() => {
@@ -333,10 +348,11 @@ test.describe.serial("new employee", () => {
     await page.goto("/employees");
     await page.getByRole("link", { name: "New employee" }).click();
     await expect(page).toHaveURL(/\/employees\/new$/);
-    await page.getByLabel("Employee number").fill("EMP-9001");
-    await page.getByLabel("Name").fill("Test Person");
+    await page.getByLabel("Employee no.").fill("EMP-9001");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Test Person");
     await page.getByLabel("Title").fill("Analyst");
-    await page.getByLabel("Department").selectOption({ label: "IT" });
+    await page.getByRole("combobox", { name: "Department", exact: true }).selectOption({ label: "IT" });
+    await toCheckAndCreate(page);
     await page.getByRole("button", { name: "Create employee" }).click();
     await expect(page).toHaveURL(/\/employees\/[^/]+$/);
     await expect(page.getByRole("heading", { name: "Test Person" })).toBeVisible();
@@ -345,16 +361,18 @@ test.describe.serial("new employee", () => {
     expect(await db.auditEntry.count({ where: { entityType: "employee", entityId: row.id, action: "create" } })).toBe(1);
 
     await page.goto("/employees/new");
-    await page.getByLabel("Employee number").fill("emp-9001");
-    await page.getByLabel("Name").fill("Someone Else");
+    await page.getByLabel("Employee no.").fill("emp-9001");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Someone Else");
     await page.getByLabel("Title").fill("Clerk");
     // Phase 23 (D-20): the create form no longer pre-selects the first
     // department — it opens on "Choose a department" so a blank one is refused
     // ("Pick a department", deadlines.spec.ts case 7). Without an explicit pick
     // the form is refused on the department before it ever reaches the
     // duplicate-employee-number check this case exists to prove.
-    await page.getByLabel("Department").selectOption({ label: "IT" });
+    await page.getByRole("combobox", { name: "Department", exact: true }).selectOption({ label: "IT" });
+    await toCheckAndCreate(page);
     await page.getByRole("button", { name: "Create employee" }).click();
+    // Phase 37 (spec §5.4): a server field error jumps back to step 1 and shows under its field.
     await expect(page.getByText("That employee number is already in use")).toBeVisible();
     expect(await db.employee.count({ where: { employeeNo: { equals: "emp-9001", mode: "insensitive" } } })).toBe(1);
   });

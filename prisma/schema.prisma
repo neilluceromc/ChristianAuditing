@@ -89,6 +89,17 @@ enum EmploymentStatus {
   OFFBOARDED
 }
 
+enum GroupKind {
+  INTERNAL
+  CLIENT
+}
+
+enum SetupState {
+  DONE
+  NOT_YET
+  NOT_NEEDED
+}
+
 enum Priority {
   NORMAL
   HIGH
@@ -163,6 +174,7 @@ model User {
   stocktakeLinesCounted    StocktakeLine[]         @relation("stocktakeLinesCounted")
   employeeTransfers        EmployeeTransfer[]      @relation("employeeTransfers")
   purchaseRecordsCreated   PurchaseRecord[]        @relation("purchaseRecordsCreated")
+  employeeNotes            EmployeeNote[]
 }
 
 model UserPreference {
@@ -191,6 +203,10 @@ model Department {
   id            String             @id @default(cuid())
   name          String             @unique
   locked        Boolean            @default(false)
+  /// Phase 37 (spec §2.1): a client is a Department row with kind CLIENT.
+  kind          GroupKind          @default(INTERNAL)
+  /// Phase 37: null = active; set = archived (internal) / ended (client). History and people stay.
+  archivedAt    DateTime?
   employees     Employee[]
   policies      EquipmentPolicy[]
   requests      PurchaseRequest[]
@@ -346,6 +362,13 @@ model Employee {
   acknowledgements Acknowledgement[]
   stockIssues      StockMovement[]
   transfers        EmployeeTransfer[]
+  /// Phase 37 (spec §4.6): IT setup checklist; null = not recorded.
+  entraStatus      SetupState?
+  autopilotStatus  SetupState?
+  argusStatus      SetupState?
+  /// "None" | "Cloudflare WARP" | "OpenVPN" | any other name (1–40); null = not recorded.
+  vpn              String?
+  notes            EmployeeNote[]
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @default(now()) @updatedAt
 
@@ -376,6 +399,20 @@ model EmployeeTransfer {
 
   @@index([employeeId, effectiveAt, id])
   @@index([toDepartmentId])
+}
+
+/// Phase 37 (spec §4.5): a dated note on a person. The author edits their own; Admin may delete any.
+model EmployeeNote {
+  id         String    @id @default(cuid())
+  employeeId String
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  authorId   String
+  author     User      @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  text       String
+  createdAt  DateTime  @default(now())
+  editedAt   DateTime?
+
+  @@index([employeeId, createdAt])
 }
 
 // ── Assets ────────────────────────────────────────────────────────────

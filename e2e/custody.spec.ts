@@ -1,9 +1,9 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { fmtDate, localDateISO } from "../src/lib/format";
+import { fmtDate, fmtDayMonth, localDateISO } from "../src/lib/format";
 import { dueStatus } from "../src/lib/deadlines";
 
 /**
@@ -66,6 +66,18 @@ async function expectNoSeriousAxe(page: Page) {
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
 }
 
+// Copied from e2e/admin.spec.ts (itself from e2e/it-nav.spec.ts:88-97) — house rule: never import
+// helpers across spec files.
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(
+      true,
+    );
+  }).toPass({ timeout: 20_000 });
+}
+
 const IT = "it@thebackroomop.com";
 const ADMIN = "admin@thebackroomop.com";
 
@@ -81,64 +93,48 @@ test.describe.serial("custody", () => {
     const laptopType = await db.assetType.findUniqueOrThrow({ where: { id: bp.typeId! }, include: { category: true } });
     const emp = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0095" } }); // Leo Tan, Contractor, holds BR-LT-0210 on loan
 
-    // Verified against the seeded DB: only "Finance standard" (applies to the
-    // Finance department) exists, and EMP-0095 is Operations/"Contractor" —
-    // no policy applies to them yet, so a title policy is created below.
+    // Phase 37 (spec §3.3): a policy belongs to a department or client and is edited on the Equipment
+    // policies page. EMP-0095 is Operations, which the seed leaves without one, so Operations gets one
+    // here: Start empty (one Laptop line), pin it to this laptop's own type, then a second line of the
+    // SAME type marked Loan. Phase 37 (spec §3.2): the lines are numbered in policy order, "Laptop" then "Laptop 2".
+    const ops = await db.department.findFirstOrThrow({ where: { name: "Operations" } });
     await login(page, ADMIN);
-    await page.goto("/admin/equipment-policies");
+    await page.goto(`/admin/equipment-policies?tab=internal&group=${ops.id}`);
+    const startEmpty = page.getByRole("button", { name: "Start empty" });
+    await waitForHydration(startEmpty);
+    await startEmpty.click();
 
-    await page.getByLabel("New policy name").fill("Contractor kit");
-    // exact:true — "Applies to" is otherwise a substring match of the
-    // department select's own label ("Department this policy applies to").
-    await page.getByLabel("Applies to", { exact: true }).selectOption({ label: "a role title" });
-    await page.getByLabel("Role title this policy applies to").fill(emp.title);
-    await page.getByRole("button", { name: "Create policy" }).click();
-    await expect(page.getByText("Policy created — add its slots next")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("heading", { name: "Contractor kit", level: 2 })).toBeVisible({ timeout: 10_000 });
-
-    // Scoped to the Contractor kit card: "Add slot" is a bare button label
-    // repeated on every policy card (Finance standard has its own), so an
-    // unscoped getByRole would hit both once a second policy exists.
-    const card = page.getByRole("heading", { name: "Contractor kit", level: 2 }).locator("xpath=../..");
-
-    const typeLabel = `${laptopType.category.name} · ${laptopType.name}`;
-
-    // A standard (non-loaner) slot of the SAME type first, to prove the
-    // converse half of this case's title: a plain slot must NOT claim a
-    // TEMPORARY device either.
-    // Wait for the slot CHIP, not the toast: the chip renders only once the
-    // action has committed and router.refresh() has carried the new slot back,
-    // so the next step sees settled state. The toast is the wrong signal here
-    // — the first add's toast is still showing when the second add is clicked,
-    // so a `.first()` toast wait passes at once and the page.goto below can
-    // outrun the second insert (seen: the employee page rendered one slot,
-    // Phase 17 final battery, custody after admin + axe-sweep in one server).
-    await card.getByLabel("New slot name for Contractor kit").fill("laptop");
-    await card.getByLabel("Asset type for the new slot in Contractor kit").selectOption({ label: typeLabel });
-    await card.getByRole("button", { name: "Add slot" }).click();
-    await expect(card.getByRole("button", { name: "Remove the laptop slot from Contractor kit", exact: true })).toBeVisible({ timeout: 10_000 });
-
-    await card.getByLabel("New slot name for Contractor kit").fill("loaner laptop");
-    await card.getByLabel("Asset type for the new slot in Contractor kit").selectOption({ label: typeLabel });
-    await card.getByLabel("loaner slot — filled by a device on loan (TEMPORARY)").check();
-    await card.getByRole("button", { name: "Add slot" }).click();
-    await expect(card.getByRole("button", { name: "Remove the loaner laptop slot from Contractor kit", exact: true })).toBeVisible({ timeout: 10_000 });
+    const editor = page.getByRole("region", { name: "What their staff should have" });
+    await editor.getByLabel("Line 1 kind", { exact: true }).selectOption({ label: laptopType.category.name });
+    await editor.getByLabel("Line 1 variant", { exact: true }).selectOption({ label: laptopType.name });
+    // A standard (non-loaner) line of the SAME type first, to prove the converse half of this case's
+    // title: a plain slot must NOT claim a TEMPORARY device either.
+    await editor.getByRole("button", { name: "+ Add slot" }).click();
+    await editor.getByLabel("Line 2 kind", { exact: true }).selectOption({ label: laptopType.category.name });
+    await editor.getByLabel("Line 2 variant", { exact: true }).selectOption({ label: laptopType.name });
+    await editor.getByLabel("Line 2 filled by a lent device").check();
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
+    // Wait for the refreshed page to replace the editor (Save idle and disabled: nothing unsaved) — leaving
+    // earlier would meet the editor's beforeunload guard — and for both slots to be in the database.
+    const save = editor.getByRole("button", { name: "Save", exact: true });
+    await expect(save).not.toHaveAttribute("aria-busy", "true", { timeout: 15_000 });
+    await expect(save).toBeDisabled();
+    expect(await db.policySlot.count({ where: { policy: { appliesToDepartmentId: ops.id, appliesToTitle: null } } })).toBe(2);
 
     await page.goto(`/employees/${emp.id}`);
-    const loanerTile = page.getByRole("button", { name: /^loaner laptop slot,/ });
-    await expect(loanerTile).toBeVisible();
-    await expect(loanerTile.getByText("BR-LT-0210")).toBeVisible();
-    // exact:true — "LOAN" is otherwise a substring match of the tile's own
-    // "loaner laptop" name label.
-    await expect(loanerTile.getByText("LOAN", { exact: true })).toBeVisible();
+    // Phase 37 (spec §4.3): each tile is a group named by its label; a tile with a device opens the side panel
+    // through a button named "{label}: {model} {tag}", and a loan is the tile's status chip.
+    const loanerTile = page.getByRole("group", { name: "Laptop 2", exact: true });
+    await expect(loanerTile.getByRole("button", { name: /^Laptop 2: .+ BR-LT-0210$/ })).toBeVisible({ timeout: 20_000 });
+    await expect(loanerTile).toContainText("On loan");
 
-    // The plain "laptop" slot (same type, not loaner) stays empty — Leo Tan
-    // holds nothing else of this type, and BR-LT-0210 is TEMPORARY so the
-    // non-loaner slot's own predicate excludes it.
-    const standardTile = page.getByRole("button", { name: /^laptop slot,/ });
-    await expect(standardTile).toBeVisible();
-    await expect(standardTile.getByText("BR-LT-0210")).toHaveCount(0);
-    await expect(standardTile.getByText("policy gap")).toBeVisible();
+    // The plain line (same type, not loaner) stays empty — Leo Tan holds nothing else of this type, and
+    // BR-LT-0210 is TEMPORARY so the non-loaner slot's own predicate excludes it.
+    const standardTile = page.getByRole("group", { name: "Laptop", exact: true });
+    await expect(standardTile).toContainText("Nothing assigned");
+    await expect(standardTile).toContainText("Missing");
+    await expect(standardTile).not.toContainText("BR-LT-0210");
   });
 
   test("8. waiving a slot updates the progress line and can be restored; adding a slot shows an EXCEPTION pill", async ({ page }) => {
@@ -158,17 +154,18 @@ test.describe.serial("custody", () => {
       .exec((await progress.textContent())!)!
       .map(Number);
 
-    await page.getByRole("button", { name: "Actions for the headset slot" }).click();
+    // Phase 37 (spec §4.3): the ⋯ is "More for {label}", and the label is the derived "Headset".
+    await page.getByRole("button", { name: "More for Headset", exact: true }).click();
     // Phase 29 (spec §4.4, ruling R4): the pinned menu label is now the shorter
     // "Waive this slot…" — the menu is already this slot's, so naming the
     // person again said nothing.
     await page.getByRole("menuitem", { name: "Waive this slot…" }).click();
-    const waiveDialog = page.getByRole("dialog", { name: "Waive the headset slot?" });
+    const waiveDialog = page.getByRole("dialog", { name: "Waive the Headset slot?" });
     await expect(waiveDialog).toBeVisible();
     await expectNoSeriousAxe(page); // D-20: the Waive dialog, open
     await waiveDialog.getByLabel("Reason").fill("piloting a BYOD headset policy");
     await waiveDialog.getByRole("button", { name: "Waive" }).click();
-    await expect(page.getByText("headset waived for this person")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Headset waived for this person")).toBeVisible({ timeout: 10_000 });
 
     // Waiving removes the slot from effectiveSlots entirely — totalSlots
     // drops by one and filled is unchanged (headset was never filled), so
@@ -192,17 +189,19 @@ test.describe.serial("custody", () => {
     expect(waives).toHaveLength(0);
     expect(await db.auditEntry.count({ where: { entityType: "employee", entityId: emp.id, action: "policy.exception.removed" } })).toBe(1);
 
-    // Add a "tablet" slot for this person only.
+    // Add a "Speaker" slot for this person only (Phase 37 §4.7: category Other, type Speaker — it shows as the type).
     await page.getByRole("button", { name: "Add a slot for this person…" }).click();
-    const addDialog = page.getByRole("dialog", { name: "Add a slot for this person" });
+    const addDialog = page.getByRole("dialog", { name: `Add a slot for ${emp.name}` });
     await expect(addDialog).toBeVisible();
+    await addDialog.getByLabel("What").selectOption({ label: "Other" });
+    await addDialog.getByLabel("Which kind").selectOption({ label: "Speaker" });
+    await expect(addDialog.getByText("Shows as “Speaker”")).toBeVisible();
     await expectNoSeriousAxe(page); // D-20: the Add-a-slot dialog, open
-    await addDialog.getByLabel("Slot name").fill("tablet");
     await addDialog.getByLabel("Reason").fill("pilot device for field staff");
-    await addDialog.getByRole("button", { name: "Add" }).click();
-    await expect(page.getByText("tablet added for this person")).toBeVisible({ timeout: 10_000 });
+    await addDialog.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByText("Speaker added for this person")).toBeVisible({ timeout: 10_000 });
 
-    const tabletTile = page.getByRole("button", { name: /^tablet slot,/ });
+    const tabletTile = page.getByRole("group", { name: "Speaker", exact: true });
     await expect(tabletTile).toBeVisible();
     const exceptionPill = tabletTile.getByText("EXCEPTION");
     await expect(exceptionPill).toBeVisible();
@@ -210,7 +209,7 @@ test.describe.serial("custody", () => {
 
     const adds = await db.employeeSlotException.findMany({ where: { employeeId: emp.id, kind: "ADD" } });
     expect(adds).toHaveLength(1);
-    expect(adds[0].name).toBe("tablet");
+    expect(adds[0].name).toBe("Speaker");
     expect(adds[0].reason).toBe("pilot device for field staff");
     expect(await db.auditEntry.count({ where: { entityType: "employee", entityId: emp.id, action: "policy.exception.added" } })).toBe(1);
   });
@@ -287,6 +286,19 @@ test.describe.serial("custody", () => {
     // Phase 32 (spec §5.1): the loan row opens the record's own Set loan date dialog in place.
     await expect(rows.nth(0).getByRole("button", { name: "Set loan date…" })).toBeVisible();
     await expect(rows.nth(1)).toContainText("BR-PH-0287 overdue by 1 d");
+
+    // Phase 37 (spec §4.3): loans are a status, not a card. Marites's Phone slot is covered by BR-PH-0287 (a
+    // TEMPORARY iPhone), so the Phone tile shows that loan and its chip carries the due date — now red, overdue.
+    const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    await page.goto(`/employees/${marites.id}`);
+    const phone = page.getByRole("group", { name: "Phone", exact: true });
+    await expect(phone.getByRole("button", { name: /^Phone: .+ BR-PH-0287$/ })).toBeVisible({ timeout: 20_000 });
+    await expect(phone).toContainText(`On loan · due ${fmtDayMonth(yesterday)}`);
+    await expect(phone.locator('[data-tone="danger"]')).toHaveText(/^On loan/);
+    // …and the device is not repeated as a tile of its own, nor in the old cards.
+    await expect(page.getByRole("button", { name: /BR-PH-0287$/ })).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: "On loan", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Also holding", exact: true })).toHaveCount(0);
   });
 
   test("11. bulk-assigning three spares assigns two and skips the untriaged one by name", async ({ page }) => {

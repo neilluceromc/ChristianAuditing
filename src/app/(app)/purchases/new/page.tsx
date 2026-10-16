@@ -9,7 +9,7 @@ export default async function NewPurchasePage() {
   await requireRole(...DRAFT_ROLES);
   const [loadouts, departments] = await Promise.all([
     policyLoadouts(),
-    prisma.department.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ select: { id: true, name: true, kind: true, archivedAt: true }, orderBy: { name: "asc" } }),
   ]);
 
   return (

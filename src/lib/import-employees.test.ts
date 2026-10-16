@@ -5,17 +5,17 @@ import {
 } from "./import-employees";
 import { nameDeptKey } from "./same-name";
 
-// The real 8-column export header (`EMPLOYEE_EXPORT_COLUMNS`, export-columns.ts)
+// The real 9-column export header (`EMPLOYEE_EXPORT_COLUMNS`, export-columns.ts)
 // — not a subset. Task 7 shipped once with a fixture missing several real
 // columns and it stayed green; using the real header exercises the round
 // trip (export, edit, re-import) this feature exists for.
-const HEADER = ["Employee no", "Name", "Department", "Title", "Employment", "M365", "Joined", "Items held"];
+const HEADER = ["Employee no", "Name", "Works for", "Staff", "Title", "Employment", "M365", "Joined", "Items held"];
 
 const COL = {
-  employeeNo: 0, name: 1, department: 2, title: 3, employment: 4, m365: 5, joined: 6, itemsHeld: 7,
+  employeeNo: 0, name: 1, department: 2, staff: 3, title: 4, employment: 5, m365: 6, joined: 7, itemsHeld: 8,
 };
 
-/** An 8-cell row, blank by default, with the given columns filled in. */
+/** A 9-cell row, blank by default, with the given columns filled in. */
 function cells(over: Partial<Record<keyof typeof COL, unknown>>): unknown[] {
   const row: unknown[] = Array(HEADER.length).fill("");
   for (const [key, value] of Object.entries(over)) row[COL[key as keyof typeof COL]] = value;
@@ -23,7 +23,11 @@ function cells(over: Partial<Record<keyof typeof COL, unknown>>): unknown[] {
 }
 
 const REFS: EmployeeRefs = {
-  departments: new Map([["finance", "dept-1"], ["it", "dept-2"]]),
+  departments: new Map([
+    ["finance", { id: "dept-1", archivedAt: null }],
+    ["it", { id: "dept-2", archivedAt: null }],
+    ["bluepeak telecom", { id: "dept-3", archivedAt: null }],
+  ]),
   byEmployeeNo: new Map([
     ["emp-0042", { id: "e-1", employment: "ACTIVE", departmentId: "dept-1" }],
     ["emp-0099", { id: "e-2", employment: "OFFBOARDED", departmentId: "dept-2" }],
@@ -36,6 +40,21 @@ const OPTS: EmployeeImportOptions = {
 };
 
 describe("matchHeaders(EMPLOYEE_IMPORT_HEADERS)", () => {
+  // Phase 37 (spec §2.3): the exported "Works for" header round-trips, and "Client" is accepted too.
+  it("maps the headers Works for and Client to the department key, and still Department", () => {
+    for (const h of ["Works for", "Client", "Department"]) {
+      const m = matchHeaders(["Employee no", "Name", "Title", h, "Joined"], EMPLOYEE_IMPORT_HEADERS);
+      expect(m.map.get("department")).toBe(3);
+      expect(m.missing).toEqual([]);
+    }
+  });
+
+  it("reports the exported Staff column as unrecognised rather than failing the file", () => {
+    const m = matchHeaders(HEADER, EMPLOYEE_IMPORT_HEADERS);
+    expect(m.missing).toEqual([]);
+    expect(m.unknown).toEqual(expect.arrayContaining(["Staff"]));
+  });
+
   it("matches case- and space-insensitively", () => {
     const m = matchHeaders(["  employee no ", "NAME"], EMPLOYEE_IMPORT_HEADERS);
     expect(m.map.get("employeeNo")).toBe(0);
@@ -60,10 +79,10 @@ describe("matchHeaders(EMPLOYEE_IMPORT_HEADERS)", () => {
     expect(m.unknown).toEqual(["Cost centre"]);
   });
 
-  it("matches the real export header with no missing and no unknown other than M365/Items held", () => {
+  it("matches the real export header with no missing and no unknown other than Staff/M365/Items held", () => {
     const m = matchHeaders(HEADER, EMPLOYEE_IMPORT_HEADERS);
     expect(m.missing).toEqual([]);
-    expect(m.unknown).toEqual(["M365", "Items held"]);
+    expect(m.unknown).toEqual(["Staff", "M365", "Items held"]);
   });
 });
 
@@ -101,6 +120,39 @@ describe("planEmployeeRows", () => {
     const row = [cells({ employeeNo: "emp-0042", name: "Marites Bautista", department: "Finance", title: "Accountant", joined: "2020-01-01" })];
     const plan = planEmployeeRows(headers, row, REFS, OPTS);
     expect(plan.rows[0]).toMatchObject({ kind: "update", employeeId: "e-1" });
+  });
+
+  // Phase 37 (spec §2.1): an archived department or client is blocked, by name, across both kinds.
+  it("blocks a row naming an archived department or client as archived-department, detail = the raw value", () => {
+    const refs: EmployeeRefs = {
+      ...REFS,
+      departments: new Map([["bluepeak telecom", { id: "dept-3", archivedAt: new Date() }]]),
+    };
+    const row = [cells({ employeeNo: "EMP-0100", name: "Nina Robles", department: "Bluepeak Telecom", title: "Agent", joined: "2026-01-05" })];
+    const plan = planEmployeeRows(matchHeaders(HEADER, EMPLOYEE_IMPORT_HEADERS), row, refs, OPTS);
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "archived-department", detail: "Bluepeak Telecom" });
+  });
+
+  // Ruling (review round 1): only a CREATE is blocked for an archived group. An UPDATE naming the
+  // person's own current archived group is accepted, so export, edit, re-import still works for them.
+  it("accepts an UPDATE row naming the person's current archived group", () => {
+    const refs: EmployeeRefs = {
+      ...REFS,
+      departments: new Map([["finance", { id: "dept-1", archivedAt: new Date() }]]),
+    };
+    const row = [cells({ employeeNo: "EMP-0042", name: "Marites Bautista", department: "Finance", title: "Accountant", joined: "2020-01-01" })];
+    const plan = planEmployeeRows(matchHeaders(HEADER, EMPLOYEE_IMPORT_HEADERS), row, refs, OPTS);
+    expect(plan.rows[0]).toMatchObject({ kind: "update", employeeId: "e-1" });
+  });
+
+  it("still blocks a CREATE row naming an archived group as archived-department", () => {
+    const refs: EmployeeRefs = {
+      ...REFS,
+      departments: new Map([["finance", { id: "dept-1", archivedAt: new Date() }]]),
+    };
+    const row = [cells({ employeeNo: "EMP-0777", name: "Nina Robles", department: "Finance", title: "Accountant", joined: "2026-01-05" })];
+    const plan = planEmployeeRows(matchHeaders(HEADER, EMPLOYEE_IMPORT_HEADERS), row, refs, OPTS);
+    expect(plan.rows[0]).toMatchObject({ kind: "blocked", cause: "archived-department", detail: "Finance" });
   });
 
   // 6. An unknown department is blocked unknown-department, detail = the raw value.

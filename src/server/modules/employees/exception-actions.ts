@@ -8,7 +8,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
-import { resolvePolicy } from "@/lib/loadout";
+import { resolvePolicy, slotLabel } from "@/lib/loadout";
 import { reasonRequired } from "@/lib/reason";
 
 const reason = reasonRequired();
@@ -38,7 +38,6 @@ async function loadEmployee(employeeId: string): Promise<
 
 const addSchema = z.object({
   employeeId: z.string().min(1),
-  name: z.string().trim().min(2, "Name the slot").max(40),
   assetTypeId: z.string().min(1, "Pick an asset type"),
   required: z.boolean(),
   loaner: z.boolean(),
@@ -55,17 +54,22 @@ export async function addSlotException(input: unknown): Promise<ActionResult<{ i
   const d = parsed.data;
   const loaded = await loadEmployee(d.employeeId);
   if ("failure" in loaded) return loaded.failure;
-  const type = await prisma.assetType.findFirst({ where: { id: d.assetTypeId, category: { cls: "IT" } }, select: { name: true } });
+  const type = await prisma.assetType.findFirst({
+    where: { id: d.assetTypeId, category: { cls: "IT" } },
+    select: { name: true, category: { select: { name: true } } },
+  });
   if (!type) return validationError({ assetTypeId: "Unknown asset type" });
+  // Phase 37 (spec §4.7): the slot names itself — the category, or the type inside Other.
+  const label = slotLabel(type.category.name, type.name);
 
   const id = await prisma.$transaction(async (tx) => {
     const row = await tx.employeeSlotException.create({
-      data: { employeeId: d.employeeId, kind: "ADD", name: d.name, assetTypeId: d.assetTypeId, required: d.required, loaner: d.loaner, reason: d.reason, createdById: user.id },
+      data: { employeeId: d.employeeId, kind: "ADD", name: label, assetTypeId: d.assetTypeId, required: d.required, loaner: d.loaner, reason: d.reason, createdById: user.id },
     });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name, entityType: "employee", entityId: d.employeeId,
       action: "policy.exception.added",
-      diff: { slot: { from: null, to: `${d.name}${d.loaner ? " (loaner)" : ""} · ${type.name}` }, reason: { from: null, to: d.reason } },
+      diff: { slot: { from: null, to: `${label}${d.loaner ? " (loaner)" : ""} · ${type.name}` }, reason: { from: null, to: d.reason } },
     });
     return row.id;
   });

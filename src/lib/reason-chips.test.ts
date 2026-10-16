@@ -21,6 +21,16 @@ describe("REASON_CHIPS", () => {
   }
 });
 
+describe("policy exception chips (Phase 37)", () => {
+  it("adding and waiving have their own chips", () => {
+    expect(REASON_CHIPS["policy.exception.add"]).toEqual(["Role needs it", "Client requirement", "Remote work setup", "Accessibility need"]);
+    expect(REASON_CHIPS["policy.exception.waive"]).toEqual(["Not needed for this role", "Uses own device", "Client provides it"]);
+  });
+  it("the single combined key is gone", () => {
+    expect("policy.exception" in REASON_CHIPS).toBe(false);
+  });
+});
+
 describe("chipsForOutcome", () => {
   it("MISSING maps to asset.missing", () => {
     expect(chipsForOutcome("MISSING")).toEqual(REASON_CHIPS["asset.missing"]);

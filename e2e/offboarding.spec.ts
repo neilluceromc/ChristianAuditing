@@ -1,10 +1,22 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 
 const db = new PrismaClient();
+
+// Copied from e2e/admin.spec.ts (itself from e2e/it-nav.spec.ts:88-97) — house rule: never import
+// helpers across spec files.
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(
+      true,
+    );
+  }).toPass({ timeout: 20_000 });
+}
 
 async function login(page: Page, email: string) {
   // /logout clears the session cookie and redirects to /login, which keeps this
@@ -396,49 +408,65 @@ test.describe("reservations", () => {
 });
 
 test.describe("equipment policies", () => {
-  test("chips show required vs optional, a slot can be added, and the audit records both lists", async ({ page }) => {
+  // Phase 37 (spec §3.3): one list per department or client, edited as Category / Type lines and saved
+  // whole; the audit entry carries the slot lists before and after.
+  test("Finance's list shows required vs optional lines, a line can be added, and the audit records both lists", async ({ page }) => {
+    const finance = await db.department.findFirstOrThrow({ where: { name: "Finance" } });
     await login(page, "it@thebackroomop.com");
-    await page.goto("/admin/equipment-policies");
+    await page.goto(`/admin/equipment-policies?tab=internal&group=${finance.id}`);
     await expectNoSeriousAxe(page);
 
-    await expect(page.getByRole("heading", { name: "Finance standard" })).toBeVisible();
-    await expect(page.getByText("department: Finance")).toBeVisible();
-    await expect(page.getByRole("button", { name: /second monitor · .* · optional/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^laptop · .* · required/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Finance", level: 2 })).toBeVisible();
+    await expect(page.getByText("Internal department", { exact: true })).toBeVisible();
+    const editor = page.getByRole("region", { name: "What their staff should have" });
+    await expect(editor.getByLabel(/^Line \d+ kind$/)).toHaveCount(6);
+    await expect(editor.getByLabel("Line 1 kind", { exact: true }).locator("option:checked")).toHaveText("Laptop");
+    await expect(editor.getByLabel("Line 1 needed")).toBeChecked();
+    // the seed's sixth line is the optional second monitor
+    await expect(editor.getByLabel("Line 6 kind", { exact: true }).locator("option:checked")).toHaveText("Monitor");
+    await expect(editor.getByLabel("Line 6 needed")).not.toBeChecked();
 
-    await page.getByLabel(/New slot name for Finance standard/).fill("webcam");
-    await page.getByRole("button", { name: "Add slot" }).click();
-    await expect(page.getByText(/Slot added/)).toBeVisible();
-    await expect(page.getByRole("button", { name: /webcam · .* · required/ })).toBeVisible();
+    const add = editor.getByRole("button", { name: "+ Add slot" });
+    await waitForHydration(add);
+    await add.click();
+    await expect(editor.getByLabel(/^Line \d+ kind$/)).toHaveCount(7);
+    await editor.getByLabel("Line 7 kind", { exact: true }).selectOption({ label: "Webcam" });
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
+    // the refreshed page replaces the editor (Save idle and disabled) before this test leaves it
+    const save = editor.getByRole("button", { name: "Save", exact: true });
+    await expect(save).not.toHaveAttribute("aria-busy", "true", { timeout: 15_000 });
+    await expect(save).toBeDisabled();
+    await expect(editor.getByLabel(/^Line \d+ kind$/)).toHaveCount(7);
 
     await page.goto("/audit");
-    // entityLabels resolves an equipment-policy id to the policy NAME with a
-    // link back to this page — without that teaching, the row reads as a
-    // truncated cuid. Phase 33 (R4): the pill reads in friendly words
-    // ("equipment policy"), and the table no longer has a field-name cell, so
-    // the `slots` key — what carries both lists — is checked on the stored row.
+    // entityLabels resolves an equipment-policy id to the policy NAME with a link back to the policies
+    // page. The `slots` key — what carries both lists — is checked on the stored row.
     const auditRow = page.getByRole("row", { name: /equipment policy/i }).first();
     await expect(auditRow).toContainText("Finance standard");
-    await expect(auditRow).toContainText("policy.slot.added");
+    await expect(auditRow).toContainText(/Policy saved|saved Finance standard's equipment list/);
     const policy = await db.equipmentPolicy.findFirstOrThrow({ where: { name: "Finance standard" } });
     const entry = await db.auditEntry.findFirstOrThrow({
-      where: { entityType: "equipment-policy", entityId: policy.id, action: "policy.slot.added" },
+      where: { entityType: "equipment-policy", entityId: policy.id, action: "policy.saved" },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
-    expect(entry.diff).toEqual(expect.objectContaining({ slots: expect.anything() }));
+    const slots = (entry.diff as { slots?: { from: string[]; to: string[] } }).slots;
+    expect(slots?.from).toHaveLength(6);
+    expect(slots?.to).toHaveLength(7);
   });
 
-  test("viewer sees the policies read-only — no chips to click, no add row", async ({ page }) => {
+  test("viewer sees the policies read-only — no line controls, no Save", async ({ page }) => {
+    const finance = await db.department.findFirstOrThrow({ where: { name: "Finance" } });
     await login(page, "viewer@thebackroomop.com");
-    await page.goto("/admin/equipment-policies");
+    await page.goto(`/admin/equipment-policies?tab=internal&group=${finance.id}`);
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Add slot" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /Actions for Finance standard/ })).toHaveCount(0);
-    // A viewer's mutating affordances are ABSENT, not disabled: the chip still
-    // displays the slot, but as a span with no toggle — so it must not be a
-    // button at all, and its label must drop the "click to toggle" suffix.
-    await expect(page.getByRole("button", { name: /click to toggle/ })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^laptop · .* · required/ })).toHaveCount(0);
-    await expect(page.getByText("LAPTOP").first()).toBeVisible();
+    // A viewer's mutating affordances are ABSENT, not disabled: the lines read as text.
+    const editor = page.getByRole("region", { name: "What their staff should have" });
+    await expect(editor.getByRole("cell", { name: "Laptop", exact: true }).first()).toBeVisible();
+    await expect(page.getByLabel(/^Line \d+ kind$/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "+ Add slot" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /More for .*policy/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Start empty" })).toHaveCount(0);
   });
 });

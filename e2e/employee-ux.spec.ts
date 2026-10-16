@@ -11,17 +11,17 @@ import { localDateISO } from "@/lib/format";
  * nine cases, each independent: its own fixtures, no serial dependency, and a
  * `finally` that puts back every MUTABLE field it changed, so a failure in one
  * never cascades into the next.
- *   1 (§4.4/§4.6) a filled tile IS its menu's trigger — Replace…/Return…/Open
- *     record, a Return dialog that names tag, model AND holder, Enter reopens
- *     the menu from the keyboard and Escape hands focus back to the tile.
- *   2 (§4.4, plan P-8) the tag inside a tile is text, not a link: "Open record"
- *     in the menu is the route to the asset.
+ *   1 (§4.4/§4.6) a filled tile's ⋯ ("More for {label}") offers Replace…/
+ *     Return…/Open record, a Return dialog that names tag, model AND holder,
+ *     Enter reopens the menu from the keyboard and Escape hands focus back.
+ *   2 (Phase 37 §4.3) the tag inside a tile is a link to the record, and
+ *     "Open record" in the menu lands there too.
  *   3 (§4.1) a leaver's header: the due pill on the badge, "Open the
  *     offboarding wizard" as the one primary, Edit still beside it, and a More
  *     menu with no Transfer…/Start offboarding… in it.
  *   4 (§4.1, plan P-6) the state-chosen primary drives the grid — "Assign kit"
  *     on a day-one hire opens the first Fill dialog; one assignment later the
- *     same button reads "Fill N gaps" and focuses the first gap tile.
+ *     same button reads "Fill N gaps" and focuses the first gap tile's Fill.
  *   5 (§4.4, ruling R8) the hold sitting on an empty tile says so, and "Assign
  *     reserved" fulfils it in one click.
  *   6 (§6, plan P-4) the list's Loadout column sorts: most required gaps
@@ -30,14 +30,19 @@ import { localDateISO } from "@/lib/format";
  *   8 (§5) the New form: Name focused, the live number check (next free /
  *     already taken), the policy preview, ONE same-name refusal, and "Create
  *     and add another" keeping the department and the URL.
- *   9 (ruling R2) a viewer's tiles are inert — groups, not buttons, and no
- *     header actions at all.
+ *   9 (ruling R2) a viewer's tiles carry no actions — no ⋯, no Fill, no
+ *     header actions — though the read-only side panel still opens.
+ *  10 (Phase 37 §4.3/§4.4) equal tiles, "Monitor" / "Monitor 2", and the side
+ *     panel: the Laptop tile opens it, Escape closes it back onto the tile,
+ *     and `?item=` reopens it after a reload.
+ *  11 (Phase 37 §4.7) Add a slot asks the category, then the type, names the
+ *     slot itself ("Shows as"), and a second Monitor is numbered "Monitor 2".
  *
  * Seeded fixtures this file depends on (prisma/seed.ts), read off the seed
  * rather than assumed from the brief:
  *   Marites Bautista EMP-0042 — Finance/Accountant, so "Finance standard"
- *     (laptop/monitor/dock/headset/phone required, second monitor optional)
- *     applies. Holds BR-LT-0148 (Dell Latitude 5420, the laptop slot),
+ *     (Laptop/Monitor/Docking Station/Headset/Phone required, a second
+ *     Monitor optional — the tiles read "Monitor" and "Monitor 2") applies. Holds BR-LT-0148 (Dell Latitude 5420, the laptop slot),
  *     BR-MN-0902, BR-DK-0071 and BR-PH-0287 (TEMPORARY). APR-2039 names
  *     BR-LT-0148 but carries NO employeeId, so the profile's `openApprovals`
  *     (employee-scoped) never sees it and the laptop tile is not "pending" —
@@ -125,12 +130,27 @@ const dayFloor = (d: Date) => dayFromISO(localDateISO(d));
 const IT = "it@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
+/**
+ * Phase 37 (spec §5): Add employee is three steps — Next past Details, wait for Equipment to load its
+ * lines, Next again to Check & create. Copied per file (house rule: no helpers across spec files).
+ */
+async function toCheckAndCreate(page: Page) {
+  const next = page.getByRole("button", { name: "Next", exact: true });
+  await next.click();
+  await expect(page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: "Equipment" }))
+    .toHaveAttribute("aria-current", "step", { timeout: 15_000 });
+  await expect(next).toBeEnabled({ timeout: 15_000 });
+  await next.click();
+  await expect(page.getByRole("button", { name: "Create employee" })).toBeVisible({ timeout: 15_000 });
+}
+
 test.describe("Phase 29 — the employee area obeys the laws", () => {
-  test("1. a filled tile opens its menu; Return… confirms with model and holder; Escape refocuses", async ({ page }) => {
+  test("1. a filled tile's ⋯ opens its menu; Return… confirms with model and holder; Escape refocuses", async ({ page }) => {
     const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     await login(page, IT);
     await page.goto(`/employees/${marites.id}`);
-    const tile = page.getByRole("button", { name: /^laptop slot, / });
+    // Phase 37 (spec §4.3): the tile body opens the side panel (case 10); the ⋯ beside the label is the menu.
+    const tile = page.getByRole("button", { name: "More for Laptop", exact: true });
     await waitForHydration(tile);
     await tile.click();
 
@@ -146,8 +166,7 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
 
-    // Plan P-7: the tile is the Menu's trigger, so Enter on it opens the menu
-    // and Escape closes it and hands focus straight back.
+    // Enter on the ⋯ opens the menu, and Escape closes it and hands focus straight back.
     await tile.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("menu")).toBeVisible();
@@ -163,14 +182,14 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
 
     await login(page, IT);
     await page.goto(`/employees/${marites.id}`);
-    const tile = page.getByRole("button", { name: /^laptop slot, / });
-    await waitForHydration(tile);
-    // Plan P-8: the tag inside the tile is plain text now (a link nested in the
-    // tile's own button is axe's nested-interactive) — this menu item is the
-    // only route from the tile to the record.
-    await expect(tile.getByRole("link")).toHaveCount(0);
+    // Phase 37 (spec §4.3): the tag is a link again — the side panel's opener is a sibling stretched over the
+    // card, never the link's parent, so nothing interactive nests.
+    const tile = page.getByRole("group", { name: "Laptop", exact: true });
+    await expect(tile.getByRole("link", { name: "BR-LT-0148" })).toHaveAttribute("href", `/inventory/${laptop.id}`);
 
-    await tile.click();
+    const more = tile.getByRole("button", { name: "More for Laptop", exact: true });
+    await waitForHydration(more);
+    await more.click();
     await page.getByRole("menu").getByRole("menuitem", { name: "Open record" }).click();
     await page.waitForURL(`**/inventory/${laptop.id}`);
     await expect(page.getByRole("heading", { name: "BR-LT-0148", level: 1 })).toBeVisible({ timeout: 20_000 });
@@ -181,7 +200,8 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     await login(page, IT);
     await page.goto(`/employees/${dennis.id}`);
 
-    const header = page.locator("main header").first();
+    // Phase 37 (spec §4.1): the name, due pill and actions moved from the page header into the identity band.
+    const header = page.getByTestId("identity-band");
     // The seed puts Dennis two days past his completion date, so the badge's
     // DuePill reads "2 d overdue" (deadlines.ts: dueStatus).
     await expect(header.getByText(/overdue|due/i)).toBeVisible();
@@ -222,9 +242,10 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       // One real assignment, through the phone tile — the only slot whose
       // spare is neither held for Nina (BR-MN-0910, case 5's fixture) nor
       // promised by an open approval (BR-LT-0181 / APR-2041).
-      const phoneTile = page.getByRole("button", { name: /^phone slot, empty, required$/ });
-      await phoneTile.click();
-      const fillPhone = page.getByRole("dialog", { name: "Fill the phone slot" });
+      // Phase 37 (spec §4.3): a required gap reads "Missing" and carries its own Fill button.
+      await expect(page.getByRole("group", { name: "Phone", exact: true })).toContainText("Missing");
+      await page.getByRole("button", { name: "Fill the Phone slot" }).click();
+      const fillPhone = page.getByRole("dialog", { name: "Fill the Phone slot" });
       await waitForHydration(fillPhone);
       await fillPhone.getByRole("radiogroup", { name: "Pick a spare" }).getByText("BR-PH-0301").click();
       await fillPhone.getByRole("button", { name: "Confirm" }).click();
@@ -237,21 +258,19 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await expect(fillGaps).toHaveText(/^Fill 4 gaps$/);
       await waitForHydration(fillGaps);
       await fillGaps.click();
-      // Focus, not just a scroll: the first EMPTY REQUIRED tile takes it.
+      // Focus, not just a scroll: the first EMPTY REQUIRED tile's Fill takes it.
       // Asserted on whatever tile that is, so the grid's own slot order is not
       // silently pinned here as well.
-      await expect(page.locator(":focus")).toHaveAttribute("aria-label", /, empty, required$/);
+      await expect(page.locator(":focus")).toHaveAttribute("aria-label", /^Fill the .+ slot$/);
 
-      // …and back out again THROUGH THE NEW PATH, driven to submission: plan
-      // P-7's filled tile IS its menu's trigger, and "Return…" behind it is the
-      // only way off a loadout from this screen now. Case 1 opens that dialog
-      // and cancels; this is the case that commits it, so the phase's own
-      // trigger → menu → dialog → write chain is covered end to end. (The
-      // `finally` below still runs: a DB restore is the idempotent safety net
-      // for a run that dies before reaching here, not this assertion's job.)
-      const filledPhoneTile = page.getByRole("button", { name: /^phone slot, Samsung A54, required$/ });
-      await expect(filledPhoneTile).toBeVisible({ timeout: 15_000 });
-      await filledPhoneTile.click();
+      // …and back out again through the tile's ⋯, driven to submission. Case 1
+      // opens that dialog and cancels; this is the case that commits it, so the
+      // ⋯ → menu → dialog → write chain is covered end to end. (The `finally`
+      // below still runs: a DB restore is the idempotent safety net for a run
+      // that dies before reaching here, not this assertion's job.)
+      await expect(page.getByRole("button", { name: "Phone: Samsung A54 BR-PH-0301" })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("group", { name: "Phone", exact: true })).toContainText("Held");
+      await page.getByRole("button", { name: "More for Phone", exact: true }).click();
       await page.getByRole("menu").getByRole("menuitem", { name: "Return…" }).click();
       // Spec §4.6: the dialog names tag · model · holder, not just the tag.
       const returnPhone = page.getByRole("dialog", { name: "Return BR-PH-0301 · Samsung A54 from Nina Robles?" });
@@ -264,8 +283,8 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
 
       await expect(page.getByText("BR-PH-0301 returned · now SPARE")).toBeVisible({ timeout: 15_000 });
       // The slot is a gap again…
-      await expect(page.getByRole("button", { name: /^phone slot, .*, required$/ }))
-        .toHaveAttribute("aria-label", /, empty, /, { timeout: 15_000 });
+      await expect(page.getByRole("group", { name: "Phone", exact: true })).toContainText("Nothing assigned", { timeout: 15_000 });
+      await expect(page.getByRole("button", { name: "Fill the Phone slot" })).toBeVisible();
       // …and the state-chosen primary has followed it all the way back.
       await expect(page.getByRole("button", { name: "Assign kit" })).toBeVisible({ timeout: 15_000 });
       expect((await db.asset.findUniqueOrThrow({ where: { id: phone.id } })).assigneeId).toBeNull();
@@ -285,20 +304,18 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await page.goto(`/employees/${nina.id}`);
 
       // Ruling R8: the hold is consumed by the FIRST empty tile of its type —
-      // the required "monitor", never also "second monitor".
-      const monitorTile = page.getByRole("button", { name: /^monitor slot, empty, required$/ });
-      await waitForHydration(monitorTile);
+      // the required "Monitor", never also "Monitor 2".
+      const monitorTile = page.getByRole("group", { name: "Monitor", exact: true });
+      await waitForHydration(monitorTile.getByRole("button", { name: "Assign reserved" }));
       await expect(monitorTile).toContainText("reserved · BR-MN-0910");
-      await expect(page.getByRole("button", { name: /^second monitor slot,/ })).not.toContainText("reserved ·");
+      await expect(page.getByRole("group", { name: "Monitor 2", exact: true })).not.toContainText("reserved ·");
       // The batch affordance states the same count the grid shows.
       await expect(page.getByRole("button", { name: "Assign all 1 reserved" })).toBeVisible();
 
-      // Scoped to the tile's own wrapper: "Assign reserved" is a SIBLING of the
-      // tile button (a button inside a button is axe's nested-interactive), and
-      // more than one tile can carry one.
-      await monitorTile.locator("..").getByRole("button", { name: "Assign reserved" }).click();
+      // Scoped to the tile: more than one tile can carry an "Assign reserved".
+      await monitorTile.getByRole("button", { name: "Assign reserved" }).click();
       await expect(page.getByText("BR-MN-0910 assigned to Nina Robles")).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByRole("button", { name: /^monitor slot, LG 27UL500, required$/ }))
+      await expect(page.getByRole("button", { name: "Monitor: LG 27UL500 BR-MN-0910" }))
         .toBeVisible({ timeout: 15_000 });
 
       // commitLifecycle settles the hold the assignment answers.
@@ -343,9 +360,9 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
   test("7. search clears and matches a department", async ({ page }) => {
     await login(page, IT);
     await page.goto("/employees");
-    // The Department facet's own count is what "the department name is a
+    // The Works for facet's own count is what "the department name is a
     // search term" has to reproduce — read it rather than hard-coding 3.
-    const counts = await facetCounts(page, "Department");
+    const counts = await facetCounts(page, "Works for");
     const financeCount = Number(counts["Finance"]);
     expect(financeCount).toBeGreaterThan(0);
 
@@ -370,7 +387,7 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     await expect(search).toHaveValue("");
   });
 
-  test("8. the New form: Name focused, the live number check, Next free, the policy preview, one same-name refusal, Create and add another", async ({ page }) => {
+  test("8. Add employee: Name focused, the prefilled number and its live check, the policy panel, one same-name refusal, Create and add another", async ({ page }) => {
     const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     const carlo = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0099" } });
     try {
@@ -383,9 +400,12 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       // any fill moves the caret somewhere else.
       await expect(name).toBeFocused();
 
-      // Empty number → the next free one, suggested and never prefilled.
-      // EMP-0099 (Carlo Dizon) is the seed's highest.
-      const number = page.getByLabel(/^Employee number\b/);
+      // Phase 37 (spec §5.2): the number is prefilled with the next free one —
+      // EMP-0099 (Carlo Dizon) is the seed's highest. Emptied, the field offers
+      // it again with "Use it".
+      const number = page.getByLabel(/^Employee no\./);
+      await expect(number).toHaveValue("EMP-0100");
+      await number.fill("");
       await expect(page.getByText(/^Next free: EMP-0100/)).toBeVisible({ timeout: 15_000 });
       await page.getByRole("button", { name: "Use it" }).click();
       await expect(number).toHaveValue("EMP-0100");
@@ -400,14 +420,15 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await number.fill("EMP-9301");
       await expect(page.getByText(/is already/)).toHaveCount(0, { timeout: 15_000 });
 
-      // The policy preview under Title: silent until the check resolves, then
-      // one line or the other, never both. No department yet → no match.
+      // Phase 37 (spec §5.1): the right panel — nothing to show before a
+      // group is picked, then the matched policy and its numbered lines.
+      const panel = page.getByRole("complementary", { name: "Equipment policy" });
       await page.getByLabel(/^Title\b/).fill("Accountant");
-      await expect(page.getByText("no policy matches this title yet")).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByText("Pick who they work for to see their equipment.")).toBeVisible();
       await page.getByLabel(/^Department\b/).selectOption({ label: "Finance" });
-      // "Finance standard" is a DEPARTMENT policy with six slots, so the line
-      // says which way it matched.
-      await expect(page.getByText("matches Finance standard · 6 slots (department)")).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByText("Finance standard", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByText("Monitor", { exact: true })).toBeVisible();
+      await expect(panel.getByText("Monitor 2", { exact: true })).toBeVisible();
 
       // The same-name nudge fires on name + department together: Carlo Dizon is
       // Operations, so it only lights up once the department moves there.
@@ -419,7 +440,9 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await expect(page.getByRole("link", { name: carlo.employeeNo })).toHaveAttribute("href", `/employees/${carlo.id}`);
 
       // Plan P-3: the server's refusal is ONE sentence, in that banner, above
-      // the checkbox it names — never a second copy under Name.
+      // the checkbox it names — never a second copy under Name. Phase 37: it is
+      // sent from step 3 and lands back on step 1, where the banner lives.
+      await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create employee" }).click();
       const refusal = page.getByText(/tick 'This is a different person'/);
       await expect(refusal).toBeVisible({ timeout: 15_000 });
@@ -427,36 +450,40 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
       await expect(page).toHaveURL(/\/employees\/new$/);
       expect(await db.employee.count({ where: { employeeNo: "EMP-9301" } })).toBe(0);
 
-      // Ticked, and through "Create and add another": a toast, the fields
-      // cleared except Department, focus back on Name, and the URL unmoved.
+      // Ticked, and through "Create and add another": a toast, back on step 1
+      // with the fields cleared except Works for and Department, focus back on
+      // Name, and the URL unmoved.
       await page.getByRole("checkbox", { name: "This is a different person" }).check();
       const operations = await page.getByLabel(/^Department\b/).inputValue();
+      await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create and add another" }).click();
       await expect(page.getByText("Added Carlo Dizon")).toBeVisible({ timeout: 15_000 });
       await expect(page).toHaveURL(/\/employees\/new$/);
+      await expect(page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: "Details" }))
+        .toHaveAttribute("aria-current", "step");
       await expect(name).toHaveValue("");
-      await expect(number).toHaveValue("");
       await expect(page.getByLabel(/^Department\b/)).toHaveValue(operations);
       await expect(name).toBeFocused();
       const first = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-9301" } });
       expect(first.name).toBe("Carlo Dizon");
 
-      // Final review I-3: the emptied field asks again, so the suggestion has
-      // MOVED ON — EMP-9301 is now the highest EMP-####, making EMP-9302 the
-      // next free. The mount-time answer (EMP-0100, read before any of these
-      // creates) must not come back, or "Use it" would offer a number the
-      // live check refuses 400 ms later.
-      await expect(page.getByText(/^Next free: EMP-9302/)).toBeVisible({ timeout: 15_000 });
+      // Final review I-3: the number is asked for again, so it has MOVED ON —
+      // EMP-9301 is now the highest EMP-####, making EMP-9302 the next free,
+      // prefilled. The mount-time answer (EMP-0100, read before any of these
+      // creates) must not come back, or the field would hold a number the live
+      // check refuses 400 ms later.
+      await expect(number).toHaveValue("EMP-9302", { timeout: 15_000 });
       await expect(page.getByText(/^Next free: EMP-0100/)).toHaveCount(0);
 
       // …and the other submit still lands on the new profile.
       await name.fill("Ux Probe Two");
       await page.getByLabel(/^Title\b/).fill("Tester");
       await number.fill("EMP-9302");
+      await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create employee" }).click();
-      await page.waitForURL(/\/employees\/[^/?]+\?created=1$/);
+      await page.waitForURL(/\/employees\/[^/?]+\?created=1&assigned=0$/);
       const second = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-9302" } });
-      await expect(page).toHaveURL(new RegExp(`/employees/${second.id}\\?created=1$`));
+      await expect(page).toHaveURL(new RegExp(`/employees/${second.id}\\?created=1&assigned=0$`));
       await expect(page.getByText("Ux Probe Two added · EMP-9302")).toBeVisible();
     } finally {
       // The audit rows these creates wrote stay (append-only); the employees go.
@@ -464,19 +491,109 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     }
   });
 
-  test("9. a viewer's tiles are inert", async ({ page }) => {
+  test("9. a viewer's tiles carry no actions", async ({ page }) => {
     const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     await login(page, VIEWER);
     await page.goto(`/employees/${marites.id}`);
 
-    // Ruling R2: the inert branch is the VIEWER — the tile is a <div
-    // role="group"> carrying the same accessible name, with no menu behind it…
-    await expect(page.getByRole("group", { name: /^laptop slot,/ })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("button", { name: /slot,/ })).toHaveCount(0);
-    // …and no ⋯ beside it.
-    await expect(page.getByRole("button", { name: /^Actions for the/ })).toHaveCount(0);
+    // Ruling R2: the VIEWER gets no ⋯ and no Fill on any tile…
+    const laptop = page.getByRole("group", { name: "Laptop", exact: true });
+    await expect(laptop).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: /^More for / })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Fill the / })).toHaveCount(0);
+    // …but Phase 37 (spec §4.4): the side panel is read-only, so the tile body still opens it.
+    await expect(laptop.getByRole("button", { name: /^Laptop: / })).toBeVisible();
     // ProfileActions renders nothing at all for a viewer.
     await expect(page.getByRole("button", { name: "More actions" })).toHaveCount(0);
     await expectNoSeriousAxe(page);
+  });
+
+  test("10. side panel: equal tiles, Monitor / Monitor 2, the Laptop tile opens the panel, Escape refocuses it, ?item= reopens it", async ({ page }) => {
+    const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    const laptop = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
+    await login(page, IT);
+    await page.goto(`/employees/${marites.id}`);
+
+    const opener = page.getByRole("button", { name: /^Laptop: / });
+    await waitForHydration(opener);
+    await expect(opener).toHaveAccessibleName(`Laptop: ${laptop.model} BR-LT-0148`);
+
+    // Spec §4.3: grid-auto-rows 1fr, so every tile is the same height whatever it holds.
+    const heights = await page.locator("[data-tile]").evaluateAll((els) =>
+      els.map((el) => Math.round(el.getBoundingClientRect().height)));
+    expect(heights.length).toBeGreaterThan(1);
+    expect(new Set(heights).size).toBe(1);
+    // Spec §3.2: the policy's two Monitor lines are numbered in policy order.
+    await expect(page.getByRole("group", { name: "Monitor", exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Monitor 2", exact: true })).toBeVisible();
+
+    await opener.click();
+    const panel = page.getByRole("dialog", { name: `BR-LT-0148 · ${laptop.model}` });
+    await expect(panel).toBeVisible();
+    // Focus lands on the close button; the URL remembers the item.
+    await expect(panel.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+    await expect(page).toHaveURL(new RegExp(`[?&]item=${laptop.id}`));
+    await expect(panel.getByRole("heading", { name: "Recent history" })).toBeVisible({ timeout: 15_000 });
+    await expect(panel.getByRole("link", { name: "Open full record" })).toHaveAttribute("href", `/inventory/${laptop.id}`);
+    // The seed's own audit row assigned BR-LT-0148 to EMP-0042 (`assignee.to` = the employee number) — the
+    // heldItemPanel JSON filter finds it.
+    await expect(panel.getByText("Held since", { exact: true })).toBeVisible();
+    // IT is on the direct path and the laptop is not pending: the tile menu's Replace and Return are here too.
+    await expect(panel.getByRole("button", { name: "Replace…" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Return…" })).toBeVisible();
+    await expectNoSeriousAxe(page);
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(page).not.toHaveURL(/[?&]item=/);
+
+    // A refresh with ?item= reopens the panel on that held item.
+    await page.goto(`/employees/${marites.id}?item=${laptop.id}`);
+    await expect(page.getByRole("dialog", { name: `BR-LT-0148 · ${laptop.model}` })).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("11. Add a slot asks the category then the type, shows what it will be called, and numbers a second Monitor", async ({ page }) => {
+    // Ramon (EMP-0051, Sales) has no policy, so every Monitor tile here is one this case adds.
+    const ramon = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0051" } });
+    await login(page, IT);
+    try {
+      await page.goto(`/employees/${ramon.id}`);
+      const addButton = page.getByRole("button", { name: "Add a slot for this person…" });
+      await waitForHydration(addButton);
+
+      async function addMonitor(kind: string) {
+        await addButton.click();
+        const dialog = page.getByRole("dialog", { name: `Add a slot for ${ramon.name}` });
+        await expect(dialog).toBeVisible();
+        await dialog.getByLabel("What").selectOption({ label: "Monitor" });
+        // Monitor has two types, so the second question appears (and a category change would reset it).
+        const which = dialog.getByLabel("Which kind");
+        await expect(which).toBeVisible();
+        await expect(which.locator("option", { hasText: "24-inch" })).toHaveCount(1);
+        await expect(which.locator("option", { hasText: "27-inch" })).toHaveCount(1);
+        await which.selectOption({ label: kind });
+        return dialog;
+      }
+
+      const first = await addMonitor("27-inch");
+      await expect(first.getByText("Shows as “Monitor”")).toBeVisible();
+      await first.getByRole("button", { name: "Client requirement", exact: true }).click();
+      await first.getByRole("button", { name: "Add", exact: true }).click();
+      await expect(page.getByText("Monitor added for this person")).toBeVisible({ timeout: 10_000 });
+      const monitor = page.getByRole("group", { name: "Monitor", exact: true });
+      await expect(monitor).toBeVisible();
+      await expect(monitor).toContainText("Missing");
+
+      // The second Monitor reads "Monitor 2" in the dialog and then on the grid.
+      const second = await addMonitor("24-inch");
+      await expect(second.getByText("Shows as “Monitor 2”")).toBeVisible();
+      await second.getByRole("button", { name: "Client requirement", exact: true }).click();
+      await second.getByRole("button", { name: "Add", exact: true }).click();
+      await expect(page.getByRole("group", { name: "Monitor 2", exact: true })).toBeVisible({ timeout: 10_000 });
+    } finally {
+      // The audit rows stay (append-only); the exceptions this case added go.
+      await db.employeeSlotException.deleteMany({ where: { employeeId: ramon.id } });
+    }
   });
 });

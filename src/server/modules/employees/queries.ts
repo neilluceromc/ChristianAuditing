@@ -18,6 +18,8 @@ export interface EmployeeListRow {
   title: string;
   employeeNo: string;
   department: string;
+  /** Phase 37 (spec §2.3): INTERNAL department or CLIENT — the list shows a "Client" tag. */
+  departmentKind: "INTERNAL" | "CLIENT";
   employment: string;
   m365: string | null;
   items: number;
@@ -31,13 +33,16 @@ const rowInclude = {
   assets: { select: { id: true, tag: true, model: true, typeId: true, status: true } },
 } as const;
 
-/** Loadout resolution for exactly these employees — one exceptions read, bounded by the page. */
-async function resolveMissing(employees: Array<{
+/**
+ * Loadout resolution for exactly these employees — one exceptions read, bounded by the page.
+ * Phase 37: also the Equipment policies page's gap count for one group's active people.
+ */
+export async function resolveMissing(employees: Array<{
   id: string; title: string; departmentId: string;
   assets: Array<{ typeId: string | null; status: string; id: string; tag: string; model: string }>;
 }>) {
   const [policies, exceptions] = await Promise.all([
-    prisma.equipmentPolicy.findMany({ include: { slots: true }, orderBy: [{ name: "asc" }] }),
+    prisma.equipmentPolicy.findMany({ include: { slots: { orderBy: { id: "asc" } } }, orderBy: [{ name: "asc" }] }),
     employees.length
       ? prisma.employeeSlotException.findMany({ where: { employeeId: { in: employees.map((e) => e.id) } }, orderBy: [{ employeeId: "asc" }, { id: "asc" }] })
       : Promise.resolve([]),
@@ -132,6 +137,7 @@ export async function listEmployees(state: ListState, gapsOnly: boolean): Promis
       title: e.title,
       employeeNo: e.employeeNo,
       department: e.department.name,
+      departmentKind: e.department.kind,
       employment: e.employment,
       m365: e.m365Status,
       items: e.assets.length,
@@ -146,18 +152,19 @@ export async function listEmployees(state: ListState, gapsOnly: boolean): Promis
 }
 
 export interface EmployeeExportRow {
-  employeeNo: string; name: string; department: string; title: string;
+  employeeNo: string; name: string; department: string; kind: "INTERNAL" | "CLIENT"; title: string;
   employment: string; m365Status: string | null; joinedAt: Date; itemsHeld: number;
 }
 
 function toExportRow(e: {
-  employeeNo: string; name: string; department: { name: string }; title: string;
+  employeeNo: string; name: string; department: { name: string; kind: "INTERNAL" | "CLIENT" }; title: string;
   employment: string; m365Status: string | null; joinedAt: Date; assets: unknown[];
 }): EmployeeExportRow {
   return {
     employeeNo: e.employeeNo,
     name: e.name,
     department: e.department.name,
+    kind: e.department.kind,
     title: e.title,
     employment: e.employment,
     m365Status: e.m365Status,
@@ -197,6 +204,8 @@ export async function employeeExportRows(state: ListState, gapsOnly: boolean): P
 
 export interface EmployeeFacets {
   department: Array<{ value: string; label: string; count: number }>;
+  /** Phase 37 (spec §2.3): the Staff facet — Internal | Client staff. */
+  kind: Array<{ value: string; label: string; count: number }>;
   employment: Array<{ value: string; label: string; count: number }>;
 }
 
@@ -224,10 +233,23 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
     prisma.employee.groupBy({ by: ["employment"], where: employmentWhere, _count: true }),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
   ]);
+  // Phase 37 (spec §2.3): the Works for facet lists internal rows first, then clients ("{name} (client)").
+  // The Staff counts are per-department counts under every other facet (its own is excluded, as
+  // `department`'s is for its counts), summed by the department's kind.
+  const kindGroups = await prisma.employee.groupBy({ by: ["departmentId"], where: buildEmployeeWhere(without("kind")), _count: true });
+  const kindCount = (kind: "INTERNAL" | "CLIENT") =>
+    kindGroups.reduce((n, g) => n + (departments.find((d) => d.id === g.departmentId)?.kind === kind ? g._count : 0), 0);
+  const sorted = [...departments.filter((d) => d.kind === "INTERNAL"), ...departments.filter((d) => d.kind === "CLIENT")];
   return {
-    department: departments.map((d) => ({
-      value: d.id, label: d.name, count: deptGroups.find((g) => g.departmentId === d.id)?._count ?? 0,
+    department: sorted.map((d) => ({
+      value: d.id,
+      label: d.kind === "CLIENT" ? `${d.name} (client)` : d.name,
+      count: deptGroups.find((g) => g.departmentId === d.id)?._count ?? 0,
     })),
+    kind: [
+      { value: "INTERNAL", label: "Internal", count: kindCount("INTERNAL") },
+      { value: "CLIENT", label: "Client staff", count: kindCount("CLIENT") },
+    ],
     employment: (["ACTIVE", "OFFBOARDING", "OFFBOARDED"] as const).map((s) => ({
       value: s, label: s, count: empGroups.find((g) => g.employment === s)?._count ?? 0,
     })),

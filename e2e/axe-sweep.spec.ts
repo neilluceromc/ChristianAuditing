@@ -114,11 +114,19 @@ async function scanRoute(page: Page, path: string) {
   const wantPath = path.split("?")[0];
   expect(new URL(page.url()).pathname, `expected to land on ${wantPath}, got ${page.url()}`).toBe(wantPath);
 
+  await scanHere(page, path);
+}
+
+/**
+ * The scan half of scanRoute, for a page already in the state to be checked: a wizard step reached by
+ * clicking, or a side panel that is open. Settles the pointer first, for the same reason scanRoute does.
+ */
+async function scanHere(page: Page, label: string) {
   await page.mouse.move(0, 0);
   await page.waitForTimeout(700);
 
   const results = await new AxeBuilder({ page }).analyze();
-  record(results, path);
+  record(results, label);
 }
 
 // ── Admin-only: workspace "admin" in PATH_RULES, or requireRole("admin") ──
@@ -129,8 +137,10 @@ const ADMIN_ROUTES = ["/admin/users", "/admin/flags", "/admin/webhooks", "/admin
 // scan the Register form twice (and scanRoute's landing check would, rightly, refuse the redirect).
 const IT_STAFF_ROUTES = [
   "/inventory/import", "/inventory/register", "/inventory/work",
-  "/admin/asset-categories", "/admin/asset-types", "/admin/departments",
+  "/admin/asset-categories", "/admin/asset-types", "/admin/departments", "/admin/departments?tab=internal",
   "/employees/import", "/employees/new",
+  // Phase 37 (spec §7.2): the per-client policies tab. /employees/new is scanned again below at steps 2 and 3.
+  "/admin/equipment-policies?tab=client",
 ];
 
 // ── purchasing_staff: requireRole(...DRAFT_ROLES) = [purchasing_staff, admin] ─
@@ -152,7 +162,7 @@ const VIEWER_STATIC_ROUTES = [
   "/inventory", "/inventory/activity",
   "/employees", "/employees?gaps=1", "/employees/activity",
   "/approvals", "/audit", "/offboarding", "/reservations",
-  "/admin/equipment-policies",
+  "/admin/equipment-policies", "/admin/equipment-policies?tab=client",
   "/purchases", "/purchases/activity",
 ];
 
@@ -203,6 +213,49 @@ test.describe("axe sweep", () => {
       `/inventory/labels?ids=${asset.id}`,
       `/employees/${employee.id}/edit`,
     ]) await scanRoute(page, path);
+
+    // Phase 37 (spec §4.4, §7.2): EMP-0042's profile with the held-item side panel open on their laptop. The
+    // panel loads its data after it mounts, so wait for the history heading — a scan of the skeleton proves
+    // nothing. The laptop's id is read off its tag, never hardcoded.
+    const marites = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
+    const laptop = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
+    await page.goto(`/employees/${marites.id}?item=${laptop.id}`);
+    const panel = page.getByRole("dialog", { name: `BR-LT-0148 · ${laptop.model}` });
+    await expect(panel).toBeVisible({ timeout: 20_000 });
+    await expect(panel.getByRole("heading", { name: "Recent history" })).toBeVisible({ timeout: 15_000 });
+    await scanHere(page, "/employees/[EMP-0042]?item=[BR-LT-0148] (panel open)");
+  });
+
+  // Phase 37 (spec §5, §7.2): Add employee, scanned on each of its three steps with valid input and nothing
+  // created. Step 1 is also in IT_STAFF_ROUTES; here it is scanned with Client staff chosen, so the Client
+  // select and the policy panel are on screen.
+  test("Add employee, on step 1 (Client staff chosen), step 2 and step 3", async ({ page }) => {
+    test.setTimeout(180_000);
+    await login(page, "it@thebackroomop.com");
+    await page.goto("/employees/new");
+    expect(new URL(page.url()).pathname).toBe("/employees/new");
+
+    const worksFor = page.getByRole("radiogroup", { name: "Works for" });
+    await expect(worksFor).toBeVisible({ timeout: 30_000 });
+    await worksFor.getByText("Client staff", { exact: true }).click();
+    await page.getByRole("combobox", { name: "Client", exact: true }).selectOption({ label: "Bluepeak Telecom" });
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Axe Sweep");
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill("Agent");
+    await expect(page.getByLabel("Employee no.")).not.toHaveValue("");
+    await scanHere(page, "/employees/new (step 1)");
+
+    const next = page.getByRole("button", { name: "Next", exact: true });
+    await next.click();
+    // Step 2: the policy's four lines are on screen once Monitor is.
+    await expect(page.getByLabel("Monitor", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel("Monitor 2", { exact: true })).toBeVisible();
+    await expect(next).toBeEnabled({ timeout: 15_000 });
+    await scanHere(page, "/employees/new (step 2)");
+
+    await next.click();
+    // Step 3: the summary and the button that would create the person (which this test never presses).
+    await expect(page.getByRole("button", { name: "Create employee" })).toBeVisible({ timeout: 15_000 });
+    await scanHere(page, "/employees/new (step 3)");
   });
 
   test("purchasing_staff-reachable routes", async ({ page }) => {

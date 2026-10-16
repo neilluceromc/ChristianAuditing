@@ -140,6 +140,20 @@ const IT = "it@thebackroomop.com";
 const ADMIN = "admin@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
+/**
+ * Phase 37 (spec §5): Add employee is three steps — Next past Details, wait for Equipment to load its
+ * lines, Next again to Check & create. Copied per file (house rule: no helpers across spec files).
+ */
+async function toCheckAndCreate(page: Page) {
+  const next = page.getByRole("button", { name: "Next", exact: true });
+  await next.click();
+  await expect(page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: "Equipment" }))
+    .toHaveAttribute("aria-current", "step", { timeout: 15_000 });
+  await expect(next).toBeEnabled({ timeout: 15_000 });
+  await next.click();
+  await expect(page.getByRole("button", { name: "Create employee" })).toBeVisible({ timeout: 15_000 });
+}
+
 test.describe("it navigation sweep (Phase 25)", () => {
   test("1. Start offboarding: IT sees the button on an active employee, the dialog is prefilled, submit lands in the wizard and writes one audit row", async ({ page }) => {
     const carlo = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0099" } });
@@ -193,10 +207,10 @@ test.describe("it navigation sweep (Phase 25)", () => {
       await expect(page.getByText("Offboarding in progress — slots are frozen")).toBeVisible();
       // Phase 29 (spec §4.1): the PageHeader badge now carries a DuePill of its
       // own for a leaver, so this text exists twice on the page (the header's
-      // and the frozen banner's). Scoped to the header — the new one — rather
+      // and the frozen banner's). Scoped to the identity band (Phase 37; it was the page header) — the new one — rather
       // than loosened with .first(), which would have gone on passing if the
       // header pill were dropped again.
-      await expect(page.locator("main header").first().getByText(/due in \d+ d|due today/)).toBeVisible();
+      await expect(page.getByTestId("identity-band").getByText(/due in \d+ d|due today/)).toBeVisible();
       await expectNoSeriousAxe(page);
     } finally {
       await db.employee.update({
@@ -415,16 +429,18 @@ test.describe("it navigation sweep (Phase 25)", () => {
       // any fill moves the caret somewhere else.
       await expect(name).toBeFocused();
 
-      await page.getByLabel("Employee number").fill("EMP-9902");
+      await page.getByLabel("Employee no.").fill("EMP-9902");
       await name.fill("Nav Test");
       await page.getByLabel("Title").fill("Tester");
-      await page.getByLabel("Department").selectOption({ label: "Operations" });
-      await page.getByLabel("Joined").fill(localDateISO(new Date()));
+      await page.getByRole("combobox", { name: "Department", exact: true }).selectOption({ label: "Operations" });
+      await page.getByLabel("Start date").fill(localDateISO(new Date()));
+      await toCheckAndCreate(page);
       await page.getByRole("button", { name: "Create employee" }).click();
-      await page.waitForURL(/\/employees\/[^/?]+\?created=1$/);
+      // Phase 37 (spec §5.4): the redirect carries how many spares were assigned (none picked here).
+      await page.waitForURL(/\/employees\/[^/?]+\?created=1&assigned=0$/);
 
       const hire = await db.employee.findFirstOrThrow({ where: { employeeNo: "EMP-9902" } });
-      await expect(page).toHaveURL(new RegExp(`/employees/${hire.id}\\?created=1$`));
+      await expect(page).toHaveURL(new RegExp(`/employees/${hire.id}\\?created=1&assigned=0$`));
       await expect(page.getByText("Nav Test added · EMP-9902")).toBeVisible();
       await expect(page.getByRole("link", { name: "Assign devices" })).toHaveAttribute("href", "#loadout");
       // The banner renders above the PageHeader, whose actions repeat the same
@@ -526,15 +542,14 @@ test.describe("it navigation sweep (Phase 25)", () => {
     const ops = await db.department.findFirstOrThrow({ where: { name: "Operations" } });
     try {
       await login(page, ADMIN);
-      await page.goto("/admin/departments");
-      const actions = page.getByRole("button", { name: "Actions for Operations" });
-      await waitForHydration(actions);
-      await actions.click();
-      await page.getByRole("menuitem", { name: "Rename" }).click();
+      await page.goto("/admin/departments?tab=internal");
+      const rename = page.getByRole("button", { name: "Rename Operations" });
+      await waitForHydration(rename);
+      await rename.click();
 
-      // The rename input only exists once the menu item has opened it; Enter is
-      // ref-table.tsx's save gesture (blur cancels).
-      const input = page.getByLabel("Rename Operations");
+      // The rename input only exists once the button has opened it; Enter is
+      // groups-page.tsx's save gesture (blur cancels).
+      const input = page.getByLabel("New name for Operations");
       await input.fill("Operations X");
       await input.press("Enter");
       await expect(page.getByText("Operations X", { exact: true })).toBeVisible();

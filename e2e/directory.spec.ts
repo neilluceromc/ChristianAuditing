@@ -62,12 +62,26 @@ async function waitForHydration(target: Locator) {
 
 const IT = "it@thebackroomop.com";
 
+/**
+ * Phase 37 (spec §5): Add employee is three steps — Next past Details, wait for Equipment to load its
+ * lines, Next again to Check & create. Copied per file (house rule: no helpers across spec files).
+ */
+async function toCheckAndCreate(page: Page) {
+  const next = page.getByRole("button", { name: "Next", exact: true });
+  await next.click();
+  await expect(page.getByRole("list", { name: "Steps" }).getByRole("listitem").filter({ hasText: "Equipment" }))
+    .toHaveAttribute("aria-current", "step", { timeout: 15_000 });
+  await expect(next).toBeEnabled({ timeout: 15_000 });
+  await next.click();
+  await expect(page.getByRole("button", { name: "Create employee" })).toBeVisible({ timeout: 15_000 });
+}
+
 test.describe.serial("directory", () => {
   test("1. creating a same-name-in-department employee warns, refuses unticked, and creates ticked", async ({ page }) => {
     await login(page, IT);
     await page.goto("/employees/new");
-    await page.getByLabel(/^Employee number\b/).fill("EMP-9101");
-    await page.getByLabel(/^Joined\b/).fill("2026-02-01");
+    await page.getByLabel(/^Employee no\./).fill("EMP-9101");
+    await page.getByLabel(/^Start date\b/).fill("2026-02-01");
     await page.getByLabel(/^Name\b/).fill("Carlo Dizon");
     await page.getByLabel(/^Title\b/).fill("Team Lead");
     await page.getByLabel(/^Department\b/).selectOption({ label: "Operations" });
@@ -77,14 +91,16 @@ test.describe.serial("directory", () => {
       timeout: 10_000,
     });
 
+    await toCheckAndCreate(page);
     await page.getByRole("button", { name: "Create employee" }).click();
-    // The field refusal under Name (actions.ts's own message), unique
+    // The refusal lands back on step 1, in the same-name banner (actions.ts's own message), unique
     // substring so it can't collide with the banner's shorter title text.
     await expect(
       page.getByText("tick 'This is a different person' to add them anyway"),
     ).toBeVisible({ timeout: 10_000 });
 
     await page.getByRole("checkbox", { name: "This is a different person" }).check();
+    await toCheckAndCreate(page);
     await page.getByRole("button", { name: "Create employee" }).click();
     await expect(page).toHaveURL(/\/employees\/[^/]+$/, { timeout: 15_000 });
     await expect(page.getByRole("heading", { name: "Carlo Dizon" })).toBeVisible();

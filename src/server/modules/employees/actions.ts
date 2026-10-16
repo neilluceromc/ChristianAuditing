@@ -7,7 +7,8 @@ import { prisma } from "@/server/db/client";
 import { actionRole, actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
-import { createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
+import { OPEN_APPROVAL_STATES, createApproval, openApprovalForAsset } from "@/server/modules/approvals/create";
+import { assignAsset } from "@/server/modules/lifecycle/actions";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -19,7 +20,10 @@ import { findSameName } from "@/server/modules/employees/queries";
 import { dayFromISO, defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { localDateISO } from "@/lib/format";
 import { nextEmployeeNo as nextNo } from "@/lib/employee-no";
-import { previewPolicyFor } from "@/lib/policy-preview";
+import { previewPolicyFor, type PolicyLine, type PolicyPreviewResult } from "@/lib/policy-preview";
+import { GROUP_ARCHIVED } from "@/lib/groups";
+import { createAssignments } from "@/lib/loadout";
+import { firstFailure, newEmployeeExtrasShape, refineDistinctAssign, type AssignFailure } from "@/lib/new-employee";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -388,10 +392,21 @@ const createEmployeeSchema = employeeSchema.omit({ id: true }).extend({
   // in the SAME department really is a different person — lets the create
   // through the guard below on a second submit.
   confirmSameName: z.boolean().default(false),
-});
+})
+  // Phase 37 (spec §5.4): accounts & access, the first note and the spares to assign. zod 4 drops a
+  // refinement on `.extend`, so the distinct-spare rule is put back on the merged object.
+  .extend(newEmployeeExtrasShape)
+  .superRefine(refineDistinctAssign);
 
-/** Phase 14 (spec §11): the first manual create path — before this, employees arrived only by import or seed. */
-export async function createEmployee(input: unknown): Promise<ActionResult<{ id: string }>> {
+/**
+ * Phase 14 (spec §11): the first manual create path — before this, employees arrived only by import or seed.
+ * Phase 37 (spec §5.4): one transaction writes the person (with their IT setup), the first note and the
+ * audit; the picked spares are assigned AFTER it, one at a time, through the same path the profile's Fill
+ * uses — a refused one (a spare taken meanwhile) is reported back, never undoes the person.
+ */
+export async function createEmployee(
+  input: unknown,
+): Promise<ActionResult<{ id: string; assigned: number; failed: AssignFailure[] }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -400,10 +415,14 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
 
+  const department = await prisma.department.findUnique({ where: { id: d.departmentId }, select: { archivedAt: true } });
+  // Phase 37 (spec §5.4): only an active department or client takes a new person.
+  if (department?.archivedAt) return validationError({ departmentId: GROUP_ARCHIVED });
+
   const errors: Record<string, string> = {};
   const joinedAt = new Date(`${d.joinedAt}T00:00:00Z`);
   if (Number.isNaN(joinedAt.getTime())) errors.joinedAt = "Use the date picker";
-  if (!(await prisma.department.findUnique({ where: { id: d.departmentId } }))) errors.departmentId = "Unknown department";
+  if (!department) errors.departmentId = "Unknown department";
   const today = localDateISO(new Date());
   if (d.employment === "OFFBOARDING" && d.offboardingDueAt && d.offboardingDueAt < minOffboardingDue(today)) {
     errors.offboardingDueAt = "Pick today or later";
@@ -430,11 +449,18 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
     joinedAt,
     offboardingAt: d.employment === "OFFBOARDING" ? new Date() : null,
     offboardingDueAt: d.employment === "OFFBOARDING" ? dayFromISO(d.offboardingDueAt || defaultOffboardingDue(today)) : null,
+    entraStatus: d.entraStatus,
+    autopilotStatus: d.autopilotStatus,
+    argusStatus: d.argusStatus,
+    vpn: d.vpn,
   };
 
   let id = "";
   try {
-    await prisma.$transaction(async (tx) => {
+    const refused = await prisma.$transaction(async (tx) => {
+      // Re-read inside the transaction: the group can be ended while the form is open (Review Focus 1).
+      const current = await tx.department.findUnique({ where: { id: d.departmentId }, select: { archivedAt: true } });
+      if (!current || current.archivedAt) return true;
       const created = await tx.employee.create({ data });
       id = created.id;
       await writeAudit(tx, {
@@ -446,7 +472,16 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
           ...(data.offboardingDueAt ? { offboardingDueAt: { from: null, to: data.offboardingDueAt } } : {}),
         },
       });
+      if (d.note) {
+        await tx.employeeNote.create({ data: { employeeId: created.id, authorId: user.id, text: d.note } });
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "employee", entityId: created.id,
+          action: "note.added", diff: { note: { from: null, to: d.note } },
+        });
+      }
+      return false;
     });
+    if (refused) return validationError({ departmentId: GROUP_ARCHIVED });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return validationError({ employeeNo: "That employee number is already in use" });
@@ -454,7 +489,26 @@ export async function createEmployee(input: unknown): Promise<ActionResult<{ id:
     throw err;
   }
   revalidatePath("/employees");
-  return ok({ id });
+
+  // After the commit: each picked spare through the Fill dialog's own path for this user — direct for IT,
+  // a request otherwise; standard status (not a loan), no reason typed. Someone created not ACTIVE gets none:
+  // any picks sent are ignored (the wizard sends none), never refused by the lifecycle guard.
+  const direct = isDirectLifecycle(user.role, "IT");
+  let assigned = 0;
+  const failed: AssignFailure[] = [];
+  for (const { assetId } of createAssignments(d.employment, d.assign)) {
+    const asset = await prisma.asset.findUnique({ where: { id: assetId }, select: { tag: true } });
+    if (!asset) {
+      failed.push({ tag: assetId, reason: "That asset no longer exists." });
+      continue;
+    }
+    const res = direct
+      ? await assignAsset({ assetId, employeeId: id, reason: "" })
+      : await requestAssign({ employeeId: id, assetId, reason: "" });
+    if (res.ok) assigned += 1;
+    else failed.push({ tag: asset.tag, reason: firstFailure(res) });
+  }
+  return ok({ id, assigned, failed });
 }
 
 const checkSameNameSchema = z.object({
@@ -518,8 +572,27 @@ export async function nextEmployeeNo(): Promise<ActionResult<{ next: string | nu
 
 const previewPolicySchema = z.object({ title: z.string(), departmentId: z.string() });
 
-/** Phase 29 (spec §5.3): read-only — which policy the typed title (or the department) will resolve to. */
-export async function previewPolicy(input: unknown): Promise<ActionResult<{ preview: { name: string; slots: number; via: "title" | "department" } | null }>> {
+/** Every policy with its slots in policy order (the profile's own `id` order) and each slot's type and category. */
+function loadPreviewPolicies() {
+  return prisma.equipmentPolicy.findMany({
+    include: {
+      slots: {
+        select: {
+          name: true, required: true, loaner: true, assetTypeId: true,
+          assetType: { select: { name: true, category: { select: { name: true } } } },
+        },
+        orderBy: { id: "asc" },
+      },
+    },
+    orderBy: [{ name: "asc" }],
+  });
+}
+
+/**
+ * Phase 29 (spec §5.3): read-only — which policy the typed title (or the department) will resolve to.
+ * Phase 37 (spec §5.1): with its numbered lines, for the Add-employee panel.
+ */
+export async function previewPolicy(input: unknown): Promise<ActionResult<{ preview: PolicyPreviewResult | null }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   // Final review I-4: read-only — the "check" budget, not the mutation one.
@@ -527,6 +600,51 @@ export async function previewPolicy(input: unknown): Promise<ActionResult<{ prev
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = previewPolicySchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const policies = await prisma.equipmentPolicy.findMany({ include: { slots: { select: { id: true } } }, orderBy: [{ name: "asc" }] });
-  return ok({ preview: previewPolicyFor(parsed.data.title, parsed.data.departmentId, policies) });
+  return ok({ preview: previewPolicyFor(parsed.data.title, parsed.data.departmentId, await loadPreviewPolicies()) });
+}
+
+export interface SpareLine extends PolicyLine {
+  key: string;
+  spares: Array<{ id: string; tag: string; model: string }>;
+}
+
+const spareOptionsSchema = z.object({ departmentId: z.string(), title: z.string() });
+const SPARES_PER_TYPE = 50;
+
+/**
+ * Phase 37 (spec §5.3): read-only — Add employee's step 2. The resolved policy's lines, and for each typed
+ * standard line up to 50 spares of that type, by tag: the profile's spare pool (IT, SPARE, not awaiting
+ * triage) less any spare already held for someone or promised by an open request.
+ */
+export async function spareOptions(input: unknown): Promise<ActionResult<{ lines: SpareLine[] }>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id, "check");
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = spareOptionsSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const preview = previewPolicyFor(parsed.data.title, parsed.data.departmentId, await loadPreviewPolicies());
+  const lines = preview?.lines ?? [];
+  const typeIds = [...new Set(lines.filter((l) => !l.loaner && l.assetTypeId).map((l) => l.assetTypeId as string))];
+  const pools = await Promise.all(typeIds.map(async (typeId) => [
+    typeId,
+    await prisma.asset.findMany({
+      where: {
+        cls: "IT", status: ASSIGNABLE_FROM.IT, returnedAt: null, typeId,
+        reservations: { none: { state: "ACTIVE" } },
+        approvals: { none: { state: { in: [...OPEN_APPROVAL_STATES] } } },
+      },
+      select: { id: true, tag: true, model: true },
+      orderBy: { tag: "asc" },
+      take: SPARES_PER_TYPE,
+    }),
+  ] as const));
+  const byType = new Map(pools);
+  return ok({
+    lines: lines.map((l, i) => ({
+      ...l,
+      key: `line:${i}`,
+      spares: !l.loaner && l.assetTypeId ? byType.get(l.assetTypeId) ?? [] : [],
+    })),
+  });
 }

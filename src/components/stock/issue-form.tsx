@@ -13,14 +13,13 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS } from "@/lib/reason-chips";
 import { unitsLabel } from "@/lib/stock-balance";
+import type { PickerGroup } from "@/lib/groups";
+import { GroupSelectOptions } from "@/components/ui/group-select-options";
 import { issueStock } from "@/server/modules/stock/movement-actions";
 import { useStockRunner } from "./use-stock-runner";
 import type { StockItemMeta } from "./receive-form";
 
-export interface DepartmentOption {
-  id: string;
-  name: string;
-}
+export type DepartmentOption = PickerGroup;
 
 const CLAIMED = ["itemId", "quantity", "departmentId", "employeeId", "reason"];
 
@@ -123,9 +122,7 @@ export function IssueForm({
                 value={form.departmentId} onChange={(e) => set("departmentId", e.target.value)}
               >
                 <option value="" disabled>Select a department</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
+                <GroupSelectOptions groups={departments} />
               </Select>
             )}
           </FormField>

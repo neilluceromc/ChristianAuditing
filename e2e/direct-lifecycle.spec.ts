@@ -114,14 +114,13 @@ test.describe.serial("direct changes", () => {
     expect(rec.state).toBe("EXECUTED");
 
     // Nina is Finance, whose one policy (Finance standard) carries a required
-    // "phone" slot of BR-PH-0301's own type — the direct assign lands
+    // "Phone" slot of BR-PH-0301's own type — the direct assign lands
     // straight in that tile, not just "somewhere on her holdings".
     await page.goto(`/employees/${nina.id}`);
-    // Anchored: Phase 16 added a per-tile "Actions for the phone slot" ⋯
-    // menu button, whose own aria-label also contains "phone slot" as a
-    // substring — an unanchored match now resolves to both.
-    const tile = page.getByRole("button", { name: /^phone slot,/ });
-    await expect(tile).toContainText("BR-PH-0301");
+    // Phase 37 (spec §4.3): the tile is a group named by its label; exact, so it never matches "Phone 2".
+    const tile = page.getByRole("group", { name: "Phone", exact: true });
+    await expect(tile.getByRole("button", { name: /^Phone: .+ BR-PH-0301$/ })).toBeVisible({ timeout: 15_000 });
+    await expect(tile).toContainText("Held");
     await expect(tile.getByText("PENDING")).toHaveCount(0);
   });
 

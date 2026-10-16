@@ -364,6 +364,36 @@ describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sent
     expect(auditSentence({ ...nina, action: "policy.exception.removed", diff: { slot: { from: "tablet · iPad", to: null } } }))
       .toBe("J. Sarmiento removed the exception slot tablet · iPad for Nina Robles");
   });
+  it("policies: saved, and copied from another group's", () => {
+    const pol = { actorLabel: "J. Sarmiento", entityLabel: "Bluepeak Telecom" };
+    expect(auditSentence({ ...pol, action: "policy.saved", diff: { slots: { from: ["Monitor · 24-inch · required"], to: ["Monitor · 24-inch · required", "Headset · Wired · required"] } } }))
+      .toBe("J. Sarmiento saved Bluepeak Telecom's equipment list");
+    expect(auditSentence({ ...pol, action: "policy.saved", diff: { slots: { from: [], to: [] }, copiedFrom: { from: null, to: "Finance" } } }))
+      .toBe("J. Sarmiento copied Finance to Bluepeak Telecom");
+    expect(auditSentence({ ...pol, action: "create", diff: { name: { from: null, to: "Bluepeak Telecom" }, appliesTo: { from: null, to: "Bluepeak Telecom" }, copiedFrom: { from: null, to: "Finance" } } }))
+      .toBe("J. Sarmiento copied Finance to Bluepeak Telecom");
+    expect(actionLabel("policy.saved")).toBe("Policy saved");
+  });
+  it("departments and clients: added, renamed, ended or archived, restored", () => {
+    const dept = { actorLabel: "J. Sarmiento", entityLabel: "Bluepeak Telecom" };
+    expect(auditSentence({ ...dept, action: "create", diff: { name: { from: null, to: "Bluepeak Telecom" }, kind: { from: null, to: "CLIENT" } } }))
+      .toBe("J. Sarmiento added client Bluepeak Telecom");
+    expect(auditSentence({ ...dept, entityLabel: "Finance", action: "create", diff: { name: { from: null, to: "Finance" }, kind: { from: null, to: "INTERNAL" } } }))
+      .toBe("J. Sarmiento added department Finance");
+    expect(auditSentence({ ...dept, entityLabel: "Finance", action: "create", diff: { name: { from: null, to: "Finance" } } }))
+      .toBe("J. Sarmiento created Finance");
+    expect(auditSentence({ ...dept, action: "rename", diff: { name: { from: "Bluepeak", to: "Bluepeak Telecom" } } }))
+      .toBe("J. Sarmiento renamed Bluepeak to Bluepeak Telecom");
+    expect(auditSentence({ ...dept, action: "archive", diff: { name: { from: "Bluepeak Telecom", to: "Bluepeak Telecom" }, kind: { from: "CLIENT", to: "CLIENT" } } }))
+      .toBe("J. Sarmiento ended the Bluepeak Telecom account");
+    expect(auditSentence({ ...dept, entityLabel: "Finance", action: "archive", diff: { name: { from: "Finance", to: "Finance" }, kind: { from: "INTERNAL", to: "INTERNAL" } } }))
+      .toBe("J. Sarmiento archived Finance");
+    expect(auditSentence({ ...dept, action: "restore", diff: { name: { from: "Bluepeak Telecom", to: "Bluepeak Telecom" }, kind: { from: "CLIENT", to: "CLIENT" } } }))
+      .toBe("J. Sarmiento restored Bluepeak Telecom");
+    expect(actionLabel("rename")).toBe("Renamed");
+    expect(actionLabel("archive")).toBe("Ended or archived");
+    expect(actionLabel("restore")).toBe("Restored");
+  });
   it("supplier set or cleared on a request", () => {
     const pr = { ...base, entityLabel: "PR-0188" };
     expect(auditSentence({ ...pr, action: "supplier-set", diff: { supplier: { from: null, to: "TechServe PH" } } }))
@@ -444,5 +474,27 @@ describe("Phase 35 depreciation sentences", () => {
     expect(s("depreciation.override", { lifeMonths: { from: null, to: 24 }, salvage: { from: null, to: 5000 } }, "BR-LT-0148"))
       .toBe("L. Domingo set custom depreciation on BR-LT-0148: 2 years, \u20b15,000.00 salvage");
     expect(s("depreciation.override.cleared", null, "BR-LT-0148")).toBe("L. Domingo cleared custom depreciation on BR-LT-0148");
+  });
+});
+
+describe("Phase 37 note and IT setup sentences", () => {
+  const s = (action: string, diff: unknown, opts?: { omitEntity?: boolean }) =>
+    auditSentence({ actorLabel: "L. Domingo", action, diff, entityLabel: "Dennis Ong" }, opts);
+  it("notes", () => {
+    expect(s("note.added", { note: { from: null, to: "Asked for a second monitor" } })).toBe("L. Domingo added a note on Dennis Ong");
+    expect(s("note.edited", { note: { from: "a", to: "b" } })).toBe("L. Domingo edited a note on Dennis Ong");
+    expect(s("note.deleted", { note: { from: "b", to: null } })).toBe("L. Domingo deleted a note on Dennis Ong");
+    expect(s("note.added", { note: { from: null, to: "x" } }, { omitEntity: true })).toBe("L. Domingo added a note");
+  });
+  it("IT setup names the label and the value from the single diff key", () => {
+    expect(s("employee.setup", { "Entra / Intune": { from: null, to: "Done" } })).toBe("L. Domingo set Dennis Ong's Entra / Intune to Done");
+    expect(s("employee.setup", { VPN: { from: "None", to: "Cloudflare WARP" } })).toBe("L. Domingo set Dennis Ong's VPN to Cloudflare WARP");
+    expect(s("employee.setup", { Argus: { from: "Done", to: "Not needed" } }, { omitEntity: true })).toBe("L. Domingo set Argus to Not needed");
+  });
+  it("the Action facet words", () => {
+    expect(actionLabel("note.added")).toBe("Note added");
+    expect(actionLabel("note.edited")).toBe("Note edited");
+    expect(actionLabel("note.deleted")).toBe("Note deleted");
+    expect(actionLabel("employee.setup")).toBe("IT setup changed");
   });
 });
