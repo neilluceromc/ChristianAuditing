@@ -15,9 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { cn } from "@/lib/cn";
-import { ASSIGNED_ONCE_ACTIVE, createAssignments } from "@/lib/loadout";
-import { EMPLOYMENT_LABEL, M365_CANONICAL } from "@/lib/labels";
-import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
+import { M365_CANONICAL } from "@/lib/labels";
 import { SETUP_STATE_LABELS, VPN_CHOICES, setupSummary } from "@/lib/it-setup";
 import { detailsMissing, type DetailsKey } from "@/lib/new-employee";
 import type { PickerGroup } from "@/lib/groups";
@@ -42,7 +40,7 @@ const SETUP_ROWS = [
 ] as const;
 const SETUP_OPTIONS = (Object.keys(SETUP_STATE_LABELS) as SetupState[]).filter((s) => s !== "REMOVED").map((s) => ({ value: s, label: SETUP_STATE_LABELS[s] }));
 /** Server field errors that live inside the "More" fold, which opens to show them. */
-const MORE_KEYS = ["employment", "offboardingDueAt", "m365Status"];
+const MORE_KEYS = ["m365Status"];
 
 interface FormState {
   kind: Kind;
@@ -57,8 +55,6 @@ interface FormState {
   vpnSelect: string;
   vpnOther: string;
   note: string;
-  employment: string;
-  offboardingDueAt: string;
   m365Select: string;
   m365Custom: string;
 }
@@ -67,7 +63,7 @@ const blankForm = (kind: Kind, departmentId: string, employeeNo: string, today: 
   kind, departmentId, name: "", title: "", employeeNo, joinedAt: today,
   entraStatus: "NOT_YET", autopilotStatus: "NOT_YET", argusStatus: "NOT_YET",
   vpnSelect: "None", vpnOther: "", note: "",
-  employment: "ACTIVE", offboardingDueAt: "", m365Select: "", m365Custom: "",
+  m365Select: "", m365Custom: "",
 });
 
 /**
@@ -112,7 +108,6 @@ export function NewEmployeeWizard({
   const group = [...groups.internal, ...groups.client].find((g) => g.id === form.departmentId) ?? null;
   const linesKey = `${form.departmentId}|${form.title.trim().toLowerCase()}`;
   const vpn = form.vpnSelect === OTHER_VPN ? form.vpnOther.trim() : form.vpnSelect;
-  const dueFloor = minOffboardingDue(today);
 
   // Focus the first invalid field after a refused Next or create (an effect: it must run after the commit
   // that paints aria-invalid — see employee-form.tsx).
@@ -162,10 +157,8 @@ export function NewEmployeeWizard({
     const next: Record<string, string> = {};
     for (const k of missing) next[k] = `Fill in the ${missingLabel(k)}`;
     if (form.vpnSelect === OTHER_VPN && !form.vpnOther.trim()) next.vpn = "Name the VPN";
-    if (form.employment === "OFFBOARDING" && !form.offboardingDueAt) next.offboardingDueAt = "Pick a date";
     setErrors(next);
     if (Object.keys(next).length) {
-      if (next.offboardingDueAt) setMoreOpen(true);
       setFocusTick((t) => t + 1);
       return;
     }
@@ -197,12 +190,11 @@ export function NewEmployeeWizard({
       const m365Status =
         form.m365Select === "" ? null : form.m365Select === CUSTOM ? form.m365Custom.trim() || null : form.m365Select;
       const res = await createEmployee({
-        name: form.name, title: form.title, employment: form.employment, m365Status,
-        offboardingDueAt: form.employment === "OFFBOARDING" ? form.offboardingDueAt : "",
+        name: form.name, title: form.title, m365Status,
         departmentId: form.departmentId, employeeNo: form.employeeNo, joinedAt: form.joinedAt, confirmSameName,
         entraStatus: form.entraStatus, autopilotStatus: form.autopilotStatus, argusStatus: form.argusStatus,
         vpn, note: form.note,
-        assign: linesFor === linesKey ? createAssignments(form.employment, chosen.map((c) => ({ assetId: c.spare.id }))) : [],
+        assign: linesFor === linesKey ? chosen.map((c) => ({ assetId: c.spare.id })) : [],
       });
       if (res.ok) {
         const { id, assigned, failed } = res.data;
@@ -248,8 +240,6 @@ export function NewEmployeeWizard({
   }
 
   const sortedLines = [...(lines ?? [])].sort((a, b) => Number(b.required) - Number(a.required));
-  // Spec §5.4: someone created not ACTIVE gets no equipment — step 2 shows their lines without spare pickers.
-  const active = form.employment === "ACTIVE";
   const pickedElsewhere = (assetId: string, key: string) =>
     Object.entries(picks).some(([k, v]) => k !== key && v === assetId);
 
@@ -259,7 +249,6 @@ export function NewEmployeeWizard({
     ["Title", form.title.trim()],
     ["Employee no.", form.employeeNo.trim()],
     ["Start date", form.joinedAt],
-    ...(form.employment !== "ACTIVE" ? [["Employment", EMPLOYMENT_LABEL[form.employment as keyof typeof EMPLOYMENT_LABEL] ?? form.employment] as [string, string]] : []),
     ...(form.m365Select ? [["Account status", form.m365Select === CUSTOM ? form.m365Custom.trim() : form.m365Select] as [string, string]] : []),
   ];
 
@@ -399,29 +388,6 @@ export function NewEmployeeWizard({
               className="rounded-(--radius-card) border border-border bg-surface px-4 py-3">
               <summary className="cursor-pointer text-[12.5px] font-medium text-fg-secondary">More</summary>
               <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <FormField label="Employment" required error={errors.employment} hint="Offboarding is started from the person's page.">
-                  {(p) => (
-                    <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                      value={form.employment}
-                      onChange={(e) => {
-                        const employment = e.target.value;
-                        setForm((f) => ({
-                          ...f, employment,
-                          offboardingDueAt: employment === "OFFBOARDING" ? (f.offboardingDueAt || defaultOffboardingDue(today)) : "",
-                        }));
-                      }}>
-                      <option value="ACTIVE">ACTIVE</option>
-                      <option value="OFFBOARDING">OFFBOARDING</option>
-                      <option value="OFFBOARDED">OFFBOARDED</option>
-                    </Select>
-                  )}
-                </FormField>
-                {form.employment === "OFFBOARDING" && (
-                  <FormField label="Complete offboarding by" required error={errors.offboardingDueAt} hint="5 working days by default.">
-                    {(p) => <Input id={p.id} type="date" aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                      min={dueFloor} value={form.offboardingDueAt} onChange={(e) => set("offboardingDueAt", e.target.value)} />}
-                  </FormField>
-                )}
                 <FormField label="Account status" error={errors.m365Status}
                   hint="Set when the M365 account exists; the directory sync fills it in later.">
                   {(p) => (
@@ -463,19 +429,18 @@ export function NewEmployeeWizard({
                 <p className="text-[12.5px] text-fg-muted">Nothing to assign yet — add equipment from their profile after creating.</p>
               ) : (
                 <>
-                {!active && <p className="text-[12.5px] text-fg-muted">{ASSIGNED_ONCE_ACTIVE}</p>}
                 <ul className="flex flex-col gap-3">
                   {sortedLines.map((line) => {
                     const selectId = `spare-${line.key.replace(":", "-")}`;
                     return (
                       <li key={line.key} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)]">
                         <div className="flex items-center gap-2">
-                          {line.loaner || !active
+                          {line.loaner
                             ? <span className="text-[12.5px] font-medium text-fg">{line.label}</span>
                             : <label htmlFor={selectId} className="text-[12.5px] font-medium text-fg">{line.label}</label>}
                           <Pill tone={line.required ? "accent" : "neutral"}>{line.required ? "Required" : "Optional"}</Pill>
                         </div>
-                        {!active ? null : line.loaner ? (
+                        {line.loaner ? (
                           <p className="text-[12.5px] text-fg-muted">Filled by a loan later</p>
                         ) : (
                           <Select id={selectId} value={picks[line.key] ?? ""}
@@ -521,9 +486,8 @@ export function NewEmployeeWizard({
                   <p className="text-fg-muted">Nothing to assign yet</p>
                 ) : (
                   <ul className="flex flex-col gap-0.5">
-                    {!active && <li className="text-fg-muted">{ASSIGNED_ONCE_ACTIVE}</li>}
                     {sortedLines.map((line) => {
-                      const spare = active ? line.spares.find((s) => s.id === picks[line.key]) : undefined;
+                      const spare = line.spares.find((s) => s.id === picks[line.key]);
                       return (
                         <li key={line.key} className="text-fg">
                           {line.label}: {spare ? `${spare.tag} · ${spare.model}` : line.loaner ? "filled by a loan later" : "gap"}

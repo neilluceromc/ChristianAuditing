@@ -319,13 +319,12 @@ test.describe("offboarding — the server gate does not trust the wizard", () =>
     await login(page, "it@thebackroomop.com");
 
     // now mark her offboarding — the anchor lands AFTER that approval
+    // Phase 40: Edit no longer starts an offboarding — its "Start offboarding…" link opens the dialog, which lands
+    // in the wizard (the navigation below is the confirmation the server action finished).
     await page.goto(`/employees/${marites.id}/edit`);
-    await page.getByLabel(/Employment/).selectOption("OFFBOARDING");
-    await page.getByRole("button", { name: /Save/ }).click();
-    // Save is a React transition with no redirect (it stays on /edit and flips
-    // the button to "✓ Saved") — navigating away before that lands can abort
-    // the in-flight server action, so wait for confirmation first.
-    await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible();
+    await page.getByRole("button", { name: "Start offboarding…" }).click();
+    await page.getByRole("dialog", { name: /^Start offboarding / }).getByRole("button", { name: "Start", exact: true }).click();
+    await page.waitForURL(/\/offboarding\//);
 
     await page.goto("/offboarding");
     await page.getByRole("row", { name: /Marites Bautista/ }).getByRole("link", { name: /^Collect \d+ items?$/ }).click();

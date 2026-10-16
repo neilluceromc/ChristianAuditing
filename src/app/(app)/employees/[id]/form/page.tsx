@@ -3,6 +3,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { fmtDate } from "@/lib/format";
 import { PrintButton } from "@/components/ui/print-button";
+import { heldSinceByAsset } from "@/server/modules/employees/held-since";
 
 const STRIPES = "repeating-linear-gradient(135deg, #EEF1F5 0 6px, #F7F9FB 6px 12px)";
 
@@ -14,6 +15,11 @@ export default async function AccountabilityFormPage({ params }: { params: Promi
     include: { department: true, assets: { orderBy: { tag: "asc" } } },
   });
   if (!employee) notFound();
+  // Phase 40 (spec 2.1): "Issued" is the date the item was assigned to THIS person (the newest assignment audit
+  // naming them), not the purchase date; one batched query, and "—" when no assignment is recorded.
+  const heldSince = await heldSinceByAsset(
+    employee.assets.map((a) => ({ assetId: a.id, employeeId: employee.id, employeeNo: employee.employeeNo })),
+  );
 
   return (
     <div className="mx-auto max-w-[760px]">
@@ -62,7 +68,7 @@ export default async function AccountabilityFormPage({ params }: { params: Promi
                 <td className="py-1.5 pr-3 font-mono">{a.tag}</td>
                 <td className="py-1.5 pr-3">{a.model}</td>
                 <td className="py-1.5 pr-3 font-mono">{a.serial ?? "—"}</td>
-                <td className="py-1.5 font-mono">{fmtDate(a.purchasedAt)}</td>
+                <td className="py-1.5 font-mono">{fmtDate(heldSince.get(a.id))}</td>
               </tr>
             ))}
             {employee.assets.length === 0 && (

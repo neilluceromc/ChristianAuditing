@@ -21,8 +21,9 @@ import { addDays, dayFromISO, defaultOffboardingDue, defaultStocktakeDue } from 
  *     reads the seeded one) and RESTORES the seeded value through Prisma in
  *     its `finally`, so cases 3 and 6 still see "2 d overdue". The audit row
  *     case 2 checks is append-only and survives that restore.
- *   - case 3 flips Leo Tan to OFFBOARDING through the form and back to
- *     ACTIVE, through the form on the happy path and unconditionally through
+ *   - case 3 flips Leo Tan to OFFBOARDING through the Start offboarding dialog
+ *     (Phase 40: Edit can no longer start an offboarding) and back to
+ *     ACTIVE, through the Edit form on the happy path and unconditionally through
  *     Prisma in its `finally` — a mid-case failure must not leave a second
  *     leaver behind for cases 4-8 or for the next spec file.
  *   - case 5 backdates the stocktake case 4 opened and then CANCELS it (plan
@@ -231,14 +232,17 @@ test.describe.serial("deadlines", () => {
       await expect(dennisRow).toContainText("2 d overdue");
       await expect(dennisRow).toContainText(d.employeeNo);
 
+      // Phase 40 (spec 2.2): an ACTIVE person's Employment is read-only on Edit; the way in is the Start offboarding
+      // dialog, which prefills the default date, visibly, and lands in the wizard.
       await page.goto(`/employees/${l.id}/edit`);
-      const employment = page.getByLabel("Employment");
-      await waitForHydration(employment);
-      await employment.selectOption("OFFBOARDING");
-      // Spec §6.2: switching to OFFBOARDING prefills the default, visibly.
-      await expect(page.getByLabel("Complete offboarding by")).toHaveValue(defaultOffboardingDue(today));
-      await page.getByRole("button", { name: "Save changes" }).click();
-      await expect(page.getByRole("button", { name: "✓ Saved" })).toBeVisible({ timeout: 30_000 });
+      const startLink = page.getByRole("button", { name: "Start offboarding…" });
+      await waitForHydration(startLink);
+      await expect(page.getByLabel("Employment")).toHaveCount(0);
+      await startLink.click();
+      const startDialog = page.getByRole("dialog", { name: "Start offboarding Leo Tan" });
+      await expect(startDialog.locator('input[type="date"]')).toHaveValue(defaultOffboardingDue(today));
+      await startDialog.getByRole("button", { name: "Start", exact: true }).click();
+      await page.waitForURL(/\/offboarding\//, { timeout: 30_000 });
 
       await page.goto("/inventory/work");
       await expect(queue).toBeVisible({ timeout: 20_000 });

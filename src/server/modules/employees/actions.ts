@@ -22,7 +22,7 @@ import { localDateISO } from "@/lib/format";
 import { nextEmployeeNo as nextNo } from "@/lib/employee-no";
 import { previewPolicyFor, type PolicyLine, type PolicyPreviewResult } from "@/lib/policy-preview";
 import { GROUP_ARCHIVED } from "@/lib/groups";
-import { createAssignments } from "@/lib/loadout";
+import { EMPLOYMENT_CHANGE_REFUSAL, employmentChangeAllowed } from "@/lib/employment-rules";
 import { firstFailure, newEmployeeExtrasShape, refineDistinctAssign, type AssignFailure } from "@/lib/new-employee";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
@@ -253,6 +253,11 @@ export async function updateEmployee(input: unknown): Promise<ActionResult<{ id:
 
   const employee = await prisma.employee.findUnique({ where: { id: d.id } });
   if (!employee) return conflict("That employee no longer exists.");
+  // Phase 40 (spec 2.2): employment moves only through offboarding — Start offboarding opens it, the wizard's
+  // completeOffboarding closes it; Edit may only cancel one (OFFBOARDING → ACTIVE) or leave employment alone.
+  if (!employmentChangeAllowed(employee.employment, d.employment)) {
+    return validationError({ employment: EMPLOYMENT_CHANGE_REFUSAL });
+  }
 
   const today = localDateISO(new Date());
   // Ruling R8: the floor guards a CHANGE, not a re-send. An employee whose
@@ -381,7 +386,9 @@ export async function startOffboarding(input: unknown): Promise<ActionResult<{ i
   return ok({ id: employee.id });
 }
 
-const createEmployeeSchema = employeeSchema.omit({ id: true }).extend({
+// Phase 40 (spec 2.2): a new person is always ACTIVE. `employment` and `offboardingDueAt` are not part of the
+// create payload — zod drops an unknown key, so a client that still sends one is ignored, never honoured.
+const createEmployeeSchema = employeeSchema.omit({ id: true, employment: true, offboardingDueAt: true }).extend({
   departmentId: z.string().min(1, "Pick a department"),
   // No format rule: Employee.employeeNo has none anywhere and the importer
   // (import-employees.ts, E-2) refuses to invent one. Uniqueness is
@@ -423,10 +430,6 @@ export async function createEmployee(
   const joinedAt = new Date(`${d.joinedAt}T00:00:00Z`);
   if (Number.isNaN(joinedAt.getTime())) errors.joinedAt = "Use the date picker";
   if (!department) errors.departmentId = "Unknown department";
-  const today = localDateISO(new Date());
-  if (d.employment === "OFFBOARDING" && d.offboardingDueAt && d.offboardingDueAt < minOffboardingDue(today)) {
-    errors.offboardingDueAt = "Pick today or later";
-  }
   // Phase 20 (spec §5) → Phase 29 (plan P-3): the same-name warning is one statement, carried under a key no field
   // claims so the form hands it to the banner that holds the checkbox — never under Name.
   if (!d.confirmSameName && !errors.departmentId) {
@@ -444,11 +447,11 @@ export async function createEmployee(
     name: d.name,
     title: d.title,
     departmentId: d.departmentId,
-    employment: d.employment,
+    employment: "ACTIVE" as const,
     m365Status: d.m365Status === "" ? null : d.m365Status,
     joinedAt,
-    offboardingAt: d.employment === "OFFBOARDING" ? new Date() : null,
-    offboardingDueAt: d.employment === "OFFBOARDING" ? dayFromISO(d.offboardingDueAt || defaultOffboardingDue(today)) : null,
+    offboardingAt: null,
+    offboardingDueAt: null,
     entraStatus: d.entraStatus,
     autopilotStatus: d.autopilotStatus,
     argusStatus: d.argusStatus,
@@ -469,7 +472,6 @@ export async function createEmployee(
         action: "create",
         diff: {
           employeeNo: { from: null, to: d.employeeNo }, name: { from: null, to: d.name },
-          ...(data.offboardingDueAt ? { offboardingDueAt: { from: null, to: data.offboardingDueAt } } : {}),
         },
       });
       if (d.note) {
@@ -491,12 +493,11 @@ export async function createEmployee(
   revalidatePath("/employees");
 
   // After the commit: each picked spare through the Fill dialog's own path for this user — direct for IT,
-  // a request otherwise; standard status (not a loan), no reason typed. Someone created not ACTIVE gets none:
-  // any picks sent are ignored (the wizard sends none), never refused by the lifecycle guard.
+  // a request otherwise; standard status (not a loan), no reason typed.
   const direct = isDirectLifecycle(user.role, "IT");
   let assigned = 0;
   const failed: AssignFailure[] = [];
-  for (const { assetId } of createAssignments(d.employment, d.assign)) {
+  for (const { assetId } of d.assign) {
     const asset = await prisma.asset.findUnique({ where: { id: assetId }, select: { tag: true } });
     if (!asset) {
       failed.push({ tag: assetId, reason: "That asset no longer exists." });
