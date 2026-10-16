@@ -79,7 +79,9 @@ export default async function AssetRecordLayout({
           { label: asset.tag },
         ]}
         badge={
-          <span className="inline-flex items-center gap-2">
+          // Phase 37 (spec §4.4): the profile side panel's "Change status" lands here (`#status`); the change itself
+          // is the actions' "Change status…" beside it.
+          <span id="status" className="inline-flex scroll-mt-4 items-center gap-2">
             <StatusPill value={asset.status} />
             {ask && <Pill tone="accent">{ask}</Pill>}
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}

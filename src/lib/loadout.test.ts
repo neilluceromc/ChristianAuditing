@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, numberSlotLabels, orderTiles, profilePrimary, profileTiles, resolvePolicy, tileChip, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, numberSlotLabels, orderTiles, profilePrimary, profileTiles, profileTileMenuItems, resolvePolicy, tileChip, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
 
 const policies = [
   { id: "p-dept", name: "Finance standard", appliesToTitle: null, appliesToDepartmentId: "dept-fin", slots: [] },
@@ -298,6 +298,13 @@ describe("profileTiles — the profile's equal tiles (spec §4.3)", () => {
   it("extras and loans carry no slot and are never required", () => {
     expect(tiles.slice(3).map((t) => [t.slot, t.required])).toEqual([[null, false], [null, false]]);
   });
+  it("numbers in policy order BEFORE sorting: an optional empty Monitor first, a filled Monitor second → tiles read Monitor 2, Monitor", () => {
+    const optionalFirst = { id: "o1", name: "Monitor", assetTypeId: "t-monitor-27", required: false, loaner: false };
+    const filledSecond = { id: "f2", name: "Monitor", assetTypeId: "t-monitor", required: true, loaner: false };
+    const reversed = profileTiles(computeLoadout([optionalFirst, filledSecond], [asset("a-mon", "t-monitor")]), (s) => s.name, () => "x");
+    expect(reversed.map((t) => t.label)).toEqual(["Monitor 2", "Monitor"]);
+    expect(reversed.map((t) => t.key)).toEqual(["slot:f2", "slot:o1"]);
+  });
   it("a slot covered by a loan shows that device and the device is not repeated as a loan tile", () => {
     const laptop = { id: "l1", name: "Laptop", assetTypeId: "t-laptop", required: true, loaner: false };
     const covered = profileTiles(
@@ -322,9 +329,10 @@ describe("tileChip — one status chip per tile (spec §4.3)", () => {
     expect(tileChip({ ...base, filled: true }, today)).toEqual({ text: "Held", tone: "success" });
     expect(tileChip({ ...base, kind: "extra", filled: true, required: false }, today)).toEqual({ text: "Not in policy", tone: "neutral" });
   });
-  it("a loan reads On loan · due d MMM: warning, danger once overdue, and says when there is no date", () => {
+  it("a loan reads On loan · due d MMM: neutral beyond 3 days, amber within 3, red once overdue, and says when there is no date", () => {
     const loan = { ...base, kind: "loan" as const, filled: true, required: false };
-    expect(tileChip({ ...loan, loanDueAt: "2026-10-20T00:00:00.000Z" }, today)).toEqual({ text: "On loan · due 20 Oct", tone: "warning" });
+    expect(tileChip({ ...loan, loanDueAt: "2026-10-20T00:00:00.000Z" }, today)).toEqual({ text: "On loan · due 20 Oct", tone: "neutral" });
+    expect(tileChip({ ...loan, loanDueAt: "2026-10-19T00:00:00.000Z" }, today)).toEqual({ text: "On loan · due 19 Oct", tone: "warning" });
     expect(tileChip({ ...loan, loanDueAt: "2026-10-16T00:00:00.000Z" }, today)).toEqual({ text: "On loan · due 16 Oct", tone: "warning" });
     expect(tileChip({ ...loan, loanDueAt: "2026-10-15T00:00:00.000Z" }, today)).toEqual({ text: "On loan · due 15 Oct", tone: "danger" });
     expect(tileChip(loan, today)).toEqual({ text: "On loan · no due date", tone: "warning" });
@@ -332,5 +340,29 @@ describe("tileChip — one status chip per tile (spec §4.3)", () => {
   it("a loaner slot's device and a loan-covered slot are loans too", () => {
     expect(tileChip({ ...base, filled: true, loaner: true, loanDueAt: "2026-11-01T00:00:00.000Z" }, today).text).toBe("On loan · due 1 Nov");
     expect(tileChip({ ...base, filled: true, coveredByLoan: true }, today).text).toBe("On loan · no due date");
+  });
+});
+
+describe("profileTileMenuItems — the ⋯ items for any profile tile (spec §4.3)", () => {
+  const slot = { kind: "slot" as const, filled: false, pending: false, exceptionId: null, waivable: true, coveredByLoan: false };
+  const act = { mayAct: true, direct: true };
+  it("a policy slot is exactly tileMenuItems", () => {
+    expect(profileTileMenuItems(slot, act)).toEqual(tileMenuItems(slot, act));
+    expect(profileTileMenuItems({ ...slot, filled: true }, act)).toEqual(["replace", "return", "open", "waive"]);
+  });
+  it("a loan-covered slot keeps the empty slot's items and adds Return and Open record for the loan — never Replace", () => {
+    const covered = { ...slot, filled: true, coveredByLoan: true };
+    expect(profileTileMenuItems(covered, act)).toEqual(["reserve", "return", "open", "waive"]);
+    expect(profileTileMenuItems(covered, { mayAct: true, direct: false })).toEqual(["return", "open", "waive"]);
+    expect(profileTileMenuItems({ ...covered, exceptionId: "x1", waivable: false }, act)).toEqual(["reserve", "return", "open", "remove-exception"]);
+    expect(profileTileMenuItems({ ...covered, pending: true }, act)).toEqual(["reserve", "open", "waive"]);
+    expect(profileTileMenuItems(covered, { mayAct: false, direct: true })).toEqual(["open"]);
+  });
+  it("extras and loans: Return and Open record when the user may act, else Open record only", () => {
+    const extra = { ...slot, kind: "extra" as const, filled: true, waivable: false };
+    expect(profileTileMenuItems(extra, act)).toEqual(["return", "open"]);
+    expect(profileTileMenuItems({ ...extra, kind: "loan" }, act)).toEqual(["return", "open"]);
+    expect(profileTileMenuItems({ ...extra, pending: true }, act)).toEqual(["open"]);
+    expect(profileTileMenuItems(extra, { mayAct: false, direct: true })).toEqual(["open"]);
   });
 });

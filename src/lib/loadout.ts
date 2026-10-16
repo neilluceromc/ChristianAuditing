@@ -252,7 +252,8 @@ export type ChipTone = "danger" | "warning" | "success" | "neutral";
 /**
  * Phase 37 (spec §4.3): the one status chip at the bottom of a tile. Loans are a
  * status, not a card: a loaner slot's device, a loan-covered slot and an
- * unclaimed loan all read "On loan · due {d MMM}" — amber, red once overdue.
+ * unclaimed loan all read "On loan · due {d MMM}" — amber within 3 days, red
+ * once overdue, neutral further out (amber when no due date is set).
  */
 export function tileChip(
   tile: { kind: TileKind; filled: boolean; required: boolean; loaner: boolean; coveredByLoan: boolean; loanDueAt: string | null },
@@ -262,7 +263,9 @@ export function tileChip(
   if (onLoan) {
     if (!tile.loanDueAt) return { text: "On loan · no due date", tone: "warning" };
     const due = new Date(tile.loanDueAt);
-    return { text: `On loan · due ${fmtDayMonth(due)}`, tone: dueStatus(due, today).overdue ? "danger" : "warning" };
+    const s = dueStatus(due, today);
+    // Spec §4.3: amber when due within 3 days, red when overdue, quiet otherwise.
+    return { text: `On loan · due ${fmtDayMonth(due)}`, tone: s.overdue ? "danger" : s.days <= 3 ? "warning" : "neutral" };
   }
   if (tile.kind === "extra") return { text: "Not in policy", tone: "neutral" };
   if (tile.filled) return { text: "Held", tone: "success" };
@@ -301,4 +304,23 @@ export function tileMenuItems(
   if (tile.exceptionId) items.push("remove-exception");
   else if (tile.waivable) items.push("waive");
   return items;
+}
+
+/**
+ * Phase 37 (spec §4.3): the ⋯ items for ANY profile tile. A policy slot asks
+ * `tileMenuItems`. A slot a loan stands in for is still an empty slot (Reserve
+ * on the direct path, Waive / Remove exception) and also holds the loan
+ * (Return unless pending, Open record) — never Replace, since replacing a loan
+ * lends another. Extras and loans offer Return and Open record, or only Open
+ * record when the user may not act or the item is pending.
+ */
+export function profileTileMenuItems(
+  tile: { kind: TileKind; filled: boolean; pending: boolean; exceptionId: string | null; waivable: boolean; coveredByLoan: boolean },
+  ctx: { mayAct: boolean; direct: boolean },
+): TileMenuItem[] {
+  const device: TileMenuItem[] = ctx.mayAct && !tile.pending ? ["return", "open"] : ["open"];
+  if (tile.kind !== "slot") return device;
+  if (!tile.coveredByLoan) return tileMenuItems(tile, ctx);
+  const empty = tileMenuItems({ ...tile, filled: false }, ctx);
+  return [...empty.filter((k) => k === "reserve"), ...device, ...empty.filter((k) => k !== "reserve")];
 }

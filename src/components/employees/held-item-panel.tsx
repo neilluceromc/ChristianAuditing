@@ -159,7 +159,7 @@ export function HeldItemPanel({
         <div className="flex flex-wrap items-center gap-2 border-t border-border-faint px-4 py-3">
           {canReplace && <Button variant="secondary" size="sm" onClick={onReplace}>Replace…</Button>}
           {canReturn && <Button variant="secondary" size="sm" onClick={onReturn}>Return…</Button>}
-          <ButtonLink href={`${href}#status`} size="sm" variant="ghost">Change status</ButtonLink>
+          {canEdit && <ButtonLink href={`${href}#status`} size="sm" variant="ghost">Change status</ButtonLink>}
           {canEdit && <ButtonLink href={`${href}/edit`} size="sm" variant="ghost">Edit details</ButtonLink>}
           <ButtonLink href={href} size="sm" variant="primary" className="ml-auto">Open full record</ButtonLink>
         </div>

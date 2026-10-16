@@ -32,7 +32,7 @@ import { reserveAsset } from "@/server/modules/reservations/actions";
 import { assignAsset, assignReserved, replaceAsset, returnAsset } from "@/server/modules/lifecycle/actions";
 import { removeSlotException } from "@/server/modules/employees/exception-actions";
 import { saveLoadoutView } from "@/server/preferences";
-import { tileChip, tileMenuItems, type TileMenuItem } from "@/lib/loadout";
+import { profileTileMenuItems, tileChip, type TileMenuItem } from "@/lib/loadout";
 import {
   DEFAULT_LOAN_DAYS, RETURN_OUTCOMES, RETURN_OUTCOME_LABEL, defaultLoanDue, minLoanDue, reasonRequiredFor,
   type ReturnOutcome,
@@ -427,16 +427,16 @@ export function LoadoutView({
 
   /**
    * Phase 29 (spec §4.4) / Phase 37 (§4.3): WHICH items a tile's menu offers is
-   * a pure rule. A policy slot asks `tileMenuItems`; a slot a loan stands in
-   * for never offers Replace (replacing a loan lends another — Fill is the way
-   * to give them their own); extras and loans offer Return and Open record.
+   * a pure rule (`profileTileMenuItems`) — this only feeds it the tile.
    */
   function kindsFor(tile: EquipmentTileData): TileMenuItem[] {
     const a = tile.asset;
-    if (tile.kind !== "slot") return mayAct && !a?.pendingRef ? ["return", "open"] : ["open"];
-    return tileMenuItems(
-      { filled: !!a, pending: !!a?.pendingRef, exceptionId: tile.exceptionId, waivable: !tile.exceptionId },
-      { mayAct, direct: direct && !tile.coveredByLoan },
+    return profileTileMenuItems(
+      {
+        kind: tile.kind, filled: !!a, pending: !!a?.pendingRef, exceptionId: tile.exceptionId,
+        waivable: !tile.exceptionId, coveredByLoan: tile.coveredByLoan,
+      },
+      { mayAct, direct },
     );
   }
 
