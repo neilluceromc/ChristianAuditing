@@ -3,7 +3,8 @@ import { manilaMonth } from "./depreciation";
 import { canSeeMoney, summariseGroup, type ReportAsset, type ReportPerson } from "./equipment-report";
 
 const asOf = manilaMonth(new Date("2026-10-17T04:00:00Z"));
-const group = { id: "g1", name: "Acme", kind: "CLIENT" as const };
+const group = { id: "g1", name: "Acme", kind: "CLIENT" as const, hasBasePolicy: false };
+const withBase = { ...group, hasBasePolicy: true };
 
 const laptopSlot = { id: "s1", name: "Laptop", assetTypeId: "t-laptop", required: true, loaner: false };
 const monitorSlot = { id: "s2", name: "Monitor", assetTypeId: "t-monitor", required: true, loaner: false };
@@ -72,6 +73,15 @@ describe("summariseGroup — who is missing something", () => {
   });
 });
 
+describe("summariseGroup — a person with no policy", () => {
+  it("is never missing something, even if slots were passed", () => {
+    const p = person("1", { hasPolicy: false, slots: [laptopSlot, monitorSlot], assets: [] });
+    const s = summariseGroup(withBase, [p], none);
+    expect(s.missing).toEqual([]);
+    expect(s.equippedPct).toBe(100);
+  });
+});
+
 describe("summariseGroup — equipped %", () => {
   it("is round(100 x (people - missing) / people)", () => {
     const ok = (id: string) => person(id, { assets: [asset(`${id}-l`, "t-laptop"), asset(`${id}-m`, "t-monitor")] });
@@ -84,6 +94,10 @@ describe("summariseGroup — equipped %", () => {
     const s = summariseGroup(group, [person("1", { hasPolicy: false, slots: [] })], none);
     expect([s.noPolicy, s.equippedPct]).toEqual([true, null]);
   });
+  it("a group base policy keeps it tracked even when nobody resolved to a policy", () => {
+    const s = summariseGroup(withBase, [person("1", { hasPolicy: false, slots: [] })], none);
+    expect([s.noPolicy, s.equippedPct]).toEqual([false, 100]);
+  });
   it("noPolicy is false as soon as one person has a policy", () => {
     const s = summariseGroup(group, [person("1", { hasPolicy: false, slots: [] }), person("2")], none);
     expect([s.noPolicy, s.equippedPct]).toEqual([false, 50]);
@@ -91,11 +105,15 @@ describe("summariseGroup — equipped %", () => {
 });
 
 describe("summariseGroup — empty groups (no NaN, no division by zero)", () => {
-  it("a group with no people reads 100% with no policy tracked as null, and zero money", () => {
-    const s = summariseGroup(group, [], none);
+  it("a group with a base policy but no people reads 100%, with zero counts and zero money", () => {
+    const s = summariseGroup(withBase, [], none);
     expect([s.people, s.items, s.loans, s.nextLoanDue, s.missing, s.byCategory]).toEqual([0, 0, 0, null, [], []]);
-    expect(s.noPolicy).toBe(true);
-    expect(s.equippedPct).toBeNull();
+    expect([s.noPolicy, s.equippedPct]).toEqual([false, 100]);
+    expect(summariseGroup(withBase, [], money).money).toEqual({ costC: 0, bookC: 0, perPersonC: 0, withoutCost: 0 });
+  });
+  it("a group with no base policy and no people is no policy: equipped is null, money still zero", () => {
+    const s = summariseGroup(group, [], none);
+    expect([s.noPolicy, s.equippedPct, s.people]).toEqual([true, null, 0]);
     expect(summariseGroup(group, [], money).money).toEqual({ costC: 0, bookC: 0, perPersonC: 0, withoutCost: 0 });
   });
   it("a group whose people hold nothing: nobody has anything, Per person is 0", () => {
@@ -143,6 +161,11 @@ describe("summariseGroup — money for Finance and Admin", () => {
     const c = person("3", { slots: [], assets: [] });
     const s = summariseGroup(group, [a, b, c], money);
     expect(s.money).toEqual({ costC: 5_200_000, bookC: 5_055_556, perPersonC: 1_685_185, withoutCost: 1 });
+  });
+  it("a cost of 0 is a cost: only a null cost adds to withoutCost", () => {
+    const s = summariseGroup(group, [person("1", { slots: [], assets: [bought("a1", 0), bought("a2", null)] })], money);
+    expect(s.money?.withoutCost).toBe(1);
+    expect(s.money?.costC).toBe(0);
   });
   it("an asset not yet approved carries its full cost as book value", () => {
     const pending = asset("a1", null, { costC: 100_000, purchasedAt: new Date("2026-10-01T00:00:00Z"), dep: { lifeMonths: 36, salvage: 0, catLifeMonths: null, catSalvagePercent: null } });

@@ -63,7 +63,7 @@ function bookValueC(a: ReportAsset, asOf: MonthIndex): number {
 }
 
 export function summariseGroup(
-  group: { id: string; name: string; kind: "INTERNAL" | "CLIENT" },
+  group: { id: string; name: string; kind: "INTERNAL" | "CLIENT"; hasBasePolicy: boolean },
   people: ReportPerson[],
   opts: { withMoney: boolean; asOf: MonthIndex },
 ): GroupSummary {
@@ -75,7 +75,8 @@ export function summariseGroup(
   const missing: GroupSummary["missing"] = [];
   for (const p of people) {
     const loadout = computeLoadout(p.slots, p.assets.map((a) => ({ id: a.id, tag: a.tag, model: "", typeId: a.typeId, status: a.status })));
-    if (loadout.missingRequired === 0) continue;
+    // Someone no policy applies to is never "missing something", whatever slots were passed.
+    if (!p.hasPolicy || loadout.missingRequired === 0) continue;
     // Numbered over every slot in policy order, exactly as the profile does, then only the empty required gaps are kept.
     const labels = numberSlotLabels(loadout.slots.map((s) => s.slot.name));
     missing.push({
@@ -84,7 +85,8 @@ export function summariseGroup(
     });
   }
 
-  const noPolicy = !people.some((p) => p.hasPolicy);
+  // Spec §3.2: no policy means no base policy for the group and no rule matching anyone in it.
+  const noPolicy = !group.hasBasePolicy && !people.some((p) => p.hasPolicy);
   const equippedPct = noPolicy ? null : people.length === 0 ? 100 : Math.round((100 * (people.length - missing.length)) / people.length);
 
   const books = new Map<string, { count: number; bookC: number }>();
