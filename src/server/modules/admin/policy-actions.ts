@@ -11,7 +11,7 @@ import { writeAudit } from "@/server/audit";
 import type { AuditDiff } from "@/lib/audit-diff";
 import { GROUP_ARCHIVED } from "@/lib/groups";
 import { slotLabel } from "@/lib/loadout";
-import { planSlotChanges, policyNameFor, POLICY_LINES_MIN, type ExistingSlot, type PolicyLine } from "@/lib/policy-lines";
+import { matchCopiedLines, planSlotChanges, policyNameFor, POLICY_LINES_MIN, type ExistingSlot, type PolicyLine } from "@/lib/policy-lines";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -243,7 +243,7 @@ export async function copyPolicy(input: unknown): Promise<ActionResult<{ copied:
   const result = await inTransaction(async (tx) => {
     const source = await tx.equipmentPolicy.findUnique({
       where: { id: d.fromPolicyId },
-      include: { appliesToDepartment: true, slots: { orderBy: [{ name: "asc" }, { id: "asc" }] } },
+      include: { appliesToDepartment: true, slots: { orderBy: { id: "asc" } } },
     });
     if (!source) throw new Refusal(conflict("That policy no longer exists."));
     const from = source.appliesToDepartment;
@@ -261,10 +261,15 @@ export async function copyPolicy(input: unknown): Promise<ActionResult<{ copied:
     // every refusal above precedes the first write below
     for (const id of d.toDepartmentIds) {
       const target = targets.find((t) => t.id === id)!;
+      // spec §3.1: the first base policy by name is the one in force
       const existing = await tx.equipmentPolicy.findFirst({
-        where: { appliesToDepartmentId: target.id, appliesToTitle: null }, select: { id: true },
+        where: { appliesToDepartmentId: target.id, appliesToTitle: null },
+        orderBy: { name: "asc" },
+        include: { slots: { orderBy: { id: "asc" } } },
       });
-      await writePolicy(tx, user, { group: target, title: null, policyId: existing?.id, lines, copiedFrom: source.name });
+      // match onto the target's slots so identical lines stay updates and their waivers survive
+      const targetLines = existing ? matchCopiedLines(existing.slots, lines) : lines;
+      await writePolicy(tx, user, { group: target, title: null, policyId: existing?.id, lines: targetLines, copiedFrom: source.name });
     }
     return d.toDepartmentIds.length;
   });
@@ -293,8 +298,9 @@ export async function deletePolicy(input: unknown): Promise<ActionResult<null>> 
     const department = policy.appliesToDepartmentId
       ? await tx.department.findUnique({ where: { id: policy.appliesToDepartmentId } })
       : null;
+    // a group's title rule reads as it did on create: "{group} · {title}"
     const appliesTo = policy.appliesToTitle
-      ? `role: ${policy.appliesToTitle}`
+      ? department ? `${department.name} · ${policy.appliesToTitle}` : `role: ${policy.appliesToTitle}`
       : `department: ${department?.name}`;
     // PolicySlot cascades with the policy; assignments are untouched by design.
     await tx.equipmentPolicy.delete({ where: { id: policy.id } });

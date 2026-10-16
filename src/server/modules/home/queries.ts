@@ -290,7 +290,7 @@ export async function hireWorkRows(now: Date): Promise<{ rows: WorkRow[]; satura
     prisma.equipmentPolicy.findMany({
       select: {
         id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
-        slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true } },
+        slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true }, orderBy: { id: "asc" } },
       },
       orderBy: [{ name: "asc" }],
     }),
@@ -488,7 +488,7 @@ export async function fleet(now: Date = new Date()): Promise<Fleet> {
       prisma.equipmentPolicy.findMany({
         select: {
           id: true, name: true, appliesToTitle: true, appliesToDepartmentId: true,
-          slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true } },
+          slots: { select: { id: true, name: true, assetTypeId: true, required: true, loaner: true }, orderBy: { id: "asc" } },
         },
         orderBy: [{ name: "asc" }],
       }),

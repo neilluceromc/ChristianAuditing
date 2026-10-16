@@ -42,7 +42,7 @@ export async function resolveMissing(employees: Array<{
   assets: Array<{ typeId: string | null; status: string; id: string; tag: string; model: string }>;
 }>) {
   const [policies, exceptions] = await Promise.all([
-    prisma.equipmentPolicy.findMany({ include: { slots: true }, orderBy: [{ name: "asc" }] }),
+    prisma.equipmentPolicy.findMany({ include: { slots: { orderBy: { id: "asc" } } }, orderBy: [{ name: "asc" }] }),
     employees.length
       ? prisma.employeeSlotException.findMany({ where: { employeeId: { in: employees.map((e) => e.id) } }, orderBy: [{ employeeId: "asc" }, { id: "asc" }] })
       : Promise.resolve([]),

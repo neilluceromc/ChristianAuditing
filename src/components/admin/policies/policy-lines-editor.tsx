@@ -9,6 +9,7 @@ import { Td, TBody, Th, THead, Tr } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { numberSlotLabels, slotLabel } from "@/lib/loadout";
+import { editedSlotId } from "@/lib/policy-lines";
 import type { GroupKindValue } from "@/lib/groups";
 import { savePolicy } from "@/server/modules/admin/policy-actions";
 import { useDirtyFlag } from "./dirty-context";
@@ -63,7 +64,8 @@ export function PolicyLinesEditor({
   const editorKey = useId();
   const [pending, startTransition] = useTransition();
   const nextKey = useRef(initialLines.length);
-  const [rows, setRows] = useState(() => initialLines.map((l, i) => ({ ...l, key: i })));
+  // `slotId` and `loadedTypeId` are what the line was loaded with; the id sent is derived from them (editedSlotId).
+  const [rows, setRows] = useState(() => initialLines.map((l, i) => ({ ...l, loadedTypeId: l.assetTypeId, key: i })));
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
   // A new list, once created, stays locked until the refresh replaces this editor: a second Save would
@@ -76,7 +78,14 @@ export function PolicyLinesEditor({
     return m;
   }, [categories]);
 
-  const lines: PolicyLineInput[] = rows.map((r) => ({ slotId: r.slotId, assetTypeId: r.assetTypeId, required: r.required, loaner: r.loaner }));
+  // spec §3.3: another category makes the line a new slot; a type change within the category keeps it.
+  const lines: PolicyLineInput[] = rows.map((r) => ({
+    slotId: editedSlotId(
+      { slotId: r.slotId, assetTypeId: r.loadedTypeId, categoryId: typeById.get(r.loadedTypeId)?.category.id },
+      { assetTypeId: r.assetTypeId, categoryId: typeById.get(r.assetTypeId)?.category.id },
+    ),
+    assetTypeId: r.assetTypeId, required: r.required, loaner: r.loaner,
+  }));
   // An unsaved list is unsaved even before it is changed: leaving would lose it.
   const dirty = canMutate && !created && (!policyId || !sameLines(lines, initialLines));
   useDirtyFlag(editorKey, dirty);
@@ -96,7 +105,7 @@ export function PolicyLinesEditor({
   function addLine() {
     const line = firstLineOf(categories, "Headset");
     if (!line) return;
-    setRows((rs) => [...rs, { ...line, key: nextKey.current++ }]);
+    setRows((rs) => [...rs, { ...line, loadedTypeId: line.assetTypeId, key: nextKey.current++ }]);
   }
 
   function save() {

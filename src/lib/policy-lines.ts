@@ -30,6 +30,36 @@ export function planSlotChanges(existing: ExistingSlot[], lines: PolicyLine[]): 
   return plan;
 }
 
+/**
+ * Phase 37 (spec §3.1, copy to others): gives each copied line the id of the first unused existing slot with the
+ * same assetTypeId, in order, so identical lines stay updates and their waivers survive. A line with no match
+ * carries no slotId (a create); existing slots nothing matched are left for planSlotChanges to remove.
+ */
+export function matchCopiedLines(existing: ExistingSlot[], lines: PolicyLine[]): PolicyLine[] {
+  const used = new Set<string>();
+  return lines.map((line) => {
+    const match = existing.find((s) => s.assetTypeId === line.assetTypeId && !used.has(s.id));
+    const rest: PolicyLine = { assetTypeId: line.assetTypeId, required: line.required, loaner: line.loaner };
+    if (!match) return rest;
+    used.add(match.id);
+    return { ...rest, slotId: match.id };
+  });
+}
+
+/**
+ * Phase 37 (spec §3.3, editor): the slot id an edited line carries. A line keeps the slot it was loaded with while
+ * its type is unchanged or still in the category it was loaded with; moving it to another category makes it a new
+ * slot (no id), and moving it back restores the id, so an edit undone reads as unchanged.
+ */
+export function editedSlotId(
+  loaded: { slotId?: string; assetTypeId: string; categoryId?: string },
+  now: { assetTypeId: string; categoryId?: string },
+): string | undefined {
+  if (!loaded.slotId) return undefined;
+  if (now.assetTypeId === loaded.assetTypeId) return loaded.slotId;
+  return loaded.categoryId !== undefined && now.categoryId === loaded.categoryId ? loaded.slotId : undefined;
+}
+
 /** Base policy = the group's name; a title rule = "{group} · {title}"; a clash adds " (2)", " (3)" … */
 export function policyNameFor(groupName: string, title: string | null, taken: (name: string) => boolean): string {
   const base = title ? `${groupName} · ${title}` : groupName;
