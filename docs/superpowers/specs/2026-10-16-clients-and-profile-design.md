@@ -1,6 +1,6 @@
 # Phase 37 — Client staff, equipment policies per client, and a better employee profile
 
-**Status:** CODE-COMPLETE 2026-10-17 on branch `phase-37-clients-profile` (final code tree `b1f3c66`), MERGED to `main` via `6050649` (`--no-ff`, merged tree = tested tip) and PUSHED 2026-10-17; designed 2026-10-16 with the user, on the mockup canvas
+**Status:** CODE-COMPLETE 2026-10-17 on branch `phase-37-clients-profile` (final code tree `b1f3c66`), MERGED to `main` via `6050649` (`--no-ff`, merged tree = tested tip) and PUSHED 2026-10-17; on staging 2026-10-17 at `c8eca0e` (migration 32 applied); designed 2026-10-16 with the user, on the mockup canvas
 (https://claude.ai/artifact/XSKxwmMGNTvFpGHdUWujdz: boards Main, AddSlot, NewHire, Org and Policies).
 The user approved the mockups and said to proceed through development overnight. Merge, push and redeploy
 stay the user's calls. **One migration (the 32nd): schema plus a guarded data step.**
