@@ -14,9 +14,9 @@ import { LoadoutView, type HoldingItem, type SpareOption } from "@/components/em
 import type { EquipmentTileData } from "@/components/employees/equipment-tile";
 import { EmployeeCreatedNotice } from "@/components/employees/employee-created-notice";
 import { IdentityBand } from "@/components/employees/identity-band";
-import { NotesCard } from "@/components/employees/notes-card";
 import { ProfileActions } from "@/components/employees/profile-actions";
 import { SideCard } from "@/components/employees/side-card/side-card";
+import { NotesTab } from "@/components/employees/side-card/notes-tab";
 import { SetupTab } from "@/components/employees/side-card/setup-tab";
 import { FormTab } from "@/components/employees/side-card/form-tab";
 import { TransfersTab } from "@/components/employees/side-card/transfers-tab";
@@ -270,12 +270,13 @@ export default async function EmployeePage({
             counts={{ notes: noteCount, notYet: notYetCount(employee), signed: latest !== null, transfers: transferCount }}
             panels={{
               notes: (
-                <NotesCard
+                <NotesTab
                   employeeId={id}
                   employeeName={employee.name}
                   notes={notes.map((n) => ({
                     id: n.id, authorId: n.author.id, authorName: n.author.name, text: n.text, createdAt: n.createdAt, editedAt: n.editedAt,
                   }))}
+                  total={noteCount}
                   viewer={{ id: user.id, role: user.role }}
                   canAdd={canMutate}
                 />

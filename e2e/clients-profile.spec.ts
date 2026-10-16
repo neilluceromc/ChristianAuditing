@@ -264,17 +264,23 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
     const box = page.getByLabel("New note");
     await waitForHydration(box);
     await expect(notesTab(0)).toBeVisible();
-    await expect(page.getByText("No notes yet", { exact: true })).toBeVisible();
+    await expect(card.getByText("No notes yet.", { exact: true })).toBeVisible();
+    // Phase 39 (spec §2.2): the composer's button is "Add"; Edit and Delete sit behind each note's ⋯ menu.
+    const addButton = card.getByRole("button", { name: "Add", exact: true });
+    const fromMenu = async (text: string, action: "Edit" | "Delete") => {
+      await note(text).getByRole("button", { name: "Note actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: action, exact: true }).click();
+    };
 
     // Add.
     await box.fill(first);
-    await page.getByRole("button", { name: "Add note", exact: true }).click();
+    await addButton.click();
     await expect(notesTab(1)).toBeVisible({ timeout: 15_000 });
     await expect(note(first)).toBeVisible();
     await expect(box).toHaveValue("");
 
     // Edit your own note.
-    await note(first).getByRole("button", { name: "Edit", exact: true }).click();
+    await fromMenu(first, "Edit");
     await page.getByLabel("Edited text").fill(firstEdited);
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(note(firstEdited)).toBeVisible({ timeout: 15_000 });
@@ -283,11 +289,11 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
 
     // A second note, so the viewer has something to read after the first is deleted.
     await box.fill(second);
-    await page.getByRole("button", { name: "Add note", exact: true }).click();
+    await addButton.click();
     await expect(notesTab(2)).toBeVisible({ timeout: 15_000 });
 
     // Delete the first, after its confirmation.
-    await note(firstEdited).getByRole("button", { name: "Delete", exact: true }).click();
+    await fromMenu(firstEdited, "Delete");
     const dialog = page.getByRole("dialog", { name: "Delete this note?" });
     await expect(dialog).toContainText(firstEdited);
     await dialog.getByRole("button", { name: "Delete", exact: true }).click();
@@ -303,7 +309,7 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
     await expect(notesTab(1)).toBeVisible({ timeout: 20_000 });
     await expect(note(second)).toBeVisible();
     await expect(page.getByLabel("New note")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Add note", exact: true })).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Add", exact: true })).toHaveCount(0);
     await expect(note(second).getByRole("button")).toHaveCount(0);
   });
 
