@@ -495,7 +495,7 @@ export function NewEmployeeWizard({
           <Card>
             <CardHeader title={<span ref={step === 3 ? headingRef : undefined} tabIndex={-1} className="outline-none">Check & create</span>} />
             <CardBody className="flex flex-col gap-4 text-[12.5px]">
-              <SummarySection title="Details" onEdit={() => goTo(1)}>
+              <SummarySection title="Details" editLabel="Edit details" onEdit={() => goTo(1)}>
                 <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1">
                   {detailsRows.map(([k, v]) => (
                     <div key={k} className="contents">
@@ -505,12 +505,12 @@ export function NewEmployeeWizard({
                   ))}
                 </dl>
               </SummarySection>
-              <SummarySection title="Accounts & access" onEdit={() => goTo(1)}>
+              <SummarySection title="Accounts & access" editLabel="Edit accounts and access" onEdit={() => goTo(1)}>
                 <p className="text-fg">
                   {setupSummary({ entraStatus: form.entraStatus, autopilotStatus: form.autopilotStatus, argusStatus: form.argusStatus, vpn: vpn || null })}
                 </p>
               </SummarySection>
-              <SummarySection title="Equipment" onEdit={() => goTo(2)}>
+              <SummarySection title="Equipment" editLabel="Edit equipment" onEdit={() => goTo(2)}>
                 {sortedLines.length === 0 ? (
                   <p className="text-fg-muted">Nothing to assign yet</p>
                 ) : (
@@ -526,7 +526,7 @@ export function NewEmployeeWizard({
                   </ul>
                 )}
               </SummarySection>
-              <SummarySection title="First note" onEdit={() => goTo(1)}>
+              <SummarySection title="First note" editLabel="Edit the opening note" onEdit={() => goTo(1)}>
                 <p className="whitespace-pre-wrap text-fg">{form.note.trim() || "None"}</p>
               </SummarySection>
             </CardBody>
@@ -567,12 +567,18 @@ export function NewEmployeeWizard({
   );
 }
 
-function SummarySection({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) {
+/**
+ * One section of step 3. Every step stays mounted, so `editLabel` must never contain a step-1/2 field label
+ * (house rule: an aria-label near a field never repeats that field's label word, or `getByLabel` finds both).
+ */
+function SummarySection({ title, editLabel, onEdit, children }: {
+  title: string; editLabel: string; onEdit: () => void; children: React.ReactNode;
+}) {
   return (
     <section className="flex flex-col gap-1.5 border-b border-border-faint pb-3 last:border-b-0 last:pb-0">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-fg-muted">{title}</h3>
-        <button type="button" className="text-[12px] text-accent underline" aria-label={`Edit ${title}`} onClick={onEdit}>Edit</button>
+        <button type="button" className="text-[12px] text-accent underline" aria-label={editLabel} onClick={onEdit}>Edit</button>
       </div>
       {children}
     </section>
