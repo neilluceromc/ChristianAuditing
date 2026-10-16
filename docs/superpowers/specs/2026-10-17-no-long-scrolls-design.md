@@ -1,6 +1,6 @@
 # Phase 39 — No long scrolls: a tabbed profile side card, previews with side panels, paged big tables
 
-**Status:** DESIGNED 2026-10-17 with the user on the mockup canvas
+**Status:** CODE-COMPLETE 2026-10-17 on branch `phase-39-no-long-scrolls` (final code tree `4e79632`), unmerged. DESIGNED 2026-10-17 with the user on the mockup canvas
 (https://claude.ai/artifact/XSKxwmMGNTvFpGHdUWujdz, boards "No long scrolls" and "Profile right column"). The user
 approved ("Sure let's do it") and asked to take it through the plan and the build. Merge, push and redeploy stay
 the user's calls. **No migration.**
