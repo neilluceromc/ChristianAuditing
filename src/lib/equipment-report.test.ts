@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { manilaMonth } from "./depreciation";
-import { canSeeMoney, summariseGroup, type ReportAsset, type ReportPerson } from "./equipment-report";
+import {
+  canSeeMoney, defaultReportSort, equippedTone, filterReportGroups, reportFilterCounts, sortReportGroups, summariseGroup,
+  type GroupSummary, type ReportAsset, type ReportPerson,
+} from "./equipment-report";
 
 const asOf = manilaMonth(new Date("2026-10-17T04:00:00Z"));
 const group = { id: "g1", name: "Acme", kind: "CLIENT" as const, hasBasePolicy: false };
@@ -205,5 +208,60 @@ describe("summariseGroup — no money without withMoney (Review Focus 1)", () =>
   });
   it("no cost figure appears anywhere in the serialised summary", () => {
     expect(JSON.stringify(s)).not.toMatch(/5200000|5055556|costC|bookC/);
+  });
+});
+
+describe("the table's filters, counts and sort", () => {
+  const row = (id: string, name: string, over: Partial<GroupSummary> = {}): GroupSummary => ({
+    id, name, kind: "CLIENT", people: 0, items: 0, loans: 0, nextLoanDue: null, noPolicy: false,
+    missing: [], equippedPct: 100, byCategory: [], ...over,
+  });
+  const gap = { id: "p", name: "P", employeeNo: "E-1", labels: ["Laptop"] };
+  const rows = [
+    row("a", "Client 10", { people: 5, items: 9, equippedPct: 80, missing: [gap], money: { costC: 0, bookC: 300, perPersonC: 60, withoutCost: 0 } }),
+    row("b", "Client 2", { people: 5, items: 2, equippedPct: null, noPolicy: true, money: { costC: 0, bookC: 900, perPersonC: 180, withoutCost: 0 } }),
+    row("c", "bluepeak", { people: 12, items: 20, equippedPct: 50, missing: [gap, gap], money: { costC: 0, bookC: 100, perPersonC: 8, withoutCost: 0 } }),
+    row("d", "Acme", { people: 1, items: 1, equippedPct: 100 }),
+  ];
+  const ids = (rs: GroupSummary[]) => rs.map((r) => r.id);
+
+  it("counts All, With gaps and No policy over the tab's rows", () => {
+    expect(reportFilterCounts(rows)).toEqual({ all: 4, gaps: 2, nopol: 1 });
+  });
+  it("filters by gaps or no policy, and by a case-insensitive substring of the name", () => {
+    expect(ids(filterReportGroups(rows, { q: "", filter: "gaps" }))).toEqual(["a", "c"]);
+    expect(ids(filterReportGroups(rows, { q: "", filter: "nopol" }))).toEqual(["b"]);
+    expect(ids(filterReportGroups(rows, { q: " CLIENT ", filter: "all" }))).toEqual(["a", "b"]);
+    expect(ids(filterReportGroups(rows, { q: "ent 1", filter: "gaps" }))).toEqual(["a"]);
+    expect(filterReportGroups(rows, { q: "zzz", filter: "all" })).toEqual([]);
+  });
+  it("sorts names in natural order, case-insensitively", () => {
+    expect(ids(sortReportGroups(rows, "name", 1))).toEqual(["d", "c", "b", "a"]);
+    expect(ids(sortReportGroups(rows, "name", -1))).toEqual(["a", "b", "c", "d"]);
+  });
+  it("sorts People, Items and Book value with the name breaking ties", () => {
+    expect(ids(sortReportGroups(rows, "people", -1))).toEqual(["c", "b", "a", "d"]);
+    expect(ids(sortReportGroups(rows, "items", 1))).toEqual(["d", "b", "a", "c"]);
+    expect(ids(sortReportGroups(rows, "book", -1))).toEqual(["b", "a", "c", "d"]);
+  });
+  it("sorts Equipped with no-policy rows last in either direction", () => {
+    expect(ids(sortReportGroups(rows, "equipped", -1))).toEqual(["d", "a", "c", "b"]);
+    expect(ids(sortReportGroups(rows, "equipped", 1))).toEqual(["c", "a", "d", "b"]);
+  });
+  it("does not reorder the input", () => {
+    sortReportGroups(rows, "people", 1);
+    expect(ids(rows)).toEqual(["a", "b", "c", "d"]);
+  });
+  it("defaults to Book value descending with money, People descending without", () => {
+    expect(defaultReportSort(true)).toEqual({ sort: "book", dir: -1 });
+    expect(defaultReportSort(false)).toEqual({ sort: "people", dir: -1 });
+  });
+  it("colours Equipped green at 100%, amber at 80% or more, red below, none for no policy", () => {
+    expect(equippedTone(100)).toBe("settled");
+    expect(equippedTone(99)).toBe("attention");
+    expect(equippedTone(80)).toBe("attention");
+    expect(equippedTone(79)).toBe("fault");
+    expect(equippedTone(0)).toBe("fault");
+    expect(equippedTone(null)).toBeNull();
   });
 });

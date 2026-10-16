@@ -119,3 +119,45 @@ export function summariseGroup(
   }
   return summary;
 }
+
+// ── The table's rules (spec §3.3): filters with counts, search and sort, run in the browser over one tab's rows ──
+
+export type ReportFilter = "all" | "gaps" | "nopol";
+export type ReportSort = "name" | "people" | "items" | "book" | "equipped";
+
+const matchesFilter = (g: GroupSummary, f: ReportFilter): boolean =>
+  f === "gaps" ? g.missing.length > 0 : f === "nopol" ? g.noPolicy : true;
+
+export function reportFilterCounts(rows: GroupSummary[]): Record<ReportFilter, number> {
+  return { all: rows.length, gaps: rows.filter((g) => matchesFilter(g, "gaps")).length, nopol: rows.filter((g) => matchesFilter(g, "nopol")).length };
+}
+
+/** A case-insensitive substring of the name, then the filter button's cut. */
+export function filterReportGroups(rows: GroupSummary[], f: { q: string; filter: ReportFilter }): GroupSummary[] {
+  const q = f.q.trim().toLowerCase();
+  return rows.filter((g) => matchesFilter(g, f.filter) && (!q || g.name.toLowerCase().includes(q)));
+}
+
+const byName = (a: GroupSummary, b: GroupSummary) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+
+/** Name in natural order; numbers with the name breaking ties; a no-policy row has no Equipped value and sorts last either way. */
+export function sortReportGroups(rows: GroupSummary[], sort: ReportSort, dir: 1 | -1): GroupSummary[] {
+  const num = (g: GroupSummary): number =>
+    sort === "people" ? g.people : sort === "items" ? g.items : sort === "book" ? (g.money?.bookC ?? 0) : (g.equippedPct ?? 0);
+  return [...rows].sort((a, b) => {
+    if (sort === "name") return byName(a, b) * dir;
+    if (sort === "equipped" && (a.equippedPct === null) !== (b.equippedPct === null)) return a.equippedPct === null ? 1 : -1;
+    return (num(a) - num(b)) * dir || byName(a, b);
+  });
+}
+
+/** Book value descending for money roles, People descending otherwise. */
+export function defaultReportSort(withMoney: boolean): { sort: ReportSort; dir: 1 | -1 } {
+  return { sort: withMoney ? "book" : "people", dir: -1 };
+}
+
+/** Equipped: green at 100%, amber at 80% or more, red below that; no colour (shown as "—") for no policy. */
+export function equippedTone(pct: number | null): "settled" | "attention" | "fault" | null {
+  if (pct === null) return null;
+  return pct >= 100 ? "settled" : pct >= 80 ? "attention" : "fault";
+}
