@@ -193,10 +193,10 @@ test.describe("it navigation sweep (Phase 25)", () => {
       await expect(page.getByText("Offboarding in progress — slots are frozen")).toBeVisible();
       // Phase 29 (spec §4.1): the PageHeader badge now carries a DuePill of its
       // own for a leaver, so this text exists twice on the page (the header's
-      // and the frozen banner's). Scoped to the header — the new one — rather
+      // and the frozen banner's). Scoped to the identity band (Phase 37; it was the page header) — the new one — rather
       // than loosened with .first(), which would have gone on passing if the
       // header pill were dropped again.
-      await expect(page.locator("main header").first().getByText(/due in \d+ d|due today/)).toBeVisible();
+      await expect(page.getByTestId("identity-band").getByText(/due in \d+ d|due today/)).toBeVisible();
       await expectNoSeriousAxe(page);
     } finally {
       await db.employee.update({

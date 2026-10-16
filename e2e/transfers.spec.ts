@@ -159,7 +159,10 @@ test.describe.serial("transfers", () => {
     // slots" grid still renders (it's the view's own container, shown
     // regardless), but empty: the "No equipment policy applies" banner is
     // up, and it holds no slot tiles.
-    await expect(page.getByText("No equipment policy applies")).toBeVisible();
+    // Phase 37: the identity band's progress line says it too, so the banner is
+    // picked by its role and the band line by its own test id.
+    await expect(page.getByRole("status").filter({ hasText: "No equipment policy applies" })).toBeVisible();
+    await expect(page.getByTestId("identity-band").getByText("No equipment policy applies")).toBeVisible();
     const slotGroup = page.getByRole("group", { name: "Equipment slots" });
     await expect(slotGroup.getByRole("button")).toHaveCount(0);
 

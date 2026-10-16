@@ -181,7 +181,8 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     await login(page, IT);
     await page.goto(`/employees/${dennis.id}`);
 
-    const header = page.locator("main header").first();
+    // Phase 37 (spec §4.1): the name, due pill and actions moved from the page header into the identity band.
+    const header = page.getByTestId("identity-band");
     // The seed puts Dennis two days past his completion date, so the badge's
     // DuePill reads "2 d overdue" (deadlines.ts: dueStatus).
     await expect(header.getByText(/overdue|due/i)).toBeVisible();
