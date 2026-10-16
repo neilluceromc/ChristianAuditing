@@ -885,18 +885,20 @@ test.describe("Phase 39 — bounded lists", () => {
     test.setTimeout(90_000);
     const stamp = Date.now();
     const asset = await db.asset.findFirstOrThrow({ where: { tag: "BR-MN-0911" } });
+    // diff is jsonb, and Postgres keeps object keys by length first, then bytewise, not in insertion order. Every
+    // field name here is the same length, so they come back in the order written (F1..F5, G1..G4).
     const diff = (names: string[]) => Object.fromEntries(names.map((n) => [n, { from: "old", to: `new ${n}` }]));
     // AuditEntry is append-only (the database refuses delete): these stay until the next reseed.
     await db.auditEntry.create({
       data: {
         actorLabel: `E2E Historian ${stamp}`, entityType: "asset", entityId: asset.id, action: "update",
-        diff: diff(["e2eAlpha", "e2eBravo", "e2eCharlie", "e2eDelta", "e2eEcho"]), createdAt: new Date(stamp),
+        diff: diff(["e2eF1", "e2eF2", "e2eF3", "e2eF4", "e2eF5"]), createdAt: new Date(stamp),
       },
     });
     await db.auditEntry.create({
       data: {
         actorLabel: `E2E Historian ${stamp}`, entityType: "asset", entityId: asset.id, action: "update",
-        diff: diff(["e2eFoxtrot", "e2eGolf", "e2eHotel", "e2eIndia"]), createdAt: new Date(stamp - 60_000),
+        diff: diff(["e2eG1", "e2eG2", "e2eG3", "e2eG4"]), createdAt: new Date(stamp - 60_000),
       },
     });
 
@@ -905,28 +907,29 @@ test.describe("Phase 39 — bounded lists", () => {
     const field = (name: string) => page.getByRole("cell", { name, exact: true });
     const buttonAfter = (name: string) =>
       page.getByRole("row").filter({ has: field(name) }).locator("xpath=following-sibling::tr[1]").getByRole("button");
-    await expect(field("e2eCharlie")).toBeVisible({ timeout: 20_000 });
+    await expect(field("e2eF3")).toBeVisible({ timeout: 20_000 });
 
-    // Collapsed: 3 of each, with the count left over.
-    for (const n of ["e2eAlpha", "e2eBravo", "e2eCharlie", "e2eFoxtrot", "e2eGolf", "e2eHotel"]) await expect(field(n)).toBeVisible();
-    for (const n of ["e2eDelta", "e2eEcho", "e2eIndia"]) await expect(field(n)).toHaveCount(0);
-    await expect(buttonAfter("e2eCharlie")).toHaveText("+2 more fields");
-    await expect(buttonAfter("e2eHotel")).toHaveText("+1 more fields");
-    await expect(buttonAfter("e2eCharlie")).toHaveAttribute("aria-expanded", "false");
+    // Collapsed: the first 3 of each, in order, with the count left over.
+    for (const n of ["e2eF1", "e2eF2", "e2eF3", "e2eG1", "e2eG2", "e2eG3"]) await expect(field(n)).toBeVisible();
+    for (const n of ["e2eF4", "e2eF5", "e2eG4"]) await expect(field(n)).toHaveCount(0);
+    await expect(page.getByRole("cell", { name: /^e2eF\d$/ })).toHaveText(["e2eF1", "e2eF2", "e2eF3"]);
+    await expect(buttonAfter("e2eF3")).toHaveText("+2 more fields");
+    await expect(buttonAfter("e2eG3")).toHaveText("+1 more fields");
+    await expect(buttonAfter("e2eF3")).toHaveAttribute("aria-expanded", "false");
 
     // Opening the first entry shows its other two fields and leaves the second entry alone.
-    await waitForHydration(buttonAfter("e2eCharlie"));
-    await buttonAfter("e2eCharlie").click();
-    await expect(field("e2eDelta")).toBeVisible();
-    await expect(field("e2eEcho")).toBeVisible();
-    await expect(field("e2eIndia")).toHaveCount(0);
+    await waitForHydration(buttonAfter("e2eF3"));
+    await buttonAfter("e2eF3").click();
+    await expect(field("e2eF4")).toBeVisible();
+    await expect(field("e2eF5")).toBeVisible();
+    await expect(field("e2eG4")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Show fewer fields", exact: true })).toHaveAttribute("aria-expanded", "true");
-    await expect(buttonAfter("e2eHotel")).toHaveText("+1 more fields");
+    await expect(buttonAfter("e2eG3")).toHaveText("+1 more fields");
 
     // And it folds back.
     await page.getByRole("button", { name: "Show fewer fields", exact: true }).click();
-    await expect(field("e2eDelta")).toHaveCount(0);
-    await expect(buttonAfter("e2eCharlie")).toHaveText("+2 more fields");
+    await expect(field("e2eF4")).toHaveCount(0);
+    await expect(buttonAfter("e2eF3")).toHaveText("+2 more fields");
   });
 });
 
