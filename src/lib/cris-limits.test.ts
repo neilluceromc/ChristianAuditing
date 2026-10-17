@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dailyLeft, manilaDayStart } from "./cris-limits";
+import { CRIS_DAILY_LIMIT_TEXT, dailyLeft, limitReached, manilaDayStart } from "./cris-limits";
 import { RATE_LIMITS, rateDecision } from "./rate-limit";
 
 describe("manilaDayStart (spec §9: the daily limit counts since Manila midnight)", () => {
@@ -22,6 +22,29 @@ describe("dailyLeft", () => {
     expect(dailyLeft(99, 100)).toBe(1);
     expect(dailyLeft(0, 100)).toBe(100);
     expect(dailyLeft(150, 100)).toBe(0);
+  });
+});
+
+describe("limitReached (Review Focus #5: the 100th and the 101st)", () => {
+  it("answers the 100th question and refuses the 101st", () => {
+    expect(limitReached(99, 100)).toBe(false); // 99 asked: the 100th goes through
+    expect(limitReached(100, 100)).toBe(true); // 100 asked: the 101st is refused
+    expect(limitReached(0, 1)).toBe(false);
+    expect(limitReached(1, 1)).toBe(true);
+  });
+  it("refuses when an admin lowered the limit below today's count", () => {
+    expect(limitReached(150, 100)).toBe(true);
+  });
+  it("resets at Manila midnight, not UTC: yesterday's questions fall before today's start", () => {
+    // 23:59 Manila on the 17th and 00:01 Manila on the 18th sit on different Manila days, though both are the 17th in UTC.
+    const lastMinute = new Date("2026-10-17T15:59:00Z");
+    const firstMinute = new Date("2026-10-17T16:01:00Z");
+    const start = manilaDayStart(firstMinute);
+    expect(lastMinute.getTime() < start.getTime()).toBe(true);
+    expect(firstMinute.getTime() >= start.getTime()).toBe(true);
+  });
+  it("has the spec's copy verbatim", () => {
+    expect(CRIS_DAILY_LIMIT_TEXT).toBe("That's all my questions for today — the limit resets at midnight");
   });
 });
 

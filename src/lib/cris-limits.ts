@@ -12,3 +12,14 @@ export function manilaDayStart(now: Date): Date {
 export function dailyLeft(used: number, limit: number): number {
   return Math.max(0, limit - used);
 }
+
+/**
+ * Review Focus #5: with `used` questions already asked today, is the next one refused? The 100th question (99
+ * used) is answered; the 101st (100 used) is refused with the daily-limit copy before any model call.
+ */
+export function limitReached(used: number, limit: number): boolean {
+  return used >= limit;
+}
+
+/** Spec §9, verbatim: what the box says when the daily limit is reached (the mascot plays Sad). */
+export const CRIS_DAILY_LIMIT_TEXT = "That's all my questions for today — the limit resets at midnight";

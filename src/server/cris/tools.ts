@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type Anthropic from "@anthropic-ai/sdk";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { SessionUser } from "@/server/auth/guards";
@@ -24,7 +25,10 @@ import { createPending, type PendingKind } from "./pending-core";
  * the person's picks on the server (spec §6.6).
  */
 
-/** The SDK's `Anthropic.Tool` shape, kept local until the SDK lands (Task 5 passes these straight through). */
+/**
+ * A tool as Cris declares it: the SDK's `Anthropic.Tool`, narrowed so every one is strict with a closed schema
+ * (CRIS_TOOLS is checked against the SDK's type below; the turn passes them straight through).
+ */
 export interface CrisTool {
   name: string;
   description: string;
@@ -127,7 +131,7 @@ export const CRIS_TOOLS: CrisTool[] = [
     },
     ["employeeId", "oldAssetId", "newAssetId", "outcome"],
   ),
-];
+] satisfies Anthropic.Tool[];
 
 // ── inputs, re-checked ──────────────────────────────────────────────────────
 
