@@ -4,8 +4,9 @@ import { Fragment, forwardRef, useLayoutEffect, useRef, useState, type KeyboardE
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { IconButton } from "@/components/ui/button";
+import { Pill } from "@/components/ui/pill";
 import type { CrisViewMessage } from "@/lib/cris-cards";
-import { contextLine, liveMessageId, type CrisPageContext, type QuickStart } from "@/lib/cris-box";
+import { contextLine, greetingLine, liveMessageId, type CrisPageContext, type QuickStart } from "@/lib/cris-box";
 import { CrisCardView, chipClass, type CardActions } from "./cris-cards";
 import { CrisComposer } from "./cris-composer";
 
@@ -22,6 +23,8 @@ export type BoxProps = {
   side: "left" | "right";
   big: boolean;
   firstName: string;
+  /** Preview mode (no AI key): the Preview pill, the preview greeting, no context chip and no scan button. */
+  preview?: boolean;
   status: string;
   busy: boolean;
   messages: CrisViewMessage[];
@@ -99,7 +102,9 @@ export const CrisBox = forwardRef<HTMLDivElement, BoxProps>(function CrisBox(p, 
     return () => cancelAnimationFrame(f);
   }, [p.historyTick, quietTick]);
   const logBusy = p.bulkLoading || p.historyTick !== quietTick;
-  const chip = contextLine(p.context);
+  const preview = !!p.preview;
+  // The preview looks nothing up, so it never says where you are.
+  const chip = preview ? null : contextLine(p.context);
 
   // New messages and the typing-out keep the list at its end; older messages put on top keep it where it was.
   useLayoutEffect(() => {
@@ -140,7 +145,10 @@ export const CrisBox = forwardRef<HTMLDivElement, BoxProps>(function CrisBox(p, 
     >
       <div className="flex items-center gap-2 border-b border-border-faint py-2.5 pl-3.5 pr-2">
         <div className="min-w-0">
-          <div className="text-[14px] font-semibold leading-tight">Cris</div>
+          <div className="flex items-center gap-1.5">
+            <div className="text-[14px] font-semibold leading-tight">Cris</div>
+            {preview && <Pill className="px-1.5 py-0 text-[9.5px]">Preview</Pill>}
+          </div>
           <div className="flex items-center gap-1.5 text-[11.5px] text-fg-secondary">
             <span
               aria-hidden
@@ -215,9 +223,7 @@ export const CrisBox = forwardRef<HTMLDivElement, BoxProps>(function CrisBox(p, 
           <>
             <div className="px-1.5 pb-1 pt-2 text-center">
               <div className="text-[15px] font-semibold">Hi {p.firstName} — what do you need?</div>
-              <div className="mt-0.5 text-[12px] text-fg-secondary">
-                I can look things up and make changes. Every change waits for your Confirm.
-              </div>
+              <div className="mt-0.5 text-[12px] text-fg-secondary">{greetingLine(preview)}</div>
             </div>
             {chip && (
               <div className="flex items-center gap-[7px] rounded-[10px] bg-accent-soft px-2.5 py-[7px] text-[12px] text-accent-soft-text">
@@ -273,6 +279,7 @@ export const CrisBox = forwardRef<HTMLDivElement, BoxProps>(function CrisBox(p, 
         busy={busy}
         placeholder={p.placeholder}
         left={p.left}
+        scan={!preview}
         scanOpen={p.scanOpen}
         scanFocusTick={p.scanFocusTick}
         onScanOpen={p.onScanOpen}

@@ -44,9 +44,9 @@ const MODEL_LABELS: Record<CrisModelId, string> = {
   "claude-opus-5-5": "Claude Opus 5.5 (Anthropic)",
 };
 
-/** Spec §8, verbatim. */
+/** Spec §8, verbatim; with no key, Cris runs in preview (added 2026-10-18). */
 const KEY_SET_TEXT = "Key: set on the server ✓";
-const NO_KEY_TEXT = "Cris is off — no AI key is set on the server";
+const PREVIEW_KEY_TEXT = "No AI key on the server — Cris is in preview: placeholder replies only.";
 
 /** When a save action throws (network, 500) rather than returning a refusal. */
 const SAVE_FAILED_TEXT = "Couldn't save — check your connection and try again.";
@@ -56,7 +56,7 @@ const PREVIEW_ORB = "[&_svg]:size-24 sm:[&_svg]:size-[130px]";
 
 export interface CrisAdminView {
   settings: CrisSettings;
-  /** Only whether a key is set — the key itself never reaches the browser. */
+  /** Only whether a key is set (false: Cris is in preview) — the key itself never reaches the browser. */
   keySet: boolean;
   usage: { questions: number; costUsd: number };
 }
@@ -80,8 +80,8 @@ export function CrisSettingsForm({
   prefs: CrisPrefs;
   /** "Cris for everyone" — null for anyone who isn't an admin, and then not rendered at all. */
   admin: CrisAdminView | null;
-  /** Why Cris is off right now, if it is. */
-  off: "off" | "no-key" | null;
+  /** "off" while an admin has Cris switched off (no key is preview, not off). */
+  off: "off" | null;
 }) {
   return (
     <div className="grid max-w-[1100px] items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
@@ -102,7 +102,7 @@ function YourCrisAndPreview({
 }: {
   initialPrefs: CrisPrefs;
   admin: CrisAdminView | null;
-  off: "off" | "no-key" | null;
+  off: "off" | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -180,7 +180,7 @@ function YourCrisAndPreview({
     <>
       <div className="flex min-w-0 flex-col gap-4">
         {off && !admin && (
-          <Banner tone="neutral" title={off === "no-key" ? NO_KEY_TEXT : "Cris is off — an admin has turned Cris off for everyone"}>
+          <Banner tone="neutral" title="Cris is off — an admin has turned Cris off for everyone">
             Your choices below are kept for when Cris is back.
           </Banner>
         )}
@@ -403,7 +403,7 @@ function CrisForEveryone({ admin }: { admin: CrisAdminView }) {
                 </Select>
               )}
             </FormField>
-            <p className="text-[11.5px] text-fg-muted">{keySet ? KEY_SET_TEXT : NO_KEY_TEXT}</p>
+            <p className="text-[11.5px] text-fg-muted">{keySet ? KEY_SET_TEXT : PREVIEW_KEY_TEXT}</p>
           </div>
 
           <p className="text-xs leading-relaxed text-fg-muted">
