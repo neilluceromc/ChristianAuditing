@@ -425,10 +425,13 @@ export function CrisWidget({
     onPickSpare: (s) => void send({ pick: { kind: "asset", assetId: s.assetId, scanned: false } }, `Use ${s.tag}`),
     onMoreSpares: () => void send({ text: "None of these — show 3 more" }, "None of these — show 3 more"),
     onMoreStock: () => void send({ text: "Show 3 more" }, "Show 3 more"),
-    onScan: () => {
-      setScanOpen(true);
-      setScanFocusTick((t) => t + 1);
-    },
+    // The preview has no scan field (the composer hides it), so the card's "Scan its label" is hidden too.
+    onScan: preview
+      ? null
+      : () => {
+          setScanOpen(true);
+          setScanFocusTick((t) => t + 1);
+        },
     onConfirm: (c) => void confirm(c),
     onChange: () => void send({ text: "Change" }, "Change"),
     onUndo: (c) => void undo(c),

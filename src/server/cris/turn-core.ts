@@ -20,6 +20,7 @@ import { readPerson } from "./cards";
 import { appendCrisMessage, viewMessages, type CrisMessageRow } from "./messages";
 import { CRIS_TOOLS, runTool, type ToolMood } from "./tools";
 import { CrisProviderError, pickModel, type CrisReply } from "./model";
+import { PREVIEW_MODEL_ID } from "./preview";
 
 /*
  * Spec §8 "Running a turn": one person message, answered. NOT "use server" — it takes a user the action in
@@ -213,6 +214,13 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
   const conversationId = await openConversation(user.id, input.conversationId);
   const userMsg = userTurn({ firstName: firstNameOf(user.name), todayManila: manilaToday(now), page }, words);
 
+  const model = pickModel(settings);
+  // A preview turn's rows are kept for the box but store no model messages (an empty `api`): modelHistory skips
+  // them, so placeholder replies are never replayed to the real model once a key is added. An empty `api` is still
+  // a turn row, so the one-turn-at-a-time guard (turnInFlight) covers preview turns too.
+  const preview = model.id === PREVIEW_MODEL_ID;
+  const stored = (api: Anthropic.MessageParam[]) => (preview ? [] : api);
+
   // One turn at a time per conversation (a second tab): two turns' rounds interleaved would garble the history both
   // are replayed from. The conversation row is locked, and the history read, the in-flight check and the person's
   // message written under that lock, so two sends can't both pass.
@@ -228,7 +236,7 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
     const picksBefore = parsePicks(conv.picks);
     // a structured pick is the person's own choice: noted before the model runs
     const picks = input.pick ? notePick(picksBefore, pickAdd) : picksBefore;
-    const userRow = await appendCrisMessage(tx, conversationId, "user", storedContent({ text: words, cards: [], api: [userMsg] }));
+    const userRow = await appendCrisMessage(tx, conversationId, "user", storedContent({ text: words, cards: [], api: stored([userMsg]) }));
     await tx.crisConversation.update({ where: { id: conversationId }, data: { picks } });
     return { rows, userRow, picksBefore, picks };
   });
@@ -241,11 +249,12 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
   const lastCris = [...rows].reverse().find((r) => r.role === "cris");
   const openSpareTags = spareTagsOf(lastCris?.content);
 
-  const model = pickModel(settings);
   // Priced at the model that served the reply (a server-side fallback may differ); the fake stores no usage; the
   // preview stores zero usage under "preview", which is never priced.
   const usageOf = (r: CrisReply) => (model.id === "fake" ? undefined : { ...r.usage, model: isPricedModel(r.model) ? r.model : model.id });
   const history = modelHistory(rows);
+  /** The person's earlier messages here, preview turns included (the preview turns its lines by it). */
+  const earlierTurns = rows.filter((r) => r.role === "user").length;
   const messages: Anthropic.MessageParam[] = [...history, userMsg];
   const cards: CrisCard[] = [];
   let lastMood: ToolMood | null = null;
@@ -300,7 +309,7 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
   let failed: Failure | null = null;
   try {
     for (let round = 0; round < CRIS_MAX_ROUNDS; round++) {
-      const reply = await model.reply({ system: CRIS_SYSTEM, messages, tools: CRIS_TOOLS });
+      const reply = await model.reply({ system: CRIS_SYSTEM, messages, tools: CRIS_TOOLS, turn: earlierTurns });
       if (reply.stop === "refusal") { failed = { text: CRIS_REFUSED_TEXT }; break; }
       // Cut off: half an answer is never shown or kept as one, and half a tool call can't be run.
       if (reply.stop === "max_tokens") { failed = { text: CRIS_TOO_LONG_TEXT }; break; }
@@ -312,7 +321,7 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
         const shown = text || (cards.length > 0 ? null : CRIS_EMPTY_TEXT);
         // An empty reply sends nothing back: no assistant message is invented for the history.
         const api = reply.content.length > 0 ? [assistant] : [];
-        finalRow = await append("cris", storedContent({ text: shown, cards, api }), usageOf(reply));
+        finalRow = await append("cris", storedContent({ text: shown, cards, api: stored(api) }), usageOf(reply));
         break;
       }
       // Tool calls with any other stop reason can't be trusted to be whole: treat as a failed reply.

@@ -60,7 +60,8 @@ function textOf(content: unknown): string | null {
  * The history to send, rows oldest first. A box note (a Cris row with no `api`) is held back until just before the
  * next person message: Confirm can be pressed while a turn is running, and a note slipped between that turn's
  * rounds would change what those rounds were sent. Held back, every earlier request's messages stay a prefix of
- * every later one.
+ * every later one. A preview turn (no AI key) stores an empty `api` on its person and Cris rows, so it adds nothing:
+ * placeholder replies are never replayed to the real model.
  */
 export function modelHistory(rows: StoredRow[]): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];

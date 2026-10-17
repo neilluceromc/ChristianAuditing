@@ -87,6 +87,19 @@ describe("the stored model history (append-only: every replay is byte-identical 
     expect(atTurn3[atTurn2.length]).toEqual(user("turn 2"));
   });
 
+  it("leaves out preview turns (person and Cris rows stored with an empty api): live turns either side stay whole", () => {
+    const rows = [
+      row("user", [user("live 1")]),
+      row("cris", [reply("live answer")], { text: "live answer" }),
+      row("user", [], { text: "Hello!" }),
+      row("cris", [], { text: "Hello! I'm Cris — I'm still in development." }),
+      row("user", [], { text: "What will you do?" }),
+      row("cris", [], { text: "Soon I'll check someone's items…" }),
+    ];
+    expect(modelHistory(rows)).toEqual([user("live 1"), reply("live answer")]);
+    expect(modelHistory(rows.slice(2))).toEqual([]);
+  });
+
   it("skips a row whose stored api is not readable rather than sending garbage", () => {
     expect(modelHistory([{ role: "tool", content: { api: "{not json" } }, row("user", [user("hi")])])).toEqual([user("hi")]);
   });
@@ -102,6 +115,10 @@ describe("turnInFlight (one turn at a time per conversation)", () => {
   });
   it("skips box notes: a Confirm row written mid-turn does not hide the running turn", () => {
     expect(turnInFlight([r("cris", 10, false), r("tool", 1000, true), r("user", 2000, true)], now, 60_000)).toBe(true);
+  });
+  it("guards preview turns too: their rows store an empty api, which is still a turn row", () => {
+    expect(turnInFlight([{ ...row("user", [], { text: "Hello!" }), createdAt: at(1000) }], now, 60_000)).toBe(true);
+    expect(turnInFlight([{ ...row("cris", [], { text: "Hi!" }), createdAt: at(10) }, { ...row("user", [], { text: "Hello!" }), createdAt: at(1000) }], now, 60_000)).toBe(false);
   });
   it("is free once the turn's Cris reply is newest, or the turn row is old (a crash)", () => {
     expect(turnInFlight([r("cris", 10, false), r("cris", 1000, true), r("user", 2000, true)], now, 60_000)).toBe(false);

@@ -1,6 +1,6 @@
 # Phase 41 — Cris, the in-app IT assistant
 
-**Status:** BUILT 2026-10-17; merged to main via 37f1b00, pushed, and on staging (migration 34) since 2026-10-17 — Cris stays off there until the owner adds the AI key. Plan: `docs/superpowers/plans/2026-10-17-phase-41-cris.md`.
+**Status:** BUILT 2026-10-17; merged to main via 37f1b00, pushed, and on staging (migration 34) since 2026-10-17 — with no AI key there, Cris runs in preview (placeholder replies only) until the owner adds the key (preview mode added 2026-10-18, owner's request). Plan: `docs/superpowers/plans/2026-10-17-phase-41-cris.md`.
 
 **Mockups:** the "Cris — the in-app IT assistant" row on https://claude.ai/artifact/XSKxwmMGNTvFpGHdUWujdz. It has four boards:
 - **Cris · 1:** looks and moods.
@@ -222,8 +222,7 @@ Cris is the mascot from the launch film: a glass orb with a lens eye, turning ri
 **The key**
 - `ANTHROPIC_API_KEY` lives in the server's `.env`. The owner pastes it there themselves.
 - It is never stored in the database or shown.
-- Without it, Cris is off and Settings says so: "Cris is off — no AI key is set on the server".
-- Without it, Cris now runs in preview mode instead: Cris shows and chats as normal, but answers only with placeholder lines (no AI calls, no cost, no lookups, no changes), and switches to the real model once the key is added (added 2026-10-18, owner's request).
+- Without it, Cris runs in preview mode: Cris shows and chats as normal, but answers only with placeholder lines (no AI calls, no cost, no lookups, no changes), and switches to the real model once the key is added. Preview turns are never replayed to the real model. Settings says "No AI key on the server — Cris is in preview: placeholder replies only." (added 2026-10-18, owner's request). Only the admin switch turns Cris off.
 
 **A fake model** (`CRIS_MODEL=fake`) gives scripted, deterministic replies so that e2e tests and the battery run with no key and no cost. It is refused when `NODE_ENV=production`.
 
@@ -274,7 +273,7 @@ Notes, free text and money are still never sent (above).
 - **The switch:** "Cris is on".
 - **Questions per person per day:** default 100.
 - **The AI model:** Haiku, Sonnet or Opus.
-- **Key status:** "Key: set on the server ✓", or the off message.
+- **Key status:** "Key: set on the server ✓", or, with no key, the preview line "No AI key on the server — Cris is in preview: placeholder replies only." (§8).
 - **This month:** "{n} questions, about {$ cost}", counted from stored token usage. Prices are a small constant table in code.
 
 These are stored as one `FeatureFlag` (`cris`) with a Json value, and changes are audited like other flags. *Builder note:* the generic flags code (`flagEnabled`, `flagChange` in `src/lib/admin-flags.ts`) treats a flag's value as the signup domain. Either extend `FlagSpec` for a typed value, or keep `cris` off the generic Flags page and edit it only from Settings › Cris.
@@ -312,7 +311,7 @@ These are stored as one `FeatureFlag` (`cris`) with a Json value, and changes ar
 
 **Live check after the redeploy.** Staging runs with `NODE_ENV=production`, so the fake model is refused there.
 - **With a key:** if the owner has added `ANTHROPIC_API_KEY` to staging's `.env`, the post-deploy check includes one short live conversation (a lookup only, a few cents).
-- **Without one:** the check confirms the "Cris is off" state instead.
+- **Without one:** the check confirms the preview instead: Cris shows with the Preview pill and answers with a placeholder line.
 
 ## 11. Rulings taken while writing (the owner can overturn any)
 

@@ -11,7 +11,11 @@ export { CrisProviderError, type ProviderFailure } from "./anthropic";
  * Anthropic implementation and the scripted fake. NOT "use server".
  */
 
-export type CrisRequest = { system: string; messages: Anthropic.MessageParam[]; tools: Anthropic.Tool[] };
+/**
+ * `turn`: how many messages the person sent earlier in this conversation. Only the preview reads it (to turn its
+ * lines), since preview turns are never in `messages` (they are kept out of the history).
+ */
+export type CrisRequest = { system: string; messages: Anthropic.MessageParam[]; tools: Anthropic.Tool[]; turn?: number };
 /**
  * `content` in the API's own block shapes, appended to the history as-is; `stop` is the API's stop_reason;
  * `model` the model that actually served the reply (a server-side fallback may differ from the one asked);

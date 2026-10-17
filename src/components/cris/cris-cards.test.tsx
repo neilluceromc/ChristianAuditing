@@ -84,6 +84,11 @@ describe("the spare pick list", () => {
     expect(out).toContain("Scan its label");
     expect(out).toContain("None of these — show 3 more");
   });
+  it("has no Scan its label when there is no scan field (the preview)", () => {
+    const out = html(spares, true, actions({ onScan: null }));
+    expect(out).toContain("Pick one above");
+    expect(out).not.toContain("Scan its label");
+  });
   it("is a record once a newer message follows", () => {
     const out = html(spares, false);
     expect(out).toContain("BR-LT-0230");

@@ -30,7 +30,8 @@ export type CardActions = {
   onMoreSpares: () => void;
   /** The stock list's "Show 3 more". */
   onMoreStock: () => void;
-  onScan: () => void;
+  /** The spares card's "Scan its label"; null hides it (the preview, which has no scan field). */
+  onScan: (() => void) | null;
   onConfirm: (card: ConfirmCard) => void;
   onChange: () => void;
   onUndo: (card: ResultCard) => void;
@@ -186,10 +187,12 @@ function SparesView({ card, live, a }: { card: SparesCard; live: boolean; a: Car
             >
               {chosen ? `Use ${chosen.tag}` : "Pick one above"}
             </Button>
-            <Button type="button" size="sm" disabled={off} onClick={a.onScan}>
-              <Icon name="scan" size={14} />
-              Scan its label
-            </Button>
+            {a.onScan && (
+              <Button type="button" size="sm" disabled={off} onClick={a.onScan}>
+                <Icon name="scan" size={14} />
+                Scan its label
+              </Button>
+            )}
           </div>
           {card.more && (
             <button

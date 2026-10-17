@@ -98,10 +98,10 @@ describe("the preview adapter (no key: placeholder replies only)", () => {
     }
   });
 
-  it("answers the newest message, turning the lines in order, and says what Cris will do when asked", async () => {
+  it("answers the newest message, turning the lines by `turn`, and says what Cris will do when asked", async () => {
     const one = await previewModel.reply({ system: "S", messages: [turn("Hi")], tools: [] });
-    const two = await previewModel.reply({ system: "S", messages: [turn("Hi"), answer("…"), turn("Hello again")], tools: [] });
-    const about = await previewModel.reply({ system: "S", messages: [turn("Hi"), answer("…"), turn("What will you do?")], tools: [] });
+    const two = await previewModel.reply({ system: "S", messages: [turn("Hello again")], tools: [], turn: 1 });
+    const about = await previewModel.reply({ system: "S", messages: [turn("Hi"), answer("…"), turn("What will you do?")], tools: [], turn: 3 });
     expect((one.content[0] as Anthropic.TextBlock).text).toBe(PREVIEW_LINES[0]);
     expect((two.content[0] as Anthropic.TextBlock).text).toBe(PREVIEW_LINES[1]);
     expect((about.content[0] as Anthropic.TextBlock).text).toBe(PREVIEW_ABOUT);
