@@ -93,7 +93,8 @@ export function boxPlacement(p: { side: CrisSide; bottom: number; height: number
     css: {
       [p.side]: `${CRIS_BOX_IN}px`,
       [above ? "bottom" : "top"]: edge,
-      width: p.big ? "min(420px, calc(100vw - 170px))" : "min(368px, calc(100vw - 170px))",
+      // Make bigger is a taller box only (spec §4); the width stays the same either way.
+      width: "min(368px, calc(100vw - 170px))",
       height: p.big ? "620px" : "470px",
       maxHeight: `${maxHeight}px`,
       transformOrigin: `${originX} ${above ? "100%" : "0"}`,

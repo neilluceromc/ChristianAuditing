@@ -100,7 +100,7 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
   const height = useSyncExternalStore(subscribeResize, screenHeight, () => SERVER_HEIGHT);
   const boxId = useId();
 
-  const dockRef = useRef<HTMLDivElement | null>(null);
+  const dockRef = useRef<HTMLElement | null>(null);
   const mascotRef = useRef<HTMLButtonElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -548,7 +548,8 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     : `Chat with Cris${unread > 0 ? ` — ${unread} new ${unread === 1 ? "reply" : "replies"}` : ""}${phone ? "" : " (drag, or use the arrow keys, to move)"}`;
 
   return (
-    <div ref={dockRef} className={cn("cris-dock print:hidden", dragAt?.live && "is-dragging")} style={dockStyle}>
+    // A labelled landmark of its own (outside <main>), so the box and the mascot are never content outside a region.
+    <aside ref={dockRef} aria-label="Cris" className={cn("cris-dock print:hidden", dragAt?.live && "is-dragging")} style={dockStyle}>
       {open && (
         <CrisBox
           id={boxId}
@@ -614,6 +615,6 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
           </span>
         )}
       </button>
-    </div>
+    </aside>
   );
 }

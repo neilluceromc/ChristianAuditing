@@ -16,6 +16,9 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { cn } from "@/lib/cn";
 import { aboutUsd } from "@/lib/cris-cost";
 import { resolveColor } from "@/lib/cris-mood";
+// After "Put Cris back in the corner" saves, the mascot is told directly: a refresh that hands the widget the same
+// props it already had (it was dragged without a refresh) wouldn't move it. The widget listens for this.
+import { CRIS_RESET_POSITION_EVENT } from "@/lib/cris-placement";
 import { CRIS_PREF_DEFAULTS, type CrisPrefs } from "@/lib/cris-prefs";
 import { CRIS_DAILY_MAX, CRIS_DAILY_MIN, CRIS_MODELS, type CrisModelId, type CrisSettings } from "@/lib/cris-settings";
 import { saveCrisPrefs, saveCrisSettings } from "@/server/cris/settings";
@@ -47,12 +50,6 @@ const NO_KEY_TEXT = "Cris is off — no AI key is set on the server";
 
 /** When a save action throws (network, 500) rather than returning a refusal. */
 const SAVE_FAILED_TEXT = "Couldn't save — check your connection and try again.";
-
-/**
- * After "Put Cris back in the corner" saves, the mascot is told directly: a refresh that hands the widget the
- * same props it already had (it was dragged without a refresh) wouldn't move it. The widget listens for this.
- */
-const CRIS_RESET_POSITION_EVENT = "cris:reset-position";
 
 /** The preview orbs: 130 px from `sm` up, 96 px on phones (CSS size wins over the svg's width/height attributes). */
 const PREVIEW_ORB = "[&_svg]:size-24 sm:[&_svg]:size-[130px]";

@@ -102,11 +102,11 @@ describe("boxPlacement (spec §4 placement)", () => {
     expect(boxPlacement({ ...base, height: 300 }).css.maxHeight).toBe("240px");
   });
 
-  it("is 368 × 470, or 420 × 620 when bigger, narrowing to fit the screen", () => {
+  it("is 368 × 470, or 368 × 620 when bigger (spec §4: a taller box, never a wider one), narrowing to fit the screen", () => {
     expect(boxPlacement(base).css.width).toBe("min(368px, calc(100vw - 170px))");
     expect(boxPlacement(base).css.height).toBe("470px");
     const big = boxPlacement({ ...base, big: true }).css;
-    expect(big.width).toBe("min(420px, calc(100vw - 170px))");
+    expect(big.width).toBe(boxPlacement(base).css.width);
     expect(big.height).toBe("620px");
   });
 
