@@ -74,7 +74,14 @@
   font-size: 12.5px;
   white-space: nowrap;
   box-shadow: 0 8px 20px rgba(16, 24, 40, 0.12);
-  animation: cris-rise 0.3s ease-out;
+  /* Slides in without fading: the hint sits on every page until the first open, and a half-transparent
+     line of muted text would fail contrast for as long as the fade runs. */
+  animation: cris-hint-in 0.3s ease-out;
+}
+
+@keyframes cris-hint-in {
+  from { transform: translateY(8px); }
+  to { transform: none; }
 }
 
 /* The box. Its side, edge, size and max height are inline (boxPlacement). */
