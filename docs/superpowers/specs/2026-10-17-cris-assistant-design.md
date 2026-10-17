@@ -81,12 +81,12 @@ Cris is the mascot from the launch film: a glass orb with a lens eye, turning ri
 - **Hint bubble.** While closed, a small bubble reads "Hi! Need a hand? · drag me anywhere". It shows until the person has opened Cris once.
 - **New-reply badge.** A reply that arrives while the box is closed puts a small red count on the mascot.
 
-**Pressing the mascot** opens a small chat box (about 368 × 470) right beside it:
+**Pressing the mascot** opens a small chat box (about 368 × 470) attached to it:
 - **Placement:**
-  - beside the mascot, on its inner side (to its left when it sits on the right, to its right when it sits on the left);
-  - the box's bottom is level with the mascot's base when it is in the lower half of the page, and its top is level with the mascot's top when it is in the upper half;
-  - the box edge comes right up to the orb's rings, and a speech-bubble pointer on that edge points at the mascot's centre;
-  - it grows out of the mascot when it opens.
+  - above the mascot by default (below it when the mascot sits in the upper half of the page);
+  - the box's edge dips into the orb's clear top margin, so there is no gap;
+  - a speech-bubble pointer on that edge sits over the mascot's centre;
+  - the box is aligned to the mascot's side and grows out of it when it opens.
 - **One unit.** The box, the hint bubble and the mascot are one positioned unit, so they never drift apart at any screen size or while dragging.
 - **Screen sizes:**
   - Wide screens: as above.
