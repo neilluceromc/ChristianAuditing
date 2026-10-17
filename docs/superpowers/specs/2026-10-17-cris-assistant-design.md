@@ -1,6 +1,6 @@
 # Phase 41 — Cris, the in-app IT assistant
 
-**Status:** BUILT 2026-10-17 on branch phase-41-cris (ed6ce10); awaiting merge/push/redeploy. Plan: `docs/superpowers/plans/2026-10-17-phase-41-cris.md`.
+**Status:** BUILT 2026-10-17; merged to main via 37f1b00, pushed, and on staging (migration 34) since 2026-10-17 — Cris stays off there until the owner adds the AI key. Plan: `docs/superpowers/plans/2026-10-17-phase-41-cris.md`.
 
 **Mockups:** the "Cris — the in-app IT assistant" row on https://claude.ai/artifact/XSKxwmMGNTvFpGHdUWujdz. It has four boards:
 - **Cris · 1:** looks and moods.
