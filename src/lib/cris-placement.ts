@@ -10,6 +10,12 @@ import { CRIS_BOTTOM_MAX, CRIS_BOTTOM_MIN } from "./cris-prefs";
 
 export type CrisSide = "left" | "right";
 
+/**
+ * Settings' "Put Cris back in the corner" dispatches this window event (`detail: { side, bottom }`) after its save;
+ * the widget moves at once instead of waiting for the next page load.
+ */
+export const CRIS_RESET_POSITION_EVENT = "cris:reset-position";
+
 /** The mascot's size on wide screens (spec: "about 110 px", the orb inside a 116 px button). */
 export const CRIS_MASCOT = 116;
 /** How far the dock sits from its side of the screen (spec: "about 64 px from the right"). */

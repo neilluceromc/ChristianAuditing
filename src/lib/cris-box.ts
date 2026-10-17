@@ -41,12 +41,21 @@ export function oldestSavedId(messages: CrisViewMessage[]): string | null {
 }
 
 /** Only the newest message's cards take a pick, a scan or a Confirm; older ones are a record. */
+function newestSaved(messages: CrisViewMessage[]): CrisViewMessage | null {
+  for (let i = messages.length - 1; i >= 0; i--) if (isSaved(messages[i].id)) return messages[i];
+  return null;
+}
+
+/**
+ * The newest SAVED message. Unsaved ones (the echo of a send that failed, a refusal said only in the box) never end
+ * a card: the server still holds it open, and the person must be able to press Confirm or pick again.
+ */
 export function liveMessageId(messages: CrisViewMessage[]): string | null {
-  return messages.length > 0 ? messages[messages.length - 1].id : null;
+  return newestSaved(messages)?.id ?? null;
 }
 
 function liveCards(messages: CrisViewMessage[]): CrisCard[] {
-  const last = messages[messages.length - 1];
+  const last = newestSaved(messages);
   return last && last.role === "cris" ? last.cards : [];
 }
 

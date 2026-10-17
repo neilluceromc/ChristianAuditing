@@ -59,6 +59,24 @@ describe("which cards are live", () => {
     expect(waitingIn([msg("m1", "cris", [sparesCard]), msg("m2", "user")], new Set())).toBe(false);
     expect(waitingIn([msg("m1", "cris", [{ type: "chips", items: ["a"] }])], new Set())).toBe(false);
   });
+  it("unsaved messages after a card (a failed send's echo, a refusal) leave it live", () => {
+    const echo = msg("transient-local-1-1", "user");
+    const refusal = msg("transient-local-1-2", "cris");
+    const confirm: CrisCard = {
+      type: "confirm", pendingId: "p1", kind: "assign", person,
+      gets: { ...spare("BR-LT-0230"), serial: null, scanned: false },
+    };
+    expect(liveMessageId([msg("m1", "cris", [confirm]), refusal])).toBe("m1");
+    expect(liveMessageId([msg("m1", "cris", [sparesCard]), echo, refusal])).toBe("m1");
+    expect(liveMessageId([msg("transient-1", "cris")])).toBeNull();
+    expect(waitingIn([msg("m1", "cris", [confirm]), refusal], new Set())).toBe(true);
+    expect(waitingIn([msg("m1", "cris", [sparesCard]), echo, refusal], new Set())).toBe(true);
+    expect(scannedSpare("BR-LT-0230", [msg("m1", "cris", [sparesCard]), echo, refusal])).toBe("a230");
+  });
+  it("a saved message after the card still ends it", () => {
+    expect(liveMessageId([msg("m1", "cris", [sparesCard]), msg("m2", "user"), msg("transient-local-1-2", "cris")])).toBe("m2");
+    expect(waitingIn([msg("m1", "cris", [sparesCard]), msg("m2", "user"), msg("transient-2", "cris")], new Set())).toBe(false);
+  });
   it("a Confirm card stops waiting once it is confirmed", () => {
     const confirm: CrisCard = {
       type: "confirm", pendingId: "p1", kind: "assign", person,

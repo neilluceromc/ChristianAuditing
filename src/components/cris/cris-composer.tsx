@@ -23,11 +23,13 @@ type Props = {
   placeholder: string;
   left: number;
   scanOpen: boolean;
+  /** Bumped to put focus in the scan field again, even when it is already open. */
+  scanFocusTick?: number;
   onScanOpen: (open: boolean) => void;
 };
 
 export const CrisComposer = forwardRef<HTMLTextAreaElement, Props>(function CrisComposer(
-  { value, onChange, onSend, onScan, busy, placeholder, left, scanOpen, onScanOpen },
+  { value, onChange, onSend, onScan, busy, placeholder, left, scanOpen, onScanOpen, scanFocusTick = 0 },
   ref,
 ) {
   const own = useRef<HTMLTextAreaElement | null>(null);
@@ -44,7 +46,7 @@ export const CrisComposer = forwardRef<HTMLTextAreaElement, Props>(function Cris
 
   useLayoutEffect(() => {
     if (scanOpen) scanRef.current?.focus();
-  }, [scanOpen]);
+  }, [scanOpen, scanFocusTick]);
 
   const setRefs = (el: HTMLTextAreaElement | null) => {
     own.current = el;

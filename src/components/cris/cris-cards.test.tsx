@@ -97,7 +97,7 @@ describe("the box", () => {
     <CrisBox
       id="b" style={{}} above side="right" big={false} firstName="Neil" status="Ready" busy={false} messages={[]}
       typing={null} queued={new Set()} history="ready" more={false} context={null} starts={[]} actions={actions()}
-      draft="" placeholder="Ask" left={94} scanOpen={false} prependTick={0} composerRef={{ current: null }}
+      draft="" placeholder="Ask" left={94} scanOpen={false} scanFocusTick={0} prependTick={0} historyTick={0} bulkLoading={false} composerRef={{ current: null }}
       onDraft={noop} onSend={noop} onScan={noop} onScanOpen={noop} onStart={noop} onEarlier={noop}
       onRetryHistory={noop} onNewChat={noop} onBig={noop} onClose={noop}
       {...over}
@@ -126,5 +126,18 @@ describe("the box", () => {
     });
     expect(out).toContain('<span class="sr-only">Ana Reyes has 3 items:</span>');
     expect(out).toContain('<span aria-hidden="true">Ana Re<span class="cris-caret"></span></span>');
+  });
+  it("keeps the same shape once typed, so the screen-reader copy is never re-inserted (announced once)", () => {
+    const m = { id: "m1", role: "cris" as const, text: "Ana Reyes has 3 items:", cards: [], at: "2026-10-17T02:00:00.000Z" };
+    const typing = box({ messages: [m], typing: { id: "m1", shown: 6 } });
+    const done = box({ messages: [m], typing: null });
+    const sr = '<span class="sr-only">Ana Reyes has 3 items:</span>';
+    expect(typing).toContain(sr);
+    expect(done).toContain(sr);
+    expect(done).toContain('<span aria-hidden="true">Ana Reyes has 3 items:</span>');
+  });
+  it("marks the log busy while history loads, so the bulk insert is not read aloud", () => {
+    expect(box({ bulkLoading: true })).toContain('aria-busy="true"');
+    expect(box()).not.toContain("aria-busy");
   });
 });

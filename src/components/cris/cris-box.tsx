@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, forwardRef, useLayoutEffect, useRef, type KeyboardEvent, type RefObject } from "react";
+import { Fragment, forwardRef, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { IconButton } from "@/components/ui/button";
@@ -37,6 +37,12 @@ export type BoxProps = {
   placeholder: string;
   left: number;
   scanOpen: boolean;
+  /** Bumped when "Scan its label" asks for the scan field, so it takes focus even when already open. */
+  scanFocusTick: number;
+  /** History is loading (on open, or "Earlier messages"): the log is busy, so the bulk insert is not read aloud. */
+  bulkLoading: boolean;
+  /** Bumped by each bulk insert from crisHistory; the log stays busy through that commit and clears a frame later. */
+  historyTick: number;
   /** Bumped when older messages were put on top, so the list keeps its place instead of jumping to the end. */
   prependTick: number;
   composerRef: RefObject<HTMLTextAreaElement | null>;
@@ -69,18 +75,13 @@ function Bubble({ m, typing, queued }: { m: CrisViewMessage; typing: BoxProps["t
   const now = typing?.id === m.id ? typing : null;
   return (
     <div className="cris-msg max-w-[92%] self-start whitespace-pre-wrap break-words rounded-[16px_16px_16px_4px] bg-(--cris-bubble) px-[11px] py-2.5">
-      {now ? (
-        <>
-          {/* The log announces the whole reply once; the typing-out is for the eyes only. */}
-          <span className="sr-only">{m.text}</span>
-          <span aria-hidden>
-            {m.text.slice(0, now.shown)}
-            <span className="cris-caret" />
-          </span>
-        </>
-      ) : (
-        m.text
-      )}
+      {/* One shape, typed or not: the log announces the whole reply once, from the screen-reader copy, which stays
+          put when the typing ends; the typing-out is for the eyes only. */}
+      <span className="sr-only">{m.text}</span>
+      <span aria-hidden>
+        {now ? m.text.slice(0, now.shown) : m.text}
+        {now && <span className="cris-caret" />}
+      </span>
     </div>
   );
 }
@@ -91,6 +92,13 @@ export const CrisBox = forwardRef<HTMLDivElement, BoxProps>(function CrisBox(p, 
   const lastPrepend = useRef(p.prependTick);
   const live = liveMessageId(p.messages);
   const fresh = p.messages.length === 0 && p.history !== "loading";
+  const [quietTick, setQuietTick] = useState(p.historyTick);
+  useLayoutEffect(() => {
+    if (p.historyTick === quietTick) return;
+    const f = requestAnimationFrame(() => setQuietTick(p.historyTick));
+    return () => cancelAnimationFrame(f);
+  }, [p.historyTick, quietTick]);
+  const logBusy = p.bulkLoading || p.historyTick !== quietTick;
   const chip = contextLine(p.context);
 
   // New messages and the typing-out keep the list at its end; older messages put on top keep it where it was.
@@ -180,7 +188,10 @@ export const CrisBox = forwardRef<HTMLDivElement, BoxProps>(function CrisBox(p, 
         </span>
       </div>
 
-      <div ref={logRef} role="log" aria-live="polite" className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
+      <div ref={logRef} role="log"
+        aria-live="polite"
+        aria-busy={logBusy || undefined}
+        className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
         {p.more && (
           <button
             type="button"
@@ -263,6 +274,7 @@ export const CrisBox = forwardRef<HTMLDivElement, BoxProps>(function CrisBox(p, 
         placeholder={p.placeholder}
         left={p.left}
         scanOpen={p.scanOpen}
+        scanFocusTick={p.scanFocusTick}
         onScanOpen={p.onScanOpen}
       />
     </div>

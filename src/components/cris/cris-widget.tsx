@@ -10,10 +10,10 @@ import type { CrisPrefs } from "@/lib/cris-prefs";
 import { moodFor, resolveColor, type MoodState } from "@/lib/cris-mood";
 import type { ConfirmCard, CrisViewMessage, PersonRef, ResultCard } from "@/lib/cris-cards";
 import {
-  CRIS_INSET, CRIS_MASCOT, boxPlacement, bottomFromTop, clampBottom, dragPosition, nudgeBottom, snapSide, type CrisSide,
+  CRIS_INSET, CRIS_MASCOT, CRIS_RESET_POSITION_EVENT, boxPlacement, bottomFromTop, clampBottom, dragPosition, nudgeBottom, snapSide, type CrisSide,
 } from "@/lib/cris-placement";
 import {
-  TYPE_TICK_MS, nextTyped, oldestSavedId, outcomeOfFailure, outcomeOfMood, personFirstFor, quickStarts, scannedSpare,
+  TYPE_TICK_MS, liveMessageId, nextTyped, oldestSavedId, outcomeOfFailure, outcomeOfMood, personFirstFor, quickStarts, scannedSpare,
   waitingIn, type CrisPageContext, type QuickStart,
 } from "@/lib/cris-box";
 import { pageEntity } from "@/lib/cris-picks";
@@ -131,6 +131,22 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     clearTimeout(nudgeTimer.current);
   }, []);
 
+  // Settings' "Put Cris back in the corner" (its own save already stored it): move now, and drop any arrow-key
+  // save still waiting, which would otherwise put the old place back.
+  useEffect(() => {
+    const onReset = (e: Event) => {
+      const d = (e as CustomEvent<{ side?: unknown; bottom?: unknown }>).detail;
+      if (!d || (d.side !== "left" && d.side !== "right") || typeof d.bottom !== "number" || !Number.isFinite(d.bottom)) return;
+      clearTimeout(nudgeTimer.current);
+      clearTimeout(glideTimer.current);
+      drag.current = null;
+      setDragAt(null);
+      setPos({ side: d.side, bottom: d.bottom });
+    };
+    window.addEventListener(CRIS_RESET_POSITION_EVENT, onReset);
+    return () => window.removeEventListener(CRIS_RESET_POSITION_EVENT, onReset);
+  }, []);
+
   // ── the box ───────────────────────────────────────────────────────────────
   const [open, setOpen] = useState(false);
   const openRef = useRef(false);
@@ -155,6 +171,9 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
   const [draft, setDraft] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [prependTick, setPrependTick] = useState(0);
+  const [historyTick, setHistoryTick] = useState(0);
+  const [earlierLoading, setEarlierLoading] = useState(false);
+  const [scanFocusTick, setScanFocusTick] = useState(0);
   const [ctx, setCtx] = useState<{ path: string; value: CrisPageContext | null } | null>(null);
 
   // ── typing out (about 3 characters every 18 ms, the Talking mood) ──────────
@@ -210,7 +229,7 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     const el = lastFocus.current;
     if (!open || !el) return;
     const a = document.activeElement;
-    const gone = !el.isConnected || (el as HTMLButtonElement).disabled === true;
+    const gone = !el.isConnected || el.matches(":disabled");
     if (gone && (!a || a === document.body)) composerRef.current?.focus();
   });
 
@@ -232,20 +251,6 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
   const context = onEntity && ctx?.path === pathname ? ctx.value : null;
 
   // ── server calls ──────────────────────────────────────────────────────────
-  const loadHistory = useCallback(async (id: string) => {
-    setHistory("loading");
-    const res = await crisHistory({ conversationId: id }).catch(() => null);
-    if (!res?.ok) {
-      setHistory("failed");
-      return;
-    }
-    const got = res.data.messages;
-    const ids = new Set(got.map((m) => m.id));
-    setMessages((ms) => [...got, ...ms.filter((m) => !ids.has(m.id))]);
-    setMore(res.data.more);
-    setHistory("ready");
-  }, []);
-
   const begin = () => {
     busyRef.current = true;
     setBusy(true);
@@ -268,6 +273,25 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     arrive([m]);
     setOutcome(res ? outcomeOfFailure(res.kind) : "error");
     setStatus("Ready");
+  };
+
+  const loadHistory = async (id: string) => {
+    setHistory("loading");
+    const res = await crisHistory({ conversationId: id }).catch(() => null);
+    if (!res?.ok) {
+      // Cris switched off since the page loaded (or not theirs): say so; a retry would only meet it again.
+      if (res && (res.kind === "conflict" || res.kind === "forbidden")) {
+        setHistory("ready");
+        fail(res);
+      } else setHistory("failed");
+      return;
+    }
+    const got = res.data.messages;
+    const ids = new Set(got.map((m) => m.id));
+    setMessages((ms) => [...got, ...ms.filter((m) => !ids.has(m.id))]);
+    setMore(res.data.more);
+    setHistory("ready");
+    setHistoryTick((t) => t + 1);
   };
 
   const send = async (body: SendBody, echo: string) => {
@@ -355,8 +379,10 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     const before = oldestSavedId(messages);
     if (!before || !conversationId || earlierRef.current) return;
     earlierRef.current = true;
+    setEarlierLoading(true);
     const res = await crisHistory({ conversationId, before }).catch(() => null);
     earlierRef.current = false;
+    setEarlierLoading(false);
     if (!res?.ok) return fail(res);
     const got = res.data.messages;
     setMessages((ms) => {
@@ -365,6 +391,7 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     });
     setMore(res.data.more);
     setPrependTick((t) => t + 1);
+    setHistoryTick((t) => t + 1);
   };
 
   const start = (s: QuickStart) => {
@@ -388,7 +415,10 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     onPickPerson: (p: PersonRef) => void send({ pick: { kind: "person", employeeId: p.id } }, p.name),
     onPickSpare: (s) => void send({ pick: { kind: "asset", assetId: s.assetId, scanned: false } }, `Use ${s.tag}`),
     onMoreSpares: () => void send({ text: "None of these — show 3 more" }, "None of these — show 3 more"),
-    onScan: () => setScanOpen(true),
+    onScan: () => {
+      setScanOpen(true);
+      setScanFocusTick((t) => t + 1);
+    },
     onConfirm: (c) => void confirm(c),
     onChange: () => void send({ text: "Change" }, "Change"),
     onUndo: (c) => void undo(c),
@@ -415,6 +445,7 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
   };
 
   const settle = (next: { side: CrisSide; bottom: number }) => {
+    clearTimeout(nudgeTimer.current); // an arrow-key save still waiting would put the old place back after this one
     setPos(next);
     savePrefs(next);
   };
@@ -433,6 +464,8 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
   const onPointerMove = (e: PointerEvent<HTMLButtonElement>) => {
     const d = drag.current;
     if (!d) return;
+    // No button held: the capture was lost without a pointerup. End the drag rather than follow a hover.
+    if (e.buttons === 0) return onPointerCancel();
     // A move of 6 px or more is a drag (and the click that follows it is not a press).
     if (!d.moved && Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) < 6) return;
     d.moved = true;
@@ -445,6 +478,11 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     drag.current = null;
     if (!d?.moved) return;
     skipClick.current = true;
+    // The click that ends a drag is dispatched straight after this pointerup; if a browser never sends it, the
+    // flag must not swallow the next press (a keyboard Enter or Space).
+    setTimeout(() => {
+      skipClick.current = false;
+    }, 0);
     const W = screenWidth();
     const H = screenHeight();
     const at = dragPosition({ x: e.clientX, y: e.clientY }, d, { width: W, height: H }, CRIS_MASCOT);
@@ -501,12 +539,13 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
   const dockStyle: React.CSSProperties = dragAt ? { left: dragAt.left, top: dragAt.top } : { [pos.side]: CRIS_INSET, bottom };
   const waiting = waitingIn(messages, confirmed);
   const mood = moodFor({ open, busy: busy ? "model" : null, typing: typingId !== null, waiting, outcome, unread });
-  const last = messages[messages.length - 1];
-  const pickOpen = last?.role === "cris" && last.cards.some((c) => c.type === "spares");
+  const liveId = liveMessageId(messages);
+  const live = messages.find((m) => m.id === liveId);
+  const pickOpen = live?.role === "cris" && live.cards.some((c) => c.type === "spares");
   const showHint = !open && !seenHint && unread === 0 && !dragAt;
   const mascotLabel = open
     ? "Hide the chat with Cris"
-    : `Chat with Cris${unread > 0 ? ` — ${unread} new ${unread === 1 ? "reply" : "replies"}` : ""} (drag, or use the arrow keys, to move)`;
+    : `Chat with Cris${unread > 0 ? ` — ${unread} new ${unread === 1 ? "reply" : "replies"}` : ""}${phone ? "" : " (drag, or use the arrow keys, to move)"}`;
 
   return (
     <div ref={dockRef} className={cn("cris-dock print:hidden", dragAt?.live && "is-dragging")} style={dockStyle}>
@@ -533,6 +572,9 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
           left={left}
           scanOpen={scanOpen}
           prependTick={prependTick}
+          historyTick={historyTick}
+          bulkLoading={history === "loading" || earlierLoading}
+          scanFocusTick={scanFocusTick}
           composerRef={composerRef}
           onDraft={setDraft}
           onSend={sendDraft}
