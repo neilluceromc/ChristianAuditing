@@ -602,4 +602,87 @@ test.describe.serial("phase 41 — Cris", () => {
       await db.crisConversation.deleteMany({ where: { id: { in: [oldChat.id, freshChat.id] } } });
     }
   });
+
+  test("16. assign with a scan: Scanned ✓ on the card, Confirm deploys it, Undo puts it back on the shelf and the hold back", async ({ page }) => {
+    test.setTimeout(150_000);
+    const before = await snapshot([SPARE2]);
+    // A hold for the person on the spare: the assign fulfils it, and Undo must make it ACTIVE again.
+    const hold = await db.reservation.create({ data: { assetId: ids[SPARE2], employeeId: people[OTHER.no], state: "ACTIVE" } });
+    try {
+      await login(page, IT);
+      await page.goto("/");
+      const box = await openBox(page);
+      await send(box, `Assign a laptop to ${OTHER.name}`);
+      const log = logOf(box);
+      await expect(log).toContainText(`Pick a spare for ${OTHER.name}, or scan its label.`, SLOW);
+      await expect(lastSpares(box).getByRole("radio", { name: new RegExp(SPARE2) })).toBeVisible();
+
+      // "Scan its label" opens the scan field with focus; a scanner types the tag and Enter.
+      await box.getByRole("button", { name: "Scan its label" }).click();
+      const scanner = box.getByRole("textbox", { name: "Scanner input" });
+      await expect(scanner).toBeFocused();
+      await scanner.fill(SPARE2);
+      await scanner.press("Enter");
+
+      const card = lastConfirm(box);
+      await expect(card).toContainText(SPARE2, SLOW);
+      await expect(card).toContainText(OTHER.name);
+      await expect(card).toContainText("Scanned ✓");
+      // the server stored the scanned spare as the proposal
+      const pending = await db.crisPendingAction.findFirstOrThrow({ where: { userId: itUserId }, orderBy: { createdAt: "desc" } });
+      expect(pending.kind).toBe("assign");
+      expect(pending.input).toMatchObject({ assetId: ids[SPARE2], employeeId: people[OTHER.no] });
+
+      await box.getByRole("button", { name: "Confirm assignment" }).click();
+      await expect(log).toContainText("Assigned.", SLOW);
+      await expect(log).toContainText(`${SPARE2} is with ${OTHER.name} now.`);
+      await expect(box.getByRole("button", { name: "Confirm assignment" })).toHaveCount(0);
+      const deployed = await db.asset.findUniqueOrThrow({ where: { id: ids[SPARE2] } });
+      expect(deployed.status).toBe("DEPLOYED");
+      expect(deployed.assigneeId).toBe(people[OTHER.no]);
+      expect((await db.reservation.findUniqueOrThrow({ where: { id: hold.id } })).state).toBe("FULFILLED");
+
+      const undo = box.getByRole("button", { name: "Undo" });
+      await expect(undo).toBeVisible();
+      await undo.click();
+      await expect(log).toContainText(`Undone — ${SPARE2} is back in spares.`, SLOW);
+      await expect(undo).toHaveCount(0);
+
+      // Straight back onto the shelf (no triage), never marked returned, and the hold is live again.
+      const back = await db.asset.findUniqueOrThrow({ where: { id: ids[SPARE2] } });
+      expect(back.status).toBe("SPARE");
+      expect(back.assigneeId).toBeNull();
+      expect(back.returnedAt).toBeNull();
+      const restored = await db.reservation.findUniqueOrThrow({ where: { id: hold.id } });
+      expect(restored.state).toBe("ACTIVE");
+      expect(restored.resolvedAt).toBeNull();
+    } finally {
+      await db.reservation.deleteMany({ where: { id: hold.id } });
+      await restore(before);
+    }
+  });
+
+  test("17. \"Spare laptops in stock\" lists the spares free for anyone, read-only, with Show 3 more", async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page, IT);
+    await page.goto("/");
+    const box = await openBox(page);
+    await box.getByRole("button", { name: "Spare laptops in stock", exact: true }).click();
+    const log = logOf(box);
+    // page one of the pool by tag; BR-LT-0181 (queued) and BR-MN-0910 (held for Nina) are never in stock
+    await expect(log).toContainText(`Spares in stock: BR-HS-0502 (Jabra Evolve2 40), ${SPARE1}`, SLOW);
+    for (const tag of ["BR-HS-0502", SPARE1, SPARE2]) await expect(log.getByRole("listitem").filter({ hasText: tag })).toHaveCount(1);
+    await expect(log).not.toContainText("BR-LT-0181");
+    await expect(log).not.toContainText("BR-MN-0910");
+    // read-only: nothing to pick or scan, and the placeholder doesn't ask for a tag
+    await expect(log.getByRole("radio")).toHaveCount(0);
+    await expect(box.getByRole("button", { name: "Scan its label" })).toHaveCount(0);
+    await expect(composer(box)).toHaveAttribute("placeholder", "Ask Cris anything about equipment or people…");
+
+    const firstList = log.locator(".cris-msg", { has: page.getByRole("listitem").filter({ hasText: "BR-HS-0502" }) });
+    await firstList.getByRole("button", { name: "Show 3 more" }).click();
+    await expect(log.getByRole("listitem").filter({ hasText: "BR-PH-0301" })).toHaveCount(1, SLOW);
+    // only the newest list offers more: the first one is a record now
+    await expect(firstList.getByRole("button", { name: "Show 3 more" })).toHaveCount(0);
+  });
 });
