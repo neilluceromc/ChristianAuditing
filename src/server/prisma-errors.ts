@@ -62,6 +62,18 @@ export function isUniqueViolation(err: unknown): err is Prisma.PrismaClientKnown
 }
 
 /**
+ * Two transactions that met head-on: Postgres picked this one to fail. A raw statement (`$queryRaw` — e.g. a
+ * `FOR UPDATE`) reports it as P2010 with the server's SQLSTATE in `meta.code` ("40P01", deadlock_detected); a
+ * Prisma query inside an interactive transaction reports P2034 ("a write conflict or a deadlock"). Either way the
+ * transaction rolled back whole, so the caller may say "try again". Matched on codes only, never on the text.
+ */
+export function isDeadlock(err: unknown): err is Prisma.PrismaClientKnownRequestError {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (err.code === "P2034") return true;
+  return (err.meta as { code?: unknown } | undefined)?.code === "40P01";
+}
+
+/**
  * P2002 meta.target is a column array (["serial"]) for a Prisma-declared index or the index NAME
  * string ("StockCategory_prefix_lower_key") for a raw one — callers match with `.includes()`, which
  * reads both shapes; keep every caller on includes().

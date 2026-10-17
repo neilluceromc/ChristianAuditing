@@ -1,6 +1,7 @@
 import type { ActionErrorKind } from "@/server/action-result";
 import type { CrisCard, CrisViewMessage, SpareRef } from "./cris-cards";
 import type { CrisMood, MoodState } from "./cris-mood";
+import { CRIS_SAME_MOMENT } from "./cris-undo";
 import { fmtDayMonth } from "./format";
 
 /*
@@ -104,6 +105,16 @@ export function personFirstFor(pendingId: string, messages: CrisViewMessage[]): 
     for (const c of m.cards) if (c.type === "confirm" && c.pendingId === pendingId) return firstWord(c.person.name);
   }
   return null;
+}
+
+/**
+ * Whether a Confirm or Undo answer ends that button: done, or refused for good (already done, expired, changed
+ * since, Cris off). A clash with another change at the same moment wrote nothing, so the button stays to press again.
+ */
+export function pressSettled(res: { ok: true } | { ok: false; kind: ActionErrorKind; message: string } | null): boolean {
+  if (!res) return false;
+  if (res.ok) return true;
+  return res.kind === "conflict" && res.message !== CRIS_SAME_MOMENT;
 }
 
 export function undoSecondsLeft(undoUntil: string, now: number): number {

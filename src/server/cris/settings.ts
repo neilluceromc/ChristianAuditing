@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
-import { actionRole, actionUser } from "@/server/auth/guards";
+import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { asActionResult } from "@/server/prisma-errors";
@@ -68,10 +68,11 @@ const prefsPatch = crisPrefsSchema.partial();
 /**
  * Spec §9, "Your Cris": per person, under UserPreference `cris:prefs`. Takes any subset of the
  * fields (a drag saves only side and bottom; the hint saves only seenHint), merges it over what is
- * stored, and returns the full result. Not audited — a preference, the same as saveLoadoutView.
+ * stored, and returns the full result. Not audited — a preference, the same as saveLoadoutView. Admin and IT only,
+ * like every Cris action (spec §2).
  */
 export async function saveCrisPrefs(input: unknown): Promise<ActionResult<CrisPrefs>> {
-  const user = await actionUser();
+  const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);

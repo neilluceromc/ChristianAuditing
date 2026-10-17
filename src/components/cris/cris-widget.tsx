@@ -13,7 +13,7 @@ import {
   CRIS_INSET, CRIS_MASCOT, CRIS_RESET_POSITION_EVENT, boxPlacement, bottomFromTop, clampBottom, dragPosition, nudgeBottom, snapSide, type CrisSide,
 } from "@/lib/cris-placement";
 import {
-  TYPE_TICK_MS, liveMessageId, nextTyped, oldestSavedId, outcomeOfFailure, outcomeOfMood, personFirstFor, quickStarts, scannedSpare,
+  TYPE_TICK_MS, liveMessageId, nextTyped, oldestSavedId, outcomeOfFailure, outcomeOfMood, personFirstFor, pressSettled, quickStarts, scannedSpare,
   waitingIn, type CrisPageContext, type QuickStart,
 } from "@/lib/cris-box";
 import { pageEntity } from "@/lib/cris-picks";
@@ -334,7 +334,8 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     begin();
     const res = await crisConfirm({ pendingId: card.pendingId }).catch(() => null);
     end();
-    if (res?.ok || res?.kind === "conflict") setConfirmed((s) => new Set(s).add(card.pendingId));
+    // Done, or refused for good (already done, expired, Cris off): the card closes. A clash at the same moment keeps it.
+    if (pressSettled(res)) setConfirmed((s) => new Set(s).add(card.pendingId));
     if (!res?.ok) return fail(res);
     setMessages((ms) => [...ms, ...res.data.messages]);
     arrive(res.data.messages);
@@ -348,8 +349,8 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     begin();
     const res = await crisUndo({ pendingId: card.pendingId }).catch(() => null);
     end();
-    // Done, or refused for good ("Something changed since…"): Undo goes from the card.
-    if (res?.ok || res?.kind === "conflict") setUndone((s) => new Set(s).add(card.pendingId));
+    // Done, or refused for good ("Something changed since…"): Undo goes from the card. A clash at the same moment keeps it.
+    if (pressSettled(res)) setUndone((s) => new Set(s).add(card.pendingId));
     if (!res?.ok) return fail(res);
     setMessages((ms) => [...ms, ...res.data.messages]);
     arrive(res.data.messages);

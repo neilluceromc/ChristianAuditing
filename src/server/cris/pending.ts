@@ -3,9 +3,11 @@
 import { z } from "zod";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
-import { forbidden, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
+import { conflict, forbidden, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
 import { revalidateAsset } from "@/server/modules/lifecycle/revalidate";
 import { confirmPending, undoPending, type Affected, type CrisActionData } from "./pending-core";
+import { crisAvailability } from "./settings-read";
+import { CRIS_OFF_NO_KEY, CRIS_OFF_SWITCH } from "./turn-core";
 
 /*
  * Spec §6.2 and §6.4: the box's Confirm and Undo buttons. They send only the pending action's id; everything else
@@ -14,6 +16,12 @@ import { confirmPending, undoPending, type Affected, type CrisActionData } from 
  */
 
 const pendingSchema = z.object({ pendingId: z.string().min(1) });
+
+/** Like every Cris action, Confirm and Undo do nothing while Cris is off: the off copy, or null when Cris is on. */
+async function offRefusal(): Promise<ActionResult<never> | null> {
+  const availability = await crisAvailability();
+  return availability.on ? null : conflict(availability.reason === "no-key" ? CRIS_OFF_NO_KEY : CRIS_OFF_SWITCH);
+}
 
 /** The pages the manual actions refresh: each asset, the inventory list, home and the person's profile. */
 function revalidateAffected(a: Affected): void {
@@ -28,6 +36,8 @@ function revalidateAffected(a: Affected): void {
 export async function crisConfirm(input: { pendingId: string }): Promise<ActionResult<CrisActionData>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
+  const off = await offRefusal();
+  if (off) return off;
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = pendingSchema.safeParse(input);
@@ -39,11 +49,13 @@ export async function crisConfirm(input: { pendingId: string }): Promise<ActionR
 
 /**
  * Reverses a confirmed change within 60 s, while nothing else has touched its assets; otherwise "Something changed
- * since — reverse it from the record instead."
+ * since — reverse it from the record instead." Both refuse with the off copy while Cris is off, before the rate limit.
  */
 export async function crisUndo(input: { pendingId: string }): Promise<ActionResult<CrisActionData>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
+  const off = await offRefusal();
+  if (off) return off;
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = pendingSchema.safeParse(input);

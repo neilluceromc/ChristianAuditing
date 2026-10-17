@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { CrisCard, CrisViewMessage, SparesCard } from "./cris-cards";
 import {
   contextLine, gapLine, isSaved, liveMessageId, nextTyped, oldestSavedId, outcomeOfFailure, outcomeOfMood,
-  personFirstFor, quickStarts, scannedSpare, spareMeta, undoSecondsLeft, waitingIn,
+  personFirstFor, pressSettled, quickStarts, scannedSpare, spareMeta, undoSecondsLeft, waitingIn,
 } from "./cris-box";
+import { CRIS_ALREADY_DONE, CRIS_SAME_MOMENT } from "./cris-undo";
 
 const person = { id: "e1", name: "Ana Reyes", employeeNo: "EMP-0101", worksFor: "Bluepeak Telecom", initials: "AR" };
 const spare = (tag: string, assetId = tag) => ({
@@ -144,5 +145,18 @@ describe("the opening state (spec §4)", () => {
     const labels = quickStarts(null).map((s) => s.label);
     expect(labels).toContain("Spare laptops in stock");
     expect(labels).toContain("Who has a tag?");
+  });
+});
+
+describe("pressSettled: whether a Confirm or Undo answer ends its button", () => {
+  it("ends it when done, or refused for good", () => {
+    expect(pressSettled({ ok: true })).toBe(true);
+    expect(pressSettled({ ok: false, kind: "conflict", message: CRIS_ALREADY_DONE })).toBe(true);
+  });
+  it("keeps it after a clash at the same moment (nothing was written), a throw, a rate limit or a refusal of the person", () => {
+    expect(pressSettled({ ok: false, kind: "conflict", message: CRIS_SAME_MOMENT })).toBe(false);
+    expect(pressSettled(null)).toBe(false);
+    expect(pressSettled({ ok: false, kind: "rate_limited", message: "Slow down" })).toBe(false);
+    expect(pressSettled({ ok: false, kind: "forbidden", message: "No" })).toBe(false);
   });
 });

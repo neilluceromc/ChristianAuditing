@@ -9,6 +9,11 @@ export const UNDO_WINDOW_MS = 60_000;
 export const CRIS_ALREADY_DONE = "That's already done.";
 export const CRIS_EXPIRED = "That expired — ask me again.";
 export const CRIS_CHANGED_SINCE = "Something changed since — reverse it from the record instead.";
+/**
+ * Confirm or Undo met another change to the same records head-on (a Postgres deadlock): nothing was written, and
+ * the same press can simply be tried again — the box keeps the card's button for it.
+ */
+export const CRIS_SAME_MOMENT = "Someone else was changing that at the same moment — try again.";
 
 /** When the result card's Undo stops showing. */
 export function undoUntil(usedAt: Date): Date {

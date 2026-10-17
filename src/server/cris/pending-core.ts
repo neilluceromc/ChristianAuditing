@@ -5,6 +5,7 @@ import { writeAudit } from "@/server/audit";
 import { emitWebhook } from "@/server/webhooks/emit";
 import { createApproval } from "@/server/modules/approvals/create";
 import { conflict, forbidden, ok, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
+import { isDeadlock } from "@/server/prisma-errors";
 import {
   assignCore, assignSchema, loadDirect, replaceCore, replaceSchema, type AssignInput, type LifecycleOpts, type ReplaceInput,
 } from "@/server/modules/lifecycle/direct";
@@ -14,7 +15,7 @@ import {
   CRIS_RETURN_OUTCOMES, cardFromSnapshot, type ConfirmCard, type CrisReturnOutcome, type CrisViewMessage, type ResultCard,
 } from "@/lib/cris-cards";
 import {
-  CRIS_ALREADY_DONE, CRIS_CHANGED_SINCE, CRIS_EXPIRED, PENDING_TTL_MS, parseResultRef, undoEligible, undoUntil,
+  CRIS_ALREADY_DONE, CRIS_CHANGED_SINCE, CRIS_EXPIRED, CRIS_SAME_MOMENT, PENDING_TTL_MS, parseResultRef, undoEligible, undoUntil,
   type AssetBefore, type ResultRef,
 } from "@/lib/cris-undo";
 import { readAsset, readPerson, sparesCard } from "./cards";
@@ -231,6 +232,8 @@ export async function confirmPending(user: SessionUser, pendingId: string, now: 
   } catch (err) {
     if (err instanceof CoreRefusal) return { result: await postRefusal(pending.conversationId, employeeId, ids.gets, err.result), affected: null };
     if (err instanceof Refusal) return { result: err.result, affected: null };
+    // Rolled back whole, the claim with it: the same Confirm can be pressed again.
+    if (isDeadlock(err)) return refuse(CRIS_SAME_MOMENT);
     throw err;
   }
 }
@@ -414,6 +417,8 @@ export async function undoPending(user: SessionUser, pendingId: string, now: Dat
     return { result: ok({ messages }), affected: { assetIds, employeeId: ref.employeeId } };
   } catch (err) {
     if (err instanceof Refusal) return { result: err.result, affected: null };
+    // The FOR UPDATE met a manual change locking the other way round: rolled back whole, the claim with it.
+    if (isDeadlock(err)) return refuse(CRIS_SAME_MOMENT);
     throw err;
   }
 }

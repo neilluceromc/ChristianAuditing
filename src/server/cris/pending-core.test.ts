@@ -36,6 +36,9 @@ const h = vi.hoisted(() => ({
   approvals: [] as Array<{ type: string; payload: { reason?: string } }>,
   spares: [] as Array<{ employeeId: string; typeId: string | null }>,
   locks: [] as unknown[][],
+  /** Thrown by the real (not dry-run) core, or by Undo's FOR UPDATE: a Postgres failure mid-transaction. */
+  coreThrow: null as unknown,
+  lockThrow: null as unknown,
 }));
 
 const clone = (s: State): State => ({
@@ -68,6 +71,7 @@ function makeTx() {
     [...rows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
   return {
     $queryRaw: async (_strings: TemplateStringsArray, ...values: Array<{ values?: unknown[] }>) => {
+      if (h.lockThrow) throw h.lockThrow;
       h.locks.push(values[0]?.values ?? []);
       return [];
     },
@@ -154,6 +158,7 @@ vi.mock("@/server/modules/lifecycle/direct", async (importActual) => {
     ...actual,
     assignCore: async (_tx: unknown, user: { id: string }, d: { assetId: string; employeeId: string }, opts: { dryRun?: boolean; via?: string }) => {
       h.coreCalls.push({ kind: "assign", opts });
+      if (h.coreThrow && !opts.dryRun) throw h.coreThrow;
       if (h.coreRefusal) return refusal();
       if (!opts.dryRun) {
         Object.assign(h.state.assets.find((a) => a.id === d.assetId)!, { status: "DEPLOYED", assigneeId: d.employeeId });
@@ -197,9 +202,13 @@ vi.mock("@/server/modules/approvals/create", () => ({
 }));
 
 import { confirmPending, createPending, undoPending } from "./pending-core";
-import { CRIS_ALREADY_DONE, CRIS_CHANGED_SINCE, CRIS_EXPIRED, parseResultRef } from "@/lib/cris-undo";
+import { CRIS_ALREADY_DONE, CRIS_CHANGED_SINCE, CRIS_EXPIRED, CRIS_SAME_MOMENT, parseResultRef } from "@/lib/cris-undo";
 import { prisma } from "@/server/db/client";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+
+/** Postgres's deadlock_detected on a raw statement, as Prisma reports it. */
+const deadlock = () =>
+  new Prisma.PrismaClientKnownRequestError("deadlock detected", { code: "P2010", clientVersion: "6", meta: { code: "40P01", message: "deadlock detected" } });
 
 const user = { id: "u1", name: "Neil Lucero", role: "it_staff" } as User;
 const now = new Date("2026-10-17T10:00:00.000Z");
@@ -227,6 +236,7 @@ beforeEach(() => {
     ],
     messages: [], employment: "ACTIVE", openApprovals: [],
   };
+  h.coreThrow = null; h.lockThrow = null;
   h.coreCalls.length = 0; h.coreRefusal = null; h.written.length = 0; h.approvals.length = 0; h.spares.length = 0; h.locks.length = 0;
 });
 
@@ -431,5 +441,39 @@ describe("undoPending", () => {
     await confirmed("assign");
     expect((await undoPending(user, "p1", later(61))).result).toMatchObject({ message: CRIS_CHANGED_SINCE });
     expect((await undoPending({ ...user, id: "u2" } as User, "p1", later(5))).result).toMatchObject({ kind: "forbidden" });
+  });
+
+  it("M7: a deadlock at the FOR UPDATE is a conflict to try again, not a 500 — nothing written, Undo still possible", async () => {
+    await confirmed("assign");
+    h.lockThrow = deadlock();
+    const r = await undoPending(user, "p1", later(5));
+    expect(r).toEqual({ result: { ok: false, kind: "conflict", message: CRIS_SAME_MOMENT }, affected: null });
+    expect(h.state.pending[0].undoneAt).toBeNull();
+    expect(h.state.assets[0]).toMatchObject({ status: "DEPLOYED", assigneeId: "emp1" });
+    h.lockThrow = null;
+    expect((await undoPending(user, "p1", later(6))).result.ok).toBe(true);
+  });
+
+  it("rethrows any other database failure", async () => {
+    await confirmed("assign");
+    h.lockThrow = new Prisma.PrismaClientKnownRequestError("boom", { code: "P2010", clientVersion: "6", meta: { code: "57014" } });
+    await expect(undoPending(user, "p1", later(5))).rejects.toThrow("boom");
+  });
+});
+
+describe("M7: a deadlock at Confirm", () => {
+  it("is a conflict to try again — the claim rolls back, so the same Confirm can run", async () => {
+    h.coreThrow = new Prisma.PrismaClientKnownRequestError("write conflict", { code: "P2034", clientVersion: "6" });
+    const r = await confirmPending(user, "p1", now);
+    expect(r).toEqual({ result: { ok: false, kind: "conflict", message: CRIS_SAME_MOMENT }, affected: null });
+    expect(h.state.pending[0].usedAt).toBeNull();
+    expect(h.state.assets[0].status).toBe("SPARE");
+    h.coreThrow = null;
+    expect((await confirmPending(user, "p1", now)).result.ok).toBe(true);
+  });
+
+  it("recognises a raw statement's 40P01 too", async () => {
+    h.coreThrow = deadlock();
+    expect((await confirmPending(user, "p1", now)).result).toMatchObject({ kind: "conflict", message: CRIS_SAME_MOMENT });
   });
 });
