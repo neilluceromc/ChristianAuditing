@@ -45,6 +45,18 @@ const MODEL_LABELS: Record<CrisModelId, string> = {
 const KEY_SET_TEXT = "Key: set on the server ✓";
 const NO_KEY_TEXT = "Cris is off — no AI key is set on the server";
 
+/** When a save action throws (network, 500) rather than returning a refusal. */
+const SAVE_FAILED_TEXT = "Couldn't save — check your connection and try again.";
+
+/**
+ * After "Put Cris back in the corner" saves, the mascot is told directly: a refresh that hands the widget the
+ * same props it already had (it was dragged without a refresh) wouldn't move it. The widget listens for this.
+ */
+const CRIS_RESET_POSITION_EVENT = "cris:reset-position";
+
+/** The preview orbs: 130 px from `sm` up, 96 px on phones (CSS size wins over the svg's width/height attributes). */
+const PREVIEW_ORB = "[&_svg]:size-24 sm:[&_svg]:size-[130px]";
+
 export interface CrisAdminView {
   settings: CrisSettings;
   /** Only whether a key is set — the key itself never reaches the browser. */
@@ -110,34 +122,50 @@ function YourCrisAndPreview({
   const motionHintId = useId();
   const showId = useId();
 
-  /** Resolves true when the server kept the change. */
-  async function save(patch: Partial<CrisPrefs>): Promise<boolean> {
+  /**
+   * Resolves to what the server kept, or null when the save was refused or never arrived. Never rejects: a
+   * thrown action (network, 500) rolls the choice back and says so, instead of leaving it on screen unsaved.
+   */
+  async function save(patch: Partial<CrisPrefs>): Promise<CrisPrefs | null> {
     setError(null);
     setStatus("");
     setPrefs((p) => ({ ...p, ...patch }));
-    const res = await saveCrisPrefs(patch);
-    if (res.ok) {
-      confirmed.current = res.data;
-      setStatus("Saved");
-      // The mascot is drawn by the shared layout from these prefs; refresh so it matches at once.
-      startTransition(() => router.refresh());
-      return true;
+    const rollBack = () => {
+      const back = Object.fromEntries(Object.keys(patch).map((k) => [k, confirmed.current[k as keyof CrisPrefs]]));
+      setPrefs((p) => ({ ...p, ...back }));
+    };
+    try {
+      const res = await saveCrisPrefs(patch);
+      if (res.ok) {
+        confirmed.current = res.data;
+        setStatus("Saved");
+        // The mascot is drawn by the shared layout from these prefs; refresh so it matches at once.
+        startTransition(() => router.refresh());
+        return res.data;
+      }
+      rollBack();
+      if (res.kind === "rate_limited") retry.start(res.retryAfterSec);
+      else setError(res.message);
+      return null;
+    } catch {
+      rollBack();
+      setError(SAVE_FAILED_TEXT);
+      return null;
     }
-    const back = Object.fromEntries(Object.keys(patch).map((k) => [k, confirmed.current[k as keyof CrisPrefs]]));
-    setPrefs((p) => ({ ...p, ...back }));
-    if (res.kind === "rate_limited") retry.start(res.retryAfterSec);
-    else setError(res.message);
-    return false;
   }
 
   // Always saves, even when this page thinks Cris is already there: the mascot on this very page may have
-  // been dragged since it loaded.
+  // been dragged since it loaded. A same-value prop refresh doesn't move it, so the widget is told directly.
   async function backToCorner() {
     if (resetting.current) return;
     resetting.current = true;
     setResetBusy(true);
     try {
-      if (await save({ side: CRIS_PREF_DEFAULTS.side, bottom: CRIS_PREF_DEFAULTS.bottom })) {
+      const saved = await save({ side: CRIS_PREF_DEFAULTS.side, bottom: CRIS_PREF_DEFAULTS.bottom });
+      if (saved) {
+        window.dispatchEvent(
+          new CustomEvent(CRIS_RESET_POSITION_EVENT, { detail: { side: saved.side, bottom: saved.bottom } }),
+        );
         toast("Cris is back in the corner", "settled");
       }
     } finally {
@@ -239,20 +267,21 @@ function YourCrisAndPreview({
       <div className="flex min-w-0 flex-col gap-2.5 lg:sticky lg:top-4">
         <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-secondary">Preview</h2>
         <Card>
-          <CardBody className="flex flex-row gap-3 p-3">
+          {/* Fits a 360 px phone: the orbs drop to 96 px under `sm`, and the panels wrap rather than overflow. */}
+          <CardBody className="flex flex-row flex-wrap gap-3 p-3">
             {/* Fixed light and dark surfaces, whatever the app's own theme is right now: the point is to show both. */}
             <div
-              className="flex flex-1 flex-col items-center gap-1.5 rounded-(--radius-card) px-2.5 py-4"
+              className="flex min-w-[116px] flex-1 flex-col items-center gap-1.5 rounded-(--radius-card) px-2.5 py-4"
               style={{ background: "#ffffff", border: "1px solid #e4e7ec", color: "#101828" }}
             >
-              <CrisOrb color={lightColor} mood="talk" motion={prefs.motion} size={130} label="Cris in light mode" />
+              <CrisOrb color={lightColor} mood="talk" motion={prefs.motion} size={130} className={PREVIEW_ORB} label="Cris in light mode" />
               <span className="text-xs font-semibold">Light mode</span>
             </div>
             <div
-              className="flex flex-1 flex-col items-center gap-1.5 rounded-(--radius-card) px-2.5 py-4"
+              className="flex min-w-[116px] flex-1 flex-col items-center gap-1.5 rounded-(--radius-card) px-2.5 py-4"
               style={{ background: "#0f1115", border: "1px solid #262b34", color: "#e6e9ef" }}
             >
-              <CrisOrb color={darkColor} mood="talk" motion={prefs.motion} size={130} label="Cris in dark mode" />
+              <CrisOrb color={darkColor} mood="talk" motion={prefs.motion} size={130} className={PREVIEW_ORB} label="Cris in dark mode" />
               <span className="text-xs font-semibold">Dark mode</span>
             </div>
           </CardBody>
@@ -279,6 +308,7 @@ function CrisForEveryone({ admin }: { admin: CrisAdminView }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
+  const limitRef = useRef<HTMLInputElement>(null);
   const retry = useRetryDeadline();
   const onId = useId();
 
@@ -292,7 +322,15 @@ function CrisForEveryone({ admin }: { admin: CrisAdminView }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedKey]);
 
-  function submit(e: React.FormEvent) {
+  /** Puts the error on the limit and the keyboard there with it. */
+  function limitRefused(message: string) {
+    setLimitError(message);
+    limitRef.current?.focus();
+  }
+
+  // Awaited directly, not inside an async transition: a throw there would reach the error boundary and
+  // blank the page. A thrown action (network, 500) is caught and said, never left silent.
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy.current) return;
     setError(null);
@@ -300,36 +338,36 @@ function CrisForEveryone({ admin }: { admin: CrisAdminView }) {
     const trimmed = limit.trim();
     const n = Number(trimmed);
     if (!/^\d+$/.test(trimmed) || n < CRIS_DAILY_MIN || n > CRIS_DAILY_MAX) {
-      setLimitError(`Enter a whole number from ${CRIS_DAILY_MIN} to ${CRIS_DAILY_MAX}.`);
+      limitRefused(`Enter a whole number from ${CRIS_DAILY_MIN} to ${CRIS_DAILY_MAX}.`);
       return;
     }
     busy.current = true;
     setSaving(true);
-    startTransition(async () => {
-      try {
-        const res = await saveCrisSettings({ on, dailyLimit: n, model });
-        if (res.ok) {
-          toast(res.data.changed ? "Cris's settings saved" : "Nothing to save — these are already Cris's settings", "settled");
-          router.refresh();
-        } else if (res.kind === "rate_limited") {
-          retry.start(res.retryAfterSec);
-        } else if (res.kind === "validation" && res.fieldErrors?.dailyLimit) {
-          setLimitError(res.fieldErrors.dailyLimit);
-        } else {
-          setError(res.message);
-        }
-      } finally {
-        busy.current = false;
-        setSaving(false);
+    try {
+      const res = await saveCrisSettings({ on, dailyLimit: n, model });
+      if (res.ok) {
+        toast(res.data.changed ? "Cris's settings saved" : "Nothing to save — these are already Cris's settings", "settled");
+        startTransition(() => router.refresh());
+      } else if (res.kind === "rate_limited") {
+        retry.start(res.retryAfterSec);
+      } else if (res.kind === "validation" && res.fieldErrors?.dailyLimit) {
+        limitRefused(res.fieldErrors.dailyLimit);
+      } else {
+        setError(res.message);
       }
-    });
+    } catch {
+      setError(SAVE_FAILED_TEXT);
+    } finally {
+      busy.current = false;
+      setSaving(false);
+    }
   }
 
   const questions = `${usage.questions} ${usage.questions === 1 ? "question" : "questions"}`;
 
   return (
     <Card>
-      <form onSubmit={submit} noValidate>
+      <form onSubmit={(e) => void submit(e)} noValidate>
         <CardBody className="flex flex-col gap-4 py-4">
           <div className="flex items-center gap-2">
             <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-secondary">Cris for everyone</h2>
@@ -350,6 +388,7 @@ function CrisForEveryone({ admin }: { admin: CrisAdminView }) {
             {(p) => (
               <Input
                 {...p}
+                ref={limitRef}
                 inputMode="numeric"
                 value={limit}
                 onChange={(e) => setLimit(e.target.value)}
@@ -376,9 +415,11 @@ function CrisForEveryone({ admin }: { admin: CrisAdminView }) {
           </p>
 
           <div>
+            {/* The name stays "Save" throughout; aria-busy and the status line carry the in-flight state. */}
             <Button type="submit" variant="primary" size="sm" aria-busy={saving || undefined}>
-              {saving ? "Saving…" : "Save"}
+              Save
             </Button>
+            <span role="status" className="sr-only">{saving ? "Saving…" : ""}</span>
           </div>
         </CardBody>
       </form>

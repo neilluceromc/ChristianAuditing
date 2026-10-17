@@ -1059,7 +1059,7 @@ model CrisMessage {
   id             String           @id @default(cuid())
   conversationId String
   conversation   CrisConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  /// "user" | "assistant" | "tool"
+  /// "user" | "cris" | "tool" (CrisMessageRole in src/server/cris/messages.ts)
   role           String
   /// text plus structured cards
   content        Json
