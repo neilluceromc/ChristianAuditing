@@ -1,4 +1,4 @@
-import type { ApprovalType, AssetStatus, Prisma } from "@prisma/client";
+import { Prisma, type ApprovalType, type AssetStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { SessionUser } from "@/server/auth/guards";
 import { writeAudit } from "@/server/audit";
@@ -8,7 +8,7 @@ import { conflict, forbidden, ok, validationError, zodFieldErrors, type ActionRe
 import {
   assignCore, assignSchema, loadDirect, replaceCore, replaceSchema, type AssignInput, type LifecycleOpts, type ReplaceInput,
 } from "@/server/modules/lifecycle/direct";
-import { commitLifecycle, prepareLifecycle } from "@/server/modules/lifecycle/apply";
+import { prepareLifecycle } from "@/server/modules/lifecycle/apply";
 import type { AuditDiff } from "@/lib/audit-diff";
 import {
   CRIS_RETURN_OUTCOMES, cardFromSnapshot, type ConfirmCard, type CrisReturnOutcome, type CrisViewMessage, type ResultCard,
@@ -30,12 +30,19 @@ export type PendingKind = "assign" | "replace";
 type Parsed = { kind: "assign"; d: AssignInput } | { kind: "replace"; d: ReplaceInput };
 
 /**
+ * What Cris may assign with: the spare, the person and a reason — the fields the Confirm card shows. `status` and
+ * `loanDueAt` are refused (strict), so a Cris assign is always the class's default status; loans stay a screen job
+ * in v1 and nothing the card leaves out can reach the record.
+ */
+const crisAssignSchema = assignSchema.pick({ assetId: true, employeeId: true, reason: true }).strict();
+
+/**
  * The stored or proposed input, re-validated with the lifecycle action's own schema (the cores do not re-check
  * their input). A replace may only propose Defective, Back for triage or Missing — Buyout stays a manual decision.
  */
 function parseInput(kind: string, input: unknown): { ok: true; p: Parsed } | { ok: false; failure: ActionResult<never> } {
   if (kind === "assign") {
-    const r = assignSchema.safeParse(input);
+    const r = crisAssignSchema.safeParse(input);
     return r.success ? { ok: true, p: { kind, d: r.data } } : { ok: false, failure: validationError(zodFieldErrors(r.error)) };
   }
   if (kind === "replace") {
@@ -103,10 +110,13 @@ export async function createPending(
     },
     select: { id: true },
   });
+  // The card shows exactly what Confirm records: an assign's reason when one was given (otherwise the record's
+  // generic "assigned"), and for the item taken back the given reason or replaceCore's "replaced by {tag}".
   const card = cardFromSnapshot({
     pendingId: row.id, kind: p.kind, person, gets, scanned: meta.scanned === true,
+    ...(p.kind === "assign" && p.d.reason ? { reason: p.d.reason } : {}),
     ...(p.kind === "replace" && back
-      ? { returns: { id: back.id, tag: back.tag, outcome: p.d.outcome as CrisReturnOutcome, reason: p.d.reason ?? "" } }
+      ? { returns: { id: back.id, tag: back.tag, outcome: p.d.outcome as CrisReturnOutcome, reason: p.d.reason || `replaced by ${gets.tag}` } }
       : {}),
   });
   await tx.crisPendingAction.update({ where: { id: row.id }, data: { card } });
@@ -160,8 +170,8 @@ async function conversationExists(tx: Tx, id: string): Promise<boolean> {
 /**
  * Spec §6.2. Owner → not used → not expired, then one transaction: the state-guarded claim (of two presses,
  * the second finds `usedAt` set and is refused — Review Focus #2), the real action with `via: "Cris"`, and the
- * result card. A refusal from the action rolls the claim back and is posted in the action's own words with the
- * spares still pickable (Review Focus #3).
+ * result card. A refusal from the action rolls the claim back and is posted in the action's own words, with the
+ * spares still pickable when it is about the picked spare (Review Focus #3).
  */
 export async function confirmPending(user: SessionUser, pendingId: string, now: Date = new Date()): Promise<CrisOutcome> {
   const pending = await prisma.crisPendingAction.findUnique({ where: { id: pendingId } });
@@ -233,16 +243,31 @@ function refusalText(r: ActionResult<never>): string {
 }
 
 /**
- * After a refused Confirm (rolled back): Cris posts the action's own message and, when any are left, the
- * pickable spares for the same person — the picked spare's type first. A forbidden refusal is returned as is.
+ * Whether a refusal is about the picked spare, so another spare is the next step: it names the spare's tag
+ * ("… is reserved for …", "… is Deployed, not a spare.", "… is held by APR-…") or it is a field error on the spare
+ * ("Pick a different device."). A refusal about the person (leaving, unknown), the item taken back, or the
+ * change itself names neither, and another spare would only meet it again.
+ */
+function aboutSpare(r: ActionResult<never>, spareTag: string | null): boolean {
+  if (r.ok) return false;
+  if (r.fieldErrors && ("assetId" in r.fieldErrors || "newAssetId" in r.fieldErrors)) return true;
+  return spareTag !== null && refusalText(r).includes(spareTag);
+}
+
+/**
+ * After a refused Confirm (rolled back): Cris posts the action's own message and — when the refusal is about the
+ * picked spare and any are left — the pickable spares for the same person, the picked spare's type first.
+ * A forbidden refusal is returned as is.
  */
 async function postRefusal(conversationId: string, employeeId: string, getsId: string, core: ActionResult<never>): Promise<ActionResult<CrisActionData>> {
   if (core.ok || core.kind === "forbidden") return core;
   return prisma.$transaction(async (tx) => {
     if (!(await conversationExists(tx, conversationId))) return core;
-    const picked = await tx.asset.findUnique({ where: { id: getsId }, select: { typeId: true } });
-    const spares = await sparesCard(tx, employeeId, { typeId: picked?.typeId ?? null });
-    const row = await appendCrisMessage(tx, conversationId, "cris", { text: refusalText(core), cards: spares.options.length ? [spares] : [] });
+    const picked = await tx.asset.findUnique({ where: { id: getsId }, select: { tag: true, typeId: true } });
+    const spares = aboutSpare(core, picked?.tag ?? null)
+      ? await sparesCard(tx, employeeId, { typeId: picked?.typeId ?? null })
+      : null;
+    const row = await appendCrisMessage(tx, conversationId, "cris", { text: refusalText(core), cards: spares?.options.length ? [spares] : [] });
     return ok({ messages: viewMessages([row]), refused: true as const });
   });
 }
@@ -281,7 +306,9 @@ async function loadForUndo(tx: Tx, user: SessionUser, assetId: string) {
 
 /**
  * The spare the person got goes back to its status before (Spare), through the lifecycle guards — and straight
- * onto the shelf, not into triage: it never left IT's hands (spec §6.4). Audited `lifecycle.return`.
+ * onto the shelf, not into triage: it never left IT's hands (spec §6.4). The write is prepareLifecycle's planned
+ * update, state-guarded on what the Confirm left (commitLifecycle's only other step, settling a hold, never
+ * applies to a return). Audited `lifecycle.return`.
  */
 async function putBack(tx: Tx, user: SessionUser, entry: ResultRef["assets"][number], employeeId: string, now: Date): Promise<string> {
   const a = await loadForUndo(tx, user, entry.id);
@@ -292,7 +319,13 @@ async function putBack(tx: Tx, user: SessionUser, entry: ResultRef["assets"][num
   const { updates, diff } = p.prepared;
   if (a.returnedAt === null) { delete updates.returnedAt; delete diff.returnedAt; }
   else { updates.returnedAt = null; diff.returnedAt = { from: a.returnedAt, to: null }; }
-  await commitLifecycle(tx, a.id, p.prepared, now);
+  const scalar: Prisma.AssetUpdateInput = { ...updates };
+  delete scalar.assignee; // { disconnect: true } — written as assigneeId: null below
+  const written = await tx.asset.updateMany({
+    where: { id: a.id, assigneeId: employeeId, status: a.status },
+    data: { ...(scalar as Prisma.AssetUncheckedUpdateManyInput), assigneeId: null },
+  });
+  if (written.count === 0) throw changed();
   await recordUndo(tx, user, a, now, {
     type: "lifecycle_return", action: "lifecycle.return", employeeId, diff,
     payload: { from: { assigneeId: employeeId }, to: { assigneeId: null, status }, reason: UNDONE },
@@ -355,6 +388,9 @@ export async function undoPending(user: SessionUser, pendingId: string, now: Dat
         where: { id: pending.id, usedAt, undoneAt: null }, data: { undoneAt: now },
       });
       if (claim.count === 0) throw new Refusal(conflict(CRIS_ALREADY_DONE));
+      // Freeze both assets before the "touched since" check: a manual change now waits for this transaction,
+      // so nothing can land between the check and the writes. One statement, in id order (no lock-order deadlock).
+      await tx.$queryRaw`SELECT "id" FROM "Asset" WHERE "id" IN (${Prisma.join([...assetIds].sort())}) ORDER BY "id" FOR UPDATE`;
       const touched = await tx.auditEntry.count({
         where: { entityType: "asset", entityId: { in: assetIds }, createdAt: { gte: usedAt }, id: { notIn: ref.auditIds } },
       });

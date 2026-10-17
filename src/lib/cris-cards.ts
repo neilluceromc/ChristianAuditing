@@ -31,6 +31,9 @@ export type SparesCard = { type: "spares"; employeeId: string; options: SpareRef
 export type ConfirmCard = {
   type: "confirm"; pendingId: string; kind: "assign" | "replace"; person: PersonRef;
   gets: SpareRef & { serial: string | null; scanned: boolean };
+  /** An assign's reason, only when one was given — it is what Confirm records. */
+  reason?: string;
+  /** `reason` is what Confirm records for the item taken back: the given reason, or "replaced by {tag}". */
   returns?: { assetId: string; tag: string; outcome: CrisReturnOutcome; reason: string };
 };
 /** `employeeId` is the profile the result card links to (spec §4, "a link to the profile"). */
@@ -56,6 +59,7 @@ const spareRef = z.object({
 const confirmSchema = z.object({
   type: z.literal("confirm"), pendingId: z.string(), kind: z.enum(["assign", "replace"]), person: personRef,
   gets: spareRef.extend({ serial: z.string().nullable(), scanned: z.boolean() }),
+  reason: z.string().optional(),
   returns: z.object({ assetId: z.string(), tag: z.string(), outcome: z.enum(CRIS_RETURN_OUTCOMES), reason: z.string() }).optional(),
 });
 const cardSchema = z.discriminatedUnion("type", [
@@ -99,6 +103,8 @@ export type AssetSnapshot = {
 export type ConfirmSnapshot = {
   pendingId: string; kind: "assign" | "replace";
   person: PersonSnapshot; gets: AssetSnapshot; scanned: boolean;
+  /** An assign's reason as it will be recorded; left out when none was given. */
+  reason?: string;
   returns?: { id: string; tag: string; outcome: CrisReturnOutcome; reason: string };
 };
 
@@ -129,6 +135,7 @@ export function cardFromSnapshot(s: ConfirmSnapshot): ConfirmCard {
     kind: s.kind,
     person: toPersonRef(s.person),
     gets: { ...toSpareRef(s.gets), serial: s.gets.serial, scanned: s.scanned },
+    ...(s.reason ? { reason: s.reason } : {}),
     ...(s.returns
       ? { returns: { assetId: s.returns.id, tag: s.returns.tag, outcome: s.returns.outcome, reason: s.returns.reason } }
       : {}),

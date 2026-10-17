@@ -37,7 +37,11 @@ describe("cardFromSnapshot", () => {
     expect(parseConfirmCard(JSON.parse(JSON.stringify(card)))).toEqual(card);
     const assign = cardFromSnapshot({ ...snap, kind: "assign", returns: undefined });
     expect(assign).not.toHaveProperty("returns");
+    expect(assign).not.toHaveProperty("reason");
     expect(parseConfirmCard(JSON.parse(JSON.stringify(assign)))).toEqual(assign);
+    const reasoned = cardFromSnapshot({ ...snap, kind: "assign", returns: undefined, reason: "new joiner" });
+    expect(reasoned.reason).toBe("new joiner");
+    expect(parseConfirmCard(JSON.parse(JSON.stringify(reasoned)))).toEqual(reasoned);
   });
 
   it("takes person.employeeNo from the snapshot, never from any text", () => {
