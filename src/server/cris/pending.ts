@@ -49,13 +49,12 @@ export async function crisConfirm(input: { pendingId: string }): Promise<ActionR
 
 /**
  * Reverses a confirmed change within 60 s, while nothing else has touched its assets; otherwise "Something changed
- * since — reverse it from the record instead." Both refuse with the off copy while Cris is off, before the rate limit.
+ * since — reverse it from the record instead." Unlike Confirm, Undo still works while Cris is off: switching Cris off
+ * must never stop someone reversing a change they made a moment ago.
  */
 export async function crisUndo(input: { pendingId: string }): Promise<ActionResult<CrisActionData>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
-  const off = await offRefusal();
-  if (off) return off;
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = pendingSchema.safeParse(input);

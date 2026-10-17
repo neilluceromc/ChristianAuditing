@@ -94,7 +94,7 @@ describe("initialsOf", () => {
 describe("toViewMessage", () => {
   const createdAt = new Date("2026-10-17T10:00:00.000Z");
   it("reads a Cris message's text and cards", () => {
-    const card: CrisCard = { type: "chips", items: ["Spare laptops in stock"] };
+    const card: CrisCard = { type: "chips", items: ["Spares in stock"] };
     expect(toViewMessage({ id: "m1", role: "cris", content: { text: "Done.", cards: [card, { type: "nope" }] }, createdAt }))
       .toEqual({ id: "m1", role: "cris", text: "Done.", cards: [card], at: "2026-10-17T10:00:00.000Z" });
   });

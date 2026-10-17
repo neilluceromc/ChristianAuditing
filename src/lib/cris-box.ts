@@ -138,7 +138,7 @@ export function contextLine(ctx: CrisPageContext | null): { before: string; name
 }
 
 const GENERAL: QuickStart[] = [
-  { label: "Spare laptops in stock", text: "Spare laptops in stock", send: true },
+  { label: "Spares in stock", text: "Spares in stock", send: true },
   { label: "Who has a tag?", text: "Who has ", send: false },
   { label: "Check someone's items", text: "Check the items of ", send: false },
 ];

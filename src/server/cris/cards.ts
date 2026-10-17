@@ -92,7 +92,7 @@ export async function sparesCard(db: Db, employeeId: string, opts: PageOpts = {}
 }
 
 /**
- * "Spare laptops in stock": the same paging over the spares free for anyone (`stockWhere` — none held for anyone,
+ * "Spares in stock": the same paging over the spares free for anyone (`stockWhere` — none held for anyone,
  * none promised by an open request), as a read-only card with no person and no picks.
  */
 export async function stockCard(db: Db, opts: PageOpts = {}): Promise<StockCard> {

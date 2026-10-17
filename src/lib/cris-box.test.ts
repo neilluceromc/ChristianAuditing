@@ -143,7 +143,7 @@ describe("the opening state (spec §4)", () => {
   it("is general elsewhere", () => {
     expect(contextLine(null)).toBeNull();
     const labels = quickStarts(null).map((s) => s.label);
-    expect(labels).toContain("Spare laptops in stock");
+    expect(labels).toContain("Spares in stock");
     expect(labels).toContain("Who has a tag?");
   });
 });

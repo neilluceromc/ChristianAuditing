@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
- * Phase 41 final review M1: Confirm and Undo answer nothing while Cris is off — the off copy, checked after the
- * role and before the rate limit (so a refused press spends no write budget). The cores are stubbed
- * (pending-core.test.ts covers them).
+ * Phase 41 final review M1: Confirm answers nothing while Cris is off — the off copy, checked after the role and
+ * before the rate limit (so a refused press spends no write budget). Undo is the exception: switching Cris off must
+ * never stop someone reversing a change they made a moment ago. The cores are stubbed (pending-core.test.ts covers them).
  */
 
 const h = vi.hoisted(() => ({
@@ -33,26 +33,41 @@ beforeEach(() => {
   h.calls.length = 0;
 });
 
-describe.each([
-  ["crisConfirm", crisConfirm, "confirm"],
-  ["crisUndo", crisUndo, "undo"],
-] as const)("%s", (_name, action, core) => {
+describe("crisConfirm", () => {
   it("runs role → availability → rate limit → the core while Cris is on", async () => {
-    expect((await action({ pendingId: "p1" })).ok).toBe(true);
-    expect(h.calls).toEqual(["role:admin,it_staff", "availability", "rate", core]);
+    expect((await crisConfirm({ pendingId: "p1" })).ok).toBe(true);
+    expect(h.calls).toEqual(["role:admin,it_staff", "availability", "rate", "confirm"]);
   });
 
   it("refuses with the switch's off copy while an admin has Cris off, before the rate limit", async () => {
     h.availability = { on: false, reason: "off" };
-    expect(await action({ pendingId: "p1" })).toEqual({ ok: false, kind: "conflict", message: CRIS_OFF_SWITCH });
+    expect(await crisConfirm({ pendingId: "p1" })).toEqual({ ok: false, kind: "conflict", message: CRIS_OFF_SWITCH });
     expect(h.calls).toEqual(["role:admin,it_staff", "availability"]);
   });
 
   it("refuses with the no-key copy when no AI key is set", async () => {
     h.availability = { on: false, reason: "no-key" };
-    expect(await action({ pendingId: "p1" })).toMatchObject({ kind: "conflict", message: CRIS_OFF_NO_KEY });
+    expect(await crisConfirm({ pendingId: "p1" })).toMatchObject({ kind: "conflict", message: CRIS_OFF_NO_KEY });
+  });
+});
+
+describe("crisUndo", () => {
+  it("runs role → rate limit → the core while Cris is on", async () => {
+    expect((await crisUndo({ pendingId: "p1" })).ok).toBe(true);
+    expect(h.calls).toEqual(["role:admin,it_staff", "rate", "undo"]);
   });
 
+  it("still undoes while Cris is switched off — the off switch never traps a fresh mistake", async () => {
+    h.availability = { on: false, reason: "off" };
+    expect((await crisUndo({ pendingId: "p1" })).ok).toBe(true);
+    expect(h.calls).toEqual(["role:admin,it_staff", "rate", "undo"]);
+  });
+});
+
+describe.each([
+  ["crisConfirm", crisConfirm],
+  ["crisUndo", crisUndo],
+] as const)("%s", (_name, action) => {
   it("checks the role first: a refused person learns nothing about Cris's state", async () => {
     h.user = null;
     h.availability = { on: false, reason: "off" };

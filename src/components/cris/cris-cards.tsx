@@ -208,7 +208,7 @@ function SparesView({ card, live, a }: { card: SparesCard; live: boolean; a: Car
   );
 }
 
-/** "Spare laptops in stock": a plain list (read-only — nothing to pick here), and "Show 3 more" while it is the newest. */
+/** "Spares in stock": a plain list (read-only — nothing to pick here), and "Show 3 more" while it is the newest. */
 function StockView({ card, live, a }: { card: StockCard; live: boolean; a: CardActions }) {
   if (card.options.length === 0) {
     return (

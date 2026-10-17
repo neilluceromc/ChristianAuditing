@@ -29,7 +29,7 @@ export type PersonCard = {
 export type WhichCard = { type: "which"; choices: PersonRef[] };
 export type SparesCard = { type: "spares"; employeeId: string; options: SpareRef[]; offset: number; more: boolean };
 /**
- * "Spare laptops in stock" (spec §2): the spares free for anyone, 3 at a time, read-only — no pick buttons and no
+ * "Spares in stock" (spec §2): the spares free for anyone, 3 at a time, read-only — no pick buttons and no
  * person. Giving one to someone still starts from a person (list_spares with their id, then a pick).
  */
 export type StockCard = { type: "stock"; options: SpareRef[]; offset: number; more: boolean };

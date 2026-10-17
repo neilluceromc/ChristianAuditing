@@ -121,7 +121,7 @@ export function fakeDecide(text: string, toolResults: FakeToolResult[], earlier:
   if (!intent || (typedTag && !lastOf(earlier.results, "list_spares"))) return say(FAKE_FALLBACK);
 
   if (intent === "who") return who(text, now);
-  // "Spare laptops in stock": list_spares with no person — a read-only list. A pick needs a person first.
+  // "Spares in stock": list_spares with no person — a read-only list. A pick needs a person first.
   if (intent === "stock") {
     if (assetPick || personPick || typedTag) return say("Who is it for? Give me their name and I'll list spares for them.");
     return stock(now);

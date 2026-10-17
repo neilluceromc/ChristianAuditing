@@ -117,7 +117,7 @@ describe("fakeDecide — assign (spec §2 job 2)", () => {
 });
 
 describe("fakeDecide — spares in stock (final review I2)", () => {
-  const ask = "Spare laptops in stock";
+  const ask = "Spares in stock";
   const stocked = (offset: number, rows = (spares.result as { spares: unknown[] }).spares): FakeToolResult => ({
     name: "list_spares", input: offset ? { offset } : {}, result: { spares: rows, offset, more: true },
   });

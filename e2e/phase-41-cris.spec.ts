@@ -662,12 +662,12 @@ test.describe.serial("phase 41 — Cris", () => {
     }
   });
 
-  test("17. \"Spare laptops in stock\" lists the spares free for anyone, read-only, with Show 3 more", async ({ page }) => {
+  test("17. \"Spares in stock\" lists the spares free for anyone, read-only, with Show 3 more", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, IT);
     await page.goto("/");
     const box = await openBox(page);
-    await box.getByRole("button", { name: "Spare laptops in stock", exact: true }).click();
+    await box.getByRole("button", { name: "Spares in stock", exact: true }).click();
     const log = logOf(box);
     // page one of the pool by tag; BR-LT-0181 (queued) and BR-MN-0910 (held for Nina) are never in stock
     await expect(log).toContainText(`Spares in stock: BR-HS-0502 (Jabra Evolve2 40), ${SPARE1}`, SLOW);
