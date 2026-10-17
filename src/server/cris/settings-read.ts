@@ -6,6 +6,8 @@ import {
   type CrisAvailability, type CrisSettings,
 } from "@/lib/cris-settings";
 import { CRIS_PREFS_KEY, parseCrisPrefs, type CrisPrefs } from "@/lib/cris-prefs";
+import { monthStartManila } from "@/lib/cris-limits";
+import { usageCostUsd } from "@/lib/cris-cost";
 
 /**
  * The readers beside the actions in ./settings.ts, deliberately NOT in that "use server" module:
@@ -47,6 +49,28 @@ export async function crisPrefsFor(userId: string): Promise<CrisPrefs> {
     where: { userId_key: { userId, key: CRIS_PREFS_KEY } }, select: { value: true },
   });
   return parseCrisPrefs(row?.value);
+}
+
+/**
+ * Spec §9, "This month: {n} questions, about {$ cost}" — totals only, across everyone, since the Manila month
+ * began (spec §7: admins see totals, never chats). Questions are user messages; the cost prices each reply's
+ * stored tokens at the model that served it. Two aggregate queries, so the page never grows with the data.
+ * Admin-only: the caller (Settings › Cris) shows it only to admins.
+ */
+export async function crisMonthUsage(now: Date = new Date()): Promise<{ questions: number; costUsd: number }> {
+  const since = monthStartManila(now);
+  const [questions, byModel] = await Promise.all([
+    prisma.crisMessage.count({ where: { role: "user", createdAt: { gte: since } } }),
+    prisma.crisMessage.groupBy({
+      by: ["model"],
+      where: { createdAt: { gte: since }, model: { not: null } },
+      _sum: { inputTokens: true, outputTokens: true },
+    }),
+  ]);
+  return {
+    questions,
+    costUsd: usageCostUsd(byModel.map((g) => ({ model: g.model, inputTokens: g._sum.inputTokens, outputTokens: g._sum.outputTokens }))),
+  };
 }
 
 /** Off with reason "off" when the admin switch is off (checked first), "no-key" when no AI key is set. */

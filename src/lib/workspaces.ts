@@ -293,6 +293,9 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   { test: /^\/purchases\/suppliers\/[^/]+\/edit(\/|$)/, workspaces: ["purchasing", "admin"], roles: ["admin", "purchasing_staff"] },
   { test: /^\/purchases(\/|$)/, workspaces: ["purchasing", "finance", "it"] },
   { test: /^\/finance(\/|$)/, workspaces: ["finance"] },
+  // Phase 41 (spec §2, §9): Settings › Cris is for the two roles that have Cris. `roles` keeps viewer out of the
+  // IT workspace it otherwise shares with it_staff; the page's own requireRole says the same.
+  { test: /^\/settings\/cris(\/|$)/, workspaces: ["it", "admin"], roles: ["admin", "it_staff"] },
 ];
 
 export function pathAllowedForRole(pathname: string, role: Role): boolean {

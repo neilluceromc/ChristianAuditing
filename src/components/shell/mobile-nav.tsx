@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Role } from "@prisma/client";
 import { Avatar } from "@/components/ui/avatar";
 import { Drawer } from "@/components/ui/drawer";
 import { Icon } from "@/components/ui/icon";
 import { ROLE_LABELS } from "@/lib/admin-users";
+import { hasCris } from "@/lib/cris-settings";
 import { navLabelFor } from "@/lib/shell";
 import type { NavSection, WorkspaceId } from "@/lib/workspaces";
 import { signOutAction } from "@/server/auth/actions";
@@ -57,19 +59,31 @@ export function MobileNav({
           <div className="flex min-h-full flex-col gap-3">
             <WorkspaceOptions current={ws} allowed={allowed} meta={meta} onSwitch={() => setOpen(false)} />
             <NavList sections={sections} badges={badges} onNavigate={() => setOpen(false)} />
-            <div className="mt-auto flex items-center gap-2.5 border-t border-border-faint pt-3">
-              <Avatar name={user.name} size="lg" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium text-fg">{user.name}</p>
-                <p className="font-mono text-[9.5px] uppercase text-fg-muted">{ROLE_LABELS[user.role]}</p>
+            <div className="mt-auto flex flex-col gap-2 border-t border-border-faint pt-3">
+              {/* Spec §9: Settings › Cris, for the roles that have Cris — the sidebar's account menu offers the same. */}
+              {hasCris(user.role) && (
+                <Link
+                  href="/settings/cris"
+                  onClick={() => setOpen(false)}
+                  className="rounded-(--radius-btn) px-2 py-1.5 text-xs text-fg-secondary hover:bg-surface-subtle"
+                >
+                  Cris settings
+                </Link>
+              )}
+              <div className="flex items-center gap-2.5">
+                <Avatar name={user.name} size="lg" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-fg">{user.name}</p>
+                  <p className="font-mono text-[9.5px] uppercase text-fg-muted">{ROLE_LABELS[user.role]}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void signOutAction()}
+                  className="rounded-(--radius-btn) border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg-secondary hover:bg-surface-subtle"
+                >
+                  Sign out
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => void signOutAction()}
-                className="rounded-(--radius-btn) border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg-secondary hover:bg-surface-subtle"
-              >
-                Sign out
-              </button>
             </div>
           </div>
         </Drawer>

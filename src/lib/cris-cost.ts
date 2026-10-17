@@ -35,6 +35,28 @@ export function costUsd(model: PricedModelId, inTok: number, outTok: number): nu
   return (inTok * p.in + outTok * p.out) / 100_000_000;
 }
 
+/**
+ * Settings › Cris "about {$ cost}": the month's stored token sums, one row per model, priced each at its own
+ * model. Rows with no model or one the table can't price (the fake model) cost nothing; missing sums count as none.
+ */
+export function usageCostUsd(
+  rows: ReadonlyArray<{ model: string | null; inputTokens: number | null; outputTokens: number | null }>,
+): number {
+  let total = 0;
+  for (const r of rows) {
+    if (r.model === null || !isPricedModel(r.model)) continue;
+    total += costUsd(r.model, r.inputTokens ?? 0, r.outputTokens ?? 0);
+  }
+  return total;
+}
+
+const usdFmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Dollars and cents for "about {$ cost}"; real spend under a cent shows as $0.01, never $0.00. */
+export function aboutUsd(usd: number): string {
+  return usdFmt.format(usd > 0 && usd < 0.01 ? 0.01 : usd);
+}
+
 /** A reply's input as the tokens it is billed like: uncached + 1.25 × cache writes + 0.1 × cache reads. */
 export function inputEquivalentTokens(u: {
   input_tokens: number; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null;

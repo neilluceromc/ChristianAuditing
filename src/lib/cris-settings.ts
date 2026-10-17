@@ -1,4 +1,10 @@
 import { z } from "zod";
+import type { Role } from "@prisma/client";
+
+/** Spec §2: Cris is for these roles only (the account-menu and drawer links, Settings › Cris). */
+export function hasCris(role: Role): boolean {
+  return role === "admin" || role === "it_staff";
+}
 
 /** Spec §8: Haiku is the default; admins may pick Sonnet or Opus in Settings › Cris. */
 export const CRIS_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] as const;

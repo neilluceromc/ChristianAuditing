@@ -8,6 +8,12 @@ export function manilaDayStart(now: Date): Date {
   return new Date(local - (((local % DAY_MS) + DAY_MS) % DAY_MS) - MANILA_OFFSET_MS);
 }
 
+/** Spec §9, Settings › Cris "This month": the instant the Manila calendar month began (the 1st, Manila midnight). */
+export function monthStartManila(now: Date): Date {
+  const local = new Date(now.getTime() + MANILA_OFFSET_MS); // its UTC fields read as Manila wall time
+  return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), 1) - MANILA_OFFSET_MS);
+}
+
 /** Questions left today; never below zero (a limit lowered mid-day leaves 0, not a negative). */
 export function dailyLeft(used: number, limit: number): number {
   return Math.max(0, limit - used);

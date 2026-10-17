@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CRIS_DAILY_LIMIT_TEXT, dailyLeft, limitReached, manilaDayStart } from "./cris-limits";
+import { CRIS_DAILY_LIMIT_TEXT, dailyLeft, limitReached, manilaDayStart, monthStartManila } from "./cris-limits";
 import { RATE_LIMITS, rateDecision } from "./rate-limit";
 
 describe("manilaDayStart (spec §9: the daily limit counts since Manila midnight)", () => {
@@ -13,6 +13,35 @@ describe("manilaDayStart (spec §9: the daily limit counts since Manila midnight
     const start = "2026-10-17T16:00:00.000Z";
     expect(manilaDayStart(new Date("2026-10-18T00:00:00Z")).toISOString()).toBe(start);
     expect(manilaDayStart(new Date("2026-10-18T15:59:59.999Z")).toISOString()).toBe(start);
+  });
+});
+
+describe("monthStartManila (spec §9: Settings › Cris counts \"This month\" from the Manila month's start)", () => {
+  it("mid-month is the 1st at Manila midnight (the 30th, 16:00 UTC)", () => {
+    expect(monthStartManila(new Date("2026-10-17T10:00:00Z")).toISOString()).toBe("2026-09-30T16:00:00.000Z");
+  });
+  it("the month's last Manila minute still belongs to it", () => {
+    expect(monthStartManila(new Date("2026-10-31T15:59:59.999Z")).toISOString()).toBe("2026-09-30T16:00:00.000Z");
+  });
+  it("a new month starts at Manila midnight on the 1st, while UTC is still on the 31st", () => {
+    expect(monthStartManila(new Date("2026-10-31T16:00:00Z")).toISOString()).toBe("2026-10-31T16:00:00.000Z");
+  });
+  it("in the first Manila minutes of the 1st, while UTC is still on the last day of the previous month", () => {
+    expect(monthStartManila(new Date("2026-11-30T16:30:00Z")).toISOString()).toBe("2026-11-30T16:00:00.000Z");
+  });
+  it("crosses the year in Manila, not UTC", () => {
+    expect(monthStartManila(new Date("2026-12-31T17:00:00Z")).toISOString()).toBe("2026-12-31T16:00:00.000Z");
+    expect(monthStartManila(new Date("2026-12-31T15:00:00Z")).toISOString()).toBe("2026-11-30T16:00:00.000Z");
+  });
+  it("handles February in a leap year", () => {
+    expect(monthStartManila(new Date("2028-02-29T15:00:00Z")).toISOString()).toBe("2028-01-31T16:00:00.000Z");
+    expect(monthStartManila(new Date("2028-02-29T16:00:00Z")).toISOString()).toBe("2028-02-29T16:00:00.000Z");
+  });
+  it("is never after now, and is a Manila day start", () => {
+    const now = new Date("2026-10-17T10:00:00Z");
+    const start = monthStartManila(now);
+    expect(start.getTime() <= now.getTime()).toBe(true);
+    expect(manilaDayStart(start).toISOString()).toBe(start.toISOString());
   });
 });
 

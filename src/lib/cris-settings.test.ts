@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  CRIS_DEFAULTS, crisAvailabilityFrom, crisFlagValue, crisSettingsFromFlag, crisSettingsSchema, parseCrisSettings,
+  CRIS_DEFAULTS, crisAvailabilityFrom, crisFlagValue, crisSettingsFromFlag, crisSettingsSchema, hasCris, parseCrisSettings,
 } from "./cris-settings";
+
+describe("hasCris (spec §2: only admin and it_staff)", () => {
+  it("is true for admin and it_staff only", () => {
+    expect(hasCris("admin")).toBe(true);
+    expect(hasCris("it_staff")).toBe(true);
+    for (const r of ["viewer", "purchasing_staff", "finance_staff"] as const) expect(hasCris(r)).toBe(false);
+  });
+});
 
 describe("parseCrisSettings (spec §9)", () => {
   it("garbage falls back to the defaults", () => {

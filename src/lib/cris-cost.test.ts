@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { costUsd, inputEquivalentTokens, isPricedModel } from "./cris-cost";
+import { aboutUsd, costUsd, inputEquivalentTokens, isPricedModel, usageCostUsd } from "./cris-cost";
 
 describe("inputEquivalentTokens (cache writes bill at 1.25×, cache reads at 0.1× of the input price)", () => {
   it("adds the cache write and read tokens at their weights, rounded up", () => {
@@ -40,5 +40,41 @@ describe("costUsd (plan: Models and prices)", () => {
   });
   it("no tokens cost nothing", () => {
     expect(costUsd("claude-opus-5-5", 0, 0)).toBe(0);
+  });
+});
+
+describe("usageCostUsd (Settings › Cris: the month's token sums by model)", () => {
+  it("prices each model's sums at that model's own rate", () => {
+    expect(
+      usageCostUsd([
+        { model: "claude-haiku-5-5", inputTokens: 1_000_000, outputTokens: 1_000_000 },
+        { model: "claude-opus-5-5", inputTokens: 1_000_000, outputTokens: 0 },
+      ]),
+    ).toBeCloseTo(0.6 + 4, 10);
+  });
+  it("skips rows with no model or a model the table can't price (the fake model)", () => {
+    expect(
+      usageCostUsd([
+        { model: null, inputTokens: 5_000_000, outputTokens: 5_000_000 },
+        { model: "fake", inputTokens: 5_000_000, outputTokens: 5_000_000 },
+        { model: "claude-sonnet-5-5", inputTokens: 0, outputTokens: 1_000_000 },
+      ]),
+    ).toBeCloseTo(10, 10);
+  });
+  it("treats missing token sums as none", () => {
+    expect(usageCostUsd([{ model: "claude-haiku-5-5", inputTokens: null, outputTokens: null }])).toBe(0);
+    expect(usageCostUsd([])).toBe(0);
+  });
+});
+
+describe("aboutUsd (\"about {$ cost}\")", () => {
+  it("shows dollars and cents", () => {
+    expect(aboutUsd(0)).toBe("$0.00");
+    expect(aboutUsd(0.6)).toBe("$0.60");
+    expect(aboutUsd(12.345)).toBe("$12.35");
+    expect(aboutUsd(1234.5)).toBe("$1,234.50");
+  });
+  it("never shows a little real spend as $0.00", () => {
+    expect(aboutUsd(0.0002)).toBe("$0.01");
   });
 });
