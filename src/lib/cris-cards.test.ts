@@ -66,12 +66,18 @@ describe("parseCrisCard", () => {
       { type: "result", pendingId: "p1", employeeId: "emp1", head: "Assigned.", text: "BR-LT-0230 is with Ana Reyes now.", undoUntil: "2026-10-17T10:01:00.000Z" },
       { type: "spares", employeeId: "emp1", options: [], offset: 0, more: false },
       {
+        type: "stock", offset: 3, more: true,
+        options: [{ assetId: "a1", tag: "BR-LT-0230", model: "Latitude", typeName: "Laptop", warrantyEnd: null, backOn: null }],
+      },
+      {
         type: "person", person: { id: "e1", name: "Ana Reyes", employeeNo: "EMP-1", worksFor: "IT", initials: "AR" },
         items: [{ assetId: "a1", tag: "BR-LT-0230", model: "Latitude", since: null }], gaps: ["Monitor"], holds: [],
       },
     ];
     for (const c of cards) expect(parseCrisCard(JSON.parse(JSON.stringify(c)))).toEqual(c);
     expect(parseCrisCard({ type: "result", head: "Deleted." })).toBeNull();
+    // a stock card carries no person and no picks: one with a negative offset is not ours
+    expect(parseCrisCard({ type: "stock", options: [], offset: -3, more: false })).toBeNull();
     expect(parseCrisCard("confirm")).toBeNull();
   });
 });

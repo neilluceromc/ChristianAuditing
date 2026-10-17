@@ -15,7 +15,7 @@ export type FakeDecision =
 
 export const FAKE_FALLBACK = "Sorry, I didn't catch that… Try \"Check Ana Reyes's items\" or \"Who has BR-LT-0148?\".";
 
-type Intent = "who" | "replace" | "assign" | "holdings";
+type Intent = "who" | "replace" | "assign" | "holdings" | "stock";
 type Person = { employeeId: string; name: string; employeeNo: string };
 
 const TAG = /(?<![A-Z0-9-])BR-[A-Z]{2}-\d{4}(?![A-Z0-9])/i;
@@ -23,6 +23,8 @@ const PICK_ASSET = /^I picked (BR-[A-Z]{2}-\d{4})( \(scanned\))?\.$/i;
 const PICK_PERSON = /^I picked (.+) \(([^()]+)\)\.$/;
 /** What the Confirm card's Change button sends (src/components/cris/cris-widget.tsx). */
 const CHANGE = /^change$/i;
+/** What the stock card's "Show 3 more" sends (src/components/cris/cris-widget.tsx). */
+const MORE_STOCK = /^show 3 more$/i;
 
 const tool = (name: string, input: Record<string, unknown>): FakeDecision => ({ kind: "tool", name, input });
 const say = (text: string): FakeDecision => ({ kind: "text", text });
@@ -32,6 +34,7 @@ function intentOf(text: string): Intent | null {
   if (/\b(replace|swap)\b/i.test(text)) return "replace";
   if (/\b(assign|give)\b/i.test(text)) return "assign";
   if (/\b(items|holds|holding|stuff|equipment)\b/i.test(text)) return "holdings";
+  if (/\bspares?\b.*\bin stock\b/i.test(text)) return "stock";
   return null;
 }
 
@@ -100,6 +103,8 @@ export function fakeDecide(text: string, toolResults: FakeToolResult[], earlier:
 
   // The Confirm card's Change button sends the bare word: show the spares again for the open replace or assign.
   if (CHANGE.test(text.trim())) return change(now, earlier);
+  // The stock card's "Show 3 more": the next 3 of the last stock list.
+  if (MORE_STOCK.test(text.trim())) return moreStock(now, earlier);
 
   const assetPick = PICK_ASSET.exec(text.trim());
   const personPick = assetPick ? null : PICK_PERSON.exec(text.trim());
@@ -116,6 +121,11 @@ export function fakeDecide(text: string, toolResults: FakeToolResult[], earlier:
   if (!intent || (typedTag && !lastOf(earlier.results, "list_spares"))) return say(FAKE_FALLBACK);
 
   if (intent === "who") return who(text, now);
+  // "Spare laptops in stock": list_spares with no person — a read-only list. A pick needs a person first.
+  if (intent === "stock") {
+    if (assetPick || personPick || typedTag) return say("Who is it for? Give me their name and I'll list spares for them.");
+    return stock(now);
+  }
 
   // A spare was picked: propose.
   if (pickedTag && (intent === "replace" || intent === "assign")) return propose(intent, request, pickedTag, now, all);
@@ -158,6 +168,24 @@ function change(now: FakeToolResult[], earlier: FakeMemory): FakeDecision {
   if ((intent !== "replace" && intent !== "assign") || !employeeId) return say(FAKE_FALLBACK);
   if (!lastOf(now, "list_spares")) return tool("list_spares", { employeeId });
   return say("Pick a different spare, or scan its label.");
+}
+
+/** The spares in stock: list them (no person), then say what the read-only list shows. */
+function stock(now: FakeToolResult[]): FakeDecision {
+  const listed = lastOf(now, "list_spares");
+  if (!listed) return tool("list_spares", {});
+  const spares = list(rec(listed.result).spares);
+  if (spares.length === 0) return say("No spares in stock right now.");
+  return say(`Spares in stock: ${spares.map((s) => `${str(s.tag)} (${str(s.model)})`).join(", ")}. Tell me who one is for to give it to them.`);
+}
+
+/** "Show 3 more" on a stock list: the next 3 after the last stock list (one with no person), then say them. */
+function moreStock(now: FakeToolResult[], earlier: FakeMemory): FakeDecision {
+  if (lastOf(now, "list_spares")) return stock(now);
+  const prev = lastOf(earlier.results, "list_spares");
+  if (!prev || str(prev.input.employeeId)) return say(FAKE_FALLBACK);
+  const offset = (typeof prev.input.offset === "number" ? prev.input.offset : 0) + 3;
+  return tool("list_spares", { offset });
 }
 
 function holdingsText(held: FakeToolResult): string {

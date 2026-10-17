@@ -28,6 +28,11 @@ export type PersonCard = {
 };
 export type WhichCard = { type: "which"; choices: PersonRef[] };
 export type SparesCard = { type: "spares"; employeeId: string; options: SpareRef[]; offset: number; more: boolean };
+/**
+ * "Spare laptops in stock" (spec §2): the spares free for anyone, 3 at a time, read-only — no pick buttons and no
+ * person. Giving one to someone still starts from a person (list_spares with their id, then a pick).
+ */
+export type StockCard = { type: "stock"; options: SpareRef[]; offset: number; more: boolean };
 export type ConfirmCard = {
   type: "confirm"; pendingId: string; kind: "assign" | "replace"; person: PersonRef;
   gets: SpareRef & { serial: string | null; scanned: boolean };
@@ -44,7 +49,7 @@ export type ResultCard = {
 };
 export type ChipsCard = { type: "chips"; items: string[] };
 
-export type CrisCard = PersonCard | WhichCard | SparesCard | ConfirmCard | ResultCard | ChipsCard;
+export type CrisCard = PersonCard | WhichCard | SparesCard | StockCard | ConfirmCard | ResultCard | ChipsCard;
 
 /** A message as the box shows it. Tool rows never reach the box. */
 export type CrisViewMessage = { id: string; role: "user" | "cris"; text: string | null; cards: CrisCard[]; at: string };
@@ -70,6 +75,7 @@ const cardSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("which"), choices: z.array(personRef) }),
   z.object({ type: z.literal("spares"), employeeId: z.string(), options: z.array(spareRef), offset: z.number().int().min(0), more: z.boolean() }),
+  z.object({ type: z.literal("stock"), options: z.array(spareRef), offset: z.number().int().min(0), more: z.boolean() }),
   confirmSchema,
   z.object({
     type: z.literal("result"), pendingId: z.string(), employeeId: z.string(),

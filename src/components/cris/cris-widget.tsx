@@ -416,6 +416,7 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     onPickPerson: (p: PersonRef) => void send({ pick: { kind: "person", employeeId: p.id } }, p.name),
     onPickSpare: (s) => void send({ pick: { kind: "asset", assetId: s.assetId, scanned: false } }, `Use ${s.tag}`),
     onMoreSpares: () => void send({ text: "None of these — show 3 more" }, "None of these — show 3 more"),
+    onMoreStock: () => void send({ text: "Show 3 more" }, "Show 3 more"),
     onScan: () => {
       setScanOpen(true);
       setScanFocusTick((t) => t + 1);

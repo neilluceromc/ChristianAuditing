@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client";
-import { SPARE_INCLUDE, SPARE_LIMIT, orderSpareCandidates, spareCandidatesWhere } from "@/lib/spare-candidates";
-import { toSpareRef, type AssetSnapshot, type PersonSnapshot, type SparesCard } from "@/lib/cris-cards";
+import { SPARE_INCLUDE, SPARE_LIMIT, orderSpareCandidates, spareCandidatesWhere, stockWhere } from "@/lib/spare-candidates";
+import {
+  toSpareRef, type AssetSnapshot, type PersonSnapshot, type SpareRef, type SparesCard, type StockCard,
+} from "@/lib/cris-cards";
 
 /*
  * The DB reads every Cris card is built from, by id (spec §4, §6): never from the model's words. Not "use server"
@@ -54,17 +56,12 @@ export async function readAsset(db: Db, assetId: string): Promise<(AssetSnapshot
 /** Spec §4: the pick list shows three at a time; "None of these — show 3 more" asks for the next offset. */
 export const SPARES_PAGE = 3;
 
-/**
- * The pick list: the same pool the profile's Replace picker reads (`spareCandidates` with `pickable: true` — so
- * spares held or queued for someone else never show), the given type first, then by tag; `SPARES_PAGE` from
- * `offset`, and whether more follow.
- */
-export async function sparesCard(
-  db: Db, employeeId: string, opts: { typeId?: string | null; offset?: number } = {},
-): Promise<SparesCard> {
+type PageOpts = { typeId?: string | null; offset?: number };
+
+/** One page of a spares pool: the given type first, then by tag; `SPARES_PAGE` from `offset`, and whether more follow. */
+async function sparesPage(db: Db, pool: Prisma.AssetWhereInput, opts: PageOpts): Promise<{ options: SpareRef[]; offset: number; more: boolean }> {
   const offset = Math.max(0, opts.offset ?? 0);
   const typeId = opts.typeId ?? null;
-  const pool = spareCandidatesWhere(employeeId, undefined, true);
   const find = (narrow: Prisma.AssetWhereInput) => db.asset.findMany({
     where: { AND: [pool, narrow] },
     include: { ...SPARE_INCLUDE, type: { select: { name: true } } },
@@ -82,5 +79,22 @@ export async function sparesCard(
     id: r.id, tag: r.tag, model: r.model, serial: r.serial, typeName: r.type?.name ?? null,
     warrantyUntil: r.warrantyUntil, backOn: await backOnFor(db, r.id),
   })));
-  return { type: "spares", employeeId, options, offset, more: ordered.length > offset + SPARES_PAGE };
+  return { options, offset, more: ordered.length > offset + SPARES_PAGE };
+}
+
+/**
+ * The pick list: the same pool the profile's Replace picker reads (`spareCandidates` with `pickable: true` — so
+ * spares held or queued for someone else never show), the given type first, then by tag; `SPARES_PAGE` from
+ * `offset`, and whether more follow.
+ */
+export async function sparesCard(db: Db, employeeId: string, opts: PageOpts = {}): Promise<SparesCard> {
+  return { type: "spares", employeeId, ...(await sparesPage(db, spareCandidatesWhere(employeeId, undefined, true), opts)) };
+}
+
+/**
+ * "Spare laptops in stock": the same paging over the spares free for anyone (`stockWhere` — none held for anyone,
+ * none promised by an open request), as a read-only card with no person and no picks.
+ */
+export async function stockCard(db: Db, opts: PageOpts = {}): Promise<StockCard> {
+  return { type: "stock", ...(await sparesPage(db, stockWhere(), opts)) };
 }

@@ -116,6 +116,38 @@ describe("fakeDecide — assign (spec §2 job 2)", () => {
   });
 });
 
+describe("fakeDecide — spares in stock (final review I2)", () => {
+  const ask = "Spare laptops in stock";
+  const stocked = (offset: number, rows = (spares.result as { spares: unknown[] }).spares): FakeToolResult => ({
+    name: "list_spares", input: offset ? { offset } : {}, result: { spares: rows, offset, more: true },
+  });
+  it("lists the spares with no person, then says what the read-only list shows", () => {
+    expect(fakeDecide(ask, [])).toEqual({ kind: "tool", name: "list_spares", input: {} });
+    expect(fakeDecide("spare docks in stock?", [])).toEqual({ kind: "tool", name: "list_spares", input: {} });
+    expect(fakeDecide(ask, [stocked(0)])).toEqual({
+      kind: "text",
+      text: "Spares in stock: BR-LT-0230 (Dell Latitude 5450), BR-LT-0231 (Dell Latitude 5450). Tell me who one is for to give it to them.",
+    });
+    expect(fakeDecide(ask, [stocked(0, [])])).toEqual({ kind: "text", text: "No spares in stock right now." });
+  });
+  it("Show 3 more asks for the next 3 of the last stock list", () => {
+    expect(fakeDecide("Show 3 more", [], memory([ask], [stocked(0)]))).toEqual({ kind: "tool", name: "list_spares", input: { offset: 3 } });
+    expect(fakeDecide("Show 3 more", [], memory([ask, "Show 3 more"], [stocked(0), stocked(3)]))).toEqual({
+      kind: "tool", name: "list_spares", input: { offset: 6 },
+    });
+    expect(fakeDecide("Show 3 more", [stocked(3)], memory([ask], [stocked(0)]))).toMatchObject({ kind: "text" });
+  });
+  it("Show 3 more without a stock list (or after a person's pick list) falls back", () => {
+    expect(fakeDecide("Show 3 more", [])).toEqual({ kind: "text", text: FAKE_FALLBACK });
+    expect(fakeDecide("Show 3 more", [], memory(["Assign a laptop to Ana Reyes"], [found([ana], true), spares]))).toEqual({ kind: "text", text: FAKE_FALLBACK });
+  });
+  it("a typed tag after the stock list is no pick: Cris asks who it is for", () => {
+    expect(fakeDecide("BR-LT-0230", [], memory([ask], [stocked(0)]))).toEqual({
+      kind: "text", text: "Who is it for? Give me their name and I'll list spares for them.",
+    });
+  });
+});
+
 describe("fakeDecide — Change on the Confirm card", () => {
   const ask = "Replace Ana Reyes's laptop, it's slow";
   const shown: FakeToolResult = { name: "propose_replace", input: {}, result: { shown: "card" } };

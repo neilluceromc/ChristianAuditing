@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { ConfirmCard, CrisCard, ResultCard, SparesCard } from "@/lib/cris-cards";
+import type { ConfirmCard, CrisCard, ResultCard, SparesCard, StockCard } from "@/lib/cris-cards";
 import { CrisCardView, type CardActions } from "./cris-cards";
 import { CrisBox, type BoxProps } from "./cris-box";
 
@@ -10,7 +10,7 @@ const noop = () => undefined;
 const actions = (over: Partial<CardActions> = {}): CardActions => ({
   busy: false, confirmed: new Set(), undone: new Set(), now: Date.parse("2026-10-17T02:00:00.000Z"),
   firstFor: () => "Ana",
-  onPickPerson: noop, onPickSpare: noop, onMoreSpares: noop, onScan: noop, onConfirm: noop, onChange: noop, onUndo: noop, onChip: noop,
+  onPickPerson: noop, onPickSpare: noop, onMoreSpares: noop, onMoreStock: noop, onScan: noop, onConfirm: noop, onChange: noop, onUndo: noop, onChip: noop,
   ...over,
 });
 const person = { id: "e1", name: "Ana Reyes", employeeNo: "EMP-0101", worksFor: "Bluepeak Telecom", initials: "AR" };
@@ -139,5 +139,33 @@ describe("the box", () => {
   it("marks the log busy while history loads, so the bulk insert is not read aloud", () => {
     expect(box({ bulkLoading: true })).toContain('aria-busy="true"');
     expect(box()).not.toContain("aria-busy");
+  });
+});
+
+describe("the stock card (final review I2: spare laptops in stock)", () => {
+  const stock: StockCard = {
+    type: "stock", offset: 0, more: true,
+    options: [
+      { assetId: "a230", tag: "BR-LT-0230", model: "Latitude 5440", typeName: "Standard", warrantyEnd: "2029-02-10T00:00:00.000Z", backOn: null },
+      { assetId: "a231", tag: "BR-LT-0231", model: "Latitude 5440", typeName: "Standard", warrantyEnd: null, backOn: null },
+    ],
+  };
+  it("is a plain list with no pick controls, and Show 3 more while live", () => {
+    const out = html(stock);
+    expect(out).toContain("BR-LT-0230");
+    expect(out).toContain("BR-LT-0231");
+    expect(out).toContain("<ul");
+    expect(out).toContain("Show 3 more");
+    expect(out).not.toContain("type=\"radio\"");
+    expect(out).not.toContain("Use ");
+    expect(out).not.toContain("Scan its label");
+    expect(out).not.toContain("Pick one above");
+  });
+  it("drops Show 3 more when it is not the newest, or when nothing more follows", () => {
+    expect(html(stock, false)).not.toContain("Show 3 more");
+    expect(html({ ...stock, more: false })).not.toContain("Show 3 more");
+  });
+  it("says so when nothing is in stock", () => {
+    expect(html({ ...stock, options: [], more: false })).toContain("No spares in stock right now.");
   });
 });

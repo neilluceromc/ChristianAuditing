@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SPARE_LIMIT, SPARE_QUERY_MAX, heldOrQueuedWhere, isUnpickable, orderSpareCandidates, replacePicker, solePick,
-  spareCandidatesSchema, spareCandidatesWhere, spareSearchWhere, spareWhere, toSpareOption, type SpareOption, type SpareRow,
+  spareCandidatesSchema, spareCandidatesWhere, spareSearchWhere, spareWhere, stockWhere, toSpareOption, type SpareOption, type SpareRow,
 } from "./spare-candidates";
 
 const row = (tag: string, typeId: string | null, extra: Partial<SpareRow> = {}): SpareRow => ({
@@ -173,5 +173,24 @@ describe("solePick", () => {
 
   it("a spare held for this person counts as pickable", () => {
     expect(solePick([opt("a", "t", { reservedFor: "Nina", reservedForThis: true })], "t", { total: 1, heldOrQueued: 0 })).toBe("a");
+  });
+});
+
+describe("stockWhere (Cris: spares in stock, no person named)", () => {
+  it("is the IT pool less every spare held for anyone or promised by an open request", () => {
+    expect(stockWhere()).toEqual({
+      AND: [
+        spareWhere(),
+        {
+          NOT: {
+            OR: [
+              { reservations: { some: { state: "ACTIVE" } } },
+              { approvals: { some: { state: { in: ["PENDING", "CLAIMED", "APPROVED"] } } } },
+            ],
+          },
+        },
+      ],
+    });
+    expect(spareWhere()).toMatchObject({ cls: "IT", returnedAt: null });
   });
 });

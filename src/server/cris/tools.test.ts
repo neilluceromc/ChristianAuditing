@@ -54,6 +54,8 @@ const h = vi.hoisted(() => {
     pendingCalls: [] as Array<{ kind: string; input: unknown; meta: unknown }>,
     pendingResult: null as unknown,
     sparesCalls: [] as Array<{ employeeId: string; opts: unknown }>,
+    stockCalls: [] as unknown[],
+    stockOptions: null as null | unknown[],
     employeeWhere: null as unknown,
   };
 });
@@ -95,6 +97,13 @@ vi.mock("./cards", () => ({
       options: [{ assetId: "s1", tag: "BR-LT-0300", model: "T14", typeName: "Laptop", warrantyEnd: "2027-01-31T00:00:00.000Z", backOn: null }],
     };
   },
+  stockCard: async (_db: unknown, opts: { offset: number }) => {
+    h.stockCalls.push(opts);
+    return {
+      type: "stock", offset: opts.offset, more: true,
+      options: h.stockOptions ?? [{ assetId: "s2", tag: "BR-LT-0301", model: "T14", typeName: "Laptop", warrantyEnd: null, backOn: null }],
+    };
+  },
 }));
 vi.mock("@/server/modules/employees/queries", () => ({ holdingsRows: async () => h.holdings }));
 vi.mock("@/server/modules/inventory/queries", () => ({ exactTagMatch: async () => h.exactTag }));
@@ -126,6 +135,8 @@ beforeEach(() => {
   h.exactTag = null;
   h.pendingCalls = [];
   h.sparesCalls = [];
+  h.stockCalls = [];
+  h.stockOptions = null;
   h.pendingResult = { ok: true, data: { card } };
 });
 
@@ -417,6 +428,47 @@ describe("list_spares", () => {
     const out = await runTool(ctx(), "list_spares", { employeeId: "nobody" });
     expect(out.result).toHaveProperty("error");
     expect(h.sparesCalls).toHaveLength(0);
+  });
+
+  it("I2: takes employeeId as optional in its strict schema", () => {
+    const def = CRIS_TOOLS.find((t) => t.name === "list_spares")!;
+    expect(def.input_schema.required).toEqual([]);
+    expect(Object.keys(def.input_schema.properties)).toContain("employeeId");
+  });
+
+  it("I2: without a person, lists the spares in stock as a read-only stock card — no pick list, no picks", async () => {
+    const out = await runTool(ctx(), "list_spares", { offset: 3 });
+    expect(h.stockCalls).toEqual([{ typeId: null, offset: 3 }]);
+    expect(h.sparesCalls).toHaveLength(0);
+    expect(out.cards).toEqual([{
+      type: "stock", offset: 3, more: true,
+      options: [{ assetId: "s2", tag: "BR-LT-0301", model: "T14", typeName: "Laptop", warrantyEnd: null, backOn: null }],
+    }]);
+    expect(out.cards.some((c) => c.type === "spares")).toBe(false);
+    expect(out.mood).toBe("search"); // nothing to wait for
+    expect(out.picks).toEqual(EMPTY_PICKS);
+    const r = out.result as { spares: Array<Record<string, unknown>>; more: boolean; note: string };
+    expect(r.spares).toEqual([{ assetId: "s2", tag: "BR-LT-0301", model: "T14", type: "Laptop", warrantyEnd: null }]);
+    expect(r.more).toBe(true);
+    expect(r.note).toMatch(/nothing to pick/);
+    // a null employeeId (as a model may send) is the same as none
+    expect((await runTool(ctx(), "list_spares", { employeeId: null })).cards[0]).toMatchObject({ type: "stock", offset: 0 });
+  });
+
+  it("I2: says so when nothing is in stock, with no card", async () => {
+    h.stockOptions = [];
+    const out = await runTool(ctx(), "list_spares", {});
+    expect(out.cards).toEqual([]);
+    expect(out.mood).toBe("sad");
+    expect(out.result).toMatchObject({ spares: [], more: false, note: "No spares in stock right now." });
+  });
+
+  it("I2: a stock spare is not a pick — propose_assign with it is refused without the person's own pick", async () => {
+    h.people = [person("e1", "Ana Reyes", "EMP-1")];
+    await runTool(ctx(), "list_spares", {});
+    const out = await runTool(ctx(), "propose_assign", { employeeId: "e1", assetId: "s2" });
+    expect(out.result).toEqual({ error: REFUSE_PICK });
+    expect(h.pendingCalls).toHaveLength(0);
   });
 });
 

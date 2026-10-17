@@ -7,7 +7,7 @@ import { fmtDayMonth } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import type {
-  ChipsCard, ConfirmCard, CrisCard, CrisReturnOutcome, PersonCard, PersonRef, ResultCard, SparesCard, WhichCard,
+  ChipsCard, ConfirmCard, CrisCard, CrisReturnOutcome, PersonCard, PersonRef, ResultCard, SparesCard, StockCard, WhichCard,
 } from "@/lib/cris-cards";
 import { firstWord, gapLine, spareMeta, undoSecondsLeft } from "@/lib/cris-box";
 
@@ -28,6 +28,8 @@ export type CardActions = {
   onPickPerson: (p: PersonRef) => void;
   onPickSpare: (spare: { assetId: string; tag: string }) => void;
   onMoreSpares: () => void;
+  /** The stock list's "Show 3 more". */
+  onMoreStock: () => void;
   onScan: () => void;
   onConfirm: (card: ConfirmCard) => void;
   onChange: () => void;
@@ -206,6 +208,42 @@ function SparesView({ card, live, a }: { card: SparesCard; live: boolean; a: Car
   );
 }
 
+/** "Spare laptops in stock": a plain list (read-only — nothing to pick here), and "Show 3 more" while it is the newest. */
+function StockView({ card, live, a }: { card: StockCard; live: boolean; a: CardActions }) {
+  if (card.options.length === 0) {
+    return (
+      <div className="cris-msg self-start rounded-[16px_16px_16px_4px] bg-(--cris-bubble) px-[11px] py-2.5 text-fg-secondary">
+        No spares in stock right now.
+      </div>
+    );
+  }
+  return (
+    <div className="cris-msg flex max-w-[92%] flex-col gap-[7px] self-start rounded-[16px_16px_16px_4px] bg-(--cris-bubble) px-[11px] py-2.5">
+      <ul className="flex flex-col gap-1.5">
+        {card.options.map((o) => (
+          <li key={o.assetId} className="flex items-start gap-[7px]">
+            <Icon name="laptop" size={14} className="mt-0.5 shrink-0 text-fg-secondary" />
+            <span>
+              <span className={tagClass}>{o.tag}</span> {o.model}
+              <span className="block text-[11px] text-fg-muted">{spareMeta(o)}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {live && card.more && (
+        <button
+          type="button"
+          disabled={a.busy}
+          onClick={a.onMoreStock}
+          className="self-start text-[12px] font-semibold text-accent-soft-text underline underline-offset-2 disabled:opacity-55"
+        >
+          Show 3 more
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[58px_minmax(0,1fr)] items-start gap-2 border-t border-border-faint py-[7px]">
@@ -322,6 +360,8 @@ export function CrisCardView({ card, live, actions }: { card: CrisCard; live: bo
       return <WhichView card={card} live={live} a={actions} />;
     case "spares":
       return <SparesView card={card} live={live} a={actions} />;
+    case "stock":
+      return <StockView card={card} live={live} a={actions} />;
     case "confirm":
       return <ConfirmView card={card} live={live} a={actions} />;
     case "result":

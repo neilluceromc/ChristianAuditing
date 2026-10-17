@@ -11,9 +11,9 @@ import { canSeeClass, statusLabel, visibleClassWhere } from "@/lib/asset-class";
 import { peopleWhere } from "@/lib/people-search";
 import { assetSearchWhere, exactTagFirst } from "@/lib/palette";
 import { computeLoadout, effectiveSlots, resolvePolicy } from "@/lib/loadout";
-import { CRIS_RETURN_OUTCOMES, toPersonRef, type CrisCard, type PersonCard } from "@/lib/cris-cards";
+import { CRIS_RETURN_OUTCOMES, toPersonRef, type CrisCard, type PersonCard, type SpareRef } from "@/lib/cris-cards";
 import { allowAsset, allowPerson, exactTagsIn, notePick, wholeNameMatch, wordsIn, type Picks } from "@/lib/cris-picks";
-import { sparesCard } from "./cards";
+import { sparesCard, stockCard } from "./cards";
 import { createPending, type PendingKind } from "./pending-core";
 
 /*
@@ -97,14 +97,16 @@ export const CRIS_TOOLS: CrisTool[] = [
   ),
   tool(
     "list_spares",
-    "Spares this person may be given, the wanted type first, 3 at a time. The box shows them as a pick list: stop and wait " +
-      "for the person to pick or scan one. Never pick for them. Ask for the next 3 with offset.",
+    "Spares, the wanted type first, 3 at a time; ask for the next 3 with offset. With employeeId: the spares this person may " +
+      "be given — the box shows them as a pick list: stop and wait for the person to pick or scan one. Never pick for them. " +
+      "Without employeeId: the spares in stock (none held or promised for anyone), shown as a read-only list with nothing " +
+      "to pick — for questions like \"spare laptops in stock\". To give one to someone, ask who, then list with their id.",
     {
-      employeeId: str("Who the spare is for."),
+      employeeId: str("Who the spare is for. Leave out to list the spares in stock."),
       typeId: str("The asset type of the slot being filled or replaced (a gap's or item's typeId), when known."),
       offset: { type: "integer", description: "0 for the first 3, then 3, 6, …" },
     },
-    ["employeeId"],
+    [],
   ),
   tool(
     "propose_assign",
@@ -142,7 +144,7 @@ const INPUTS = {
   get_holdings: z.object({ employeeId: id }),
   find_asset: z.object({ q: z.string().trim().min(1).max(100) }),
   list_spares: z.object({
-    employeeId: id,
+    employeeId: id.nullish().transform((v) => v ?? undefined),
     typeId: id.nullish().transform((v) => v ?? undefined),
     offset: z.number().int().min(0).max(1000).nullish().transform((v) => v ?? 0),
   }),
@@ -295,13 +297,39 @@ const findAsset: Exec<"find_asset"> = async (ctx, { q }) => {
   return { result: { assets }, cards: [], picks: ctx.picks, mood: "search" };
 };
 
+const spareFor = (s: SpareRef) => ({ assetId: s.assetId, tag: s.tag, model: s.model, type: s.typeName, warrantyEnd: s.warrantyEnd?.slice(0, 10) ?? null });
+
+/**
+ * Final review I2, "spare laptops in stock" (spec §2): with no person named, the spares free for anyone as a
+ * read-only stock card — no pick buttons and no picks noted. A pick still needs a person: propose_* is unchanged.
+ * Gated like the inventory list's spares: the IT class, on the inventory screens.
+ */
+async function listStock(ctx: ToolCtx, typeId: string | undefined, offset: number): Promise<ToolOutcome> {
+  if (!canAssets(ctx.user) || !canSeeClass(ctx.user.role, "IT")) return fail(ctx, NOT_OPEN);
+  const card = await stockCard(prisma, { typeId: typeId ?? null, offset });
+  const spares = card.options.map(spareFor);
+  if (spares.length === 0) {
+    return { result: { spares, offset, more: false, note: "No spares in stock right now." }, cards: [], picks: ctx.picks, mood: "sad" };
+  }
+  return {
+    result: {
+      spares, offset, more: card.more,
+      note: "The box shows these as a read-only list, nothing to pick. To give one to someone, ask who it is for, then list_spares with their id.",
+    },
+    cards: [card],
+    picks: ctx.picks,
+    mood: "search",
+  };
+}
+
 const listSpares: Exec<"list_spares"> = async (ctx, { employeeId, typeId, offset }) => {
+  if (!employeeId) return listStock(ctx, typeId, offset);
   // the profile's pickers' own gate (spareCandidates): the IT class, on the people screens
   if (!canPeople(ctx.user) || !canSeeClass(ctx.user.role, "IT")) return fail(ctx, NOT_OPEN);
   const employee = await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true } });
   if (!employee) return fail(ctx, "No one has that id — search with find_people.");
   const card = await sparesCard(prisma, employeeId, { typeId: typeId ?? null, offset });
-  const spares = card.options.map((s) => ({ assetId: s.assetId, tag: s.tag, model: s.model, type: s.typeName, warrantyEnd: s.warrantyEnd?.slice(0, 10) ?? null }));
+  const spares = card.options.map(spareFor);
   if (spares.length === 0) {
     return { result: { spares, offset, more: false, note: "No pickable spares left." }, cards: [], picks: ctx.picks, mood: "sad" };
   }
