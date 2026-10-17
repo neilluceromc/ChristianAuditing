@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fakeDecide, nameIn, type FakeMemory, type FakeToolResult } from "./cris-fake";
+import { FAKE_FALLBACK, fakeDecide, nameIn, type FakeMemory, type FakeToolResult } from "./cris-fake";
 
 const ana = { employeeId: "e-ana", name: "Ana Reyes", employeeNo: "EMP-0101", title: "Agent", worksFor: "Acme", client: true, leaving: false };
 const anaB = { ...ana, employeeId: "e-ana2", name: "Ana Bautista", employeeNo: "EMP-0102" };
@@ -113,6 +113,28 @@ describe("fakeDecide — assign (spec §2 job 2)", () => {
     expect(fakeDecide("I picked BR-LT-0230 (scanned).", [], earlier)).toEqual({
       kind: "tool", name: "propose_assign", input: { employeeId: "e-ana", assetId: "a-230" },
     });
+  });
+});
+
+describe("fakeDecide — Change on the Confirm card", () => {
+  const ask = "Replace Ana Reyes's laptop, it's slow";
+  const shown: FakeToolResult = { name: "propose_replace", input: {}, result: { shown: "card" } };
+  it("lists the spares again for the open replace, then waits", () => {
+    const earlier = memory([ask, "I picked BR-LT-0230."], [found([ana], true), holdings(), spares, shown]);
+    expect(fakeDecide("Change", [], earlier)).toEqual({ kind: "tool", name: "list_spares", input: { employeeId: "e-ana" } });
+    expect(fakeDecide("Change", [spares], earlier)).toEqual({ kind: "text", text: "Pick a different spare, or scan its label." });
+  });
+  it("does the same for an open assign, whatever the case of the word", () => {
+    const earlier = memory(["Assign a laptop to Ana Reyes", "I picked BR-LT-0231."], [found([ana], true), spares]);
+    expect(fakeDecide(" change ", [], earlier)).toEqual({ kind: "tool", name: "list_spares", input: { employeeId: "e-ana" } });
+  });
+  it("a pick after Change proposes with the new spare", () => {
+    const earlier = memory([ask, "I picked BR-LT-0230.", "Change"], [found([ana], true), holdings(), spares, shown, spares]);
+    expect(fakeDecide("I picked BR-LT-0231.", [], earlier)).toMatchObject({ name: "propose_replace", input: { newAssetId: "a-231" } });
+  });
+  it("falls back when nothing is open to change", () => {
+    expect(fakeDecide("Change", [])).toEqual({ kind: "text", text: FAKE_FALLBACK });
+    expect(fakeDecide("Change", [], memory(["Check Ana Reyes's items"], [found([ana], true), holdings()]))).toEqual({ kind: "text", text: FAKE_FALLBACK });
   });
 });
 

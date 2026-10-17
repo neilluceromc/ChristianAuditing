@@ -21,6 +21,8 @@ type Person = { employeeId: string; name: string; employeeNo: string };
 const TAG = /(?<![A-Z0-9-])BR-[A-Z]{2}-\d{4}(?![A-Z0-9])/i;
 const PICK_ASSET = /^I picked (BR-[A-Z]{2}-\d{4})( \(scanned\))?\.$/i;
 const PICK_PERSON = /^I picked (.+) \(([^()]+)\)\.$/;
+/** What the Confirm card's Change button sends (src/components/cris/cris-widget.tsx). */
+const CHANGE = /^change$/i;
 
 const tool = (name: string, input: Record<string, unknown>): FakeDecision => ({ kind: "tool", name, input });
 const say = (text: string): FakeDecision => ({ kind: "text", text });
@@ -96,6 +98,9 @@ export function fakeDecide(text: string, toolResults: FakeToolResult[], earlier:
   const error = lastNow ? str(rec(lastNow.result).error) : "";
   if (error) return say(`I couldn't do that: ${error.replace(/\.$/, "")}.`);
 
+  // The Confirm card's Change button sends the bare word: show the spares again for the open replace or assign.
+  if (CHANGE.test(text.trim())) return change(now, earlier);
+
   const assetPick = PICK_ASSET.exec(text.trim());
   const personPick = assetPick ? null : PICK_PERSON.exec(text.trim());
   const ownIntent = intentOf(text);
@@ -143,6 +148,16 @@ export function fakeDecide(text: string, toolResults: FakeToolResult[], earlier:
   if (intent === "replace" && !held) return tool("get_holdings", { employeeId: person.employeeId });
   if (!lastOf(now, "list_spares")) return tool("list_spares", { employeeId: person.employeeId });
   return say(`Pick a spare for ${person.name}, or scan its label.`);
+}
+
+/** Change: the spares again for the person of the last replace or assign (its list's own employeeId), then wait. */
+function change(now: FakeToolResult[], earlier: FakeMemory): FakeDecision {
+  const request = [...earlier.texts].reverse().find((t) => intentOf(t) !== null) ?? "";
+  const intent = intentOf(request);
+  const employeeId = str(lastOf(earlier.results, "list_spares")?.input.employeeId);
+  if ((intent !== "replace" && intent !== "assign") || !employeeId) return say(FAKE_FALLBACK);
+  if (!lastOf(now, "list_spares")) return tool("list_spares", { employeeId });
+  return say("Pick a different spare, or scan its label.");
 }
 
 function holdingsText(held: FakeToolResult): string {
