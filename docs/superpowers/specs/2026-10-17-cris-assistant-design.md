@@ -48,7 +48,7 @@ Cris is the mascot from the launch film: a glass orb with a lens eye, turning ri
 - find an asset by tag or serial;
 - spare laptops in stock.
 
-**Not in v1:** offboarding, transfers, IT setup, notes, bulk changes, Purchasing-class assets, holds, voice, and the phone layout. Below `lg` Cris is hidden.
+**Not in v1:** offboarding, transfers, IT setup, notes, bulk changes, Purchasing-class assets, holds and voice.
 
 ## 3. Non-goals and anti-goals
 
@@ -81,11 +81,17 @@ Cris is the mascot from the launch film: a glass orb with a lens eye, turning ri
 - **Hint bubble.** While closed, a small bubble reads "Hi! Need a hand? · drag me anywhere". It shows until the person has opened Cris once.
 - **New-reply badge.** A reply that arrives while the box is closed puts a small red count on the mascot.
 
-**Pressing the mascot** opens a small chat box (about 372 × 470) right next to it:
+**Pressing the mascot** opens a small chat box (about 368 × 470) right beside it:
 - **Placement:**
-  - above it when the mascot is in the lower half, below it when in the upper half;
-  - aligned to the mascot's side;
-  - with a speech-bubble pointer at the mascot.
+  - beside the mascot, on its inner side (to its left when it sits on the right, to its right when it sits on the left);
+  - the box's bottom is level with the mascot's base when it is in the lower half of the page, and its top is level with the mascot's top when it is in the upper half;
+  - the box edge comes right up to the orb's rings, and a speech-bubble pointer on that edge points at the mascot's centre;
+  - it grows out of the mascot when it opens.
+- **One unit.** The box, the hint bubble and the mascot are one positioned unit, so they never drift apart at any screen size or while dragging.
+- **Screen sizes:**
+  - Wide screens: as above.
+  - Narrower than about 1100 px: the box narrows to fit (`min(368px, 100vw − 170px)`).
+  - Phones (under about 640 px): the mascot shrinks to about 72 px and is fixed bottom-right. The box opens as a panel across the bottom of the screen, 12 px from each edge, up to 560 px tall. There is no pointer and no hint bubble.
 - **Closing.** Pressing again, the header's Close, or Esc closes the box. The conversation is still there next time, including after a page change or a reload (§7).
 - **Focus.** Focus goes to the message box on open. On close, focus returns to the mascot, never to body.
 - **Screen readers.** The message list is `role="log"` with `aria-live="polite"`.
@@ -313,6 +319,6 @@ These are stored as one `FeatureFlag` (`cris`) with a Json value, and changes ar
 2. **No streaming in v1.** Replies arrive whole, then type out. The cost is a 1–3 s wait with the Thinking mood.
 3. **Undo is a compensating change** within 60 s, and only while nothing else touched those assets. The cost is that an assign-undo skips triage.
 4. **Chats are stored for 30 days**, are private to their person, and admins see totals only. The cost is that a chat can't be audited by someone else; the changes themselves are audited.
-5. **Cris is hidden below `lg`**, so there is no phone Cris in v1.
+5. **Phones get a smaller Cris** and a bottom-panel chat (§4). This replaces the earlier "hidden on phones"; the owner asked for it to be responsive.
 6. **The audit marker is a diff key** (`via: Cris`), not a new column. The cost is that "via" filtering would need a JSON query later.
 7. **The server, not only the prompt, enforces picks** (§6.6). The cost is that a person has to pick or scan even when the model "knows" the right spare; typing the exact tag still counts as a pick.
