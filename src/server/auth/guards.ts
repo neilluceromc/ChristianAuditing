@@ -4,6 +4,9 @@ import { auth } from "./index";
 import { prisma } from "../db/client";
 import { ROLE_LANDING } from "@/lib/workspaces";
 
+/** Phase 41: the signed-in person a server action acts as — what `actionUser()` returns once it is not null. */
+export type SessionUser = User;
+
 /**
  * Layer-2 enforcement. Middleware (layer 1) can't reach the DB, so a
  * disabled account's JWT survives until it hits this guard — every page
@@ -34,9 +37,6 @@ export async function requireRole(...roles: Role[]): Promise<User> {
  * RETURN null instead of redirecting, so actions hand back the typed
  * `forbidden` result (spec §5) rather than navigating mid-mutation.
  */
-/** Phase 41: the signed-in person a server action acts as — what `actionUser()` returns once it is not null. */
-export type SessionUser = User;
-
 export async function actionUser(): Promise<User | null> {
   const session = await auth();
   if (!session?.user?.id) return null;

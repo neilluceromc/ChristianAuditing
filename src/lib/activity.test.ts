@@ -528,4 +528,10 @@ describe("Phase 41 — a change made through Cris says so", () => {
   it("labels the via field", () => {
     expect(fieldLabel("via")).toBe("Via");
   });
+  it("a Cris settings change reads as a sentence, with or without the flag's label", () => {
+    const e = { actorLabel: "Neil Lucero", action: "cris-settings", diff: { dailyCap: { from: 40, to: 60 } }, entityLabel: "cris" };
+    expect(auditSentence(e)).toBe("Neil Lucero changed the Cris settings");
+    expect(auditSentence(e, { omitEntity: true })).toBe("Neil Lucero changed the Cris settings");
+    expect(auditPhrase(e)).toBe("changed the Cris settings");
+  });
 });

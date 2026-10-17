@@ -499,6 +499,9 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
       const what = `a purchase of ${n} item${n === 1 ? "" : "s"}`;
       return omitEntity ? `${actor}recorded ${what}` : `${actor}recorded ${what} (${entry.entityLabel})`;
     }
+    // Phase 41 (spec §9): written on the `cris` feature flag; the flag's key adds nothing to the sentence
+    case "cris-settings":
+      return `${actor}changed the Cris settings`;
     default:
       return omitEntity ? `${actor}${entry.action}` : `${actor}${entry.action} ${entry.entityLabel}`;
   }

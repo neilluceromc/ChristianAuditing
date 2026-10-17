@@ -14,9 +14,9 @@ vi.mock("@/server/webhooks/emit", () => ({ emitWebhook: async (_tx: unknown, ...
 
 import { assignCore, replaceCore } from "./direct";
 
-type Row = { id: string; tag: string; cls: "IT"; status: string; assigneeId: string | null; defectiveSince: null; repairEndedAt: null; returnedAt: Date | null; loanDueAt: null; model: string };
-const asset = (id: string, tag: string, status: string, assigneeId: string | null = null): Row => ({
-  id, tag, cls: "IT", status, assigneeId, defectiveSince: null, repairEndedAt: null, returnedAt: null, loanDueAt: null, model: "Latitude",
+type Row = { id: string; tag: string; cls: "IT" | "PURCHASING"; status: string; assigneeId: string | null; defectiveSince: null; repairEndedAt: null; returnedAt: Date | null; loanDueAt: null; model: string };
+const asset = (id: string, tag: string, status: string, assigneeId: string | null = null, extra: Partial<Row> = {}): Row => ({
+  id, tag, cls: extra.cls ?? "IT", status, assigneeId, defectiveSince: null, repairEndedAt: null, returnedAt: extra.returnedAt ?? null, loanDueAt: null, model: "Latitude",
 });
 
 /** A transaction that reads from fixtures and records every row it would write. */
@@ -84,6 +84,13 @@ describe("assignCore", () => {
     await assignCore(tx, user, { assetId: "a1", employeeId: "emp1" }, { via: "Cris" });
     expect(writes.audits[0].diff.via).toEqual({ from: null, to: "Cris" });
   });
+  it("via rides the audit diff only when passed, and never the approval payload", async () => {
+    await assignCore(fakeTx([spare]).tx, user, { assetId: "a1", employeeId: "emp1" });
+    await assignCore(fakeTx([spare]).tx, user, { assetId: "a1", employeeId: "emp1" }, { via: "Cris" });
+    expect(writes.audits.map((a) => "via" in a.diff)).toEqual([false, true]);
+    expect(JSON.stringify(writes.approvals)).not.toContain("Cris");
+    expect(JSON.stringify(writes.approvals)).not.toContain("via");
+  });
 });
 
 describe("replaceCore", () => {
@@ -115,8 +122,32 @@ describe("replaceCore", () => {
     expect(await replaceCore(tx, user, { ...input, newAssetId: "a0" }, { dryRun: true }))
       .toMatchObject({ ok: false, kind: "validation", fieldErrors: { newAssetId: "Pick a different device." } });
     expect(await replaceCore(tx, user, { ...input, outcome: "MISSING", reason: "" }, { dryRun: true }))
-      .toMatchObject({ ok: false, kind: "validation" });
+      .toMatchObject({ ok: false, kind: "validation", fieldErrors: { reason: "Missing needs a reason (at least 3 characters) — it opens an investigation." } });
     expect(await replaceCore(tx, user, { ...input, employeeId: "emp2" }, { dryRun: true }))
       .toMatchObject({ ok: false, message: "BR-LT-0100 isn't held by this person." });
+  });
+  it("refuses a new item that is not a spare, in a dry run and a real one alike", async () => {
+    for (const dryRun of [true, false]) {
+      const deployed = fakeTx([held, asset("a1", "BR-LT-0230", "DEPLOYED", "emp9")]);
+      expect(await replaceCore(deployed.tx, user, input, { dryRun }))
+        .toMatchObject({ ok: false, kind: "conflict", message: "BR-LT-0230 is Deployed, not a spare." });
+      const back = fakeTx([held, asset("a1", "BR-LT-0230", "SPARE", null, { returnedAt: new Date("2026-10-01") })]);
+      expect(await replaceCore(back.tx, user, input, { dryRun }))
+        .toMatchObject({ ok: false, kind: "conflict", message: "BR-LT-0230 is back but not yet triaged — triage it first." });
+      expect(deployed.rowWrites.concat(back.rowWrites)).toEqual([]);
+    }
+    expect(writes.audits).toEqual([]);
+  });
+  it("refuses a new item of another class before anything is written", async () => {
+    // Only IT is direct-lifecycle, so loadDirect refuses the Purchasing item before the one-class check;
+    // "Replace within one class only." is the backstop should a second class ever become direct.
+    const admin = { ...user, role: "admin" } as User;
+    const chair = asset("a1", "BR-CH-0001", "STORED", null, { cls: "PURCHASING" });
+    for (const dryRun of [true, false]) {
+      const { tx, rowWrites } = fakeTx([held, chair]);
+      expect(await replaceCore(tx, admin, input, { dryRun })).toMatchObject({ ok: false, kind: "forbidden" });
+      expect(rowWrites).toEqual([]);
+    }
+    expect(writes.audits).toEqual([]);
   });
 });

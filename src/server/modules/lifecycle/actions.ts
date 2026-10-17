@@ -26,6 +26,7 @@ import {
 import {
   assetSelect, assignCore, assignSchema, dateStr, loadDirect, recordDirect, replaceCore, replaceSchema,
 } from "./direct";
+import { revalidateAsset } from "./revalidate";
 import { rememberPicks } from "@/server/recent-picks";
 
 /**
@@ -36,13 +37,6 @@ import { rememberPicks } from "@/server/recent-picks";
  * `$transaction` call and converted back into a `conflict()` result.
  */
 class DirectRefusal extends Error {}
-
-function revalidateAsset(assetId: string, employeeIds: Array<string | null | undefined>) {
-  revalidatePath(`/inventory/${assetId}`);
-  revalidatePath("/inventory");
-  revalidatePath("/");
-  for (const e of employeeIds) if (e) revalidatePath(`/employees/${e}`);
-}
 
 const reasonOpt = reasonOptional();
 
