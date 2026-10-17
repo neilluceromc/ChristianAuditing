@@ -1,6 +1,6 @@
 import type { FeatureFlag } from "@prisma/client";
-import { prisma } from "../db/client";
-import { isUniqueViolation } from "../prisma-errors";
+import { prisma } from "@/server/db/client";
+import { isUniqueViolation } from "@/server/prisma-errors";
 import {
   CRIS_DEFAULTS, CRIS_FLAG_DESCRIPTION, CRIS_FLAG_KEY, crisAvailabilityFrom, crisFlagValue, crisSettingsFromFlag,
   type CrisAvailability, type CrisSettings,
@@ -13,16 +13,22 @@ import { CRIS_PREFS_KEY, parseCrisPrefs, type CrisPrefs } from "@/lib/cris-prefs
  * hand any signed-in caller anyone's prefs. Same split as loadout-view.ts / preferences.ts.
  */
 
-/** The `cris` flag row, created with the defaults the first time anything asks for it. */
+/**
+ * The `cris` flag row, created with the defaults the first time anything asks for it. Read-first:
+ * the layout calls crisAvailability() on every page, so the common path is one SELECT, never a write.
+ */
 export async function ensureCrisFlag(): Promise<FeatureFlag> {
-  const create = {
-    key: CRIS_FLAG_KEY,
-    enabled: CRIS_DEFAULTS.on,
-    description: CRIS_FLAG_DESCRIPTION,
-    value: crisFlagValue(CRIS_DEFAULTS),
-  };
+  const existing = await prisma.featureFlag.findUnique({ where: { key: CRIS_FLAG_KEY } });
+  if (existing) return existing;
   try {
-    return await prisma.featureFlag.upsert({ where: { key: CRIS_FLAG_KEY }, update: {}, create });
+    return await prisma.featureFlag.create({
+      data: {
+        key: CRIS_FLAG_KEY,
+        enabled: CRIS_DEFAULTS.on,
+        description: CRIS_FLAG_DESCRIPTION,
+        value: crisFlagValue(CRIS_DEFAULTS),
+      },
+    });
   } catch (err) {
     // Two first-ever reads racing: the loser's insert hits the unique key; the winner's row is the answer.
     if (!isUniqueViolation(err)) throw err;

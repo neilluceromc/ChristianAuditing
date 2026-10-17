@@ -59,7 +59,7 @@ export function crisFlagValue(s: CrisSettings): { dailyLimit: number; model: Cri
   return { dailyLimit: s.dailyLimit, model: s.model };
 }
 
-export type CrisAvailability ={ on: boolean; reason?: "off" | "no-key" };
+export type CrisAvailability = { on: boolean; reason?: "off" | "no-key" };
 
 /**
  * Plan, "Who and when": Cris is off when the admin switch is off (checked first), or when no

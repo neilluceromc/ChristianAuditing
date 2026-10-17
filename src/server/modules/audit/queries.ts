@@ -5,6 +5,7 @@ import { buildActivityWhere, type ActivityFeed } from "@/lib/activity-list";
 import { actionLabel, auditSentence } from "@/lib/activity";
 import { ASSET_CLASSES, canSeeClass } from "@/lib/asset-class";
 import { fmtDateTime } from "@/lib/format";
+import { CRIS_FLAG_KEY } from "@/lib/cris-settings";
 import type { ListState } from "@/lib/url-state";
 import { LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
@@ -121,7 +122,7 @@ export async function entityLabels(
   for (const u of users) map.set(`user:${u.id}`, { label: `${u.name} · ${u.email}`, href: "/admin/users" });
   // Phase 41: the `cris` row is kept off the Flags page (not in FLAG_SPECS); it is edited in Settings › Cris.
   for (const f of flags) {
-    map.set(`feature-flag:${f.id}`, f.key === "cris" ? { label: "Cris", href: "/settings/cris" } : { label: f.key, href: "/admin/flags" });
+    map.set(`feature-flag:${f.id}`, f.key === CRIS_FLAG_KEY ? { label: "Cris", href: "/settings/cris" } : { label: f.key, href: "/admin/flags" });
   }
   // A deleted endpoint has no row to resolve — it correctly keeps the
   // truncated-id fallback below; deleteEndpoint's diff carries the URL instead.
