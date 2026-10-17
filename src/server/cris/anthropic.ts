@@ -9,16 +9,21 @@ import type { CrisModel, CrisReply, CrisRequest } from "./model";
  */
 
 /**
- * Why a request did not get a reply. "bad-request" (HTTP 400) means the API refused what was sent — for Cris
- * most likely a conversation history it will no longer accept — so the turn starts a fresh conversation; every
- * other kind gets "I couldn't reach my brain…" (Review Focus #4). "sdk" is any other SDK error before a reply.
+ * Why a request did not get a reply. "bad-request" (HTTP 400) means the API refused what was sent — perhaps a
+ * conversation history it will no longer accept, perhaps not (an exhausted credit balance or spend limit is a 400
+ * too) — so the turn retries once without the history to tell which; every other kind gets "I couldn't reach my
+ * brain…" (Review Focus #4). "sdk" is any other SDK error before a reply.
  */
 export type ProviderFailure = "no-key" | "auth" | "bad-request" | "rate-limited" | "timeout" | "connection" | "api" | "sdk";
 
 /** The provider failed, timed out, refused the request, or there is no usable key. */
 export class CrisProviderError extends Error {
-  constructor(readonly kind: ProviderFailure, readonly status?: number) {
-    super(`Cris could not reach the model (${kind}${status ? ` ${status}` : ""})`);
+  /**
+   * `type` is the API's own error type from the response body (e.g. "invalid_request_error"), for the server log
+   * only. Never the message text, a header or the key.
+   */
+  constructor(readonly kind: ProviderFailure, readonly status?: number, readonly type?: string) {
+    super(`Cris could not reach the model (${kind}${status ? ` ${status}` : ""}${type ? ` ${type}` : ""})`);
     this.name = "CrisProviderError";
   }
 }
@@ -34,14 +39,20 @@ function anthropic(): Anthropic {
   return client;
 }
 
+/** The API's error type from a response body (`{ type: "error", error: { type, message } }`), when it has one. */
+function errorType(err: InstanceType<typeof Anthropic.APIError>): string | undefined {
+  const type = (err.error as { error?: { type?: unknown } } | undefined)?.error?.type;
+  return typeof type === "string" ? type : undefined;
+}
+
 /** The SDK's typed errors, most specific first (never matched on their text). */
 function failure(err: unknown): CrisProviderError | null {
   if (err instanceof Anthropic.APIConnectionTimeoutError) return new CrisProviderError("timeout");
   if (err instanceof Anthropic.APIConnectionError) return new CrisProviderError("connection");
-  if (err instanceof Anthropic.BadRequestError) return new CrisProviderError("bad-request", err.status);
-  if (err instanceof Anthropic.AuthenticationError) return new CrisProviderError("auth", err.status);
-  if (err instanceof Anthropic.RateLimitError) return new CrisProviderError("rate-limited", err.status);
-  if (err instanceof Anthropic.APIError) return new CrisProviderError("api", err.status);
+  if (err instanceof Anthropic.BadRequestError) return new CrisProviderError("bad-request", err.status, errorType(err));
+  if (err instanceof Anthropic.AuthenticationError) return new CrisProviderError("auth", err.status, errorType(err));
+  if (err instanceof Anthropic.RateLimitError) return new CrisProviderError("rate-limited", err.status, errorType(err));
+  if (err instanceof Anthropic.APIError) return new CrisProviderError("api", err.status, errorType(err));
   if (err instanceof Anthropic.AnthropicError) return new CrisProviderError("sdk");
   return null;
 }
@@ -72,7 +83,8 @@ export function anthropicModel(model: CrisModelId): CrisModel {
       }
       const params = {
         model,
-        max_tokens: 2000,
+        // Adaptive thinking counts toward max_tokens; the round cap (CRIS_MAX_ROUNDS) bounds the cost.
+        max_tokens: 4000,
         system,
         messages,
         tools,

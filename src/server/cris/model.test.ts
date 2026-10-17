@@ -59,11 +59,11 @@ describe("pickModel (spec §8: the fake is refused in production)", () => {
 });
 
 describe("the Anthropic adapter", () => {
-  it("asks Haiku with the plan's request: 2000 tokens, auto tool choice, low effort, no fallback", async () => {
+  it("asks Haiku with the plan's request: 4000 tokens (thinking counts), auto tool choice, low effort, no fallback", async () => {
     h.create.mockResolvedValue(message([{ type: "text", text: "hello", citations: null }]));
     const r = await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req);
     expect(h.create).toHaveBeenCalledWith(expect.objectContaining({
-      model: "claude-haiku-5-5", max_tokens: 2000, system: "S", messages: req.messages, tools: [],
+      model: "claude-haiku-5-5", max_tokens: 4000, system: "S", messages: req.messages, tools: [],
       tool_choice: { type: "auto" }, output_config: { effort: "low" },
     }));
     expect(h.create.mock.calls[0][0]).not.toHaveProperty("fallbacks");
@@ -154,6 +154,16 @@ describe("the Anthropic adapter", () => {
       expect(thrown).toBeInstanceOf(CrisProviderError);
       expect((thrown as InstanceType<typeof CrisProviderError>).kind).toBe(kind);
     }
+  });
+
+  it("carries the API's error type (for the log) and the status, never the message text", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const body = { type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low" } };
+    h.create.mockRejectedValueOnce(new Anthropic_.BadRequestError(400, body, "Your credit balance is too low", new Headers()));
+    const thrown = (await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req).catch((e: unknown) => e)) as InstanceType<typeof CrisProviderError>;
+    expect(thrown).toMatchObject({ kind: "bad-request", status: 400, type: "invalid_request_error" });
+    expect(thrown.message).toBe("Cris could not reach the model (bad-request 400 invalid_request_error)");
+    expect(logged.mock.calls.flat().join(" ")).not.toContain("credit balance");
   });
 
   it("lets anything that isn't the SDK's error surface as it is", async () => {

@@ -93,9 +93,21 @@ async function ownedConversationId(userId: string, raw: unknown): Promise<string
   return c?.id ?? null;
 }
 
-/** Questions asked today (Manila): the person's saved messages since Manila midnight, in every conversation. */
-function usedToday(userId: string, now: Date): Promise<number> {
+/**
+ * Questions asked today (Manila): the person's saved messages since Manila midnight, in every conversation. The
+ * daily limit here, and the "{n} questions left today" a page load starts from (./widget-read.ts).
+ */
+export function usedToday(userId: string, now: Date): Promise<number> {
   return prisma.crisMessage.count({ where: { role: "user", createdAt: { gte: manilaDayStart(now) }, conversation: { userId } } });
+}
+
+/** Newest first: the person's open conversation is their most recently used one (spec §7, one per person). */
+const latestFirst = (): Prisma.CrisConversationOrderByWithRelationInput[] => [{ updatedAt: "desc" }, { id: "desc" }];
+
+/** The person's open conversation, as crisSend picks it when the browser sends none; null when they have none. */
+export async function latestConversationId(userId: string): Promise<string | null> {
+  const c = await prisma.crisConversation.findFirst({ where: { userId }, orderBy: latestFirst(), select: { id: true } });
+  return c?.id ?? null;
 }
 
 /**
@@ -109,7 +121,7 @@ function usedToday(userId: string, now: Date): Promise<number> {
 async function openConversation(userId: string, requested: string | undefined): Promise<string> {
   const found = await prisma.crisConversation.findFirst({
     where: requested ? { id: requested, userId } : { userId },
-    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    orderBy: latestFirst(),
     select: { id: true, picks: true },
   });
   if (!found) return (await prisma.crisConversation.create({ data: { userId }, select: { id: true } })).id;
@@ -149,8 +161,12 @@ async function pickWords(user: SessionUser, pick: Pick): Promise<{ text: string;
 
 const firstNameOf = (name: string) => name.trim().split(/\s+/)[0] ?? "";
 
-/** How a turn ended without an answer: the copy to show, and whether the conversation's history must be left behind. */
-type Failure = { text: string; fresh?: true };
+/**
+ * How a turn ended without an answer: the copy to show, and whether the conversation's history must be left behind.
+ * `badRequest`: the API refused the request itself (400) — whether the history is to blame is found out before
+ * the turn is taken back.
+ */
+type Failure = { text: string; fresh?: true; badRequest?: CrisProviderError };
 
 /**
  * Spec §8 "Running a turn". Returns ok with Cris's messages for every outcome the box shows as a message —
@@ -225,7 +241,8 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
   const model = pickModel(settings);
   // Priced at the model that served the reply (a server-side fallback may differ); the fake stores no usage.
   const usageOf = (r: CrisReply) => (model.id === "fake" ? undefined : { ...r.usage, model: isPricedModel(r.model) ? r.model : model.id });
-  const messages: Anthropic.MessageParam[] = [...modelHistory(rows), userMsg];
+  const history = modelHistory(rows);
+  const messages: Anthropic.MessageParam[] = [...history, userMsg];
   const cards: CrisCard[] = [];
   let lastMood: ToolMood | null = null;
 
@@ -239,16 +256,36 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
 
   /**
    * Review Focus #4: take the whole turn back out — the question is not counted — and say so, Frustrated. When the
-   * API refused the request itself (400), the conversation's history is what it will no longer take, so the person
-   * is moved to a fresh conversation (unless this one had no history to blame).
+   * history was found to be what the API will no longer take (`fresh`), the person is moved to a fresh conversation.
    */
+  /**
+   * Final review I1: a 400 with history may be the history (a conversation the API will no longer accept) or not
+   * (the owner's credit or spend limit is used up, which is a 400 too — and would otherwise abandon every chat).
+   * One retry with this message alone tells which: accepted, the history was the cause, so the person moves to a
+   * fresh conversation; refused again, it is not the history, so they keep theirs and get the brain copy. The
+   * retry's reply is never kept (the person is asked again in the fresh chat). The log says the status and the
+   * API's error type only — never the message text, a header or the key.
+   */
+  const blameHistory = async (first: CrisProviderError): Promise<Failure> => {
+    console.warn(`cris: the API refused a turn with history (${first.status ?? "?"} ${first.type ?? "unknown"}); retrying without it`);
+    try {
+      await model.reply({ system: CRIS_SYSTEM, messages: [userMsg], tools: CRIS_TOOLS });
+    } catch (err) {
+      const again = err instanceof CrisProviderError ? `${err.kind} ${err.status ?? "?"} ${err.type ?? "unknown"}` : "not a provider error";
+      console.warn(`cris: the retry without history failed too (${again}); keeping the conversation`);
+      return { text: CRIS_BRAIN_TEXT };
+    }
+    console.warn("cris: the retry without history was accepted; moving the person to a fresh conversation");
+    return { text: CRIS_FRESH_TEXT, fresh: true };
+  };
+
   const takeBack = async (f: Failure): Promise<ActionResult<CrisSendData>> => {
     await prisma.$transaction([
       prisma.crisMessage.deleteMany({ where: { id: { in: turnRows } } }),
       prisma.crisConversation.update({ where: { id: conversationId }, data: { picks: picksBefore } }),
     ]);
     const left = dailyLeft(used, settings.dailyLimit);
-    if (f.fresh && rows.length > 0) {
+    if (f.fresh) {
       const fresh = await prisma.crisConversation.create({ data: { userId: user.id }, select: { id: true } });
       return ok({ conversationId: fresh.id, messages: [transient(CRIS_FRESH_TEXT, now)], left, mood: "cross", status: STATUS_READY });
     }
@@ -301,8 +338,10 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
       await takeBack({ text: CRIS_BRAIN_TEXT });
       throw err;
     }
-    failed = err.kind === "bad-request" ? { text: CRIS_BRAIN_TEXT, fresh: true } : { text: CRIS_BRAIN_TEXT };
+    failed = err.kind === "bad-request" ? { text: CRIS_BRAIN_TEXT, badRequest: err } : { text: CRIS_BRAIN_TEXT };
   }
+  // With no history there is nothing to blame: the brain copy, and the person keeps the conversation.
+  if (failed?.badRequest && history.length > 0) failed = await blameHistory(failed.badRequest);
   if (failed || !finalRow) return takeBack(failed ?? { text: CRIS_BRAIN_TEXT });
 
   const waiting = cards.some((c) => c.type === "confirm" || c.type === "spares" || c.type === "which");

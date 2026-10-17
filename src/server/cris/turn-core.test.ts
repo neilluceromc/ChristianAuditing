@@ -307,13 +307,24 @@ describe("a provider failure or a refusal (Review Focus #4)", () => {
 });
 
 describe("a history the API rejects (400) never bricks the chat", () => {
-  it("moves the person to a fresh conversation, says so, and leaves the old one as it was", async () => {
+  let warned: string[] = [];
+  beforeEach(() => {
+    warned = [];
+    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => { warned.push(args.join(" ")); });
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("retries once without the history; accepted, it moves the person to a fresh conversation and leaves the old one as it was", async () => {
     h.replies.push(text("first answer"));
     const first = await send();
     const oldId = first.ok ? first.data.conversationId : "";
     const oldRows = h.rows.map((r) => r.id);
-    h.replies.push(new CrisProviderError("bad-request", 400));
+    h.replies.push(new CrisProviderError("bad-request", 400, "invalid_request_error"), text("the retry's answer"));
     const r = await send({ conversationId: oldId, text: "and now?" });
+    // the retry sent this message alone: no history
+    expect(h.requests.at(-2)!.messages.length).toBeGreaterThan(1);
+    expect(h.requests.at(-1)!.messages).toHaveLength(1);
+    expect(personTextOf(h.requests.at(-1)!.messages[0])).toBe("and now?");
     expect(r.ok && r.data).toMatchObject({ mood: "cross", left: 99 });
     expect(r.ok && r.data.messages.map((m) => m.text)).toEqual([CRIS_FRESH_TEXT]);
     const freshId = r.ok ? r.data.conversationId : null;
@@ -326,11 +337,47 @@ describe("a history the API rejects (400) never bricks the chat", () => {
     expect(h.requests.at(-1)!.messages).toHaveLength(1);
   });
 
-  it("stays put with the brain copy when the conversation had no history to blame", async () => {
+  it("I1: a 400 again without the history is not the history — the person keeps the conversation, the turn is not counted", async () => {
+    h.replies.push(text("first answer"));
+    const first = await send();
+    const oldId = first.ok ? first.data.conversationId : "";
+    const oldRows = h.rows.map((r) => r.id);
+    // e.g. the owner's credit or spend limit is used up: every request is a 400, history or not
+    h.replies.push(new CrisProviderError("bad-request", 400, "invalid_request_error"), new CrisProviderError("bad-request", 400, "invalid_request_error"));
+    const r = await send({ conversationId: oldId, text: "and now?" });
+    expect(r).toEqual({
+      ok: true,
+      data: expect.objectContaining({ conversationId: oldId, mood: "cross", left: 99, status: "Ready" }),
+    });
+    expect(r.ok && r.data.messages.map((m) => m.text)).toEqual([CRIS_BRAIN_TEXT]);
+    expect(h.convs).toHaveLength(1); // no fresh conversation
+    expect(h.rows.map((x) => x.id)).toEqual(oldRows); // the failed turn is deleted
+    expect(h.requests).toHaveLength(3); // the first answer, the turn, one retry — never more
+    expect(h.requests.at(-1)!.messages).toHaveLength(1);
+    // logged: the status and the API's error type
+    expect(warned.join("\n")).toContain("400 invalid_request_error");
+    // and the next message still replays the old history
+    h.replies.push(text("back"));
+    await send({ conversationId: oldId, text: "and now?" });
+    expect(h.requests.at(-1)!.messages.length).toBeGreaterThan(1);
+  });
+
+  it("I1: the retry failing some other way also keeps the conversation", async () => {
+    h.replies.push(text("first answer"));
+    const first = await send();
+    const oldId = first.ok ? first.data.conversationId : "";
+    h.replies.push(new CrisProviderError("bad-request", 400), new CrisProviderError("timeout"));
+    const r = await send({ conversationId: oldId, text: "and now?" });
+    expect(r.ok && r.data).toMatchObject({ conversationId: oldId, mood: "cross" });
+    expect(r.ok && r.data.messages[0].text).toBe(CRIS_BRAIN_TEXT);
+  });
+
+  it("stays put with the brain copy when the conversation had no history to blame, with no retry", async () => {
     h.replies.push(new CrisProviderError("bad-request", 400));
     const r = await send();
     expect(r.ok && r.data.messages[0].text).toBe(CRIS_BRAIN_TEXT);
     expect(h.convs).toHaveLength(1);
+    expect(h.requests).toHaveLength(1);
   });
 });
 
