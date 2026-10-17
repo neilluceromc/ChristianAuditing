@@ -431,3 +431,18 @@ describe("Phase 38 Equipment by client", () => {
     }
   });
 });
+
+describe("Phase 41 Settings › Cris (spec §2, §9: admin and it_staff only)", () => {
+  it("admin and it_staff reach /settings/cris", () => {
+    for (const r of ["admin", "it_staff"] as const) expect(pathAllowedForRole("/settings/cris", r)).toBe(true);
+  });
+  it("viewer shares the IT workspace but not Cris; Purchasing and Finance never reach it", () => {
+    for (const r of ["viewer", "purchasing_staff", "finance_staff"] as const) {
+      expect(pathAllowedForRole("/settings/cris", r)).toBe(false);
+    }
+  });
+  it("matches the path exactly, not a lookalike prefix", () => {
+    expect(pathAllowedForRole("/settings/crisp", "it_staff")).toBe(false);
+    expect(pathAllowedForRole("/settings", "it_staff")).toBe(false);
+  });
+});

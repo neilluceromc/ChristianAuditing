@@ -7,6 +7,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { domainValue, flagChange, specFor, type FlagState } from "@/lib/admin-flags";
+import { CRIS_FLAG_KEY } from "@/lib/cris-settings";
 import { asActionResult } from "@/server/prisma-errors";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
@@ -23,6 +24,13 @@ function revalidateAll() {
   for (const path of PATHS) revalidatePath(path);
 }
 
+/**
+ * The `cris` row is a FeatureFlag too, but it is changed only through Settings › Cris (saveCrisSettings), which
+ * validates its value and audits it as `cris-settings`. The generic flag actions refuse it, so it can never be
+ * flipped here under a `flag-enable`/`flag-disable` entry.
+ */
+const CRIS_ONLY_IN_SETTINGS = "Cris is switched on and off in Settings › Cris.";
+
 const setSchema = z.object({ key: z.string().min(1), enabled: z.boolean() });
 
 export async function setFlag(input: unknown): Promise<ActionResult<{ changed: boolean }>> {
@@ -33,6 +41,7 @@ export async function setFlag(input: unknown): Promise<ActionResult<{ changed: b
   const parsed = setSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { key, enabled } = parsed.data;
+  if (key === CRIS_FLAG_KEY) return conflict(CRIS_ONLY_IN_SETTINGS);
 
   // Same discriminated-on-.ok shape as user-actions.ts: every path below
   // returns a full ActionResult, so the caller can tell a real refusal apart
@@ -104,6 +113,7 @@ export async function setFlagValue(input: unknown): Promise<ActionResult<{ chang
   const parsed = valueSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { key } = parsed.data;
+  if (key === CRIS_FLAG_KEY) return conflict(CRIS_ONLY_IN_SETTINGS);
 
   const spec = specFor(key);
   if (!spec?.hasValue) return conflict(`The flag "${key}" doesn't carry a value.`);

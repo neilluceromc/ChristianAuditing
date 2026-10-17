@@ -54,6 +54,26 @@ export function heldOrQueuedWhere(employeeId: string): Prisma.AssetWhereInput {
   };
 }
 
+/**
+ * Phase 41 (Cris, "spare laptops in stock"): the spares free for anyone — the pool less every spare held for
+ * someone (an ACTIVE hold) or promised by an open request. With no person named, nobody's hold is theirs.
+ */
+export function stockWhere(): Prisma.AssetWhereInput {
+  return {
+    AND: [
+      spareWhere(),
+      {
+        NOT: {
+          OR: [
+            { reservations: { some: { state: "ACTIVE" } } },
+            { approvals: { some: { state: { in: [...OPEN_APPROVAL] } } } },
+          ],
+        },
+      },
+    ],
+  };
+}
+
 /** The pool, narrowed by the typed text: a case-insensitive match on the tag or the model. */
 export function spareSearchWhere(q?: string): Prisma.AssetWhereInput {
   const term = q?.trim();

@@ -13,6 +13,10 @@ import { CommandPalette } from "@/components/shell/command-palette";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
 import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
 import { purchaseReviewCount, worklistCount } from "@/server/modules/home/queries";
+import { CrisOrbDefs } from "@/components/cris/orb";
+import { CrisWidget } from "@/components/cris/cris-widget";
+import { crisAvailability, crisPrefsFor } from "@/server/cris/settings-read";
+import { crisWidgetStart } from "@/server/cris/widget-read";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -23,7 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // hides the badge rather than failing every page's shell. Phase 40 §6: so is
   // the Purchase reviews count, read only where its nav item shows (IT workspace).
   const reviewer = user.role === "admin" || user.role === "it_staff";
-  const [approvals, worklist, purchaseReviews] = await Promise.all([
+  const [approvals, worklist, purchaseReviews, cris] = await Promise.all([
     getApprovalsBadge(user.role),
     reviewer
       ? worklistCount(user.id, user.role).catch((err: unknown) => {
@@ -37,6 +41,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           return 0;
         })
       : Promise.resolve(0),
+    // Phase 41 (spec §2, §4): Cris is admin's and IT's only, and only while the admin switch is on and a key is
+    // set. A failed read hides Cris rather than failing every page's shell.
+    reviewer ? crisFor(user.id, user.name, jar.get("br.theme")?.value) : Promise.resolve(null),
   ]);
   const badges = { approvals, worklist, purchaseReviews };
 
@@ -74,8 +81,30 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </main>
       </div>
       <CommandPalette role={user.role} sections={sections} />
+      {/* The orb's symbols, once per page: the widget and Settings › Cris both draw from them. */}
+      {reviewer && <CrisOrbDefs />}
+      {cris && <CrisWidget {...cris} />}
       <PageSearchShortcut />
       <Suspense fallback={null}><NavigationTracker /></Suspense>
     </div>
   );
+}
+
+/** The widget's props, or null when Cris doesn't show for this person (switched off, no key, or hidden in their prefs). */
+async function crisFor(userId: string, name: string, themeCookie: string | undefined) {
+  try {
+    const [availability, prefs] = await Promise.all([crisAvailability(), crisPrefsFor(userId)]);
+    if (!availability.on || !prefs.show) return null;
+    const start = await crisWidgetStart(userId);
+    return {
+      firstName: name.trim().split(/\s+/)[0] ?? "",
+      prefs,
+      theme: themeCookie === "dark" ? ("dark" as const) : ("light" as const),
+      conversationId: start.conversationId,
+      left: start.left,
+    };
+  } catch (err: unknown) {
+    console.error("[cris] widget read failed:", err);
+    return null;
+  }
 }

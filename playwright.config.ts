@@ -15,5 +15,8 @@ export default defineConfig({
     // whatever sits on :3000 can green the suite against stale/wrong-branch code.
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // Phase 41 (spec §8, §10): Cris answers from the scripted fake model — no key, no cost, deterministic.
+    // Refused when NODE_ENV=production. A reused server (above) keeps the env it was started with.
+    env: { ...process.env, CRIS_MODEL: "fake" } as Record<string, string>,
   },
 });

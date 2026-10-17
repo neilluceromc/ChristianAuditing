@@ -109,6 +109,9 @@ async function safePrune(): Promise<void> {
     if (r.deliveries || r.jobs) {
       console.log(`[worker] pruned ${r.deliveries} deliver${r.deliveries === 1 ? "y" : "ies"}, ${r.jobs} job${r.jobs === 1 ? "" : "s"} older than ${RETENTION_DAYS} days`);
     }
+    if (r.crisConversations || r.crisPending) {
+      console.log(`[worker] pruned ${r.crisConversations} Cris chat${r.crisConversations === 1 ? "" : "s"}, ${r.crisPending} Cris pending action${r.crisPending === 1 ? "" : "s"}`);
+    }
   } catch (err) {
     console.error(`[worker] prune failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {

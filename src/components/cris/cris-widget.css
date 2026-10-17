@@ -1,0 +1,157 @@
+/* Cris's dock, chat box and hint (spec §4), ported from the CrisPage mockup. The geometry that depends on where
+   the mascot sits (which side, above or below, how tall) comes from src/lib/cris-placement.ts as inline style;
+   this file holds what doesn't move, the pointer, and the phone layout, which overrides the inline style. Colours
+   are the app's tokens, so both themes work. Prefixed cris- so nothing collides with Tailwind or the app. */
+
+@keyframes cris-pop {
+  from { opacity: 0; transform: scale(0.86); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes cris-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* One unit: the box, the hint and the mascot never drift apart. */
+.cris-dock {
+  position: fixed;
+  z-index: 30;
+  width: 116px;
+  height: 116px;
+  transition: left 0.25s ease, right 0.25s ease, top 0.25s ease, bottom 0.25s ease;
+}
+.cris-dock.is-dragging { transition: none; }
+
+.cris-mascot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 116px;
+  height: 116px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  touch-action: none;
+  transition: transform 0.15s;
+}
+.cris-mascot:hover { transform: scale(1.05); }
+.cris-mascot:active { transform: scale(0.96); }
+.cris-mascot.is-closed { cursor: grab; }
+.cris-mascot.is-dragging { cursor: grabbing; transition: none; }
+.cris-mascot .cris-orb { filter: drop-shadow(0 6px 10px rgba(16, 24, 40, 0.25)); }
+
+.cris-badge {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 2px solid var(--canvas);
+  border-radius: 999px;
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cris-hint {
+  position: absolute;
+  z-index: 6;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 12.5px;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px rgba(16, 24, 40, 0.12);
+  /* Slides in without fading: the hint sits on every page until the first open, and a half-transparent
+     line of muted text would fail contrast for as long as the fade runs. */
+  animation: cris-hint-in 0.3s ease-out;
+}
+
+@keyframes cris-hint-in {
+  from { transform: translateY(8px); }
+  to { transform: none; }
+}
+
+/* The box. Its side, edge, size and max height are inline (boxPlacement). */
+.cris-box {
+  --cris-bubble: #f2f4f7;
+  --cris-pick: #f7f8fa;
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  box-shadow: 0 24px 54px rgba(16, 24, 40, 0.22), 0 2px 6px rgba(16, 24, 40, 0.06);
+  animation: cris-pop 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+[data-theme="dark"] .cris-box {
+  --cris-bubble: #232833;
+  --cris-pick: #1d2129;
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* The speech-bubble pointer: a 16 px square turned 45°, 21 px in, over the mascot's centre. */
+.cris-box::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transform: rotate(45deg);
+}
+.cris-box.cris-above::after { bottom: -9px; border-top: 0; border-left: 0; }
+.cris-box.cris-below::after { top: -9px; border-bottom: 0; border-right: 0; }
+.cris-box.cris-r::after { right: 21px; }
+.cris-box.cris-l::after { left: 21px; }
+
+.cris-msg { animation: cris-rise 0.22s ease-out; }
+
+/* Phones: a smaller Cris fixed bottom-right, and the box as a panel across the bottom; no pointer, no hint. */
+@media (max-width: 640px) {
+  .cris-dock {
+    width: 76px !important;
+    height: 76px !important;
+    left: auto !important;
+    top: auto !important;
+    right: 16px !important;
+    bottom: 16px !important;
+  }
+  .cris-mascot { width: 76px; height: 76px; }
+  .cris-mascot .cr-orb { width: 72px; height: 72px; }
+  .cris-badge { right: 2px; top: 0; }
+  .cris-box {
+    position: fixed;
+    left: 12px !important;
+    right: 12px !important;
+    top: auto !important;
+    bottom: 100px !important;
+    width: auto !important;
+    height: min(560px, calc(100vh - 124px)) !important;
+    max-height: none !important;
+  }
+  .cris-box::after,
+  .cris-hint { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cris-dock, .cris-mascot { transition: none; }
+  .cris-box, .cris-hint, .cris-msg { animation: none; }
+}

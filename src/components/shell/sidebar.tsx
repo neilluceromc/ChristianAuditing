@@ -1,6 +1,7 @@
 import type { Role, User } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { approvalClassWhere } from "@/lib/approval-access";
+import { hasCris } from "@/lib/cris-settings";
 import { Avatar } from "@/components/ui/avatar";
 import {
   WORKSPACE_META,
@@ -64,7 +65,7 @@ export function Sidebar({
           <p className="truncate text-xs font-medium text-fg">{user.name}</p>
           <p className="font-mono text-[9.5px] uppercase text-fg-muted">{user.role}</p>
         </div>
-        <AccountMenu />
+        <AccountMenu crisSettings={hasCris(user.role)} />
       </div>
     </aside>
   );

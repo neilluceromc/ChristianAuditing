@@ -177,6 +177,7 @@ model User {
   employeeTransfers        EmployeeTransfer[]      @relation("employeeTransfers")
   purchaseRecordsCreated   PurchaseRecord[]        @relation("purchaseRecordsCreated")
   employeeNotes            EmployeeNote[]
+  crisConversations        CrisConversation[]
 }
 
 model UserPreference {
@@ -1034,4 +1035,58 @@ model StocktakeLine {
   countedBy   User?     @relation("stocktakeLinesCounted", fields: [countedById], references: [id], onDelete: Restrict)
 
   @@unique([stocktakeId, itemId])
+}
+
+// ── Cris, the in-app IT assistant (Phase 41, spec §7) ─────────────────
+
+/// One open conversation per person; New chat starts a fresh one. Private to its person.
+/// The worker's prune deletes rows not updated for 30 days.
+model CrisConversation {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String?
+  /// What the person has picked in the box so far (person, slot, spare), carried between turns.
+  picks     Json          @default("{}")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  CrisMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model CrisMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   CrisConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// "user" | "cris" | "tool" (CrisMessageRole in src/server/cris/messages.ts)
+  role           String
+  /// text plus structured cards
+  content        Json
+  inputTokens    Int?
+  outputTokens   Int?
+  /// the CrisModelId that produced an assistant reply, so the month's cost prices each reply at its own model
+  model          String?
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+/// A change Cris proposed, waiting for the person's Confirm (spec §6). Expires after 10 minutes;
+/// the worker's prune deletes rows older than a day. No foreign keys: a short-lived token, not a record.
+model CrisPendingAction {
+  id             String    @id @default(cuid())
+  userId         String
+  conversationId String
+  /// "assign" | "replace"
+  kind           String
+  input          Json
+  card           Json
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  usedAt         DateTime?
+  undoneAt       DateTime?
+  resultRef      String?
+
+  @@index([userId, createdAt])
 }

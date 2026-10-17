@@ -202,6 +202,13 @@ describe("timelinePhrase — a timeline row's words", () => {
     expect(timelinePhrase(e("reservation.placed", { hold: { from: null, to: "EMP-0097" }, expiresAt: { from: null, to: "2026-08-23T00:00:00.000Z" } }), "BR-HS-0502", emps))
       .toMatch(/^reserved for Nina Robles until /);
   });
+  it("says when a change came through Cris, and still words an unknown action", () => {
+    const via = { via: { from: null, to: "Cris" } };
+    expect(timelinePhrase(e("lifecycle.assign", { assignee: { from: null, to: "EMP-0097" }, ...via }), "BR-LT-0148", emps))
+      .toBe("assigned to Nina Robles (via Cris)");
+    // a labelled action with no sentence of its own still falls back to its label, never the raw code
+    expect(timelinePhrase(e("rotate-secret", via), "BR-LT-0148", emps)).toBe("Webhook secret rotated (via Cris)");
+  });
   it("keeps an unresolved holder as written", () => {
     expect(timelinePhrase(e("lifecycle.assign", { assignee: { from: null, to: "EMP-0001" } }), "BR-LT-0148", emps))
       .toBe("assigned to EMP-0001");
