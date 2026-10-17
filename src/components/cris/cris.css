@@ -1,0 +1,171 @@
+/* Cris orb + moods (spec §5). Ported from the CrisLooks mockup's ORB_CSS and MOOD_CSS,
+   with every name prefixed so nothing collides with Tailwind or the app.
+
+   How it works: the mood class sits on the .cris-orb wrapper and moves the whole orb
+   (.cr-orb, the outer <svg>). The eye, core and HUD rings live inside the <symbol>, so
+   the <use> clone can't be reached by descendant selectors; instead the mood sets CSS
+   custom properties on .cr-orb, which inherit into the clone and drive its animations.
+
+   Motion: Lively plays every mood; Calm keeps only the slow float; Still and
+   prefers-reduced-motion stop everything. Nothing flashes more than 3 times a second
+   (the frustrated red glow is one 1.6 s cycle). */
+
+@keyframes cris-spin { to { transform: rotate(360deg); } }
+@keyframes cris-spin-r { to { transform: rotate(-360deg); } }
+@keyframes cris-bob { 50% { transform: translateY(-6px); } }
+@keyframes cris-talk {
+  0% { transform: translateY(0) scale(1, 1) rotate(0); }
+  25% { transform: translateY(-6px) scale(0.95, 1.06) rotate(-2deg); }
+  50% { transform: translateY(-2px) scale(1.03, 0.97) rotate(1deg); }
+  75% { transform: translateY(-7px) scale(0.96, 1.05) rotate(2deg); }
+  100% { transform: translateY(0) scale(1, 1) rotate(0); }
+}
+@keyframes cris-think {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-4px) rotate(3deg); }
+}
+@keyframes cris-lean {
+  0%, 100% { transform: translateX(-6px) rotate(-4deg); }
+  50% { transform: translateX(6px) rotate(4deg); }
+}
+@keyframes cris-lookabout {
+  0%, 18% { transform: rotate(0) translateX(0); }
+  28%, 46% { transform: rotate(-12deg) translateX(-8px); }
+  56%, 74% { transform: rotate(12deg) translateX(8px); }
+  84%, 100% { transform: rotate(0) translateX(0); }
+}
+@keyframes cris-sag {
+  0%, 100% { transform: translateY(12px) rotate(-7deg) scale(0.97); }
+  50% { transform: translateY(16px) rotate(-8deg) scale(0.96); }
+}
+@keyframes cris-shake {
+  0%, 52%, 100% { transform: translateX(0); }
+  56% { transform: translateX(-7px) rotate(-2deg); }
+  62% { transform: translateX(7px) rotate(2deg); }
+  68% { transform: translateX(-6px); }
+  74% { transform: translateX(5px); }
+  80% { transform: translateX(-3px); }
+  86% { transform: translateX(0); }
+}
+@keyframes cris-glow-red {
+  0%, 50%, 100% { filter: drop-shadow(0 0 0 rgba(217, 45, 32, 0)); }
+  62% { filter: drop-shadow(0 0 14px rgba(217, 45, 32, 0.75)); }
+}
+@keyframes cris-eye-sweep {
+  0%, 100% { transform: translateX(-34px); }
+  50% { transform: translateX(34px); }
+}
+@keyframes cris-eye-dart {
+  0%, 18% { transform: translate(0, 0); }
+  28%, 46% { transform: translate(-30px, -6px); }
+  56%, 74% { transform: translate(30px, -6px); }
+  84%, 100% { transform: translate(0, 0); }
+}
+@keyframes cris-eye-down {
+  0%, 100% { transform: translateY(24px); }
+  50% { transform: translateY(28px); }
+}
+@keyframes cris-eye-up {
+  0%, 100% { transform: translate(10px, -18px); }
+  50% { transform: translate(-10px, -22px); }
+}
+@keyframes cris-eye-narrow {
+  0%, 100% { transform: scaleY(0.62); }
+  50% { transform: scaleY(0.7); }
+}
+@keyframes cris-core-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.28); }
+}
+@keyframes cris-core-breath {
+  0%, 100% { transform: scale(0.92); opacity: 0.85; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+@keyframes cris-core-dim {
+  0%, 100% { transform: scale(0.7); opacity: 0.55; }
+  50% { transform: scale(0.76); opacity: 0.65; }
+}
+@keyframes cris-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes cris-blink { 50% { opacity: 0; } }
+
+/* Inside the symbol (applies to the <use> clones). */
+.cr-spin, .cr-spin-r, .cr-spin-f, .cr-eye, .cr-core {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.cr-spin { animation: var(--cr-spin, cris-spin) var(--cr-spin-a, 24s) linear infinite; }
+.cr-spin-r { animation: var(--cr-spin-r, cris-spin-r) var(--cr-spin-b, 36s) linear infinite; }
+.cr-spin-f { animation: var(--cr-spin, cris-spin) var(--cr-spin-c, 9s) linear infinite; }
+.cr-eye { animation: var(--cr-eye-anim, none) var(--cr-eye-dur, 3s) ease-in-out infinite; }
+.cr-core { animation: var(--cr-core-anim, cris-core-breath) var(--cr-core-dur, 3.2s) ease-in-out infinite; }
+
+/* The orb itself. */
+.cris-orb { display: inline-block; line-height: 0; }
+.cr-orb { display: block; overflow: visible; }
+
+/* Moods (Lively). */
+.cris-orb.m-idle .cr-orb { animation: cris-bob 4s ease-in-out infinite; }
+.cris-orb.m-talk .cr-orb {
+  animation: cris-talk 0.9s ease-in-out infinite;
+  --cr-core-anim: cris-core-pulse; --cr-core-dur: 0.36s;
+}
+.cris-orb.m-think .cr-orb {
+  animation: cris-think 2.4s ease-in-out infinite;
+  --cr-spin-a: 3s; --cr-spin-b: 4s; --cr-spin-c: 1.6s;
+  --cr-eye-anim: cris-eye-up; --cr-eye-dur: 2.4s;
+}
+.cris-orb.m-search .cr-orb {
+  animation: cris-lean 1.8s ease-in-out infinite;
+  --cr-eye-anim: cris-eye-sweep; --cr-eye-dur: 1.8s; --cr-spin-c: 2s;
+}
+.cris-orb.m-look .cr-orb {
+  animation: cris-lookabout 4.2s ease-in-out infinite;
+  --cr-eye-anim: cris-eye-dart; --cr-eye-dur: 4.2s;
+}
+.cris-orb.m-sad .cr-orb {
+  animation: cris-sag 5s ease-in-out infinite;
+  filter: saturate(0.35) brightness(0.88);
+  --cr-eye-anim: cris-eye-down; --cr-eye-dur: 5s;
+  --cr-core-anim: cris-core-dim; --cr-core-dur: 5s;
+  --cr-spin-a: 90s; --cr-spin-b: 120s; --cr-spin-c: 40s;
+}
+.cris-orb.m-cross .cr-orb {
+  animation: cris-shake 1.6s ease-in-out infinite, cris-glow-red 1.6s ease-in-out infinite;
+  --cr-eye-anim: cris-eye-narrow; --cr-eye-dur: 1.6s;
+  --cr-core-anim: cris-core-pulse; --cr-core-dur: 0.5s;
+  --cr-spin-a: 2s; --cr-spin-b: 2.5s; --cr-spin-c: 0.8s;
+}
+
+/* Calm and Still. Same specificity as the moods, so these must stay after them. */
+.cris-orb.cr-calm .cr-orb,
+.cris-orb.cr-still .cr-orb {
+  --cr-spin: none; --cr-spin-r: none; --cr-eye-anim: none; --cr-core-anim: none;
+}
+.cris-orb.cr-calm .cr-orb { animation: cris-bob 4s ease-in-out infinite; }
+.cris-orb.cr-still .cr-orb { animation: none; }
+
+/* Chat helpers from the same mockup: the thinking dots and the typing caret. */
+.cris-dots span {
+  display: inline-block; width: 6px; height: 6px; margin: 0 2px;
+  border-radius: 50%; background: currentColor;
+  animation: cris-dot 1.2s infinite;
+}
+.cris-dots span:nth-child(2) { animation-delay: 0.2s; }
+.cris-dots span:nth-child(3) { animation-delay: 0.4s; }
+.cris-caret {
+  display: inline-block; width: 2px; height: 1em; margin-left: 1px; vertical-align: -2px;
+  background: currentColor;
+  animation: cris-blink 1s steps(1) infinite;
+}
+
+/* The person's OS setting always wins. */
+@media (prefers-reduced-motion: reduce) {
+  .cris-orb .cr-orb,
+  .cr-spin, .cr-spin-r, .cr-spin-f, .cr-eye, .cr-core,
+  .cris-dots span, .cris-caret {
+    animation: none !important;
+  }
+}
