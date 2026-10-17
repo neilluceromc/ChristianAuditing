@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { CrisModelId } from "@/lib/cris-settings";
+import { inputEquivalentTokens } from "@/lib/cris-cost";
 import type { CrisModel, CrisReply, CrisRequest } from "./model";
 
 /*
@@ -7,10 +8,14 @@ import type { CrisModel, CrisReply, CrisRequest } from "./model";
  * NOT "use server". The key is read from ANTHROPIC_API_KEY by the SDK — never stored, never shown.
  */
 
-/** Why a request did not get a reply. The turn treats every one the same (Review Focus #4); the kind is for the log. */
-export type ProviderFailure = "no-key" | "auth" | "rate-limited" | "timeout" | "connection" | "api";
+/**
+ * Why a request did not get a reply. "bad-request" (HTTP 400) means the API refused what was sent — for Cris
+ * most likely a conversation history it will no longer accept — so the turn starts a fresh conversation; every
+ * other kind gets "I couldn't reach my brain…" (Review Focus #4). "sdk" is any other SDK error before a reply.
+ */
+export type ProviderFailure = "no-key" | "auth" | "bad-request" | "rate-limited" | "timeout" | "connection" | "api" | "sdk";
 
-/** The provider failed, timed out, or there is no usable key: the turn says "I couldn't reach my brain…". */
+/** The provider failed, timed out, refused the request, or there is no usable key. */
 export class CrisProviderError extends Error {
   constructor(readonly kind: ProviderFailure, readonly status?: number) {
     super(`Cris could not reach the model (${kind}${status ? ` ${status}` : ""})`);
@@ -33,31 +38,38 @@ function anthropic(): Anthropic {
 function failure(err: unknown): CrisProviderError | null {
   if (err instanceof Anthropic.APIConnectionTimeoutError) return new CrisProviderError("timeout");
   if (err instanceof Anthropic.APIConnectionError) return new CrisProviderError("connection");
+  if (err instanceof Anthropic.BadRequestError) return new CrisProviderError("bad-request", err.status);
   if (err instanceof Anthropic.AuthenticationError) return new CrisProviderError("auth", err.status);
   if (err instanceof Anthropic.RateLimitError) return new CrisProviderError("rate-limited", err.status);
   if (err instanceof Anthropic.APIError) return new CrisProviderError("api", err.status);
-  // The SDK's own errors before any request — e.g. no key set (constructing the client).
-  if (err instanceof Anthropic.AnthropicError) return new CrisProviderError("no-key");
+  if (err instanceof Anthropic.AnthropicError) return new CrisProviderError("sdk");
   return null;
 }
 
 /**
- * A fallback reply's blocks as the next request should echo them: only what follows the last `fallback` marker (a
- * non-streaming mid-output decline omits the declined partial, and the marker itself may be dropped), and only the
- * block types this app sends — text, thinking and tool calls — unchanged.
+ * A fallback reply's blocks as the next request should echo them (the documented rule): before the LAST `fallback`
+ * marker, omit only thinking, redacted_thinking and tool_use blocks; everything else, and everything after the
+ * marker, echoes unchanged. The marker itself is an audit marker and is dropped.
  */
-function echoable(content: Anthropic.Beta.BetaContentBlock[]): Anthropic.ContentBlock[] {
-  let start = 0;
-  content.forEach((b, i) => { if (b.type === "fallback") start = i + 1; });
-  return content
-    .slice(start)
-    .filter((b) => b.type === "text" || b.type === "thinking" || b.type === "redacted_thinking" || b.type === "tool_use") as unknown as Anthropic.ContentBlock[];
+const DROPPED_BEFORE_FALLBACK: ReadonlySet<string> = new Set(["thinking", "redacted_thinking", "tool_use"]);
+export function echoable(content: Anthropic.Beta.BetaContentBlock[]): Anthropic.ContentBlock[] {
+  let marker = -1;
+  content.forEach((b, i) => { if (b.type === "fallback") marker = i; });
+  return content.filter((b, i) => {
+    if (i === marker) return false;
+    return i > marker || !DROPPED_BEFORE_FALLBACK.has(b.type);
+  }) as unknown as Anthropic.ContentBlock[];
 }
 
 export function anthropicModel(model: CrisModelId): CrisModel {
   return {
     id: model,
     async reply({ system, messages, tools }: CrisRequest): Promise<CrisReply> {
+      // Checked here, not left to the SDK: without a key the SDK throws a plain Error, not one of its typed errors.
+      if (!process.env.ANTHROPIC_API_KEY) {
+        console.error("cris: no ANTHROPIC_API_KEY is set");
+        throw new CrisProviderError("no-key");
+      }
       const params = {
         model,
         max_tokens: 2000,
@@ -72,10 +84,16 @@ export function anthropicModel(model: CrisModelId): CrisModel {
       try {
         if (WITH_FALLBACK.has(model)) {
           const r = await anthropic().beta.messages.create({ ...params, betas: [FALLBACK_BETA], fallbacks: "default" });
-          return { content: echoable(r.content), stop: r.stop_reason ?? "end_turn", usage: { input: r.usage.input_tokens, output: r.usage.output_tokens } };
+          return {
+            content: echoable(r.content), stop: r.stop_reason ?? "end_turn", model: r.model,
+            usage: { input: inputEquivalentTokens(r.usage), output: r.usage.output_tokens },
+          };
         }
         const r = await anthropic().messages.create(params);
-        return { content: r.content, stop: r.stop_reason ?? "end_turn", usage: { input: r.usage.input_tokens, output: r.usage.output_tokens } };
+        return {
+          content: r.content, stop: r.stop_reason ?? "end_turn", model: r.model,
+          usage: { input: inputEquivalentTokens(r.usage), output: r.usage.output_tokens },
+        };
       } catch (err) {
         const f = failure(err);
         if (!f) throw err;

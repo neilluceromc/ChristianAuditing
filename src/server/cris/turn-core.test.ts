@@ -17,7 +17,7 @@ type Row = {
   inputTokens: number | null; outputTokens: number | null; model: string | null; createdAt: Date;
 };
 type Conv = { id: string; userId: string; picks: unknown; updatedAt: Date };
-type Reply = { content: Anthropic.ContentBlock[]; stop: string; usage: { input: number; output: number } };
+type Reply = { content: Anthropic.ContentBlock[]; stop: string; model: string; usage: { input: number; output: number } };
 type ToolCall = { ctx: Record<string, unknown>; name: string; input: unknown };
 
 const h = vi.hoisted(() => ({
@@ -35,6 +35,7 @@ const h = vi.hoisted(() => ({
   toolCalls: [] as ToolCall[],
   tool: null as null | ((ctx: { picks: Picks }, name: string, input: unknown) => { result: unknown; cards: CrisCard[]; picks: Picks; mood: string }),
   modelId: "fake",
+  locks: [] as unknown[][],
 }));
 
 /** jsonb: keys re-ordered shorter-first; strings kept byte for byte. */
@@ -84,8 +85,13 @@ vi.mock("@/server/db/client", () => {
         mine.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
         return mine[0] ? { id: mine[0].id, picks: mine[0].picks } : null;
       },
-      create: async ({ data }: { data: { userId: string } }) => {
-        const c = { id: nextId("conv"), userId: data.userId, picks: {}, updatedAt: new Date(++h.clock) };
+      findUniqueOrThrow: async ({ where }: { where: { id: string } }) => {
+        const c = h.convs.find((x) => x.id === where.id);
+        if (!c) throw new Error("no conversation");
+        return { picks: c.picks };
+      },
+      create: async ({ data }: { data: { userId: string; picks?: unknown } }) => {
+        const c = { id: nextId("conv"), userId: data.userId, picks: jsonb(data.picks ?? {}), updatedAt: new Date(++h.clock) };
         h.convs.push(c);
         return { id: c.id };
       },
@@ -103,7 +109,8 @@ vi.mock("@/server/db/client", () => {
         const rows = sorted(h.rows.filter((r) => whereRow(r, where)), orderBy[0].createdAt === "desc");
         return rows.slice(0, take ?? rows.length);
       },
-      findFirst: async ({ where }: { where: Record<string, unknown> }) => h.rows.find((r) => whereRow(r, where)) ?? null,
+      findFirst: async ({ where, orderBy }: { where: Record<string, unknown>; orderBy?: Array<{ createdAt: string }> }) =>
+        sorted(h.rows.filter((r) => whereRow(r, where)), orderBy?.[0]?.createdAt === "desc")[0] ?? null,
       create: async ({ data }: { data: Omit<Row, "id" | "createdAt"> }) => {
         const row: Row = {
           id: nextId("msg"), conversationId: data.conversationId, role: data.role, content: jsonb(data.content),
@@ -128,6 +135,10 @@ vi.mock("@/server/db/client", () => {
     },
     employee: {
       findUnique: async ({ where }: { where: { id: string } }) => h.people.find((p) => p.id === where.id) ?? null,
+    },
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      h.locks.push([strings.join("?"), ...values]);
+      return [];
     },
     $transaction: async (arg: unknown) => (typeof arg === "function" ? (arg as (tx: unknown) => unknown)(db) : Promise.all(arg as unknown[])),
   };
@@ -163,19 +174,23 @@ vi.mock("./model", async (importOriginal) => {
   };
 });
 
-const { crisTurn, crisHistoryFor, CRIS_ROUNDS_TEXT, CRIS_OFF_NO_KEY, CRIS_RATE_TEXT, CRIS_MAX_ROUNDS, CRIS_BUSY_TEXT } = await import("./turn-core");
+const {
+  crisTurn, crisHistoryFor, crisNewChatFor, CRIS_ROUNDS_TEXT, CRIS_OFF_NO_KEY, CRIS_RATE_TEXT, CRIS_MAX_ROUNDS, CRIS_BUSY_TEXT,
+  CRIS_TOO_LONG_TEXT, CRIS_FRESH_TEXT, CRIS_MAX_TURNS,
+} = await import("./turn-core");
 const { CrisProviderError } = await import("./model");
 
 const user = { id: "u1", name: "Neil Lucero", role: "it_staff" } as User;
 const NOW = new Date("2026-10-17T04:00:00Z"); // midday in Manila
 
-const text = (t: string): Reply => ({ content: [{ type: "text", text: t, citations: null }], stop: "end_turn", usage: { input: 10, output: 5 } });
+const text = (t: string): Reply => ({ content: [{ type: "text", text: t, citations: null }], stop: "end_turn", model: "claude-haiku-5-5", usage: { input: 10, output: 5 } });
 const call = (id: string, name: string, input: Record<string, unknown>): Reply => ({
   content: [
     { type: "thinking", thinking: "", signature: `sig-${id}` },
     { type: "tool_use", id, name, input, caller: { type: "direct" } },
   ],
   stop: "tool_use",
+  model: "claude-haiku-5-5",
   usage: { input: 20, output: 8 },
 });
 const send = (over: Record<string, unknown> = {}) => crisTurn(user, { text: "Check Ana Reyes's items", page: { path: "/inventory" }, ...over }, NOW);
@@ -194,7 +209,7 @@ beforeEach(() => {
   Object.assign(h, {
     convs: [], rows: [], assets: [], people: [], clock: NOW.getTime() - 1_000_000, seq: 0,
     settings: { on: true, dailyLimit: 100, model: "claude-haiku-5-5" }, rate: { allowed: true }, rateCalls: [],
-    replies: [], requests: [], toolCalls: [], modelId: "fake",
+    replies: [], requests: [], toolCalls: [], modelId: "fake", locks: [],
     tool: (ctx: { picks: Picks }) => ({ result: { ok: true }, cards: [], picks: notePick(ctx.picks, { person: "e9" }), mood: "search" }),
   });
 });
@@ -210,6 +225,16 @@ describe("the daily limit (Review Focus #5) — checked before any model call", 
     expect(h.rows.length).toBe(before);
     expect(h.requests).toHaveLength(0);
     expect(h.rateCalls).toHaveLength(0); // the limit comes before the rate check
+    expect(r.ok && r.data.conversationId).toBeNull(); // none sent: null, never ""
+  });
+
+  it("returns the sent conversation only when it is the person's own", async () => {
+    seedUserRows(100, new Date(NOW.getTime() - 60_000));
+    h.convs.push({ id: "theirs", userId: "u2", picks: {}, updatedAt: new Date(0) });
+    const mine = await send({ conversationId: "conv-old" });
+    expect(mine.ok && mine.data.conversationId).toBe("conv-old");
+    const other = await send({ conversationId: "theirs" });
+    expect(other.ok && other.data.conversationId).toBeNull();
   });
 
   it("answers the 100th question", async () => {
@@ -248,7 +273,7 @@ describe("a provider failure or a refusal (Review Focus #4)", () => {
   });
 
   it("says the refusal copy for a refusal stop reason", async () => {
-    h.replies.push({ content: [], stop: "refusal", usage: { input: 5, output: 0 } });
+    h.replies.push({ content: [], stop: "refusal", model: "claude-haiku-5-5", usage: { input: 5, output: 0 } });
     const r = await send();
     expect(r.ok && r.data).toMatchObject({ mood: "cross", left: 100 });
     expect(r.ok && r.data.messages[0].text).toBe(CRIS_REFUSED_TEXT);
@@ -258,7 +283,19 @@ describe("a provider failure or a refusal (Review Focus #4)", () => {
   it("treats tool calls cut off by max_tokens as a failed reply", async () => {
     h.replies.push({ ...call("t1", "find_people", { q: "Ana" }), stop: "max_tokens" });
     const r = await send();
-    expect(r.ok && r.data.messages[0].text).toBe(CRIS_BRAIN_TEXT);
+    expect(r.ok && r.data.messages[0].text).toBe(CRIS_TOO_LONG_TEXT);
+    expect(h.rows).toHaveLength(0);
+  });
+
+  it("never keeps a reply cut off by max_tokens as an answer (text or thinking only)", async () => {
+    h.replies.push({ ...text("Ana Reyes has 2 items: BR-LT-01"), stop: "max_tokens" });
+    const r = await send();
+    expect(r.ok && r.data).toMatchObject({ mood: "cross", left: 100 });
+    expect(r.ok && r.data.messages.map((m) => m.text)).toEqual([CRIS_TOO_LONG_TEXT]);
+    expect(h.rows).toHaveLength(0);
+    h.replies.push({ content: [{ type: "thinking", thinking: "", signature: "s" }], stop: "max_tokens", model: "claude-haiku-5-5", usage: { input: 1, output: 2000 } });
+    const r2 = await send();
+    expect(r2.ok && r2.data.messages[0].text).toBe(CRIS_TOO_LONG_TEXT);
     expect(h.rows).toHaveLength(0);
   });
 
@@ -266,6 +303,34 @@ describe("a provider failure or a refusal (Review Focus #4)", () => {
     h.replies.push(new Error("db down"));
     await expect(send()).rejects.toThrow("db down");
     expect(h.rows).toHaveLength(0);
+  });
+});
+
+describe("a history the API rejects (400) never bricks the chat", () => {
+  it("moves the person to a fresh conversation, says so, and leaves the old one as it was", async () => {
+    h.replies.push(text("first answer"));
+    const first = await send();
+    const oldId = first.ok ? first.data.conversationId : "";
+    const oldRows = h.rows.map((r) => r.id);
+    h.replies.push(new CrisProviderError("bad-request", 400));
+    const r = await send({ conversationId: oldId, text: "and now?" });
+    expect(r.ok && r.data).toMatchObject({ mood: "cross", left: 99 });
+    expect(r.ok && r.data.messages.map((m) => m.text)).toEqual([CRIS_FRESH_TEXT]);
+    const freshId = r.ok ? r.data.conversationId : null;
+    expect(freshId).not.toBe(oldId);
+    expect(h.convs.find((c) => c.id === freshId)?.userId).toBe(user.id);
+    expect(h.rows.map((x) => x.id)).toEqual(oldRows); // the failed question is not counted or kept
+    // the next message in the fresh conversation starts a clean history
+    h.replies.push(text("ok"));
+    await send({ conversationId: freshId, text: "Check Ana Reyes's items" });
+    expect(h.requests.at(-1)!.messages).toHaveLength(1);
+  });
+
+  it("stays put with the brain copy when the conversation had no history to blame", async () => {
+    h.replies.push(new CrisProviderError("bad-request", 400));
+    const r = await send();
+    expect(r.ok && r.data.messages[0].text).toBe(CRIS_BRAIN_TEXT);
+    expect(h.convs).toHaveLength(1);
   });
 });
 
@@ -337,6 +402,72 @@ describe("the turn", () => {
     h.replies.push(text("ok"));
     await send();
     expect(h.rows.every((x) => x.inputTokens === null && x.model === null)).toBe(true);
+  });
+
+  it("prices each reply at the model that served it (a server-side fallback), or the asked model when unknown", async () => {
+    h.modelId = "claude-sonnet-5-5";
+    h.replies.push({ ...call("t1", "find_people", { q: "x" }), model: "claude-sonnet-5" }, { ...text("ok"), model: "some-new-model" });
+    await send();
+    expect(h.rows.filter((x) => x.role !== "user").map((x) => x.model)).toEqual(["claude-sonnet-5", "claude-sonnet-5-5"]);
+  });
+});
+
+describe("Cris off: history and new chat refuse too", () => {
+  it("refuses both with the off copy", async () => {
+    vi.stubEnv("CRIS_MODEL", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    expect(await crisNewChatFor(user)).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_NO_KEY });
+    expect(await crisHistoryFor(user, { conversationId: "c1" })).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_NO_KEY });
+    expect(h.convs).toHaveLength(0);
+  });
+});
+
+describe("rolling over a full conversation", () => {
+  const spares: CrisCard = { type: "spares", employeeId: "e1", offset: 0, more: false, options: [
+    { assetId: "a230", tag: "BR-LT-0230", model: "M", typeName: "Laptop", warrantyEnd: null, backOn: null },
+  ] };
+
+  function fullConversation(lastCards: CrisCard[]) {
+    h.convs.push({ id: "full", userId: user.id, picks: { people: ["e1"], assets: [] }, updatedAt: new Date(NOW.getTime() - 60_000) });
+    const at = new Date("2026-10-15T00:00:00Z"); // an earlier day: not counted today
+    for (let i = 0; i < CRIS_MAX_TURNS; i++) {
+      h.rows.push({ id: `u${String(i).padStart(3, "0")}`, conversationId: "full", role: "user", content: { text: "q", api: "[]" }, inputTokens: null, outputTokens: null, model: null, createdAt: new Date(at.getTime() + i * 2) });
+      h.rows.push({ id: `c${String(i).padStart(3, "0")}`, conversationId: "full", role: "cris", content: { text: "a", cards: i === CRIS_MAX_TURNS - 1 ? lastCards : [], api: "[]" }, inputTokens: null, outputTokens: null, model: null, createdAt: new Date(at.getTime() + i * 2 + 1) });
+    }
+  }
+
+  it("moves on after CRIS_MAX_TURNS questions, carrying the picks and the open spares card, so the pick still works", async () => {
+    fullConversation([spares]);
+    h.assets.push({ id: "a230", tag: "BR-LT-0230", cls: "IT" });
+    h.tool = (ctx) => ({ result: { shown: "card" }, cards: [], picks: ctx.picks, mood: "look" });
+    h.replies.push(call("t1", "propose_assign", { employeeId: "e1", assetId: "a230" }), text("Check the card."));
+    const r = await crisTurn(user, { conversationId: "full", pick: { kind: "asset", assetId: "a230", scanned: false }, page: { path: "/" } }, NOW);
+    const freshId = r.ok ? r.data.conversationId : null;
+    expect(freshId).not.toBe("full");
+    // the person's picks came along, plus this pick
+    expect(h.toolCalls[0].ctx.picks).toEqual({ people: ["e1"], assets: ["a230"] });
+    // the open card came along as the new conversation's first Cris message: it is the open spares card
+    expect(h.toolCalls[0].ctx.openSpareTags).toEqual(["BR-LT-0230"]);
+    const carried = h.rows.filter((x) => x.conversationId === freshId);
+    expect(carried[0].role).toBe("cris");
+    expect((carried[0].content as { cards: CrisCard[] }).cards).toEqual([spares]);
+    // and the model reads it as a box note naming the ids, before the person's pick
+    const sent = h.requests[0].messages;
+    expect(sent).toHaveLength(2);
+    expect(String(sent[0].content)).toContain("Spares listed for person id e1: BR-LT-0230 (asset id a230).");
+    expect(personTextOf(sent[1])).toBe("I picked BR-LT-0230.");
+    // the full conversation is left as it was
+    expect(h.rows.filter((x) => x.conversationId === "full")).toHaveLength(CRIS_MAX_TURNS * 2);
+  });
+
+  it("carries the picks but no card when nothing was waiting", async () => {
+    fullConversation([]);
+    h.replies.push(text("ok"));
+    const r = await send({ conversationId: "full" });
+    const freshId = r.ok ? r.data.conversationId : null;
+    expect(freshId).not.toBe("full");
+    expect(h.convs.find((c) => c.id === freshId)?.picks).toEqual({ people: ["e1"], assets: [] });
+    expect(h.rows.filter((x) => x.conversationId === freshId).map((x) => x.role)).toEqual(["user", "cris"]);
   });
 });
 
@@ -424,13 +555,32 @@ describe("the history the model reads (append-only)", () => {
 
   it("answers one turn at a time per conversation: a second tab waits while a turn is running", async () => {
     h.convs.push({ id: "c1", userId: user.id, picks: {}, updatedAt: new Date(0) });
-    h.rows.push({ id: "m1", conversationId: "c1", role: "user", content: { text: "q" }, inputTokens: null, outputTokens: null, model: null, createdAt: new Date(NOW.getTime() - 5_000) });
+    h.rows.push({ id: "m1", conversationId: "c1", role: "user", content: { text: "q", api: "[]" }, inputTokens: null, outputTokens: null, model: null, createdAt: new Date(NOW.getTime() - 5_000) });
     expect(await send({ conversationId: "c1" })).toMatchObject({ ok: false, kind: "conflict", message: CRIS_BUSY_TEXT });
     expect(h.requests).toHaveLength(0);
+    expect(h.rows).toHaveLength(1); // nothing written
     // a crashed turn's rows stop blocking after a few minutes
     h.rows[0].createdAt = new Date(NOW.getTime() - 4 * 60_000);
     h.replies.push(text("ok"));
     expect((await send({ conversationId: "c1" })).ok).toBe(true);
+  });
+
+  it("is not fooled by a Confirm or Undo message written while a turn runs (box notes are skipped)", async () => {
+    h.convs.push({ id: "c1", userId: user.id, picks: {}, updatedAt: new Date(0) });
+    h.rows.push(
+      { id: "m1", conversationId: "c1", role: "user", content: { text: "q", api: "[]" }, inputTokens: null, outputTokens: null, model: null, createdAt: new Date(NOW.getTime() - 5_000) },
+      { id: "m2", conversationId: "c1", role: "cris", content: { text: "That's already done.", cards: [] }, inputTokens: null, outputTokens: null, model: null, createdAt: new Date(NOW.getTime() - 1_000) },
+    );
+    expect(await send({ conversationId: "c1" })).toMatchObject({ ok: false, kind: "conflict", message: CRIS_BUSY_TEXT });
+  });
+
+  it("locks the conversation row in the transaction that writes the person's message", async () => {
+    h.replies.push(text("ok"));
+    const r = await send();
+    const convId = r.ok ? r.data.conversationId : "";
+    expect(h.locks).toHaveLength(1);
+    expect(h.locks[0][0]).toMatch(/FROM "CrisConversation" WHERE "id" = \? FOR UPDATE/);
+    expect(h.locks[0][1]).toBe(convId);
   });
 
   it("never answers in someone else's conversation", async () => {

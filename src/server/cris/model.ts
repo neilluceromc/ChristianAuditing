@@ -11,8 +11,12 @@ export { CrisProviderError, type ProviderFailure } from "./anthropic";
  */
 
 export type CrisRequest = { system: string; messages: Anthropic.MessageParam[]; tools: Anthropic.Tool[] };
-/** `content` in the API's own block shapes, appended to the history as-is; `stop` is the API's stop_reason. */
-export type CrisReply = { content: Anthropic.ContentBlock[]; stop: string; usage: { input: number; output: number } };
+/**
+ * `content` in the API's own block shapes, appended to the history as-is; `stop` is the API's stop_reason;
+ * `model` the model that actually served the reply (a server-side fallback may differ from the one asked);
+ * `usage.input` is input-equivalent tokens (cris-cost's inputEquivalentTokens).
+ */
+export type CrisReply = { content: Anthropic.ContentBlock[]; stop: string; model: string; usage: { input: number; output: number } };
 
 export interface CrisModel {
   /** The model id stored with each reply's token usage; "fake" for the scripted model (no usage stored). */

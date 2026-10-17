@@ -145,7 +145,12 @@ export function boxNote(m: { text: string | null; cards: CrisCard[] }): string {
   if (m.text) parts.push(m.text);
   for (const c of m.cards) {
     if (c.type === "result") parts.push(`${c.head} ${c.text}`);
-    else if (c.type === "spares" && c.options.length > 0) parts.push(`Spares listed: ${c.options.map((o) => o.tag).join(", ")}.`);
+    else if (c.type === "spares" && c.options.length > 0) {
+      parts.push(`Spares listed for person id ${c.employeeId}: ${c.options.map((o) => `${o.tag} (asset id ${o.assetId})`).join(", ")}.`);
+    }
+    else if (c.type === "which" && c.choices.length > 0) {
+      parts.push(`Which one? list: ${c.choices.map((p) => `${p.name} (${p.employeeNo}, id ${p.id})`).join(", ")}.`);
+    }
   }
   return `${BOX_NOTE_PREFIX} ${parts.join(" ") || "(nothing shown)"}`;
 }

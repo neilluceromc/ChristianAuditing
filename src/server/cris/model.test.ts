@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
 
 /*
@@ -31,16 +31,19 @@ const { fakeModel } = await import("./fake");
 const { default: Anthropic_ } = await import("@anthropic-ai/sdk");
 const { userTurn } = await import("@/lib/cris-prompt");
 
-const message = (content: unknown[], stop = "end_turn") => ({
-  id: "msg", type: "message", role: "assistant", model: "m", content, stop_reason: stop, stop_details: null,
-  stop_sequence: null, usage: { input_tokens: 11, output_tokens: 7 }, container: null, diagnostics: null,
+
+const message = (content: unknown[], stop = "end_turn", usage: Record<string, unknown> = { input_tokens: 11, output_tokens: 7 }, model = "claude-haiku-5-5") => ({
+  id: "msg", type: "message", role: "assistant", model, content, stop_reason: stop, stop_details: null,
+  stop_sequence: null, usage, container: null, diagnostics: null,
 });
 const req = { system: "S", messages: [{ role: "user", content: "hi" }] as Anthropic.MessageParam[], tools: [] };
 
 beforeEach(() => {
   h.create.mockReset();
   h.betaCreate.mockReset();
+  vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
 });
+afterEach(() => { vi.unstubAllEnvs(); });
 
 describe("pickModel (spec §8: the fake is refused in production)", () => {
   it("gives the fake with CRIS_MODEL=fake outside production", () => {
@@ -65,11 +68,21 @@ describe("the Anthropic adapter", () => {
     }));
     expect(h.create.mock.calls[0][0]).not.toHaveProperty("fallbacks");
     expect(h.betaCreate).not.toHaveBeenCalled();
-    expect(r).toEqual({ content: [{ type: "text", text: "hello", citations: null }], stop: "end_turn", usage: { input: 11, output: 7 } });
+    expect(r).toEqual({
+      content: [{ type: "text", text: "hello", citations: null }], stop: "end_turn", model: "claude-haiku-5-5", usage: { input: 11, output: 7 },
+    });
+  });
+
+  it("counts cache writes (1.25×) and reads (0.1×) into the input tokens it reports", async () => {
+    h.create.mockResolvedValue(message([{ type: "text", text: "hi", citations: null }], "end_turn", {
+      input_tokens: 50, output_tokens: 9, cache_creation_input_tokens: 2000, cache_read_input_tokens: 30_000,
+    }));
+    const r = await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req);
+    expect(r.usage).toEqual({ input: 50 + 2500 + 3000, output: 9 });
   });
 
   it.each(["claude-sonnet-5-5", "claude-opus-5-5"] as const)("adds the server-side refusal fallback for %s", async (model) => {
-    h.betaCreate.mockResolvedValue(message([{ type: "text", text: "ok", citations: null }]));
+    h.betaCreate.mockResolvedValue(message([{ type: "text", text: "ok", citations: null }], "end_turn", undefined, model));
     await pickModel({ model }, {}).reply(req);
     expect(h.betaCreate).toHaveBeenCalledWith(expect.objectContaining({
       model, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default", output_config: { effort: "low" },
@@ -77,13 +90,36 @@ describe("the Anthropic adapter", () => {
     expect(h.create).not.toHaveBeenCalled();
   });
 
-  it("echoes only what follows a fallback marker", async () => {
-    h.betaCreate.mockResolvedValue(message([
-      { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: "claude-sonnet-5" } },
-      { type: "text", text: "from the fallback", citations: null },
-    ]));
+  it("reports the model that served a fallback reply, with its cache tokens counted", async () => {
+    h.betaCreate.mockResolvedValue(message([{ type: "text", text: "ok", citations: null }], "end_turn",
+      { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 100, cache_creation_input_tokens: null }, "claude-sonnet-5"));
     const r = await pickModel({ model: "claude-sonnet-5-5" }, {}).reply(req);
-    expect(r.content).toEqual([{ type: "text", text: "from the fallback", citations: null }]);
+    expect(r.model).toBe("claude-sonnet-5");
+    expect(r.usage).toEqual({ input: 20, output: 1 });
+  });
+
+  it("echoes a fallback reply by the documented rule: before the last marker only thinking and tool calls go", async () => {
+    const before = [
+      { type: "thinking", thinking: "", signature: "s1" },
+      { type: "text", text: "partial", citations: null },
+      { type: "redacted_thinking", data: "x" },
+      { type: "tool_use", id: "t0", name: "find_people", input: { q: "a" }, caller: { type: "direct" } },
+      { type: "some_future_block", value: 1 },
+    ];
+    const after = [
+      { type: "thinking", thinking: "", signature: "s2" },
+      { type: "text", text: "from the fallback", citations: null },
+      { type: "tool_use", id: "t1", name: "find_people", input: { q: "b" }, caller: { type: "direct" } },
+    ];
+    h.betaCreate.mockResolvedValue(message([...before, { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: "claude-sonnet-5" } }, ...after]));
+    const r = await pickModel({ model: "claude-sonnet-5-5" }, {}).reply(req);
+    expect(r.content).toEqual([before[1], before[4], ...after]);
+  });
+
+  it("leaves a reply with no fallback marker exactly as it came", async () => {
+    const content = [{ type: "thinking", thinking: "", signature: "s" }, { type: "text", text: "ok", citations: null }];
+    h.betaCreate.mockResolvedValue(message(content));
+    expect((await pickModel({ model: "claude-opus-5-5" }, {}).reply(req)).content).toEqual(content);
   });
 
   it("passes the refusal stop reason through for the turn to word", async () => {
@@ -91,16 +127,26 @@ describe("the Anthropic adapter", () => {
     expect((await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req)).stop).toBe("refusal");
   });
 
-  it("turns the SDK's typed errors into a provider failure", async () => {
+  it("fails as no-key, before any request, when no key is set", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    const thrown = await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req).catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(CrisProviderError);
+    expect((thrown as InstanceType<typeof CrisProviderError>).kind).toBe("no-key");
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("turns the SDK's typed errors into a provider failure, a 400 as its own kind", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const model = pickModel({ model: "claude-haiku-5-5" }, {});
     const cases: Array<[unknown, string]> = [
+      [new Anthropic_.BadRequestError(400, undefined, "thinking block mismatch", new Headers()), "bad-request"],
       [new Anthropic_.RateLimitError(429, undefined, "slow down", new Headers()), "rate-limited"],
       [new Anthropic_.InternalServerError(529, undefined, "overloaded", new Headers()), "api"],
       [new Anthropic_.AuthenticationError(401, undefined, "bad key", new Headers()), "auth"],
       [new Anthropic_.APIConnectionTimeoutError(), "timeout"],
       [new Anthropic_.APIConnectionError({ message: "down" }), "connection"],
-      [new Anthropic_.AnthropicError("no key"), "no-key"],
+      [new Anthropic_.AnthropicError("other"), "sdk"],
     ];
     for (const [err, kind] of cases) {
       h.create.mockRejectedValueOnce(err);
@@ -115,6 +161,7 @@ describe("the Anthropic adapter", () => {
     await expect(pickModel({ model: "claude-haiku-5-5" }, {}).reply(req)).rejects.toThrow(TypeError);
   });
 });
+
 
 describe("the fake adapter answers in the API's shapes", () => {
   const ctx = { firstName: "Neil", todayManila: "Saturday 17 October 2026", page: { path: "/", employeeId: null, assetId: null } };

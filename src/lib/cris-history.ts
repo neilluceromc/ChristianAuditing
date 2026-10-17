@@ -83,6 +83,23 @@ export function modelHistory(rows: StoredRow[]): Anthropic.MessageParam[] {
   return out;
 }
 
+/**
+ * Is a turn still running in this conversation? Looks at the newest TURN row — one that carries the model's
+ * `api` (box notes from Confirm and Undo carry none and are skipped): a turn's last row is its Cris reply, so a
+ * newest person or tool row younger than `guardMs` means one is in flight. Older, it was a crash: no longer blocks.
+ * `newestFirst` is the conversation's newest rows, newest first.
+ */
+export function turnInFlight(newestFirst: Array<StoredRow & { createdAt: Date }>, now: Date, guardMs: number): boolean {
+  const turnRow = newestFirst.find((r) => decodeApi(r.content) !== null);
+  if (!turnRow || turnRow.role === "cris" || turnRow.role === "assistant") return false;
+  return now.getTime() - turnRow.createdAt.getTime() < guardMs;
+}
+
+/** The pick card still open on a Cris message (a spares list or a "Which one?" list), or null. */
+export function openPickCard(content: unknown): CrisCard | null {
+  return cardsOf(content).find((c) => c.type === "spares" || c.type === "which") ?? null;
+}
+
 /** The tags on a Cris message's spares card — the pick list open in the box, so a bare "0230" can name one. */
 export function spareTagsOf(content: unknown): string[] {
   const spares = cardsOf(content).find((c) => c.type === "spares");

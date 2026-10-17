@@ -109,7 +109,14 @@ describe("boxNote (what Confirm and Undo posted, told to the model)", () => {
     expect(note.startsWith(BOX_NOTE_PREFIX)).toBe(true);
     expect(note).toContain("That spare was just taken.");
     expect(note).toContain("Replaced. BR-LT-0230 is with Ana Reyes.");
-    expect(note).toContain("BR-LT-0231");
+    expect(note).toContain("Spares listed for person id e1: BR-LT-0231 (asset id a1).");
+  });
+  it("names a carried-over Which one? list with numbers and ids", () => {
+    const note = boxNote({ text: null, cards: [{ type: "which", choices: [
+      { id: "e1", name: "Ana Reyes", employeeNo: "EMP-0101", worksFor: "Acme", initials: "AR" },
+      { id: "e2", name: "Ana Bautista", employeeNo: "EMP-0102", worksFor: "Acme", initials: "AB" },
+    ] }] });
+    expect(note).toBe(`${BOX_NOTE_PREFIX} Which one? list: Ana Reyes (EMP-0101, id e1), Ana Bautista (EMP-0102, id e2).`);
   });
 });
 

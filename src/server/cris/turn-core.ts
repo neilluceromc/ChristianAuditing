@@ -7,18 +7,19 @@ import { checkRate } from "@/server/rate-limit";
 import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
 import { visibleClassWhere } from "@/lib/asset-class";
 import { pathAllowedForRole } from "@/lib/workspaces";
-import { crisAvailabilityFrom } from "@/lib/cris-settings";
+import { crisAvailabilityFrom, type CrisSettings } from "@/lib/cris-settings";
 import { CRIS_DAILY_LIMIT_TEXT, dailyLeft, limitReached, manilaDayStart } from "@/lib/cris-limits";
+import { isPricedModel } from "@/lib/cris-cost";
 import { notePick, pageEntity, parsePicks, type Picks } from "@/lib/cris-picks";
 import { CRIS_BRAIN_TEXT, CRIS_REFUSED_TEXT, CRIS_SYSTEM, manilaToday, pickText, userTurn } from "@/lib/cris-prompt";
-import { modelHistory, spareTagsOf, storedContent } from "@/lib/cris-history";
+import { modelHistory, openPickCard, spareTagsOf, storedContent, turnInFlight } from "@/lib/cris-history";
 import type { CrisCard, CrisViewMessage } from "@/lib/cris-cards";
 import type { CrisMood } from "@/lib/cris-mood";
 import { crisSettings } from "./settings-read";
 import { readPerson } from "./cards";
 import { appendCrisMessage, viewMessages, type CrisMessageRow } from "./messages";
 import { CRIS_TOOLS, runTool, type ToolMood } from "./tools";
-import { CrisProviderError, pickModel } from "./model";
+import { CrisProviderError, pickModel, type CrisReply } from "./model";
 
 /*
  * Spec §8 "Running a turn": one person message, answered. NOT "use server" — it takes a user the action in
@@ -43,6 +44,8 @@ export const CRIS_OFF_SWITCH = "Cris is off — an admin can switch Cris on in S
 export const CRIS_RATE_TEXT = "Cris can take 10 questions a minute — try again in a moment.";
 export const CRIS_ROUNDS_TEXT = "That took more steps than I'm allowed — try asking a simpler way.";
 export const CRIS_EMPTY_TEXT = "Sorry, I didn't catch that — could you say it another way?";
+export const CRIS_TOO_LONG_TEXT = "That got too long for me — try asking a smaller question.";
+export const CRIS_FRESH_TEXT = "Something went wrong in our chat — I've started a fresh one. Ask me again?";
 export const CRIS_BUSY_TEXT = "Cris is still answering your last message — wait for it, then ask again.";
 /** How long a turn's unanswered rows block another turn in the same conversation (a crashed turn's stop blocking after this). */
 export const CRIS_TURN_GUARD_MS = 3 * 60_000;
@@ -65,7 +68,8 @@ export const sendSchema = z
   .refine((v) => (v.text === undefined) !== (v.pick === undefined), { message: "Send a message or a pick.", path: ["text"] });
 
 export type CrisSendInput = z.input<typeof sendSchema>;
-export type CrisSendData = { conversationId: string; messages: CrisViewMessage[]; left: number; mood: CrisMood; status: string };
+/** `conversationId` is null only on the daily-limit reply when the browser sent no conversation of the person's. */
+export type CrisSendData = { conversationId: string | null; messages: CrisViewMessage[]; left: number; mood: CrisMood; status: string };
 
 type Db = Prisma.TransactionClient;
 
@@ -74,10 +78,19 @@ function transient(text: string, now: Date): CrisViewMessage {
   return { id: `transient-${now.getTime()}`, role: "cris", text, cards: [], at: now.toISOString() };
 }
 
-/** The conversation id the browser sent, echoed only for the limit reply, which runs before zod and saves nothing. */
-function sentConversationId(raw: unknown): string {
+/** Cris off (the admin switch, or no key): the refusal every Cris action gives; null when Cris is on. */
+function offRefusal(settings: CrisSettings): ActionResult<never> | null {
+  const availability = crisAvailabilityFrom(settings, process.env);
+  if (availability.on) return null;
+  return conflict(availability.reason === "no-key" ? CRIS_OFF_NO_KEY : CRIS_OFF_SWITCH);
+}
+
+/** The conversation the browser sent, when it is the person's own (checked by id and owner); otherwise null. */
+async function ownedConversationId(userId: string, raw: unknown): Promise<string | null> {
   const v = typeof raw === "object" && raw !== null ? (raw as { conversationId?: unknown }).conversationId : undefined;
-  return typeof v === "string" && v.length <= 64 ? v : "";
+  if (typeof v !== "string" || v.length === 0 || v.length > 64) return null;
+  const c = await prisma.crisConversation.findFirst({ where: { id: v, userId }, select: { id: true } });
+  return c?.id ?? null;
 }
 
 /** Questions asked today (Manila): the person's saved messages since Manila midnight, in every conversation. */
@@ -86,22 +99,38 @@ function usedToday(userId: string, now: Date): Promise<number> {
 }
 
 /**
- * The conversation to answer in: the one asked for when it is theirs, otherwise their most recent (one open
- * conversation per person), otherwise a new one. Someone else's id is never used. A conversation that has reached
- * CRIS_MAX_TURNS moves on to a new one.
+ * The conversation to answer in:
+ *  - with an id: that conversation when it is the person's own; an id that is not theirs (or no longer exists)
+ *    gets a NEW conversation — someone else's is never used, and theirs is never guessed;
+ *  - without one: their most recent (one open conversation per person), or a new one if they have none;
+ *  - one that has reached CRIS_MAX_TURNS moves on to a new one, carrying over the person's picks and the pick
+ *    card still open in it (a spares or "Which one?" list), so the pick that answers that card still works.
  */
-async function openConversation(userId: string, requested: string | undefined): Promise<{ id: string; picks: Picks }> {
+async function openConversation(userId: string, requested: string | undefined): Promise<string> {
   const found = await prisma.crisConversation.findFirst({
     where: requested ? { id: requested, userId } : { userId },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     select: { id: true, picks: true },
   });
-  if (found) {
-    const turns = await prisma.crisMessage.count({ where: { conversationId: found.id, role: "user" } });
-    if (turns < CRIS_MAX_TURNS) return { id: found.id, picks: parsePicks(found.picks) };
-  }
-  const created = await prisma.crisConversation.create({ data: { userId }, select: { id: true } });
-  return { id: created.id, picks: { people: [], assets: [] } };
+  if (!found) return (await prisma.crisConversation.create({ data: { userId }, select: { id: true } })).id;
+  const turns = await prisma.crisMessage.count({ where: { conversationId: found.id, role: "user" } });
+  if (turns < CRIS_MAX_TURNS) return found.id;
+  return rollOver(userId, found.id, parsePicks(found.picks));
+}
+
+/** A fresh conversation for a full one: the picks, and the open pick card as a Cris message (a box note to the model). */
+async function rollOver(userId: string, fromId: string, picks: Picks): Promise<string> {
+  const lastCris = await prisma.crisMessage.findFirst({
+    where: { conversationId: fromId, role: "cris" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { content: true },
+  });
+  const card = openPickCard(lastCris?.content);
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.crisConversation.create({ data: { userId, picks }, select: { id: true } });
+    if (card) await appendCrisMessage(tx, created.id, "cris", { text: null, cards: [card] });
+    return created.id;
+  });
 }
 
 type Pick = NonNullable<z.output<typeof sendSchema>["pick"]>;
@@ -120,19 +149,25 @@ async function pickWords(user: SessionUser, pick: Pick): Promise<{ text: string;
 
 const firstNameOf = (name: string) => name.trim().split(/\s+/)[0] ?? "";
 
+/** How a turn ended without an answer: the copy to show, and whether the conversation's history must be left behind. */
+type Failure = { text: string; fresh?: true };
+
 /**
  * Spec §8 "Running a turn". Returns ok with Cris's messages for every outcome the box shows as a message —
  * including the daily limit (mood sad) and a provider failure or refusal (mood cross, not counted).
  */
 export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new Date()): Promise<ActionResult<CrisSendData>> {
   const settings = await crisSettings();
-  const availability = crisAvailabilityFrom(settings, process.env);
-  if (!availability.on) return conflict(availability.reason === "no-key" ? CRIS_OFF_NO_KEY : CRIS_OFF_SWITCH);
+  const off = offRefusal(settings);
+  if (off) return off;
 
   // Review Focus #5: the limit is checked before any model call, and the refused question saves nothing.
   const used = await usedToday(user.id, now);
   if (limitReached(used, settings.dailyLimit)) {
-    return ok({ conversationId: sentConversationId(raw), messages: [transient(CRIS_DAILY_LIMIT_TEXT, now)], left: 0, mood: "sad", status: STATUS_READY });
+    return ok({
+      conversationId: await ownedConversationId(user.id, raw),
+      messages: [transient(CRIS_DAILY_LIMIT_TEXT, now)], left: 0, mood: "sad", status: STATUS_READY,
+    });
   }
 
   const rate = await checkRate(user.id, "cris");
@@ -144,44 +179,52 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
 
   // The page person is THIS message's page only — never an earlier message's (Review Focus #1).
   const page = { path: input.page.path, ...pageEntity(input.page.path) };
-  const conversation = await openConversation(user.id, input.conversationId);
-  const conversationId = conversation.id;
-  const picksBefore = conversation.picks;
-  let picks = picksBefore;
 
   let words = input.text ?? "";
+  let pickAdd: { person?: string; asset?: string } = {};
   const scannedAssetIds: string[] = [];
   if (input.pick) {
     const pw = await pickWords(user, input.pick);
     if (!pw) return forbidden();
     words = pw.text;
-    picks = notePick(picks, pw.add); // a structured pick is the person's own choice: noted before the model runs
+    pickAdd = pw.add;
     if (input.pick.kind === "asset" && input.pick.scanned) scannedAssetIds.push(input.pick.assetId);
   }
 
-  const rows = await prisma.crisMessage.findMany({
-    where: { conversationId },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { role: true, content: true, createdAt: true },
+  const conversationId = await openConversation(user.id, input.conversationId);
+  const userMsg = userTurn({ firstName: firstNameOf(user.name), todayManila: manilaToday(now), page }, words);
+
+  // One turn at a time per conversation (a second tab): two turns' rounds interleaved would garble the history both
+  // are replayed from. The conversation row is locked, and the history read, the in-flight check and the person's
+  // message written under that lock, so two sends can't both pass.
+  const begun = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "CrisConversation" WHERE "id" = ${conversationId} FOR UPDATE`;
+    const rows = await tx.crisMessage.findMany({
+      where: { conversationId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { role: true, content: true, createdAt: true },
+    });
+    if (turnInFlight([...rows].reverse(), now, CRIS_TURN_GUARD_MS)) return null;
+    const conv = await tx.crisConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { picks: true } });
+    const picksBefore = parsePicks(conv.picks);
+    // a structured pick is the person's own choice: noted before the model runs
+    const picks = input.pick ? notePick(picksBefore, pickAdd) : picksBefore;
+    const userRow = await appendCrisMessage(tx, conversationId, "user", storedContent({ text: words, cards: [], api: [userMsg] }));
+    await tx.crisConversation.update({ where: { id: conversationId }, data: { picks } });
+    return { rows, userRow, picksBefore, picks };
   });
-  // One turn at a time per conversation (a second tab): two turns' rounds interleaved would garble the history
-  // both are replayed from. A turn's last row is its Cris reply; a recent person or tool row means one is running.
-  const last = rows[rows.length - 1];
-  if (last && last.role !== "cris" && now.getTime() - last.createdAt.getTime() < CRIS_TURN_GUARD_MS) return conflict(CRIS_BUSY_TEXT);
+  if (!begun) return conflict(CRIS_BUSY_TEXT);
+  const { rows, userRow, picksBefore } = begun;
+  let picks = begun.picks;
+  const turnRows = [userRow.id];
+
   // The spares card open in the box is the server's own: the last Cris message's, never the browser's say-so.
   const lastCris = [...rows].reverse().find((r) => r.role === "cris");
   const openSpareTags = spareTagsOf(lastCris?.content);
 
-  const userMsg = userTurn({ firstName: firstNameOf(user.name), todayManila: manilaToday(now), page }, words);
-  const userRow = await prisma.$transaction(async (tx) => {
-    const row = await appendCrisMessage(tx, conversationId, "user", storedContent({ text: words, cards: [], api: [userMsg] }));
-    await tx.crisConversation.update({ where: { id: conversationId }, data: { picks } });
-    return row;
-  });
-  const turnRows = [userRow.id];
-
   const model = pickModel(settings);
-  const usageOf = (u: { input: number; output: number }) => (model.id === "fake" ? undefined : { ...u, model: model.id });
+  // Priced at the model that served the reply (a server-side fallback may differ); the fake stores no usage.
+  const usageOf = (r: CrisReply) => (model.id === "fake" ? undefined : { ...r.usage, model: isPricedModel(r.model) ? r.model : model.id });
   const messages: Anthropic.MessageParam[] = [...modelHistory(rows), userMsg];
   const cards: CrisCard[] = [];
   let lastMood: ToolMood | null = null;
@@ -194,21 +237,32 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
       return row;
     });
 
-  /** Review Focus #4: take the whole turn back out — the question is not counted — and say so, Frustrated. */
-  const takeBack = async (text: string): Promise<ActionResult<CrisSendData>> => {
+  /**
+   * Review Focus #4: take the whole turn back out — the question is not counted — and say so, Frustrated. When the
+   * API refused the request itself (400), the conversation's history is what it will no longer take, so the person
+   * is moved to a fresh conversation (unless this one had no history to blame).
+   */
+  const takeBack = async (f: Failure): Promise<ActionResult<CrisSendData>> => {
     await prisma.$transaction([
       prisma.crisMessage.deleteMany({ where: { id: { in: turnRows } } }),
       prisma.crisConversation.update({ where: { id: conversationId }, data: { picks: picksBefore } }),
     ]);
-    return ok({ conversationId, messages: [transient(text, now)], left: dailyLeft(used, settings.dailyLimit), mood: "cross", status: STATUS_READY });
+    const left = dailyLeft(used, settings.dailyLimit);
+    if (f.fresh && rows.length > 0) {
+      const fresh = await prisma.crisConversation.create({ data: { userId: user.id }, select: { id: true } });
+      return ok({ conversationId: fresh.id, messages: [transient(CRIS_FRESH_TEXT, now)], left, mood: "cross", status: STATUS_READY });
+    }
+    return ok({ conversationId, messages: [transient(f.text, now)], left, mood: "cross", status: STATUS_READY });
   };
 
   let finalRow: CrisMessageRow | null = null;
-  let failed: string | null = null;
+  let failed: Failure | null = null;
   try {
     for (let round = 0; round < CRIS_MAX_ROUNDS; round++) {
       const reply = await model.reply({ system: CRIS_SYSTEM, messages, tools: CRIS_TOOLS });
-      if (reply.stop === "refusal") { failed = CRIS_REFUSED_TEXT; break; }
+      if (reply.stop === "refusal") { failed = { text: CRIS_REFUSED_TEXT }; break; }
+      // Cut off: half an answer is never shown or kept as one, and half a tool call can't be run.
+      if (reply.stop === "max_tokens") { failed = { text: CRIS_TOO_LONG_TEXT }; break; }
       const uses = reply.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
       const assistant: Anthropic.MessageParam = { role: "assistant", content: reply.content };
 
@@ -217,11 +271,11 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
         const shown = text || (cards.length > 0 ? null : CRIS_EMPTY_TEXT);
         // An empty reply sends nothing back: no assistant message is invented for the history.
         const api = reply.content.length > 0 ? [assistant] : [];
-        finalRow = await append("cris", storedContent({ text: shown, cards, api }), usageOf(reply.usage));
+        finalRow = await append("cris", storedContent({ text: shown, cards, api }), usageOf(reply));
         break;
       }
-      // Tool calls cut off mid-way (max_tokens) can't be run or answered: treat as a failed reply.
-      if (reply.stop !== "tool_use") { failed = CRIS_BRAIN_TEXT; break; }
+      // Tool calls with any other stop reason can't be trusted to be whole: treat as a failed reply.
+      if (reply.stop !== "tool_use") { failed = { text: CRIS_BRAIN_TEXT }; break; }
 
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const use of uses) {
@@ -236,7 +290,7 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
         results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify(out.result), ...(isError ? { is_error: true } : {}) });
       }
       const resultsMsg: Anthropic.MessageParam = { role: "user", content: results };
-      const toolRow = await append("tool", { api: JSON.stringify([assistant, resultsMsg]) }, usageOf(reply.usage));
+      const toolRow = await append("tool", { api: JSON.stringify([assistant, resultsMsg]) }, usageOf(reply));
       turnRows.push(toolRow.id);
       messages.push(assistant, resultsMsg);
     }
@@ -244,12 +298,12 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
   } catch (err) {
     if (!(err instanceof CrisProviderError)) {
       // A bug or a database error: leave no half turn behind (its rounds would be replayed), then let it surface.
-      await takeBack(CRIS_BRAIN_TEXT);
+      await takeBack({ text: CRIS_BRAIN_TEXT });
       throw err;
     }
-    failed = CRIS_BRAIN_TEXT;
+    failed = err.kind === "bad-request" ? { text: CRIS_BRAIN_TEXT, fresh: true } : { text: CRIS_BRAIN_TEXT };
   }
-  if (failed || !finalRow) return takeBack(failed ?? CRIS_BRAIN_TEXT);
+  if (failed || !finalRow) return takeBack(failed ?? { text: CRIS_BRAIN_TEXT });
 
   const waiting = cards.some((c) => c.type === "confirm" || c.type === "spares" || c.type === "which");
   const mood: CrisMood = waiting ? "look" : lastMood === "sad" ? "sad" : "talk";
@@ -268,6 +322,8 @@ export const historySchema = z.object({ conversationId: id, before: id.optional(
 
 /** Spec §7 "Paging": 30 messages before `before` (or the newest 30), oldest first; `more` when earlier ones exist. */
 export async function crisHistoryFor(user: SessionUser, raw: unknown): Promise<ActionResult<{ messages: CrisViewMessage[]; more: boolean }>> {
+  const off = offRefusal(await crisSettings());
+  if (off) return off;
   const rate = await checkRate(user.id, "check");
   if (!rate.allowed) return rateLimited(rate.retryAfterSec, CRIS_RATE_TEXT);
   const parsed = historySchema.safeParse(raw);
@@ -292,6 +348,8 @@ export async function crisHistoryFor(user: SessionUser, raw: unknown): Promise<A
 
 /** Spec §7: New chat starts a fresh conversation; the old one stays until the 30-day prune. */
 export async function crisNewChatFor(user: SessionUser): Promise<ActionResult<{ conversationId: string }>> {
+  const off = offRefusal(await crisSettings());
+  if (off) return off;
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const created = await prisma.crisConversation.create({ data: { userId: user.id }, select: { id: true } });

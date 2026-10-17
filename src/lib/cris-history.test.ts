@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
-import { decodeApi, encodeApi, modelHistory, spareTagsOf, storedContent } from "./cris-history";
+import { decodeApi, encodeApi, modelHistory, openPickCard, spareTagsOf, storedContent, turnInFlight } from "./cris-history";
 import { BOX_NOTE_PREFIX } from "./cris-prompt";
 
 const user = (text: string): Anthropic.MessageParam => ({ role: "user", content: [{ type: "text", text }] });
@@ -89,6 +89,33 @@ describe("the stored model history (append-only: every replay is byte-identical 
 
   it("skips a row whose stored api is not readable rather than sending garbage", () => {
     expect(modelHistory([{ role: "tool", content: { api: "{not json" } }, row("user", [user("hi")])])).toEqual([user("hi")]);
+  });
+});
+
+describe("turnInFlight (one turn at a time per conversation)", () => {
+  const now = new Date(1_000_000);
+  const at = (msAgo: number) => new Date(now.getTime() - msAgo);
+  const r = (role: string, msAgo: number, api: boolean) => ({ ...row(role, api ? [] : null, { text: "x" }), createdAt: at(msAgo) });
+  it("is busy while the newest turn row is a recent person or tool row", () => {
+    expect(turnInFlight([r("user", 1000, true)], now, 60_000)).toBe(true);
+    expect(turnInFlight([r("tool", 1000, true), r("user", 2000, true)], now, 60_000)).toBe(true);
+  });
+  it("skips box notes: a Confirm row written mid-turn does not hide the running turn", () => {
+    expect(turnInFlight([r("cris", 10, false), r("tool", 1000, true), r("user", 2000, true)], now, 60_000)).toBe(true);
+  });
+  it("is free once the turn's Cris reply is newest, or the turn row is old (a crash)", () => {
+    expect(turnInFlight([r("cris", 10, false), r("cris", 1000, true), r("user", 2000, true)], now, 60_000)).toBe(false);
+    expect(turnInFlight([r("user", 120_000, true)], now, 60_000)).toBe(false);
+    expect(turnInFlight([], now, 60_000)).toBe(false);
+  });
+});
+
+describe("openPickCard", () => {
+  it("finds a spares or Which one? card, and nothing else", () => {
+    const which = { type: "which", choices: [] };
+    expect(openPickCard({ cards: [{ type: "chips", items: [] }, which] })).toEqual(which);
+    expect(openPickCard({ cards: [{ type: "chips", items: [] }] })).toBeNull();
+    expect(openPickCard(undefined)).toBeNull();
   });
 });
 

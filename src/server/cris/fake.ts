@@ -47,13 +47,14 @@ export const fakeModel: CrisModel = {
     const next = fakeDecide(current.text, current.results, earlier);
     const usage = { input: 0, output: 0 };
     if (next.kind === "text") {
-      return { content: [{ type: "text", text: next.text, citations: null }], stop: "end_turn", usage };
+      return { content: [{ type: "text", text: next.text, citations: null }], stop: "end_turn", model: "fake", usage };
     }
     // Deterministic, and unique within the conversation: one id per message sent so far.
     const id = `toolu_fake_${messages.length}`;
     return {
       content: [{ type: "tool_use", id, name: next.name, input: next.input, caller: { type: "direct" } }],
       stop: "tool_use",
+      model: "fake",
       usage,
     };
   },
