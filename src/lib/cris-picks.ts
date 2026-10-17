@@ -46,7 +46,8 @@ export function notePick(picks: Picks, pick: { person?: string; asset?: string }
 // ── tags the person typed ───────────────────────────────────────────────────
 
 const TAG_RE = /(?<![A-Z0-9-])BR-[A-Z]{2}-\d{4}(?![A-Z0-9])/gi;
-const BARE_RE = /(?<![A-Z0-9-])\d{4}(?![A-Z0-9-])/gi;
+/** A bare number stands alone: never part of a date or a path (`17/10/2026`, `17.10.2026`, `2026/10`) or a code. */
+const BARE_RE = /(?<![A-Z0-9\-/.])\d{4}(?![A-Z0-9\-/])/gi;
 
 /**
  * Every exact tag (BR-XX-0000, any case) in the person's own text, upper-cased, once each, in order. A bare
@@ -93,10 +94,19 @@ export function wholeNameMatch(q: string, person: { name: string; employeeNo: st
 /** Static pages beside the record routes — never a record id. */
 const NOT_IDS = new Set(["new", "export", "import", "activity", "labels", "register", "scan", "work"]);
 
-/** The record a page is about: `/employees/{id}…` → employeeId, `/inventory/{id}…` → assetId; otherwise both null. */
+/**
+ * The record a page is about: `/employees/{id}…` → employeeId, `/inventory/{id}…` → assetId; otherwise both null.
+ * The path comes from the client, so a malformed escape reads as no record rather than throwing.
+ */
 export function pageEntity(path: string): { employeeId: string | null; assetId: string | null } {
+  const none = { employeeId: null, assetId: null };
   const m = /^\/(employees|inventory)\/([^/?#]+)/.exec(path);
-  if (!m || NOT_IDS.has(m[2])) return { employeeId: null, assetId: null };
-  const id = decodeURIComponent(m[2]);
+  if (!m || NOT_IDS.has(m[2])) return none;
+  let id: string;
+  try {
+    id = decodeURIComponent(m[2]);
+  } catch {
+    return none;
+  }
   return m[1] === "employees" ? { employeeId: id, assetId: null } : { employeeId: null, assetId: id };
 }

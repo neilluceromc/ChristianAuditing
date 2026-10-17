@@ -76,6 +76,14 @@ describe("exactTagIn", () => {
     // two open tags ending the same way: ambiguous, never guessed
     expect(exactTagIn("take 0230", ["BR-LT-0230", "BR-MN-0230"])).toBeNull();
   });
+  it("never reads a date's or a path's digits as a bare number", () => {
+    const open = ["BR-LT-2026"];
+    expect(exactTagIn("bought 17/10/2026", open)).toBeNull();
+    expect(exactTagIn("bought 17.10.2026", open)).toBeNull();
+    expect(exactTagIn("from 2026/10/17", open)).toBeNull();
+    expect(exactTagIn("from 2026-10-17", open)).toBeNull();
+    expect(exactTagIn("take 2026.", open)).toBe("BR-LT-2026");
+  });
   it("exactTagsIn lists every typed tag once", () => {
     expect(exactTagsIn("replace BR-LT-0001 with br-lt-0230, not BR-LT-0001")).toEqual(["BR-LT-0001", "BR-LT-0230"]);
   });
@@ -94,6 +102,11 @@ describe("pageEntity", () => {
     expect(pageEntity("/employees/new")).toEqual({ employeeId: null, assetId: null });
     expect(pageEntity("/inventory/scan")).toEqual({ employeeId: null, assetId: null });
     expect(pageEntity("/approvals/abc")).toEqual({ employeeId: null, assetId: null });
+  });
+  it("decodes an escaped id, and reads a malformed escape as no record instead of throwing", () => {
+    expect(pageEntity("/employees/a%20b")).toEqual({ employeeId: "a b", assetId: null });
+    expect(pageEntity("/employees/%E0%A4%A")).toEqual({ employeeId: null, assetId: null });
+    expect(pageEntity("/inventory/%zz/history")).toEqual({ employeeId: null, assetId: null });
   });
 });
 
