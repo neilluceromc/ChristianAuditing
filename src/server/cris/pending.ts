@@ -7,7 +7,7 @@ import { conflict, forbidden, rateLimited, validationError, zodFieldErrors, type
 import { revalidateAsset } from "@/server/modules/lifecycle/revalidate";
 import { confirmPending, undoPending, type Affected, type CrisActionData } from "./pending-core";
 import { crisAvailability } from "./settings-read";
-import { CRIS_OFF_NO_KEY, CRIS_OFF_SWITCH } from "./turn-core";
+import { CRIS_OFF_SWITCH, CRIS_PREVIEW_ONLY_CHAT } from "./turn-core";
 
 /*
  * Spec §6.2 and §6.4: the box's Confirm and Undo buttons. They send only the pending action's id; everything else
@@ -17,10 +17,14 @@ import { CRIS_OFF_NO_KEY, CRIS_OFF_SWITCH } from "./turn-core";
 
 const pendingSchema = z.object({ pendingId: z.string().min(1) });
 
-/** Like every Cris action, Confirm and Undo do nothing while Cris is off: the off copy, or null when Cris is on. */
+/**
+ * Like every Cris action, Confirm does nothing while Cris is off: the off copy, or null when Cris is on. The preview
+ * (no key) changes nothing either: a Confirm card left from before the key was removed is refused, not run.
+ */
 async function offRefusal(): Promise<ActionResult<never> | null> {
   const availability = await crisAvailability();
-  return availability.on ? null : conflict(availability.reason === "no-key" ? CRIS_OFF_NO_KEY : CRIS_OFF_SWITCH);
+  if (!availability.on) return conflict(CRIS_OFF_SWITCH);
+  return availability.preview ? conflict(CRIS_PREVIEW_ONLY_CHAT) : null;
 }
 
 /** The pages the manual actions refresh: each asset, the inventory list, home and the person's profile. */

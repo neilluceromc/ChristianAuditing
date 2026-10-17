@@ -38,8 +38,8 @@ export const CRIS_HISTORY_PAGE = 30;
  */
 export const CRIS_MAX_TURNS = 40;
 
-/** Spec §8 "The key", verbatim. */
-export const CRIS_OFF_NO_KEY = "Cris is off — no AI key is set on the server";
+/** Preview mode (no key, added 2026-10-18): a pick or a Confirm sent to Cris anyway. */
+export const CRIS_PREVIEW_ONLY_CHAT = "Cris is in preview and can only chat for now.";
 export const CRIS_OFF_SWITCH = "Cris is off — an admin can switch Cris on in Settings › Cris.";
 export const CRIS_RATE_TEXT = "Cris can take 10 questions a minute — try again in a moment.";
 export const CRIS_ROUNDS_TEXT = "That took more steps than I'm allowed — try asking a simpler way.";
@@ -78,11 +78,12 @@ function transient(text: string, now: Date): CrisViewMessage {
   return { id: `transient-${now.getTime()}`, role: "cris", text, cards: [], at: now.toISOString() };
 }
 
-/** Cris off (the admin switch, or no key): the refusal every Cris action gives; null when Cris is on. */
+/**
+ * Cris off (the admin switch — no key is preview, not off, since 2026-10-18): the refusal every Cris action gives;
+ * null when Cris is on.
+ */
 function offRefusal(settings: CrisSettings): ActionResult<never> | null {
-  const availability = crisAvailabilityFrom(settings, process.env);
-  if (availability.on) return null;
-  return conflict(availability.reason === "no-key" ? CRIS_OFF_NO_KEY : CRIS_OFF_SWITCH);
+  return crisAvailabilityFrom(settings, process.env).on ? null : conflict(CRIS_OFF_SWITCH);
 }
 
 /** The conversation the browser sent, when it is the person's own (checked by id and owner); otherwise null. */
@@ -174,8 +175,8 @@ type Failure = { text: string; fresh?: true; badRequest?: CrisProviderError };
  */
 export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new Date()): Promise<ActionResult<CrisSendData>> {
   const settings = await crisSettings();
-  const off = offRefusal(settings);
-  if (off) return off;
+  const availability = crisAvailabilityFrom(settings, process.env);
+  if (!availability.on) return conflict(CRIS_OFF_SWITCH);
 
   // Review Focus #5: the limit is checked before any model call, and the refused question saves nothing.
   const used = await usedToday(user.id, now);
@@ -192,6 +193,8 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
   const parsed = sendSchema.safeParse(raw);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const input = parsed.data;
+  // The preview looks nothing up: the box offers no picks, and one sent anyway is refused before any read.
+  if (availability.preview && input.pick) return conflict(CRIS_PREVIEW_ONLY_CHAT);
 
   // The page person is THIS message's page only — never an earlier message's (Review Focus #1).
   const page = { path: input.page.path, ...pageEntity(input.page.path) };
@@ -239,7 +242,8 @@ export async function crisTurn(user: SessionUser, raw: unknown, now: Date = new 
   const openSpareTags = spareTagsOf(lastCris?.content);
 
   const model = pickModel(settings);
-  // Priced at the model that served the reply (a server-side fallback may differ); the fake stores no usage.
+  // Priced at the model that served the reply (a server-side fallback may differ); the fake stores no usage; the
+  // preview stores zero usage under "preview", which is never priced.
   const usageOf = (r: CrisReply) => (model.id === "fake" ? undefined : { ...r.usage, model: isPricedModel(r.model) ? r.model : model.id });
   const history = modelHistory(rows);
   const messages: Anthropic.MessageParam[] = [...history, userMsg];

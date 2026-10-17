@@ -65,19 +65,31 @@ export function crisFlagValue(s: CrisSettings): { dailyLimit: number; model: Cri
   return { dailyLimit: s.dailyLimit, model: s.model };
 }
 
-export type CrisAvailability = { on: boolean; reason?: "off" | "no-key" };
+export type CrisEnv = Partial<Record<"ANTHROPIC_API_KEY" | "CRIS_MODEL" | "NODE_ENV", string | undefined>>;
 
 /**
- * Plan, "Who and when": Cris is off when the admin switch is off (checked first), or when no
- * `ANTHROPIC_API_KEY` is set — except that `CRIS_MODEL=fake` stands in for the key outside
- * production (spec §8: the fake model is refused when NODE_ENV=production).
+ * Which brain answers while Cris is on:
+ *  - "fake": `CRIS_MODEL=fake` outside production (spec §8: the fake model is refused when NODE_ENV=production);
+ *  - "live": an `ANTHROPIC_API_KEY` is set;
+ *  - "preview": neither — placeholder replies only (added 2026-10-18, owner's request). Adding the key later
+ *    switches Cris to "live" with nothing else to change.
  */
-export function crisAvailabilityFrom(
-  settings: Pick<CrisSettings, "on">,
-  env: Partial<Record<"ANTHROPIC_API_KEY" | "CRIS_MODEL" | "NODE_ENV", string | undefined>>,
-): CrisAvailability {
+export type CrisMode = "fake" | "live" | "preview";
+
+export function crisModeFrom(env: CrisEnv): CrisMode {
+  if (env.CRIS_MODEL === "fake" && env.NODE_ENV !== "production") return "fake";
+  if (env.ANTHROPIC_API_KEY) return "live";
+  return "preview";
+}
+
+/** Off only by the admin switch; on, `preview` says there is no key (crisModeFrom). */
+export type CrisAvailability = { on: true; preview?: true } | { on: false; reason: "off" };
+
+/**
+ * Plan, "Who and when": Cris is off only when the admin switch is off. Otherwise Cris is on — in preview when there
+ * is no key and no dev fake (it was off for want of a key until 2026-10-18).
+ */
+export function crisAvailabilityFrom(settings: Pick<CrisSettings, "on">, env: CrisEnv): CrisAvailability {
   if (!settings.on) return { on: false, reason: "off" };
-  const fake = env.CRIS_MODEL === "fake" && env.NODE_ENV !== "production";
-  if (!env.ANTHROPIC_API_KEY && !fake) return { on: false, reason: "no-key" };
-  return { on: true };
+  return crisModeFrom(env) === "preview" ? { on: true, preview: true } : { on: true };
 }

@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   user: { id: "u1", name: "Neil Lucero", role: "it_staff" } as { id: string; name: string; role: string } | null,
-  availability: { on: true } as { on: true } | { on: false; reason: "off" | "no-key" },
+  availability: { on: true } as { on: true; preview?: true } | { on: false; reason: "off" },
   calls: [] as string[],
 }));
 
@@ -25,7 +25,7 @@ vi.mock("./pending-core", () => ({
 }));
 
 import { crisConfirm, crisUndo } from "./pending";
-import { CRIS_OFF_NO_KEY, CRIS_OFF_SWITCH } from "./turn-core";
+import { CRIS_OFF_SWITCH, CRIS_PREVIEW_ONLY_CHAT } from "./turn-core";
 
 beforeEach(() => {
   h.user = { id: "u1", name: "Neil Lucero", role: "it_staff" };
@@ -45,9 +45,10 @@ describe("crisConfirm", () => {
     expect(h.calls).toEqual(["role:admin,it_staff", "availability"]);
   });
 
-  it("refuses with the no-key copy when no AI key is set", async () => {
-    h.availability = { on: false, reason: "no-key" };
-    expect(await crisConfirm({ pendingId: "p1" })).toMatchObject({ kind: "conflict", message: CRIS_OFF_NO_KEY });
+  it("refuses in preview (no AI key: Cris only chats), before the rate limit and the core", async () => {
+    h.availability = { on: true, preview: true };
+    expect(await crisConfirm({ pendingId: "p1" })).toEqual({ ok: false, kind: "conflict", message: CRIS_PREVIEW_ONLY_CHAT });
+    expect(h.calls).toEqual(["role:admin,it_staff", "availability"]);
   });
 });
 

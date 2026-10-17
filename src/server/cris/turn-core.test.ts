@@ -175,7 +175,7 @@ vi.mock("./model", async (importOriginal) => {
 });
 
 const {
-  crisTurn, crisHistoryFor, crisNewChatFor, CRIS_ROUNDS_TEXT, CRIS_OFF_NO_KEY, CRIS_RATE_TEXT, CRIS_MAX_ROUNDS, CRIS_BUSY_TEXT,
+  crisTurn, crisHistoryFor, crisNewChatFor, CRIS_ROUNDS_TEXT, CRIS_OFF_SWITCH, CRIS_PREVIEW_ONLY_CHAT, CRIS_RATE_TEXT, CRIS_MAX_ROUNDS, CRIS_BUSY_TEXT,
   CRIS_TOO_LONG_TEXT, CRIS_FRESH_TEXT, CRIS_MAX_TURNS,
 } = await import("./turn-core");
 const { CrisProviderError } = await import("./model");
@@ -382,11 +382,32 @@ describe("a history the API rejects (400) never bricks the chat", () => {
 });
 
 describe("the turn", () => {
-  it("is refused when Cris is off, with the spec's no-key copy", async () => {
+  it("is refused when an admin has Cris off, with the switch's copy", async () => {
+    h.settings = { ...h.settings, on: false };
+    const r = await send();
+    expect(r).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_SWITCH });
+    expect(h.requests).toHaveLength(0);
+  });
+
+  it("answers in preview with no AI key (added 2026-10-18): saved and counted, zero usage under \"preview\"", async () => {
     vi.stubEnv("CRIS_MODEL", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
-    const r = await send();
-    expect(r).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_NO_KEY });
+    h.modelId = "preview";
+    h.replies.push({ ...text("Hello! I'm Cris"), model: "preview", usage: { input: 0, output: 0 } });
+    const r = await send({ text: "Hello!" });
+    expect(r.ok && r.data).toMatchObject({ left: 99, mood: "talk" });
+    expect(r.ok && r.data.messages.map((m) => m.text)).toEqual(["Hello!", "Hello! I'm Cris"]);
+    const reply = h.rows.find((x) => x.role === "cris");
+    expect(reply).toMatchObject({ model: "preview", inputTokens: 0, outputTokens: 0 });
+  });
+
+  it("refuses a pick in preview before any read: the preview looks nothing up", async () => {
+    vi.stubEnv("CRIS_MODEL", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    const r = await crisTurn(user, { pick: { kind: "person", employeeId: "e1" }, page: { path: "/inventory" } }, NOW);
+    expect(r).toMatchObject({ ok: false, kind: "conflict", message: CRIS_PREVIEW_ONLY_CHAT });
+    expect(h.rows).toHaveLength(0);
+    expect(h.requests).toHaveLength(0);
   });
 
   it("is rate limited after the daily limit and before zod", async () => {
@@ -461,11 +482,17 @@ describe("the turn", () => {
 
 describe("Cris off: history and new chat refuse too", () => {
   it("refuses both with the off copy", async () => {
+    h.settings = { ...h.settings, on: false };
+    expect(await crisNewChatFor(user)).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_SWITCH });
+    expect(await crisHistoryFor(user, { conversationId: "c1" })).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_SWITCH });
+    expect(h.convs).toHaveLength(0);
+  });
+
+  it("works in preview (no key is not off)", async () => {
     vi.stubEnv("CRIS_MODEL", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
-    expect(await crisNewChatFor(user)).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_NO_KEY });
-    expect(await crisHistoryFor(user, { conversationId: "c1" })).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_NO_KEY });
-    expect(h.convs).toHaveLength(0);
+    expect((await crisNewChatFor(user)).ok).toBe(true);
+    expect(h.convs).toHaveLength(1);
   });
 });
 
