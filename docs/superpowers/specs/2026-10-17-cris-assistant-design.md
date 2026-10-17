@@ -223,6 +223,7 @@ Cris is the mascot from the launch film: a glass orb with a lens eye, turning ri
 - `ANTHROPIC_API_KEY` lives in the server's `.env`. The owner pastes it there themselves.
 - It is never stored in the database or shown.
 - Without it, Cris is off and Settings says so: "Cris is off — no AI key is set on the server".
+- Without it, Cris now runs in preview mode instead: Cris shows and chats as normal, but answers only with placeholder lines (no AI calls, no cost, no lookups, no changes), and switches to the real model once the key is added (added 2026-10-18, owner's request).
 
 **A fake model** (`CRIS_MODEL=fake`) gives scripted, deterministic replies so that e2e tests and the battery run with no key and no cost. It is refused when `NODE_ENV=production`.
 
