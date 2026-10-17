@@ -102,6 +102,12 @@
 .cr-eye { animation: var(--cr-eye-anim, none) var(--cr-eye-dur, 3s) ease-in-out infinite; }
 .cr-core { animation: var(--cr-core-anim, cris-core-breath) var(--cr-core-dur, 3.2s) ease-in-out infinite; }
 
+/* The originals inside the hidden defs svg never show, so they don't animate. The
+   <use> clones inherit from their <use> element, not from here, so they are unaffected. */
+.cr-defs {
+  --cr-spin: none; --cr-spin-r: none; --cr-eye-anim: none; --cr-core-anim: none;
+}
+
 /* The orb itself. */
 .cris-orb { display: inline-block; line-height: 0; }
 .cr-orb { display: block; overflow: visible; }
@@ -136,7 +142,9 @@
   animation: cris-shake 1.6s ease-in-out infinite, cris-glow-red 1.6s ease-in-out infinite;
   --cr-eye-anim: cris-eye-narrow; --cr-eye-dur: 1.6s;
   --cr-core-anim: cris-core-pulse; --cr-core-dur: 0.5s;
-  --cr-spin-a: 2s; --cr-spin-b: 2.5s; --cr-spin-c: 0.8s;
+  /* The fast spins rotate dashed rings; rotation is motion, not a luminance flash. The
+     inner ring is still slowed to 1.4 s (the mockup had 0.8 s) to keep it calm to look at. */
+  --cr-spin-a: 2s; --cr-spin-b: 2.5s; --cr-spin-c: 1.4s;
 }
 
 /* Calm and Still. Same specificity as the moods, so these must stay after them. */

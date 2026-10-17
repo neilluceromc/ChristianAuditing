@@ -230,6 +230,7 @@ function OrbSymbol({ color }: { color: CrisColor }) {
 export function CrisOrbDefs() {
   return (
     <svg
+      className="cr-defs"
       aria-hidden="true"
       width={0}
       height={0}
@@ -254,6 +255,7 @@ export function CrisOrb({
   size,
   label,
   className,
+  decorative = false,
 }: {
   color: CrisColor;
   mood: CrisMood;
@@ -261,11 +263,16 @@ export function CrisOrb({
   size: number;
   label?: string;
   className?: string;
+  /** True when something nearby already names Cris (e.g. inside a labelled button): hidden from assistive tech. */
+  decorative?: boolean;
 }) {
   const cls = `cris-orb m-${mood} cr-${motion}${className ? ` ${className}` : ""}`;
+  const a11y = decorative
+    ? ({ "aria-hidden": true } as const)
+    : ({ role: "img", "aria-label": label ?? "Cris" } as const);
   return (
     <span className={cls}>
-      <svg className="cr-orb" role="img" aria-label={label ?? "Cris"} width={size} height={size} viewBox="-300 -300 600 600">
+      <svg className="cr-orb" {...a11y} width={size} height={size} viewBox="-300 -300 600 600">
         {/* Explicit viewport so the symbol's centred viewBox lines up with this one. */}
         <use href={`#cris-${color}`} x={-300} y={-300} width={600} height={600} />
       </svg>
