@@ -1,4 +1,4 @@
-import { actionLabel, auditSentence, fieldLabel } from "./activity";
+import { actionLabel, auditSentence, fieldLabel, viaSuffix } from "./activity";
 import { fmtDayMonthYear } from "./format";
 import { statusLabel } from "./asset-class";
 import { EMPLOYMENT_LABEL } from "./labels";
@@ -208,5 +208,7 @@ export function timelinePhrase(
     { actorLabel: entry.actorLabel, action: entry.action, diff: withHolderNamed(entry.diff, employees), entityLabel: tag },
     { omitActor: true, omitEntity: true },
   );
-  return phrase === entry.action ? actionLabel(entry.action) : phrase;
+  // Phase 41: the fallback compares without the "(via Cris)" ending auditSentence adds, then puts it back
+  const via = viaSuffix(entry.diff);
+  return phrase === entry.action + via ? actionLabel(entry.action) + via : phrase;
 }

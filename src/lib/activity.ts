@@ -66,7 +66,15 @@ export const FIELD_LABELS: Record<string, string> = {
   unit: "unit", packSize: "pack size", reorderLevel: "reorder level", expiresAt: "expiry",
   // Phase 40 §8: triage records Dispose/Donate's `reason` apart from Keep/Repair's optional `note`
   reason: "reason", note: "note",
+  // Phase 41 (spec §6.3): a change made through Cris carries `via: { from: null, to: "Cris" }`; History reads "Via: Cris"
+  via: "Via",
 };
+
+/** Phase 41 (spec §6.3): the words a Cris-made change's sentence ends with — "" for every other entry. */
+export function viaSuffix(diff: unknown): string {
+  const via = (diff as { via?: { to?: unknown } } | null | undefined)?.via;
+  return typeof via === "object" && via !== null && via.to === "Cris" ? " (via Cris)" : "";
+}
 /** Known keys read from the table; unknown ones lose a trailing "Id" and split camelCase: "repairEndedAt" → "repair ended at". */
 export function fieldLabel(key: string): string {
   return FIELD_LABELS[key] ?? key.replace(/Id$/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
@@ -111,6 +119,11 @@ export interface ActivityEntryLike {
  * rendered sentence. `auditPhrase` is the public shorthand for omitting both.
  */
 export function auditSentence(entry: ActivityEntryLike, opts?: { omitActor?: boolean; omitEntity?: boolean }): string {
+  // Phase 41 (spec §6.3): every action's sentence, whatever its verb, says when Cris made it
+  return sentenceBody(entry, opts) + viaSuffix(entry.diff);
+}
+
+function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; omitEntity?: boolean }): string {
   const omitEntity = opts?.omitEntity ?? false;
   const actor = opts?.omitActor ? "" : `${entry.actorLabel} `;
   const diff = (entry.diff ?? null) as Record<string, { from: unknown; to: unknown }> | null;

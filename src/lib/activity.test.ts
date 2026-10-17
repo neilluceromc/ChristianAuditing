@@ -498,3 +498,34 @@ describe("Phase 37 note and IT setup sentences", () => {
     expect(actionLabel("employee.setup")).toBe("IT setup changed");
   });
 });
+
+describe("Phase 41 — a change made through Cris says so", () => {
+  const assign = {
+    actorLabel: "Neil Lucero", action: "lifecycle.assign", entityLabel: "BR-LT-0230",
+    diff: { assignee: { from: null, to: "EMP-0101" }, via: { from: null, to: "Cris" } } as unknown,
+  };
+  it("adds (via Cris) to the sentence", () => {
+    expect(auditSentence(assign)).toBe("Neil Lucero assigned BR-LT-0230 to EMP-0101 (via Cris)");
+    expect(auditSentence(assign)).toMatch(/\(via Cris\)$/);
+  });
+  it("the same entry without via has no suffix", () => {
+    expect(auditSentence({ ...assign, diff: { assignee: { from: null, to: "EMP-0101" } } })).toBe("Neil Lucero assigned BR-LT-0230 to EMP-0101");
+  });
+  it("applies to every action, both replace legs and the short phrase", () => {
+    const via = { via: { from: null, to: "Cris" } };
+    expect(auditSentence({ ...assign, action: "lifecycle.replace", diff: { replacedBy: { from: null, to: "BR-LT-0231" }, ...via } }))
+      .toBe("Neil Lucero replaced BR-LT-0230 with BR-LT-0231 (via Cris)");
+    expect(auditSentence({ ...assign, action: "lifecycle.replace", entityLabel: "BR-LT-0231", diff: { replaces: { from: null, to: "BR-LT-0230" }, assignee: { from: null, to: "EMP-0101" }, ...via } }))
+      .toBe("Neil Lucero put BR-LT-0231 in place of BR-LT-0230 for EMP-0101 (via Cris)");
+    expect(auditSentence({ ...assign, action: "lifecycle.return", diff: { status: { from: "DEPLOYED", to: "SPARE" }, ...via } }))
+      .toBe("Neil Lucero returned BR-LT-0230 as Spare (via Cris)");
+    expect(auditPhrase({ action: "lifecycle.assign", diff: assign.diff })).toBe("assigned to EMP-0101 (via Cris)");
+  });
+  it("only Cris counts as via", () => {
+    expect(auditSentence({ ...assign, diff: { assignee: { from: null, to: "EMP-0101" }, via: { from: null, to: "Other" } } }))
+      .toBe("Neil Lucero assigned BR-LT-0230 to EMP-0101");
+  });
+  it("labels the via field", () => {
+    expect(fieldLabel("via")).toBe("Via");
+  });
+});
