@@ -1,6 +1,6 @@
 # Phase 41 — Cris, the in-app IT assistant
 
-**Status:** DRAFT 2026-10-17. Not yet approved.
+**Status:** APPROVED 2026-10-17. Plan: `docs/superpowers/plans/2026-10-17-phase-41-cris.md`.
 
 **Mockups:** the "Cris — the in-app IT assistant" row on https://claude.ai/artifact/XSKxwmMGNTvFpGHdUWujdz. It has four boards:
 - **Cris · 1:** looks and moods.
