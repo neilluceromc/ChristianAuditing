@@ -25,6 +25,9 @@ export const RATE_LIMITS = {
   // on a form that did nothing wrong. Its own, far larger budget still bounds
   // a runaway client; `RateEvent.kind` is a plain `String`, so no migration.
   check: { limit: 240, windowMs: 60_000 },
+  // Phase 41 (spec §9): Cris messages, 10 a minute per person. Each one may run up to six model
+  // rounds, so it gets its own small budget rather than sharing the 60/min write budget.
+  cris: { limit: 10, windowMs: 60_000 },
 } as const;
 
 export type RateKind = keyof typeof RATE_LIMITS;

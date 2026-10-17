@@ -48,6 +48,7 @@ export const ACTION_LABELS: Record<string, string> = {
   signup: "Signed up", bootstrap: "First admin set up", "role-change": "Role changed",
   disable: "Account disabled", enable: "Account enabled",
   "flag-enable": "Flag turned on", "flag-disable": "Flag turned off", "flag-value": "Flag value changed",
+  "cris-settings": "Cris settings changed",
   "endpoint-enable": "Webhook turned on", "endpoint-disable": "Webhook turned off", "endpoint-delete": "Webhook removed",
   "rotate-secret": "Webhook secret rotated", replay: "Delivery resent",
 };

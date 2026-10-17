@@ -119,7 +119,10 @@ export async function entityLabels(
   // `User.name` isn't unique (only `email` is) — the label carries both so it
   // reads as an identity, not just a display name two people might share.
   for (const u of users) map.set(`user:${u.id}`, { label: `${u.name} · ${u.email}`, href: "/admin/users" });
-  for (const f of flags) map.set(`feature-flag:${f.id}`, { label: f.key, href: "/admin/flags" });
+  // Phase 41: the `cris` row is kept off the Flags page (not in FLAG_SPECS); it is edited in Settings › Cris.
+  for (const f of flags) {
+    map.set(`feature-flag:${f.id}`, f.key === "cris" ? { label: "Cris", href: "/settings/cris" } : { label: f.key, href: "/admin/flags" });
+  }
   // A deleted endpoint has no row to resolve — it correctly keeps the
   // truncated-id fallback below; deleteEndpoint's diff carries the URL instead.
   for (const e of endpoints) map.set(`webhook-endpoint:${e.id}`, { label: e.url, href: "/admin/webhooks" });
