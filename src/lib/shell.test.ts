@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { navDestinations, navLabelFor, workspaceCountLabel } from "./shell";
-import { filterSectionsForRole, WORKSPACE_NAV, type VisibleSection } from "./workspaces";
+import type { Role } from "@prisma/client";
+import { matchDestinations, navDestinations, navLabelFor, workspaceCountLabel } from "./shell";
+import { filterSectionsForRole, WORKSPACE_NAV, type NavSection, type VisibleSection } from "./workspaces";
 
 const SECTIONS: VisibleSection[] = [
   { heading: "start", items: [{ label: "Home", href: "/", icon: "home", badge: [], views: [] }] },
@@ -89,30 +90,79 @@ describe("navLabelFor (the phone top bar's page name)", () => {
   });
 });
 
-describe("navDestinations (the command palette's Go to list, spec §4.6)", () => {
-  it("flattens links and views, de-duplicated by href, links first", () => {
-    expect(navDestinations(SECTIONS, "admin")).toEqual([
-      { label: "Home", href: "/" },
-      { label: "Inventory", href: "/inventory" },
-      { label: "Spare", href: "/inventory?status=SPARE" },
-      { label: "Register assets", href: "/inventory/register" },
-      { label: "Worklist", href: "/inventory/work" },
-      { label: "Approvals", href: "/approvals" },
-      { label: "Mine", href: "/approvals?tab=mine" },
-      { label: "Purchase reviews", href: "/purchases?state=SUBMITTED" },
-      { label: "Setup", href: "/admin/asset-categories" },
-      { label: "Asset types", href: "/admin/asset-types" },
+describe("navDestinations and matchDestinations (the command palette's Go to list, spec §4.6)", () => {
+  const RAW: NavSection[] = [
+    {
+      heading: "one",
+      items: [
+        { label: "Home", href: "/", icon: "home" },
+        {
+          label: "Inventory", href: "/inventory", icon: "inventory",
+          views: [
+            { label: "All", href: "/inventory" },
+            { label: "Spare", href: "/inventory?status=SPARE" },
+            { label: "Register assets", href: "/inventory/register", roles: ["admin", "it_staff"] },
+          ],
+        },
+        {
+          label: "Setup", icon: "setup",
+          views: [
+            { label: "Asset categories", href: "/admin/asset-categories", roles: ["admin", "it_staff"] },
+            { label: "Asset types", href: "/admin/asset-types", roles: ["admin", "it_staff"] },
+            { label: "Equipment policies", href: "/admin/equipment-policies" },
+          ],
+        },
+      ],
+    },
+  ];
+  const find = (role: Role, query: string, nav: NavSection[] = WORKSPACE_NAV.it) =>
+    matchDestinations(navDestinations(nav, role), query);
+
+  it("one destination per href, the link's label first and every other name kept", () => {
+    expect(navDestinations(RAW, "admin")).toEqual([
+      { label: "Home", href: "/", also: [] },
+      { label: "Inventory", href: "/inventory", also: ["All"] },
+      { label: "Spare", href: "/inventory?status=SPARE", also: [] },
+      { label: "Register assets", href: "/inventory/register", also: [] },
+      { label: "Setup", href: "/admin/asset-categories", also: ["Asset categories"] },
+      { label: "Asset types", href: "/admin/asset-types", also: [] },
+      { label: "Equipment policies", href: "/admin/equipment-policies", also: [] },
     ]);
   });
-  it("applies the role filter to views too", () => {
-    const hrefs = navDestinations(SECTIONS, "viewer").map((d) => d.href);
+  it("applies the role filter to links and views, and keeps a collapsed link's view name", () => {
+    expect(navDestinations(RAW, "viewer")).toEqual([
+      { label: "Home", href: "/", also: [] },
+      { label: "Inventory", href: "/inventory", also: ["All"] },
+      { label: "Spare", href: "/inventory?status=SPARE", also: [] },
+      { label: "Setup", href: "/admin/equipment-policies", also: ["Equipment policies"] },
+    ]);
+    const hrefs = navDestinations(WORKSPACE_NAV.it, "viewer").map((d) => d.href);
     expect(hrefs).not.toContain("/inventory/register");
     expect(hrefs).not.toContain("/purchases?state=SUBMITTED");
   });
-  it("still finds Asset types and Audit log in the real IT nav", () => {
-    const labels = navDestinations(filterSectionsForRole(WORKSPACE_NAV.it, "it_staff"), "it_staff").map((d) => d.label);
-    expect(labels).toContain("Asset types");
-    expect(labels).toContain("Audit log");
+  it("lists every destination under its link's label when there is no query", () => {
+    expect(matchDestinations(navDestinations(RAW, "admin"), "").map((d) => d.label)).toEqual([
+      "Home", "Inventory", "Spare", "Register assets", "Setup", "Asset types", "Equipment policies",
+    ]);
+  });
+  it("finds a page by its view name and shows that name (case-insensitive)", () => {
+    expect(find("it_staff", "categories")).toEqual([{ label: "Asset categories", href: "/admin/asset-categories" }]);
+    expect(find("it_staff", "Asset categories")).toEqual([{ label: "Asset categories", href: "/admin/asset-categories" }]);
+    expect(find("it_staff", "inventory activity")).toEqual([{ label: "Inventory activity", href: "/inventory/activity" }]);
+    expect(find("viewer", "policies")).toEqual([{ label: "Equipment policies", href: "/admin/equipment-policies" }]);
+    expect(find("it_staff", "Asset types")).toEqual([{ label: "Asset types", href: "/admin/asset-types" }]);
+    expect(find("it_staff", "audit")).toEqual([{ label: "Audit log", href: "/audit" }]);
+  });
+  it("prefers the link's own label when it matches", () => {
+    expect(find("it_staff", "setup")).toEqual([{ label: "Setup", href: "/admin/asset-categories" }]);
+    expect(find("purchasing_staff", "categories", WORKSPACE_NAV.purchasing).map((d) => d.label)).toEqual([
+      "Asset categories", "Stock categories",
+    ]);
+  });
+  it("a viewer never finds what they cannot open", () => {
+    expect(find("viewer", "register")).toEqual([]);
+    expect(find("viewer", "purchase reviews")).toEqual([]);
+    expect(find("viewer", "asset types")).toEqual([]);
   });
 });
 

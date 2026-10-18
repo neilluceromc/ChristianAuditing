@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Role } from "@prisma/client";
 import { cn } from "@/lib/cn";
-import { navDestinations } from "@/lib/shell";
-import type { VisibleSection } from "@/lib/workspaces";
+import { matchDestinations, type NavDestination } from "@/lib/shell";
 import { createSequence, rateLimitMessage } from "@/lib/palette";
 import { paletteShortcutOpens } from "@/lib/shortcuts";
 import { Kbd } from "@/components/ui/kbd";
@@ -77,7 +75,8 @@ interface Group {
   mono: boolean;
 }
 
-export function CommandPalette({ role, sections }: { role: Role; sections: VisibleSection[] }) {
+/** `destinations`: the role's "Go to" pages, from `navDestinations` on the server. */
+export function CommandPalette({ destinations }: { destinations: NavDestination[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hint, setHint] = useState<string | null>(null);
@@ -208,12 +207,10 @@ export function CommandPalette({ role, sections }: { role: Role; sections: Visib
     return () => clearTimeout(t);
   }, [retryLeft, search]);
 
-  // Spec §4.6: links and views alike, role-filtered and de-duplicated by href, so "Asset types" still finds its page.
-  const destinations = useMemo(() => navDestinations(sections, role), [sections, role]);
+  // Spec §4.6: links and views alike, each findable by its own name ("Asset categories", "Audit log").
   const actions = useMemo(
     () =>
-      destinations
-        .filter((d) => !query || d.label.toLowerCase().includes(query.toLowerCase()))
+      matchDestinations(destinations, query)
         .slice(0, 5)
         .map((d) => ({ label: d.label, sub: "Go to", href: d.href })),
     [destinations, query],

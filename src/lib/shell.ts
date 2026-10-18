@@ -1,5 +1,5 @@
 import type { Role } from "@prisma/client";
-import type { VisibleSection } from "./workspaces";
+import { filterSectionsForRole, type NavSection, type VisibleSection } from "./workspaces";
 
 const pathOf = (href: string) => href.split("?")[0];
 const matches = (path: string, pathname: string) =>
@@ -33,21 +33,48 @@ export function navLabelFor(pathname: string, sections: VisibleSection[]): strin
 }
 
 /**
- * The command palette's "Go to" destinations (spec §4.6): every link and view, in nav order, role-filtered (views
- * carry `roles`) and de-duplicated by href, the first label winning (so /inventory reads "Inventory", not "All").
+ * One "Go to" destination: a page, the label it lists under, and every other name the nav gives it (a view that
+ * shares its link's href, like Setup's "Asset categories", or a collapsed link's single view).
  */
-export function navDestinations(sections: VisibleSection[], role: Role): Array<{ label: string; href: string }> {
-  const seen = new Set<string>();
-  const out: Array<{ label: string; href: string }> = [];
-  for (const item of sections.flatMap((s) => s.items)) {
-    const views = item.views.filter((v) => !v.roles || v.roles.includes(role));
-    for (const { label, href } of [item, ...views]) {
-      if (seen.has(href)) continue;
-      seen.add(href);
-      out.push({ label, href });
-    }
+export interface NavDestination {
+  label: string;
+  href: string;
+  also: string[];
+}
+
+/**
+ * The command palette's "Go to" destinations (spec §4.6): every link and view a role can see, in nav order, one per
+ * href. The first name for an href is its label (so /inventory lists as "Inventory"); later names for the same href
+ * are kept in `also`, so every sub-page stays findable by its own name. Built from the nav definition, not the
+ * visible sections, because a link collapsed to one view (a viewer's Setup) no longer carries that view's name.
+ */
+export function navDestinations(sections: NavSection[], role: Role): NavDestination[] {
+  const visible = (x: { roles?: Role[] }) => !x.roles || x.roles.includes(role);
+  const byLabel = new Map(sections.flatMap((s) => s.items).map((i) => [i.label, i]));
+  const byHref = new Map<string, NavDestination>();
+  const add = (label: string, href: string) => {
+    const d = byHref.get(href);
+    if (!d) byHref.set(href, { label, href, also: [] });
+    else if (d.label !== label && !d.also.includes(label)) d.also.push(label);
+  };
+  for (const item of filterSectionsForRole(sections, role).flatMap((s) => s.items)) {
+    add(item.label, item.href);
+    for (const view of (byLabel.get(item.label)?.views ?? []).filter(visible)) add(view.label, view.href);
   }
-  return out;
+  return [...byHref.values()];
+}
+
+/**
+ * The destinations a palette query finds (case-insensitive substring), each shown under the name that matched: its
+ * label when that matches, else the first matching other name ("categories" finds "Asset categories", not "Setup").
+ * An empty query lists every destination under its label.
+ */
+export function matchDestinations(destinations: NavDestination[], query: string): Array<{ label: string; href: string }> {
+  const q = query.trim().toLowerCase();
+  return destinations.flatMap(({ label, href, also }) => {
+    const name = !q ? label : [label, ...also].find((n) => n.toLowerCase().includes(q));
+    return name ? [{ label: name, href }] : [];
+  });
 }
 
 /** Spec §3: the workspace switcher reads "{n} workspaces" (singular for one), never the cookie name. */

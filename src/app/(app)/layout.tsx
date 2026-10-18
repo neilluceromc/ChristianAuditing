@@ -11,6 +11,7 @@ import {
 import { getApprovalsBadge, Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
+import { navDestinations } from "@/lib/shell";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
 import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
 import { purchaseReviewCount, worklistCount } from "@/server/modules/home/queries";
@@ -81,7 +82,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {children}
         </main>
       </div>
-      <CommandPalette role={user.role} sections={sections} />
+      <CommandPalette destinations={navDestinations(WORKSPACE_NAV[ws], user.role)} />
       {/* The orb's symbols, once per page: the widget and Settings › Cris both draw from them. */}
       {reviewer && <CrisOrbDefs />}
       {cris && <CrisWidget {...cris} />}

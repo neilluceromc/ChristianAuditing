@@ -447,6 +447,10 @@ describe("filterSectionsForRole (spec §3.5)", () => {
           ],
         },
         { label: "Empty hub", icon: "setup", views: [{ label: "Only", href: "/d", roles: ["admin"] }] },
+        {
+          label: "Own href, hidden views", href: "/f", icon: "home",
+          views: [{ label: "F1", href: "/f", roles: ["admin"] }, { label: "F2", href: "/f?x=1", roles: ["admin"] }],
+        },
       ],
     },
     { heading: "two", items: [{ label: "Hidden", href: "/e", icon: "home", roles: ["admin"] }] },
@@ -455,6 +459,10 @@ describe("filterSectionsForRole (spec §3.5)", () => {
     const out = filterSectionsForRole(NAV, "viewer");
     expect(out.map((s) => s.heading)).toEqual(["one"]);
     expect(out[0].items.map((i) => i.label)).toEqual(["Plain", "Hub"]);
+  });
+  it("a link with views is visible only while one of its views is, even with an href of its own", () => {
+    expect(filterSectionsForRole(NAV, "viewer")[0].items.map((i) => i.label)).not.toContain("Own href, hidden views");
+    expect(filterSectionsForRole(NAV, "admin")[0].items[4]).toMatchObject({ label: "Own href, hidden views", href: "/f" });
   });
   it("a link with no href points at its first visible view", () => {
     expect(filterSectionsForRole(NAV, "admin")[0].items[2].href).toBe("/c/1");

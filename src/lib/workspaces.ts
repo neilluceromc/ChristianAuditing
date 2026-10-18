@@ -339,7 +339,7 @@ const visibleTo = (role: Role) => (x: { roles?: Role[] }) => !x.roles || x.roles
 /**
  * What one role sees of a workspace's nav (spec §3.5):
  * 1. links and views the role can't see are dropped;
- * 2. a link left with no href and no views is dropped;
+ * 2. a link that had views and has none left is dropped, even with an href of its own;
  * 3. a link with no href of its own points at its first visible view;
  * 4. with one visible view or none, the link has no view list (one view: the link points straight at it);
  * 5. empty groups are dropped.
@@ -353,6 +353,8 @@ export function filterSectionsForRole(sections: NavSection[], role: Role): Visib
       heading: section.heading,
       items: section.items.filter(visible).flatMap((item): VisibleItem[] => {
         const views = (item.views ?? []).filter(visible);
+        // Spec §3.5: a link with views is visible only while at least one of its views is.
+        if (item.views?.length && views.length === 0) return [];
         const href = views.length === 1 ? views[0].href : (item.href ?? views[0]?.href);
         if (!href) return [];
         const countedByAnyView = new Set((item.views ?? []).map((v) => v.count));
