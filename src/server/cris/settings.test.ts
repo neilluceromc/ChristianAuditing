@@ -42,6 +42,17 @@ describe("saveCrisPrefs", () => {
     expect(h.upserts).toBe(1);
   });
 
+  it("merges tucked alone over the stored prefs", async () => {
+    const r = await saveCrisPrefs({ tucked: true });
+    expect(r).toMatchObject({ ok: true, data: { tucked: true, side: "right", bottom: 20, seenHint: false } });
+    expect(h.upserts).toBe(1);
+  });
+
+  it("refuses a tucked that isn't a boolean, writing nothing", async () => {
+    expect(await saveCrisPrefs({ tucked: "yes" })).toMatchObject({ ok: false, kind: "validation" });
+    expect(h.upserts).toBe(0);
+  });
+
   it("refuses a viewer, writing nothing", async () => {
     h.user = { id: "u2", name: "Vee Wer", role: "viewer" };
     expect(await saveCrisPrefs({ seenHint: true })).toMatchObject({ ok: false, kind: "forbidden" });
