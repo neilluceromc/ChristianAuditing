@@ -504,7 +504,8 @@ export function NewEmployeeWizard({
           </Card>
         </div>
 
-        <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-3 border-t border-border bg-surface px-1 py-3">
+        {/* data-cris-avoid: while Cris shows, the bar keeps its buttons out of Cris's corner (cris-widget.css). */}
+        <div data-cris-avoid="" className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-3 border-t border-border bg-surface px-1 py-3">
           {step === 1 ? (
             <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
           ) : (

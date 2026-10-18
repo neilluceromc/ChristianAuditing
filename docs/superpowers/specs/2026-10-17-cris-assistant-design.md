@@ -72,26 +72,38 @@ Cris is the mascot from the launch film: a glass orb with a lens eye, turning ri
 
 ## 4. Where Cris lives (mockup boards 2 and 4)
 
-**The mascot**
-- **One per page.** A single mascot sits in the bottom-right of every IT page, about 64 px from the right and 72 px from the bottom, at about 110 px. It is the only place the orb appears; messages carry no avatars.
+**The mascot** (sizes, clicks, corner clearing and tuck away updated 2026-10-18, owner's request: the 116 px mascot covered the "Register asset" button in the register form's sticky action bar)
+- **One per page.** A single mascot sits in the bottom-right of every IT page, about 20 px from the right and 20 px from the bottom, at 64 px. It is the only place the orb appears; messages carry no avatars.
+- **Never in the way.** Only the orb's glass body takes clicks: a centred circle about 44 px across. The rest of the orb (its rings and glow) and the space around it pass clicks through to the page beneath. The open box is interactive as usual.
+- **The corner is kept clear.** While the mascot shows:
+  - every page's content has about 88 px of extra room at its end, so its last row can scroll clear of Cris;
+  - a field that takes keyboard focus scrolls above Cris (the page's bottom scroll padding is 88 px);
+  - sticky bottom action bars (register, edit asset, edit employee, the new-employee wizard) get about 84 px of padding on Cris's side, so their buttons never sit under Cris. On phones it is 76 px on the right.
+
+  None of this applies while Cris is tucked away or hidden.
 - **Moving it.** While the chat box is closed, the person can drag the mascot anywhere. On release it glides to the nearest side (left or right) at the height dropped. A short drag never counts as a click.
   - Arrow keys move it when it has focus and the box is closed.
   - The position is saved per person (§9).
   - Settings has "Put Cris back in the corner".
-- **Hint bubble.** While closed, a small bubble reads "Hi! Need a hand? · drag me anywhere". It shows until the person has opened Cris once.
-- **New-reply badge.** A reply that arrives while the box is closed puts a small red count on the mascot.
+- **Tuck away.** While the mascot is hovered or focused (and the box is closed), a small round "–" ("Tuck Cris away") shows at the orb's top corner on the side facing into the screen; it is the next Tab stop after the mascot.
+  - Pressing it closes the box, hides the mascot and leaves a slim tab on that screen edge (about 22 × 56, rounded on the inward side, a mini orb half peeking out) at the height the mascot was. Focus moves to the tab.
+  - The tab ("Bring Cris back") restores the mascot and puts focus on it. It shows the new-reply badge too.
+  - Being tucked away is saved per person (§9), so it lasts across pages, reloads and computers. "Put Cris back in the corner" also brings Cris back.
+- **Hint bubble.** While closed, a small bubble beside the mascot reads "Hi! Need a hand? · drag me anywhere". It shows until the person has opened Cris once, disappears by itself after 8 s (counting as seen), and never shows on a page with a sticky bottom action bar, so it can't sit over that bar's buttons. A saved position at the old default (72 px up) reads as the new default (20 px). *(updated 2026-10-18, owner's request)*
+- **New-reply badge.** A reply that arrives while the box is closed puts a small red count on the mascot (or on the tab).
 
 **Pressing the mascot** opens a small chat box (about 368 × 470) attached to it:
 - **Placement:**
   - above the mascot by default (below it when the mascot sits in the upper half of the page);
-  - the box's edge dips into the orb's clear top margin, so there is no gap;
+  - the box's edge dips into the orb's clear margin outside its outer ring (about 10 px at 64 px), so there is no gap;
   - a speech-bubble pointer on that edge sits over the mascot's centre;
   - the box is aligned to the mascot's side and grows out of it when it opens.
+  - The geometry takes the mascot's size as a parameter, so a future size change keeps all of this.
 - **One unit.** The box, the hint bubble and the mascot are one positioned unit, so they never drift apart at any screen size or while dragging.
 - **Screen sizes:**
   - Wide screens: as above.
   - Narrower than about 1100 px: the box narrows to fit (`min(368px, 100vw − 170px)`).
-  - Phones (under about 640 px): the mascot shrinks to about 72 px and is fixed bottom-right. The box opens as a panel across the bottom of the screen, 12 px from each edge, up to 560 px tall. There is no pointer and no hint bubble.
+  - Phones (under about 640 px): the mascot shrinks to 56 px and is fixed bottom-right, 16 px from each edge. The box opens as a panel across the bottom of the screen, 12 px from each edge and 80 px up, up to 560 px tall. There is no pointer and no hint bubble.
 - **Closing.** Pressing again, the header's Close, or Esc closes the box. The conversation is still there next time, including after a page change or a reload (§7).
 - **Focus.** Focus goes to the message box on open. On close, focus returns to the mascot, never to body.
 - **Screen readers.** The message list is `role="log"` with `aria-live="polite"`.
@@ -267,7 +279,8 @@ Notes, free text and money are still never sent (above).
 - Colour: Gold, Sky blue, Silver or Match theme. New people start on Match theme.
 - Motion: Lively, Calm or Still.
 - "Show Cris in the bottom-right corner of every page" (on).
-- "Put Cris back in the corner".
+- "Put Cris back in the corner". It also brings back a tucked-away Cris (§4).
+- Whether Cris is tucked away (`tucked`, off for new people), set from the mascot's "–" and the tab (§4, added 2026-10-18).
 
 **Cris for everyone** (admins only):
 - **The switch:** "Cris is on".
@@ -304,6 +317,8 @@ These are stored as one `FeatureFlag` (`cris`) with a Json value, and changes ar
 - Confirm refused when the spare was taken meanwhile;
 - the daily limit message;
 - dragging the mascot and the box opening beside it;
+- the register form's primary button takes a real click with Cris in the corner, and a click on Cris's rings reaches the page beneath (added 2026-10-18);
+- tucking Cris away, kept after a reload, and the tab bringing the mascot back with focus (added 2026-10-18);
 - focus on open and close;
 - axe on the open box.
 

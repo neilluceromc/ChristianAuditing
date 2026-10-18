@@ -12,30 +12,36 @@
   to { opacity: 1; transform: none; }
 }
 
-/* One unit: the box, the hint and the mascot never drift apart. */
+/* One unit: the box, the hint and the mascot never drift apart. The sizes match src/lib/cris-placement.ts
+   (CRIS_MASCOT, CRIS_MASCOT_PHONE, CRIS_HIT). Updated 2026-10-18 (owner's request): a 64 px mascot, and the dock
+   passes clicks through — only the glass body (.cris-mascot), the "–" and the open box take them. */
 .cris-dock {
+  --cris-size: 64px;
+  --cris-hit: 44px;
   position: fixed;
   z-index: 30;
-  width: 116px;
-  height: 116px;
+  width: var(--cris-size);
+  height: var(--cris-size);
+  pointer-events: none;
   transition: left 0.25s ease, right 0.25s ease, top 0.25s ease, bottom 0.25s ease;
 }
 .cris-dock.is-dragging { transition: none; }
 
+/* The glass body: a centred 44 px circle, the dock's one clickable part. The orb (64 px, rings and glow) overflows
+   it and passes clicks through; a round border-radius also keeps the button's own corners out of hit testing. */
 .cris-mascot {
   position: absolute;
-  left: 0;
-  top: 0;
+  left: calc((var(--cris-size) - var(--cris-hit)) / 2);
+  top: calc((var(--cris-size) - var(--cris-hit)) / 2);
   z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 116px;
-  height: 116px;
+  width: var(--cris-hit);
+  height: var(--cris-hit);
   padding: 0;
   border: 0;
   border-radius: 50%;
   background: none;
   cursor: pointer;
+  pointer-events: auto;
   touch-action: none;
   transition: transform 0.15s;
 }
@@ -43,29 +49,117 @@
 .cris-mascot:active { transform: scale(0.96); }
 .cris-mascot.is-closed { cursor: grab; }
 .cris-mascot.is-dragging { cursor: grabbing; transition: none; }
-.cris-mascot .cris-orb { filter: drop-shadow(0 6px 10px rgba(16, 24, 40, 0.25)); }
+.cris-mascot .cris-orb {
+  position: absolute;
+  left: calc((var(--cris-hit) - var(--cris-size)) / 2);
+  top: calc((var(--cris-hit) - var(--cris-size)) / 2);
+  pointer-events: none;
+  filter: drop-shadow(0 4px 7px rgba(16, 24, 40, 0.25));
+}
+.cris-mascot .cr-orb {
+  width: var(--cris-size);
+  height: var(--cris-size);
+  pointer-events: none;
+}
 
 .cris-badge {
   position: absolute;
-  right: 14px;
-  top: 12px;
+  right: -6px;
+  top: -6px;
   display: grid;
   place-items: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
   border: 2px solid var(--canvas);
   border-radius: 999px;
   background: var(--danger-bg);
   color: var(--danger-fg);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
   line-height: 1;
+  pointer-events: none;
 }
+
+/* "Tuck Cris away": a small round "–" in the dock's top corner, on the side facing into the screen. Its inner edge
+   overlaps the glass body by a few px, so the pointer can reach it without leaving the mascot. Shown while the dock
+   is hovered (only the glass body and this button take the pointer) or something in it has keyboard focus
+   (:focus-visible, so a mouse click doesn't leave it up). Hidden it is out of the Tab order, but a keyboard focus
+   on the mascot shows it, so it is the next Tab stop. */
+.cris-tuck {
+  position: absolute;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 24px; /* WCAG 2.5.8's minimum target */
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(16, 24, 40, 0.18);
+  cursor: pointer;
+  pointer-events: auto;
+  visibility: hidden;
+  opacity: 0;
+  /* A short grace before hiding, for a pointer on its way from the glass to the button. */
+  transition: opacity 0.15s, visibility 0s linear 0.3s;
+}
+.cris-tuck-l { left: 0; }
+.cris-tuck-r { right: 0; }
+.cris-dock:hover .cris-tuck,
+.cris-dock:has(:focus-visible) .cris-tuck {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.15s, visibility 0s;
+}
+.cris-tuck:hover { background: var(--surface-subtle); }
+.cris-dock.is-dragging .cris-tuck { display: none; }
+
+/* Tucked away: a slim 22 × 56 tab on the screen's edge, rounded on the inward side, a mini orb half peeking out. */
+.cris-tucked {
+  position: fixed;
+  z-index: 30;
+  width: 22px;
+  height: 56px;
+}
+.cris-tab {
+  position: relative;
+  display: block;
+  width: 22px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.16);
+  cursor: pointer;
+}
+.cris-tab:hover { background: var(--surface-subtle); }
+.cris-tab-r { border-right: 0; border-radius: 12px 0 0 12px; }
+.cris-tab-l { border-left: 0; border-radius: 0 12px 12px 0; }
+.cris-tab-peek {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+/* The 30 px orb's centre sits on the screen's edge, so half of it shows. */
+.cris-tab-peek .cris-orb { position: absolute; top: 13px; }
+.cris-tab-r .cris-tab-peek .cris-orb { left: 7px; }
+.cris-tab-l .cris-tab-peek .cris-orb { right: 7px; }
+.cris-tab .cris-badge { top: -8px; }
+.cris-tab-r .cris-badge { right: auto; left: -8px; }
+.cris-tab-l .cris-badge { right: -8px; }
 
 .cris-hint {
   position: absolute;
   z-index: 6;
+  pointer-events: none;
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -92,6 +186,7 @@
   z-index: 5;
   display: flex;
   flex-direction: column;
+  pointer-events: auto; /* the dock passes clicks through; the open box is interactive as before */
   border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--surface);
@@ -107,7 +202,8 @@
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
-/* The speech-bubble pointer: a 16 px square turned 45°, 21 px in, over the mascot's centre. */
+/* The speech-bubble pointer: a 16 px square turned 45°, --cris-pointer-in from the box's side (boxPlacement sets it
+   from the mascot's size; 21 px at 64 px), over the mascot's centre. */
 .cris-box::after {
   content: "";
   position: absolute;
@@ -116,35 +212,65 @@
   border: 1px solid var(--border);
   background: var(--surface);
   transform: rotate(45deg);
+  pointer-events: none;
 }
 .cris-box.cris-above::after { bottom: -9px; border-top: 0; border-left: 0; }
 .cris-box.cris-below::after { top: -9px; border-bottom: 0; border-right: 0; }
-.cris-box.cris-r::after { right: 21px; }
-.cris-box.cris-l::after { left: 21px; }
+.cris-box.cris-r::after { right: var(--cris-pointer-in, 21px); }
+.cris-box.cris-l::after { left: var(--cris-pointer-in, 21px); }
 
 .cris-msg { animation: cris-rise 0.22s ease-out; }
 
-/* Phones: a smaller Cris fixed bottom-right, and the box as a panel across the bottom; no pointer, no hint. */
+/* Keeping the corner clear (spec §4, added 2026-10-18). Only while the mascot shows: a tucked-away tab or a hidden
+   Cris has no [data-cris-dock], so none of this applies then.
+   - #main gets extra room at its end (88 px on top of its p-6), so every page's last row scrolls clear of Cris;
+   - keyboard focus scrolls a focused field above Cris (scroll-padding-bottom);
+   - sticky bottom action bars ([data-cris-avoid]) get padding on Cris's side, so their buttons never sit under Cris.
+   Wide screens follow the side Cris is on (84 px = the 20 px inset + the 64 px mascot); phones put the 56 px Cris
+   bottom-right 16 px in, always (76 px). The first-run hint never shows on a page with such a bar: beside Cris, it
+   would cover the bar's buttons.
+   Wide is "over 640 px" (640.02, as the phone rule is max-width: 640px), so no width falls between the two. */
+@media screen {
+  html:has([data-cris-dock]) {
+    --cris-clear: 88px;
+    --cris-avoid: 84px;
+    scroll-padding-bottom: var(--cris-clear);
+  }
+  html:has([data-cris-dock]) #main { padding-bottom: calc(1.5rem + var(--cris-clear)); }
+  html:has([data-cris-avoid]) .cris-hint { display: none; }
+}
+@media screen and (min-width: 640.02px) {
+  html:has([data-cris-dock][data-cris-side="right"]) [data-cris-avoid] { padding-right: var(--cris-avoid); }
+  html:has([data-cris-dock][data-cris-side="left"]) [data-cris-avoid] { padding-left: var(--cris-avoid); }
+}
+
+/* Phones: a smaller Cris (56 px) fixed bottom-right, and the box as a panel across the bottom; no pointer, no hint. */
 @media (max-width: 640px) {
+  html:has([data-cris-dock]) {
+    --cris-clear: 76px;
+    --cris-avoid: 76px;
+  }
+  html:has([data-cris-dock]) [data-cris-avoid] { padding-right: var(--cris-avoid); }
   .cris-dock {
-    width: 76px !important;
-    height: 76px !important;
+    --cris-size: 56px;
     left: auto !important;
     top: auto !important;
     right: 16px !important;
     bottom: 16px !important;
   }
-  .cris-mascot { width: 76px; height: 76px; }
-  .cris-mascot .cr-orb { width: 72px; height: 72px; }
-  .cris-badge { right: 2px; top: 0; }
+  .cris-tucked {
+    left: auto !important;
+    right: 0 !important;
+    bottom: 16px !important;
+  }
   .cris-box {
     position: fixed;
     left: 12px !important;
     right: 12px !important;
     top: auto !important;
-    bottom: 100px !important;
+    bottom: 80px !important;
     width: auto !important;
-    height: min(560px, calc(100vh - 124px)) !important;
+    height: min(560px, calc(100vh - 104px)) !important;
     max-height: none !important;
   }
   .cris-box::after,
@@ -152,6 +278,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cris-dock, .cris-mascot { transition: none; }
+  .cris-dock, .cris-mascot, .cris-tuck { transition: none; }
   .cris-box, .cris-hint, .cris-msg { animation: none; }
 }

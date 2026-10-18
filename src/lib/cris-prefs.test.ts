@@ -5,8 +5,17 @@ describe("crisPrefsSchema (spec §9, Your Cris)", () => {
   it("accepts the defaults", () => {
     expect(crisPrefsSchema.safeParse(CRIS_PREF_DEFAULTS).success).toBe(true);
   });
-  it("the defaults: Match theme, Lively, shown, bottom-right at 72, hint not yet seen", () => {
-    expect(CRIS_PREF_DEFAULTS).toEqual({ color: "auto", motion: "lively", show: true, side: "right", bottom: 72, seenHint: false });
+  it("the defaults: Match theme, Lively, shown, bottom-right at 20, hint not yet seen, not tucked away", () => {
+    expect(CRIS_PREF_DEFAULTS).toEqual({
+      color: "auto", motion: "lively", show: true, side: "right", bottom: 20, seenHint: false, tucked: false,
+    });
+  });
+  it("tucked is a boolean", () => {
+    expect(crisPrefsSchema.safeParse({ ...CRIS_PREF_DEFAULTS, tucked: true }).success).toBe(true);
+    expect(crisPrefsSchema.safeParse({ ...CRIS_PREF_DEFAULTS, tucked: "yes" }).success).toBe(false);
+  });
+  it("a partial patch can carry tucked alone (saveCrisPrefs merges it)", () => {
+    expect(crisPrefsSchema.partial().safeParse({ tucked: true })).toMatchObject({ success: true, data: { tucked: true } });
   });
   it("rejects an unknown colour", () => {
     expect(crisPrefsSchema.safeParse({ ...CRIS_PREF_DEFAULTS, color: "pink" }).success).toBe(false);
@@ -31,8 +40,19 @@ describe("parseCrisPrefs", () => {
     }
   });
   it("keeps every valid field and replaces only the bad ones", () => {
-    expect(parseCrisPrefs({ color: "sky", motion: "still", show: false, side: "left", bottom: 9999, seenHint: true })).toEqual({
-      color: "sky", motion: "still", show: false, side: "left", bottom: 72, seenHint: true,
+    expect(parseCrisPrefs({ color: "sky", motion: "still", show: false, side: "left", bottom: 9999, seenHint: true, tucked: true })).toEqual({
+      color: "sky", motion: "still", show: false, side: "left", bottom: 20, seenHint: true, tucked: true,
     });
+  });
+  it("prefs stored before tucked existed read as not tucked", () => {
+    expect(parseCrisPrefs({ color: "gold", motion: "calm", show: true, side: "left", bottom: 300, seenHint: true })).toEqual({
+      color: "gold", motion: "calm", show: true, side: "left", bottom: 300, seenHint: true, tucked: false,
+    });
+  });
+  it("a stored 72 (the default before 2026-10-18) reads as the new default, 20; other heights are kept", () => {
+    expect(parseCrisPrefs({ side: "right", bottom: 72 }).bottom).toBe(20);
+    expect(parseCrisPrefs({ side: "left", bottom: 72 })).toMatchObject({ side: "left", bottom: 20 });
+    expect(parseCrisPrefs({ bottom: 73 }).bottom).toBe(73);
+    expect(parseCrisPrefs({ bottom: 16 }).bottom).toBe(16);
   });
 });

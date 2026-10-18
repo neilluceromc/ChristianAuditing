@@ -10,7 +10,8 @@ import type { CrisPrefs } from "@/lib/cris-prefs";
 import { moodFor, resolveColor, type MoodState } from "@/lib/cris-mood";
 import type { ConfirmCard, CrisViewMessage, PersonRef, ResultCard } from "@/lib/cris-cards";
 import {
-  CRIS_INSET, CRIS_MASCOT, CRIS_RESET_POSITION_EVENT, boxPlacement, bottomFromTop, clampBottom, dragPosition, nudgeBottom, snapSide, type CrisSide,
+  CRIS_INSET, CRIS_MASCOT, CRIS_RESET_POSITION_EVENT, boxPlacement, bottomFromTop, clampBottom, dragPosition, nudgeBottom, snapSide,
+  tabBottom, type CrisSide,
 } from "@/lib/cris-placement";
 import {
   TYPE_TICK_MS, liveMessageId, nextTyped, oldestSavedId, outcomeOfFailure, outcomeOfMood, personFirstFor, pressSettled, quickStarts, scannedSpare,
@@ -33,6 +34,11 @@ import "./cris-widget.css";
  * box attached to it. One fixed dock holds the box, the hint and the mascot (pinned at the dock's top-left), so they
  * never drift apart. Ported from the CrisPage mockup; the geometry is src/lib/cris-placement.ts, the box's rules are
  * src/lib/cris-box.ts.
+ *
+ * Updated 2026-10-18 (owner's request): the mascot is 64 px and only its 44 px glass body takes clicks — the dock and
+ * the orb's rings pass them through to the page. While the dock shows (data-cris-dock), cris-widget.css keeps the
+ * corner clear: extra room under #main, scroll padding, and padding on Cris's side of [data-cris-avoid] bars. The
+ * "–" button tucks Cris away into a slim tab on the screen's edge (prefs.tucked); then none of that padding applies.
  */
 
 export type CrisWidgetProps = {
@@ -88,6 +94,7 @@ const no = () => false;
 const SERVER_HEIGHT = 900;
 const DROP_GLIDE_MS = 260;
 const NUDGE_SAVE_MS = 600;
+const HINT_MS = 8000;
 const BROKEN_TEXT = "Something went wrong — try again in a moment.";
 
 let localSeq = 0;
@@ -109,6 +116,7 @@ export function CrisWidget({
 
   const dockRef = useRef<HTMLElement | null>(null);
   const mascotRef = useRef<HTMLButtonElement | null>(null);
+  const tabRef = useRef<HTMLButtonElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   // ── where it sits ─────────────────────────────────────────────────────────
@@ -127,6 +135,23 @@ export function CrisWidget({
   const glideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  // ── tucked away (a slim tab on the screen's edge) ─────────────────────────
+  const [tucked, setTucked] = useState(prefs.tucked);
+  // Settings' "Put Cris back in the corner" also untucks; a later refresh brings the stored value: follow it.
+  const [seenPropTucked, setSeenPropTucked] = useState(prefs.tucked);
+  if (prefs.tucked !== seenPropTucked) {
+    setSeenPropTucked(prefs.tucked);
+    setTucked(prefs.tucked);
+  }
+  /** Where focus goes once the swap between the mascot and the tab has rendered, so it never falls to body. */
+  const focusAfterSwap = useRef<"mascot" | "tab" | null>(null);
+  useEffect(() => {
+    const to = focusAfterSwap.current;
+    focusAfterSwap.current = null;
+    if (to === "mascot") mascotRef.current?.focus();
+    else if (to === "tab") tabRef.current?.focus();
+  }, [tucked]);
+
   // Prefs saves are a partial merge on the server; one at a time, so a drag and the hint can't overwrite each other.
   const prefsQueue = useRef<Promise<unknown>>(Promise.resolve());
   const savePrefs = useCallback((patch: Partial<CrisPrefs>) => {
@@ -142,13 +167,15 @@ export function CrisWidget({
   // save still waiting, which would otherwise put the old place back.
   useEffect(() => {
     const onReset = (e: Event) => {
-      const d = (e as CustomEvent<{ side?: unknown; bottom?: unknown }>).detail;
+      const d = (e as CustomEvent<{ side?: unknown; bottom?: unknown; tucked?: unknown }>).detail;
       if (!d || (d.side !== "left" && d.side !== "right") || typeof d.bottom !== "number" || !Number.isFinite(d.bottom)) return;
       clearTimeout(nudgeTimer.current);
       clearTimeout(glideTimer.current);
       drag.current = null;
       setDragAt(null);
       setPos({ side: d.side, bottom: d.bottom });
+      // Back in the corner means shown, not tucked away (focus stays on Settings' button, which pressed it).
+      if (d.tucked === false) setTucked(false);
     };
     window.addEventListener(CRIS_RESET_POSITION_EVENT, onReset);
     return () => window.removeEventListener(CRIS_RESET_POSITION_EVENT, onReset);
@@ -438,6 +465,17 @@ export function CrisWidget({
     onChip: (text) => void send({ text }, text),
   };
 
+  // ── the first-run hint goes by itself after 8 s on any page, and counts as seen, so it never lingers ──
+  const hintUp = prefs.show && !tucked && !open && !seenHint && unread === 0 && !dragAt;
+  useEffect(() => {
+    if (!hintUp) return;
+    const t = setTimeout(() => {
+      setSeenHint(true);
+      savePrefs({ seenHint: true });
+    }, HINT_MS);
+    return () => clearTimeout(t);
+  }, [hintUp, savePrefs]);
+
   // ── open, close, drag, keys ───────────────────────────────────────────────
   const openBox = () => {
     openRef.current = true;
@@ -457,6 +495,25 @@ export function CrisWidget({
     mascotRef.current?.focus();
   };
 
+  /** The "–" button: the box closes, the mascot hides, and a slim tab on that edge takes focus. */
+  const tuck = () => {
+    openRef.current = false;
+    setOpen(false);
+    setScanOpen(false);
+    clearTimeout(glideTimer.current);
+    drag.current = null;
+    setDragAt(null);
+    focusAfterSwap.current = "tab";
+    setTucked(true);
+    savePrefs({ tucked: true });
+  };
+  /** The tab: the mascot comes back where it was, with focus. */
+  const untuck = () => {
+    focusAfterSwap.current = "mascot";
+    setTucked(false);
+    savePrefs({ tucked: false });
+  };
+
   const settle = (next: { side: CrisSide; bottom: number }) => {
     clearTimeout(nudgeTimer.current); // an arrow-key save still waiting would put the old place back after this one
     setPos(next);
@@ -466,7 +523,8 @@ export function CrisWidget({
   const onPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
     skipClick.current = false;
     if (open || phone || e.button !== 0) return;
-    const r = e.currentTarget.getBoundingClientRect();
+    // Measured from the dock (the whole mascot), not the smaller glass body that took the press.
+    const r = (dockRef.current ?? e.currentTarget).getBoundingClientRect();
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -548,6 +606,27 @@ export function CrisWidget({
 
   // ── render ────────────────────────────────────────────────────────────────
   const bottom = clampBottom(pos.bottom, height, CRIS_MASCOT);
+  const newReplies = unread > 0 ? ` — ${unread} new ${unread === 1 ? "reply" : "replies"}` : "";
+
+  if (tucked) {
+    // On a phone the mascot is fixed bottom-right, so the tab is too (cris-widget.css places it).
+    const edge: CrisSide = phone ? "right" : pos.side;
+    return (
+      <aside key="tab" aria-label="Cris" className="cris-tucked print:hidden" data-cris-tucked={edge} style={{ [edge]: 0, bottom: tabBottom(bottom, CRIS_MASCOT) }}>
+        <button ref={tabRef} type="button" className={cn("cris-tab", edge === "right" ? "cris-tab-r" : "cris-tab-l")} aria-label={`Bring Cris back${newReplies}`} onClick={untuck}>
+          <span className="cris-tab-peek" aria-hidden>
+            <CrisOrb color={resolveColor(prefs.color, theme)} mood="idle" motion="still" size={30} decorative />
+          </span>
+          {unread > 0 && (
+            <span className="cris-badge" aria-hidden>
+              {unread}
+            </span>
+          )}
+        </button>
+      </aside>
+    );
+  }
+
   const placement = boxPlacement({ side: pos.side, bottom, height, mascot: CRIS_MASCOT, big });
   const dockStyle: React.CSSProperties = dragAt ? { left: dragAt.left, top: dragAt.top } : { [pos.side]: CRIS_INSET, bottom };
   const waiting = waitingIn(messages, confirmed);
@@ -555,14 +634,26 @@ export function CrisWidget({
   const liveId = liveMessageId(messages);
   const live = messages.find((m) => m.id === liveId);
   const pickOpen = live?.role === "cris" && live.cards.some((c) => c.type === "spares");
-  const showHint = !open && !seenHint && unread === 0 && !dragAt;
+  // Also hidden by cris-widget.css on a page with a sticky action bar ([data-cris-avoid]), whose buttons it would cover.
+  const showHint = hintUp;
   const mascotLabel = open
     ? "Hide the chat with Cris"
-    : `Chat with Cris${unread > 0 ? ` — ${unread} new ${unread === 1 ? "reply" : "replies"}` : ""}${phone ? "" : " (drag, or use the arrow keys, to move)"}`;
+    : `Chat with Cris${newReplies}${phone ? "" : " (drag, or use the arrow keys, to move)"}`;
+  // The "–" sits at the orb's top corner on the side facing into the screen (a phone's Cris is always on the right).
+  const inward: CrisSide = (phone ? "right" : pos.side) === "right" ? "left" : "right";
 
   return (
     // A labelled landmark of its own (outside <main>), so the box and the mascot are never content outside a region.
-    <aside ref={dockRef} aria-label="Cris" className={cn("cris-dock print:hidden", dragAt?.live && "is-dragging")} style={dockStyle}>
+    // data-cris-dock and data-cris-side tell cris-widget.css which corner to keep clear.
+    <aside
+      key="dock"
+      ref={dockRef}
+      aria-label="Cris"
+      data-cris-dock=""
+      data-cris-side={pos.side}
+      className={cn("cris-dock print:hidden", dragAt?.live && "is-dragging")}
+      style={dockStyle}
+    >
       {open && (
         <CrisBox
           id={boxId}
@@ -604,7 +695,8 @@ export function CrisWidget({
         />
       )}
       {showHint && (
-        <div className="cris-hint" style={{ [pos.side]: CRIS_MASCOT + 2, bottom: 40 }}>
+        // Beside the mascot, level with its centre (the bubble is about 34 px tall).
+        <div className="cris-hint" style={{ [pos.side]: CRIS_MASCOT + 2, bottom: CRIS_MASCOT / 2 - 17 }}>
           Hi! Need a hand? <span className="text-[11px] text-fg-muted">· drag me anywhere</span>
         </div>
       )}
@@ -622,13 +714,19 @@ export function CrisWidget({
         onPointerCancel={onPointerCancel}
         onKeyDown={onKeyDown}
       >
-        <CrisOrb color={resolveColor(prefs.color, theme)} mood={mood} motion={prefs.motion} size={110} decorative />
+        <CrisOrb color={resolveColor(prefs.color, theme)} mood={mood} motion={prefs.motion} size={CRIS_MASCOT} decorative />
         {!open && unread > 0 && (
           <span className="cris-badge" aria-hidden>
             {unread}
           </span>
         )}
       </button>
+      {/* After the mascot, so it is the next Tab stop; shown while the mascot is hovered or focus is in the dock. */}
+      {!open && (
+        <button type="button" className={cn("cris-tuck", inward === "left" ? "cris-tuck-l" : "cris-tuck-r")} aria-label="Tuck Cris away" title="Tuck away" onClick={tuck}>
+          <span aria-hidden>–</span>
+        </button>
+      )}
     </aside>
   );
 }
