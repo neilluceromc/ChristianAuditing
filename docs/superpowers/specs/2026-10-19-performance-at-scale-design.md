@@ -1,6 +1,6 @@
 # Phase 43 — Performance at real size: 1,000 assets, 600 employees, 15 people at once
 
-**Status:** APPROVED 2026-10-19 in chat.
+**Status:** APPROVED 2026-10-19 in chat; CODE-COMPLETE on branch `phase-43-performance`; the owner pre-approved merge, push and redeploy ("no need for approval for these tasks"); the after-run numbers will be added after the redeploy. One migration (35, `20261019090000_perf_indexes`).
 - The owner chose to replace staging's demo data with a realistic large data set ("Replace staging data").
 - The owner put this phase before client staff, which becomes Phase 44 (deeper assets becomes Phase 45).
 - The owner confirmed the usage guess ("yes that's close"), then: "I'm going to sleep, test it then fix the problems and gaps we might encounter. No need for approval for these tasks." So the whole loop runs without stopping: seed, measure, fix, battery, merge, push, redeploy, re-measure.

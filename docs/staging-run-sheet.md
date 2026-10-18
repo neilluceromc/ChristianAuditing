@@ -144,6 +144,26 @@ docker compose --profile prod up -d --force-recreate web
 
 ---
 
+## 8. The scale data and the slow-query log (since 2026-10-19)
+
+Staging's demo data was replaced on 2026-10-19 with a large test set, so the app can be tried at real size:
+
+- **What is in it:** 1,000 assets (900 IT), 600 employees across 8 internal teams and 40 fictional clients, 150 purchase requests, about 3,000 executed approvals plus 40 open, 200 reservations, 1,500 notes, 43 policies and 40,000 audit rows over 6 months.
+- **Accounts:** 20 - the 5 role accounts (admin@, it@, purchasing@, finance@, viewer@thebackroomop.com) plus perf01 to perf15@thebackroomop.com (perf01-10 IT, 11-12 purchasing, 13-14 finance, 15 admin). They all use staging's seed password. The hand-made neil.lucero@thebackroomop.com account was removed by the wipe; recreate it in Admin > Users if it is still needed.
+- **The snapshot taken first:** `staging-before-scale.dump` (about 156 KB, 43 tables) holds the old demo data. It sits in the dev session's scratchpad, not in the repo, so copy it somewhere safe if you want to keep it.
+- **How it was made:** the normal seed, then `npm run db:seed:scale` (deterministic; it layers on the normal seed and refuses if scale data already exists).
+- **Load test:** `scripts/loadtest` (README there) runs 15 people at once. Run it alone against staging - never with the dev server or the browser battery running; the laptop crashes under that much load.
+
+**`SLOW_QUERY_MS` (the slow-query log).** It is off unless set. To switch it on, add `SLOW_QUERY_MS=<milliseconds>` to staging's `.env` and recreate the web container:
+
+```powershell
+docker compose up -d web
+```
+
+Slow database calls then appear in the web container's log as `[slow-query] Model.op Nms`. The log never records the query's arguments. Remove the line and recreate the container again to switch it off.
+
+---
+
 ## Ongoing — how a change reaches staging
 
 On the dev laptop, when a phase is merged: `git push origin main` (already the rule; nothing else changes).
