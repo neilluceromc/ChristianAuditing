@@ -131,7 +131,24 @@ const OFFBOARDING_INCLUDE = {
   },
 } satisfies Prisma.EmployeeInclude;
 
-type OffboardingCandidate = Prisma.EmployeeGetPayload<{ include: typeof OFFBOARDING_INCLUDE }>;
+/** The approval fields a row is computed from — OFFBOARDING_INCLUDE's and leaverStates' approval reads alike. */
+const ROW_APPROVAL_SELECT = OFFBOARDING_INCLUDE.approvals.select;
+
+/**
+ * Phase 43: what toOffboardingRow reads, and nothing more — leaverStates selects exactly this (the employee fields,
+ * the department's name, the held asset ids); the queue's OFFBOARDING_INCLUDE payload is a superset of it.
+ */
+const ROW_EMPLOYEE_SELECT = {
+  id: true, name: true, employeeNo: true, title: true, departmentId: true, employment: true, m365Status: true,
+  offboardingAt: true, offboardingDueAt: true, joinedAt: true,
+  entraStatus: true, autopilotStatus: true, argusStatus: true, vpn: true,
+  department: { select: { name: true } },
+  assets: { select: { id: true } },
+} satisfies Prisma.EmployeeSelect;
+
+type OffboardingCandidate = Prisma.EmployeeGetPayload<{ select: typeof ROW_EMPLOYEE_SELECT }> & {
+  approvals: ApprovalLike[];
+};
 
 function toOffboardingRow(e: OffboardingCandidate, todayISO: string): OffboardingRow {
   const byAsset = candidatesFor(e, e.approvals);
@@ -600,15 +617,39 @@ export async function offboardingExportRows(
   };
 }
 
-/** Every OFFBOARDING employee as a row — the worklist's leavers, Home and the wizard's Next leaver read this. */
+/**
+ * Every OFFBOARDING employee as a row — the worklist's leavers, Home and the wizard's Next leaver read this.
+ *
+ * Phase 43: the same rows from a narrower read (leaver-states.test.ts pins them on fixtures). The employees come with
+ * only the fields toOffboardingRow reads, and the returns are read once for everyone, already cut in SQL to the ones
+ * that can decide anything — each exact, not a heuristic:
+ *  - the window: candidatesFor keeps only returns created at or after the leaver's offboardingAt and none at all
+ *    without one, so `createdAt >= offboardingAt` per anchored leaver (timestamps compared at the stored ms) drops
+ *    only rows it would drop;
+ *  - REJECTED: decisionOf never lets a REJECTED return win and never takes the EXECUTED boundary from one, so a
+ *    REJECTED row can change no decision, no "gone" count and no failure.
+ * Order is irrelevant: decisionOf sorts by (createdAt, id), and the rest only counts.
+ */
 export async function leaverStates(): Promise<OffboardingRow[]> {
   const today = localDateISO(new Date());
-  const candidates = await prisma.employee.findMany({
+  const employees = await prisma.employee.findMany({
     where: { employment: "OFFBOARDING" },
     orderBy: [{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }],
-    include: OFFBOARDING_INCLUDE,
+    select: ROW_EMPLOYEE_SELECT,
   });
-  return candidates.map((e) => toOffboardingRow(e, today));
+  const windows = employees.flatMap((e) =>
+    e.offboardingAt ? [{ employeeId: e.id, createdAt: { gte: e.offboardingAt } }] : []);
+  const approvals = windows.length === 0 ? [] : await prisma.approval.findMany({
+    where: { type: "lifecycle_return", assetId: { not: null }, state: { not: "REJECTED" }, OR: windows },
+    select: { ...ROW_APPROVAL_SELECT, employeeId: true },
+  });
+  const byEmployee = new Map<string, ApprovalLike[]>();
+  for (const { employeeId, ...a } of approvals) {
+    const list = byEmployee.get(employeeId!) ?? [];
+    list.push(a);
+    byEmployee.set(employeeId!, list);
+  }
+  return employees.map((e) => toOffboardingRow({ ...e, approvals: byEmployee.get(e.id) ?? [] }, today));
 }
 
 /** Spec §4.4: the next person in Attention order after the one just completed, or null (Queue clear). */
