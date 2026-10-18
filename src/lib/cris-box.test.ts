@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CrisCard, CrisViewMessage, SparesCard } from "./cris-cards";
 import {
-  contextLine, gapLine, isSaved, liveMessageId, nextTyped, oldestSavedId, outcomeOfFailure, outcomeOfMood,
+  contextLine, gapLine, greetingLine, isSaved, liveMessageId, nextTyped, oldestSavedId, outcomeOfFailure, outcomeOfMood,
   personFirstFor, pressSettled, quickStarts, scannedSpare, spareMeta, undoSecondsLeft, waitingIn,
 } from "./cris-box";
 import { CRIS_ALREADY_DONE, CRIS_SAME_MOMENT } from "./cris-undo";
@@ -145,6 +145,21 @@ describe("the opening state (spec §4)", () => {
     const labels = quickStarts(null).map((s) => s.label);
     expect(labels).toContain("Spares in stock");
     expect(labels).toContain("Who has a tag?");
+  });
+  it("offers only the two chat starters in preview, wherever the person is (added 2026-10-18)", () => {
+    const starters = [
+      { label: "Say hello", text: "Hello!", send: true },
+      { label: "What will you do?", text: "What will you do?", send: true },
+    ];
+    expect(quickStarts(null, true)).toEqual(starters);
+    expect(quickStarts({ kind: "person", id: "e1", name: "Ana Reyes" }, true)).toEqual(starters);
+    expect(quickStarts({ kind: "asset", id: "a1", tag: "BR-LT-0148" }, true)).toEqual(starters);
+  });
+  it("words the greeting's second line for live and preview", () => {
+    expect(greetingLine(false)).toBe("I can look things up and make changes. Every change waits for your Confirm.");
+    expect(greetingLine(true)).toBe(
+      "I'm still in development — for now I can only chat. Soon I'll look things up and make changes for you.",
+    );
   });
 });
 

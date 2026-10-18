@@ -30,6 +30,12 @@ const { pickModel, CrisProviderError } = await import("./model");
 const { fakeModel } = await import("./fake");
 const { default: Anthropic_ } = await import("@anthropic-ai/sdk");
 const { userTurn } = await import("@/lib/cris-prompt");
+const { previewModel } = await import("./preview");
+const { PREVIEW_ABOUT, PREVIEW_LINES } = await import("@/lib/cris-preview");
+const { isPricedModel } = await import("@/lib/cris-cost");
+
+/** pickModel's env when a key is set (the adapter itself reads the stubbed process.env key). */
+const KEY = { ANTHROPIC_API_KEY: "test-key" };
 
 
 const message = (content: unknown[], stop = "end_turn", usage: Record<string, unknown> = { input_tokens: 11, output_tokens: 7 }, model = "claude-haiku-5-5") => ({
@@ -51,17 +57,61 @@ describe("pickModel (spec §8: the fake is refused in production)", () => {
     expect(pickModel({ model: "claude-haiku-5-5" }, { CRIS_MODEL: "fake", NODE_ENV: "test" }).id).toBe("fake");
   });
   it("never gives the fake in production, even with CRIS_MODEL=fake", () => {
-    expect(pickModel({ model: "claude-haiku-5-5" }, { CRIS_MODEL: "fake", NODE_ENV: "production" }).id).toBe("claude-haiku-5-5");
+    expect(pickModel({ model: "claude-haiku-5-5" }, { CRIS_MODEL: "fake", NODE_ENV: "production", ...KEY }).id).toBe("claude-haiku-5-5");
+    expect(pickModel({ model: "claude-haiku-5-5" }, { CRIS_MODEL: "fake", NODE_ENV: "production" }).id).toBe("preview");
   });
-  it("gives the admin's chosen model otherwise", () => {
-    expect(pickModel({ model: "claude-opus-5-5" }, {}).id).toBe("claude-opus-5-5");
+  it("gives the admin's chosen model when a key is set", () => {
+    expect(pickModel({ model: "claude-opus-5-5" }, KEY).id).toBe("claude-opus-5-5");
+    expect(pickModel({ model: "claude-haiku-5-5" }, { ...KEY, NODE_ENV: "production" }).id).toBe("claude-haiku-5-5");
+  });
+  it("gives the preview when there is no key and no dev fake (added 2026-10-18)", () => {
+    expect(pickModel({ model: "claude-opus-5-5" }, {})).toBe(previewModel);
+    expect(pickModel({ model: "claude-haiku-5-5" }, { ANTHROPIC_API_KEY: "", NODE_ENV: "production" })).toBe(previewModel);
+  });
+});
+
+describe("the preview adapter (no key: placeholder replies only)", () => {
+  const turn = (text: string) =>
+    userTurn({ firstName: "Neil", todayManila: "Sunday 18 October 2026", page: { path: "/inventory", employeeId: null, assetId: null } }, text);
+  const answer = (text: string): Anthropic.MessageParam => ({ role: "assistant", content: [{ type: "text", text }] });
+
+  it("answers with ONE text block, end_turn, zero usage and model \"preview\" — never priced, never calling the API", async () => {
+    const r = await previewModel.reply({ system: "S", messages: [turn("Hello!")], tools: [{ name: "find_people", input_schema: { type: "object" } }] });
+    expect(r).toEqual({
+      content: [{ type: "text", text: PREVIEW_LINES[0], citations: null }], stop: "end_turn", model: "preview", usage: { input: 0, output: 0 },
+    });
+    expect(isPricedModel(r.model)).toBe(false);
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.betaCreate).not.toHaveBeenCalled();
+  });
+
+  it("never emits tool_use, whatever is asked — even with tools offered", async () => {
+    const asks = ["Check Ana Reyes's items", "Replace Ana's laptop", "Who has BR-LT-0148?", "Spares in stock", "What will you do?", ""];
+    const history: Anthropic.MessageParam[] = [];
+    for (const a of asks) {
+      history.push(turn(a));
+      const r = await previewModel.reply({ system: "S", messages: [...history], tools: [{ name: "propose_assign", input_schema: { type: "object" } }] });
+      expect(r.content).toHaveLength(1);
+      expect(r.content.every((b) => b.type === "text")).toBe(true);
+      expect(r.stop).toBe("end_turn");
+      history.push(answer((r.content[0] as Anthropic.TextBlock).text));
+    }
+  });
+
+  it("answers the newest message, turning the lines by `turn`, and says what Cris will do when asked", async () => {
+    const one = await previewModel.reply({ system: "S", messages: [turn("Hi")], tools: [] });
+    const two = await previewModel.reply({ system: "S", messages: [turn("Hello again")], tools: [], turn: 1 });
+    const about = await previewModel.reply({ system: "S", messages: [turn("Hi"), answer("…"), turn("What will you do?")], tools: [], turn: 3 });
+    expect((one.content[0] as Anthropic.TextBlock).text).toBe(PREVIEW_LINES[0]);
+    expect((two.content[0] as Anthropic.TextBlock).text).toBe(PREVIEW_LINES[1]);
+    expect((about.content[0] as Anthropic.TextBlock).text).toBe(PREVIEW_ABOUT);
   });
 });
 
 describe("the Anthropic adapter", () => {
   it("asks Haiku with the plan's request: 4000 tokens (thinking counts), auto tool choice, low effort, no fallback", async () => {
     h.create.mockResolvedValue(message([{ type: "text", text: "hello", citations: null }]));
-    const r = await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req);
+    const r = await pickModel({ model: "claude-haiku-5-5" }, KEY).reply(req);
     expect(h.create).toHaveBeenCalledWith(expect.objectContaining({
       model: "claude-haiku-5-5", max_tokens: 4000, system: "S", messages: req.messages, tools: [],
       tool_choice: { type: "auto" }, output_config: { effort: "low" },
@@ -77,13 +127,13 @@ describe("the Anthropic adapter", () => {
     h.create.mockResolvedValue(message([{ type: "text", text: "hi", citations: null }], "end_turn", {
       input_tokens: 50, output_tokens: 9, cache_creation_input_tokens: 2000, cache_read_input_tokens: 30_000,
     }));
-    const r = await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req);
+    const r = await pickModel({ model: "claude-haiku-5-5" }, KEY).reply(req);
     expect(r.usage).toEqual({ input: 50 + 2500 + 3000, output: 9 });
   });
 
   it.each(["claude-sonnet-5-5", "claude-opus-5-5"] as const)("adds the server-side refusal fallback for %s", async (model) => {
     h.betaCreate.mockResolvedValue(message([{ type: "text", text: "ok", citations: null }], "end_turn", undefined, model));
-    await pickModel({ model }, {}).reply(req);
+    await pickModel({ model }, KEY).reply(req);
     expect(h.betaCreate).toHaveBeenCalledWith(expect.objectContaining({
       model, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default", output_config: { effort: "low" },
     }));
@@ -93,7 +143,7 @@ describe("the Anthropic adapter", () => {
   it("reports the model that served a fallback reply, with its cache tokens counted", async () => {
     h.betaCreate.mockResolvedValue(message([{ type: "text", text: "ok", citations: null }], "end_turn",
       { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 100, cache_creation_input_tokens: null }, "claude-sonnet-5"));
-    const r = await pickModel({ model: "claude-sonnet-5-5" }, {}).reply(req);
+    const r = await pickModel({ model: "claude-sonnet-5-5" }, KEY).reply(req);
     expect(r.model).toBe("claude-sonnet-5");
     expect(r.usage).toEqual({ input: 20, output: 1 });
   });
@@ -112,25 +162,25 @@ describe("the Anthropic adapter", () => {
       { type: "tool_use", id: "t1", name: "find_people", input: { q: "b" }, caller: { type: "direct" } },
     ];
     h.betaCreate.mockResolvedValue(message([...before, { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: "claude-sonnet-5" } }, ...after]));
-    const r = await pickModel({ model: "claude-sonnet-5-5" }, {}).reply(req);
+    const r = await pickModel({ model: "claude-sonnet-5-5" }, KEY).reply(req);
     expect(r.content).toEqual([before[1], before[4], ...after]);
   });
 
   it("leaves a reply with no fallback marker exactly as it came", async () => {
     const content = [{ type: "thinking", thinking: "", signature: "s" }, { type: "text", text: "ok", citations: null }];
     h.betaCreate.mockResolvedValue(message(content));
-    expect((await pickModel({ model: "claude-opus-5-5" }, {}).reply(req)).content).toEqual(content);
+    expect((await pickModel({ model: "claude-opus-5-5" }, KEY).reply(req)).content).toEqual(content);
   });
 
   it("passes the refusal stop reason through for the turn to word", async () => {
     h.create.mockResolvedValue(message([], "refusal"));
-    expect((await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req)).stop).toBe("refusal");
+    expect((await pickModel({ model: "claude-haiku-5-5" }, KEY).reply(req)).stop).toBe("refusal");
   });
 
   it("fails as no-key, before any request, when no key is set", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubEnv("ANTHROPIC_API_KEY", "");
-    const thrown = await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req).catch((e: unknown) => e);
+    const thrown = await pickModel({ model: "claude-haiku-5-5" }, KEY).reply(req).catch((e: unknown) => e);
     expect(thrown).toBeInstanceOf(CrisProviderError);
     expect((thrown as InstanceType<typeof CrisProviderError>).kind).toBe("no-key");
     expect(h.create).not.toHaveBeenCalled();
@@ -138,7 +188,7 @@ describe("the Anthropic adapter", () => {
 
   it("turns the SDK's typed errors into a provider failure, a 400 as its own kind", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const model = pickModel({ model: "claude-haiku-5-5" }, {});
+    const model = pickModel({ model: "claude-haiku-5-5" }, KEY);
     const cases: Array<[unknown, string]> = [
       [new Anthropic_.BadRequestError(400, undefined, "thinking block mismatch", new Headers()), "bad-request"],
       [new Anthropic_.RateLimitError(429, undefined, "slow down", new Headers()), "rate-limited"],
@@ -160,7 +210,7 @@ describe("the Anthropic adapter", () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const body = { type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low" } };
     h.create.mockRejectedValueOnce(new Anthropic_.BadRequestError(400, body, "Your credit balance is too low", new Headers()));
-    const thrown = (await pickModel({ model: "claude-haiku-5-5" }, {}).reply(req).catch((e: unknown) => e)) as InstanceType<typeof CrisProviderError>;
+    const thrown = (await pickModel({ model: "claude-haiku-5-5" }, KEY).reply(req).catch((e: unknown) => e)) as InstanceType<typeof CrisProviderError>;
     expect(thrown).toMatchObject({ kind: "bad-request", status: 400, type: "invalid_request_error" });
     expect(thrown.message).toBe("Cris could not reach the model (bad-request 400 invalid_request_error)");
     expect(logged.mock.calls.flat().join(" ")).not.toContain("credit balance");
@@ -168,7 +218,7 @@ describe("the Anthropic adapter", () => {
 
   it("lets anything that isn't the SDK's error surface as it is", async () => {
     h.create.mockRejectedValueOnce(new TypeError("bug"));
-    await expect(pickModel({ model: "claude-haiku-5-5" }, {}).reply(req)).rejects.toThrow(TypeError);
+    await expect(pickModel({ model: "claude-haiku-5-5" }, KEY).reply(req)).rejects.toThrow(TypeError);
   });
 });
 

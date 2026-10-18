@@ -41,8 +41,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           return 0;
         })
       : Promise.resolve(0),
-    // Phase 41 (spec §2, §4): Cris is admin's and IT's only, and only while the admin switch is on and a key is
-    // set. A failed read hides Cris rather than failing every page's shell.
+    // Phase 41 (spec §2, §4): Cris is admin's and IT's only, and only while the admin switch is on (with no key,
+    // Cris shows in preview). A failed read hides Cris rather than failing every page's shell.
     reviewer ? crisFor(user.id, user.name, jar.get("br.theme")?.value) : Promise.resolve(null),
   ]);
   const badges = { approvals, worklist, purchaseReviews };
@@ -90,7 +90,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   );
 }
 
-/** The widget's props, or null when Cris doesn't show for this person (switched off, no key, or hidden in their prefs). */
+/**
+ * The widget's props, or null when Cris doesn't show for this person (switched off, or hidden in their prefs). With
+ * no AI key Cris shows in preview: placeholder replies only (added 2026-10-18).
+ */
 async function crisFor(userId: string, name: string, themeCookie: string | undefined) {
   try {
     const [availability, prefs] = await Promise.all([crisAvailability(), crisPrefsFor(userId)]);
@@ -102,6 +105,7 @@ async function crisFor(userId: string, name: string, themeCookie: string | undef
       theme: themeCookie === "dark" ? ("dark" as const) : ("light" as const),
       conversationId: start.conversationId,
       left: start.left,
+      preview: !!availability.preview,
     };
   } catch (err: unknown) {
     console.error("[cris] widget read failed:", err);

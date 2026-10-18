@@ -73,7 +73,7 @@ export async function crisMonthUsage(now: Date = new Date()): Promise<{ question
   };
 }
 
-/** Off with reason "off" when the admin switch is off (checked first), "no-key" when no AI key is set. */
+/** Off (reason "off") only when the admin switch is off; on with `preview` when no AI key is set (crisModeFrom). */
 export async function crisAvailability(): Promise<CrisAvailability> {
   return crisAvailabilityFrom(await crisSettings(), process.env);
 }

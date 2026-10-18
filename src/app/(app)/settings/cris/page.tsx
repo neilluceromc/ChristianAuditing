@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
-import { crisAvailabilityFrom } from "@/lib/cris-settings";
+import { crisModeFrom } from "@/lib/cris-settings";
 import { requireRole } from "@/server/auth/guards";
 import { crisMonthUsage, crisPrefsFor, crisSettings } from "@/server/cris/settings-read";
 import { PageHeader } from "@/components/ui/page-header";
@@ -18,9 +18,9 @@ export default async function CrisSettingsPage() {
     isAdmin ? crisMonthUsage() : Promise.resolve(null),
   ]);
   // Only a yes/no ever leaves the server — never the key, nor any part of it. The same rule as
-  // crisAvailability() with the switch held on, so the line agrees with whether Cris can answer (the
-  // fake model stands in for the key outside production, as it does there).
-  const keySet = crisAvailabilityFrom({ on: true }, process.env).on;
+  // crisAvailability() and pickModel(), so the line agrees with how Cris answers (the fake model stands
+  // in for the key outside production, as it does there; with neither, Cris is in preview).
+  const keySet = crisModeFrom(process.env) !== "preview";
 
   return (
     <>
@@ -28,7 +28,7 @@ export default async function CrisSettingsPage() {
       <CrisSettingsForm
         prefs={prefs}
         admin={isAdmin ? { settings, keySet, usage: usage ?? { questions: 0, costUsd: 0 } } : null}
-        off={settings.on ? (keySet ? null : "no-key") : "off"}
+        off={settings.on ? null : "off"}
       />
     </>
   );

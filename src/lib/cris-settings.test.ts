@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CRIS_DEFAULTS, crisAvailabilityFrom, crisFlagValue, crisSettingsFromFlag, crisSettingsSchema, hasCris, parseCrisSettings,
+  CRIS_DEFAULTS, crisAvailabilityFrom, crisFlagValue, crisModeFrom, crisSettingsFromFlag, crisSettingsSchema, hasCris, parseCrisSettings,
 } from "./cris-settings";
 
 describe("hasCris (spec §2: only admin and it_staff)", () => {
@@ -71,16 +71,31 @@ describe("crisAvailabilityFrom (plan: Who and when)", () => {
     expect(crisAvailabilityFrom(off, { ANTHROPIC_API_KEY: "k" })).toEqual({ on: false, reason: "off" });
     expect(crisAvailabilityFrom(off, {})).toEqual({ on: false, reason: "off" });
   });
-  it("no key → off with reason no-key", () => {
-    expect(crisAvailabilityFrom(on, {})).toEqual({ on: false, reason: "no-key" });
-    expect(crisAvailabilityFrom(on, { ANTHROPIC_API_KEY: "" })).toEqual({ on: false, reason: "no-key" });
+  it("no key → on in preview (added 2026-10-18: placeholder replies, no AI calls)", () => {
+    expect(crisAvailabilityFrom(on, {})).toEqual({ on: true, preview: true });
+    expect(crisAvailabilityFrom(on, { ANTHROPIC_API_KEY: "" })).toEqual({ on: true, preview: true });
+    expect(crisAvailabilityFrom(on, { NODE_ENV: "production" })).toEqual({ on: true, preview: true });
   });
-  it("a key → on", () => {
+  it("a key → on, live", () => {
     expect(crisAvailabilityFrom(on, { ANTHROPIC_API_KEY: "k" })).toEqual({ on: true });
+    expect(crisAvailabilityFrom(on, { ANTHROPIC_API_KEY: "k", NODE_ENV: "production" })).toEqual({ on: true });
   });
-  it("the fake model stands in for the key, but never in production", () => {
+  it("the fake model stands in for the key, but never in production (there, no key is preview)", () => {
     expect(crisAvailabilityFrom(on, { CRIS_MODEL: "fake", NODE_ENV: "development" })).toEqual({ on: true });
     expect(crisAvailabilityFrom(on, { CRIS_MODEL: "fake", NODE_ENV: "test" })).toEqual({ on: true });
-    expect(crisAvailabilityFrom(on, { CRIS_MODEL: "fake", NODE_ENV: "production" })).toEqual({ on: false, reason: "no-key" });
+    expect(crisAvailabilityFrom(on, { CRIS_MODEL: "fake", NODE_ENV: "production" })).toEqual({ on: true, preview: true });
+    expect(crisAvailabilityFrom(on, { CRIS_MODEL: "fake", NODE_ENV: "production", ANTHROPIC_API_KEY: "k" })).toEqual({ on: true });
+  });
+});
+
+describe("crisModeFrom (which brain answers while Cris is on)", () => {
+  it("the dev fake first, then a key (live), otherwise preview", () => {
+    expect(crisModeFrom({ CRIS_MODEL: "fake", NODE_ENV: "development" })).toBe("fake");
+    expect(crisModeFrom({ CRIS_MODEL: "fake", NODE_ENV: "test", ANTHROPIC_API_KEY: "k" })).toBe("fake");
+    expect(crisModeFrom({ CRIS_MODEL: "fake", NODE_ENV: "production" })).toBe("preview");
+    expect(crisModeFrom({ CRIS_MODEL: "fake", NODE_ENV: "production", ANTHROPIC_API_KEY: "k" })).toBe("live");
+    expect(crisModeFrom({ ANTHROPIC_API_KEY: "k" })).toBe("live");
+    expect(crisModeFrom({ ANTHROPIC_API_KEY: "" })).toBe("preview");
+    expect(crisModeFrom({})).toBe("preview");
   });
 });

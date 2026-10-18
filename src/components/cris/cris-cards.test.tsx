@@ -84,6 +84,11 @@ describe("the spare pick list", () => {
     expect(out).toContain("Scan its label");
     expect(out).toContain("None of these — show 3 more");
   });
+  it("has no Scan its label when there is no scan field (the preview)", () => {
+    const out = html(spares, true, actions({ onScan: null }));
+    expect(out).toContain("Pick one above");
+    expect(out).not.toContain("Scan its label");
+  });
   it("is a record once a newer message follows", () => {
     const out = html(spares, false);
     expect(out).toContain("BR-LT-0230");
@@ -139,6 +144,21 @@ describe("the box", () => {
   it("marks the log busy while history loads, so the bulk insert is not read aloud", () => {
     expect(box({ bulkLoading: true })).toContain('aria-busy="true"');
     expect(box()).not.toContain("aria-busy");
+  });
+  it("has the scan button and no Preview pill when live", () => {
+    const out = box();
+    expect(out).toContain('aria-label="Scan a tag"');
+    expect(out).not.toContain("Preview");
+  });
+  it("in preview (no key): a Preview pill by the name, the preview greeting, no context chip and no scan button", () => {
+    const out = box({ preview: true, context: { kind: "person", id: "e1", name: "Ana Reyes" } });
+    expect(out).toMatch(/>Cris<\/div><span[^>]*>Preview<\/span>/);
+    expect(out).toContain("Hi Neil — what do you need?");
+    expect(out).toContain("I&#x27;m still in development — for now I can only chat. Soon I&#x27;ll look things up and make changes for you.");
+    expect(out).not.toContain("I can look things up and make changes.");
+    expect(out).not.toContain("Ana Reyes");
+    expect(out).not.toContain("Scan a tag");
+    expect(out).toContain("94 questions left today");
   });
 });
 

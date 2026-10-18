@@ -129,6 +129,13 @@ export type CrisPageContext = { kind: "person"; id: string; name: string } | { k
 /** A quick start either sends its text, or (when Cris needs more, such as why) starts it in the message box. */
 export type QuickStart = { label: string; text: string; send: boolean };
 
+/** The greeting's second line (spec §4), and the preview's (added 2026-10-18). */
+export function greetingLine(preview: boolean): string {
+  return preview
+    ? "I'm still in development — for now I can only chat. Soon I'll look things up and make changes for you."
+    : "I can look things up and make changes. Every change waits for your Confirm.";
+}
+
 /** The context chip's words: "You're on **Ana Reyes**'s profile". */
 export function contextLine(ctx: CrisPageContext | null): { before: string; name: string; after: string } | null {
   if (!ctx) return null;
@@ -143,8 +150,18 @@ const GENERAL: QuickStart[] = [
   { label: "Check someone's items", text: "Check the items of ", send: false },
 ];
 
-/** Spec §4: on a profile or a record the first quick starts name that person or asset; elsewhere they are general. */
-export function quickStarts(ctx: CrisPageContext | null): QuickStart[] {
+/** Preview mode (no key, added 2026-10-18): Cris can only chat, so the box offers two chat starters and nothing else. */
+const PREVIEW_STARTS: QuickStart[] = [
+  { label: "Say hello", text: "Hello!", send: true },
+  { label: "What will you do?", text: "What will you do?", send: true },
+];
+
+/**
+ * Spec §4: on a profile or a record the first quick starts name that person or asset; elsewhere they are general.
+ * In preview, only the two chat starters.
+ */
+export function quickStarts(ctx: CrisPageContext | null, preview = false): QuickStart[] {
+  if (preview) return PREVIEW_STARTS;
   if (!ctx) return GENERAL;
   if (ctx.kind === "person") {
     const first = firstWord(ctx.name);

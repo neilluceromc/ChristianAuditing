@@ -43,6 +43,11 @@ export type CrisWidgetProps = {
   /** The person's open conversation, if any; its messages load when the box first opens. */
   conversationId: string | null;
   left: number;
+  /**
+   * Preview mode (no AI key on the server, added 2026-10-18): placeholder replies only — the box shows a Preview pill,
+   * two chat starters, no context chip and no scan button. Everything else works as usual.
+   */
+  preview?: boolean;
 };
 
 type Failure = { kind: ActionErrorKind; message: string; fieldErrors?: Record<string, string> };
@@ -92,7 +97,9 @@ function localMessage(role: "user" | "cris", text: string): CrisViewMessage {
   return { id: `transient-local-${Date.now()}-${localSeq}`, role, text, cards: [], at: new Date().toISOString() };
 }
 
-export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationId: startId, left: startLeft }: CrisWidgetProps) {
+export function CrisWidget({
+  firstName, prefs, theme: servedTheme, conversationId: startId, left: startLeft, preview = false,
+}: CrisWidgetProps) {
   const pathname = usePathname() ?? "/";
   const theme = useSyncExternalStore(subscribeTheme, readTheme, () => servedTheme);
   const phone = useSyncExternalStore(phoneMedia.subscribe, phoneMedia.read, no);
@@ -236,7 +243,8 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
   // ── the page it was opened on (the context chip and the quick starts) ─────
   const fresh = messages.length === 0;
   const entity = pageEntity(pathname);
-  const onEntity = !!(entity.employeeId || entity.assetId);
+  // The preview looks nothing up: no context chip, so the page's record is never asked for.
+  const onEntity = !preview && !!(entity.employeeId || entity.assetId);
   const ctxPath = ctx?.path;
   useEffect(() => {
     if (!open || !fresh || !onEntity || ctxPath === pathname) return;
@@ -417,10 +425,13 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
     onPickSpare: (s) => void send({ pick: { kind: "asset", assetId: s.assetId, scanned: false } }, `Use ${s.tag}`),
     onMoreSpares: () => void send({ text: "None of these — show 3 more" }, "None of these — show 3 more"),
     onMoreStock: () => void send({ text: "Show 3 more" }, "Show 3 more"),
-    onScan: () => {
-      setScanOpen(true);
-      setScanFocusTick((t) => t + 1);
-    },
+    // The preview has no scan field (the composer hides it), so the card's "Scan its label" is hidden too.
+    onScan: preview
+      ? null
+      : () => {
+          setScanOpen(true);
+          setScanFocusTick((t) => t + 1);
+        },
     onConfirm: (c) => void confirm(c),
     onChange: () => void send({ text: "Change" }, "Change"),
     onUndo: (c) => void undo(c),
@@ -560,6 +571,7 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
           side={pos.side}
           big={big}
           firstName={firstName}
+          preview={preview}
           status={busy ? "Thinking…" : status}
           busy={busy}
           messages={messages}
@@ -568,7 +580,7 @@ export function CrisWidget({ firstName, prefs, theme: servedTheme, conversationI
           history={history === "idle" ? "ready" : history}
           more={more}
           context={context}
-          starts={quickStarts(context)}
+          starts={quickStarts(context, preview)}
           actions={actions}
           draft={draft}
           placeholder={pickOpen ? "Type or scan a tag…" : "Ask Cris anything about equipment or people…"}

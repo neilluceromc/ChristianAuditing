@@ -10,7 +10,7 @@ import { pathAllowedForRole } from "@/lib/workspaces";
 import { pageEntity } from "@/lib/cris-picks";
 import type { CrisPageContext } from "@/lib/cris-box";
 import { crisAvailability } from "./settings-read";
-import { CRIS_OFF_NO_KEY, CRIS_OFF_SWITCH } from "./turn-core";
+import { CRIS_OFF_SWITCH } from "./turn-core";
 
 const schema = z.object({ path: z.string().max(500) }).strict();
 
@@ -22,9 +22,11 @@ const schema = z.object({ path: z.string().max(500) }).strict();
 export async function crisPageContext(input: { path: string }): Promise<ActionResult<CrisPageContext | null>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
-  // Like every Cris action, it answers nothing while Cris is off.
+  // Like every Cris action, it answers nothing while Cris is off; the preview (no key) looks nothing up, so it has
+  // no context (the box asks for none then).
   const availability = await crisAvailability();
-  if (!availability.on) return conflict(availability.reason === "no-key" ? CRIS_OFF_NO_KEY : CRIS_OFF_SWITCH);
+  if (!availability.on) return conflict(CRIS_OFF_SWITCH);
+  if (availability.preview) return ok(null);
   const rate = await checkRate(user.id, "check");
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = schema.safeParse(input);

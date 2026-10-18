@@ -22,6 +22,8 @@ type Props = {
   busy: boolean;
   placeholder: string;
   left: number;
+  /** Whether the scan button shows (not in preview, where Cris looks nothing up). Default true. */
+  scan?: boolean;
   scanOpen: boolean;
   /** Bumped to put focus in the scan field again, even when it is already open. */
   scanFocusTick?: number;
@@ -29,7 +31,7 @@ type Props = {
 };
 
 export const CrisComposer = forwardRef<HTMLTextAreaElement, Props>(function CrisComposer(
-  { value, onChange, onSend, onScan, busy, placeholder, left, scanOpen, onScanOpen, scanFocusTick = 0 },
+  { value, onChange, onSend, onScan, busy, placeholder, left, scan = true, scanOpen, onScanOpen, scanFocusTick = 0 },
   ref,
 ) {
   const own = useRef<HTMLTextAreaElement | null>(null);
@@ -83,7 +85,7 @@ export const CrisComposer = forwardRef<HTMLTextAreaElement, Props>(function Cris
   const canSend = !busy && value.trim().length > 0;
   return (
     <div className="flex flex-col gap-[5px] rounded-b-[18px] border-t border-border-faint px-2.5 py-2">
-      {scanOpen && (
+      {scan && scanOpen && (
         <div className="flex items-center gap-1.5 rounded-[10px] border border-accent-soft-border bg-accent-tint px-2.5 py-1 focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--focus-shadow)]">
           <Icon name="scan" size={14} className="text-accent-soft-text" />
           <input
@@ -116,16 +118,18 @@ export const CrisComposer = forwardRef<HTMLTextAreaElement, Props>(function Cris
           className="min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[12.5px] leading-[1.4] outline-none placeholder:text-fg-muted focus-visible:outline-none"
           style={{ maxHeight: MAX_HEIGHT }}
         />
-        <IconButton
-          type="button"
-          aria-label="Scan a tag"
-          title="Scan a tag"
-          aria-pressed={scanOpen}
-          className="size-8"
-          onClick={() => (scanOpen ? closeScan() : onScanOpen(true))}
-        >
-          <Icon name="scan" size={16} />
-        </IconButton>
+        {scan && (
+          <IconButton
+            type="button"
+            aria-label="Scan a tag"
+            title="Scan a tag"
+            aria-pressed={scanOpen}
+            className="size-8"
+            onClick={() => (scanOpen ? closeScan() : onScanOpen(true))}
+          >
+            <Icon name="scan" size={16} />
+          </IconButton>
+        )}
         <IconButton type="button" variant="primary" aria-label="Send" className="size-8 rounded-[9px]" disabled={!canSend} onClick={onSend}>
           <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M5 12h13M13 6l6 6-6 6" />

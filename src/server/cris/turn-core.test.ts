@@ -5,6 +5,7 @@ import { notePick, type Picks } from "@/lib/cris-picks";
 import { CRIS_BRAIN_TEXT, CRIS_REFUSED_TEXT, personTextOf } from "@/lib/cris-prompt";
 import { CRIS_DAILY_LIMIT_TEXT } from "@/lib/cris-limits";
 import type { CrisCard } from "@/lib/cris-cards";
+import { decodeApi } from "@/lib/cris-history";
 
 /*
  * The turn against an in-memory Prisma. Message content goes through a jsonb-like round trip (object keys
@@ -31,7 +32,7 @@ const h = vi.hoisted(() => ({
   rate: { allowed: true } as { allowed: true } | { allowed: false; retryAfterSec: number },
   rateCalls: [] as string[],
   replies: [] as Array<Reply | Error | ((req: { messages: unknown[] }) => Reply)>,
-  requests: [] as Array<{ system: string; messages: Anthropic.MessageParam[]; picksAtCall: unknown }>,
+  requests: [] as Array<{ system: string; messages: Anthropic.MessageParam[]; picksAtCall: unknown; turn?: number }>,
   toolCalls: [] as ToolCall[],
   tool: null as null | ((ctx: { picks: Picks }, name: string, input: unknown) => { result: unknown; cards: CrisCard[]; picks: Picks; mood: string }),
   modelId: "fake",
@@ -162,9 +163,9 @@ vi.mock("./model", async (importOriginal) => {
     ...actual,
     pickModel: () => ({
       id: h.modelId,
-      async reply(req: { system: string; messages: Anthropic.MessageParam[] }) {
+      async reply(req: { system: string; messages: Anthropic.MessageParam[]; turn?: number }) {
         const conv = h.convs[h.convs.length - 1];
-        h.requests.push({ system: req.system, messages: JSON.parse(JSON.stringify(req.messages)), picksAtCall: conv?.picks });
+        h.requests.push({ system: req.system, messages: JSON.parse(JSON.stringify(req.messages)), picksAtCall: conv?.picks, turn: req.turn });
         const next = h.replies.shift();
         if (!next) throw new Error("test: no reply queued");
         if (next instanceof Error) throw next;
@@ -175,7 +176,7 @@ vi.mock("./model", async (importOriginal) => {
 });
 
 const {
-  crisTurn, crisHistoryFor, crisNewChatFor, CRIS_ROUNDS_TEXT, CRIS_OFF_NO_KEY, CRIS_RATE_TEXT, CRIS_MAX_ROUNDS, CRIS_BUSY_TEXT,
+  crisTurn, crisHistoryFor, crisNewChatFor, CRIS_ROUNDS_TEXT, CRIS_OFF_SWITCH, CRIS_PREVIEW_ONLY_CHAT, CRIS_RATE_TEXT, CRIS_MAX_ROUNDS, CRIS_BUSY_TEXT,
   CRIS_TOO_LONG_TEXT, CRIS_FRESH_TEXT, CRIS_MAX_TURNS,
 } = await import("./turn-core");
 const { CrisProviderError } = await import("./model");
@@ -382,11 +383,73 @@ describe("a history the API rejects (400) never bricks the chat", () => {
 });
 
 describe("the turn", () => {
-  it("is refused when Cris is off, with the spec's no-key copy", async () => {
+  it("is refused when an admin has Cris off, with the switch's copy", async () => {
+    h.settings = { ...h.settings, on: false };
+    const r = await send();
+    expect(r).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_SWITCH });
+    expect(h.requests).toHaveLength(0);
+  });
+
+  it("answers in preview with no AI key (added 2026-10-18): saved and counted, zero usage under \"preview\"", async () => {
     vi.stubEnv("CRIS_MODEL", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
-    const r = await send();
-    expect(r).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_NO_KEY });
+    h.modelId = "preview";
+    h.replies.push({ ...text("Hello! I'm Cris"), model: "preview", usage: { input: 0, output: 0 } });
+    const r = await send({ text: "Hello!" });
+    expect(r.ok && r.data).toMatchObject({ left: 99, mood: "talk" });
+    expect(r.ok && r.data.messages.map((m) => m.text)).toEqual(["Hello!", "Hello! I'm Cris"]);
+    const reply = h.rows.find((x) => x.role === "cris");
+    expect(reply).toMatchObject({ model: "preview", inputTokens: 0, outputTokens: 0 });
+  });
+
+  it("never replays preview turns to the real model once a key is added (fix round 1)", async () => {
+    const say = (t: string): Reply => ({ ...text(t), model: "preview", usage: { input: 0, output: 0 } });
+    const words = (m: Anthropic.MessageParam) => (Array.isArray(m.content) ? m.content.map((b) => ("text" in b ? b.text : "")).join(" ") : m.content);
+
+    // A live turn first (a key was set), then the key is removed: two preview turns.
+    vi.stubEnv("CRIS_MODEL", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "k");
+    h.modelId = "claude-haiku-5-5";
+    h.replies.push(text("Ana has 3 items."));
+    await send({ text: "Check Ana Reyes's items" });
+    const conversationId = h.convs[0].id;
+
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    h.modelId = "preview";
+    h.replies.push(say("Hello! I'm Cris — preview"), say("Soon I'll check someone's items — preview"));
+    await send({ conversationId, text: "Hello!" });
+    await send({ conversationId, text: "What will you do?" });
+    // The preview counts the person's earlier messages to turn its lines, though it is sent none of them.
+    expect(h.requests.slice(1).map((r) => r.turn)).toEqual([1, 2]);
+    // The preview turns' rows are kept for the box, but store no model messages (an empty `api`).
+    const previewRows = h.rows.slice(2);
+    expect(previewRows.map((x) => x.role)).toEqual(["user", "cris", "user", "cris"]);
+    for (const x of previewRows) expect(decodeApi(x.content)).toEqual([]);
+    expect(previewRows.map((x) => (x.content as { text: string }).text)).toEqual([
+      "Hello!", "Hello! I'm Cris — preview", "What will you do?", "Soon I'll check someone's items — preview",
+    ]);
+
+    // The key is added back: the live turn is sent the earlier LIVE turn and its own message — nothing from the preview.
+    vi.stubEnv("ANTHROPIC_API_KEY", "k");
+    h.modelId = "claude-haiku-5-5";
+    h.replies.push(text("Done."));
+    const r = await send({ conversationId, text: "Who has BR-LT-0148?" });
+    expect(r.ok).toBe(true);
+    const live = h.requests[h.requests.length - 1].messages;
+    expect(live.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(live.map(words).join(" | ")).not.toMatch(/preview|Hello!|What will you do\?/);
+    expect(words(live[0])).toContain("Check Ana Reyes's items");
+    expect(words(live[1])).toContain("Ana has 3 items.");
+    expect(words(live[2])).toContain("Who has BR-LT-0148?");
+  });
+
+  it("refuses a pick in preview before any read: the preview looks nothing up", async () => {
+    vi.stubEnv("CRIS_MODEL", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    const r = await crisTurn(user, { pick: { kind: "person", employeeId: "e1" }, page: { path: "/inventory" } }, NOW);
+    expect(r).toMatchObject({ ok: false, kind: "conflict", message: CRIS_PREVIEW_ONLY_CHAT });
+    expect(h.rows).toHaveLength(0);
+    expect(h.requests).toHaveLength(0);
   });
 
   it("is rate limited after the daily limit and before zod", async () => {
@@ -461,11 +524,17 @@ describe("the turn", () => {
 
 describe("Cris off: history and new chat refuse too", () => {
   it("refuses both with the off copy", async () => {
+    h.settings = { ...h.settings, on: false };
+    expect(await crisNewChatFor(user)).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_SWITCH });
+    expect(await crisHistoryFor(user, { conversationId: "c1" })).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_SWITCH });
+    expect(h.convs).toHaveLength(0);
+  });
+
+  it("works in preview (no key is not off)", async () => {
     vi.stubEnv("CRIS_MODEL", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
-    expect(await crisNewChatFor(user)).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_NO_KEY });
-    expect(await crisHistoryFor(user, { conversationId: "c1" })).toMatchObject({ ok: false, kind: "conflict", message: CRIS_OFF_NO_KEY });
-    expect(h.convs).toHaveLength(0);
+    expect((await crisNewChatFor(user)).ok).toBe(true);
+    expect(h.convs).toHaveLength(1);
   });
 });
 
