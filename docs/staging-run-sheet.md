@@ -153,14 +153,16 @@ Staging's demo data was replaced on 2026-10-19 with a large test set, so the app
 - **The snapshot taken first:** `staging-before-scale.dump` (about 156 KB, 43 tables) holds the old demo data. It sits in the dev session's scratchpad, not in the repo, so copy it somewhere safe if you want to keep it.
 - **How it was made:** the normal seed, then `npm run db:seed:scale` (deterministic; it layers on the normal seed and refuses if scale data already exists).
 - **Load test:** `scripts/loadtest` (README there) runs 15 people at once. Run it alone against staging - never with the dev server or the browser battery running; the laptop crashes under that much load.
+- **Redeployed 2026-10-19 at `27bc496` (Phase 43):** the CI image was pulled; the snapshot `staging-before-phase43.dump` (about 2.4 MB, 43 tables, holding the scale data) was taken first; the IP check passed (.193); migration 35 `20261019090000_perf_indexes` (12 indexes, no data change) was applied, so staging is at 35 migrations; the data is intact (1,000 assets); web is healthy and /login returns 200 locally and over the LAN.
+- **After-run** (`docs/perf/2026-10-19-after.md`): all targets met - 1,331 page requests with 0 errors, writers 234 steps with 0 failed, slowest request 426 ms (519 before), overall p50 94 / p95 200 / p99 283 ms (before 96 / 219 / 366), 0 P2024 timeouts, 0 queries over 200 ms. The app already met the targets at this size; the fixes trimmed the slow tail (p99 -22 %, slowest -18 %) and cut about 5 queries per IT page.
 
-**`SLOW_QUERY_MS` (the slow-query log).** It is off unless set. To switch it on, add `SLOW_QUERY_MS=<milliseconds>` to staging's `.env` and recreate the web container:
+**`SLOW_QUERY_MS` (the slow-query log).** It is ON at staging: `SLOW_QUERY_MS=200` was appended to staging's `.env` on 2026-10-19 and confirmed in the container, and it stays on. It logs only queries over 200 ms and is off wherever it is not set. To switch it on, add `SLOW_QUERY_MS=<milliseconds>` to staging's `.env` and recreate the web container:
 
 ```powershell
 docker compose up -d web
 ```
 
-Slow database calls then appear in the web container's log as `[slow-query] Model.op Nms`. The log never records the query's arguments. Remove the line and recreate the container again to switch it off.
+Slow database calls then appear in the web container's log as `[slow-query] Model.op Nms`. The log never records the query's arguments. Remove the line and recreate the container again to switch it off (for staging, remove the `SLOW_QUERY_MS=200` line, then `docker compose up -d web`).
 
 ---
 
