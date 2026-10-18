@@ -66,26 +66,21 @@ async function expectLinks(nav: Locator, links: [label: string, href: string][])
 const PROMOTED_RULES = new Set<string>(["empty-table-header", "page-has-heading-one", "heading-order", "landmark-unique"]);
 
 /**
- * The page at axe-sweep's bar (serious/critical, plus the promoted rules), and the sidebar — the thing this phase
- * rebuilt — at "moderate": any moderate, serious or critical violation inside the Primary landmark fails. The
- * page-wide moderate tail belongs to axe-sweep's count, not to this phase. Settles the pointer first, as
- * axe-sweep's scanHere does (a hovered primary button reports a phantom contrast failure mid-transition).
+ * The whole page at the project's bar: any moderate, serious or critical violation fails, and so does any
+ * promoted rule whatever its impact (the existing sweep records "axe moderate none"). Each failure names its node
+ * targets, so a sidebar node is easy to tell from the page's. Settles the pointer first, as axe-sweep's scanHere
+ * does (a hovered primary button reports a phantom contrast failure mid-transition).
  */
 async function expectAxeClean(page: Page, label: string) {
   await page.mouse.move(0, 0);
   await page.waitForTimeout(700);
 
-  const whole = await new AxeBuilder({ page }).analyze();
-  const bad = whole.violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical" || PROMOTED_RULES.has(v.id))
-    .map((v) => `${v.id} (${v.impact}) x${v.nodes.length}`);
-  expect(bad, `axe on ${label}`).toEqual([]);
-
-  const sidebar = await new AxeBuilder({ page }).include('aside[aria-label="Primary"]').analyze();
-  const badInSidebar = sidebar.violations
-    .filter((v) => v.impact === "moderate" || v.impact === "serious" || v.impact === "critical")
+  const results = await new AxeBuilder({ page }).analyze();
+  const bad = results.violations
+    .filter((v) =>
+      v.impact === "moderate" || v.impact === "serious" || v.impact === "critical" || PROMOTED_RULES.has(v.id))
     .map((v) => `${v.id} (${v.impact}) ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-  expect(badInSidebar, `axe (moderate) on the sidebar at ${label}`).toEqual([]);
+  expect(bad, `axe (moderate and above) on ${label}`).toEqual([]);
 }
 
 test.describe("phase 42 — the sidebar stays put, with views under the current link", () => {
