@@ -1,5 +1,6 @@
 import type { Role } from "@prisma/client";
 import type { IconName } from "@/components/ui/icon";
+import { REPAIR_STAGES } from "./repairs";
 
 export type WorkspaceId = "it" | "purchasing" | "finance" | "admin";
 
@@ -33,6 +34,12 @@ export type CountKey =
   | "itSpare" | "itDefective" | "itMissing" | "leaving"
   | "prDraft" | "prSubmitted" | "prItReviewed";
 
+/**
+ * What a view matches on, param by param: a string is the param's exact value; a list matches when any of the
+ * param's comma-separated values is in it (Repairs' `stage`, as `isRepairView` reads it).
+ */
+export type NavMatch = Record<string, string | readonly string[]>;
+
 /** One view under a link: shown only while that link is the current one (spec §4.2). */
 export interface NavView {
   label: string;
@@ -40,8 +47,8 @@ export interface NavView {
   /** restrict the view to these roles, within an already-allowed workspace */
   roles?: Role[];
   count?: CountKey;
-  /** match on these params instead of the href's (Repairs: { status: "DEFECTIVE" }) */
-  match?: Record<string, string>;
+  /** match on these params instead of the href's; a list of them matches when any one does (Repairs) */
+  match?: NavMatch | NavMatch[];
 }
 
 export interface NavItem {
@@ -54,6 +61,8 @@ export interface NavItem {
   /** summed into one badge when the item is not current, or has no views */
   badge?: CountKey[];
   views?: NavView[];
+  /** other names the command palette finds this link's page by (spec §4.6), e.g. its page title */
+  also?: string[];
 }
 
 /** A group of links. `heading` is an internal name only: groups are separated by spacing, never titled. */
@@ -69,6 +78,8 @@ export interface VisibleItem {
   icon: IconName;
   badge: CountKey[];
   views: NavView[];
+  /** set only when the link collapsed onto its one visible view: that view's label (the page's own name) */
+  viewLabel?: string;
 }
 
 export interface VisibleSection {
@@ -94,6 +105,8 @@ const REPORTS: NavItem = {
   label: "Reports",
   href: "/equipment-by-client",
   icon: "reports",
+  // The report's page title, so the palette still finds it by the name it had before Phase 42.
+  also: ["Equipment by client"],
   views: [
     { label: "By client", href: "/equipment-by-client" },
     { label: "Internal teams", href: "/equipment-by-client?tab=internal" },
@@ -118,12 +131,13 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           views: [
             { label: "All", href: "/inventory" },
             { label: "Spare", href: "/inventory?status=SPARE", count: "itSpare" },
-            // The page is in repair mode whenever DEFECTIVE is the only status, whatever the sort.
+            // The page is in repair mode whenever DEFECTIVE is the only status, whatever the sort, or a repair
+            // stage is picked (the stage chips clear status) — isRepairView's rule (repairs.ts).
             {
               label: "Repairs",
               href: "/inventory?status=DEFECTIVE&sort=defectiveSince",
               count: "itDefective",
-              match: { status: "DEFECTIVE" },
+              match: [{ status: "DEFECTIVE" }, { stage: REPAIR_STAGES }],
             },
             { label: "Missing", href: "/inventory?status=MISSING", count: "itMissing" },
             // The one Register flow (Phase 30): the /inventory/register PATH_RULE's roles, minus purchasing,
@@ -360,7 +374,9 @@ export function filterSectionsForRole(sections: NavSection[], role: Role): Visib
         const countedByAnyView = new Set((item.views ?? []).map((v) => v.count));
         const countedByVisibleView = new Set(views.map((v) => v.count));
         const badge = (item.badge ?? []).filter((k) => !countedByAnyView.has(k) || countedByVisibleView.has(k));
-        return [{ label: item.label, href, icon: item.icon, badge, views: views.length > 1 ? views : [] }];
+        const visibleItem: VisibleItem = { label: item.label, href, icon: item.icon, badge, views: views.length > 1 ? views : [] };
+        if (views.length === 1) visibleItem.viewLabel = views[0].label;
+        return [visibleItem];
       }),
     }))
     .filter((section) => section.items.length > 0);

@@ -88,6 +88,15 @@ describe("navLabelFor (the phone top bar's page name)", () => {
     expect(navLabelFor("/employees", it)).toBe("Employees");
     expect(navLabelFor("/inventoryx", it)).toBeNull();
   });
+
+  it("a link collapsed onto its one view reads as that view, as it does for every other role", () => {
+    const viewer = filterSectionsForRole(WORKSPACE_NAV.it, "viewer");
+    expect(navLabelFor("/admin/equipment-policies", viewer)).toBe("Equipment policies");
+    expect(navLabelFor("/admin/equipment-policies", filterSectionsForRole(WORKSPACE_NAV.it, "it_staff")))
+      .toBe("Equipment policies");
+    // A link that keeps its views still reads as its own label on its own page.
+    expect(navLabelFor("/inventory", viewer)).toBe("Inventory");
+  });
 });
 
 describe("navDestinations and matchDestinations (the command palette's Go to list, spec §4.6)", () => {
@@ -158,6 +167,39 @@ describe("navDestinations and matchDestinations (the command palette's Go to lis
     expect(find("purchasing_staff", "categories", WORKSPACE_NAV.purchasing).map((d) => d.label)).toEqual([
       "Asset categories", "Stock categories",
     ]);
+  });
+  it("a view whose label repeats across the workspace's views is named under its link", () => {
+    expect(find("it_staff", "closed")).toEqual([
+      { label: "Approvals › Closed", href: "/approvals?tab=closed" },
+      { label: "Reservations › Closed", href: "/reservations?state=CLOSED" },
+    ]);
+    expect(find("it_staff", "all")).toEqual([
+      { label: "Inventory › All", href: "/inventory" },
+      { label: "Offboarding › All", href: "/offboarding" },
+    ]);
+    // Unique view names keep their own name; the bare list still lists under its link's label.
+    expect(find("it_staff", "mine")).toEqual([{ label: "Mine", href: "/approvals?tab=mine" }]);
+    expect(find("it_staff", "").filter((d) => d.href === "/approvals?tab=closed")).toEqual([
+      { label: "Approvals › Closed", href: "/approvals?tab=closed" },
+    ]);
+    // Within a workspace whose views never repeat a name, nothing changes.
+    expect(navDestinations(RAW, "admin").find((d) => d.href === "/inventory")!.also).toEqual(["All"]);
+    // No two rows of any workspace's full list read the same.
+    for (const ws of ["it", "purchasing", "finance", "admin"] as const) {
+      const labels = matchDestinations(navDestinations(WORKSPACE_NAV[ws], "admin"), "").map((d) => d.label);
+      expect(new Set(labels).size, ws).toBe(labels.length);
+    }
+  });
+  it("finds the report by its page title, Equipment by client", () => {
+    expect(find("it_staff", "equipment by client")).toEqual([
+      { label: "Equipment by client", href: "/equipment-by-client" },
+    ]);
+    expect(find("finance_staff", "equipment", WORKSPACE_NAV.finance)).toEqual([
+      { label: "Equipment by client", href: "/equipment-by-client" },
+    ]);
+    expect(find("viewer", "equipment").map((d) => d.label)).toEqual(["Equipment by client", "Equipment policies"]);
+    // The view's own name still finds it first.
+    expect(find("it_staff", "by client")).toEqual([{ label: "By client", href: "/equipment-by-client" }]);
   });
   it("a viewer never finds what they cannot open", () => {
     expect(find("viewer", "register")).toEqual([]);

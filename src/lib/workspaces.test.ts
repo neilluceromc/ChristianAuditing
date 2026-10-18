@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Role } from "@prisma/client";
 import { PURCHASE_TABS } from "./purchases-list";
+import { REPAIR_STAGES } from "./repairs";
 import {
   filterSectionsForRole,
   PAGE_DEFAULTS,
@@ -320,9 +321,10 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     ]);
     expect(item("it", "it_staff", "Worklist")).toMatchObject({ href: "/inventory/work", icon: "worklist", views: [] });
   });
-  it("Repairs matches on status alone, so a re-sorted Repairs page stays Repairs (spec §4.2)", () => {
+  it("Repairs matches on status alone, so a re-sorted Repairs page stays Repairs (spec §4.2), or on any repair stage", () => {
     const repairs = item("it", "it_staff", "Inventory").views.find((v) => v.label === "Repairs")!;
-    expect(repairs.match).toEqual({ status: "DEFECTIVE" });
+    // …and so does a stage chip's URL, which clears status: the page is in repair mode either way (isRepairView).
+    expect(repairs.match).toEqual([{ status: "DEFECTIVE" }, { stage: REPAIR_STAGES }]);
   });
   it("counts sit on the spec §3 views", () => {
     const counts = (ws: WorkspaceId, label: string) =>
@@ -468,10 +470,12 @@ describe("filterSectionsForRole (spec §3.5)", () => {
     expect(filterSectionsForRole(NAV, "admin")[0].items[2].href).toBe("/c/1");
     expect(filterSectionsForRole(NAV, "viewer")[0].items[1].href).toBe("/c/2");
   });
-  it("one visible view collapses into a plain link to that view", () => {
+  it("one visible view collapses into a plain link to that view, which keeps the view's name", () => {
     expect(filterSectionsForRole(NAV, "admin")[0].items[3]).toEqual({
-      label: "Empty hub", href: "/d", icon: "setup", badge: [], views: [],
+      label: "Empty hub", href: "/d", icon: "setup", badge: [], views: [], viewLabel: "Only",
     });
+    // A link that keeps its views carries no viewLabel.
+    expect(filterSectionsForRole(NAV, "admin")[0].items.every((i) => i.views.length === 0 || !("viewLabel" in i))).toBe(true);
   });
   it("never mutates the nav it is given", () => {
     const before = JSON.stringify(NAV);

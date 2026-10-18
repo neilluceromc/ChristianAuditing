@@ -11,6 +11,24 @@ const CASES: Array<[WorkspaceId, Role, string, string | null, string | null]> = 
   ["it", "it_staff", "/inventory?status=SPARE&sort=tag", "Inventory", "Spare"],
   ["it", "it_staff", "/inventory?status=DEFECTIVE&sort=tag,defectiveSince", "Inventory", "Repairs"],
   ["it", "it_staff", "/inventory?status=SPARE,MISSING", "Inventory", null],
+  // Repair mode (isRepairView): DEFECTIVE as the only status, or any repair stage — the stage chips clear status.
+  ["it", "it_staff", "/inventory?stage=at-vendor&sort=defectiveSince", "Inventory", "Repairs"],
+  ["it", "it_staff", "/inventory?stage=returned-ok", "Inventory", "Repairs"],
+  ["it", "it_staff", "/inventory?stage=to-assess,beyond-repair", "Inventory", "Repairs"],
+  ["it", "it_staff", "/inventory?status=DEFECTIVE&stage=to-assess", "Inventory", "Repairs"],
+  ["it", "it_staff", "/inventory?status=DEFECTIVE,SPARE", "Inventory", null],
+  ["it", "it_staff", "/inventory?stage=bogus", "Inventory", null],
+  // A class other than the viewer's default, with no view matching on cls: no view (the counts are the default's).
+  ["it", "admin", "/inventory?cls=PURCHASING", "Inventory", null],
+  ["it", "admin", "/inventory?cls=PURCHASING&status=SPARE", "Inventory", null],
+  ["it", "admin", "/inventory?cls=IT", "Inventory", "All"],
+  ["it", "admin", "/inventory?cls=IT&status=SPARE", "Inventory", "Spare"],
+  // Only the list itself is class-scoped: the Register page keeps its view whatever class it registers.
+  ["it", "admin", "/inventory/register?cls=PURCHASING", "Inventory", "Register assets"],
+  // An empty param is absent.
+  ["it", "it_staff", "/inventory?status=", "Inventory", "All"],
+  ["it", "it_staff", "/approvals?tab=", "Approvals", "Open"],
+  ["purchasing", "purchasing_staff", "/inventory?cls=", "Assets", "Purchasing assets"],
   ["it", "it_staff", "/inventory?category=x", "Inventory", "All"],
   ["it", "it_staff", "/inventory/abc", "Inventory", null],
   ["it", "it_staff", "/inventory/register", "Inventory", "Register assets"],
