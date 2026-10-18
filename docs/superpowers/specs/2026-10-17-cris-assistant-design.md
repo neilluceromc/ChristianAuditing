@@ -89,7 +89,7 @@ Cris is the mascot from the launch film: a glass orb with a lens eye, turning ri
   - Pressing it closes the box, hides the mascot and leaves a slim tab on that screen edge (about 22 × 56, rounded on the inward side, a mini orb half peeking out) at the height the mascot was. Focus moves to the tab.
   - The tab ("Bring Cris back") restores the mascot and puts focus on it. It shows the new-reply badge too.
   - Being tucked away is saved per person (§9), so it lasts across pages, reloads and computers. "Put Cris back in the corner" also brings Cris back.
-- **Hint bubble.** While closed, a small bubble beside the mascot reads "Hi! Need a hand? · drag me anywhere". It shows until the person has opened Cris once.
+- **Hint bubble.** While closed, a small bubble beside the mascot reads "Hi! Need a hand? · drag me anywhere". It shows until the person has opened Cris once, disappears by itself after 8 s (counting as seen), and never shows on a page with a sticky bottom action bar, so it can't sit over that bar's buttons. A saved position at the old default (72 px up) reads as the new default (20 px). *(updated 2026-10-18, owner's request)*
 - **New-reply badge.** A reply that arrives while the box is closed puts a small red count on the mascot (or on the tab).
 
 **Pressing the mascot** opens a small chat box (about 368 × 470) attached to it:
