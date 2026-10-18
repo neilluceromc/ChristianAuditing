@@ -469,7 +469,7 @@ export async function getWizard(employeeId: string): Promise<WizardData | null> 
     employee.employment === "OFFBOARDED"
       ? prisma.auditEntry.findFirst({
           where: { entityType: "employee", entityId: employee.id, action: "offboarding.completed" },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           select: { createdAt: true },
         })
       : Promise.resolve(null),

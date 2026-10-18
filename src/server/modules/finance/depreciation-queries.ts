@@ -94,7 +94,7 @@ export async function policyRows(): Promise<PolicyRow[]> {
     prisma.asset.groupBy({ by: ["categoryId"], where: { ...CAPITALISED, depreciationLifeMonths: null }, _count: { _all: true } }),
     prisma.auditEntry.findMany({
       where: { entityType: "asset-category", action: "depreciation.policy" },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: { entityId: true, actorLabel: true, createdAt: true },
     }),
   ]);
