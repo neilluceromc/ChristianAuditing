@@ -18,6 +18,18 @@ export function ageBucket(purchasedAt: Date | null | undefined, now: Date = new 
   return AGE_BUCKETS[years];
 }
 
+/**
+ * Phase 43: the four instants ageBucket splits at — now minus 1, 2, 3 and 4 years of YEAR_MS — so ageHistogram can
+ * count in SQL. floor((now − p) / YEAR_MS) ≥ k exactly when p ≤ now − k·YEAR_MS: every value is a whole number of ms
+ * far below 2^53, and at k ≤ 4 the division's rounding is ~10^5 times too fine to reach an integer it is short of.
+ * So "<1y" is p > b0 (a future date included, as ageBucket has it), bucket k is b(k) < p ≤ b(k−1), and "4y+" is
+ * p ≤ b3. Pure ms arithmetic: no timezone enters it (home.test.ts checks it against ageBucket at every boundary).
+ */
+export function ageBucketBounds(now: Date): [Date, Date, Date, Date] {
+  const at = (k: number) => new Date(now.getTime() - k * YEAR_MS);
+  return [at(1), at(2), at(3), at(4)];
+}
+
 export interface Coverage {
   covered: number;
   needed: number;

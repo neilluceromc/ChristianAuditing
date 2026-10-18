@@ -1,4 +1,4 @@
-import type { ApprovalType, Prisma, Role } from "@prisma/client";
+import { Prisma, type ApprovalType, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney, fmtMoneyExact, localDateISO } from "@/lib/format";
 import { regWhere } from "@/lib/registration";
@@ -12,7 +12,7 @@ import { approvalClassWhere } from "@/lib/approval-access";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { beyondRepair, downDays, repairStage, REPAIR_STAGE_LABEL } from "@/lib/repairs";
 import {
-  AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
+  AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucketBounds, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
 import {
@@ -555,15 +555,31 @@ export interface AgeBar {
   count: number;
 }
 
+/**
+ * Phase 43: the histogram's one query — the five ageBucket buckets counted in SQL against ageBucketBounds, instead of
+ * loading every IT asset's purchasedAt. A null purchasedAt matches no predicate, as ageBucket buckets it nowhere.
+ * Prisma stores a DateTime as its UTC wall clock in `timestamp(3)`, so each bound is cast to timestamptz and read back
+ * AT TIME ZONE 'UTC': the same instant, compared at the stored ms, whatever the session's TimeZone.
+ */
+export function ageHistogramSql(now: Date): Prisma.Sql {
+  const [b0, b1, b2, b3] = ageBucketBounds(now);
+  const utc = (d: Date) => Prisma.sql`(${d}::timestamptz AT TIME ZONE 'UTC')`;
+  return Prisma.sql`
+    SELECT
+      COUNT(*) FILTER (WHERE "purchasedAt" > ${utc(b0)}) AS "lt1",
+      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b0)} AND "purchasedAt" > ${utc(b1)}) AS "y1",
+      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b1)} AND "purchasedAt" > ${utc(b2)}) AS "y2",
+      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b2)} AND "purchasedAt" > ${utc(b3)}) AS "y3",
+      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b3)}) AS "y4"
+    FROM "Asset" WHERE "cls" = 'IT'::"AssetClass"
+  `;
+}
+
 /** Five buckets; only 4y+ changes colour, because that's next year's capex conversation. */
 export async function ageHistogram(now: Date = new Date()): Promise<AgeBar[]> {
-  const assets = await prisma.asset.findMany({ where: { cls: "IT" }, select: { purchasedAt: true } });
-  const counts = new Map<AgeBucket, number>(AGE_BUCKETS.map((b) => [b, 0]));
-  for (const a of assets) {
-    const bucket = ageBucket(a.purchasedAt, now);
-    if (bucket) counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
-  }
-  return AGE_BUCKETS.map((bucket) => ({ bucket, count: counts.get(bucket) ?? 0 }));
+  const [row] = await prisma.$queryRaw<[Record<"lt1" | "y1" | "y2" | "y3" | "y4", bigint>]>(ageHistogramSql(now));
+  const counts: Record<AgeBucket, bigint> = { "<1y": row.lt1, "1–2y": row.y1, "2–3y": row.y2, "3–4y": row.y3, "4y+": row.y4 };
+  return AGE_BUCKETS.map((bucket) => ({ bucket, count: Number(counts[bucket]) }));
 }
 
 export interface WarrantyRow {
