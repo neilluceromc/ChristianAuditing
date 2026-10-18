@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { Role } from "@prisma/client";
+import type { AssetClass, Role } from "@prisma/client";
 import { Avatar } from "@/components/ui/avatar";
 import { Drawer } from "@/components/ui/drawer";
 import { Icon } from "@/components/ui/icon";
@@ -35,6 +35,7 @@ export function MobileNav({
   ws,
   allowed,
   meta,
+  defaultCls,
 }: {
   sections: VisibleSection[];
   badges: NavBadges;
@@ -43,6 +44,8 @@ export function MobileNav({
   ws: WorkspaceId;
   allowed: WorkspaceId[];
   meta: Record<WorkspaceId, { label: string; landing: string }>;
+  /** the viewer's default asset class, for the nav's current-link matching */
+  defaultCls: AssetClass;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -59,7 +62,7 @@ export function MobileNav({
         <Drawer open onClose={() => setOpen(false)} title={workspaceLabel} side="left" width={280}>
           <div className="flex min-h-full flex-col gap-3">
             <WorkspaceOptions current={ws} allowed={allowed} meta={meta} onSwitch={() => setOpen(false)} />
-            <NavList sections={sections} badges={badges} onNavigate={() => setOpen(false)} />
+            <NavList sections={sections} badges={badges} defaultCls={defaultCls} onNavigate={() => setOpen(false)} />
             <div className="mt-auto flex flex-col gap-2 border-t border-border-faint pt-3">
               {/* Spec §9: Settings › Cris, for the roles that have Cris — the sidebar's account menu offers the same. */}
               {hasCris(user.role) && (

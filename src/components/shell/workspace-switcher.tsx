@@ -1,12 +1,13 @@
 "use client";
 
+import { Icon } from "@/components/ui/icon";
 import { Menu } from "@/components/ui/menu";
 import { cn } from "@/lib/cn";
 import { workspaceCountLabel } from "@/lib/shell";
 import { switchWorkspace } from "@/server/auth/actions";
 import type { WorkspaceId } from "@/lib/workspaces";
 
-type WorkspaceMeta = Record<WorkspaceId, { label: string; landing: string }>;
+export type WorkspaceMeta = Record<WorkspaceId, { label: string; landing: string }>;
 
 function CurrentWorkspace({ label, count }: { label: string; count: number }) {
   return (
@@ -21,7 +22,12 @@ function CurrentWorkspace({ label, count }: { label: string; count: number }) {
   );
 }
 
-export function WorkspaceSwitcher({
+/**
+ * Phase 42 spec §4.4: the workspace's name as a small tag at the right end of the sidebar's brand row — a 6 px
+ * accent dot and the label. One workspace: plain text, not a control. Several: a button opening the workspace
+ * menu (✓ on the current one); its name keeps "{n} workspaces" for `auth-shell.spec`.
+ */
+export function WorkspaceTag({
   current,
   allowed,
   meta,
@@ -30,39 +36,43 @@ export function WorkspaceSwitcher({
   allowed: WorkspaceId[];
   meta: WorkspaceMeta;
 }) {
-  const body = <CurrentWorkspace label={meta[current].label} count={allowed.length} />;
+  const label = meta[current].label;
+  const tag = (
+    <>
+      <span aria-hidden className="size-[6px] shrink-0 rounded-full bg-accent" />
+      <span className="truncate">{label}</span>
+    </>
+  );
+  // Narrow on purpose: "Purchasing" has to fit beside the logo and "Backroom IT" in a 236 px panel.
+  const shape = "flex min-w-0 items-center gap-1 rounded-(--radius-ctl) px-1 py-0.5 text-[11px] font-medium";
 
-  if (allowed.length === 1) {
-    // Static label, not a disabled control (handover shell spec).
-    return <div className="mx-3 mb-2 flex items-center rounded-(--radius-btn) border border-border px-2.5 py-2">{body}</div>;
-  }
+  if (allowed.length === 1) return <span className={cn(shape, "text-fg-secondary")}>{tag}</span>;
 
   return (
-    <div className="mx-3 mb-2">
-      <Menu
-        align="start"
-        trigger={(p) => (
-          <button
-            {...p}
-            type="button"
-            className="flex w-full items-center gap-2 rounded-(--radius-btn) border border-border px-2.5 py-2 hover:bg-surface-subtle"
-          >
-            {body}
-            <span aria-hidden className="font-mono text-[9px] text-fg-muted">▲▼</span>
-          </button>
-        )}
-        items={allowed.map((ws) => ({
-          label: meta[ws].label + (ws === current ? " ✓" : ""),
-          onSelect: () => void switchWorkspace(ws),
-        }))}
-      />
-    </div>
+    <Menu
+      align="end"
+      trigger={(p) => (
+        <button
+          {...p}
+          type="button"
+          aria-label={`Switch workspace — ${label}, ${workspaceCountLabel(allowed.length)}`}
+          className={cn(shape, "text-fg-secondary hover:bg-surface-subtle hover:text-fg")}
+        >
+          {tag}
+          <Icon name="chevron" size={9} className="rotate-90 text-fg-muted" />
+        </button>
+      )}
+      items={allowed.map((ws) => ({
+        label: meta[ws].label + (ws === current ? " ✓" : ""),
+        onSelect: () => void switchWorkspace(ws),
+      }))}
+    />
   );
 }
 
 /**
  * Spec §3: the menu drawer's workspace switch — the same choice as the
- * sidebar's switcher, shown as a row of options (one tap, no nested menu
+ * sidebar's workspace tag, shown as a row of options (one tap, no nested menu
  * inside the drawer). A single-workspace role gets the static label.
  * `onSwitch` runs before the switch so the drawer can close itself (its focus
  * trap hands focus back to the menu button, never to body).

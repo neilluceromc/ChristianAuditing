@@ -15,6 +15,7 @@ import { navDestinations } from "@/lib/shell";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
 import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
 import { navCountKeys, type NavBadges } from "@/lib/nav-badges";
+import { defaultClassFor } from "@/lib/asset-class";
 import { readNavCounts } from "@/server/modules/home/nav-counts";
 import { CrisOrbDefs } from "@/components/cris/orb";
 import { CrisWidget } from "@/components/cris/cris-widget";
@@ -39,6 +40,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     reviewer ? crisFor(user.id, user.name, jar.get("br.theme")?.value) : Promise.resolve(null),
   ]);
   const badges: NavBadges = { approvals, counts: { ...counts, approvals: approvals.open } };
+  // Spec §4.2: /inventory drops `cls` from its URLs when it is the viewer's default, so the nav matcher needs it.
+  const defaultCls = defaultClassFor(user.role);
 
   return (
     <div className="flex min-h-screen">
@@ -55,6 +58,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           sections={sections}
           badges={badges}
           allowed={ROLE_WORKSPACES[user.role]}
+          defaultCls={defaultCls}
         />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
@@ -67,6 +71,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             ws={ws}
             allowed={ROLE_WORKSPACES[user.role]}
             meta={WORKSPACE_META}
+            defaultCls={defaultCls}
           />
         </div>
         <main id="main" tabIndex={-1} className="flex-1 p-6 print:p-0">

@@ -1,66 +1,67 @@
 "use client";
 
-import Link from "next/link";
-import { cn } from "@/lib/cn";
+import { Suspense, useEffect, useRef } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import type { AssetClass } from "@prisma/client";
+import type { NavBadges } from "@/lib/nav-badges";
+import { currentNav } from "@/lib/nav-match";
 import type { VisibleSection } from "@/lib/workspaces";
-import { itemBadge, type NavBadges } from "@/lib/nav-badges";
+import { NavTree } from "./nav-tree";
 
-/**
- * Phase 42 Task 1 stopgap: the links render flat (groups by spacing, no headings, no views, no current-link state),
- * each with its own summed badge (Task 3), until Task 4 replaces this with the nav tree and the matcher.
- */
-export function NavList({
-  sections,
-  badges,
-  onNavigate,
-}: {
+interface NavListProps {
   sections: VisibleSection[];
   badges: NavBadges;
-  /** mobile drawer closes itself on navigation */
+  /** the viewer's default asset class: `/inventory` drops `cls` from its URLs when it is this (spec §4.2) */
+  defaultCls: AssetClass;
+  /** the mobile drawer closes itself on navigation */
   onNavigate?: () => void;
-}) {
+}
+
+/**
+ * Phase 42 spec §4.1 / §4.2: the nav tree for the current URL. After mount, and whenever the current link or view
+ * changes, the current entry is scrolled into the nav's visible part (`block: "nearest"`, no animation). The
+ * sidebar's own scroll region is the nearest scroller; the sticky column keeps it on screen, so the window stays.
+ */
+export function NavList(props: NavListProps) {
+  // useSearchParams needs a Suspense boundary wherever a page could prerender; until the params are known, the
+  // tree reads the path alone.
   return (
-    <nav aria-label="Workspace" className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4">
-      {sections.map((section) => (
-        <div key={section.heading} className="flex flex-col gap-0.5">
-          {section.items.map((item) => {
-            const badge = itemBadge(item, badges);
-            return (
-              <Link
-                key={item.href + item.label}
-                href={item.href}
-                onClick={onNavigate}
-                className={cn(
-                  "flex items-center justify-between rounded-(--radius-btn) px-2.5 py-[7px] text-[12.5px]",
-                  "transition-colors duration-(--dur-1) text-fg-secondary hover:bg-surface-subtle hover:text-fg",
-                )}
-              >
-                {item.label}
-                {badge && (
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-(--radius-ctl) border px-1.5 font-mono text-[10px]",
-                      badge.fault
-                        ? "border-[var(--st-fault-border)] bg-[var(--st-fault-bg)] text-[var(--st-fault-text)]"
-                        : "border-border bg-border-faint text-fg-secondary",
-                    )}
-                    aria-label={badge.label}
-                  >
-                    {badge.fault && (
-                      <span
-                        aria-hidden
-                        className="size-[5px] rounded-full bg-[var(--st-fault-dot)]"
-                        style={{ animation: "pulse 1.9s ease-in-out infinite" }}
-                      />
-                    )}
-                    {badge.n}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-        </div>
-      ))}
-    </nav>
+    <Suspense fallback={<PathOnlyNav {...props} />}>
+      <CurrentNav {...props} />
+    </Suspense>
+  );
+}
+
+function CurrentNav(props: NavListProps) {
+  const search = useSearchParams();
+  return <ScrolledNav {...props} search={search} />;
+}
+
+function PathOnlyNav(props: NavListProps) {
+  return <ScrolledNav {...props} search={null} />;
+}
+
+function ScrolledNav({
+  sections,
+  badges,
+  defaultCls,
+  onNavigate,
+  search,
+}: NavListProps & { search: URLSearchParams | null }) {
+  const pathname = usePathname();
+  const current = currentNav(sections, pathname, new URLSearchParams(search?.toString()), defaultCls);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const nav = ref.current?.querySelector('nav[aria-label="Workspace"]');
+    // The current page's entry; on a page under an open link that no view matches (a record), the link itself.
+    (nav?.querySelector('[aria-current="page"]') ?? nav?.querySelector("[data-nav-current]"))
+      ?.scrollIntoView({ block: "nearest" });
+  }, [current.item, current.view]);
+
+  return (
+    <div ref={ref} className="contents">
+      <NavTree sections={sections} current={current} badges={badges} onNavigate={onNavigate} />
+    </div>
   );
 }

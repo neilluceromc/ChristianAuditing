@@ -1,3 +1,4 @@
+import type { AssetClass } from "@prisma/client";
 import { DensityToggle } from "@/components/ui/density-toggle";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import type { VisibleSection, WorkspaceId } from "@/lib/workspaces";
@@ -21,6 +22,7 @@ export function Topbar({
   ws,
   allowed,
   meta,
+  defaultCls,
 }: {
   sections: VisibleSection[];
   badges: NavBadges;
@@ -29,6 +31,7 @@ export function Topbar({
   ws: WorkspaceId;
   allowed: WorkspaceId[];
   meta: Record<WorkspaceId, { label: string; landing: string }>;
+  defaultCls: AssetClass;
 }) {
   return (
     <header className="flex h-[52px] shrink-0 items-center gap-2 border-b border-border bg-surface px-4 sm:gap-3">
@@ -40,6 +43,7 @@ export function Topbar({
         ws={ws}
         allowed={allowed}
         meta={meta}
+        defaultCls={defaultCls}
       />
       <PageName sections={sections} workspaceLabel={workspaceLabel} />
       <CommandPaletteTrigger />
