@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  AGE_BUCKETS, activeDismissals, ageBucket, coverageLine,
+  AGE_BUCKETS, activeDismissals, ageBucket, ageBucketBounds, coverageLine, type AgeBucket,
   warrantyClusters, warrantyDaysLeft, withDismissal, withoutDismissal,
 } from "./home";
 
@@ -24,6 +24,45 @@ describe("ageBucket", () => {
   });
   it("puts the exact boundary in the older bucket", () => {
     expect(ageBucket(daysAgo(365), NOW)).toBe("1–2y");
+  });
+});
+
+describe("ageBucketBounds (Phase 43: ageHistogram counts in SQL)", () => {
+  const YEAR = 365 * 86_400_000;
+  /** The SQL's predicates, word for word: p > b0 · b1 < p ≤ b0 · b2 < p ≤ b1 · b3 < p ≤ b2 · p ≤ b3. */
+  const bySql = (p: Date, [b0, b1, b2, b3]: Date[]): AgeBucket => {
+    const t = p.getTime();
+    if (t > b0.getTime()) return "<1y";
+    if (t > b1.getTime()) return "1–2y";
+    if (t > b2.getTime()) return "2–3y";
+    if (t > b3.getTime()) return "3–4y";
+    return "4y+";
+  };
+
+  it("are now minus one to four 365-day years, to the millisecond", () => {
+    expect(ageBucketBounds(NOW).map((d) => NOW.getTime() - d.getTime())).toEqual([YEAR, 2 * YEAR, 3 * YEAR, 4 * YEAR]);
+  });
+
+  it("split exactly where ageBucket does, at and around every boundary", () => {
+    for (const now of [NOW, new Date("2026-01-01T00:00:00.000Z"), new Date("2028-02-29T23:59:59.999Z"), new Date(0)]) {
+      const bounds = ageBucketBounds(now);
+      for (let k = -1; k <= 6; k++) {
+        for (const d of [-86_400_000, -1, 0, 1, 86_400_000]) {
+          const p = new Date(now.getTime() - k * YEAR + d);
+          expect([k, d, bySql(p, bounds)]).toEqual([k, d, ageBucket(p, now)]);
+        }
+      }
+    }
+  });
+
+  it("agree with ageBucket on thousands of dates, the future included", () => {
+    let seed = 42;
+    const rand = () => ((seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31) / 2 ** 31);
+    const bounds = ageBucketBounds(NOW);
+    for (let i = 0; i < 5000; i++) {
+      const p = new Date(NOW.getTime() + Math.round((rand() * 10 - 8) * YEAR));
+      expect(bySql(p, bounds)).toBe(ageBucket(p, NOW));
+    }
   });
 });
 

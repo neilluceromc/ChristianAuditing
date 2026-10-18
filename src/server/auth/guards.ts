@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import type { Role, User } from "@prisma/client";
 import { auth } from "./index";
@@ -11,8 +12,16 @@ export type SessionUser = User;
  * Layer-2 enforcement. Middleware (layer 1) can't reach the DB, so a
  * disabled account's JWT survives until it hits this guard — every page
  * and server action goes through requireUser or requireRole.
+ *
+ * Phase 43: wrapped in React `cache()`, so the layout's call and the page's
+ * (and requireRole's) share ONE session read and ONE user read per request —
+ * a redirect thrown here is the same redirect for every caller. `cache()` is
+ * request-scoped (a fresh store per server render; outside one it does not
+ * memoise), never a module-level memo, so nothing outlives the request.
  */
-export async function requireUser(): Promise<User> {
+export const requireUser = cache(readRequestUser);
+
+async function readRequestUser(): Promise<User> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   // Stale JWT (user deleted/disabled/role-changed) goes to /logout, which

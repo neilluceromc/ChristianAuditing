@@ -1,4 +1,4 @@
-import type { ApprovalType, Prisma, Role } from "@prisma/client";
+import { Prisma, type ApprovalType, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney, fmtMoneyExact, localDateISO } from "@/lib/format";
 import { regWhere } from "@/lib/registration";
@@ -12,7 +12,7 @@ import { approvalClassWhere } from "@/lib/approval-access";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { beyondRepair, downDays, repairStage, REPAIR_STAGE_LABEL } from "@/lib/repairs";
 import {
-  AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucket, coverageLine,
+  AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucketBounds, coverageLine,
   todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
 } from "@/lib/home";
 import {
@@ -65,13 +65,13 @@ export async function worklist(
   const [breached, failed, leavers, hireWork, missing, orphaned, awaiting, pref, triage, repairs, loans, reviews] = await Promise.all([
     prisma.approval.findMany({
       where: breachedWhere,
-      orderBy: { slaAt: "asc" },
+      orderBy: [{ slaAt: "asc" }, { id: "asc" }],
       take: CAP.small,
       include: { asset: true, employee: true },
     }),
     prisma.approval.findMany({
       where: { AND: [{ state: "EXECUTION_FAILED" as const }, scope] },
-      orderBy: { updatedAt: "asc" },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: CAP.small,
       include: { asset: true, employee: true },
     }),
@@ -80,21 +80,21 @@ export async function worklist(
     hireWorkRows(now),
     prisma.asset.findMany({
       where: { status: "MISSING", cls: "IT" },
-      orderBy: { updatedAt: "asc" },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: CAP.small,
       select: { id: true, tag: true, model: true, updatedAt: true },
     }),
     // custody that doesn't add up: DEPLOYED with nobody holding it
     prisma.asset.findMany({
       where: { status: "DEPLOYED", assigneeId: null, cls: "IT" },
-      orderBy: { updatedAt: "asc" },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: CAP.small,
       select: { id: true, tag: true, model: true, updatedAt: true },
     }),
     // Phase 14 (spec §5.5): IT assets Purchasing registered, waiting for IT.
     prisma.asset.findMany({
       where: { cls: "IT", itVerifiedAt: null },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: CAP.small,
       select: { id: true, tag: true, model: true, createdAt: true },
     }),
@@ -105,7 +105,7 @@ export async function worklist(
     // Phase 15 (spec §5): back from a person, sitting on SPARE unchecked.
     prisma.asset.findMany({
       where: { cls: "IT", returnedAt: { not: null } },
-      orderBy: { returnedAt: "asc" },
+      orderBy: [{ returnedAt: "asc" }, { id: "asc" }],
       take: CAP.large,
       select: { id: true, tag: true, model: true, returnedAt: true },
     }),
@@ -113,7 +113,7 @@ export async function worklist(
     // stage and down-clock from (src/lib/repairs.ts).
     prisma.asset.findMany({
       where: { cls: "IT", status: "DEFECTIVE" },
-      orderBy: { defectiveSince: "asc" },
+      orderBy: [{ defectiveSince: "asc" }, { id: "asc" }],
       take: CAP.large,
       select: {
         id: true, tag: true, model: true, status: true, vendorId: true, rmaRef: true,
@@ -303,7 +303,7 @@ export async function worklist(
 export async function hireWorkRows(now: Date): Promise<{ rows: WorkRow[]; saturated: boolean }> {
   const hires = await prisma.employee.findMany({
     where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
-    orderBy: { joinedAt: "asc" },
+    orderBy: [{ joinedAt: "asc" }, { id: "asc" }],
     take: CAP.small,
     select: {
       id: true, name: true, employeeNo: true, title: true, departmentId: true, joinedAt: true,
@@ -406,7 +406,7 @@ export interface ClaimRow {
 export async function claimedByYou(userId: string, role: Role, now: Date = new Date()): Promise<ClaimRow[]> {
   const rows = await prisma.approval.findMany({
     where: { AND: [{ state: "CLAIMED" as const, claimedById: userId }, approvalClassWhere(role)] },
-    orderBy: { slaAt: "asc" },
+    orderBy: [{ slaAt: "asc" }, { id: "asc" }],
     take: 5,
     include: { asset: true, employee: true },
   });
@@ -555,15 +555,31 @@ export interface AgeBar {
   count: number;
 }
 
+/**
+ * Phase 43: the histogram's one query — the five ageBucket buckets counted in SQL against ageBucketBounds, instead of
+ * loading every IT asset's purchasedAt. A null purchasedAt matches no predicate, as ageBucket buckets it nowhere.
+ * Prisma stores a DateTime as its UTC wall clock in `timestamp(3)`, so each bound is cast to timestamptz and read back
+ * AT TIME ZONE 'UTC': the same instant, compared at the stored ms, whatever the session's TimeZone.
+ */
+export function ageHistogramSql(now: Date): Prisma.Sql {
+  const [b0, b1, b2, b3] = ageBucketBounds(now);
+  const utc = (d: Date) => Prisma.sql`(${d}::timestamptz AT TIME ZONE 'UTC')`;
+  return Prisma.sql`
+    SELECT
+      COUNT(*) FILTER (WHERE "purchasedAt" > ${utc(b0)}) AS "lt1",
+      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b0)} AND "purchasedAt" > ${utc(b1)}) AS "y1",
+      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b1)} AND "purchasedAt" > ${utc(b2)}) AS "y2",
+      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b2)} AND "purchasedAt" > ${utc(b3)}) AS "y3",
+      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b3)}) AS "y4"
+    FROM "Asset" WHERE "cls" = 'IT'::"AssetClass"
+  `;
+}
+
 /** Five buckets; only 4y+ changes colour, because that's next year's capex conversation. */
 export async function ageHistogram(now: Date = new Date()): Promise<AgeBar[]> {
-  const assets = await prisma.asset.findMany({ where: { cls: "IT" }, select: { purchasedAt: true } });
-  const counts = new Map<AgeBucket, number>(AGE_BUCKETS.map((b) => [b, 0]));
-  for (const a of assets) {
-    const bucket = ageBucket(a.purchasedAt, now);
-    if (bucket) counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
-  }
-  return AGE_BUCKETS.map((bucket) => ({ bucket, count: counts.get(bucket) ?? 0 }));
+  const [row] = await prisma.$queryRaw<[Record<"lt1" | "y1" | "y2" | "y3" | "y4", bigint>]>(ageHistogramSql(now));
+  const counts: Record<AgeBucket, bigint> = { "<1y": row.lt1, "1–2y": row.y1, "2–3y": row.y2, "3–4y": row.y3, "4y+": row.y4 };
+  return AGE_BUCKETS.map((bucket) => ({ bucket, count: Number(counts[bucket]) }));
 }
 
 export interface WarrantyRow {
@@ -585,7 +601,7 @@ export async function warrantyRunway(now: Date = new Date()): Promise<WarrantyRo
       status: { notIn: ["DISPOSE", "DONATED", "BUYOUT"] },
       cls: "IT",
     },
-    orderBy: { warrantyUntil: "asc" },
+    orderBy: [{ warrantyUntil: "asc" }, { id: "asc" }],
     take: 8,
     select: { id: true, tag: true, model: true, warrantyUntil: true },
   });
@@ -636,14 +652,14 @@ export async function purchasingHome(userId: string, role: Role, now: Date = new
   const [mine, counts, completed, approvalsWaiting, awaitingItCheck, stockSignals] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
-      orderBy: { updatedAt: "asc" },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: 8,
       select: {
         id: true, refNo: true, state: true, updatedAt: true,
         units: { select: { qty: true, unitPrice: true } },
         notes: {
           where: { kind: { not: "COMMENT" } },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: 1,
           select: { kind: true, author: { select: { name: true } } },
         },
@@ -714,7 +730,7 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
   const [waiting, completed, capitalized, totals, toReviewIt, toReviewPurchasing] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { state: "IT_REVIEWED" },
-      orderBy: { reviewedAt: "asc" },
+      orderBy: [{ reviewedAt: "asc" }, { id: "asc" }],
       select: {
         id: true, refNo: true, reviewedAt: true, updatedAt: true,
         requestedBy: { select: { name: true } },

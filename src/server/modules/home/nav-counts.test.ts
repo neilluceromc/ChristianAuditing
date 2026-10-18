@@ -13,6 +13,7 @@ import { WORKSPACE_NAV, type CountKey } from "@/lib/workspaces";
 
 const h = vi.hoisted(() => ({
   asset: vi.fn(),
+  assetGroup: vi.fn(),
   employee: vi.fn(),
   purchase: vi.fn(),
   worklist: vi.fn(),
@@ -22,7 +23,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/server/db/client", () => ({
   prisma: {
-    asset: { count: h.asset },
+    asset: { count: h.asset, groupBy: h.assetGroup },
     employee: { count: h.employee },
     purchaseRequest: { count: h.purchase },
     approval: { count: h.approval },
@@ -37,9 +38,16 @@ const viewer = { id: "u2", role: "viewer" as const };
 
 const statusOf = (where: { status?: { in: string[] } }) => where.status?.in[0];
 
+type GroupArgs = { by: string[]; where: { status: { in: string[] } }; _count: { _all: true } };
+const FLEET: Record<string, number> = { SPARE: 7, DEFECTIVE: 2, MISSING: 1 };
+/** What Postgres would answer: one row per status that has assets, none for a status with none. */
+const grouped = (counts: Record<string, number>) => async ({ where }: GroupArgs) =>
+  where.status.in.filter((s) => counts[s]).map((status) => ({ status, _count: { _all: counts[status] } }));
+
 beforeEach(() => {
   h.asset.mockImplementation(async ({ where }: { where: { status?: { in: string[] } } }) =>
-    ({ SPARE: 7, DEFECTIVE: 2, MISSING: 1 })[statusOf(where) ?? ""] ?? 0);
+    FLEET[statusOf(where) ?? ""] ?? 0);
+  h.assetGroup.mockImplementation(grouped(FLEET));
   h.employee.mockResolvedValue(4);
   h.purchase.mockImplementation(async ({ where }: { where: { state?: string } }) =>
     ({ DRAFT: 3, SUBMITTED: 5, IT_REVIEWED: 6 })[where.state ?? ""] ?? 0);
@@ -55,7 +63,8 @@ afterEach(() => {
 describe("readNavCounts", () => {
   it("queries only the requested keys", async () => {
     expect(await readNavCounts(["itSpare"], itStaff)).toEqual({ itSpare: 7 });
-    expect(h.asset).toHaveBeenCalledTimes(1);
+    expect(h.assetGroup).toHaveBeenCalledTimes(1);
+    expect(h.asset).not.toHaveBeenCalled();
     expect(h.employee).not.toHaveBeenCalled();
     expect(h.purchase).not.toHaveBeenCalled();
     expect(h.worklist).not.toHaveBeenCalled();
@@ -81,15 +90,21 @@ describe("readNavCounts", () => {
   it("a throwing query yields 0 for that key and the others still return", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const boom = new Error("db down");
-    h.asset.mockImplementation(async ({ where }: { where: { status?: { in: string[] } } }) => {
-      if (statusOf(where) === "MISSING") throw boom;
-      return 7;
-    });
     h.worklist.mockRejectedValue(boom);
     expect(await readNavCounts(["itSpare", "itMissing", "worklist", "leaving"], itStaff))
-      .toEqual({ itSpare: 7, itMissing: 0, worklist: 0, leaving: 4 });
-    expect(error).toHaveBeenCalledWith("[nav counts] itMissing failed:", boom);
+      .toEqual({ itSpare: 7, itMissing: 1, worklist: 0, leaving: 4 });
     expect(error).toHaveBeenCalledWith("[nav counts] worklist failed:", boom);
+    expect(error).toHaveBeenCalledTimes(1);
+  });
+
+  it("the IT status counts share one query, so its failure zeroes every one asked for and logs each (Phase 43)", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const boom = new Error("db down");
+    h.assetGroup.mockRejectedValue(boom);
+    expect(await readNavCounts(["itSpare", "itMissing", "leaving"], itStaff))
+      .toEqual({ itSpare: 0, itMissing: 0, leaving: 4 });
+    expect(error).toHaveBeenCalledWith("[nav counts] itSpare failed:", boom);
+    expect(error).toHaveBeenCalledWith("[nav counts] itMissing failed:", boom);
     expect(error).toHaveBeenCalledTimes(2);
   });
 
@@ -102,7 +117,13 @@ describe("readNavCounts", () => {
 
   it("builds the asset where the way /inventory does: buildAssetWhere with cls IT and the status", async () => {
     await readNavCounts(["itSpare", "itDefective", "itMissing"], viewer);
-    const wheres = h.asset.mock.calls.map(([arg]) => arg.where);
+    expect(h.assetGroup).toHaveBeenCalledTimes(1);
+    const [{ by, where, _count }] = h.assetGroup.mock.calls[0] as [GroupArgs];
+    expect(by).toEqual(["status"]);
+    expect(_count).toEqual({ _all: true });
+    expect(where.status).toEqual({ in: ["SPARE", "DEFECTIVE", "MISSING"] });
+    // Equivalence (Phase 43): each status's group is the rows of the shared where with that one status, and that where
+    // is exactly the per-view where the old per-key asset.count used, the page's own row count for the view's URL.
     for (const [status, qs] of [
       ["SPARE", "status=SPARE"],
       ["DEFECTIVE", "status=DEFECTIVE&sort=defectiveSince"],
@@ -110,8 +131,32 @@ describe("readNavCounts", () => {
     ] as const) {
       const expected = buildAssetWhere(parseListState(new URLSearchParams(qs), INVENTORY_LIST_CONFIG), null, "IT");
       expect(expected).toEqual({ cls: "IT", status: { in: [status] } });
-      expect(wheres).toContainEqual(expected);
+      expect({ ...where, status: { in: [status] } }).toEqual(expected);
     }
+  });
+
+  it("asks only for the statuses whose counts are wanted, and reads a missing group as 0", async () => {
+    h.assetGroup.mockImplementation(grouped({ SPARE: 3 }));
+    expect(await readNavCounts(["itMissing", "itSpare"], viewer)).toEqual({ itSpare: 3, itMissing: 0 });
+    const [{ where }] = h.assetGroup.mock.calls[0] as [GroupArgs];
+    expect([...where.status.in].sort()).toEqual(["MISSING", "SPARE"]);
+  });
+
+  it("does not query assets when no IT status count is wanted", async () => {
+    await readNavCounts(["leaving", "prDraft", "worklist"], itStaff);
+    expect(h.assetGroup).not.toHaveBeenCalled();
+    expect(h.asset).not.toHaveBeenCalled();
+  });
+
+  it("gives the same numbers the three per-status counts gave", async () => {
+    const keys: CountKey[] = ["itSpare", "itDefective", "itMissing"];
+    const viaGroup = await readNavCounts(keys, viewer);
+    const old = Object.fromEntries(
+      await Promise.all(keys.map(async (k) => [k, await h.asset({ where: buildAssetWhere(
+        parseListState(new URL(NAV_COUNT_HREF[k as keyof typeof NAV_COUNT_HREF], "http://x").searchParams, INVENTORY_LIST_CONFIG),
+        null, "IT") })])),
+    );
+    expect(viaGroup).toEqual(old);
   });
 
   it("builds the leaving where the way /employees does", async () => {

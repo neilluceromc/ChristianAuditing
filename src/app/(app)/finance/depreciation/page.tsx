@@ -3,7 +3,7 @@ import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import Link from "next/link";
-import { policyRows, scheduleCategory, scheduleSummary } from "@/server/modules/finance/depreciation-queries";
+import { policyRows, scheduleView } from "@/server/modules/finance/depreciation-queries";
 import { ASSET_CLASSES, CLASS_LABEL, parseCls } from "@/lib/asset-class";
 import { parsePage } from "@/lib/paging";
 import { manilaMonth } from "@/lib/depreciation";
@@ -36,8 +36,10 @@ export default async function DepreciationPage({
   const parsedYear = /^\d{4}$/.test(rawYear) ? Number(rawYear) : NaN;
   const year = parsedYear >= 2000 && parsedYear <= 2100 ? parsedYear : thisYear;
   const catId = params.get("cat") ?? "";
-  const sched = tab === "schedule" ? await scheduleSummary(cls, year, now) : null;
-  const drill = sched && catId ? await scheduleCategory(cls, year, catId, parsePage(params), now) : null;
+  // Phase 43: one grid pass for the summary and the drill-down (scheduleView).
+  const view = tab === "schedule" ? await scheduleView(cls, year, catId, parsePage(params), now) : null;
+  const sched = view?.summary ?? null;
+  const drill = view?.drill ?? null;
   const schedHref = (extra = "") => `/finance/depreciation?tab=schedule&year=${year}&cls=${cls}${extra}`;
   const years = sched ? (sched.years.includes(year) ? sched.years : [...sched.years, year].sort((a, b) => a - b)) : [];
 
