@@ -110,41 +110,98 @@ export class CookieJar {
 }
 
 /**
- * The writers' server-action timing (fix round 1). Each server-action POST is labelled with the step that made it
- * when the request STARTS (`request`), and the label is read back when it finishes or fails. A label read at finish
- * time would be gone for any revalidated response still streaming after the step's toast had shown and the step had
- * ended. Takes Playwright Request objects; records { action: "server action · <step>", ms, ok, server: true }, where
- * ms is the response end (or, when the browser has none, the first byte), relative to the request's start.
+ * The writers' server-action timing. Each server-action POST is tagged with its step's label and id when the request
+ * STARTS (fix round 1: a label read at finish time is gone once the step has ended), and recorded when it finishes:
+ * { action: "server action · <label>", ms, ok, server: true }, ms being the response end (or, without one, the first
+ * byte) relative to the request's start.
+ *
+ * Fix round 2:
+ * - `settle(step, ms)` waits (bounded) until the step's server actions have finished or failed, so the writer does not
+ *   navigate away while a revalidated RSC response is still streaming;
+ * - a request that fails with net::ERR_ABORTED is an error only when its step failed. When the step succeeded it is
+ *   recorded as { ok: true, aborted: true, note: "aborted-after-success" }, which the report keeps out of the
+ *   timings and the errors. Its outcome is held back until `endStep` says how the step went. Any other network
+ *   failure is always an error.
  */
 export function serverActionTracker({ user, actions, stopped }) {
-  const labels = new WeakMap();
+  const tags = new WeakMap(); // request → { label, step }
+  const inflight = new Map(); // step → Set<request>
+  const waiters = new Map(); // step → [resolve]
+  const outcomes = new Map(); // step → ok
+  const heldBack = new Map(); // step → aborted rows waiting for the step's outcome
   const isServerAction = (req) => req.method() === "POST" && Boolean(req.headers()["next-action"]);
-  const take = (req) => {
-    const label = labels.get(req);
-    labels.delete(req);
-    return label;
-  };
+
+  function take(req) {
+    const tag = tags.get(req);
+    tags.delete(req);
+    return tag;
+  }
+  function done(req, step) {
+    const set = inflight.get(step);
+    if (!set) return;
+    set.delete(req);
+    if (set.size > 0) return;
+    inflight.delete(step);
+    for (const resolve of waiters.get(step) ?? []) resolve();
+    waiters.delete(step);
+  }
+  function classify(row, stepOk) {
+    actions.push(stepOk
+      ? { user: row.user, action: row.action, ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" }
+      : { ...row, ok: false });
+  }
 
   return {
-    /** page.on("request"): `phase` is the step running now, or null outside a step. */
-    request(req, phase) {
-      if (phase && isServerAction(req)) labels.set(req, phase);
+    /** page.on("request"): `label`/`step` name the step running now, or null outside a step. */
+    request(req, label, step) {
+      if (!label || step == null || !isServerAction(req)) return;
+      tags.set(req, { label, step });
+      if (!inflight.has(step)) inflight.set(step, new Set());
+      inflight.get(step).add(req);
     },
     /** page.on("requestfinished") */
     async finished(req) {
-      const label = take(req);
-      if (!label) return;
-      const timing = req.timing();
-      const ms = timing.responseEnd >= 0 ? timing.responseEnd : timing.responseStart;
-      const res = await req.response().catch(() => null);
-      if (ms < 0) return; // the browser has no timing for it at all
-      actions.push({ user, action: `server action · ${label}`, ms: Math.round(ms), ok: !!res && res.status() < 400, server: true });
+      const tag = take(req);
+      if (!tag) return;
+      try {
+        const timing = req.timing();
+        const ms = timing.responseEnd >= 0 ? timing.responseEnd : timing.responseStart;
+        const res = await req.response().catch(() => null);
+        if (ms >= 0) {
+          actions.push({ user, action: `server action · ${tag.label}`, ms: Math.round(ms), ok: !!res && res.status() < 400, server: true });
+        }
+      } finally {
+        done(req, tag.step);
+      }
     },
     /** page.on("requestfailed"): a request torn down by the hard stop is not a measurement. */
     failed(req) {
-      const label = take(req);
-      if (!label || stopped()) return;
-      actions.push({ user, action: `server action · ${label}`, ms: 0, ok: false, server: true, error: req.failure()?.errorText ?? "failed" });
+      const tag = take(req);
+      if (!tag) return;
+      done(req, tag.step);
+      if (stopped()) return;
+      const errorText = req.failure()?.errorText ?? "failed";
+      const row = { user, action: `server action · ${tag.label}`, ms: 0, ok: false, server: true, error: errorText };
+      if (!/ERR_ABORTED/.test(errorText)) return void actions.push(row);
+      if (outcomes.has(tag.step)) return classify(row, outcomes.get(tag.step));
+      if (!heldBack.has(tag.step)) heldBack.set(tag.step, []);
+      heldBack.get(tag.step).push(row);
+    },
+    /** Resolves once the step has no server action in flight, or after `timeoutMs`. Never rejects. */
+    settle(step, timeoutMs) {
+      if (!inflight.has(step)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        const list = waiters.get(step) ?? [];
+        list.push(() => { clearTimeout(timer); resolve(); });
+        waiters.set(step, list);
+      });
+    },
+    /** How the step went: releases its held-back aborted rows, and classifies any abort that arrives later. */
+    endStep(step, ok) {
+      outcomes.set(step, ok);
+      for (const row of heldBack.get(step) ?? []) classify(row, ok);
+      heldBack.delete(step);
     },
   };
 }

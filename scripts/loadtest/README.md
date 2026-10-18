@@ -58,6 +58,14 @@ that as `[slow-query] <Model>.<operation> <ms>ms`. Unset, the log is off. Argume
 - Targets (spec §2 goal 3): p95 ≤ 1.0 s for lists, records and actions; p95 ≤ 1.5 s for Home and the reports
   (equipment by client, depreciation, stock reports); no request over 5 s; no errors.
 - Reader times are measured from the request to the last byte of the HTML.
+- A successful writer step waits (at most 10 s) for its server-action responses to finish before the next click or
+  navigation, so the harness does not cut them off. A server action the browser still aborts (`net::ERR_ABORTED`)
+  after its step succeeded is counted under *Aborted after success*: not an error, and not in the timings. The same
+  abort on a failed step is an error.
+- *Skipped steps, by reason* says why a step did not happen: `assign` — no assignable scale-seed spare on the Spare
+  page it read (with the page's row counts), or every candidate opened was passed over (with what each offered
+  instead of Assign); `approve or reject` — no unclaimed PENDING request on the queue's first page (with its row
+  counts), the decision cap, or the request no longer offered Approve/Reject.
 - Writer `server action · …` rows are the server action POSTs alone, from the browser's network timing; these are
   what the targets judge. The other writer rows are the whole step in the browser: from the confirming click to the
   success toast, i.e. the action's round trip and the toast's render. The page refresh (`router.refresh()`) starts

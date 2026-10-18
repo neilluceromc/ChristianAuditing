@@ -22,7 +22,7 @@ export function percentile(values, p) {
 /** A reader request is an error unless it answered 2xx (a redirect means a lost session or a refused page). */
 export function isError(row) {
   if ("status" in row) return !(row.status >= 200 && row.status < 300);
-  return !row.skipped && row.ok === false;
+  return !row.skipped && !row.aborted && row.ok === false;
 }
 
 const SLOW_TARGET_MS = 1_500;
@@ -37,25 +37,33 @@ export function targetFor(key) {
   return HOME_AND_REPORTS.some((re) => re.test(route)) ? SLOW_TARGET_MS : FAST_TARGET_MS;
 }
 
-/** Rows grouped by `keyOf`: count, skipped, p50, p95, max (ms) and errors, slowest p95 first. */
+/**
+ * Rows grouped by `keyOf`: count, skipped, aborted, p50, p95, max (ms) and errors, slowest p95 first. A skipped step
+ * and a server action aborted after its step succeeded (fix round 2) are counted apart and carry no time.
+ */
 export function summarise(rows, keyOf) {
   const groups = new Map();
   for (const row of rows) {
     const key = keyOf(row);
-    const g = groups.get(key) ?? { key, ms: [], skipped: 0, errors: 0 };
+    const g = groups.get(key) ?? { key, ms: [], skipped: 0, aborted: 0, errors: 0 };
     groups.set(key, g);
     if (row.skipped) {
       g.skipped += 1;
+      continue;
+    }
+    if (row.aborted) {
+      g.aborted += 1;
       continue;
     }
     g.ms.push(row.ms);
     if (isError(row)) g.errors += 1;
   }
   return [...groups.values()]
-    .map(({ key, ms, skipped, errors }) => ({
+    .map(({ key, ms, skipped, aborted, errors }) => ({
       key,
       count: ms.length,
       skipped,
+      aborted,
       p50: percentile(ms, 50),
       p95: percentile(ms, 95),
       max: ms.length ? Math.max(...ms) : null,
@@ -78,7 +86,8 @@ const list = (items, n = 8) => items.slice(0, n).join(", ") + (items.length > n 
  * action target when the writers ran but recorded no server-action timing (fix round 1).
  */
 export function evaluateTargets(readers, writers) {
-  const serverRows = writers.filter((w) => w.server);
+  // Timed server actions only: an aborted-after-success row has no time (fix round 2).
+  const serverRows = writers.filter((w) => w.server && !w.aborted);
   const gated = [...readers, ...serverRows];
   const groups = summarise(gated, keyOf);
   const writersUntimed = serverRows.length === 0 && writers.some((w) => !w.server && !w.skipped);
@@ -101,7 +110,7 @@ export function evaluateTargets(readers, writers) {
     return { ...target, met: true, detail: `all ${mine.length} within ${fmtS(limit)}` };
   }
 
-  const slow = gated.filter((r) => !r.skipped && r.ms > MAX_MS);
+  const slow = gated.filter((r) => !r.skipped && !r.aborted && r.ms > MAX_MS);
   const slowKeys = summarise(slow, keyOf).map((g) => `\`${g.key}\` ${fmtMs(g.max)} ms`);
   const readerErrors = readers.filter(isError);
   const writerErrors = writers.filter(isError);
@@ -160,7 +169,8 @@ export function buildReport({ label, inputs, generatedAt }) {
   const skipped = writers.filter((w) => w.skipped).length;
   out.push(
     `- **volume:** ${readers.length} page requests · ${writers.filter((w) => !w.server && !w.skipped).length} writer steps` +
-      ` (${skipped} skipped) · ${writers.filter((w) => w.server).length} server-action calls`,
+      ` (${skipped} skipped) · ${writers.filter((w) => w.server && !w.aborted).length} timed server-action calls` +
+      ` (${writers.filter((w) => w.aborted).length} aborted after success)`,
     "",
   );
 
@@ -189,15 +199,39 @@ export function buildReport({ label, inputs, generatedAt }) {
       " browser's network timing) and is what the targets judge. Every other row is the whole step in the browser:" +
       " for a change, from the confirming click to the success toast (the action's round trip and the toast's render," +
       " before the page refresh, which starts after the toast); for an" +
-      " `open …` row, the navigation to the page's load event. A skipped step (no spare free, empty approval queue, decision" +
-      " cap reached) has no time and is not an error.",
+      " `open …` row, the navigation until the page's heading shows (its streamed content revealed). A skipped step (no spare free, empty approval queue, decision" +
+      " cap reached) has no time and is not an error. *Aborted after success* counts server-action responses the" +
+      " browser cut off (net::ERR_ABORTED) after their step had already succeeded: not errors, and not timed.",
     "",
   );
-  out.push("| Action | Count | Skipped | p50 | p95 | Max | Errors |", "|---|---:|---:|---:|---:|---:|---:|");
+  out.push(
+    "| Action | Count | Skipped | p50 | p95 | Max | Errors | Aborted after success |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|",
+  );
   for (const g of summarise(writers, keyOf)) {
-    out.push(`| \`${g.key}\` | ${g.count} | ${g.skipped} | ${fmtMs(g.p50)} | ${fmtMs(g.p95)} | ${fmtMs(g.max)} | ${g.errors} |`);
+    out.push(`| \`${g.key}\` | ${g.count} | ${g.skipped} | ${fmtMs(g.p50)} | ${fmtMs(g.p95)} | ${fmtMs(g.max)} | ${g.errors} | ${g.aborted} |`);
   }
   out.push("");
+
+  // Fix round 2: why steps were skipped, so a run that barely exercised a change says so. A reason's diagnostic
+  // detail (in parentheses) varies per loop, so reasons are grouped on the text before it, with one example kept.
+  const skips = new Map();
+  for (const w of writers.filter((x) => x.skipped)) {
+    const reason = String(w.reason ?? "no reason recorded");
+    const key = `${w.action}\u0000${reason.split(" (")[0]}`;
+    const s = skips.get(key) ?? { action: w.action, reason: reason.split(" (")[0], count: 0, example: reason };
+    s.count += 1;
+    skips.set(key, s);
+  }
+  if (skips.size) {
+    out.push("## Skipped steps, by reason", "");
+    out.push("| Step | Reason | Count | Example |", "|---|---|---:|---|");
+    for (const s of [...skips.values()].sort((a, b) => b.count - a.count)) {
+      const example = s.example === s.reason ? "" : s.example.replace(/\|/g, "/").slice(0, 200);
+      out.push(`| \`${s.action}\` | ${s.reason} | ${s.count} | ${example} |`);
+    }
+    out.push("");
+  }
 
   const errors = [...readers, ...writers].filter(isError);
   if (errors.length) {

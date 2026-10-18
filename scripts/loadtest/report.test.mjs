@@ -76,6 +76,16 @@ describe("summarise", () => {
     expect(out[0]).toMatchObject({ key: "/", count: 2, p50: 100, p95: 3000, max: 3000, errors: 1 });
   });
 
+  it("leaves aborted-after-success server actions out of the timings and the errors, but counts them (fix round 2)", () => {
+    const rows = [
+      { action: "server action · assign", ms: 300, ok: true, server: true },
+      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" },
+    ];
+    const [g] = summarise(rows, (r) => r.action);
+    expect(g).toMatchObject({ count: 1, aborted: 1, skipped: 0, p50: 300, p95: 300, max: 300, errors: 0 });
+    expect(isError(rows[1])).toBe(false);
+  });
+
   it("leaves skipped writer steps out of the timings but counts them", () => {
     const rows = [
       { action: "approve or reject", ms: 400, ok: true },
@@ -130,6 +140,17 @@ describe("evaluateTargets", () => {
     // … but a reader route over target still reads MISSED.
     const slow = [...readers, ...Array.from({ length: 5 }, () => ({ route: "/audit", ms: 1200, status: 200 }))];
     expect(Object.fromEntries(evaluateTargets(slow, writers).map((t) => [t.key, t])).p95List.met).toBe(false);
+  });
+
+  it("server actions that were all aborted after success leave the action target CHECK (fix round 2)", () => {
+    const readers = [{ route: "/inventory", ms: 100, status: 200 }];
+    const writers = [
+      { action: "assign", ms: 900, ok: true },
+      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" },
+    ];
+    const byName = Object.fromEntries(evaluateTargets(readers, writers).map((t) => [t.key, t]));
+    expect(byName.p95List.met).toBeNull();
+    expect(byName.errors.met).toBe(true);
   });
 
   it("gates writer actions on their server time, not the browser's end-to-end time", () => {
@@ -195,6 +216,27 @@ describe("buildReport", () => {
     const md = buildReport({ label: "baseline", inputs: noServer, generatedAt: "2026-10-19T01:00:00.000Z" });
     expect(md).not.toContain("All targets met");
     expect(md).toMatch(/No target missed; 1 to check/);
+  });
+
+  it("shows the aborted-after-success count in the actions table (fix round 2)", () => {
+    const withAbort = structuredClone(inputs);
+    withAbort[1].data.actions.push({ action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success", user: "perf01" });
+    const md = buildReport({ label: "baseline", inputs: withAbort, generatedAt: "2026-10-19T01:00:00.000Z" });
+    expect(md).toContain("| Action | Count | Skipped | p50 | p95 | Max | Errors | Aborted after success |");
+    expect(md).toContain("| `server action · assign` | 1 | 0 | 250 | 250 | 250 | 0 | 1 |");
+    expect(md).toContain("All targets met");
+  });
+
+  it("lists skipped steps by reason, grouping on the text before the diagnostic detail (fix round 2)", () => {
+    const skipped = structuredClone(inputs);
+    skipped[1].data.actions.push(
+      { action: "assign", ms: 0, ok: true, skipped: true, reason: "no scale-seed spare on the Spare list (page 2: 25 rows, 0 scale tags)" },
+      { action: "assign", ms: 0, ok: true, skipped: true, reason: "no scale-seed spare on the Spare list (page 3: 0 rows, 0 scale tags)" },
+    );
+    const md = buildReport({ label: "baseline", inputs: skipped, generatedAt: "2026-10-19T01:00:00.000Z" });
+    expect(md).toContain("## Skipped steps, by reason");
+    expect(md).toContain("| `assign` | no scale-seed spare on the Spare list | 2 | no scale-seed spare on the Spare list (page 2: 25 rows, 0 scale tags) |");
+    expect(md).toContain("| `approve or reject` | no reason recorded | 1 |  |");
   });
 
   it("says which targets were missed", () => {
