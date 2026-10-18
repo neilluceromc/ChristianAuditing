@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { navIsActive, type NavSection } from "@/lib/workspaces";
+import type { VisibleSection } from "@/lib/workspaces";
 
 export interface ApprovalsBadge {
   open: number;
@@ -18,44 +17,38 @@ export interface NavBadges {
   purchaseReviews: number;
 }
 
+/**
+ * Phase 42 Task 1 stopgap: the links render flat (groups by spacing, no headings, no views, no current-link state)
+ * until Task 4 replaces this with the nav tree and the matcher.
+ */
 export function NavList({
   sections,
   badges,
   onNavigate,
 }: {
-  sections: NavSection[];
+  sections: VisibleSection[];
   badges: NavBadges;
   /** mobile drawer closes itself on navigation */
   onNavigate?: () => void;
 }) {
-  const pathname = usePathname();
-  const search = useSearchParams();
   const badge = badges.approvals;
   return (
     <nav aria-label="Workspace" className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4">
       {sections.map((section) => (
         <div key={section.heading} className="flex flex-col gap-0.5">
-          <h3 className="px-2.5 pb-1 font-mono text-[9.5px] font-medium uppercase tracking-[0.08em] text-fg-muted">
-            {section.heading}
-          </h3>
           {section.items.map((item) => {
-            const active = navIsActive(item.href, pathname, search);
             return (
               <Link
                 key={item.href + item.label}
                 href={item.href}
                 onClick={onNavigate}
-                aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex items-center justify-between rounded-(--radius-btn) px-2.5 py-[7px] text-[12.5px]",
-                  "transition-colors duration-(--dur-1)",
-                  active
-                    ? "bg-accent-tint text-accent shadow-[inset_2px_0_0_var(--accent)]"
-                    : "text-fg-secondary hover:bg-surface-subtle hover:text-fg",
+                  "transition-colors duration-(--dur-1) text-fg-secondary hover:bg-surface-subtle hover:text-fg",
                 )}
               >
                 {item.label}
-                {item.badge === "approvals" && badge.open > 0 && (
+                {item.badge.includes("approvals") && badge.open > 0 && (
                   <span
                     className={cn(
                       "inline-flex items-center gap-1 rounded-(--radius-ctl) border px-1.5 font-mono text-[10px]",
@@ -75,7 +68,7 @@ export function NavList({
                     {badge.open}
                   </span>
                 )}
-                {item.badge === "worklist" && badges.worklist > 0 && (
+                {item.badge.includes("worklist") && badges.worklist > 0 && (
                   <span
                     className="inline-flex items-center rounded-(--radius-ctl) border border-border bg-border-faint px-1.5 font-mono text-[10px] text-fg-secondary"
                     aria-label={`${badges.worklist} waiting on the worklist`}
@@ -83,7 +76,7 @@ export function NavList({
                     {badges.worklist}
                   </span>
                 )}
-                {item.badge === "purchaseReviews" && badges.purchaseReviews > 0 && (
+                {item.badge.includes("purchaseReviews") && badges.purchaseReviews > 0 && (
                   <span
                     className="inline-flex items-center rounded-(--radius-ctl) border border-border bg-border-faint px-1.5 font-mono text-[10px] text-fg-secondary"
                     aria-label={`${badges.purchaseReviews} waiting for IT`}

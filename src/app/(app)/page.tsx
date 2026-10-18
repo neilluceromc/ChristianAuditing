@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
 import { cookies } from "next/headers";
 import { requireUser } from "@/server/auth/guards";
-import { resolveWorkspace, WORKSPACE_NAV, type WorkspaceId } from "@/lib/workspaces";
-import { filterSectionsForRole } from "@/components/shell/sidebar";
+import { filterSectionsForRole, resolveWorkspace, WORKSPACE_NAV, type WorkspaceId } from "@/lib/workspaces";
 import { safeSection } from "@/lib/section";
 import {
   ageHistogram, claimedByYou, directChanges, financeHome, fleet, purchasingHome, warrantyRunway, worklist,

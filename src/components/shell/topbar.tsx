@@ -1,6 +1,6 @@
 import { DensityToggle } from "@/components/ui/density-toggle";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import type { NavSection, WorkspaceId } from "@/lib/workspaces";
+import type { VisibleSection, WorkspaceId } from "@/lib/workspaces";
 import { CommandPaletteTrigger, ScanTagButton } from "./command-palette";
 import { KeyboardShortcutsButton } from "./keyboard-shortcuts-dialog";
 import { MobileNav, PageName, type ShellUser } from "./mobile-nav";
@@ -22,7 +22,7 @@ export function Topbar({
   allowed,
   meta,
 }: {
-  sections: NavSection[];
+  sections: VisibleSection[];
   badges: NavBadges;
   workspaceLabel: string;
   user: ShellUser;

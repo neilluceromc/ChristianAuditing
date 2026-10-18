@@ -10,7 +10,7 @@ import { Icon } from "@/components/ui/icon";
 import { ROLE_LABELS } from "@/lib/admin-users";
 import { hasCris } from "@/lib/cris-settings";
 import { navLabelFor } from "@/lib/shell";
-import type { NavSection, WorkspaceId } from "@/lib/workspaces";
+import type { VisibleSection, WorkspaceId } from "@/lib/workspaces";
 import { signOutAction } from "@/server/auth/actions";
 import { NavList, type NavBadges } from "./nav-list";
 import { WorkspaceOptions } from "./workspace-switcher";
@@ -35,7 +35,7 @@ export function MobileNav({
   allowed,
   meta,
 }: {
-  sections: NavSection[];
+  sections: VisibleSection[];
   badges: NavBadges;
   workspaceLabel: string;
   user: ShellUser;
@@ -93,7 +93,7 @@ export function MobileNav({
 }
 
 /** Spec §3: the phone top bar's BR mark and page name (the sidebar carries both from `lg` up). */
-export function PageName({ sections, workspaceLabel }: { sections: NavSection[]; workspaceLabel: string }) {
+export function PageName({ sections, workspaceLabel }: { sections: VisibleSection[]; workspaceLabel: string }) {
   const pathname = usePathname();
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2 lg:hidden">

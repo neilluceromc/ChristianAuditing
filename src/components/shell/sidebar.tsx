@@ -3,12 +3,7 @@ import { prisma } from "@/server/db/client";
 import { approvalClassWhere } from "@/lib/approval-access";
 import { hasCris } from "@/lib/cris-settings";
 import { Avatar } from "@/components/ui/avatar";
-import {
-  WORKSPACE_META,
-  WORKSPACE_NAV,
-  type NavSection,
-  type WorkspaceId,
-} from "@/lib/workspaces";
+import { WORKSPACE_META, type VisibleSection, type WorkspaceId } from "@/lib/workspaces";
 import { AccountMenu } from "./account-menu";
 import { NavList, type ApprovalsBadge, type NavBadges } from "./nav-list";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -24,15 +19,6 @@ export async function getApprovalsBadge(role: Role): Promise<ApprovalsBadge> {
   return { open, overdue };
 }
 
-export function filterSectionsForRole(
-  sections: (typeof WORKSPACE_NAV)[WorkspaceId],
-  role: User["role"],
-): NavSection[] {
-  return sections
-    .map((s) => ({ ...s, items: s.items.filter((i) => !i.roles || i.roles.includes(role)) }))
-    .filter((s) => s.items.length > 0);
-}
-
 export function Sidebar({
   user,
   ws,
@@ -42,7 +28,7 @@ export function Sidebar({
 }: {
   user: User;
   ws: WorkspaceId;
-  sections: NavSection[];
+  sections: VisibleSection[];
   badges: NavBadges;
   allowed: WorkspaceId[];
 }) {

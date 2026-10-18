@@ -2,12 +2,13 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { requireUser } from "@/server/auth/guards";
 import {
+  filterSectionsForRole,
   resolveWorkspace,
   ROLE_WORKSPACES,
   WORKSPACE_META,
   WORKSPACE_NAV,
 } from "@/lib/workspaces";
-import { filterSectionsForRole, getApprovalsBadge, Sidebar } from "@/components/shell/sidebar";
+import { getApprovalsBadge, Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
