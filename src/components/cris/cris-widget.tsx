@@ -94,6 +94,7 @@ const no = () => false;
 const SERVER_HEIGHT = 900;
 const DROP_GLIDE_MS = 260;
 const NUDGE_SAVE_MS = 600;
+const HINT_MS = 8000;
 const BROKEN_TEXT = "Something went wrong — try again in a moment.";
 
 let localSeq = 0;
@@ -464,6 +465,17 @@ export function CrisWidget({
     onChip: (text) => void send({ text }, text),
   };
 
+  // ── the first-run hint goes by itself after 8 s on any page, and counts as seen, so it never lingers ──
+  const hintUp = prefs.show && !tucked && !open && !seenHint && unread === 0 && !dragAt;
+  useEffect(() => {
+    if (!hintUp) return;
+    const t = setTimeout(() => {
+      setSeenHint(true);
+      savePrefs({ seenHint: true });
+    }, HINT_MS);
+    return () => clearTimeout(t);
+  }, [hintUp, savePrefs]);
+
   // ── open, close, drag, keys ───────────────────────────────────────────────
   const openBox = () => {
     openRef.current = true;
@@ -622,7 +634,8 @@ export function CrisWidget({
   const liveId = liveMessageId(messages);
   const live = messages.find((m) => m.id === liveId);
   const pickOpen = live?.role === "cris" && live.cards.some((c) => c.type === "spares");
-  const showHint = !open && !seenHint && unread === 0 && !dragAt;
+  // Also hidden by cris-widget.css on a page with a sticky action bar ([data-cris-avoid]), whose buttons it would cover.
+  const showHint = hintUp;
   const mascotLabel = open
     ? "Hide the chat with Cris"
     : `Chat with Cris${newReplies}${phone ? "" : " (drag, or use the arrow keys, to move)"}`;

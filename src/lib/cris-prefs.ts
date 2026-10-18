@@ -28,6 +28,9 @@ export const CRIS_PREF_DEFAULTS: CrisPrefs = {
   color: "auto", motion: "lively", show: true, side: "right", bottom: 20, seenHint: false, tucked: false,
 };
 
+/** The default height before 2026-10-18; parseCrisPrefs reads a stored one as the new default. */
+const CRIS_OLD_DEFAULT_BOTTOM = 72;
+
 export const crisPrefsSchema = z.object({
   color: z.enum(CRIS_COLORS),
   motion: z.enum(CRIS_MOTIONS),
@@ -46,5 +49,7 @@ export function parseCrisPrefs(json: unknown): CrisPrefs {
     const field = crisPrefsSchema.shape[key].safeParse(o[key]);
     if (field.success) (out as Record<keyof CrisPrefs, unknown>)[key] = field.data;
   }
+  // The corner moved from 72 px up to 20 px on 2026-10-18; a stored 72 is the old default, so it becomes the new one.
+  if (out.bottom === CRIS_OLD_DEFAULT_BOTTOM) out.bottom = CRIS_PREF_DEFAULTS.bottom;
   return out;
 }

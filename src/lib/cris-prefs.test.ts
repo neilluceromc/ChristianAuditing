@@ -45,8 +45,14 @@ describe("parseCrisPrefs", () => {
     });
   });
   it("prefs stored before tucked existed read as not tucked", () => {
-    expect(parseCrisPrefs({ color: "gold", motion: "calm", show: true, side: "left", bottom: 72, seenHint: true })).toEqual({
-      color: "gold", motion: "calm", show: true, side: "left", bottom: 72, seenHint: true, tucked: false,
+    expect(parseCrisPrefs({ color: "gold", motion: "calm", show: true, side: "left", bottom: 300, seenHint: true })).toEqual({
+      color: "gold", motion: "calm", show: true, side: "left", bottom: 300, seenHint: true, tucked: false,
     });
+  });
+  it("a stored 72 (the default before 2026-10-18) reads as the new default, 20; other heights are kept", () => {
+    expect(parseCrisPrefs({ side: "right", bottom: 72 }).bottom).toBe(20);
+    expect(parseCrisPrefs({ side: "left", bottom: 72 })).toMatchObject({ side: "left", bottom: 20 });
+    expect(parseCrisPrefs({ bottom: 73 }).bottom).toBe(73);
+    expect(parseCrisPrefs({ bottom: 16 }).bottom).toBe(16);
   });
 });

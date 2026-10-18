@@ -590,8 +590,12 @@ test.describe.serial("phase 41 — Cris", () => {
       expect(saved.bottom).toBe(CORNER_BOTTOM);
       expect(saved.tucked).toBe(false);
 
-      // It also brings a tucked-away Cris back.
+      // It also brings a tucked-away Cris back. The "–" shows on keyboard focus (:focus-visible), so the mascot is
+      // reached by the keyboard: focus it, step back and Tab onto it again, then Tab to the "–".
       await closedMascot(page).focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(closedMascot(page)).toBeFocused();
       await page.keyboard.press("Tab");
       await expect(tuckButton(page)).toBeFocused();
       await page.keyboard.press("Enter");
@@ -759,8 +763,15 @@ test.describe.serial("phase 41 — Cris", () => {
       const crisAt = await boxOn(dock(page));
       expect(corner.x).toBeLessThan(crisAt.x + MASCOT / 2);
       expect(corner.y).toBeLessThan(crisAt.y + MASCOT / 2);
-      // ... and it is the next Tab stop after the mascot.
+      // ... hides again once the pointer leaves (after a short grace) ...
+      await page.mouse.move(0, 0);
+      await expect(tuckButton(page)).toBeHidden();
+      // ... and, by keyboard, it is the next Tab stop after the mascot (shown on :focus-visible, not a mouse focus).
       await mascot.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(mascot).toBeFocused();
+      await expect(tuckButton(page)).toBeVisible();
       await page.keyboard.press("Tab");
       await expect(tuckButton(page)).toBeFocused();
       await page.keyboard.press("Enter");

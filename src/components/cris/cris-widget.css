@@ -81,12 +81,14 @@
   pointer-events: none;
 }
 
-/* "Tuck Cris away": a small round "–" at the orb's top corner, on the side facing into the screen. It overlaps the
-   glass body, so the pointer can reach it without leaving the mascot. Shown while the glass body is hovered or focus
-   is in the dock; hidden it is also out of the Tab order, but focusing the mascot shows it, so it is the next stop. */
+/* "Tuck Cris away": a small round "–" in the dock's top corner, on the side facing into the screen. Its inner edge
+   overlaps the glass body by a few px, so the pointer can reach it without leaving the mascot. Shown while the dock
+   is hovered (only the glass body and this button take the pointer) or something in it has keyboard focus
+   (:focus-visible, so a mouse click doesn't leave it up). Hidden it is out of the Tab order, but a keyboard focus
+   on the mascot shows it, so it is the next Tab stop. */
 .cris-tuck {
   position: absolute;
-  top: -4px;
+  top: 0;
   z-index: 3;
   display: grid;
   place-items: center;
@@ -108,11 +110,10 @@
   /* A short grace before hiding, for a pointer on its way from the glass to the button. */
   transition: opacity 0.15s, visibility 0s linear 0.3s;
 }
-.cris-tuck-l { left: -4px; }
-.cris-tuck-r { right: -4px; }
-.cris-dock:has(.cris-mascot:hover) .cris-tuck,
-.cris-dock:focus-within .cris-tuck,
-.cris-tuck:hover {
+.cris-tuck-l { left: 0; }
+.cris-tuck-r { right: 0; }
+.cris-dock:hover .cris-tuck,
+.cris-dock:has(:focus-visible) .cris-tuck {
   visibility: visible;
   opacity: 1;
   transition: opacity 0.15s, visibility 0s;
@@ -211,6 +212,7 @@
   border: 1px solid var(--border);
   background: var(--surface);
   transform: rotate(45deg);
+  pointer-events: none;
 }
 .cris-box.cris-above::after { bottom: -9px; border-top: 0; border-left: 0; }
 .cris-box.cris-below::after { top: -9px; border-bottom: 0; border-right: 0; }
@@ -225,7 +227,9 @@
    - keyboard focus scrolls a focused field above Cris (scroll-padding-bottom);
    - sticky bottom action bars ([data-cris-avoid]) get padding on Cris's side, so their buttons never sit under Cris.
    Wide screens follow the side Cris is on (84 px = the 20 px inset + the 64 px mascot); phones put the 56 px Cris
-   bottom-right 16 px in, always (76 px). */
+   bottom-right 16 px in, always (76 px). The first-run hint never shows on a page with such a bar: beside Cris, it
+   would cover the bar's buttons.
+   Wide is "over 640 px" (640.02, as the phone rule is max-width: 640px), so no width falls between the two. */
 @media screen {
   html:has([data-cris-dock]) {
     --cris-clear: 88px;
@@ -233,8 +237,9 @@
     scroll-padding-bottom: var(--cris-clear);
   }
   html:has([data-cris-dock]) #main { padding-bottom: calc(1.5rem + var(--cris-clear)); }
+  html:has([data-cris-avoid]) .cris-hint { display: none; }
 }
-@media screen and (min-width: 641px) {
+@media screen and (min-width: 640.02px) {
   html:has([data-cris-dock][data-cris-side="right"]) [data-cris-avoid] { padding-right: var(--cris-avoid); }
   html:has([data-cris-dock][data-cris-side="left"]) [data-cris-avoid] { padding-left: var(--cris-avoid); }
 }
