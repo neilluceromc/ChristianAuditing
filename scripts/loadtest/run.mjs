@@ -15,15 +15,16 @@ import { parseArgs } from "node:util";
 import {
   CookieJar, MAX_USERS, REQUEST_TIMEOUT_MS, THINK_MAX_MS, parseBase, parseMinutes, requireSeedPassword, sleep, thinkMs,
 } from "./common.mjs";
-import { SCENARIOS, USERS, extractIds, normaliseRoute, pickWeighted, resolveStep } from "./scenarios.mjs";
+import { SCENARIOS, USERS, extractIds, pickWeighted, resolveStep, routeLabel } from "./scenarios.mjs";
 
 const POOL_CAP = 200;
 
 /** Signs one person in; their jar then holds the session cookie. Throws a message that never contains the password. */
-async function signIn(base, user, password, jar) {
+async function signIn(base, user, password, jar, stop) {
+  const signal = () => AbortSignal.any([AbortSignal.timeout(REQUEST_TIMEOUT_MS), stop]);
   const csrfRes = await fetch(`${base}/api/auth/csrf`, {
     headers: { cookie: jar.header() },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: signal(),
   });
   jar.store(csrfRes.headers);
   if (!csrfRes.ok) throw new Error(`${user.name}: GET /api/auth/csrf answered ${csrfRes.status}`);
@@ -34,7 +35,7 @@ async function signIn(base, user, password, jar) {
     headers: { "content-type": "application/x-www-form-urlencoded", cookie: jar.header() },
     body: new URLSearchParams({ email: user.email, password, csrfToken, callbackUrl: `${base}/` }),
     redirect: "manual",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: signal(),
   });
   jar.store(res.headers);
   await res.arrayBuffer();
@@ -49,7 +50,7 @@ async function signIn(base, user, password, jar) {
   const check = await fetch(`${base}/`, {
     headers: { cookie: jar.header() },
     redirect: "manual",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: signal(),
   });
   jar.store(check.headers);
   await check.arrayBuffer();
@@ -69,8 +70,8 @@ function mergePools(pools, found) {
 async function person({ base, user, jar, stop, requests, rand }) {
   const pools = {};
 
-  async function get(url) {
-    const route = normaliseRoute(url);
+  async function get(url, dept) {
+    const route = routeLabel(url, dept);
     const started = performance.now();
     try {
       const res = await fetch(base + url, {
@@ -101,17 +102,18 @@ async function person({ base, user, jar, stop, requests, rand }) {
   await sleep(rand() * THINK_MAX_MS, stop);
   while (!stop.aborted) {
     const step = pickWeighted(SCENARIOS[user.role], rand);
-    jar.set("br.dept", step.dept ?? user.dept);
+    const dept = step.dept ?? user.dept;
+    jar.set("br.dept", dept);
     let next = resolveStep(step, pools, rand);
     if (next.need) {
       // A record step with nothing to open yet: read its list first, as a person would.
-      await get(next.need);
+      await get(next.need, dept);
       await sleep(thinkMs(rand), stop);
       if (stop.aborted) break;
       next = resolveStep(step, pools, rand);
       if (next.need) continue; // the list had no records of this kind
     }
-    await get(next.url);
+    await get(next.url, dept);
     await sleep(thinkMs(rand), stop);
   }
 }
@@ -139,27 +141,36 @@ async function main() {
     process.exit(2);
   }
 
+  // Ctrl+C is hooked before the sign-ins: during them it stops at once with nothing written (no load has run);
+  // during the load it stops every person and writes what was measured.
+  const controller = new AbortController();
+  let interrupted = false;
+  process.once("SIGINT", () => {
+    interrupted = true;
+    console.log("\n[readers] interrupted — stopping…");
+    controller.abort();
+  });
+  const quitDuringSignIn = () => {
+    console.error("[readers] interrupted during sign-in — no load was run, nothing written.");
+    process.exit(130);
+  };
+
   const people = USERS.slice(0, count).map((user) => ({ user, jar: new CookieJar() }));
   console.log(`[readers] signing in ${people.length} people at ${base}…`);
   for (const p of people) {
     try {
-      await signIn(base, p.user, password, p.jar);
+      await signIn(base, p.user, password, p.jar, controller.signal);
     } catch (err) {
+      if (controller.signal.aborted) quitDuringSignIn();
       console.error(`[readers] ${String(err?.message ?? err).replaceAll(password, "***")}`);
       process.exit(1);
     }
   }
+  if (controller.signal.aborted) quitDuringSignIn();
 
-  const controller = new AbortController();
   const requests = [];
   const startedAt = new Date();
-  let interrupted = false;
   const deadline = setTimeout(() => controller.abort(), minutes * 60_000);
-  process.once("SIGINT", () => {
-    interrupted = true;
-    console.log("\n[readers] interrupted — stopping and writing what was measured…");
-    controller.abort();
-  });
   const progress = setInterval(() => {
     const errors = requests.filter((r) => r.error).length;
     const elapsed = ((Date.now() - startedAt.getTime()) / 60_000).toFixed(1);

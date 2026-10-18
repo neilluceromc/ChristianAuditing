@@ -5,7 +5,8 @@
 // ONE headless Chromium, three contexts:
 //   perf01, perf02 (IT)  — open a spare from the Spare list, Assign it to an active scale employee (EMP-1xxx) from
 //                          the asset page, Return it ("Back for triage"), then Triage it "Keep as spare" so it goes
-//                          back to the pool; IT's lifecycle is direct, so each is a real server action + refresh.
+//                          back to the pool; IT's lifecycle is direct, so each is a real server action, and the
+//                          page's router.refresh() after the toast adds its own request to the load.
 //   perf15 (admin)       — open the IT Approvals queue, open a PENDING request, Approve it (2 in 3) or Reject it.
 // Each step is recorded as { user, action, ms, ok }; each server-action POST the step makes is also recorded as
 // { action: "server action · <step>", ms, ok, server: true } from the browser's network timing. A failure records
@@ -16,7 +17,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium } from "@playwright/test";
-import { REQUEST_TIMEOUT_MS, parseBase, parseMinutes, requireSeedPassword, sleep, thinkMs } from "./common.mjs";
+import {
+  REQUEST_TIMEOUT_MS, parseBase, parseMinutes, requireSeedPassword, serverActionTracker, sleep, thinkMs,
+} from "./common.mjs";
 import { USERS } from "./scenarios.mjs";
 
 /** Scale-seed asset tags only (BR-xx-1000+): the fixed seed's records stay untouched. */
@@ -45,6 +48,9 @@ class Skip extends Error {}
 function recorder({ user, actions, stopped, password }) {
   let phase = null;
   const redact = (text) => String(text).replaceAll(password, "***").replace(/\s+/g, " ").slice(0, 300);
+  // Fix round 1: the label is captured when the POST starts, so a response still streaming after the step has
+  // ended (its toast showed, `phase` cleared) is still recorded under the right step.
+  const tracker = serverActionTracker({ user, actions, stopped });
 
   return {
     /** Names the step whose server-action POSTs follow (null: don't record them). */
@@ -52,18 +58,9 @@ function recorder({ user, actions, stopped, password }) {
       phase = name;
     },
     attach(page) {
-      page.on("requestfinished", async (req) => {
-        if (req.method() !== "POST" || !req.headers()["next-action"] || !phase) return;
-        const label = phase;
-        const timing = req.timing();
-        const res = await req.response().catch(() => null);
-        if (timing.responseEnd < 0) return;
-        actions.push({ user, action: `server action · ${label}`, ms: Math.round(timing.responseEnd), ok: !!res && res.status() < 400, server: true });
-      });
-      page.on("requestfailed", (req) => {
-        if (req.method() !== "POST" || !req.headers()["next-action"] || !phase || stopped()) return;
-        actions.push({ user, action: `server action · ${phase}`, ms: 0, ok: false, server: true, error: req.failure()?.errorText ?? "failed" });
-      });
+      page.on("request", (req) => tracker.request(req, phase));
+      page.on("requestfinished", (req) => tracker.finished(req).catch(() => {}));
+      page.on("requestfailed", (req) => tracker.failed(req));
     },
     /**
      * Runs one step and records it. `fn` returns { ms?, value? }: `ms` when the step times itself (from the
@@ -118,7 +115,8 @@ async function openDialog(trigger, dialog) {
 
 /**
  * Clicks `confirm` and waits for the success toast; a new alert (a refusal banner or an error toast) is a failure
- * with that alert's text. Returns the time from the click to the toast.
+ * with that alert's text. Returns the time from the click to the toast: the server action's round trip plus the
+ * toast's render. The page's router.refresh() starts only after the toast, so it is not in this time.
  */
 async function confirmAndWait(page, confirm, successText) {
   const alerts = page.getByRole("alert");
@@ -361,11 +359,13 @@ async function main() {
       try {
         await signIn(page, w.user, password);
       } catch (err) {
+        if (stopped()) throw new Error("interrupted during sign-in — no load was run");
         throw new Error(`${w.user.name} could not sign in through /login: ${String(err?.message ?? err).replaceAll(password, "***").split("\n")[0]}`);
       }
       const rec = recorder({ user: w.user.name, actions, stopped, password });
       rec.attach(page);
       sessions.push({ ...w, page, rec });
+      if (stopped()) break; // Ctrl+C (hooked before the sign-ins) during them: no loop starts
     }
 
     const endAt = Date.now() + minutes * 60_000;

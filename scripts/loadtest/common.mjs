@@ -108,3 +108,43 @@ export class CookieJar {
     return [...this.#cookies].map(([name, value]) => `${name}=${value}`).join("; ");
   }
 }
+
+/**
+ * The writers' server-action timing (fix round 1). Each server-action POST is labelled with the step that made it
+ * when the request STARTS (`request`), and the label is read back when it finishes or fails. A label read at finish
+ * time would be gone for any revalidated response still streaming after the step's toast had shown and the step had
+ * ended. Takes Playwright Request objects; records { action: "server action · <step>", ms, ok, server: true }, where
+ * ms is the response end (or, when the browser has none, the first byte), relative to the request's start.
+ */
+export function serverActionTracker({ user, actions, stopped }) {
+  const labels = new WeakMap();
+  const isServerAction = (req) => req.method() === "POST" && Boolean(req.headers()["next-action"]);
+  const take = (req) => {
+    const label = labels.get(req);
+    labels.delete(req);
+    return label;
+  };
+
+  return {
+    /** page.on("request"): `phase` is the step running now, or null outside a step. */
+    request(req, phase) {
+      if (phase && isServerAction(req)) labels.set(req, phase);
+    },
+    /** page.on("requestfinished") */
+    async finished(req) {
+      const label = take(req);
+      if (!label) return;
+      const timing = req.timing();
+      const ms = timing.responseEnd >= 0 ? timing.responseEnd : timing.responseStart;
+      const res = await req.response().catch(() => null);
+      if (ms < 0) return; // the browser has no timing for it at all
+      actions.push({ user, action: `server action · ${label}`, ms: Math.round(ms), ok: !!res && res.status() < 400, server: true });
+    },
+    /** page.on("requestfailed"): a request torn down by the hard stop is not a measurement. */
+    failed(req) {
+      const label = take(req);
+      if (!label || stopped()) return;
+      actions.push({ user, action: `server action · ${label}`, ms: 0, ok: false, server: true, error: req.failure()?.errorText ?? "failed" });
+    },
+  };
+}

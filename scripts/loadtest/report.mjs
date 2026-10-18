@@ -31,9 +31,10 @@ const MAX_MS = 5_000;
 /** Spec §2 goal 3: Home and the reports get 1.5 s at p95. */
 const HOME_AND_REPORTS = [/^\/(\?|$)/, /^\/equipment-by-client(\?|$)/, /^\/finance\/depreciation(\?|$)/, /^\/stock\/reports(\/|\?|$)/];
 
-/** The p95 target, in ms, for a route or action key. */
+/** The p95 target, in ms, for a route or action key. A workspace suffix (`/ [admin]`) does not change the target. */
 export function targetFor(key) {
-  return HOME_AND_REPORTS.some((re) => re.test(key)) ? SLOW_TARGET_MS : FAST_TARGET_MS;
+  const route = key.replace(/ \[[a-z]+\]$/, "");
+  return HOME_AND_REPORTS.some((re) => re.test(route)) ? SLOW_TARGET_MS : FAST_TARGET_MS;
 }
 
 /** Rows grouped by `keyOf`: count, skipped, p50, p95, max (ms) and errors, slowest p95 first. */
@@ -70,26 +71,34 @@ const list = (items, n = 8) => items.slice(0, n).join(", ") + (items.length > n 
 
 /**
  * Spec §2 goal 3, judged on server time: reader page requests, and the writers' server-action POSTs (rows marked
- * `server`). A writer's browser step (click → success toast) also includes the page refresh and rendering, so it is
+ * `server`). A writer's browser step (click → success toast) also includes the browser's own work, so it is
  * reported but not gated — except for errors, which count wherever they happen.
+ *
+ * `met` is true, false, or null for "check by hand": a target with no rows to judge is never MET, and neither is the
+ * action target when the writers ran but recorded no server-action timing (fix round 1).
  */
 export function evaluateTargets(readers, writers) {
-  const gated = [...readers, ...writers.filter((w) => w.server)];
+  const serverRows = writers.filter((w) => w.server);
+  const gated = [...readers, ...serverRows];
   const groups = summarise(gated, keyOf);
+  const writersUntimed = serverRows.length === 0 && writers.some((w) => !w.server && !w.skipped);
 
-  function p95Target(key, limit, label) {
+  function p95Target(key, limit, label, untimed = false) {
     const mine = groups.filter((g) => targetFor(g.key) === limit && g.p95 !== null);
     const over = mine.filter((g) => g.p95 > limit);
-    return {
-      key,
-      name: `p95 ≤ ${fmtS(limit)} — ${label}`,
-      met: over.length === 0,
-      detail: mine.length === 0
-        ? "no requests"
-        : over.length === 0
-          ? `all ${mine.length} within ${fmtS(limit)}`
-          : `${over.length} over: ${list(over.map((g) => `\`${g.key}\` ${fmtMs(g.p95)} ms`))}`,
-    };
+    const target = { key, name: `p95 ≤ ${fmtS(limit)} — ${label}` };
+    if (over.length) {
+      return { ...target, met: false, detail: `${over.length} over: ${list(over.map((g) => `\`${g.key}\` ${fmtMs(g.p95)} ms`))}` };
+    }
+    if (mine.length === 0) return { ...target, met: null, detail: "no requests to judge" };
+    if (untimed) {
+      return {
+        ...target,
+        met: null,
+        detail: `all ${mine.length} page routes within ${fmtS(limit)}, but the writers ran and recorded no server-action timing — the actions are unjudged`,
+      };
+    }
+    return { ...target, met: true, detail: `all ${mine.length} within ${fmtS(limit)}` };
   }
 
   const slow = gated.filter((r) => !r.skipped && r.ms > MAX_MS);
@@ -100,7 +109,7 @@ export function evaluateTargets(readers, writers) {
   const errorCount = readerErrors.length + writerErrors.length;
 
   return [
-    p95Target("p95List", FAST_TARGET_MS, "lists, records and actions"),
+    p95Target("p95List", FAST_TARGET_MS, "lists, records and actions", writersUntimed),
     p95Target("p95Home", SLOW_TARGET_MS, "Home and the reports"),
     {
       key: "max5s",
@@ -127,7 +136,7 @@ export function evaluateTargets(readers, writers) {
   ];
 }
 
-const verdict = (met) => (met === null ? "CHECK LOG" : met ? "MET" : "**MISSED**");
+const verdict = (t) => (t.met === null ? (t.key === "dbTimeouts" ? "CHECK LOG" : "CHECK") : t.met ? "MET" : "**MISSED**");
 
 /** The whole Markdown report (LF line ends; the CLI writes CRLF). */
 export function buildReport({ label, inputs, generatedAt }) {
@@ -137,6 +146,8 @@ export function buildReport({ label, inputs, generatedAt }) {
   const writers = writerRuns.flatMap((i) => i.data.actions ?? []);
   const targets = evaluateTargets(readers, writers);
   const missed = targets.filter((t) => t.met === false);
+  // The database-timeout row is always a log check; any other unjudged target is worth saying in the headline.
+  const toCheck = targets.filter((t) => t.met === null && t.key !== "dbTimeouts");
 
   const out = [];
   out.push(`# Load test — ${label}`, "");
@@ -154,9 +165,14 @@ export function buildReport({ label, inputs, generatedAt }) {
   );
 
   out.push("## Targets (spec §2 goal 3, server time under the 15-person load)", "");
-  out.push(missed.length === 0 ? "**All targets met.**" : `**Targets MISSED: ${missed.length}.**`, "");
+  const headline = missed.length
+    ? `**Targets MISSED: ${missed.length}.**`
+    : toCheck.length
+      ? `**No target missed; ${toCheck.length} to check by hand.**`
+      : "**All targets met.**";
+  out.push(headline, "");
   out.push("| Target | Result | Detail |", "|---|---|---|");
-  for (const t of targets) out.push(`| ${t.name} | ${verdict(t.met)} | ${t.detail} |`);
+  for (const t of targets) out.push(`| ${t.name} | ${verdict(t)} | ${t.detail} |`);
   out.push("");
 
   out.push("## Pages (readers), slowest p95 first", "");
@@ -171,7 +187,8 @@ export function buildReport({ label, inputs, generatedAt }) {
   out.push(
     "Times in ms. A `server action · …` row is the server action's POST alone (request to response end, from the" +
       " browser's network timing) and is what the targets judge. Every other row is the whole step in the browser:" +
-      " for a change, from the confirming click to the success toast (action, page refresh and rendering); for an" +
+      " for a change, from the confirming click to the success toast (the action's round trip and the toast's render," +
+      " before the page refresh, which starts after the toast); for an" +
       " `open …` row, the navigation to the page's load event. A skipped step (no spare free, empty approval queue, decision" +
       " cap reached) has no time and is not an error.",
     "",

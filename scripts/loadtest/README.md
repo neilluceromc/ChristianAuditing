@@ -47,7 +47,8 @@ Remove-Item Env:SEED_PASSWORD
 Options:
 - `run.mjs --users <1–15>` runs only the first N people (a quick check before the real run).
 - `writers.mjs --max-decisions <n>` caps approve/reject decisions per run (default 12).
-- Ctrl+C stops either script early; it still writes what it measured.
+- Ctrl+C stops either script early. During the load it still writes what it measured; during the sign-ins (it is
+  hooked before them) it stops at once and no load runs.
 
 Start the server with `SLOW_QUERY_MS=200` (any positive number of ms) to log every Prisma operation slower than
 that as `[slow-query] <Model>.<operation> <ms>ms`. Unset, the log is off. Arguments are never logged.
@@ -58,7 +59,13 @@ that as `[slow-query] <Model>.<operation> <ms>ms`. Unset, the log is off. Argume
   (equipment by client, depreciation, stock reports); no request over 5 s; no errors.
 - Reader times are measured from the request to the last byte of the HTML.
 - Writer `server action · …` rows are the server action POSTs alone, from the browser's network timing; these are
-  what the targets judge. The other writer rows are the whole step in the browser (click to success toast).
+  what the targets judge. The other writer rows are the whole step in the browser: from the confirming click to the
+  success toast, i.e. the action's round trip and the toast's render. The page refresh (`router.refresh()`) starts
+  after the toast, so it is not in that time; its request still adds to the server's load.
+- A target with nothing to judge reads CHECK, never MET; so does the action target when the writers ran but recorded
+  no server-action timing.
+- Home is one row per workspace (`/`, `/ [purchasing]`, `/ [finance]`, `/ [admin]`), and every admin-workspace page
+  carries `[admin]`; other shared pages are one row whatever the workspace.
 - A redirect counts as an error: a reader should never be bounced (to `/login`, or to its landing page from a page
   its role may not open).
 - Database connection timeouts are not visible from outside: check the web container's log for `P2024`.

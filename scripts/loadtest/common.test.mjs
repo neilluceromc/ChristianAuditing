@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CookieJar, MAX_MINUTES, parseBase, parseMinutes, requireSeedPassword, thinkMs } from "./common.mjs";
+import {
+  CookieJar, MAX_MINUTES, parseBase, parseMinutes, requireSeedPassword, serverActionTracker, thinkMs,
+} from "./common.mjs";
 
 describe("requireSeedPassword", () => {
   it("returns SEED_PASSWORD when set", () => {
@@ -43,6 +45,72 @@ describe("thinkMs", () => {
     expect(thinkMs(() => 0)).toBe(2000);
     expect(thinkMs(() => 0.5)).toBe(4000);
     expect(thinkMs(() => 0.999999)).toBeLessThanOrEqual(6000);
+  });
+});
+
+describe("serverActionTracker (fix round 1: the label is taken when the POST starts)", () => {
+  /** A stand-in for a Playwright Request. */
+  function fakeRequest({ method = "POST", action = true, responseEnd = 250, responseStart = 200, status = 200 } = {}) {
+    return {
+      method: () => method,
+      headers: () => (action ? { "next-action": "abc123", accept: "text/x-component" } : { accept: "text/html" }),
+      timing: () => ({ startTime: 0, responseStart, responseEnd }),
+      response: async () => ({ status: () => status }),
+      failure: () => ({ errorText: "net::ERR_ABORTED" }),
+    };
+  }
+  function setup(stopped = false) {
+    const actions = [];
+    const tracker = serverActionTracker({ user: "perf01", actions, stopped: () => stopped });
+    return { actions, tracker };
+  }
+
+  it("keeps the step's label even when the response finishes after the step has ended", async () => {
+    const { actions, tracker } = setup();
+    const req = fakeRequest({ responseEnd: 812.4 });
+    tracker.request(req, "assign");
+    // the step ends (its toast showed) while the revalidated response is still streaming …
+    await tracker.finished(req);
+    expect(actions).toEqual([{ user: "perf01", action: "server action · assign", ms: 812, ok: true, server: true }]);
+  });
+
+  it("ignores page GETs, and POSTs made outside a step", async () => {
+    const { actions, tracker } = setup();
+    const get = fakeRequest({ method: "GET", action: false });
+    tracker.request(get, "assign");
+    await tracker.finished(get);
+    const stray = fakeRequest();
+    tracker.request(stray, null);
+    await tracker.finished(stray);
+    expect(actions).toEqual([]);
+  });
+
+  it("records an HTTP failure as not ok, and a failed request with its reason", async () => {
+    const { actions, tracker } = setup();
+    const bad = fakeRequest({ status: 500 });
+    tracker.request(bad, "return");
+    await tracker.finished(bad);
+    const dropped = fakeRequest();
+    tracker.request(dropped, "triage");
+    tracker.failed(dropped);
+    expect(actions).toEqual([
+      { user: "perf01", action: "server action · return", ms: 250, ok: false, server: true },
+      { user: "perf01", action: "server action · triage", ms: 0, ok: false, server: true, error: "net::ERR_ABORTED" },
+    ]);
+  });
+
+  it("falls back to the first byte when the last byte's time is unavailable, and records nothing after the hard stop", async () => {
+    const { actions, tracker } = setup();
+    const partial = fakeRequest({ responseEnd: -1, responseStart: 300 });
+    tracker.request(partial, "approve");
+    await tracker.finished(partial);
+    expect(actions[0]).toMatchObject({ action: "server action · approve", ms: 300, ok: true });
+
+    const late = setup(true);
+    const req = fakeRequest();
+    late.tracker.request(req, "approve");
+    late.tracker.failed(req);
+    expect(late.actions).toEqual([]);
   });
 });
 

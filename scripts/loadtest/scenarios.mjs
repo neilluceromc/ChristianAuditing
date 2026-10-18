@@ -86,7 +86,9 @@ export const SCENARIOS = {
     { w: 4, path: "/purchases/suppliers" },
     { w: 2, record: "suppliers", from: "/purchases/suppliers" },
     { w: 4, path: "/stock" },
-    { w: 1, path: "/stock/reports" },
+    // `/stock/reports` itself is a bare redirect to on-hand: link the report tabs directly.
+    { w: 1, path: "/stock/reports/on-hand" },
+    { w: 1, path: "/stock/reports/expiry" },
     { w: 3, path: "/inventory?cls=PURCHASING" },
     { w: 2, path: "/approvals" },
     { w: 1, path: "/purchases/activity" },
@@ -196,4 +198,15 @@ export function normaliseRoute(url) {
     .map(([k, v]) => `${k}=${FOLD[k] ?? (ID_ONLY.test(v) ? ":id" : v)}`)
     .join("&");
   return query ? `${pathname}?${query}` : pathname;
+}
+
+/**
+ * A request's report row: the normalised route, keyed by workspace where the same path renders a different page —
+ * every page in the admin workspace (its Home is not IT's), and each workspace's Home. Other shared pages
+ * (`/approvals`, `/purchases` …) render the same list whatever the workspace, so they stay one row.
+ */
+export function routeLabel(url, dept) {
+  const route = normaliseRoute(url);
+  if (dept === "admin" || (route === "/" && dept && dept !== "it")) return `${route} [${dept}]`;
+  return route;
 }

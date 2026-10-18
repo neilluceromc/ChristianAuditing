@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathAllowedForRole } from "@/lib/workspaces";
-import { SCENARIOS, TERMS, USERS, extractIds, normaliseRoute, pickWeighted, resolveStep, stepPaths } from "./scenarios.mjs";
+import {
+  SCENARIOS, TERMS, USERS, extractIds, normaliseRoute, pickWeighted, resolveStep, routeLabel, stepPaths,
+} from "./scenarios.mjs";
 
 const ID = "c" + "k3x9q2m7p1z8v4b6n0w5r2t8y"; // cuid-shaped: "c" + 24 base-36 characters
 const ID2 = "c" + "m1a2b3c4d5e6f7g8h9i0j1k2l";
@@ -38,6 +40,22 @@ describe("normaliseRoute", () => {
     expect(normaliseRoute(`/finance/depreciation?tab=schedule&year=2026&cls=IT&cat=${ID}`))
       .toBe("/finance/depreciation?tab=schedule&year=:year&cls=IT&cat=:id");
     expect(normaliseRoute("/")).toBe("/");
+  });
+});
+
+describe("routeLabel (fix round 1: one report row per workspace where the page differs)", () => {
+  it("keys the admin workspace's pages apart from the same paths in IT", () => {
+    expect(routeLabel("/", "admin")).toBe("/ [admin]");
+    expect(routeLabel("/admin/users", "admin")).toBe("/admin/users [admin]");
+    expect(routeLabel("/", "it")).toBe("/");
+    expect(routeLabel(`/inventory/${ID}`, "it")).toBe("/inventory/:id");
+  });
+
+  it("keys each workspace's Home apart (its content is the workspace's own); other shared pages stay one row", () => {
+    expect(routeLabel("/", "purchasing")).toBe("/ [purchasing]");
+    expect(routeLabel("/", "finance")).toBe("/ [finance]");
+    expect(routeLabel("/purchases?state=IT_REVIEWED", "finance")).toBe("/purchases?state=IT_REVIEWED");
+    expect(routeLabel("/approvals", "purchasing")).toBe("/approvals");
   });
 });
 
@@ -108,27 +126,42 @@ describe("resolveStep", () => {
 
 const APP = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../../src/app/(app)");
 
-/** Does a page.tsx exist for these path segments? Route groups `(x)` are transparent; `:id` matches a `[param]` dir. */
-function pageExists(dir, segs) {
-  if (!existsSync(dir)) return false;
+/** The page.tsx for these path segments, or null. Route groups `(x)` are transparent; `:id` matches a `[param]` dir. */
+function pageFile(dir, segs) {
+  if (!existsSync(dir)) return null;
   const entries = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
-  if (segs.length === 0 && existsSync(path.join(dir, "page.tsx"))) return true;
+  if (segs.length === 0 && existsSync(path.join(dir, "page.tsx"))) return path.join(dir, "page.tsx");
   for (const group of entries.filter((n) => /^\(.+\)$/.test(n))) {
-    if (pageExists(path.join(dir, group), segs)) return true;
+    const found = pageFile(path.join(dir, group), segs);
+    if (found) return found;
   }
-  if (segs.length === 0) return false;
+  if (segs.length === 0) return null;
   const [head, ...rest] = segs;
-  if (head === ":id") return entries.filter((n) => /^\[[^.\]]+\]$/.test(n)).some((n) => pageExists(path.join(dir, n), rest));
-  return entries.includes(head) && pageExists(path.join(dir, head), rest);
+  if (head === ":id") {
+    for (const n of entries.filter((e) => /^\[[^.\]]+\]$/.test(e))) {
+      const found = pageFile(path.join(dir, n), rest);
+      if (found) return found;
+    }
+    return null;
+  }
+  return entries.includes(head) ? pageFile(path.join(dir, head), rest) : null;
 }
 
+/**
+ * A page that renders returns markup; a bare redirect page (`/stock/reports` → on-hand) never returns at all, and with
+ * `redirect: "manual"` every hit on it would be recorded as an error (fix round 1).
+ */
+const rendersMarkup = (file) => /\breturn\b/.test(readFileSync(file, "utf8"));
+
 describe("SCENARIOS", () => {
-  it("the page check below is not vacuous", () => {
-    expect(pageExists(APP, ["inventory", ":id", "history"])).toBe(true);
-    expect(pageExists(APP, [])).toBe(true);
-    expect(pageExists(APP, ["inventory", "nope"])).toBe(false);
-    expect(pageExists(APP, ["finance", "depreciation", ":id"])).toBe(false);
+  it("the page checks below are not vacuous", () => {
+    expect(pageFile(APP, ["inventory", ":id", "history"])).not.toBeNull();
+    expect(pageFile(APP, [])).not.toBeNull();
+    expect(pageFile(APP, ["inventory", "nope"])).toBeNull();
+    expect(pageFile(APP, ["finance", "depreciation", ":id"])).toBeNull();
     expect(pathAllowedForRole("/admin/users", "it_staff")).toBe(false);
+    expect(rendersMarkup(pageFile(APP, ["stock", "reports"]))).toBe(false);
+    expect(rendersMarkup(pageFile(APP, ["stock", "reports", "on-hand"]))).toBe(true);
   });
 
   it("has a scenario for every role in USERS", () => {
@@ -141,8 +174,9 @@ describe("SCENARIOS", () => {
         for (const p of stepPaths(step)) {
           const pathname = p.split("?")[0];
           expect(pathAllowedForRole(pathname.replace(":id", ID), role), `${role} may open ${p}`).toBe(true);
-          const segs = pathname.split("/").filter(Boolean);
-          expect(pageExists(APP, segs), `page for ${p}`).toBe(true);
+          const file = pageFile(APP, pathname.split("/").filter(Boolean));
+          expect(file, `page for ${p}`).not.toBeNull();
+          expect(rendersMarkup(file), `${p} renders a page, not a bare redirect`).toBe(true);
         }
       }
     });

@@ -55,6 +55,12 @@ describe("targetFor (spec §2 goal 3)", () => {
     expect(targetFor("/inventory/:id")).toBe(1000);
     expect(targetFor("server action · assign")).toBe(1000);
   });
+
+  it("reads a workspace-keyed row by its route (fix round 1)", () => {
+    expect(targetFor("/ [admin]")).toBe(1500);
+    expect(targetFor("/ [finance]")).toBe(1500);
+    expect(targetFor("/admin/users [admin]")).toBe(1000);
+  });
 });
 
 describe("summarise", () => {
@@ -108,6 +114,24 @@ describe("evaluateTargets", () => {
     expect(byName.errors.detail).toMatch(/2 error/);
   });
 
+  it("a target with no rows to judge reads CHECK (met null), not MET (fix round 1)", () => {
+    const byName = Object.fromEntries(evaluateTargets([{ route: "/inventory", ms: 100, status: 200 }], []).map((t) => [t.key, t]));
+    expect(byName.p95List.met).toBe(true);
+    expect(byName.p95Home.met).toBeNull();
+    expect(byName.p95Home.detail).toMatch(/no requests/);
+  });
+
+  it("writers that ran but recorded no server-action timing make the action target CHECK, not MET (fix round 1)", () => {
+    const readers = [{ route: "/inventory", ms: 100, status: 200 }];
+    const writers = [{ action: "assign", ms: 900, ok: true }, { action: "approve or reject", ms: 0, ok: true, skipped: true }];
+    const byName = Object.fromEntries(evaluateTargets(readers, writers).map((t) => [t.key, t]));
+    expect(byName.p95List.met).toBeNull();
+    expect(byName.p95List.detail).toMatch(/no server-action/);
+    // … but a reader route over target still reads MISSED.
+    const slow = [...readers, ...Array.from({ length: 5 }, () => ({ route: "/audit", ms: 1200, status: 200 }))];
+    expect(Object.fromEntries(evaluateTargets(slow, writers).map((t) => [t.key, t])).p95List.met).toBe(false);
+  });
+
   it("gates writer actions on their server time, not the browser's end-to-end time", () => {
     const writers = [
       { action: "assign", ms: 2500, ok: true },
@@ -157,6 +181,20 @@ describe("buildReport", () => {
     expect(md).toContain("| `assign` |");
     // Action table columns: Action | Count | Skipped | p50 | p95 | Max | Errors — the skipped step has no timings.
     expect(md).toContain("| `approve or reject` | 0 | 1 | – | – | – | 0 |");
+  });
+
+  it("does not claim the click-to-toast time includes the page refresh (the toast fires before router.refresh)", () => {
+    const md = buildReport({ label: "baseline", inputs, generatedAt: "2026-10-19T01:00:00.000Z" });
+    expect(md).not.toMatch(/page refresh and render/);
+    expect(md).toMatch(/before the page refresh/);
+  });
+
+  it("says when nothing was missed but some targets need checking by hand", () => {
+    const noServer = structuredClone(inputs);
+    noServer[1].data.actions = noServer[1].data.actions.filter((a) => !a.server);
+    const md = buildReport({ label: "baseline", inputs: noServer, generatedAt: "2026-10-19T01:00:00.000Z" });
+    expect(md).not.toContain("All targets met");
+    expect(md).toMatch(/No target missed; 1 to check/);
   });
 
   it("says which targets were missed", () => {
