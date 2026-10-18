@@ -17,6 +17,7 @@
     "e2e": "playwright test",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:scale": "tsx prisma/seed-scale.ts",
     "worker": "tsx src/worker/index.ts",
     "worker:once": "tsx src/worker/index.ts --once",
     "worker:prune": "tsx src/worker/prune.ts"
