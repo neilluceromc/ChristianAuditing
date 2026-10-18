@@ -334,7 +334,8 @@ export function AssetForm({
         </CardBody>
       </Card>
 
-      <div className="sticky bottom-0 z-10 -mx-1 flex items-center gap-3 border-t border-border bg-surface px-1 py-3">
+      {/* data-cris-avoid: while Cris shows, the bar keeps its buttons out of Cris's corner (cris-widget.css). */}
+      <div data-cris-avoid="" className="sticky bottom-0 z-10 -mx-1 flex items-center gap-3 border-t border-border bg-surface px-1 py-3">
         <Button type="button" variant="ghost" disabled={pending} onClick={() => leave(`/inventory/${assetId}`)}>
           Cancel
         </Button>

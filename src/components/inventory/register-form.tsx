@@ -740,7 +740,8 @@ export function RegisterForm({
           disabled={pending}
         />
 
-        <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-3 border-t border-border bg-surface py-4">
+        {/* data-cris-avoid: while Cris shows, the bar keeps its buttons out of Cris's corner (cris-widget.css). */}
+        <div data-cris-avoid="" className="sticky bottom-0 z-10 flex flex-wrap items-center gap-3 border-t border-border bg-surface py-4">
           <p
             aria-live="polite"
             className={cn(

@@ -11,8 +11,8 @@ import { CRIS_BOTTOM_MAX, CRIS_BOTTOM_MIN } from "./cris-prefs";
 export type CrisSide = "left" | "right";
 
 /**
- * Settings' "Put Cris back in the corner" dispatches this window event (`detail: { side, bottom }`) after its save;
- * the widget moves at once instead of waiting for the next page load.
+ * Settings' "Put Cris back in the corner" dispatches this window event (`detail: { side, bottom, tucked }`) after its
+ * save; the widget moves (and comes back from being tucked away) at once instead of waiting for the next page load.
  */
 export const CRIS_RESET_POSITION_EVENT = "cris:reset-position";
 

@@ -158,10 +158,11 @@ function YourCrisAndPreview({
     resetting.current = true;
     setResetBusy(true);
     try {
-      const saved = await save({ side: CRIS_PREF_DEFAULTS.side, bottom: CRIS_PREF_DEFAULTS.bottom });
+      // Back in the corner also brings a tucked-away Cris back (spec §4, added 2026-10-18).
+      const saved = await save({ side: CRIS_PREF_DEFAULTS.side, bottom: CRIS_PREF_DEFAULTS.bottom, tucked: false });
       if (saved) {
         window.dispatchEvent(
-          new CustomEvent(CRIS_RESET_POSITION_EVENT, { detail: { side: saved.side, bottom: saved.bottom } }),
+          new CustomEvent(CRIS_RESET_POSITION_EVENT, { detail: { side: saved.side, bottom: saved.bottom, tucked: saved.tucked } }),
         );
         toast("Cris is back in the corner", "settled");
       }
