@@ -1,6 +1,6 @@
 # Phase 42 — A sidebar that stays put, with fewer links and views under the page you're on
 
-**Status:** CODE-COMPLETE 2026-10-18 on branch `phase-42-sidebar` (final code tree a21e289), awaiting the owner's merge/redeploy decision. APPROVED 2026-10-18 on the mockup canvas
+**Status:** MERGED, PUSHED and DEPLOYED 2026-10-18 (code-complete on branch `phase-42-sidebar`, final code tree a21e289; merged `--no-ff` as `4c2dd00`, merged tree = tested tip `821ddf0`; staging redeployed at `4c2dd00`, no migration). APPROVED 2026-10-18 on the mockup canvas
 (https://claude.ai/artifact/XSKxwmMGNTvFpGHdUWujdz, section "Sidebar that stays put", board **Sidebar · 12**,
 with the Today card removed at the user's request; look from **Sidebar · 9**). The user chose a fixed set of views,
 then said "write the spec and proceed until development". Merge, push and redeploy stay the user's calls.
