@@ -14,7 +14,8 @@ import { CommandPalette } from "@/components/shell/command-palette";
 import { navDestinations } from "@/lib/shell";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
 import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
-import { purchaseReviewCount, worklistCount } from "@/server/modules/home/queries";
+import { navCountKeys, type NavBadges } from "@/lib/nav-badges";
+import { readNavCounts } from "@/server/modules/home/nav-counts";
 import { CrisOrbDefs } from "@/components/cris/orb";
 import { CrisWidget } from "@/components/cris/cris-widget";
 import { crisAvailability, crisPrefsFor } from "@/server/cris/settings-read";
@@ -25,29 +26,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const jar = await cookies();
   const ws = resolveWorkspace(user.role, jar.get("br.dept")?.value);
   const sections = filterSectionsForRole(WORKSPACE_NAV[ws], user.role);
-  // Spec §5.3: the Worklist count is admin's and IT's only. A failed count
-  // hides the badge rather than failing every page's shell. Phase 40 §6: so is
-  // the Purchase reviews count, read only where its nav item shows (IT workspace).
   const reviewer = user.role === "admin" || user.role === "it_staff";
-  const [approvals, worklist, purchaseReviews, cris] = await Promise.all([
-    getApprovalsBadge(user.role),
-    reviewer
-      ? worklistCount(user.id, user.role).catch((err: unknown) => {
-          console.error("[worklist badge] count failed:", err);
-          return 0;
-        })
-      : Promise.resolve(0),
-    reviewer && ws === "it"
-      ? purchaseReviewCount().catch((err: unknown) => {
-          console.error("[purchase reviews badge] count failed:", err);
-          return 0;
-        })
-      : Promise.resolve(0),
+  // Phase 42 spec §4.3: only the counts this role's visible links and views use are read. Role gating comes from
+  // which keys the visible nav carries; readNavCounts keeps the Worklist and Purchase reviews counts admin's and
+  // IT's only, and fails each count to 0 rather than failing every page's shell.
+  const keys = navCountKeys(sections);
+  const [approvals, counts, cris] = await Promise.all([
+    keys.includes("approvals") ? getApprovalsBadge(user.role) : Promise.resolve({ open: 0, overdue: 0 }),
+    readNavCounts(keys.filter((k) => k !== "approvals"), user),
     // Phase 41 (spec §2, §4): Cris is admin's and IT's only, and only while the admin switch is on (with no key,
     // Cris shows in preview). A failed read hides Cris rather than failing every page's shell.
     reviewer ? crisFor(user.id, user.name, jar.get("br.theme")?.value) : Promise.resolve(null),
   ]);
-  const badges = { approvals, worklist, purchaseReviews };
+  const badges: NavBadges = { approvals, counts: { ...counts, approvals: approvals.open } };
 
   return (
     <div className="flex min-h-screen">

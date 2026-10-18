@@ -4,7 +4,7 @@ import type { VisibleSection, WorkspaceId } from "@/lib/workspaces";
 import { CommandPaletteTrigger, ScanTagButton } from "./command-palette";
 import { KeyboardShortcutsButton } from "./keyboard-shortcuts-dialog";
 import { MobileNav, PageName, type ShellUser } from "./mobile-nav";
-import type { NavBadges } from "./nav-list";
+import type { NavBadges } from "@/lib/nav-badges";
 
 /**
  * Spec §3 — below `lg` the top bar reads, left to right: the menu button, the

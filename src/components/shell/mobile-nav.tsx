@@ -12,7 +12,8 @@ import { hasCris } from "@/lib/cris-settings";
 import { navLabelFor } from "@/lib/shell";
 import type { VisibleSection, WorkspaceId } from "@/lib/workspaces";
 import { signOutAction } from "@/server/auth/actions";
-import { NavList, type NavBadges } from "./nav-list";
+import type { NavBadges } from "@/lib/nav-badges";
+import { NavList } from "./nav-list";
 import { WorkspaceOptions } from "./workspace-switcher";
 
 /** Only what the drawer's account block shows — never the whole User row (it carries the password hash). */

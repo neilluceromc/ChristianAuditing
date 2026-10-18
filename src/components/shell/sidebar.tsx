@@ -5,7 +5,8 @@ import { hasCris } from "@/lib/cris-settings";
 import { Avatar } from "@/components/ui/avatar";
 import { WORKSPACE_META, type VisibleSection, type WorkspaceId } from "@/lib/workspaces";
 import { AccountMenu } from "./account-menu";
-import { NavList, type ApprovalsBadge, type NavBadges } from "./nav-list";
+import type { ApprovalsBadge, NavBadges } from "@/lib/nav-badges";
+import { NavList } from "./nav-list";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
 export async function getApprovalsBadge(role: Role): Promise<ApprovalsBadge> {
