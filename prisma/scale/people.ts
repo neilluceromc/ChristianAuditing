@@ -4,7 +4,7 @@ import { localDateISO } from "../../src/lib/format";
 import { slotLabel } from "../../src/lib/loadout";
 import { SETUP_LABELS, SETUP_STATE_LABELS } from "../../src/lib/it-setup";
 import { DAY, HOUR } from "./random";
-import type { Actor, Actors, AuditRow, EmpRec, Gen, ScaleContext } from "./types";
+import type { Actor, Actors, AuditRow, EmpRec, Gen, PolicyDef, ScaleContext } from "./types";
 import {
   CLIENT_TITLES, EMPLOYEE_NOTES, FIRST_NAMES, INTERNAL_HEADCOUNT, INTERNAL_TITLES, LAST_NAMES, NEW_CLIENTS,
   NEW_INTERNAL_DEPARTMENTS,
@@ -229,7 +229,8 @@ export function buildEmployeeNotes(g: Gen, employees: EmpRec[], actors: Actors, 
   for (let i = 0; i < EMPLOYEE_NOTE_COUNT; i++) {
     const e = g.rng.pick(employees);
     const from = Math.max(g.windowStart, (e.row.createdAt as Date).getTime(), e.row.joinedAt.getTime()) + HOUR;
-    const at = g.rng.between(from, g.now - HOUR);
+    // nobody writes about a leaver once their offboarding is complete
+    const at = g.rng.between(from, (e.completedAt?.getTime() ?? g.now) - HOUR);
     const author = pickActor(g, actors.it, ctx.fixedUsers.it);
     const text = g.rng.pick(EMPLOYEE_NOTES);
     notes.push({ employeeId: e.row.id, authorId: author.id, text, createdAt: at });
@@ -246,6 +247,7 @@ export function buildEmployeeNotes(g: Gen, employees: EmpRec[], actors: Actors, 
 export function buildPolicies(g: Gen, ctx: ScaleContext, internal: Dept[], clients: Dept[]) {
   const policies: Prisma.EquipmentPolicyCreateManyInput[] = [];
   const slots: Prisma.PolicySlotCreateManyInput[] = [];
+  const defs: PolicyDef[] = [];
   const typeId = (cat: string, type: string) => {
     const id = ctx.categories[cat]?.types[type];
     if (!id) throw new Error(`scale seed: no type ${cat} / ${type} — run npm run db:seed first`);
@@ -257,26 +259,30 @@ export function buildPolicies(g: Gen, ctx: ScaleContext, internal: Dept[], clien
     for (const [cat, type, required] of lines) {
       slots.push({ policyId: id, name: slotLabel(cat, type), assetTypeId: typeId(cat, type), required });
     }
+    defs.push({
+      id, name, appliesToDepartmentId: deptId, appliesToTitle: title,
+      slots: lines.map(([cat, type, required]) => ({ assetTypeId: typeId(cat, type), required, loaner: false })),
+    });
   };
   // The normal seed already gives Bluepeak Telecom a policy and leaves Harborline Billing without one on purpose.
   const fixedClientIds = new Set(Object.values(ctx.departments).filter((d) => d.kind === "CLIENT").map((d) => d.id));
   for (const c of clients) {
     if (fixedClientIds.has(c.id)) continue;
     const computer = g.rng.weighted<[string, string]>([[["Workstation (PC)", "Mini PC"], 5], [["Workstation (PC)", "Desktop tower"], 2], [["Laptop", "Standard"], 3]]);
+    // a computer always; a headset is required on most accounts; a monitor and a webcam are nice to have
     const lines: Array<[string, string, boolean]> = [
       [computer[0], computer[1], true],
-      ["Monitor", "24-inch", true],
-      ["Headset", g.rng.chance(0.7) ? "Wired" : "Wireless", true],
+      ["Headset", g.rng.chance(0.7) ? "Wired" : "Wireless", g.rng.chance(0.5)],
     ];
-    if (g.rng.chance(0.4)) lines.push(["Monitor", "24-inch", false]);
+    if (g.rng.chance(0.6)) lines.push(["Monitor", "24-inch", false]);
     if (g.rng.chance(0.2)) lines.push(["Webcam", "USB webcam", false]);
     policy(c.name, c.id, null, lines);
   }
   const dept = (name: string) => internal.find((d) => d.name === name)?.id ?? null;
-  policy("Operations standard", dept("Operations"), null, [["Laptop", "Standard", true], ["Monitor", "24-inch", true], ["Headset", "Wireless", true]]);
+  policy("Operations standard", dept("Operations"), null, [["Laptop", "Standard", true], ["Monitor", "24-inch", false], ["Headset", "Wireless", false]]);
   policy("Sales standard", dept("Sales"), null, [["Laptop", "Standard", true], ["Headset", "Wireless", true], ["Other", "Phone", false]]);
-  policy("IT standard", dept("IT"), null, [["Laptop", "High-performance", true], ["Monitor", "27-inch", true], ["Monitor", "27-inch", false], ["Other", "Docking Station", true]]);
-  policy("Quality Assurance standard", dept("Quality Assurance"), null, [["Workstation (PC)", "Mini PC", true], ["Monitor", "24-inch", true], ["Headset", "Wired", true]]);
-  policy("Team Leader kit", null, "Team Leader", [["Laptop", "Standard", true], ["Monitor", "27-inch", true], ["Headset", "Wireless", true]]);
-  return { policies, slots };
+  policy("IT standard", dept("IT"), null, [["Laptop", "High-performance", true], ["Monitor", "27-inch", true], ["Monitor", "27-inch", false], ["Other", "Docking Station", false]]);
+  policy("Quality Assurance standard", dept("Quality Assurance"), null, [["Workstation (PC)", "Mini PC", true], ["Monitor", "24-inch", false], ["Headset", "Wired", true]]);
+  policy("Team Leader kit", null, "Team Leader", [["Laptop", "Standard", true], ["Monitor", "27-inch", false], ["Headset", "Wireless", true]]);
+  return { policies, slots, defs };
 }

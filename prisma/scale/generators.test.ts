@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { STATUSES_BY_CLASS } from "@/lib/asset-class";
+import { computeLoadout, resolvePolicy } from "@/lib/loadout";
 import { generateScaleData, type ScaleContext, type ScaleData } from "./generators";
 
 /** The normal seed's reference rows, by name (prisma/seed.ts); ids are stand-ins. */
@@ -20,6 +21,8 @@ const TYPES: Record<string, [cls: "IT" | "PURCHASING", types: string[]]> = {
   "Pantry Equipment": ["PURCHASING", ["Microwave", "Air purifier"]],
   Building: ["PURCHASING", ["Floor", "Warehouse"]],
 };
+const typeId = (cat: string, type: string) => `type-${cat}-${type}`;
+const slot = (cat: string, type: string, required = true) => ({ assetTypeId: typeId(cat, type), required, loaner: false });
 const ctx: ScaleContext = {
   categories: Object.fromEntries(Object.entries(TYPES).map(([name, [cls, types]]) => [
     name, { id: `cat-${name}`, cls, types: Object.fromEntries(types.map((t) => [t, `type-${name}-${t}`])) },
@@ -34,6 +37,16 @@ const ctx: ScaleContext = {
     admin: { id: "user-admin", name: "System Admin" }, it: { id: "user-it", name: "J. Sarmiento" },
     purchasing: { id: "user-purchasing", name: "A. Reyes" }, finance: { id: "user-finance", name: "L. Domingo" },
   },
+  // the normal seed's two policies (prisma/seed.ts)
+  policies: [
+    { id: "policy-finance", name: "Finance standard", appliesToDepartmentId: "dept-Finance", appliesToTitle: null, slots: [
+      slot("Laptop", "Standard"), slot("Monitor", "24-inch"), slot("Other", "Docking Station"), slot("Headset", "Wired"),
+      slot("Other", "Phone"), slot("Monitor", "27-inch", false),
+    ] },
+    { id: "policy-bluepeak", name: "Bluepeak Telecom", appliesToDepartmentId: "dept-Bluepeak", appliesToTitle: null, slots: [
+      slot("Workstation (PC)", "Mini PC"), slot("Monitor", "24-inch"), slot("Monitor", "24-inch"), slot("Headset", "Wired"),
+    ] },
+  ],
 };
 const NOW = new Date("2026-10-19T03:00:00.000Z");
 
@@ -113,6 +126,33 @@ describe("generateScaleData (Phase 43 spec §3)", () => {
     for (const a of data.assets.filter((x) => x.status === "TEMPORARY")) expect(a.loanDueAt).toBeTruthy();
   });
 
+  it("leaves policy gaps for a minority (20–40 %) of the active people a policy applies to", () => {
+    const defs = [
+      ...ctx.policies,
+      ...data.policies.map((p) => ({
+        id: p.id!, name: p.name, appliesToDepartmentId: p.appliesToDepartmentId ?? null, appliesToTitle: p.appliesToTitle ?? null,
+        slots: data.policySlots.filter((s) => s.policyId === p.id).map((s) => ({ assetTypeId: s.assetTypeId ?? null, required: s.required ?? true, loaner: s.loaner ?? false })),
+      })),
+    ];
+    const members = data.employees
+      .filter((e) => e.employment === "ACTIVE")
+      .map((e) => ({ e, policy: resolvePolicy({ title: e.title, departmentId: e.departmentId }, defs) }))
+      .filter((m) => m.policy !== null);
+    expect(members.length).toBeGreaterThan(400);
+    const gaps = members.filter(({ e, policy }) => {
+      const held = data.assets.filter((a) => a.assigneeId === e.id)
+        .map((a) => ({ id: a.id!, tag: a.tag, model: a.model, typeId: a.typeId ?? null, status: a.status! }));
+      const slots = policy!.slots.map((s, i) => ({ id: String(i), name: String(i), ...s }));
+      return computeLoadout(slots, held).missingRequired > 0;
+    }).length;
+    expect(gaps / members.length).toBeGreaterThanOrEqual(0.2);
+    expect(gaps / members.length).toBeLessThanOrEqual(0.4);
+    // 622 DEPLOYED devices for ~530 active people: most hold something, a minority wait for kit
+    const holders = new Set(data.assets.map((a) => a.assigneeId));
+    const active = count(data.employees, (e) => e.employment === "ACTIVE");
+    expect(count(data.employees, (e) => e.employment === "ACTIVE" && !holders.has(e.id!))).toBeLessThan(active / 3);
+  });
+
   it("uses unique tags (BR-xx-1000+), serials and refNos (PR-1000+, APR-5000+)", () => {
     const tags = data.assets.map((a) => a.tag);
     expect(new Set(tags).size).toBe(tags.length);
@@ -143,6 +183,16 @@ describe("generateScaleData (Phase 43 spec §3)", () => {
     const actions = new Set(data.auditEntries.map((a) => a.action));
     for (const a of ["lifecycle.assign", "lifecycle.return", "lifecycle.change-status", "update", "offboarding.completed", "note.added"]) {
       expect(actions).toContain(a);
+    }
+    const cancels = data.auditEntries.filter((a) => a.entityType === "purchase-request" && a.action === "cancel");
+    for (const c of cancels) expect((c.diff as Record<string, { to: unknown }>).reason?.to).toBeTruthy();
+    // nothing is written about a leaver after their offboarding was completed, except that completion itself
+    const done = new Map(data.employees.filter((e) => e.employment === "OFFBOARDED").map((e) => [e.id, e]));
+    const completedAt = new Map(data.auditEntries.filter((a) => a.action === "offboarding.completed").map((a) => [a.entityId, t(a.createdAt)]));
+    for (const a of data.auditEntries) {
+      if (a.entityType === "employee" && done.has(a.entityId) && a.action !== "offboarding.completed") {
+        expect(t(a.createdAt)).toBeLessThan(completedAt.get(a.entityId)!);
+      }
     }
   });
 

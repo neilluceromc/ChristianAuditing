@@ -1,14 +1,19 @@
 import type { AssetStatus } from "@prisma/client";
 import { CREATABLE_BY_CLASS } from "../../src/lib/asset-class";
+import { resolvePolicy } from "../../src/lib/loadout";
 import { DAY, HOUR } from "./random";
 import { GO_LIVE_DAYS_AGO, pickActor } from "./people";
-import type { Actors, AssetRec, AuditRow, EmpRec, Gen, ScaleContext } from "./types";
+import { vendorIdOf, type Actors, type AssetRec, type AuditRow, type EmpRec, type Gen, type PolicyDef, type ScaleContext } from "./types";
 import { ASSET_NOTES, CATEGORY_SPECS, DEFECT_NOTES, WARRANTY_CONTACTS, type ModelSpec } from "./vocab";
 
 /** The normal seed has 32 assets (25 IT, 7 Purchasing); these bring the totals to 1,000 = 900 IT + 100 Purchasing. */
 export const NEW_ASSETS = Object.values(CATEGORY_SPECS).reduce((s, c) => s + c.count, 0);
 export const FIRST_TAG_NO = 1000;
 export const AWAITING_IT_CHECK = 10;
+/** the share of active people with a policy who get every required line of it before the rest is handed out */
+export const KIT_SHARE = 0.7;
+/** how much likelier a peripheral is than a computer or headset to be the spare */
+const SPARE_LEAN = 4;
 
 /**
  * The IT status mix of the new assets (spec §3: about 70 % DEPLOYED, 18 % SPARE, 4 % DEFECTIVE, 2 % MISSING, rest
@@ -43,11 +48,11 @@ function serialFactory(g: Gen) {
 }
 
 /** Every new asset, its details and current status; holders, finance and the creation audit rows. */
-export function buildAssets(g: Gen, ctx: ScaleContext, employees: EmpRec[], actors: Actors) {
+export function buildAssets(g: Gen, ctx: ScaleContext, employees: EmpRec[], actors: Actors, policies: PolicyDef[]) {
   const goLive = g.now - GO_LIVE_DAYS_AGO * DAY;
   const tagCounter: Record<string, number> = {};
   const serial = serialFactory(g);
-  const vendor = (name: string) => ctx.vendors[name] ?? null;
+  const vendor = (name: string) => vendorIdOf(ctx, name);
   const recs: AssetRec[] = [];
   const models = new Map<AssetRec, ModelSpec>();
 
@@ -81,7 +86,13 @@ export function buildAssets(g: Gen, ctx: ScaleContext, employees: EmpRec[], acto
     const pool = it.filter((r) => !taken.has(r) && STATUS_FITS[status](r.category, r.type)).slice(0, IT_STATUS_COUNTS[status]);
     for (const r of pool) { r.row.status = status as AssetStatus; taken.add(r); }
   }
-  const rest = it.filter((r) => !taken.has(r));
+  // Spares lean towards peripherals: computers and headsets are what every policy asks for, so most of them are
+  // out on desks (weighted sampling without replacement, Efraimidis–Spirakis keys).
+  const kit = (r: AssetRec) => r.category === "Laptop" || r.category === "Workstation (PC)" || r.category === "Headset";
+  const rest = it.filter((r) => !taken.has(r))
+    .map((r) => ({ r, key: g.rng.float() ** (1 / (kit(r) ? 1 : SPARE_LEAN)) }))
+    .sort((a, b) => b.key - a.key)
+    .map(({ r }) => r);
   rest.slice(0, IT_STATUS_COUNTS.SPARE).forEach((r) => { r.row.status = "SPARE"; });
   rest.slice(IT_STATUS_COUNTS.SPARE).forEach((r) => { r.row.status = "DEPLOYED"; });
 
@@ -129,11 +140,51 @@ export function buildAssets(g: Gen, ctx: ScaleContext, employees: EmpRec[], acto
       if (a) { a.row.assigneeId = e.row.id; held.add(a); }
     }
   }
+
+  // Policy kits: most people with a policy get every required line, matched by type. When no device of the exact
+  // type is free, one of the same category is re-typed (and re-modelled) to it — never across categories, and
+  // never inside Other, whose types carry their own tag prefixes. The rest of the people keep the gaps.
+  const typeInfo = new Map<string, { category: string; type: string }>();
+  for (const [category, c] of Object.entries(ctx.categories)) {
+    for (const [type, id] of Object.entries(c.types)) typeInfo.set(id, { category, type });
+  }
+  const retype = (r: AssetRec, type: string) => {
+    const model = g.rng.pick(CATEGORY_SPECS[r.category].types[type]);
+    r.type = type;
+    Object.assign(r.row, { typeId: ctx.categories[r.category].types[type], model: model.model, brand: model.brand });
+    models.set(r, model);
+  };
+  const members = g.rng.shuffle(active)
+    .map((e) => ({ e, policy: resolvePolicy({ title: e.row.title, departmentId: e.row.departmentId }, policies) }))
+    .filter((m): m is { e: EmpRec; policy: PolicyDef } => m.policy !== null);
+  let kitted = 0;
+  for (const { e, policy } of members) {
+    if (kitted >= Math.round(members.length * KIT_SHARE)) break;
+    const plan: Array<{ r: AssetRec; type: string | null }> = [];
+    for (const slot of policy.slots.filter((s) => s.required && !s.loaner && s.assetTypeId)) {
+      const info = typeInfo.get(slot.assetTypeId!);
+      const pool = info ? deployed.filter((r) => !held.has(r) && r.category === info.category && !plan.some((p) => p.r === r)) : [];
+      const exact = pool.find((r) => r.row.typeId === slot.assetTypeId);
+      const near = info && info.category !== "Other" ? pool[0] : undefined;
+      if (!exact && !near) { plan.length = 0; break; }
+      plan.push(exact ? { r: exact, type: null } : { r: near!, type: info!.type });
+    }
+    if (plan.length === 0) continue;
+    for (const p of plan) {
+      if (p.type) retype(p.r, p.type);
+      p.r.row.assigneeId = e.row.id;
+      held.add(p.r);
+    }
+    kitted += 1;
+  }
+
+  // The rest go round-robin per category, people holding nothing first.
   const byCategory = new Map<string, AssetRec[]>();
   for (const r of deployed.filter((r) => !held.has(r))) byCategory.set(r.category, [...(byCategory.get(r.category) ?? []), r]);
   for (const [, list] of [...byCategory.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    const order = g.rng.shuffle(active);
-    list.forEach((r, i) => { r.row.assigneeId = order[i % order.length].row.id; });
+    const holding = new Set(deployed.map((r) => r.row.assigneeId).filter(Boolean));
+    const order = [...g.rng.shuffle(active.filter((e) => !holding.has(e.row.id))), ...g.rng.shuffle(active.filter((e) => holding.has(e.row.id)))];
+    list.forEach((r, i) => { r.row.assigneeId = order[i % order.length].row.id; held.add(r); });
   }
   for (const r of it.filter((r) => r.row.status === "TEMPORARY")) r.row.assigneeId = g.rng.pick(active).row.id;
   const drivers = active.filter((e) => e.deptName === "Operations");

@@ -33,7 +33,8 @@ export function buildEdits(g: Gen, ctx: ScaleContext, recs: AssetRec[], employee
   const employeeFields = (e: EmpRec): Field[] => {
     const r = e.row;
     const from = start(r.createdAt as Date, r.joinedAt.getTime());
-    const base = { entity: "employee" as const, from, to: g.now - HOUR };
+    // a leaver's record stops changing once their offboarding is complete
+    const base = { entity: "employee" as const, from, to: (e.completedAt?.getTime() ?? g.now) - HOUR };
     const titles = e.isClient ? CLIENT_TITLES.map(([t]) => t) : [...(INTERNAL_TITLES[e.deptName] ?? [r.title])];
     const out: Field[] = [{ ...base, action: "update", key: "title", current: r.title, choices: titles }];
     if (r.employment === "ACTIVE") {

@@ -78,50 +78,50 @@ export interface CategorySpec {
 const m = (model: string, brand: string, cost: number): ModelSpec => ({ model, brand, cost });
 
 export const CATEGORY_SPECS: Record<string, CategorySpec> = {
-  Laptop: { cls: "IT", count: 290, prefix: { "*": "LT" }, warrantyMonths: 36, serial: true, types: {
+  Laptop: { cls: "IT", count: 255, prefix: { "*": "LT" }, warrantyMonths: 36, serial: true, types: {
     Standard: [m("Dell Latitude 5440", "Dell", 58_000), m("ThinkPad T14 Gen 4", "Lenovo", 65_000), m("HP ProBook 450 G10", "HP", 52_000), m("ThinkPad E14 Gen 5", "Lenovo", 45_000)],
     "High-performance": [m("Dell Precision 3581", "Dell", 110_000), m("ThinkPad P16s Gen 2", "Lenovo", 120_000)],
     MacBook: [m("MacBook Air M2", "Apple", 70_000), m("MacBook Pro 14 M3", "Apple", 120_000)],
   } },
-  "Workstation (PC)": { cls: "IT", count: 150, prefix: { "*": "WS" }, warrantyMonths: 36, serial: true, types: {
+  "Workstation (PC)": { cls: "IT", count: 200, prefix: { "*": "WS" }, warrantyMonths: 36, serial: true, types: {
     "Desktop tower": [m("Dell OptiPlex 7010 Tower", "Dell", 42_000), m("HP Pro Tower 400 G9", "HP", 38_000)],
     "Mini PC": [m("ThinkCentre M70q Gen 4", "Lenovo", 36_000), m("Dell OptiPlex 7010 Micro", "Dell", 40_000)],
     "All-in-one": [m("HP ProOne 440 G9", "HP", 55_000)],
   } },
-  Monitor: { cls: "IT", count: 160, prefix: { "*": "MN" }, warrantyMonths: 36, serial: true, types: {
+  Monitor: { cls: "IT", count: 80, prefix: { "*": "MN" }, warrantyMonths: 36, serial: true, types: {
     "24-inch": [m("Dell P2422H", "Dell", 9_500), m("LG 24MP400", "LG", 6_500), m("Samsung S24C310", "Samsung", 6_000)],
     "27-inch": [m("Dell P2723D", "Dell", 16_000), m("LG 27UL500", "LG", 12_000)],
   } },
-  Headset: { cls: "IT", count: 120, prefix: { "*": "HS" }, warrantyMonths: 24, serial: true, types: {
+  Headset: { cls: "IT", count: 245, prefix: { "*": "HS" }, warrantyMonths: 24, serial: true, types: {
     Wired: [m("Jabra Evolve2 30", "Jabra", 3_800), m("Logitech H390", "Logitech", 1_800), m("Poly Blackwire 3220", "Poly", 3_200)],
     Wireless: [m("Jabra Evolve2 65", "Jabra", 9_000), m("Logitech Zone Vibe 100", "Logitech", 6_000)],
   } },
-  Mouse: { cls: "IT", count: 35, prefix: { "*": "MS" }, warrantyMonths: 12, lowValue: true, types: {
+  Mouse: { cls: "IT", count: 20, prefix: { "*": "MS" }, warrantyMonths: 12, lowValue: true, types: {
     Wired: [m("Logitech B100", "Logitech", 350)],
     Wireless: [m("Logitech M331", "Logitech", 900), m("Logitech MX Anywhere 3", "Logitech", 3_500)],
   } },
-  Keyboard: { cls: "IT", count: 30, prefix: { "*": "KB" }, warrantyMonths: 12, lowValue: true, types: {
+  Keyboard: { cls: "IT", count: 15, prefix: { "*": "KB" }, warrantyMonths: 12, lowValue: true, types: {
     Wired: [m("Logitech K120", "Logitech", 500)],
     Wireless: [m("Logitech MK270", "Logitech", 1_500), m("Logitech MX Keys", "Logitech", 6_000)],
   } },
-  Webcam: { cls: "IT", count: 15, prefix: { "*": "WC" }, warrantyMonths: 24, serial: true, types: {
+  Webcam: { cls: "IT", count: 10, prefix: { "*": "WC" }, warrantyMonths: 24, serial: true, types: {
     "USB webcam": [m("Logitech C920", "Logitech", 4_000)],
     "Conference camera": [m("Logitech MeetUp", "Logitech", 55_000)],
   } },
-  UPS: { cls: "IT", count: 15, prefix: { "*": "UP" }, warrantyMonths: 24, serial: true, types: {
+  UPS: { cls: "IT", count: 10, prefix: { "*": "UP" }, warrantyMonths: 24, serial: true, types: {
     "Desktop UPS": [m("APC Back-UPS 650VA", "APC", 3_500)],
     "Rack UPS": [m("APC Smart-UPS 1500VA", "APC", 45_000)],
   } },
-  "Windows License": { cls: "IT", count: 20, prefix: { "*": "WL" }, warrantyMonths: null, types: {
+  "Windows License": { cls: "IT", count: 10, prefix: { "*": "WL" }, warrantyMonths: null, types: {
     OEM: [m("Windows 11 Pro OEM", "Microsoft", 8_000)],
     Retail: [m("Windows 11 Pro Retail", "Microsoft", 12_000)],
     Volume: [m("Windows 11 Pro Volume", "Microsoft", 9_000)],
   } },
-  "Laptop Bag": { cls: "IT", count: 15, prefix: { "*": "BG" }, warrantyMonths: null, lowValue: true, types: {
+  "Laptop Bag": { cls: "IT", count: 10, prefix: { "*": "BG" }, warrantyMonths: null, lowValue: true, types: {
     Backpack: [m("Targus Classic Backpack", "Targus", 1_600)],
     Sleeve: [m("Targus 14-inch Sleeve", "Targus", 800)],
   } },
-  Other: { cls: "IT", count: 25, prefix: { Phone: "PH", Speaker: "SP", Printer: "PR", "Docking Station": "DK", "Type C Hub": "HB" }, warrantyMonths: 12, serial: true, types: {
+  Other: { cls: "IT", count: 20, prefix: { Phone: "PH", Speaker: "SP", Printer: "PR", "Docking Station": "DK", "Type C Hub": "HB" }, warrantyMonths: 12, serial: true, types: {
     Phone: [m("Samsung Galaxy A54", "Samsung", 18_000), m("iPhone 13", "Apple", 32_000)],
     Speaker: [m("Jabra Speak 510", "Jabra", 6_000)],
     Printer: [m("Brother HL-L2350DW", "Brother", 8_000), m("Epson L3210", "Epson", 9_000)],

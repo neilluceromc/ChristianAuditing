@@ -4,6 +4,15 @@ import type { Rng } from "./random";
 /** A user an audit row or a decision is attributed to. */
 export interface Actor { id: string; name: string }
 
+/** An equipment policy as resolvePolicy/computeLoadout (src/lib/loadout.ts) read it. */
+export interface PolicyDef {
+  id: string;
+  name: string;
+  appliesToDepartmentId: string | null;
+  appliesToTitle: string | null;
+  slots: Array<{ assetTypeId: string | null; required: boolean; loaner: boolean }>;
+}
+
 /**
  * The fixed rows the scale seed builds on, read from the database after `npm run db:seed` (prisma/seed-scale.ts).
  * The generators never invent a category, type, vendor or one of these departments: they only reference them.
@@ -16,6 +25,15 @@ export interface ScaleContext {
   /** department name → id and kind */
   departments: Record<string, { id: string; kind: GroupKind }>;
   fixedUsers: { admin: Actor; it: Actor; purchasing: Actor; finance: Actor };
+  /** the normal seed's equipment policies (Finance standard, Bluepeak Telecom), so loadouts are filled against them too */
+  policies: PolicyDef[];
+}
+
+/** A vendor the normal seed must have created; a missing one is a broken context, never a silent null. */
+export function vendorIdOf(ctx: ScaleContext, name: string): string {
+  const id = ctx.vendors[name];
+  if (!id) throw new Error(`scale seed: no vendor ${name} — run npm run db:seed first`);
+  return id;
 }
 
 /** The shared generation state: one PRNG stream, one id stream, and the clock everything is relative to. */

@@ -2,7 +2,7 @@ import type { NoteKind, Prisma, PurchaseRequestState } from "@prisma/client";
 import { CANONICAL_NOTE } from "../../src/lib/purchase-flow";
 import { DAY, HOUR } from "./random";
 import { pickActor, type Dept } from "./people";
-import type { Actor, Actors, AssetRec, AuditRow, Gen, ScaleContext } from "./types";
+import { vendorIdOf, type Actor, type Actors, type AssetRec, type AuditRow, type Gen, type ScaleContext } from "./types";
 import { CANCEL_REASONS, CATEGORY_SPECS } from "./vocab";
 
 /**
@@ -24,7 +24,7 @@ export function buildPurchases(g: Gen, ctx: ScaleContext, recs: AssetRec[], dept
   const audit: AuditRow[] = [];
   const W = g.windowStart;
   const minus = (t: number, lo: number, hi: number) => t - g.rng.int(lo, hi) * DAY - g.rng.int(1, 8) * HOUR;
-  const vendor = (name: string) => ctx.vendors[name] ?? null;
+  const vendor = (name: string) => vendorIdOf(ctx, name);
   const allModels = Object.values(CATEGORY_SPECS).filter((c) => c.cls === "IT" || c.count > 10)
     .flatMap((c) => Object.values(c.types).flat());
 
@@ -75,7 +75,10 @@ export function buildPurchases(g: Gen, ctx: ScaleContext, recs: AssetRec[], dept
     if (dates.cancelled) {
       req.cancelReason = g.rng.pick(CANCEL_REASONS);
       note("CANCEL", requester, dates.cancelled, req.cancelReason);
-      log(requester, dates.cancelled, "cancel", { state: { from: dates.reviewed ? "IT_REVIEWED" : dates.submitted ? "SUBMITTED" : "DRAFT", to: "CANCELLED" } });
+      log(requester, dates.cancelled, "cancel", {
+        state: { from: dates.reviewed ? "IT_REVIEWED" : dates.submitted ? "SUBMITTED" : "DRAFT", to: "CANCELLED" },
+        reason: { from: null, to: req.cancelReason },
+      });
     }
     if (g.rng.chance(0.2)) {
       const by = pickActor(g, actors.it, ctx.fixedUsers.it);

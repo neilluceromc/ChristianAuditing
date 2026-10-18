@@ -26,7 +26,8 @@ async function main() {
     return;
   }
 
-  const [categories, vendors, departments, admin, it, purchasing, finance] = await Promise.all([
+  const [policies, categories, vendors, departments, admin, it, purchasing, finance] = await Promise.all([
+    prisma.equipmentPolicy.findMany({ include: { slots: { select: { assetTypeId: true, required: true, loaner: true } } }, orderBy: { name: "asc" } }),
     prisma.assetCategory.findMany({ include: { types: true } }),
     prisma.vendor.findMany({ select: { id: true, name: true } }),
     prisma.department.findMany({ select: { id: true, name: true, kind: true } }),
@@ -43,6 +44,7 @@ async function main() {
     vendors: Object.fromEntries(vendors.map((v) => [v.name, v.id])),
     departments: Object.fromEntries(departments.map((d) => [d.name, { id: d.id, kind: d.kind }])),
     fixedUsers: { admin, it, purchasing, finance },
+    policies: policies.map((p) => ({ id: p.id, name: p.name, appliesToDepartmentId: p.appliesToDepartmentId, appliesToTitle: p.appliesToTitle, slots: p.slots })),
   };
 
   const data = generateScaleData(ctx, new Date());
