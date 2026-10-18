@@ -86,6 +86,17 @@ describe("summarise", () => {
     expect(isError(rows[1])).toBe(false);
   });
 
+  it("counts aborts at the hard stop apart from aborted-after-success, and gathers first-byte times (fix round 3)", () => {
+    const rows = [
+      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success", firstByteMs: 120 },
+      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success", firstByteMs: 140 },
+      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" },
+      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-at-stop" },
+    ];
+    const [g] = summarise(rows, (r) => r.action);
+    expect(g).toMatchObject({ count: 0, aborted: 3, stopped: 1, errors: 0, firstByte: { count: 2, p50: 120, p95: 140 } });
+  });
+
   it("leaves skipped writer steps out of the timings but counts them", () => {
     const rows = [
       { action: "approve or reject", ms: 400, ok: true },
@@ -142,24 +153,40 @@ describe("evaluateTargets", () => {
     expect(Object.fromEntries(evaluateTargets(slow, writers).map((t) => [t.key, t])).p95List.met).toBe(false);
   });
 
-  it("server actions that were all aborted after success leave the action target CHECK (fix round 2)", () => {
-    const readers = [{ route: "/inventory", ms: 100, status: 200 }];
-    const writers = [
-      { action: "assign", ms: 900, ok: true },
-      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" },
-    ];
-    const byName = Object.fromEntries(evaluateTargets(readers, writers).map((t) => [t.key, t]));
-    expect(byName.p95List.met).toBeNull();
-    expect(byName.errors.met).toBe(true);
+  // ---- fix round 3: an action is judged on server time only with 20+ fully timed rows ----
+  const server = (label, ms, extra = {}) => ({ action: `server action · ${label}`, ms, ok: true, server: true, ...extra });
+  const aborted = (label) => server(label, 0, { aborted: true, note: "aborted-after-success" });
+  const step = (label, ms) => ({ action: label, ms, ok: true });
+  const byKey = (readers, writers) => Object.fromEntries(evaluateTargets(readers, writers).map((t) => [t.key, t]));
+
+  it("judges an action on its server time when it has at least 20 fully timed rows", () => {
+    const writers = [...range(20).map(() => server("assign", 300)), step("assign", 2500)];
+    const t = byKey([], writers).p95List;
+    expect(t.met).toBe(true);
+    expect(t.detail).toMatch(/`assign` 300 ms on server time \(20 timed of 20\)/);
   });
 
-  it("gates writer actions on their server time, not the browser's end-to-end time", () => {
-    const writers = [
-      { action: "assign", ms: 2500, ok: true },
-      { action: "server action · assign", ms: 300, ok: true, server: true },
-    ];
-    const byName = Object.fromEntries(evaluateTargets([], writers).map((t) => [t.key, t]));
-    expect(byName.p95List.met).toBe(true);
+  it("under 20 fully timed rows, judges the action on its whole step instead (a conservative upper bound)", () => {
+    const writers = [...range(19).map(() => server("assign", 300)), aborted("assign"), step("assign", 1200), step("assign", 900)];
+    const t = byKey([{ route: "/inventory", ms: 100, status: 200 }], writers).p95List;
+    expect(t.met).toBe(false);
+    expect(t.detail).toMatch(/`assign` 1200 ms on the whole step, click to toast \(19 timed of 20\)/);
+  });
+
+  it("an action whose server rows were all aborted still counts, judged on its whole step", () => {
+    const writers = [aborted("assign"), aborted("assign"), step("assign", 900)];
+    const t = byKey([{ route: "/inventory", ms: 100, status: 200 }], writers).p95List;
+    expect(t.met).toBe(true);
+    expect(t.detail).toMatch(/all 1 routes and 1 actions within 1\.0 s/);
+    expect(t.detail).toMatch(/`assign` 900 ms on the whole step, click to toast \(0 timed of 2\)/);
+  });
+
+  it("an action with neither basis reads CHECK and is named", () => {
+    const writers = [server("people search", 60), step("assign", 400), ...range(20).map(() => server("assign", 300))];
+    const t = byKey([{ route: "/inventory", ms: 100, status: 200 }], writers).p95List;
+    expect(t.met).toBeNull();
+    expect(t.detail).toMatch(/`people search` unjudged \(1 timed of 1, no whole-step rows\)/);
+    expect(byKey([], writers).errors.met).toBe(true);
   });
 });
 
@@ -181,7 +208,7 @@ describe("buildReport", () => {
       data: {
         kind: "writers", base: "http://host:3000", minutes: 6, startedAt: "2026-10-19T00:00:00.000Z",
         actions: [
-          { action: "assign", ms: 1500, ok: true, user: "perf01" },
+          { action: "assign", ms: 800, ok: true, user: "perf01" },
           { action: "server action · assign", ms: 250, ok: true, server: true, user: "perf01" },
           { action: "approve or reject", ms: 0, ok: true, skipped: true, user: "perf15" },
         ],
@@ -222,9 +249,20 @@ describe("buildReport", () => {
     const withAbort = structuredClone(inputs);
     withAbort[1].data.actions.push({ action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success", user: "perf01" });
     const md = buildReport({ label: "baseline", inputs: withAbort, generatedAt: "2026-10-19T01:00:00.000Z" });
-    expect(md).toContain("| Action | Count | Skipped | p50 | p95 | Max | Errors | Aborted after success |");
+    expect(md).toContain("| Action | Count | Skipped | p50 | p95 | Max | Errors | Aborted after success | First byte (n · p50 · p95) |");
     expect(md).toContain("| `server action · assign` | 1 | 0 | 250 | 250 | 250 | 0 | 1 |");
     expect(md).toContain("All targets met");
+  });
+
+  it("shows the first byte of aborted responses per server-action key (fix round 3)", () => {
+    const withAbort = structuredClone(inputs);
+    withAbort[1].data.actions.push(
+      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success", firstByteMs: 120, user: "perf01" },
+      { action: "server action · assign", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success", firstByteMs: 160, user: "perf02" },
+    );
+    const md = buildReport({ label: "baseline", inputs: withAbort, generatedAt: "2026-10-19T01:00:00.000Z" });
+    expect(md).toContain("| `server action · assign` | 1 | 0 | 250 | 250 | 250 | 0 | 2 | 2 · 120 · 160 |");
+    expect(md).toContain("| `assign` | 1 | 0 | 800 | 800 | 800 | 0 | 0 | – |");
   });
 
   it("lists skipped steps by reason, grouping on the text before the diagnostic detail (fix round 2)", () => {

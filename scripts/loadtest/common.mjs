@@ -145,10 +145,21 @@ export function serverActionTracker({ user, actions, stopped }) {
     for (const resolve of waiters.get(step) ?? []) resolve();
     waiters.delete(step);
   }
-  function classify(row, stepOk) {
-    actions.push(stepOk
-      ? { user: row.user, action: row.action, ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" }
-      : { ...row, ok: false });
+  /**
+   * An abort, once its step's outcome is known: true → aborted-after-success (with the server's first byte when the
+   * browser had one, fix round 3); "stopped" → aborted-at-stop, the hard stop cut the step short, so it is neither a
+   * success nor an error (fix round 3); false → an error.
+   */
+  function classify(row, outcome) {
+    const { firstByteMs, ...rest } = row;
+    if (outcome === true) {
+      const aborted = { user: rest.user, action: rest.action, ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" };
+      actions.push(firstByteMs === undefined ? aborted : { ...aborted, firstByteMs });
+    } else if (outcome === "stopped") {
+      actions.push({ user: rest.user, action: rest.action, ms: 0, ok: true, server: true, aborted: true, note: "aborted-at-stop" });
+    } else {
+      actions.push({ ...rest, ok: false });
+    }
   }
 
   return {
@@ -183,6 +194,15 @@ export function serverActionTracker({ user, actions, stopped }) {
       const errorText = req.failure()?.errorText ?? "failed";
       const row = { user, action: `server action · ${tag.label}`, ms: 0, ok: false, server: true, error: errorText };
       if (!/ERR_ABORTED/.test(errorText)) return void actions.push(row);
+      // Fix round 3: the server's first byte, when the browser got that far before the response was cut off.
+      const firstByte = (() => {
+        try {
+          return req.timing().responseStart;
+        } catch {
+          return -1;
+        }
+      })();
+      if (firstByte >= 0) row.firstByteMs = Math.round(firstByte);
       if (outcomes.has(tag.step)) return classify(row, outcomes.get(tag.step));
       if (!heldBack.has(tag.step)) heldBack.set(tag.step, []);
       heldBack.get(tag.step).push(row);
@@ -197,7 +217,10 @@ export function serverActionTracker({ user, actions, stopped }) {
         waiters.set(step, list);
       });
     },
-    /** How the step went: releases its held-back aborted rows, and classifies any abort that arrives later. */
+    /**
+     * How the step went (true, false, or "stopped" when the hard stop cut it short): releases its held-back aborted
+     * rows, and classifies any abort that arrives later.
+     */
     endStep(step, ok) {
       outcomes.set(step, ok);
       for (const row of heldBack.get(step) ?? []) classify(row, ok);

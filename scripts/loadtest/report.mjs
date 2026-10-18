@@ -38,36 +38,44 @@ export function targetFor(key) {
 }
 
 /**
- * Rows grouped by `keyOf`: count, skipped, aborted, p50, p95, max (ms) and errors, slowest p95 first. A skipped step
- * and a server action aborted after its step succeeded (fix round 2) are counted apart and carry no time.
+ * Rows grouped by `keyOf`: count, skipped, aborted, stopped, p50, p95, max (ms), errors and the first byte of aborted
+ * responses, slowest p95 first. A skipped step, a server action aborted after its step succeeded (fix round 2) and
+ * one cut off by the hard stop (fix round 3) are counted apart and carry no time; an aborted-after-success row's
+ * `firstByteMs` (the server's first byte, fix round 3) is gathered on its own.
  */
 export function summarise(rows, keyOf) {
   const groups = new Map();
   for (const row of rows) {
     const key = keyOf(row);
-    const g = groups.get(key) ?? { key, ms: [], skipped: 0, aborted: 0, errors: 0 };
+    const g = groups.get(key) ?? { key, ms: [], firstByte: [], skipped: 0, aborted: 0, stopped: 0, errors: 0 };
     groups.set(key, g);
     if (row.skipped) {
       g.skipped += 1;
       continue;
     }
     if (row.aborted) {
-      g.aborted += 1;
+      if (row.note === "aborted-at-stop") g.stopped += 1;
+      else {
+        g.aborted += 1;
+        if (typeof row.firstByteMs === "number") g.firstByte.push(row.firstByteMs);
+      }
       continue;
     }
     g.ms.push(row.ms);
     if (isError(row)) g.errors += 1;
   }
   return [...groups.values()]
-    .map(({ key, ms, skipped, aborted, errors }) => ({
+    .map(({ key, ms, firstByte, skipped, aborted, stopped, errors }) => ({
       key,
       count: ms.length,
       skipped,
       aborted,
+      stopped,
       p50: percentile(ms, 50),
       p95: percentile(ms, 95),
       max: ms.length ? Math.max(...ms) : null,
       errors,
+      firstByte: { count: firstByte.length, p50: percentile(firstByte, 50), p95: percentile(firstByte, 95) },
     }))
     .sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1) || a.key.localeCompare(b.key));
 }
@@ -77,36 +85,93 @@ const fmtMs = (ms) => (ms === null ? "–" : String(Math.round(ms)));
 const fmtS = (ms) => `${(ms / 1000).toFixed(1)} s`;
 const list = (items, n = 8) => items.slice(0, n).join(", ") + (items.length > n ? `, and ${items.length - n} more` : "");
 
+/** Fix round 3: below this many fully timed server-action rows, an action is judged on its whole step instead. */
+export const MIN_TIMED_SERVER_ROWS = 20;
+const SERVER_PREFIX = "server action · ";
+
 /**
- * Spec §2 goal 3, judged on server time: reader page requests, and the writers' server-action POSTs (rows marked
- * `server`). A writer's browser step (click → success toast) also includes the browser's own work, so it is
- * reported but not gated — except for errors, which count wherever they happen.
+ * Fix round 3: the basis each writer action is judged on, per server-action label. With at least
+ * MIN_TIMED_SERVER_ROWS fully timed rows: the server time ("server"). Otherwise the action's own whole-step rows
+ * (click to toast, a conservative upper bound: it contains the server time) when there are any ("step"). Otherwise
+ * none (null, a CHECK). `timed` of `total` counts the fully timed rows among the label's server-action rows,
+ * aborted-after-success ones included; rows cut off by the hard stop are not counted.
+ */
+export function actionBases(writers) {
+  const byLabel = new Map();
+  for (const w of writers) {
+    if (!w.server || w.skipped || w.note === "aborted-at-stop" || !w.action.startsWith(SERVER_PREFIX)) continue;
+    const label = w.action.slice(SERVER_PREFIX.length);
+    const e = byLabel.get(label) ?? { label, timed: [], total: 0 };
+    e.total += 1;
+    if (!w.aborted) e.timed.push(w.ms);
+    byLabel.set(label, e);
+  }
+  return [...byLabel.values()].map(({ label, timed, total }) => {
+    const base = { label, timed: timed.length, total };
+    if (timed.length >= MIN_TIMED_SERVER_ROWS) return { ...base, basis: "server", p95: percentile(timed, 95) };
+    const steps = writers.filter((w) => !w.server && !w.skipped && w.ok !== false && w.action === label).map((w) => w.ms);
+    if (steps.length) return { ...base, basis: "step", p95: percentile(steps, 95) };
+    return { ...base, basis: null, p95: null };
+  });
+}
+
+const describeAction = (a) => (a.basis
+  ? `\`${a.label}\` ${fmtMs(a.p95)} ms on ${a.basis === "server" ? "server time" : "the whole step, click to toast"} (${a.timed} timed of ${a.total})`
+  : `\`${a.label}\` unjudged (${a.timed} timed of ${a.total}, no whole-step rows)`);
+
+/**
+ * Spec §2 goal 3. Reader page requests are judged on their own time. A writer action is judged on its server-action
+ * time when it has 20+ fully timed rows, else on its whole step (fix round 3, `actionBases`); the detail names the
+ * basis and "N timed of M" for each action. Errors count wherever they happen.
  *
- * `met` is true, false, or null for "check by hand": a target with no rows to judge is never MET, and neither is the
- * action target when the writers ran but recorded no server-action timing (fix round 1).
+ * `met` is true, false, or null for "check by hand": a target with nothing to judge is never MET; nor is the action
+ * target when an action has no basis, or when the writers ran but recorded no server action at all (fix round 1).
  */
 export function evaluateTargets(readers, writers) {
-  // Timed server actions only: an aborted-after-success row has no time (fix round 2).
+  // Timed server actions only: an aborted row has no time (fix round 2).
   const serverRows = writers.filter((w) => w.server && !w.aborted);
   const gated = [...readers, ...serverRows];
-  const groups = summarise(gated, keyOf);
-  const writersUntimed = serverRows.length === 0 && writers.some((w) => !w.server && !w.skipped);
+  const routeGroups = summarise(readers, keyOf);
+  const actions = actionBases(writers);
+  const writersUntimed = actions.length === 0 && writers.some((w) => !w.server && !w.skipped);
 
-  function p95Target(key, limit, label, untimed = false) {
-    const mine = groups.filter((g) => targetFor(g.key) === limit && g.p95 !== null);
+  function listTarget() {
+    const limit = FAST_TARGET_MS;
+    const target = { key: "p95List", name: `p95 ≤ ${fmtS(limit)} — lists, records and actions` };
+    const routes = routeGroups.filter((g) => targetFor(g.key) === limit && g.p95 !== null);
+    const judged = actions.filter((a) => a.basis);
+    const unjudged = actions.filter((a) => !a.basis);
+    const overRoutes = routes.filter((g) => g.p95 > limit).map((g) => `\`${g.key}\` ${fmtMs(g.p95)} ms`);
+    const overActions = judged.filter((a) => a.p95 > limit).map(describeAction);
+    const actionText = actions.length ? `; actions: ${actions.map(describeAction).join(", ")}` : "";
+    if (overRoutes.length || overActions.length) {
+      const over = [...overRoutes, ...overActions];
+      return { ...target, met: false, detail: `${over.length} over: ${list(over)}${actionText}` };
+    }
+    if (routes.length + judged.length === 0 && unjudged.length === 0) {
+      return { ...target, met: null, detail: writersUntimed ? "no requests to judge; the writers ran but recorded no server-action timing" : "no requests to judge" };
+    }
+    const within = `all ${routes.length} routes and ${judged.length} actions within ${fmtS(limit)}`;
+    if (unjudged.length) return { ...target, met: null, detail: `${within}, ${unjudged.length} unjudged${actionText}` };
+    if (writersUntimed) {
+      return {
+        ...target,
+        met: null,
+        detail: `${within}, but the writers ran and recorded no server-action timing — the actions are unjudged`,
+      };
+    }
+    return { ...target, met: true, detail: `${within}${actionText}` };
+  }
+
+  function homeTarget() {
+    const limit = SLOW_TARGET_MS;
+    const target = { key: "p95Home", name: `p95 ≤ ${fmtS(limit)} — Home and the reports` };
+    const mine = routeGroups.filter((g) => targetFor(g.key) === limit && g.p95 !== null);
     const over = mine.filter((g) => g.p95 > limit);
-    const target = { key, name: `p95 ≤ ${fmtS(limit)} — ${label}` };
     if (over.length) {
       return { ...target, met: false, detail: `${over.length} over: ${list(over.map((g) => `\`${g.key}\` ${fmtMs(g.p95)} ms`))}` };
     }
     if (mine.length === 0) return { ...target, met: null, detail: "no requests to judge" };
-    if (untimed) {
-      return {
-        ...target,
-        met: null,
-        detail: `all ${mine.length} page routes within ${fmtS(limit)}, but the writers ran and recorded no server-action timing — the actions are unjudged`,
-      };
-    }
     return { ...target, met: true, detail: `all ${mine.length} within ${fmtS(limit)}` };
   }
 
@@ -118,8 +183,8 @@ export function evaluateTargets(readers, writers) {
   const errorCount = readerErrors.length + writerErrors.length;
 
   return [
-    p95Target("p95List", FAST_TARGET_MS, "lists, records and actions", writersUntimed),
-    p95Target("p95Home", SLOW_TARGET_MS, "Home and the reports"),
+    listTarget(),
+    homeTarget(),
     {
       key: "max5s",
       name: `No request over ${fmtS(MAX_MS)}`,
@@ -170,7 +235,8 @@ export function buildReport({ label, inputs, generatedAt }) {
   out.push(
     `- **volume:** ${readers.length} page requests · ${writers.filter((w) => !w.server && !w.skipped).length} writer steps` +
       ` (${skipped} skipped) · ${writers.filter((w) => w.server && !w.aborted).length} timed server-action calls` +
-      ` (${writers.filter((w) => w.aborted).length} aborted after success)`,
+      ` (${writers.filter((w) => w.aborted && w.note !== "aborted-at-stop").length} aborted after success,` +
+      ` ${writers.filter((w) => w.note === "aborted-at-stop").length} cut off by the hard stop)`,
     "",
   );
 
@@ -196,20 +262,25 @@ export function buildReport({ label, inputs, generatedAt }) {
   out.push("## Actions (writers), slowest p95 first", "");
   out.push(
     "Times in ms. A `server action · …` row is the server action's POST alone (request to response end, from the" +
-      " browser's network timing) and is what the targets judge. Every other row is the whole step in the browser:" +
+      " browser's network timing). The targets judge an action on it only when it has at least" +
+      ` ${MIN_TIMED_SERVER_ROWS} fully timed rows; with fewer, on the action's whole step instead (an upper bound),` +
+      " and the Targets table says which basis and how many rows were timed. Every other row is the whole step in the browser:" +
       " for a change, from the confirming click to the success toast (the action's round trip and the toast's render," +
       " before the page refresh, which starts after the toast); for an" +
       " `open …` row, the navigation until the page's heading shows (its streamed content revealed). A skipped step (no spare free, empty approval queue, decision" +
       " cap reached) has no time and is not an error. *Aborted after success* counts server-action responses the" +
-      " browser cut off (net::ERR_ABORTED) after their step had already succeeded: not errors, and not timed.",
+      " browser cut off (net::ERR_ABORTED) after their step had already succeeded: not errors, and not timed;" +
+      " *First byte* is the server's first byte for those of them the browser had timed (count · p50 · p95)," +
+      " a lower bound on their server time. Responses cut off by the hard stop are counted in neither.",
     "",
   );
   out.push(
-    "| Action | Count | Skipped | p50 | p95 | Max | Errors | Aborted after success |",
-    "|---|---:|---:|---:|---:|---:|---:|---:|",
+    "| Action | Count | Skipped | p50 | p95 | Max | Errors | Aborted after success | First byte (n · p50 · p95) |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
   );
   for (const g of summarise(writers, keyOf)) {
-    out.push(`| \`${g.key}\` | ${g.count} | ${g.skipped} | ${fmtMs(g.p50)} | ${fmtMs(g.p95)} | ${fmtMs(g.max)} | ${g.errors} | ${g.aborted} |`);
+    const fb = g.firstByte.count ? `${g.firstByte.count} · ${fmtMs(g.firstByte.p50)} · ${fmtMs(g.firstByte.p95)}` : "–";
+    out.push(`| \`${g.key}\` | ${g.count} | ${g.skipped} | ${fmtMs(g.p50)} | ${fmtMs(g.p95)} | ${fmtMs(g.max)} | ${g.errors} | ${g.aborted} | ${fb} |`);
   }
   out.push("");
 

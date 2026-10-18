@@ -92,7 +92,7 @@ function recorder({ user, actions, stopped, password }) {
         const skipped = err instanceof Skip;
         // Cut short by the hard stop: not a measurement, and its torn-down requests are not errors either.
         if (stopped()) {
-          tracker.endStep(id, true);
+          tracker.endStep(id, "stopped"); // fix round 3: never released as aborted-after-success
           return null;
         }
         tracker.endStep(id, skipped);

@@ -146,7 +146,7 @@ describe("serverActionTracker", () => {
     expect(actions).toEqual([]);
     tracker.endStep(3, true);
     expect(actions).toEqual([
-      { user: "perf01", action: "server action · triage", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" },
+      { user: "perf01", action: "server action · triage", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success", firstByteMs: 200 },
     ]);
   });
 
@@ -157,7 +157,7 @@ describe("serverActionTracker", () => {
     tracker.endStep(4, true);
     tracker.failed(req);
     expect(actions).toEqual([
-      { user: "perf01", action: "server action · approve", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success" },
+      { user: "perf01", action: "server action · approve", ms: 0, ok: true, server: true, aborted: true, note: "aborted-after-success", firstByteMs: 200 },
     ]);
   });
 
@@ -169,6 +169,33 @@ describe("serverActionTracker", () => {
     tracker.endStep(5, false);
     expect(actions).toEqual([
       { user: "perf01", action: "server action · assign", ms: 0, ok: false, server: true, error: "net::ERR_ABORTED" },
+    ]);
+  });
+
+  // ---- fix round 3: the first byte of an aborted response; a hard stop is not a success ----
+
+  it("an aborted-after-success row carries the server's first byte when the browser has one, and none when not", () => {
+    const { actions, tracker } = setup();
+    const timed = fakeRequest({ responseStart: 143.6, responseEnd: -1 });
+    tracker.request(timed, "assign", 8);
+    tracker.failed(timed);
+    const blind = fakeRequest({ responseStart: -1, responseEnd: -1 });
+    tracker.request(blind, "assign", 8);
+    tracker.failed(blind);
+    tracker.endStep(8, true);
+    expect(actions[0]).toMatchObject({ aborted: true, note: "aborted-after-success", firstByteMs: 144 });
+    expect(actions[1]).toMatchObject({ aborted: true, note: "aborted-after-success" });
+    expect(actions[1]).not.toHaveProperty("firstByteMs");
+  });
+
+  it("a step cut short by the hard stop releases its held-back aborts as aborted-at-stop, never as a success or an error", () => {
+    const { actions, tracker } = setup();
+    const req = fakeRequest();
+    tracker.request(req, "return", 9);
+    tracker.failed(req);
+    tracker.endStep(9, "stopped");
+    expect(actions).toEqual([
+      { user: "perf01", action: "server action · return", ms: 0, ok: true, server: true, aborted: true, note: "aborted-at-stop" },
     ]);
   });
 

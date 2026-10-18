@@ -66,8 +66,12 @@ that as `[slow-query] <Model>.<operation> <ms>ms`. Unset, the log is off. Argume
   page it read (with the page's row counts), or every candidate opened was passed over (with what each offered
   instead of Assign); `approve or reject` — no unclaimed PENDING request on the queue's first page (with its row
   counts), the decision cap, or the request no longer offered Approve/Reject.
-- Writer `server action · …` rows are the server action POSTs alone, from the browser's network timing; these are
-  what the targets judge. The other writer rows are the whole step in the browser: from the confirming click to the
+- Writer `server action · …` rows are the server action POSTs alone, from the browser's network timing. An action is
+  judged on them only when it has at least 20 fully timed rows; with fewer it is judged on its whole step (click to
+  toast, an upper bound), and with neither it reads CHECK. The Targets table names the basis and "N timed of M" for
+  each action. *First byte* shows the server's first byte for aborted-after-success responses (a lower bound). A step
+  cut short by the hard stop releases its aborted responses as `aborted-at-stop`: counted in neither column, never an
+  error. The other writer rows are the whole step in the browser: from the confirming click to the
   success toast, i.e. the action's round trip and the toast's render. The page refresh (`router.refresh()`) starts
   after the toast, so it is not in that time; its request still adds to the server's load.
 - A target with nothing to judge reads CHECK, never MET; so does the action target when the writers ran but recorded
