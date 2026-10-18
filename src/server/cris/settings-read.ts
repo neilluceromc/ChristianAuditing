@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { FeatureFlag } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { isUniqueViolation } from "@/server/prisma-errors";
@@ -38,9 +39,17 @@ export async function ensureCrisFlag(): Promise<FeatureFlag> {
   }
 }
 
+/**
+ * Phase 43: the flag row once per request. The (app) layout reads it for admin and IT through crisAvailability() and
+ * again through crisWidgetStart(), and Settings › Cris a third time; React `cache()` makes those one SELECT. It is
+ * request-scoped (a fresh store per server render; outside one it does not memoise), so a switch flipped between
+ * requests is always seen. ensureCrisFlag stays uncached: saveCrisSettings' read-before-write must hit the database.
+ */
+const crisFlagThisRequest = cache(ensureCrisFlag);
+
 /** Spec §9, "Cris for everyone": the switch, questions per person per day, the model. */
 export async function crisSettings(): Promise<CrisSettings> {
-  return crisSettingsFromFlag(await ensureCrisFlag());
+  return crisSettingsFromFlag(await crisFlagThisRequest());
 }
 
 /** Spec §9, "Your Cris": this person's colour, motion, show, place and hint — defaults until saved. */
