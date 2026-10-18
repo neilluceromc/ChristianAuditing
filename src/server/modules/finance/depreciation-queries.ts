@@ -164,12 +164,23 @@ export async function scheduleYear(cls: AssetClass, year: number, now: Date = ne
   return { groups, total: groups.length ? sumYearRows(groups.map((g) => g.subtotal), year, asOf) : null, notStarted, noPolicy, asOf, years };
 }
 
-/** Phase 36 (spec 5): category totals only, no asset rows — the Schedule's default view. */
-export async function scheduleSummary(cls: AssetClass, year: number, now: Date = new Date()): Promise<{
+type GridPass = Awaited<ReturnType<typeof gridPass>>;
+
+export interface ScheduleSummary {
   categories: Array<{ categoryId: string; category: string; assets: number; costC: number; row: YearRow }>;
   total: YearRow | null; totalCostC: number; notStarted: number; noPolicy: number; asOf: MonthIndex; years: number[];
-}> {
-  const { entries, notStarted, noPolicy, asOf, years } = await gridPass(cls, year, now);
+}
+
+export interface ScheduleCategory {
+  category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow; subtotalCostC: number; total: number; page: number; pageCount: number;
+}
+
+/** Phase 36 (spec 5): category totals only, no asset rows — the Schedule's default view. */
+export async function scheduleSummary(cls: AssetClass, year: number, now: Date = new Date()): Promise<ScheduleSummary> {
+  return summaryOf(await gridPass(cls, year, now), year);
+}
+
+function summaryOf({ entries, notStarted, noPolicy, asOf, years }: GridPass, year: number): ScheduleSummary {
   const byCat = new Map<string, { category: string; grids: YearRow[]; costC: number }>();
   for (const e of entries) {
     const c = byCat.get(e.categoryId) ?? { category: e.category, grids: [], costC: 0 };
@@ -184,16 +195,40 @@ export async function scheduleSummary(cls: AssetClass, year: number, now: Date =
 }
 
 /** One category's asset rows for the year, paged by tag; the subtotal covers every row of the category, not just the page. */
-export async function scheduleCategory(cls: AssetClass, year: number, categoryId: string, page: number, now: Date = new Date()): Promise<{
-  category: string; rows: ScheduleGroup["rows"]; subtotal: YearRow; subtotalCostC: number; total: number; page: number; pageCount: number;
-} | null> {
+export async function scheduleCategory(
+  cls: AssetClass, year: number, categoryId: string, page: number, now: Date = new Date(),
+): Promise<ScheduleCategory | null> {
   const cat = await prisma.assetCategory.findFirst({ where: { id: categoryId, cls }, select: { name: true } });
   if (!cat) return null;
   const { entries, asOf } = await gridPass(cls, year, now, categoryId);
+  return categoryOf(cat.name, entries, year, asOf, page);
+}
+
+/**
+ * Phase 43: the Schedule tab's summary and (with a category) its drill-down from ONE grid pass over the class — the
+ * page used to run the pass twice. The drill-down's entries are the class pass's entries of that category: the same
+ * rows gridPass(…, categoryId) selects with `categoryId` in SQL, each computed by the same pure code, then sorted by
+ * tag (unique) before paging and summing, so neither the database's row order nor the extra rows can change a total.
+ * The category lookup runs alongside; an unknown or other-class category is a null drill-down, as before.
+ */
+export async function scheduleView(
+  cls: AssetClass, year: number, categoryId: string, page: number, now: Date = new Date(),
+): Promise<{ summary: ScheduleSummary; drill: ScheduleCategory | null }> {
+  const [pass, cat] = await Promise.all([
+    gridPass(cls, year, now),
+    categoryId ? prisma.assetCategory.findFirst({ where: { id: categoryId, cls }, select: { name: true } }) : null,
+  ]);
+  return {
+    summary: summaryOf(pass, year),
+    drill: cat ? categoryOf(cat.name, pass.entries.filter((e) => e.categoryId === categoryId), year, pass.asOf, page) : null,
+  };
+}
+
+function categoryOf(category: string, entries: GridEntry[], year: number, asOf: MonthIndex, page: number): ScheduleCategory {
   const all = entries.map((e) => e.row).sort((a, b) => a.tag.localeCompare(b.tag));
   const p = pageOf(all.length, page, ENTITY_PAGE_SIZE);
   return {
-    category: cat.name, rows: all.slice(p.skip, p.skip + p.take), subtotal: sumYearRows(all.map((x) => x.grid), year, asOf), subtotalCostC: all.reduce((a, x) => a + x.costC, 0),
+    category, rows: all.slice(p.skip, p.skip + p.take), subtotal: sumYearRows(all.map((x) => x.grid), year, asOf), subtotalCostC: all.reduce((a, x) => a + x.costC, 0),
     total: all.length, page: p.page, pageCount: p.pageCount,
   };
 }
