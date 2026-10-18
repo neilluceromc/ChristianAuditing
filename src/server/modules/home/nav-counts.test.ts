@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   purchase: vi.fn(),
   worklist: vi.fn(),
   reviews: vi.fn(),
+  approval: vi.fn(),
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -24,11 +25,12 @@ vi.mock("@/server/db/client", () => ({
     asset: { count: h.asset },
     employee: { count: h.employee },
     purchaseRequest: { count: h.purchase },
+    approval: { count: h.approval },
   },
 }));
 vi.mock("./queries", () => ({ worklistCount: h.worklist, purchaseReviewCount: h.reviews }));
 
-import { NAV_COUNT_HREF, readNavCounts } from "./nav-counts";
+import { getApprovalsBadge, NAV_COUNT_HREF, readNavCounts } from "./nav-counts";
 
 const itStaff = { id: "u1", role: "it_staff" as const };
 const viewer = { id: "u2", role: "viewer" as const };
@@ -124,6 +126,23 @@ describe("readNavCounts", () => {
     for (const state of ["DRAFT", "SUBMITTED", "IT_REVIEWED"] as const) {
       expect(h.purchase).toHaveBeenCalledWith({ where: purchaseWhere(state, "") });
     }
+  });
+});
+
+describe("getApprovalsBadge", () => {
+  it("counts the open approvals and the overdue ones", async () => {
+    h.approval.mockImplementation(async ({ where }: { where: { AND: Array<{ slaAt?: unknown }> } }) =>
+      (where.AND.some((w) => w.slaAt) ? 2 : 9));
+    expect(await getApprovalsBadge("it_staff")).toEqual({ open: 9, overdue: 2 });
+    expect(h.approval).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails to 0 with a console.error rather than failing every page's shell (spec §4.3)", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const boom = new Error("db down");
+    h.approval.mockRejectedValue(boom);
+    expect(await getApprovalsBadge("it_staff")).toEqual({ open: 0, overdue: 0 });
+    expect(error).toHaveBeenCalledWith("[nav counts] approvals failed:", boom);
   });
 });
 

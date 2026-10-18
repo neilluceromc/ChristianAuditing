@@ -1,24 +1,11 @@
-import type { AssetClass, Role, User } from "@prisma/client";
-import { prisma } from "@/server/db/client";
-import { approvalClassWhere } from "@/lib/approval-access";
+import type { AssetClass, User } from "@prisma/client";
 import { hasCris } from "@/lib/cris-settings";
 import { Avatar } from "@/components/ui/avatar";
 import { WORKSPACE_META, type VisibleSection, type WorkspaceId } from "@/lib/workspaces";
 import { AccountMenu } from "./account-menu";
-import type { ApprovalsBadge, NavBadges } from "@/lib/nav-badges";
+import type { NavBadges } from "@/lib/nav-badges";
 import { NavList } from "./nav-list";
 import { WorkspaceTag } from "./workspace-switcher";
-
-export async function getApprovalsBadge(role: Role): Promise<ApprovalsBadge> {
-  const scope = approvalClassWhere(role);
-  const [open, overdue] = await Promise.all([
-    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, scope] } }),
-    prisma.approval.count({
-      where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: new Date() } }, scope] },
-    }),
-  ]);
-  return { open, overdue };
-}
 
 /**
  * Phase 42 spec §4.1 / §4.5: a sticky column (`top: 0`, `100dvh`) holding an inset panel — brand row with the

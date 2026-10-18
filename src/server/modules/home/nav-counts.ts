@@ -1,5 +1,7 @@
 import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { approvalClassWhere } from "@/lib/approval-access";
+import type { ApprovalsBadge } from "@/lib/nav-badges";
 import type { CountKey } from "@/lib/workspaces";
 import { parseListState } from "@/lib/url-state";
 import { buildAssetWhere, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
@@ -54,6 +56,27 @@ const READERS: Record<ReadKey, (user: User) => Promise<number>> = {
   prSubmitted: purchases("prSubmitted"),
   prItReviewed: purchases("prItReviewed"),
 };
+
+/**
+ * The `approvals` count: open approvals in the role's classes, and how many of them are past their SLA (the red).
+ * Like every nav count it fails to 0 with a console.error (spec §4.3): it sits in the layout's Promise.all, so a
+ * throw here would fail every page's shell.
+ */
+export async function getApprovalsBadge(role: Role): Promise<ApprovalsBadge> {
+  try {
+    const scope = approvalClassWhere(role);
+    const [open, overdue] = await Promise.all([
+      prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, scope] } }),
+      prisma.approval.count({
+        where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] }, slaAt: { lt: new Date() } }, scope] },
+      }),
+    ]);
+    return { open, overdue };
+  } catch (err: unknown) {
+    console.error("[nav counts] approvals failed:", err);
+    return { open: 0, overdue: 0 };
+  }
+}
 
 /**
  * The nav's counts for the keys asked for, read in parallel. `approvals` is not read here (the layout feeds it from

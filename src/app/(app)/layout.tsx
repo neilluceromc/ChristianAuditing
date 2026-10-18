@@ -8,7 +8,7 @@ import {
   WORKSPACE_META,
   WORKSPACE_NAV,
 } from "@/lib/workspaces";
-import { getApprovalsBadge, Sidebar } from "@/components/shell/sidebar";
+import { Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { navDestinations } from "@/lib/shell";
@@ -16,7 +16,7 @@ import { NavigationTracker } from "@/components/shell/navigation-tracker";
 import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
 import { navCountKeys, type NavBadges } from "@/lib/nav-badges";
 import { defaultClassFor } from "@/lib/asset-class";
-import { readNavCounts } from "@/server/modules/home/nav-counts";
+import { getApprovalsBadge, readNavCounts } from "@/server/modules/home/nav-counts";
 import { CrisOrbDefs } from "@/components/cris/orb";
 import { CrisWidget } from "@/components/cris/cris-widget";
 import { crisAvailability, crisPrefsFor } from "@/server/cris/settings-read";
@@ -30,7 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const reviewer = user.role === "admin" || user.role === "it_staff";
   // Phase 42 spec §4.3: only the counts this role's visible links and views use are read. Role gating comes from
   // which keys the visible nav carries; readNavCounts keeps the Worklist and Purchase reviews counts admin's and
-  // IT's only, and fails each count to 0 rather than failing every page's shell.
+  // IT's only; both it and getApprovalsBadge fail each count to 0 rather than failing every page's shell.
   const keys = navCountKeys(sections);
   const [approvals, counts, cris] = await Promise.all([
     keys.includes("approvals") ? getApprovalsBadge(user.role) : Promise.resolve({ open: 0, overdue: 0 }),
