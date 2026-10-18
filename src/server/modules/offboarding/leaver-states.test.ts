@@ -182,6 +182,8 @@ beforeEach(() => {
     // e6: a PENDING whose payload names no outcome is not a decision; a return of a held asset in someone else's name
     ret("p15", "a10", "PENDING", "2026-10-05T00:00:00Z", "e6", { payload: { to: { assigneeId: null } } }),
     ret("p16", "a10", "PENDING", "2026-10-06T00:00:00Z", "e1"),
+    // e1: after the earliest leaver's start (e3's) but before e1's own — outside e1's window, so a2 stays undecided
+    ret("p17", "a2", "PENDING", "2026-09-20T00:00:00Z", "e1"),
   ];
 });
 
@@ -246,7 +248,7 @@ describe("leaverStates (Phase 43: the same rows from a narrower read)", () => {
     expect(args.select.assets).toEqual({ select: { id: true } });
   });
 
-  it("reads only the returns that can decide something: in each leaver's window, never REJECTED", async () => {
+  it("reads only returns that can decide something: anchored leavers', from the earliest start, never REJECTED", async () => {
     await leaverStates();
     expect(h.calls).toEqual(["employee.findMany", "approval.findMany"]);
     const { where } = h.args.approval as { where: Record<string, unknown> };
@@ -254,12 +256,8 @@ describe("leaverStates (Phase 43: the same rows from a narrower read)", () => {
       type: "lifecycle_return",
       assetId: { not: null },
       state: { not: "REJECTED" },
-      OR: [
-        { employeeId: "e5", createdAt: { gte: DAY("2026-10-12") } },
-        { employeeId: "e1", createdAt: { gte: DAY("2026-10-01") } },
-        { employeeId: "e3", createdAt: { gte: DAY("2026-09-15") } },
-        { employeeId: "e6", createdAt: { gte: DAY("2026-10-02") } },
-      ],
+      employeeId: { in: ["e5", "e1", "e3", "e6"] }, // e2 has no start, so no window
+      createdAt: { gte: DAY("2026-09-15") }, // e3's start, the earliest
     });
   });
 

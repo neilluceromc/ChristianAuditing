@@ -621,11 +621,12 @@ export async function offboardingExportRows(
  * Every OFFBOARDING employee as a row — the worklist's leavers, Home and the wizard's Next leaver read this.
  *
  * Phase 43: the same rows from a narrower read (leaver-states.test.ts pins them on fixtures). The employees come with
- * only the fields toOffboardingRow reads, and the returns are read once for everyone, already cut in SQL to the ones
- * that can decide anything — each exact, not a heuristic:
- *  - the window: candidatesFor keeps only returns created at or after the leaver's offboardingAt and none at all
- *    without one, so `createdAt >= offboardingAt` per anchored leaver (timestamps compared at the stored ms) drops
- *    only rows it would drop;
+ * only the fields toOffboardingRow reads, and the returns are read once for everyone, cut in SQL to rows that can
+ * decide something. Each cut only drops rows the computation already ignores:
+ *  - the window: candidatesFor keeps only returns created at or after the leaver's own offboardingAt, and none
+ *    without one. So only anchored leavers' returns are read, from the EARLIEST anchor on (a row before it is before
+ *    its own leaver's anchor too); candidatesFor still applies each leaver's exact window in memory. One bound, not a
+ *    per-leaver OR: measured on the scale seed, a 30-branch OR cost ~2 ms more than it could save.
  *  - REJECTED: decisionOf never lets a REJECTED return win and never takes the EXECUTED boundary from one, so a
  *    REJECTED row can change no decision, no "gone" count and no failure.
  * Order is irrelevant: decisionOf sorts by (createdAt, id), and the rest only counts.
@@ -637,10 +638,13 @@ export async function leaverStates(): Promise<OffboardingRow[]> {
     orderBy: [{ name: "asc" }, { employeeNo: "asc" }, { id: "asc" }],
     select: ROW_EMPLOYEE_SELECT,
   });
-  const windows = employees.flatMap((e) =>
-    e.offboardingAt ? [{ employeeId: e.id, createdAt: { gte: e.offboardingAt } }] : []);
-  const approvals = windows.length === 0 ? [] : await prisma.approval.findMany({
-    where: { type: "lifecycle_return", assetId: { not: null }, state: { not: "REJECTED" }, OR: windows },
+  const anchored = employees.filter((e): e is typeof e & { offboardingAt: Date } => e.offboardingAt !== null);
+  const approvals = anchored.length === 0 ? [] : await prisma.approval.findMany({
+    where: {
+      type: "lifecycle_return", assetId: { not: null }, state: { not: "REJECTED" },
+      employeeId: { in: anchored.map((e) => e.id) },
+      createdAt: { gte: new Date(Math.min(...anchored.map((e) => e.offboardingAt.getTime()))) },
+    },
     select: { ...ROW_APPROVAL_SELECT, employeeId: true },
   });
   const byEmployee = new Map<string, ApprovalLike[]>();
