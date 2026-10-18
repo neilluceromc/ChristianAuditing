@@ -232,12 +232,17 @@ test.describe("inventory list", () => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/inventory");
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
+    // Phase 42 (spec §3.1): Register assets is an Inventory view (admin, it_staff), and Inventory's views are
+    // open here — so its absence is the role filter, not a closed list.
+    await expect(page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "All", exact: true }))
+      .toHaveAttribute("href", "/inventory");
     await expect(page.getByRole("link", { name: "Register assets" })).toHaveCount(0);
     await expect(page.getByRole("checkbox")).toHaveCount(0);
   });
 
   test("the nav reaches the list's views: IT's Register assets, Purchasing's IT inventory", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
+    // Phase 42 (spec §3.1, §4.2): Register assets is a view under Inventory, shown while Inventory is current.
     await page.goto("/inventory");
     const itNav = page.getByRole("navigation", { name: "Workspace" });
     await expect(itNav.getByRole("link", { name: "Register assets" })).toHaveAttribute("href", "/inventory/register");
@@ -246,9 +251,10 @@ test.describe("inventory list", () => {
     // Phase 34 (plan P-9): the page is "New equipment"; the nav link keeps its name.
     await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
 
-    // purchasing_staff's list opens on Purchasing (plan P-7), so the Reference link names IT.
+    // purchasing_staff's list opens on Purchasing (plan P-7), so the nav's view names IT. Phase 42 (spec §3.2):
+    // IT inventory is a view under Assets, so start on Assets' own page, where its views show.
     await login(page, "purchasing@thebackroomop.com");
-    await page.goto("/purchases");
+    await page.goto("/inventory?cls=PURCHASING");
     const purchasingNav = page.getByRole("navigation", { name: "Workspace" });
     await expect(purchasingNav.getByRole("link", { name: "IT inventory" })).toHaveAttribute("href", "/inventory?cls=IT");
     await purchasingNav.getByRole("link", { name: "IT inventory" }).click();

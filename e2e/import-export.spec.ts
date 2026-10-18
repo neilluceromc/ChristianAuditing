@@ -696,7 +696,8 @@ test.describe("export", () => {
 
     await page.goto("/inventory");
     const allAssets = await screenCount(page, ASSETS);
-    await page.getByRole("link", { name: "Repairs" }).click();
+    // The toolbar's saved view (scoped: the Phase 42 nav has a "Repairs" view too).
+    await page.getByRole("main").getByRole("link", { name: "Repairs" }).click();
     await expect(page).toHaveURL(/status=DEFECTIVE/, { timeout: 30_000 });
     await page.getByRole("link", { name: "AT VENDOR" }).click();
     await expect(page).toHaveURL(/stage=at-vendor/, { timeout: 30_000 });

@@ -554,10 +554,12 @@ test.describe("page gates speak the class", () => {
     // Phase 30 (spec §6.1): the header's one primary; scoped to main — the nav has an entry of the same name.
     const registerLink = page.getByRole("main").getByRole("link", { name: "Register assets" });
     await expect(registerLink).toHaveAttribute("href", /^\/inventory\/register\?cls=PURCHASING$/);
-    await expect(page.getByRole("link", { name: "Repairs" })).toHaveCount(0);
+    // The toolbar's Repairs saved view is IT-only. Scoped to main: since Phase 42 the IT nav's Inventory link
+    // opens a "Repairs" view of its own on every /inventory page.
+    await expect(page.getByRole("main").getByRole("link", { name: "Repairs" })).toHaveCount(0);
 
     await page.goto("/inventory");
-    await expect(page.getByRole("link", { name: "Repairs" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("link", { name: "Repairs" })).toBeVisible();
   });
 });
 

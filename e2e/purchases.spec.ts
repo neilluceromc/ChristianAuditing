@@ -38,10 +38,11 @@ test.beforeAll(() => {
 });
 
 test.describe("purchases — ?state= tab contract & sidebar", () => {
-  test("tabs write ?state=; the sidebar's By status links share the same highlight", async ({ page }) => {
+  test("tabs write ?state=; the sidebar's Requests views share the same highlight", async ({ page }) => {
     // The sidebar only renders at the lg: breakpoint.
     await page.setViewportSize({ width: 1280, height: 900 });
     await login(page, "purchasing@thebackroomop.com");
+    // Phase 42 (spec §3.2): the state links are views under Requests, shown while Requests is current — on /purchases.
     await page.goto("/purchases");
 
     const main = page.locator("main");
@@ -55,12 +56,14 @@ test.describe("purchases — ?state= tab contract & sidebar", () => {
     await expect(main.getByRole("link", { name: /^Awaiting IT/ })).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("row", { name: /PR-0198/ })).toBeVisible();
     await expect(page.getByRole("row", { name: /PR-0201/ })).toHaveCount(0); // DRAFT, not SUBMITTED
+    await expect(sidebar.getByRole("link", { name: /^Awaiting IT/ })).toHaveAttribute("aria-current", "page");
 
-    // The sidebar's "By status" link targets the identical ?state= contract
-    // and lands on the same tab — both light up together.
-    await sidebar.getByRole("link", { name: "Awaiting finance" }).click();
+    // The sidebar's Requests view targets the identical ?state= contract
+    // and lands on the same tab — both light up together. Its name carries
+    // its count ("Awaiting finance 1 awaiting finance"), hence the anchor.
+    await sidebar.getByRole("link", { name: /^Awaiting finance/ }).click();
     await expect(page).toHaveURL(/state=IT_REVIEWED/);
-    await expect(sidebar.getByRole("link", { name: "Awaiting finance" })).toHaveAttribute("aria-current", "page");
+    await expect(sidebar.getByRole("link", { name: /^Awaiting finance/ })).toHaveAttribute("aria-current", "page");
     await expect(main.getByRole("link", { name: /^Awaiting finance/ })).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("row", { name: /PR-0195/ })).toBeVisible();
   });

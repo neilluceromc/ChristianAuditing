@@ -6,7 +6,8 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 /**
  * Phase 40 (spec §6, Work and approvals):
  *   1. requests waiting for IT's review (SUBMITTED) are a "Purchase reviews" group on the worklist, whose heading opens
- *      /purchases?state=SUBMITTED, and the IT nav's "Purchase reviews" item carries their count;
+ *      /purchases?state=SUBMITTED, and the IT nav's "Purchase reviews" item (a view under Approvals since Phase 42)
+ *      carries their count;
  *   2. each approval check says "Passed" or "Failed" in words beside its dot;
  *   3. the A key in the queue runs the row's primary action, so a PENDING row approves in one step.
  *
@@ -59,12 +60,6 @@ test.describe.serial("phase 40 — work and approvals", () => {
     await expect(row).toContainText("from ");
     await expect(row.getByRole("link", { name: "Review", exact: true })).toHaveAttribute("href", `/purchases/${pr.id}`);
 
-    // The nav item's badge: every request waiting for IT, the same count the list's Awaiting IT tab shows.
-    const navItem = page.getByRole("navigation", { name: "Workspace" }).first().locator('a[href="/purchases?state=SUBMITTED"]');
-    const badge = navItem.locator('[aria-label$="waiting for IT"]');
-    await expect(badge).toHaveText(String(waiting));
-    await expect(badge).toHaveAttribute("aria-label", `${waiting} waiting for IT`);
-
     // The group's heading is the link to the whole list.
     const open = group.getByRole("link", { name: "Purchase reviews", exact: true });
     await expect(open).toHaveAttribute("href", "/purchases?state=SUBMITTED");
@@ -76,6 +71,16 @@ test.describe.serial("phase 40 — work and approvals", () => {
     // Only SUBMITTED requests: the seed's draft (PR-0201) and its IT_REVIEWED one (PR-0195) are filtered out.
     await expect(page.getByRole("link", { name: "PR-0201" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "PR-0195" })).toHaveCount(0);
+
+    // The nav item's badge: every request waiting for IT, the same count the list's Awaiting IT tab shows.
+    // Phase 42 (spec §3.1, §4.2): Purchase reviews is a view under Approvals, rendered only while Approvals is the
+    // current link — so it is here (the view is the current page) and on /approvals.
+    const navItem = page.getByRole("navigation", { name: "Workspace" }).first().locator('a[href="/purchases?state=SUBMITTED"]');
+    await expect(navItem).toHaveAttribute("aria-current", "page");
+    await page.goto("/approvals");
+    const badge = navItem.locator('[aria-label$="waiting for IT"]');
+    await expect(badge).toHaveText(String(waiting));
+    await expect(badge).toHaveAttribute("aria-label", `${waiting} waiting for IT`);
 
     // Home carries the same group.
     await page.goto("/");

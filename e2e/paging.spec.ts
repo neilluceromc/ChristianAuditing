@@ -286,7 +286,8 @@ test.describe.serial("paging", () => {
     // Genuinely on page 2, not silently clamped back to page 1.
     await expect(page.getByRole("navigation", { name: "Pagination" }).getByRole("link", { name: "2", exact: true }))
       .toHaveAttribute("aria-current", "page");
-    const badgeText = await page.getByRole("link", { name: /^Active/ }).innerText();
+    // The page's own tab (scoped: the Phase 42 nav's Reservations link opens an "Active" view too).
+    const badgeText = await page.getByRole("main").getByRole("link", { name: /^Active/ }).innerText();
     expect(Number(badgeText.match(/\d+/)?.[0])).toBe(dbActiveCount);
   });
 
