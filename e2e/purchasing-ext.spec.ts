@@ -391,8 +391,9 @@ test.describe.serial("purchasing extensions", () => {
     await login(page, PURCHASING);
     const pr0198 = await reqByRef("PR-0198");
     await page.goto(`/purchases/${pr0198.id}`);
-    // exact: the sidebar's own "Suppliers" nav section heading also renders
-    // at this breakpoint and a substring match would resolve both.
+    // exact: a substring match would also take any heading that merely
+    // contains "Supplier" (the sidebar's "Suppliers" section heading did,
+    // until Phase 42 dropped the nav's headings).
     await expect(page.getByRole("heading", { name: "Supplier", exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("heading", { name: "Attachments" })).toBeVisible();
     await expectNoSeriousAxe(page);

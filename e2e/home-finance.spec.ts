@@ -51,8 +51,9 @@ test.describe("home — IT dashboard leads with work, not KPIs", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
-    // Scoped to <main> — the sidebar's nav groups are h3s too ("Overview",
-    // "Tracking", …) and would otherwise pollute this list.
+    // Scoped to <main> — this list is the page's own cards. (The sidebar's nav
+    // groups were h3s until Phase 42; they have no headings now, but nothing
+    // outside <main> belongs in this list either.)
     const headings = page.locator("main").getByRole("heading", { level: 2 });
     // Phase 32 (spec §5.4): no Jump to on IT's Home, and it@ holds no claim in
     // the seed — "Claimed by you" is then one muted line under the Worklist,
@@ -245,8 +246,8 @@ test.describe("home — /finance/assets, the register", () => {
     await login(page, "finance@thebackroomop.com");
     await page.goto("/finance/assets");
 
-    // The finance sidebar has an h3 nav-group heading with this same text —
-    // scope to the page's h1 title.
+    // The finance sidebar has an "Assets" link with this same text (an h3
+    // heading before Phase 42) — scope to the page's h1 title.
     // Phase 35 (plan P-5): the page is "Assets"; its footer line carries the whole filter's totals.
     await expect(page.getByRole("heading", { name: "Assets", level: 1 })).toBeVisible();
     await expect(page.getByText(/\d+ assets? · \d+ with a cost · ₱[\d,.]+ at cost/)).toBeVisible();

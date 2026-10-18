@@ -1,4 +1,6 @@
 import type { Role } from "@prisma/client";
+import type { IconName } from "@/components/ui/icon";
+import { REPAIR_STAGES } from "./repairs";
 
 export type WorkspaceId = "it" | "purchasing" | "finance" | "admin";
 
@@ -26,158 +28,359 @@ export const WORKSPACE_META: Record<WorkspaceId, { label: string; landing: strin
   admin: { label: "Admin", landing: "/admin/users" },
 };
 
-export interface NavItem {
+/** A count the nav can show (Phase 42 spec §4.3). Task 3 reads them in the layout. */
+export type CountKey =
+  | "worklist" | "approvals" | "purchaseReviews"
+  | "itSpare" | "itDefective" | "itMissing" | "leaving"
+  | "prDraft" | "prSubmitted" | "prItReviewed";
+
+/**
+ * What a view matches on, param by param: a string is the param's exact value; a list matches when any of the
+ * param's comma-separated values is in it (Repairs' `stage`, as `isRepairView` reads it).
+ */
+export type NavMatch = Record<string, string | readonly string[]>;
+
+/** One view under a link: shown only while that link is the current one (spec §4.2). */
+export interface NavView {
   label: string;
   href: string;
-  badge?: "approvals" | "worklist" | "purchaseReviews";
-  /** restrict the item to these roles, within an already-allowed workspace */
+  /** restrict the view to these roles, within an already-allowed workspace */
   roles?: Role[];
+  count?: CountKey;
+  /** match on these params instead of the href's; a list of them matches when any one does (Repairs) */
+  match?: NavMatch | NavMatch[];
 }
 
+export interface NavItem {
+  label: string;
+  /** omitted → the first visible view's href */
+  href?: string;
+  icon: IconName;
+  /** restrict the link to these roles, within an already-allowed workspace */
+  roles?: Role[];
+  /** summed into one badge when the item is not current, or has no views */
+  badge?: CountKey[];
+  views?: NavView[];
+  /** other names the command palette finds this link's page by (spec §4.6), e.g. its page title */
+  also?: string[];
+}
+
+/** A group of links. `heading` is an internal name only: groups are separated by spacing, never titled. */
 export interface NavSection {
   heading: string;
   items: NavItem[];
 }
 
-// Brief §2 — the four workspace IAs, verbatim.
+/** A link as one role sees it: href resolved, views filtered (empty when one or none remain), badge trimmed. */
+export interface VisibleItem {
+  label: string;
+  href: string;
+  icon: IconName;
+  badge: CountKey[];
+  views: NavView[];
+  /** set only when the link collapsed onto its one visible view: that view's label (the page's own name) */
+  viewLabel?: string;
+}
+
+export interface VisibleSection {
+  heading: string;
+  items: VisibleItem[];
+}
+
+/**
+ * A param value equal to the page's own default is treated as absent when matching views (spec §4.2), so the
+ * param-less view still wins: `tab=open` on /approvals, `state=ACTIVE` on /reservations, `tab=client` on
+ * /equipment-by-client.
+ */
+export const PAGE_DEFAULTS: Record<string, Record<string, string>> = {
+  "/approvals": { tab: "open" },
+  "/reservations": { state: "ACTIVE" },
+  "/equipment-by-client": { tab: "client" },
+};
+
+const HOME: NavItem = { label: "Home", href: "/", icon: "home" };
+
+// IT and Finance share the Phase 38 report and its two tabs (spec §3.3).
+const REPORTS: NavItem = {
+  label: "Reports",
+  href: "/equipment-by-client",
+  icon: "reports",
+  // The report's page title, so the palette still finds it by the name it had before Phase 42.
+  also: ["Equipment by client"],
+  views: [
+    { label: "By client", href: "/equipment-by-client" },
+    { label: "Internal teams", href: "/equipment-by-client?tab=internal" },
+  ],
+};
+
+/**
+ * Phase 42 spec §3: each workspace's links and the views under them, verbatim. `roles` on a link or view
+ * restricts it exactly as it did before; every href a role can see must pass `pathAllowedForRole` (asserted in
+ * workspaces.test.ts for every role and workspace).
+ */
 export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
   it: [
-    { heading: "Overview", items: [{ label: "Home", href: "/" }] },
     {
-      heading: "Tracking",
+      heading: "work",
       items: [
-        { label: "Inventory", href: "/inventory" },
-        // The one Register flow (Phase 30, spec §5.1) — same roles as the
-        // `/inventory/register` PATH_RULE below (admin, it_staff; purchasing
-        // reaches it through the Purchasing workspace's own nav instead).
-        { label: "Register assets", href: "/inventory/register", roles: ["admin", "it_staff"] },
-        { label: "Employees", href: "/employees" },
-        { label: "Worklist", href: "/inventory/work", badge: "worklist" },
-        { label: "Approvals", href: "/approvals", badge: "approvals" },
-        { label: "Purchase reviews", href: "/purchases?state=SUBMITTED", badge: "purchaseReviews", roles: ["admin", "it_staff"] },
-        { label: "Audit log", href: "/audit" },
+        HOME,
+        {
+          label: "Inventory",
+          href: "/inventory",
+          icon: "inventory",
+          views: [
+            { label: "All", href: "/inventory" },
+            { label: "Spare", href: "/inventory?status=SPARE", count: "itSpare" },
+            // The page is in repair mode whenever DEFECTIVE is the only status, whatever the sort, or a repair
+            // stage is picked (the stage chips clear status) — isRepairView's rule (repairs.ts).
+            {
+              label: "Repairs",
+              href: "/inventory?status=DEFECTIVE&sort=defectiveSince",
+              count: "itDefective",
+              match: [{ status: "DEFECTIVE" }, { stage: REPAIR_STAGES }],
+            },
+            { label: "Missing", href: "/inventory?status=MISSING", count: "itMissing" },
+            // The one Register flow (Phase 30): the /inventory/register PATH_RULE's roles, minus purchasing,
+            // who registers from its own workspace.
+            { label: "Register assets", href: "/inventory/register", roles: ["admin", "it_staff"] },
+          ],
+        },
+        {
+          label: "Employees",
+          href: "/employees",
+          icon: "employee",
+          views: [
+            { label: "Everyone", href: "/employees" },
+            { label: "Client staff", href: "/employees?kind=CLIENT" },
+            { label: "Leaving", href: "/employees?employment=OFFBOARDING", count: "leaving" },
+            { label: "Policy gaps", href: "/employees?gaps=1" },
+          ],
+        },
+        { label: "Worklist", href: "/inventory/work", icon: "worklist", badge: ["worklist"] },
+        {
+          label: "Approvals",
+          href: "/approvals",
+          icon: "approval",
+          // Spec §4.3: purchase reviews waiting for IT stay visible while Approvals is closed.
+          badge: ["approvals", "purchaseReviews"],
+          views: [
+            { label: "Open", href: "/approvals", count: "approvals" },
+            { label: "Mine", href: "/approvals?tab=mine" },
+            // The `roles` key is the only thing keeping this out of a viewer's sidebar: every IT-workspace role
+            // passes the /purchases path gate.
+            {
+              label: "Purchase reviews",
+              href: "/purchases?state=SUBMITTED",
+              count: "purchaseReviews",
+              roles: ["admin", "it_staff"],
+            },
+            { label: "Closed", href: "/approvals?tab=closed" },
+          ],
+        },
       ],
     },
     {
-      heading: "People lifecycle",
+      heading: "people",
       items: [
-        { label: "Offboarding", href: "/offboarding" },
-        { label: "Equipment policies", href: "/admin/equipment-policies" },
-        // Phase 38 (spec §3.1): what each group holds and who is missing something (peso amounts for Admin and Finance only).
-        { label: "Equipment by client", href: "/equipment-by-client" },
-        { label: "Reservations", href: "/reservations" },
+        {
+          label: "Offboarding",
+          href: "/offboarding",
+          icon: "offboarding",
+          views: [
+            { label: "All", href: "/offboarding" },
+            { label: "Overdue", href: "/offboarding?due=overdue" },
+            { label: "Complete", href: "/offboarding?progress=complete" },
+          ],
+        },
+        {
+          label: "Reservations",
+          href: "/reservations",
+          icon: "reservations",
+          views: [
+            { label: "Active", href: "/reservations" },
+            { label: "Fulfilled", href: "/reservations?state=FULFILLED" },
+            { label: "Closed", href: "/reservations?state=CLOSED" },
+          ],
+        },
+        REPORTS,
       ],
     },
     {
-      heading: "Records & admin",
+      heading: "records",
       items: [
-        { label: "Asset categories", href: "/admin/asset-categories", roles: ["admin", "it_staff"] },
-        { label: "Asset types", href: "/admin/asset-types", roles: ["admin", "it_staff"] },
-        { label: "Departments & clients", href: "/admin/departments", roles: ["admin", "it_staff"] },
-      ],
-    },
-    {
-      heading: "Activity logs",
-      items: [
-        { label: "Inventory activity", href: "/inventory/activity" },
-        { label: "Employee activity", href: "/employees/activity" },
+        {
+          label: "Activity",
+          icon: "activity",
+          views: [
+            { label: "Inventory activity", href: "/inventory/activity" },
+            { label: "Employee activity", href: "/employees/activity" },
+            { label: "Audit log", href: "/audit" },
+          ],
+        },
+        {
+          // A viewer sees only Equipment policies, so their Setup is a plain link straight to it.
+          label: "Setup",
+          icon: "setup",
+          views: [
+            { label: "Asset categories", href: "/admin/asset-categories", roles: ["admin", "it_staff"] },
+            { label: "Asset types", href: "/admin/asset-types", roles: ["admin", "it_staff"] },
+            { label: "Departments & clients", href: "/admin/departments", roles: ["admin", "it_staff"] },
+            { label: "Equipment policies", href: "/admin/equipment-policies" },
+          ],
+        },
       ],
     },
   ],
   purchasing: [
-    { heading: "Overview", items: [{ label: "Home", href: "/" }] },
     {
-      heading: "Procurement",
+      heading: "work",
       items: [
-        { label: "All requests", href: "/purchases" },
-        { label: "Register purchase", href: "/purchases/new" },
-        { label: "Activity log", href: "/purchases/activity" },
+        HOME,
+        {
+          label: "Requests",
+          href: "/purchases",
+          icon: "requests",
+          views: [
+            { label: "All", href: "/purchases" },
+            { label: "My drafts", href: "/purchases?state=DRAFT", count: "prDraft" },
+            // Labels match PURCHASE_TABS (purchases-list.ts), asserted in workspaces.test.ts.
+            { label: "Awaiting IT", href: "/purchases?state=SUBMITTED", count: "prSubmitted" },
+            { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED", count: "prItReviewed" },
+            { label: "Completed", href: "/purchases?state=COMPLETED" },
+            { label: "Register purchase", href: "/purchases/new" },
+          ],
+        },
+        {
+          label: "Suppliers",
+          href: "/purchases/suppliers",
+          icon: "suppliers",
+          views: [
+            { label: "All suppliers", href: "/purchases/suppliers" },
+            { label: "New supplier", href: "/purchases/suppliers/new", roles: ["admin", "purchasing_staff"] },
+            { label: "Import suppliers", href: "/purchases/suppliers/import", roles: ["admin", "purchasing_staff"] },
+          ],
+        },
+        {
+          // Phase 19/22: the read surfaces (Items, Stocktakes, Reports) carry no `roles`, matching the general
+          // /stock PATH_RULE; the write surfaces match the Purchasing-only PATH_RULEs.
+          label: "Stock",
+          href: "/stock",
+          icon: "stock",
+          views: [
+            { label: "Items", href: "/stock" },
+            { label: "Receive stock", href: "/stock/receive", roles: ["admin", "purchasing_staff"] },
+            { label: "Issue stock", href: "/stock/issue", roles: ["admin", "purchasing_staff"] },
+            { label: "Stocktakes", href: "/stock/stocktakes" },
+            { label: "Reports", href: "/stock/reports" },
+            { label: "Import items", href: "/stock/import", roles: ["admin", "purchasing_staff"] },
+          ],
+        },
+        {
+          // Phase 30 (plan P-7): Purchasing's list opens on its own class, so the IT list names its class.
+          label: "Assets",
+          href: "/inventory?cls=PURCHASING",
+          icon: "inventory",
+          views: [
+            { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
+            { label: "IT inventory", href: "/inventory?cls=IT" },
+            { label: "Register assets", href: "/inventory/register", roles: ["admin", "purchasing_staff"] },
+          ],
+        },
+        // Phase 14: Purchasing approves lifecycle changes on its own class and reads the directory.
+        { label: "Approvals", href: "/approvals", icon: "approval", badge: ["approvals"] },
+        { label: "Employees", href: "/employees", icon: "employee" },
       ],
     },
     {
-      heading: "Suppliers",
+      heading: "records",
       items: [
-        { label: "All suppliers", href: "/purchases/suppliers" },
-        { label: "New supplier", href: "/purchases/suppliers/new", roles: ["admin", "purchasing_staff"] },
-        { label: "Import suppliers", href: "/purchases/suppliers/import", roles: ["admin", "purchasing_staff"] },
+        { label: "Activity", href: "/purchases/activity", icon: "activity" },
+        {
+          // Phase 14: categories and types of Purchasing's own class, never departments.
+          label: "Setup",
+          icon: "setup",
+          views: [
+            { label: "Asset categories", href: "/admin/asset-categories" },
+            { label: "Asset types", href: "/admin/asset-types" },
+            { label: "Stock categories", href: "/stock/categories", roles: ["admin", "purchasing_staff"] },
+          ],
+        },
       ],
     },
-    {
-      heading: "Stock",
-      items: [
-        { label: "Items", href: "/stock" },
-        { label: "Receive stock", href: "/stock/receive", roles: ["admin", "purchasing_staff"] },
-        { label: "Issue stock", href: "/stock/issue", roles: ["admin", "purchasing_staff"] },
-        { label: "Stocktakes", href: "/stock/stocktakes" },
-        { label: "Reports", href: "/stock/reports" },
-        { label: "Stock categories", href: "/stock/categories", roles: ["admin", "purchasing_staff"] },
-        { label: "Import items", href: "/stock/import", roles: ["admin", "purchasing_staff"] },
-      ],
-    },
-    {
-      heading: "By status",
-      items: [
-        { label: "My drafts", href: "/purchases?state=DRAFT" },
-        { label: "Awaiting IT", href: "/purchases?state=SUBMITTED" },
-        { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED" },
-        { label: "Completed", href: "/purchases?state=COMPLETED" },
-      ],
-    },
-    {
-      heading: "Assets",
-      items: [
-        { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
-        { label: "Register assets", href: "/inventory/register", roles: ["admin", "purchasing_staff"] },
-        { label: "Approvals", href: "/approvals", badge: "approvals" },
-        { label: "Employees", href: "/employees" },
-      ],
-    },
-    {
-      heading: "Records",
-      items: [
-        { label: "Asset categories", href: "/admin/asset-categories" },
-        { label: "Asset types", href: "/admin/asset-types" },
-      ],
-    },
-    // Phase 30 (plan P-7): Purchasing's list opens on its own class, so the IT list names its class.
-    { heading: "Reference", items: [{ label: "IT inventory", href: "/inventory?cls=IT" }] },
   ],
   finance: [
-    { heading: "Overview", items: [{ label: "Home", href: "/" }] },
     {
-      heading: "Assets & depreciation",
+      heading: "work",
       items: [
-        { label: "Assets", href: "/finance/assets" },
-        { label: "Depreciation", href: "/finance/depreciation" },
-        { label: "Equipment by client", href: "/equipment-by-client" },
-        { label: "Activity log", href: "/finance/activity" },
+        HOME,
+        { label: "Assets", href: "/finance/assets", icon: "inventory" },
+        { label: "Depreciation", href: "/finance/depreciation", icon: "depreciation" },
+        { label: "Approvals", href: "/approvals", icon: "approval", badge: ["approvals"] },
+        {
+          label: "Purchases",
+          href: "/purchases",
+          icon: "requests",
+          badge: ["prItReviewed"],
+          views: [
+            { label: "All purchases", href: "/purchases" },
+            { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED", count: "prItReviewed" },
+            { label: "Approved", href: "/purchases?state=COMPLETED" },
+            { label: "Cancelled", href: "/purchases?state=CANCELLED" },
+          ],
+        },
+        { label: "Suppliers", href: "/purchases/suppliers", icon: "suppliers" },
+        { label: "Stock", href: "/stock", icon: "stock" },
       ],
     },
-    { heading: "Approvals & spend", items: [{ label: "PR approvals", href: "/approvals" }] },
-    {
-      heading: "By status",
-      items: [
-        { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED" },
-        { label: "Approved", href: "/purchases?state=COMPLETED" },
-        { label: "Cancelled", href: "/purchases?state=CANCELLED" },
-        { label: "All purchases", href: "/purchases" },
-        { label: "Suppliers", href: "/purchases/suppliers" },
-        { label: "Stock", href: "/stock" },
-      ],
-    },
+    { heading: "reports", items: [REPORTS] },
+    { heading: "records", items: [{ label: "Activity", href: "/finance/activity", icon: "activity" }] },
   ],
   admin: [
-    { heading: "Overview", items: [{ label: "Home", href: "/" }] },
-    { heading: "Identity & access", items: [{ label: "Users & roles", href: "/admin/users" }] },
+    { heading: "start", items: [HOME] },
+    { heading: "access", items: [{ label: "Users & roles", href: "/admin/users", icon: "users" }] },
     {
-      heading: "Integrations & flags",
+      heading: "integrations",
       items: [
-        { label: "Webhooks", href: "/admin/webhooks" },
-        { label: "Feature flags", href: "/admin/flags" },
+        { label: "Webhooks", href: "/admin/webhooks", icon: "webhooks" },
+        { label: "Feature flags", href: "/admin/flags", icon: "flags" },
       ],
     },
   ],
 };
+
+const visibleTo = (role: Role) => (x: { roles?: Role[] }) => !x.roles || x.roles.includes(role);
+
+/**
+ * What one role sees of a workspace's nav (spec §3.5):
+ * 1. links and views the role can't see are dropped;
+ * 2. a link that had views and has none left is dropped, even with an href of its own;
+ * 3. a link with no href of its own points at its first visible view;
+ * 4. with one visible view or none, the link has no view list (one view: the link points straight at it);
+ * 5. empty groups are dropped.
+ * A badge key that some view of the link counts is kept only while a visible view still counts it (ruling R1),
+ * so a viewer's IT Approvals badge never sums purchase reviews they cannot open.
+ */
+export function filterSectionsForRole(sections: NavSection[], role: Role): VisibleSection[] {
+  const visible = visibleTo(role);
+  return sections
+    .map((section) => ({
+      heading: section.heading,
+      items: section.items.filter(visible).flatMap((item): VisibleItem[] => {
+        const views = (item.views ?? []).filter(visible);
+        // Spec §3.5: a link with views is visible only while at least one of its views is.
+        if (item.views?.length && views.length === 0) return [];
+        const href = views.length === 1 ? views[0].href : (item.href ?? views[0]?.href);
+        if (!href) return [];
+        const countedByAnyView = new Set((item.views ?? []).map((v) => v.count));
+        const countedByVisibleView = new Set(views.map((v) => v.count));
+        const badge = (item.badge ?? []).filter((k) => !countedByAnyView.has(k) || countedByVisibleView.has(k));
+        const visibleItem: VisibleItem = { label: item.label, href, icon: item.icon, badge, views: views.length > 1 ? views : [] };
+        if (views.length === 1) visibleItem.viewLabel = views[0].label;
+        return [visibleItem];
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
+}
 
 export function resolveWorkspace(role: Role, cookie: string | undefined): WorkspaceId {
   const allowed = ROLE_WORKSPACES[role];
@@ -305,48 +508,4 @@ export function pathAllowedForRole(pathname: string, role: Role): boolean {
   if (rule.roles && !rule.roles.includes(role)) return false;
   const mine = ROLE_WORKSPACES[role];
   return rule.workspaces.some((w) => mine.includes(w));
-}
-
-// Per-pathname cache of the query-param keys some sibling WORKSPACE_NAV item
-// on that same path declares (e.g. /inventory -> {"cls"}, /purchases ->
-// {"state"}). Built lazily and memoized — navIsActive runs once per nav item
-// per render, and the nav definition never changes at runtime.
-const ownedParamsByPath = new Map<string, ReadonlySet<string>>();
-
-function ownedParamsFor(pathname: string): ReadonlySet<string> {
-  const cached = ownedParamsByPath.get(pathname);
-  if (cached) return cached;
-  const owned = new Set<string>();
-  for (const sections of Object.values(WORKSPACE_NAV)) {
-    for (const section of sections) {
-      for (const item of section.items) {
-        const [itemPath, itemQuery] = item.href.split("?");
-        if (itemPath !== pathname || !itemQuery) continue;
-        for (const key of new URLSearchParams(itemQuery).keys()) owned.add(key);
-      }
-    }
-  }
-  ownedParamsByPath.set(pathname, owned);
-  return owned;
-}
-
-/**
- * Saved-filter links (href carries a query) are active only when every one
- * of their params matches the URL. A bare list link (no query of its own)
- * yields only to a sibling's own params — never to a page-owned param (page,
- * q, sort, a status facet, ...) that no sibling nav item on this path
- * declares. The owned set is derived from WORKSPACE_NAV itself (today:
- * {state} for /purchases, {cls} for /inventory) so it cannot drift from the
- * nav out from under this rule.
- */
-export function navIsActive(href: string, pathname: string, search: URLSearchParams): boolean {
-  const [hrefPath, hrefQuery] = href.split("?");
-  if (pathname !== hrefPath) return false;
-  if (hrefQuery) {
-    const wanted = new URLSearchParams(hrefQuery);
-    for (const [k, v] of wanted) if (search.get(k) !== v) return false;
-    return true;
-  }
-  for (const key of ownedParamsFor(pathname)) if (search.has(key)) return false;
-  return true;
 }

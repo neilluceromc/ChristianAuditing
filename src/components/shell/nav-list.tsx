@@ -1,101 +1,67 @@
 "use client";
 
-import Link from "next/link";
+import { Suspense, useEffect, useRef } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { cn } from "@/lib/cn";
-import { navIsActive, type NavSection } from "@/lib/workspaces";
+import type { AssetClass } from "@prisma/client";
+import type { NavBadges } from "@/lib/nav-badges";
+import { currentNav } from "@/lib/nav-match";
+import type { VisibleSection } from "@/lib/workspaces";
+import { NavTree } from "./nav-tree";
 
-export interface ApprovalsBadge {
-  open: number;
-  overdue: number;
+interface NavListProps {
+  sections: VisibleSection[];
+  badges: NavBadges;
+  /** the viewer's default asset class: `/inventory` drops `cls` from its URLs when it is this (spec §4.2) */
+  defaultCls: AssetClass;
+  /** the mobile drawer closes itself on navigation */
+  onNavigate?: () => void;
 }
 
-/** Every nav count the shell carries (the Worklist count is 0 for roles without one). */
-export interface NavBadges {
-  approvals: ApprovalsBadge;
-  worklist: number;
-  /** Phase 40 §6: purchase requests waiting for IT's review (0 for roles without the item) */
-  purchaseReviews: number;
+/**
+ * Phase 42 spec §4.1 / §4.2: the nav tree for the current URL. After mount, and whenever the current link or view
+ * changes, the current entry is scrolled into the nav's visible part (`block: "nearest"`, no animation). The
+ * sidebar's own scroll region is the nearest scroller; the sticky column keeps it on screen, so the window stays.
+ */
+export function NavList(props: NavListProps) {
+  // useSearchParams needs a Suspense boundary wherever a page could prerender; until the params are known, the
+  // tree reads the path alone.
+  return (
+    <Suspense fallback={<PathOnlyNav {...props} />}>
+      <CurrentNav {...props} />
+    </Suspense>
+  );
 }
 
-export function NavList({
+function CurrentNav(props: NavListProps) {
+  const search = useSearchParams();
+  return <ScrolledNav {...props} search={search} />;
+}
+
+function PathOnlyNav(props: NavListProps) {
+  return <ScrolledNav {...props} search={null} />;
+}
+
+function ScrolledNav({
   sections,
   badges,
+  defaultCls,
   onNavigate,
-}: {
-  sections: NavSection[];
-  badges: NavBadges;
-  /** mobile drawer closes itself on navigation */
-  onNavigate?: () => void;
-}) {
+  search,
+}: NavListProps & { search: URLSearchParams | null }) {
   const pathname = usePathname();
-  const search = useSearchParams();
-  const badge = badges.approvals;
+  const current = currentNav(sections, pathname, new URLSearchParams(search?.toString()), defaultCls);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const nav = ref.current?.querySelector('nav[aria-label="Workspace"]');
+    // The current page's entry; on a page under an open link that no view matches (a record), the link itself.
+    (nav?.querySelector('[aria-current="page"]') ?? nav?.querySelector("[data-nav-current]"))
+      ?.scrollIntoView({ block: "nearest" });
+  }, [current.item, current.view]);
+
   return (
-    <nav aria-label="Workspace" className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4">
-      {sections.map((section) => (
-        <div key={section.heading} className="flex flex-col gap-0.5">
-          <h3 className="px-2.5 pb-1 font-mono text-[9.5px] font-medium uppercase tracking-[0.08em] text-fg-muted">
-            {section.heading}
-          </h3>
-          {section.items.map((item) => {
-            const active = navIsActive(item.href, pathname, search);
-            return (
-              <Link
-                key={item.href + item.label}
-                href={item.href}
-                onClick={onNavigate}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center justify-between rounded-(--radius-btn) px-2.5 py-[7px] text-[12.5px]",
-                  "transition-colors duration-(--dur-1)",
-                  active
-                    ? "bg-accent-tint text-accent shadow-[inset_2px_0_0_var(--accent)]"
-                    : "text-fg-secondary hover:bg-surface-subtle hover:text-fg",
-                )}
-              >
-                {item.label}
-                {item.badge === "approvals" && badge.open > 0 && (
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-(--radius-ctl) border px-1.5 font-mono text-[10px]",
-                      badge.overdue > 0
-                        ? "border-[var(--st-fault-border)] bg-[var(--st-fault-bg)] text-[var(--st-fault-text)]"
-                        : "border-border bg-border-faint text-fg-secondary",
-                    )}
-                    aria-label={`${badge.open} open approvals${badge.overdue > 0 ? ", some past SLA" : ""}`}
-                  >
-                    {badge.overdue > 0 && (
-                      <span
-                        aria-hidden
-                        className="size-[5px] rounded-full bg-[var(--st-fault-dot)]"
-                        style={{ animation: "pulse 1.9s ease-in-out infinite" }}
-                      />
-                    )}
-                    {badge.open}
-                  </span>
-                )}
-                {item.badge === "worklist" && badges.worklist > 0 && (
-                  <span
-                    className="inline-flex items-center rounded-(--radius-ctl) border border-border bg-border-faint px-1.5 font-mono text-[10px] text-fg-secondary"
-                    aria-label={`${badges.worklist} waiting on the worklist`}
-                  >
-                    {badges.worklist}
-                  </span>
-                )}
-                {item.badge === "purchaseReviews" && badges.purchaseReviews > 0 && (
-                  <span
-                    className="inline-flex items-center rounded-(--radius-ctl) border border-border bg-border-faint px-1.5 font-mono text-[10px] text-fg-secondary"
-                    aria-label={`${badges.purchaseReviews} waiting for IT`}
-                  >
-                    {badges.purchaseReviews}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-        </div>
-      ))}
-    </nav>
+    <div ref={ref} className="contents">
+      <NavTree sections={sections} current={current} badges={badges} onNavigate={onNavigate} />
+    </div>
   );
 }

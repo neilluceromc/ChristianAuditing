@@ -1,26 +1,32 @@
 import { describe, expect, it } from "vitest";
 import type { Role } from "@prisma/client";
+import { PURCHASE_TABS } from "./purchases-list";
+import { REPAIR_STAGES } from "./repairs";
 import {
-  navIsActive,
+  filterSectionsForRole,
+  PAGE_DEFAULTS,
   pathAllowedForRole,
   resolveWorkspace,
   ROLE_LANDING,
   ROLE_WORKSPACES,
   WORKSPACE_NAV,
+  type NavSection,
   type WorkspaceId,
 } from "./workspaces";
 
-/**
- * Flattens one workspace's nav into the items a role actually sees — the
- * same `!i.roles || i.roles.includes(role)` predicate `filterSectionsForRole`
- * (`components/shell/sidebar.tsx`) and the command palette apply at render
- * time. Kept local to the test rather than imported from `sidebar.tsx`: that
- * module pulls in Prisma and the approvals query, which this lib-level suite
- * has no business depending on for a pure nav-shape assertion.
- */
-function navFor(role: Role, ws: WorkspaceId = "it") {
-  return WORKSPACE_NAV[ws].flatMap((s) => s.items).filter((i) => !i.roles || i.roles.includes(role));
-}
+const ROLES = Object.keys(ROLE_WORKSPACES) as Role[];
+
+/** The labels a role sees in one workspace, group by group (spec §3). */
+const labels = (ws: WorkspaceId, role: Role) =>
+  filterSectionsForRole(WORKSPACE_NAV[ws], role).map((s) => s.items.map((i) => i.label));
+/** One visible link, by label. */
+const item = (ws: WorkspaceId, role: Role, label: string) =>
+  filterSectionsForRole(WORKSPACE_NAV[ws], role).flatMap((s) => s.items).find((i) => i.label === label)!;
+/** Every href (links and views) a role can see in a workspace. */
+const hrefs = (ws: WorkspaceId, role: Role) =>
+  filterSectionsForRole(WORKSPACE_NAV[ws], role)
+    .flatMap((s) => s.items)
+    .flatMap((i) => [i.href, ...i.views.map((v) => v.href)]);
 
 describe("role → workspaces (brief §2)", () => {
   it("matches the brief's table", () => {
@@ -249,156 +255,244 @@ describe("pathAllowedForRole", () => {
   });
 });
 
-describe("navIsActive", () => {
-  const q = (s: string) => new URLSearchParams(s);
-  it("plain link matches its exact path with no state param", () => {
-    expect(navIsActive("/inventory", "/inventory", q(""))).toBe(true);
-    expect(navIsActive("/inventory", "/inventory/abc", q(""))).toBe(false);
-    expect(navIsActive("/", "/", q(""))).toBe(true);
-    expect(navIsActive("/", "/inventory", q(""))).toBe(false);
+describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current one)", () => {
+  it("IT shows ten links in three groups", () => {
+    expect(labels("it", "it_staff")).toEqual([
+      ["Home", "Inventory", "Employees", "Worklist", "Approvals"],
+      ["Offboarding", "Reservations", "Reports"],
+      ["Activity", "Setup"],
+    ]);
   });
-  it("saved-filter link is active only when its params match", () => {
-    expect(navIsActive("/purchases?state=DRAFT", "/purchases", q("state=DRAFT"))).toBe(true);
-    expect(navIsActive("/purchases?state=DRAFT", "/purchases", q("state=SUBMITTED"))).toBe(false);
-    expect(navIsActive("/purchases?state=DRAFT", "/purchases", q(""))).toBe(false);
+  it("Purchasing, Finance and Admin groups", () => {
+    expect(labels("purchasing", "purchasing_staff")).toEqual([
+      ["Home", "Requests", "Suppliers", "Stock", "Assets", "Approvals", "Employees"],
+      ["Activity", "Setup"],
+    ]);
+    expect(labels("finance", "finance_staff")).toEqual([
+      ["Home", "Assets", "Depreciation", "Approvals", "Purchases", "Suppliers", "Stock"],
+      ["Reports"],
+      ["Activity"],
+    ]);
+    expect(labels("admin", "admin")).toEqual([["Home"], ["Users & roles"], ["Webhooks", "Feature flags"]]);
   });
-  it("the bare list link yields to an active saved filter", () => {
-    expect(navIsActive("/purchases", "/purchases", q("state=DRAFT"))).toBe(false);
-    expect(navIsActive("/purchases", "/purchases", q(""))).toBe(true);
-    // Same yield, for the /inventory + ?cls=PURCHASING pair (Task 7 fix).
-    expect(navIsActive("/inventory", "/inventory", q("cls=PURCHASING"))).toBe(false);
-    expect(navIsActive("/inventory?cls=PURCHASING", "/inventory", q("cls=PURCHASING"))).toBe(true);
+  it("an admin sees the same links as each workspace's own staff", () => {
+    expect(labels("it", "admin")).toEqual(labels("it", "it_staff"));
+    expect(labels("purchasing", "admin")).toEqual(labels("purchasing", "purchasing_staff"));
+    expect(labels("finance", "admin")).toEqual(labels("finance", "finance_staff"));
   });
-  it("the bare list link stays active under a page-owned param no sibling declares", () => {
-    // /inventory's only sibling-declared key is `cls` (?cls=PURCHASING) — paging,
-    // searching, sorting and status faceting are page-owned and must not
-    // de-activate the bare "Inventory" item.
-    expect(navIsActive("/inventory", "/inventory", q("page=2"))).toBe(true);
-    expect(navIsActive("/inventory", "/inventory", q("q=dell"))).toBe(true);
-    expect(navIsActive("/inventory", "/inventory", q("status=DEFECTIVE"))).toBe(true);
-    // /purchases's only sibling-declared key is `state` — paging is page-owned.
-    expect(navIsActive("/purchases", "/purchases", q("page=3"))).toBe(true);
-    // `sort` and `purchaseYear` are page-owned too (the docblock names them).
-    expect(navIsActive("/inventory", "/inventory", q("sort=tag:desc"))).toBe(true);
-    expect(navIsActive("/inventory", "/inventory", q("purchaseYear=2024"))).toBe(true);
-    // The with-query branch is subset-match ON PURPOSE: paging inside the
-    // Purchasing view keeps the Purchasing item lit, and only it. Tightening
-    // it to an exact match would kill this highlight with a green suite.
-    expect(navIsActive("/inventory?cls=PURCHASING", "/inventory", q("cls=PURCHASING&page=2"))).toBe(true);
-    expect(navIsActive("/inventory", "/inventory", q("cls=PURCHASING&page=2"))).toBe(false);
-  });
-  it("a bare item is unaffected by a query on a route with no sibling saved filters at all", () => {
-    // No WORKSPACE_NAV item for /reservations carries a query, so `state`
-    // here is page-owned, not sibling-owned — the bare item must stay active.
-    expect(navIsActive("/reservations", "/reservations", q("state=ACTIVE"))).toBe(true);
-  });
-});
-
-describe("WORKSPACE_NAV shape", () => {
-  it("every workspace has an Overview → Home section first", () => {
+  it("every workspace starts with Home at /", () => {
     for (const ws of ["it", "purchasing", "finance", "admin"] as const) {
-      expect(WORKSPACE_NAV[ws][0].heading).toBe("Overview");
-      expect(WORKSPACE_NAV[ws][0].items[0]).toMatchObject({ label: "Home", href: "/" });
+      expect(filterSectionsForRole(WORKSPACE_NAV[ws], "admin")[0].items[0]).toMatchObject({
+        label: "Home", href: "/", icon: "home", views: [],
+      });
     }
   });
-  it("the IT Approvals item carries the badge marker", () => {
-    const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking");
-    expect(tracking?.items.find((i) => i.label === "Approvals")?.badge).toBe("approvals");
+  it("views are the spec §3 sets, in order", () => {
+    expect(item("it", "it_staff", "Inventory").views.map((v) => v.label)).toEqual(["All", "Spare", "Repairs", "Missing", "Register assets"]);
+    expect(item("it", "it_staff", "Approvals").views.map((v) => v.href)).toEqual(["/approvals", "/approvals?tab=mine", "/purchases?state=SUBMITTED", "/approvals?tab=closed"]);
+    expect(item("it", "it_staff", "Setup").href).toBe("/admin/asset-categories");
+    expect(item("purchasing", "purchasing_staff", "Requests").views.map((v) => v.label)).toEqual(["All", "My drafts", "Awaiting IT", "Awaiting finance", "Completed", "Register purchase"]);
+    expect(item("purchasing", "purchasing_staff", "Stock").views.map((v) => v.href)).toEqual(["/stock", "/stock/receive", "/stock/issue", "/stock/stocktakes", "/stock/reports", "/stock/import"]);
   });
-  it("Phase 40 §6: the IT Purchase reviews item carries its own count badge", () => {
-    const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking");
-    expect(tracking?.items.find((i) => i.label === "Purchase reviews")).toMatchObject({
-      href: "/purchases?state=SUBMITTED", badge: "purchaseReviews",
+  it("the rest of the IT views, hrefs verbatim", () => {
+    expect(item("it", "it_staff", "Inventory").views.map((v) => v.href)).toEqual([
+      "/inventory", "/inventory?status=SPARE", "/inventory?status=DEFECTIVE&sort=defectiveSince",
+      "/inventory?status=MISSING", "/inventory/register",
+    ]);
+    expect(item("it", "it_staff", "Employees").views.map((v) => [v.label, v.href])).toEqual([
+      ["Everyone", "/employees"], ["Client staff", "/employees?kind=CLIENT"],
+      ["Leaving", "/employees?employment=OFFBOARDING"], ["Policy gaps", "/employees?gaps=1"],
+    ]);
+    expect(item("it", "it_staff", "Offboarding").views.map((v) => v.href)).toEqual(["/offboarding", "/offboarding?due=overdue", "/offboarding?progress=complete"]);
+    expect(item("it", "it_staff", "Reservations").views.map((v) => [v.label, v.href])).toEqual([
+      ["Active", "/reservations"], ["Fulfilled", "/reservations?state=FULFILLED"], ["Closed", "/reservations?state=CLOSED"],
+    ]);
+    expect(item("it", "it_staff", "Reports")).toMatchObject({ href: "/equipment-by-client", icon: "reports" });
+    expect(item("it", "it_staff", "Reports").views.map((v) => [v.label, v.href])).toEqual([
+      ["By client", "/equipment-by-client"], ["Internal teams", "/equipment-by-client?tab=internal"],
+    ]);
+    expect(item("it", "it_staff", "Activity")).toMatchObject({ href: "/inventory/activity", icon: "activity" });
+    expect(item("it", "it_staff", "Activity").views.map((v) => [v.label, v.href])).toEqual([
+      ["Inventory activity", "/inventory/activity"], ["Employee activity", "/employees/activity"], ["Audit log", "/audit"],
+    ]);
+    expect(item("it", "it_staff", "Setup").views.map((v) => [v.label, v.href])).toEqual([
+      ["Asset categories", "/admin/asset-categories"], ["Asset types", "/admin/asset-types"],
+      ["Departments & clients", "/admin/departments"], ["Equipment policies", "/admin/equipment-policies"],
+    ]);
+    expect(item("it", "it_staff", "Worklist")).toMatchObject({ href: "/inventory/work", icon: "worklist", views: [] });
+  });
+  it("Repairs matches on status alone, so a re-sorted Repairs page stays Repairs (spec §4.2), or on any repair stage", () => {
+    const repairs = item("it", "it_staff", "Inventory").views.find((v) => v.label === "Repairs")!;
+    // …and so does a stage chip's URL, which clears status: the page is in repair mode either way (isRepairView).
+    expect(repairs.match).toEqual([{ status: "DEFECTIVE" }, { stage: REPAIR_STAGES }]);
+  });
+  it("counts sit on the spec §3 views", () => {
+    const counts = (ws: WorkspaceId, label: string) =>
+      Object.fromEntries(item(ws, "admin", label).views.filter((v) => v.count).map((v) => [v.label, v.count]));
+    expect(counts("it", "Inventory")).toEqual({ Spare: "itSpare", Repairs: "itDefective", Missing: "itMissing" });
+    expect(counts("it", "Employees")).toEqual({ Leaving: "leaving" });
+    expect(counts("it", "Approvals")).toEqual({ Open: "approvals", "Purchase reviews": "purchaseReviews" });
+    expect(counts("purchasing", "Requests")).toEqual({ "My drafts": "prDraft", "Awaiting IT": "prSubmitted", "Awaiting finance": "prItReviewed" });
+    expect(counts("finance", "Purchases")).toEqual({ "Awaiting finance": "prItReviewed" });
+  });
+  it("badges sit on the spec §3 links", () => {
+    expect(item("it", "it_staff", "Worklist").badge).toEqual(["worklist"]);
+    expect(item("it", "it_staff", "Approvals").badge).toEqual(["approvals", "purchaseReviews"]);
+    expect(item("purchasing", "purchasing_staff", "Approvals").badge).toEqual(["approvals"]);
+    expect(item("finance", "finance_staff", "Approvals").badge).toEqual(["approvals"]);
+    expect(item("finance", "finance_staff", "Purchases").badge).toEqual(["prItReviewed"]);
+    expect(item("it", "it_staff", "Inventory").badge).toEqual([]);
+  });
+  it("icons: Inventory and the Assets links reuse inventory, Employees employee, Approvals approval", () => {
+    expect(item("it", "it_staff", "Inventory").icon).toBe("inventory");
+    expect(item("purchasing", "purchasing_staff", "Assets").icon).toBe("inventory");
+    expect(item("finance", "finance_staff", "Assets").icon).toBe("inventory");
+    expect(item("it", "it_staff", "Employees").icon).toBe("employee");
+    expect(item("purchasing", "purchasing_staff", "Employees").icon).toBe("employee");
+    for (const ws of ["it", "purchasing", "finance"] as const) expect(item(ws, "admin", "Approvals").icon).toBe("approval");
+    expect(item("finance", "finance_staff", "Purchases").icon).toBe("requests");
+    expect(item("admin", "admin", "Feature flags").icon).toBe("flags");
+  });
+  it("Purchasing Assets points at its own class, with IT inventory one view away", () => {
+    expect(item("purchasing", "purchasing_staff", "Assets").href).toBe("/inventory?cls=PURCHASING");
+    expect(item("purchasing", "purchasing_staff", "Assets").views.map((v) => [v.label, v.href])).toEqual([
+      ["Purchasing assets", "/inventory?cls=PURCHASING"], ["IT inventory", "/inventory?cls=IT"], ["Register assets", "/inventory/register"],
+    ]);
+  });
+  it("Purchasing Suppliers and Setup; Finance Purchases and its plain links", () => {
+    expect(item("purchasing", "purchasing_staff", "Suppliers").views.map((v) => v.href)).toEqual([
+      "/purchases/suppliers", "/purchases/suppliers/new", "/purchases/suppliers/import",
+    ]);
+    expect(item("purchasing", "purchasing_staff", "Setup")).toMatchObject({ href: "/admin/asset-categories" });
+    expect(item("purchasing", "purchasing_staff", "Setup").views.map((v) => v.href)).toEqual([
+      "/admin/asset-categories", "/admin/asset-types", "/stock/categories",
+    ]);
+    expect(item("finance", "finance_staff", "Purchases").views.map((v) => [v.label, v.href])).toEqual([
+      ["All purchases", "/purchases"], ["Awaiting finance", "/purchases?state=IT_REVIEWED"],
+      ["Approved", "/purchases?state=COMPLETED"], ["Cancelled", "/purchases?state=CANCELLED"],
+    ]);
+    expect(item("finance", "finance_staff", "Reports").views).toEqual(item("it", "it_staff", "Reports").views);
+    for (const [label, href] of [
+      ["Assets", "/finance/assets"], ["Depreciation", "/finance/depreciation"], ["Approvals", "/approvals"],
+      ["Suppliers", "/purchases/suppliers"], ["Stock", "/stock"], ["Activity", "/finance/activity"],
+    ]) {
+      expect(item("finance", "finance_staff", label), label).toMatchObject({ href, views: [] });
+    }
+  });
+  it("a viewer: no write views, Setup goes straight to Equipment policies", () => {
+    expect(item("it", "viewer", "Inventory").views.map((v) => v.label)).toEqual(["All", "Spare", "Repairs", "Missing"]);
+    expect(item("it", "viewer", "Approvals").views.map((v) => v.label)).toEqual(["Open", "Mine", "Closed"]);
+    const setup = item("it", "viewer", "Setup");
+    expect(setup.href).toBe("/admin/equipment-policies");
+    expect(setup.views).toEqual([]);
+  });
+  it("a viewer keeps all ten IT links, Worklist and Reports included", () => {
+    expect(labels("it", "viewer")).toEqual(labels("it", "it_staff"));
+  });
+  it("Purchase reviews and Register assets stay reviewers' and registrars' only", () => {
+    for (const role of ["admin", "it_staff"] as const) {
+      expect(hrefs("it", role)).toContain("/purchases?state=SUBMITTED");
+      expect(hrefs("it", role)).toContain("/inventory/register");
+    }
+    expect(hrefs("it", "viewer")).not.toContain("/purchases?state=SUBMITTED");
+    expect(hrefs("it", "viewer")).not.toContain("/inventory/register");
+  });
+  it("every IT-workspace role and Finance can open Equipment by client (Phase 38)", () => {
+    for (const r of ["admin", "it_staff", "viewer"] as const) expect(hrefs("it", r)).toContain("/equipment-by-client");
+    expect(hrefs("finance", "finance_staff")).toContain("/equipment-by-client");
+  });
+  it("single-view links collapse: Purchasing Activity is a plain link", () => {
+    expect(item("purchasing", "purchasing_staff", "Activity")).toMatchObject({ href: "/purchases/activity", views: [] });
+  });
+  it("every href a role can see passes pathAllowedForRole", () => {
+    for (const role of ROLES) for (const ws of ROLE_WORKSPACES[role])
+      for (const s of filterSectionsForRole(WORKSPACE_NAV[ws], role)) for (const i of s.items)
+        for (const href of [i.href, ...i.views.map((v) => v.href)])
+          expect(pathAllowedForRole(href.split("?")[0], role), `${role} ${ws} ${href}`).toBe(true);
+  });
+  it("labels are unique within a workspace, and view labels within their link", () => {
+    for (const role of ROLES) for (const ws of ROLE_WORKSPACES[role]) {
+      const items = filterSectionsForRole(WORKSPACE_NAV[ws], role).flatMap((s) => s.items);
+      expect(new Set(items.map((i) => i.label)).size, `${role} ${ws}`).toBe(items.length);
+      for (const i of items) expect(new Set(i.views.map((v) => v.label)).size, `${ws} ${i.label}`).toBe(i.views.length);
+    }
+  });
+  it("PURCHASE_TABS still match the Requests views", () => {
+    const views = item("purchasing", "purchasing_staff", "Requests").views;
+    for (const id of ["SUBMITTED", "IT_REVIEWED"] as const) {
+      const tab = PURCHASE_TABS.find((t) => t.id === id)!;
+      expect(views.find((v) => v.href === tab.href)?.label).toBe(tab.label);
+    }
+  });
+  it("PAGE_DEFAULTS names each page's default value (spec §4.2)", () => {
+    expect(PAGE_DEFAULTS).toEqual({
+      "/approvals": { tab: "open" },
+      "/reservations": { state: "ACTIVE" },
+      "/equipment-by-client": { tab: "client" },
     });
   });
-  it("Phase 14: the Purchasing Assets section carries Approvals (with badge) and Employees", () => {
-    const assets = WORKSPACE_NAV.purchasing.find((s) => s.heading === "Assets");
-    expect(assets?.items.find((i) => i.label === "Approvals")?.badge).toBe("approvals");
-    expect(assets?.items.map((i) => i.href)).toContain("/employees");
+});
+
+describe("filterSectionsForRole (spec §3.5)", () => {
+  const NAV: NavSection[] = [
+    {
+      heading: "one",
+      items: [
+        { label: "Plain", href: "/a", icon: "home" },
+        { label: "Admins only", href: "/b", icon: "home", roles: ["admin"] },
+        {
+          label: "Hub", icon: "setup",
+          views: [
+            { label: "First", href: "/c/1", roles: ["admin"] },
+            { label: "Second", href: "/c/2" },
+            { label: "Third", href: "/c/3" },
+          ],
+        },
+        { label: "Empty hub", icon: "setup", views: [{ label: "Only", href: "/d", roles: ["admin"] }] },
+        {
+          label: "Own href, hidden views", href: "/f", icon: "home",
+          views: [{ label: "F1", href: "/f", roles: ["admin"] }, { label: "F2", href: "/f?x=1", roles: ["admin"] }],
+        },
+      ],
+    },
+    { heading: "two", items: [{ label: "Hidden", href: "/e", icon: "home", roles: ["admin"] }] },
+  ];
+  it("drops links and views the role can't see, then empty links and groups", () => {
+    const out = filterSectionsForRole(NAV, "viewer");
+    expect(out.map((s) => s.heading)).toEqual(["one"]);
+    expect(out[0].items.map((i) => i.label)).toEqual(["Plain", "Hub"]);
   });
-  it("Phase 14: the Purchasing Records section offers categories and types, never departments", () => {
-    const records = WORKSPACE_NAV.purchasing.find((s) => s.heading === "Records");
-    expect(records?.items.map((i) => i.href)).toEqual(["/admin/asset-categories", "/admin/asset-types"]);
+  it("a link with views is visible only while one of its views is, even with an href of its own", () => {
+    expect(filterSectionsForRole(NAV, "viewer")[0].items.map((i) => i.label)).not.toContain("Own href, hidden views");
+    expect(filterSectionsForRole(NAV, "admin")[0].items[4]).toMatchObject({ label: "Own href, hidden views", href: "/f" });
   });
-  it("Records & admin items are role-restricted", () => {
-    const records = WORKSPACE_NAV.it.find((s) => s.heading === "Records & admin");
-    for (const item of records?.items ?? []) {
-      expect(item.roles).toEqual(["admin", "it_staff"]);
-    }
+  it("a link with no href points at its first visible view", () => {
+    expect(filterSectionsForRole(NAV, "admin")[0].items[2].href).toBe("/c/1");
+    expect(filterSectionsForRole(NAV, "viewer")[0].items[1].href).toBe("/c/2");
   });
-  // Phase 19: the Purchasing workspace gains a Stock section after Suppliers;
-  // the read-only items (Items, Stocktakes) carry no `roles` restriction,
-  // matching the general /stock PATH_RULE, while the write-surface items
-  // match the Purchasing-only PATH_RULEs above.
-  it("Phase 19: the Purchasing Stock section follows Suppliers and gates its write items", () => {
-    const headings = WORKSPACE_NAV.purchasing.map((s) => s.heading);
-    const suppliersIdx = headings.indexOf("Suppliers");
-    const stockIdx = headings.indexOf("Stock");
-    expect(stockIdx).toBeGreaterThan(-1);
-    expect(stockIdx).toBe(suppliersIdx + 1);
-    const stock = WORKSPACE_NAV.purchasing[stockIdx];
-    expect(stock.items.map((i) => i.href)).toEqual([
-      "/stock",
-      "/stock/receive",
-      "/stock/issue",
-      "/stock/stocktakes",
-      "/stock/reports",
-      "/stock/categories",
-      "/stock/import",
-    ]);
-    expect(stock.items.find((i) => i.href === "/stock")?.roles).toBeUndefined();
-    expect(stock.items.find((i) => i.href === "/stock/stocktakes")?.roles).toBeUndefined();
-    // Phase 22 (spec §6.5): Reports is read-only, like Items and Stocktakes —
-    // reachable by anyone in the Stock PATH_RULE, not just admin/purchasing_staff.
-    expect(stock.items.find((i) => i.href === "/stock/reports")?.roles).toBeUndefined();
-    for (const href of ["/stock/receive", "/stock/issue", "/stock/categories", "/stock/import"]) {
-      expect(stock.items.find((i) => i.href === href)?.roles).toEqual(["admin", "purchasing_staff"]);
-    }
+  it("one visible view collapses into a plain link to that view, which keeps the view's name", () => {
+    expect(filterSectionsForRole(NAV, "admin")[0].items[3]).toEqual({
+      label: "Empty hub", href: "/d", icon: "setup", badge: [], views: [], viewLabel: "Only",
+    });
+    // A link that keeps its views carries no viewLabel.
+    expect(filterSectionsForRole(NAV, "admin")[0].items.every((i) => i.views.length === 0 || !("viewLabel" in i))).toBe(true);
   });
-  it("Phase 19: the Finance By status section appends a Stock link", () => {
-    const byStatus = WORKSPACE_NAV.finance.find((s) => s.heading === "By status");
-    expect(byStatus?.items.at(-1)).toEqual({ label: "Stock", href: "/stock" });
+  it("never mutates the nav it is given", () => {
+    const before = JSON.stringify(NAV);
+    filterSectionsForRole(NAV, "viewer");
+    expect(JSON.stringify(NAV)).toBe(before);
+  });
+  it("trims a badge key that only a hidden view counts (ruling R1)", () => {
+    expect(item("it", "viewer", "Approvals").badge).toEqual(["approvals"]);
+    expect(item("it", "it_staff", "Approvals").badge).toEqual(["approvals", "purchaseReviews"]);
+    expect(item("it", "admin", "Approvals").badge).toEqual(["approvals", "purchaseReviews"]);
+  });
+  it("keeps a badge key no view counts (Worklist has no views)", () => {
+    expect(item("it", "viewer", "Worklist").badge).toEqual(["worklist"]);
   });
 });
 
-describe("IT workspace nav", () => {
-  it("carries a Purchase reviews entry pointing at the awaiting-IT filter", () => {
-    const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking")!;
-    expect(tracking.items.map((i) => i.href)).toContain("/purchases?state=SUBMITTED");
-  });
-
-  /**
-   * The `roles` key is the ONLY thing keeping this link out of a viewer's
-   * sidebar — every IT-workspace role now passes the path gate, so deleting it
-   * would hand viewers a working link to a reviewer's surface. Pin it.
-   */
-  it("restricts Purchase reviews to reviewers, not every IT-workspace role", () => {
-    const tracking = WORKSPACE_NAV.it.find((s) => s.heading === "Tracking")!;
-    const item = tracking.items.find((i) => i.href === "/purchases?state=SUBMITTED")!;
-    expect(item.roles).toEqual(["admin", "it_staff"]);
-    expect(item.roles).not.toContain("viewer");
-  });
-  it("highlights it only when the state param matches", () => {
-    expect(navIsActive("/purchases?state=SUBMITTED", "/purchases", new URLSearchParams("state=SUBMITTED"))).toBe(true);
-    expect(navIsActive("/purchases?state=SUBMITTED", "/purchases", new URLSearchParams("state=DRAFT"))).toBe(false);
-  });
-
-  // Task 13: the batch register page's own nav entry, same shape as Purchase
-  // reviews above — reachable for admin/it_staff, not for a viewer sharing
-  // the same IT workspace.
-  it("IT can reach the batch register page", () => {
-    expect(navFor("it_staff").some((i) => i.href === "/inventory/register")).toBe(true);
-  });
-  it("does not hand a viewer the batch register link", () => {
-    expect(navFor("viewer").some((i) => i.href === "/inventory/register")).toBe(false);
-  });
-});
-
-describe("Phase 35 Finance nav", () => {
-  it("Finance nav: Assets & depreciation", () => {
-    const sec = WORKSPACE_NAV.finance.find((s) => s.heading === "Assets & depreciation");
-    expect(sec?.items.map((i) => i.label)).toEqual(["Assets", "Depreciation", "Equipment by client", "Activity log"]);
-  });
+describe("Phase 35 Finance paths", () => {
   it("/finance/depreciation and /finance/assets/<id> are Finance-only", () => {
     for (const p of ["/finance/depreciation", "/finance/assets/abc"]) {
       expect(pathAllowedForRole(p, "finance_staff")).toBe(true);
@@ -409,20 +503,6 @@ describe("Phase 35 Finance nav", () => {
 });
 
 describe("Phase 38 Equipment by client", () => {
-  it("IT People lifecycle lists it right after Equipment policies", () => {
-    const sec = WORKSPACE_NAV.it.find((s) => s.heading === "People lifecycle");
-    const labels = sec?.items.map((i) => i.label) ?? [];
-    expect(labels[labels.indexOf("Equipment policies") + 1]).toBe("Equipment by client");
-    expect(sec?.items.find((i) => i.label === "Equipment by client")?.href).toBe("/equipment-by-client");
-  });
-  it("Finance lists it right after Depreciation", () => {
-    const sec = WORKSPACE_NAV.finance.find((s) => s.heading === "Assets & depreciation");
-    expect(sec?.items.find((i) => i.label === "Equipment by client")?.href).toBe("/equipment-by-client");
-  });
-  it("every IT-workspace role and Finance see the link", () => {
-    for (const r of ["admin", "it_staff", "viewer"] as const) expect(navFor(r).some((i) => i.href === "/equipment-by-client")).toBe(true);
-    expect(navFor("finance_staff", "finance").some((i) => i.href === "/equipment-by-client")).toBe(true);
-  });
   it("the page and its export are readable by admin, IT, Finance and viewer, not Purchasing", () => {
     expect(pathAllowedForRole("/equipment-by-clients", "it_staff")).toBe(false);
     for (const p of ["/equipment-by-client", "/equipment-by-client/export"]) {

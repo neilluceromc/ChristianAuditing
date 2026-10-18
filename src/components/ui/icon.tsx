@@ -5,7 +5,9 @@ export type IconName =
   | "employee" | "approval" | "audit" | "search" | "filter" | "sla"
   | "alert" | "secret" | "export" | "add"
   | "workstation" | "mouse" | "hub" | "bag" | "other" | "scan"
-  | "keyboard" | "webcam" | "ups" | "license" | "menu";
+  | "keyboard" | "webcam" | "ups" | "license" | "menu"
+  | "home" | "worklist" | "offboarding" | "reservations" | "reports" | "activity" | "setup"
+  | "requests" | "suppliers" | "stock" | "depreciation" | "users" | "webhooks" | "flags" | "chevron";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   laptop: (<><rect x="3" y="4" width="12" height="8" /><line x1="1.5" y1="14.5" x2="16.5" y2="14.5" /></>),
@@ -37,6 +39,22 @@ const PATHS: Record<IconName, React.ReactNode> = {
   scan: (<><polyline points="2,6 2,2 6,2" /><polyline points="12,2 16,2 16,6" /><polyline points="16,12 16,16 12,16" /><polyline points="6,16 2,16 2,12" /><line x1="4.5" y1="9" x2="13.5" y2="9" /></>),
   // Phase 40 (spec §3): the phone top bar's menu button — three equal lines, not the filter funnel.
   menu: (<><line x1="3" y1="5" x2="15" y2="5" /><line x1="3" y1="9" x2="15" y2="9" /><line x1="3" y1="13" x2="15" y2="13" /></>),
+  // Phase 42 (spec §4.5): the sidebar's link icons, and the chevron (pointing right) on links with views.
+  home: (<><polyline points="2.5,8.5 9,3 15.5,8.5" /><polyline points="4.5,7 4.5,15 13.5,15 13.5,7" /><polyline points="7.5,15 7.5,10.5 10.5,10.5 10.5,15" /></>),
+  worklist: (<><polyline points="2.5,4.5 3.8,5.8 6,3.5" /><line x1="8.5" y1="4.5" x2="15.5" y2="4.5" /><polyline points="2.5,9 3.8,10.3 6,8" /><line x1="8.5" y1="9" x2="15.5" y2="9" /><line x1="3" y1="13.5" x2="5.5" y2="13.5" /><line x1="8.5" y1="13.5" x2="15.5" y2="13.5" /></>),
+  offboarding: (<><polyline points="10,3 3,3 3,15 10,15" /><line x1="7" y1="9" x2="16" y2="9" /><polyline points="13,6 16,9 13,12" /></>),
+  reservations: (<><rect x="2.5" y="3.5" width="13" height="12" /><line x1="2.5" y1="7" x2="15.5" y2="7" /><line x1="6" y1="2" x2="6" y2="5" /><line x1="12" y1="2" x2="12" y2="5" /><polyline points="6.5,11 8.3,12.8 11.5,9.5" /></>),
+  reports: (<><polyline points="2.5,2.5 2.5,15.5 15.5,15.5" /><line x1="6" y1="12.5" x2="6" y2="9" /><line x1="9.5" y1="12.5" x2="9.5" y2="5.5" /><line x1="13" y1="12.5" x2="13" y2="7.5" /></>),
+  activity: (<><polyline points="1.5,9 5,9 7,4 11,14 13,9 16.5,9" /></>),
+  setup: (<><circle cx="9" cy="9" r="2.5" /><circle cx="9" cy="9" r="5.5" /><line x1="9" y1="1.5" x2="9" y2="3.5" /><line x1="9" y1="14.5" x2="9" y2="16.5" /><line x1="1.5" y1="9" x2="3.5" y2="9" /><line x1="14.5" y1="9" x2="16.5" y2="9" /><line x1="12.9" y1="5.1" x2="14.3" y2="3.7" /><line x1="5.1" y1="5.1" x2="3.7" y2="3.7" /><line x1="12.9" y1="12.9" x2="14.3" y2="14.3" /><line x1="5.1" y1="12.9" x2="3.7" y2="14.3" /></>),
+  requests: (<><polyline points="11,2.5 4,2.5 4,15.5 14,15.5 14,5.5 11,2.5 11,5.5 14,5.5" /><line x1="6.5" y1="9" x2="11.5" y2="9" /><line x1="6.5" y1="12" x2="11.5" y2="12" /></>),
+  suppliers: (<><rect x="1.5" y="4.5" width="9" height="8" /><polyline points="10.5,7 14,7 16.5,10 16.5,12.5 10.5,12.5" /><circle cx="5" cy="14" r="1.5" /><circle cx="13" cy="14" r="1.5" /></>),
+  stock: (<><rect x="2.5" y="9.5" width="6" height="6" /><rect x="9.5" y="9.5" width="6" height="6" /><rect x="6" y="2.5" width="6" height="6" /></>),
+  depreciation: (<><polyline points="2.5,2.5 2.5,15.5 15.5,15.5" /><polyline points="5,5 8.5,9 11,8 15,12.5" /><polyline points="12.5,12.5 15,12.5 15,10" /></>),
+  users: (<><circle cx="7" cy="6" r="2.5" /><path d="M2 15 V13 a5 3.5 0 0 1 10 0 V15" /><path d="M11.5 3.8 a2.5 2.5 0 0 1 0 4.4" /><path d="M14 10.2 a4 3.5 0 0 1 2 2.8 V15" /></>),
+  webhooks: (<><line x1="7.5" y1="10.5" x2="10.5" y2="7.5" /><path d="M8.5 5 L10 3.5 a2.5 2.5 0 0 1 3.5 0 l1 1 a2.5 2.5 0 0 1 0 3.5 L13 9.5" /><path d="M9.5 13 L8 14.5 a2.5 2.5 0 0 1 -3.5 0 l-1 -1 a2.5 2.5 0 0 1 0 -3.5 L5 8.5" /></>),
+  flags: (<><line x1="4" y1="2" x2="4" y2="16" /><polyline points="4,3 14.5,3 12,6.5 14.5,10 4,10" /></>),
+  chevron: (<><polyline points="7,4 12,9 7,14" /></>),
 };
 
 export function Icon({

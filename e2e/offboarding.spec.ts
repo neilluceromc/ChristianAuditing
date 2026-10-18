@@ -278,7 +278,9 @@ test.describe.serial("the 4-step wizard", () => {
 
     await login(page, "admin@thebackroomop.com");
     await page.goto(`/inventory/${asset.id}`);
-    await expect(page.getByText("Missing", { exact: true }).first()).toBeVisible();
+    // Scoped to main: since Phase 42 the nav's Inventory link opens a "Missing" view on record pages too, and
+    // `.first()` would otherwise settle for it.
+    await expect(page.getByRole("main").getByText("Missing", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Dennis Ong")).toHaveCount(0);
   });
 });
@@ -345,7 +347,8 @@ test.describe("repairs — a saved view, not an enum", () => {
   test("the named URL adds Stage and Down; chips move between stages, including the one outside DEFECTIVE", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
-    await page.getByRole("link", { name: "Repairs" }).click();
+    // The toolbar's saved view (scoped: the Phase 42 nav has a "Repairs" view too).
+    await page.getByRole("main").getByRole("link", { name: "Repairs" }).click();
     await expect(page).toHaveURL(/status=DEFECTIVE&sort=defectiveSince/);
 
     await expect(page.getByRole("columnheader", { name: /Down/ })).toBeVisible();
@@ -390,7 +393,8 @@ test.describe("reservations", () => {
     // column (spec §5.2, plan P-12); the hint under the tabs states the same fact.
     await expect(page.getByText("Held spares still read Spare · place holds from a record or a profile", { exact: true })).toBeVisible();
 
-    await page.getByRole("link", { name: /Closed/ }).click();
+    // The page's own tab (scoped: the Phase 42 nav's Reservations link opens a "Closed" view too).
+    await page.getByRole("main").getByRole("link", { name: /Closed/ }).click();
     await expect(page).toHaveURL(/state=CLOSED/);
     // Scoped to the table, so no page copy outside it can ever match. The
     // Closed column keeps the lowercase "expired …" / "released …" beside the

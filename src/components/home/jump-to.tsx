@@ -1,7 +1,8 @@
 import Link from "next/link";
-import type { NavSection } from "@/lib/workspaces";
+import type { VisibleSection } from "@/lib/workspaces";
 
-export function JumpTo({ sections }: { sections: NavSection[] }) {
+/** Spec §4.6: the top-level links except Home, up to 10 (views stay in the sidebar). */
+export function JumpTo({ sections }: { sections: VisibleSection[] }) {
   const links = sections.flatMap((s) => s.items).filter((i) => i.href !== "/").slice(0, 10);
   return (
     <div className="grid grid-cols-2 gap-1">

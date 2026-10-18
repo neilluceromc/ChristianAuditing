@@ -1,7 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
+import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
+
+const db = new PrismaClient();
+test.afterAll(async () => {
+  await db.$disconnect();
+});
 
 async function login(page: Page, email: string) {
   await page.goto("/login");
@@ -9,6 +15,18 @@ async function login(page: Page, email: string) {
   await page.getByLabel(/Password/).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+}
+
+/**
+ * Phase 42 spec §4.3 (builder-check ruling): IT's Approvals badge label. With no purchase reviews waiting it is
+ * exactly the old "{n} open approvals[, some past SLA]"; otherwise "{sum} waiting: {a} open approval(s), {b}
+ * purchase review(s)[, some approvals past SLA]". Copied, not imported — house rule.
+ */
+function itApprovalsLabel(open: number, reviews: number, overdue: boolean): string {
+  if (reviews === 0) return `${open} open approvals${overdue ? ", some past SLA" : ""}`;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  return `${open + reviews} waiting: ${plural(open, "open approval")}, ${plural(reviews, "purchase review")}`
+    + (overdue ? ", some approvals past SLA" : "");
 }
 
 // Spec files share one database and run in alphabetical order — each file
@@ -82,7 +100,13 @@ test.describe("workspace gating", () => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/admin/asset-categories");
     await expect(page).toHaveURL(/\/inventory$/);
-    await expect(page.getByRole("navigation", { name: "Workspace" })).not.toContainText("Asset categories");
+    // Phase 42 (spec §3.1, §3.5): Asset categories is a Setup view, and views render only under the current link —
+    // so look where it would be, on Setup's own page. The viewer's Setup has one visible view (Equipment
+    // policies): the link points straight at it and opens no list.
+    await page.goto("/admin/equipment-policies");
+    const nav = page.getByRole("navigation", { name: "Workspace" });
+    await expect(nav.getByRole("link", { name: "Setup", exact: true })).toHaveAttribute("href", "/admin/equipment-policies");
+    await expect(nav).not.toContainText("Asset categories");
   });
 
   test("admin switches workspaces; the cookie sticks", async ({ page }) => {
@@ -91,24 +115,37 @@ test.describe("workspace gating", () => {
     await page.getByRole("button", { name: /4 workspaces/ }).click();
     await page.getByRole("menuitem", { name: "Purchasing" }).click();
     await expect(page).toHaveURL(/\/purchases$/);
-    await expect(page.getByRole("navigation", { name: "Workspace" })).toContainText("Procurement");
+    // Phase 42 (spec §3.2): no headings any more — Purchasing's nav is known by its Requests link.
+    const nav = page.getByRole("navigation", { name: "Workspace" });
+    await expect(nav.getByRole("link", { name: "Requests", exact: true })).toHaveAttribute("href", "/purchases");
+    await expect(page.getByRole("button", { name: /^Switch workspace — Purchasing, 4 workspaces$/ })).toBeVisible();
     await page.reload();
-    await expect(page.getByRole("navigation", { name: "Workspace" })).toContainText("Procurement");
+    await expect(nav.getByRole("link", { name: "Requests", exact: true })).toHaveAttribute("href", "/purchases");
+    await expect(page.getByRole("button", { name: /^Switch workspace — Purchasing, 4 workspaces$/ })).toBeVisible();
   });
 
   test("single-workspace roles get a static label, no switcher", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await expect(page.getByText("1 workspace", { exact: true })).toBeVisible();
+    // Phase 42 (spec §4.4): the brand row's workspace tag reads just "IT" — plain text, not a control, and the
+    // old "1 workspace" line is gone.
+    const sidebar = page.getByRole("complementary", { name: "Primary" });
+    await expect(sidebar.getByText("IT", { exact: true })).toBeVisible();
+    await expect(sidebar).not.toContainText(/workspace/i);
     await expect(page.getByRole("button", { name: /workspaces?$/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Switch workspace/ })).toHaveCount(0);
     await expect(page.getByText(/br\.dept/)).toHaveCount(0);
   });
 });
 
 test.describe("shell", () => {
   test("approvals badge shows the seeded urgent count", async ({ page }) => {
+    // Phase 42 (spec §4.3): IT's Approvals badge is the 3 seeded open approvals (one past SLA) plus the purchase
+    // reviews waiting for IT (the seed's PR-0198), so waiting reviews stay visible while Approvals is closed.
+    const reviews = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
     await login(page, "it@thebackroomop.com");
-    const badge = page.getByLabel(/open approvals/);
-    await expect(badge).toContainText("3");
+    const badge = page.getByLabel(/open approval/);
+    await expect(badge).toHaveText(String(3 + reviews));
+    await expect(badge).toHaveAttribute("aria-label", itApprovalsLabel(3, reviews, true));
     await expect(badge).toHaveClass(/fault/);
   });
 

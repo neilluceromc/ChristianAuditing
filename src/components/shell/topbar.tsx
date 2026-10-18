@@ -1,10 +1,11 @@
+import type { AssetClass } from "@prisma/client";
 import { DensityToggle } from "@/components/ui/density-toggle";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import type { NavSection, WorkspaceId } from "@/lib/workspaces";
+import type { VisibleSection, WorkspaceId } from "@/lib/workspaces";
 import { CommandPaletteTrigger, ScanTagButton } from "./command-palette";
 import { KeyboardShortcutsButton } from "./keyboard-shortcuts-dialog";
 import { MobileNav, PageName, type ShellUser } from "./mobile-nav";
-import type { NavBadges } from "./nav-list";
+import type { NavBadges } from "@/lib/nav-badges";
 
 /**
  * Spec §3 — below `lg` the top bar reads, left to right: the menu button, the
@@ -21,14 +22,16 @@ export function Topbar({
   ws,
   allowed,
   meta,
+  defaultCls,
 }: {
-  sections: NavSection[];
+  sections: VisibleSection[];
   badges: NavBadges;
   workspaceLabel: string;
   user: ShellUser;
   ws: WorkspaceId;
   allowed: WorkspaceId[];
   meta: Record<WorkspaceId, { label: string; landing: string }>;
+  defaultCls: AssetClass;
 }) {
   return (
     <header className="flex h-[52px] shrink-0 items-center gap-2 border-b border-border bg-surface px-4 sm:gap-3">
@@ -40,6 +43,7 @@ export function Topbar({
         ws={ws}
         allowed={allowed}
         meta={meta}
+        defaultCls={defaultCls}
       />
       <PageName sections={sections} workspaceLabel={workspaceLabel} />
       <CommandPaletteTrigger />

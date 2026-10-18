@@ -86,6 +86,9 @@
 
   /* placeholder stripes for product imagery */
   --placeholder-stripes: repeating-linear-gradient(135deg, #eef1f5 0 6px, #f7f9fb 6px 12px);
+
+  /* Phase 42: the sidebar nav's edge shadows while it overflows (.nav-scroll-shadows) */
+  --scroll-shadow: rgba(16, 24, 40, 0.1);
 }
 
 [data-density="compact"] {
@@ -144,6 +147,8 @@
   --danger-fg: #2d1917;
 
   --placeholder-stripes: repeating-linear-gradient(135deg, #1a1e25 0 6px, #1d2129 6px 12px);
+
+  --scroll-shadow: rgba(0, 0, 0, 0.45);
 }
 
 /* ── Map tokens into Tailwind utility namespaces ── */
@@ -291,6 +296,11 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+/* Phase 42 (spec §4.5): the current link's views fade in over 180 ms — used only under motion-safe:. */
+@keyframes nav-views-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 /* A slot tile that just changed rings once and settles — the write landed HERE,
    said without moving anything (plan P-10). The reduced-motion rule below
    collapses it to nothing, which is fine: the toast carries the same news. */
@@ -300,6 +310,19 @@ body {
 }
 .tile-changed {
   animation: changed-ring 2000ms var(--ease-std) forwards;
+}
+
+/* Phase 42 (spec §4.1): soft shadows at the sidebar nav's top and bottom edges, only while content is hidden on
+   that side. Pure CSS: two surface-coloured covers scroll with the content (local) and hide the two shadows
+   (fixed to the box) whenever that edge of the content is in view, so a nav that fits shows no shadow. Both
+   sit behind the content, never over it. The covers are --surface: use this only on a bg-surface box. */
+.nav-scroll-shadows {
+  background:
+    linear-gradient(var(--surface) 30%, transparent) center top / 100% 40px no-repeat local,
+    linear-gradient(transparent, var(--surface) 70%) center bottom / 100% 40px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, var(--scroll-shadow), transparent) center top / 100% 12px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, var(--scroll-shadow), transparent) center bottom / 100% 12px no-repeat scroll,
+    var(--surface);
 }
 
 /* Hard requirement, not an enhancement. */

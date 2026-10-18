@@ -366,9 +366,9 @@ test.describe.serial("suppliers", () => {
     const paletteTrigger = page.getByRole("button", { name: /Search assets, people, requests/ });
     await waitForHydration(paletteTrigger);
     await paletteTrigger.click();
-    // Scoped to the palette dialog: "Suppliers" is ALSO the sidebar nav
-    // section heading and this very page's own <h1> — both still on screen
-    // behind the palette veil.
+    // Scoped to the palette dialog: "Suppliers" is ALSO the sidebar nav's
+    // link and this very page's own <h1> — both still on screen behind the
+    // palette veil.
     const palette = page.getByRole("dialog", { name: "Command palette" });
     // Phase 40 (spec §4): the input is a combobox, and each result group is a listbox group named by its heading.
     await palette.getByRole("combobox", { name: "Search" }).fill("bayside");

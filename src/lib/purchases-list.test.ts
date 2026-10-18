@@ -30,9 +30,9 @@ describe("PURCHASE_TABS", () => {
     expect(PURCHASE_TABS.find((t) => t.id === "IT_REVIEWED")!.href).toBe("/purchases?state=IT_REVIEWED");
   });
 
-  // Every href is pinned: the sidebar's "By status" links target these exact
-  // URLs and navIsActive compares them verbatim, so a typo in any one of them
-  // silently stops highlighting that nav item.
+  // Every href is pinned: the sidebar's Requests views target these exact
+  // URLs and currentNav matches on their `state`, so a typo in any one of them
+  // silently stops highlighting that view.
   it("pins every tab's href and label", () => {
     expect(PURCHASE_TABS).toEqual([
       { id: "ALL", label: "All", href: "/purchases" },
