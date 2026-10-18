@@ -1,8 +1,8 @@
 import type { Prisma, PurchaseRequestState } from "@prisma/client";
 
 /**
- * `?state=` is the tab contract (HANDOVER §6.4): the sidebar's "By status"
- * links target it and navIsActive already highlights them, so the tab is
+ * `?state=` is the tab contract (HANDOVER §6.4): the sidebar's Requests
+ * views target it and currentNav highlights them by it, so the tab is
  * parsed on its own rather than as a url-state facet (facets are comma-joined
  * multi-selects; this is a single value that names a nav destination).
  */
