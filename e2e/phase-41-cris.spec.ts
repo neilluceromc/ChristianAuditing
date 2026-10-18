@@ -31,11 +31,16 @@ const YSABEL_LT = "BR-LT-9413";
 const SPARE1 = "BR-LT-9421";
 const SPARE2 = "BR-LT-9422";
 
-/** cris-placement.ts: the mascot button is 116 px and sits 64 px in from its side; the box is 29 px in from the mascot's side and dips 24 px into it. */
-const MASCOT = 116;
-const INSET = 64;
-const BOX_IN = 29;
-const BOX_DIP = 24;
+/**
+ * cris-placement.ts (updated 2026-10-18): the mascot (the dock) is 64 px and sits 20 px in from its side and 20 px up;
+ * only its centred 44 px glass body takes clicks. The box is 3 px in from the mascot's side and dips 10 px into it.
+ */
+const MASCOT = 64;
+const HIT = 44;
+const INSET = 20;
+const CORNER_BOTTOM = 20;
+const BOX_IN = 3;
+const BOX_DIP = 10;
 
 /** Spec §9, verbatim. */
 const LIMIT_TEXT = "That's all my questions for today — the limit resets at midnight";
@@ -121,6 +126,8 @@ async function waitForHydration(target: Locator) {
 const closedMascot = (page: Page) => page.getByRole("button", { name: /^Chat with Cris/ });
 const dock = (page: Page) => page.locator(".cris-dock");
 const orb = (page: Page) => page.locator("button.cris-mascot .cris-orb");
+const tuckButton = (page: Page) => page.getByRole("button", { name: "Tuck Cris away", exact: true });
+const tab = (page: Page) => page.getByRole("button", { name: /^Bring Cris back/ });
 const boxOf = (page: Page) => page.getByRole("dialog", { name: "Chat with Cris" });
 const logOf = (box: Locator) => box.getByRole("log");
 const composer = (box: Locator) => box.getByRole("textbox", { name: "Your message" });
@@ -187,6 +194,13 @@ async function restorePrefs(userId: string, row: Awaited<ReturnType<typeof saved
 }
 async function prefsSide(userId: string): Promise<unknown> {
   return ((await savedPrefs(userId))?.value as { side?: unknown } | undefined)?.side;
+}
+async function prefsTucked(userId: string): Promise<unknown> {
+  return ((await savedPrefs(userId))?.value as { tucked?: unknown } | undefined)?.tucked;
+}
+/** #main's bottom padding: its own 24 px, plus 88 px while the mascot shows (cris-widget.css). */
+async function mainPaddingBottom(page: Page): Promise<string> {
+  return page.evaluate(() => getComputedStyle(document.getElementById("main")!).paddingBottom);
 }
 
 /** Drags the closed mascot by its centre to (x, y) with real pointer moves; returns where the pointer let go. */
@@ -494,7 +508,7 @@ test.describe.serial("phase 41 — Cris", () => {
       });
       expect(pointer.display).not.toBe("none");
       expect(pointer.left).toBe("21px");
-      // 29 + 21 + 8 (half the 16 px pointer) = 58: the mascot's centre
+      // 3 + 21 + 8 (half the 16 px pointer) = 32: the mascot's centre
       expect(BOX_IN + parseFloat(pointer.left) + parseFloat(pointer.width) / 2).toBe(MASCOT / 2);
     } finally {
       await restorePrefs(itUserId, prefsBefore);
@@ -526,7 +540,8 @@ test.describe.serial("phase 41 — Cris", () => {
       const b = await boxOn(box);
       expect(Math.round(b.x)).toBe(12);
       expect(Math.abs(b.width - (width - 24))).toBeLessThan(2);
-      expect(Math.abs(b.y + b.height - (812 - 100))).toBeLessThan(2);
+      // 8 px over the 56 px phone mascot, which sits 16 px up
+      expect(Math.abs(b.y + b.height - (812 - 80))).toBeLessThan(2);
     }).toPass({ timeout: 5_000 });
     await expect(composer(box)).toBeFocused();
   });
@@ -569,10 +584,23 @@ test.describe.serial("phase 41 — Cris", () => {
       await expect(page.getByText("Cris is back in the corner").first()).toBeVisible();
       const width = await page.evaluate(() => document.documentElement.clientWidth);
       await expect.poll(async () => Math.round((await boxOn(dock(page))).x)).toBe(width - INSET - MASCOT);
-      await expect.poll(async () => Math.round((await boxOn(dock(page))).y)).toBe(vp.height - 72 - MASCOT);
-      const saved = (await savedPrefs(itUserId))?.value as { side?: unknown; bottom?: unknown };
+      await expect.poll(async () => Math.round((await boxOn(dock(page))).y)).toBe(vp.height - CORNER_BOTTOM - MASCOT);
+      const saved = (await savedPrefs(itUserId))?.value as { side?: unknown; bottom?: unknown; tucked?: unknown };
       expect(saved.side).toBe("right");
-      expect(saved.bottom).toBe(72);
+      expect(saved.bottom).toBe(CORNER_BOTTOM);
+      expect(saved.tucked).toBe(false);
+
+      // It also brings a tucked-away Cris back.
+      await closedMascot(page).focus();
+      await page.keyboard.press("Tab");
+      await expect(tuckButton(page)).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(tab(page)).toBeVisible();
+      await expect.poll(() => prefsTucked(itUserId), { timeout: 10_000 }).toBe(true);
+      await reset.click();
+      await expect(closedMascot(page)).toBeVisible();
+      await expect(tab(page)).toHaveCount(0);
+      await expect.poll(() => prefsTucked(itUserId), { timeout: 10_000 }).toBe(false);
     } finally {
       await restorePrefs(itUserId, prefsBefore);
     }
@@ -684,5 +712,136 @@ test.describe.serial("phase 41 — Cris", () => {
     await expect(log.getByRole("listitem").filter({ hasText: "BR-PH-0301" })).toHaveCount(1, SLOW);
     // only the newest list offers more: the first one is a record now
     await expect(firstList.getByRole("button", { name: "Show 3 more" })).toHaveCount(0);
+  });
+
+  // ── 2026-10-18 (owner's request): a smaller Cris that never blocks the page ──
+
+  test("18. on Register assets, the sticky bar's primary button takes a real click with Cris in the corner", async ({ page }) => {
+    test.setTimeout(90_000);
+    const before = await db.asset.count();
+    await login(page, IT);
+    await page.goto("/inventory/register");
+    await waitForHydration(closedMascot(page));
+    const submit = page.getByRole("button", { name: "Register 1 asset", exact: true });
+    await waitForHydration(submit);
+    await submit.scrollIntoViewIfNeeded();
+
+    // The bar keeps its buttons out of Cris's corner: 84 px of padding on Cris's side, and the button ends left of Cris.
+    const bar = page.locator("[data-cris-avoid]");
+    expect(await bar.evaluate((el) => getComputedStyle(el).paddingRight)).toBe("84px");
+    const button = await boxOn(submit);
+    const cris = await boxOn(dock(page));
+    expect(button.x + button.width).toBeLessThanOrEqual(cris.x);
+    // #main has room at its end for the last row to scroll clear of Cris
+    expect(await mainPaddingBottom(page)).toBe(`${24 + 88}px`);
+
+    // A real mouse click: Playwright's actionability check fails if anything of Cris's intercepts it.
+    await submit.click();
+    // It landed: an empty form is refused with the first field's hint, and nothing was saved.
+    await expect(page.getByText("Pick a category").first()).toBeVisible();
+    await expect(boxOf(page)).toHaveCount(0);
+    expect(await db.asset.count()).toBe(before);
+  });
+
+  test("19. tuck Cris away: a tab on the edge, kept after a reload; the tab brings the mascot back with focus", async ({ page }) => {
+    test.setTimeout(90_000);
+    const prefsBefore = await savedPrefs(itUserId);
+    try {
+      await login(page, IT);
+      await page.goto("/");
+      const mascot = closedMascot(page);
+      await waitForHydration(mascot);
+
+      // The "–" shows on hover at the orb's top inward corner (left, for a Cris on the right) ...
+      await mascot.hover();
+      await expect(tuckButton(page)).toBeVisible();
+      const corner = await boxOn(tuckButton(page));
+      const crisAt = await boxOn(dock(page));
+      expect(corner.x).toBeLessThan(crisAt.x + MASCOT / 2);
+      expect(corner.y).toBeLessThan(crisAt.y + MASCOT / 2);
+      // ... and it is the next Tab stop after the mascot.
+      await mascot.focus();
+      await page.keyboard.press("Tab");
+      await expect(tuckButton(page)).toBeFocused();
+      await page.keyboard.press("Enter");
+
+      // Tucked: the mascot is gone, the tab is on the right edge with focus, and the corner padding is off.
+      const back = tab(page);
+      await expect(back).toBeVisible();
+      await expect(back).toBeFocused();
+      await expect(closedMascot(page)).toHaveCount(0);
+      await expect(dock(page)).toHaveCount(0);
+      const width = await page.evaluate(() => document.documentElement.clientWidth);
+      const t = await boxOn(back);
+      expect(Math.round(t.x + t.width)).toBe(width);
+      expect(Math.round(t.width)).toBe(22);
+      expect(Math.round(t.height)).toBe(56);
+      expect(await mainPaddingBottom(page)).toBe("24px");
+      await expect.poll(() => prefsTucked(itUserId), { timeout: 10_000 }).toBe(true);
+
+      // It stays tucked after a reload.
+      await page.reload();
+      await waitForHydration(tab(page));
+      await expect(tab(page)).toBeVisible();
+      await expect(closedMascot(page)).toHaveCount(0);
+
+      // The tab brings the mascot back, with focus (never on body), and that is saved too.
+      await tab(page).click();
+      await expect(closedMascot(page)).toBeVisible();
+      await expect(closedMascot(page)).toBeFocused();
+      await expect(page.locator("body")).not.toBeFocused();
+      await expect(tab(page)).toHaveCount(0);
+      expect(await mainPaddingBottom(page)).toBe(`${24 + 88}px`);
+      await expect.poll(() => prefsTucked(itUserId), { timeout: 10_000 }).toBe(false);
+    } finally {
+      await restorePrefs(itUserId, prefsBefore);
+    }
+  });
+
+  test("20. a click on Cris's rings, just outside the glass body, reaches the page beneath; the glass still opens the box", async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page, IT);
+    await page.goto("/");
+    const mascot = closedMascot(page);
+    await waitForHydration(mascot);
+    const cris = await boxOn(dock(page));
+    expect(Math.round(cris.width)).toBe(MASCOT);
+    expect(Math.round((await boxOn(mascot)).width)).toBe(HIT);
+
+    // A known button laid under the whole dock (Cris's z-index is 30), counting the clicks it gets.
+    await page.evaluate((r) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.id = "under-cris";
+      b.textContent = "Beneath";
+      b.dataset.hits = "0";
+      Object.assign(b.style, {
+        position: "fixed", left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px`, zIndex: "29",
+      });
+      b.addEventListener("click", () => {
+        b.dataset.hits = String(Number(b.dataset.hits) + 1);
+      });
+      document.body.appendChild(b);
+    }, cris);
+    const under = page.locator("#under-cris");
+    const cx = cris.x + cris.width / 2;
+    const cy = cris.y + cris.height / 2;
+    // The ring 28 px out from the centre (the glass is 22 px), and the glass button's square corner 19 px out each way.
+    const outside = [
+      { x: cx + 28, y: cy },
+      { x: cx + 19, y: cy + 19 },
+    ];
+    for (const p of outside) {
+      expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.id ?? null, p)).toBe("under-cris");
+      await page.mouse.click(p.x, p.y);
+    }
+    await expect(under).toHaveAttribute("data-hits", "2");
+    await expect(boxOf(page)).toHaveCount(0);
+    await expect(mascot).toHaveAttribute("aria-expanded", "false");
+
+    // The glass body itself still opens the box.
+    await page.mouse.click(cx, cy);
+    await expect(boxOf(page)).toBeVisible();
+    await expect(under).toHaveAttribute("data-hits", "2");
   });
 });
