@@ -94,9 +94,12 @@ test.afterAll(async () => {
 
 async function login(page: Page, email: string) {
   await page.goto("/logout");
-  await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /^Log in/ }).click();
+  await page.locator('[data-login-ready="true"]').waitFor();
+  await page.getByLabel("Work email", { exact: true }).fill(email);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
@@ -308,6 +311,9 @@ test.describe("axe sweep", () => {
   test("the public signup page, which no spec had ever scanned", async ({ page }) => {
     await page.goto("/logout");
     await scanRoute(page, "/signup");
+    // Phase 44: the Cris login page, Welcome and the Log in steps (direct load), beside /signup.
+    await scanRoute(page, "/login");
+    await scanRoute(page, "/login?step=login");
   });
 
   test("viewer-reachable routes — the largest group, and the one most likely to have gone unchecked", async ({ page }) => {

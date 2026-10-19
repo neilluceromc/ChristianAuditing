@@ -73,6 +73,10 @@
   0%, 100% { transform: scaleY(0.62); }
   50% { transform: scaleY(0.7); }
 }
+@keyframes cris-eye-shy {
+  0%, 100% { transform: translate(-30px, -28px); }
+  50% { transform: translate(-24px, -32px); }
+}
 @keyframes cris-core-pulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.28); }
@@ -145,6 +149,10 @@
   /* The fast spins rotate dashed rings; rotation is motion, not a luminance flash. The
      inner ring is still slowed to 1.4 s (the mockup had 0.8 s) to keep it calm to look at. */
   --cr-spin-a: 2s; --cr-spin-b: 2.5s; --cr-spin-c: 1.4s;
+}
+.cris-orb.m-shy .cr-orb {
+  animation: cris-bob 4s ease-in-out infinite;
+  --cr-eye-anim: cris-eye-shy; --cr-eye-dur: 3s;
 }
 
 /* Calm and Still. Same specificity as the moods, so these must stay after them. */

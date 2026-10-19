@@ -72,7 +72,7 @@ The bubble starts typing when the second mood starts (scene 2: 2200 ms). Depreci
 Screen space (not scaled), 15 px text (13 px narrow), `max-width: min(300px, 100% − 24px)`, `width: max-content`, typed at 34 ms per character with a caret. Positioned at the scene's anchor, clamped inside the visible room (never under the card), tail pointing at Cris.
 
 ### 4.6 Day log
-A small panel: the clock (mono, 28 px), the area (uppercase mono, accent) and the task; a pause/play icon button (`aria-pressed`, label "Pause the scene" / "Play the scene"); a timeline from 08:00 to 18:00 with one 24 px button per scene (label "08:40 Stockroom: Checking in a returned laptop", `aria-pressed` on the current one, earlier ones filled) and a fill bar up to the current time. It is the only interactive part of the scene and is a labelled `<section aria-label="Cris's day">`.
+A small panel: the clock (mono, 28 px), the area (uppercase mono, accent) and the task; a pause/play icon button (`aria-pressed`, constant label "Pause the scene", `aria-pressed` true while paused); a timeline from 08:00 to 18:00 with one 24 px button per scene (label "08:40 Stockroom: Checking in a returned laptop", `aria-pressed` on the current one, earlier ones filled) and a fill bar up to the current time. It is the only interactive part of the scene and is a labelled `<section aria-label="Cris's day">`.
 
 ## 5. The sign-in card
 
@@ -89,7 +89,7 @@ Wordmark **Cris** (23 px, 700, tight tracking) with **IT INVENTORY** beside it (
 
 **Log in · 1 of 2** (progress 50 %)
 - Back (→ Welcome), `h1` "What's your work email?", field **Work email** (`type=email`, `autocomplete=username`, placeholder `name@{domain}` or `name@company.com` when no domain), **Continue**. Footer: "New to Cris? Sign up" (→ Sign up 1).
-- Client checks, in order: empty → "Enter your work email."; not an email → "That doesn't look like an email address. Check for typos."; domain set and not matching → "Use your @{domain} email." Errors show under the field (`aria-live="polite"`, `aria-invalid`, focus moves to the field without scrolling).
+- Client checks, in order: empty → "Enter your work email."; not an email → "That doesn't look like an email address. Check for typos." Log in does not check the allowed domain (the server never has); only Sign up 1 does. Errors show under the field (`aria-live="polite"`, `aria-invalid`, focus moves to the field without scrolling).
 
 **Log in · 2 of 2** (progress 100 %)
 - Back (→ Log in 1), `h1` "Enter your password", a chip with initials (from the email's local part, up to two letters), the email, and **Change** (→ Log in 1). Field **Password** with **Show/Hide** (`aria-pressed`), a "Caps Lock is on." hint, **Log in** (shows a spinner and "Logging in…" while pending). Footer: "Forgot your password? Ask an admin for help."
@@ -169,7 +169,7 @@ Resizing while focused re-places the card offset, Cris and the bubble without an
   ```ts
   await page.getByRole("link", { name: /^Log in/ }).click();
   await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email").fill(EMAIL);
+  await page.getByLabel("Work email", { exact: true }).fill(EMAIL);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();

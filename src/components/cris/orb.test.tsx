@@ -38,6 +38,10 @@ describe("CrisOrb", () => {
     expect(html).not.toContain("aria-label");
     expect(html).toContain('href="#cris-silver"');
   });
+  it("takes the shy mood", () => {
+    const html = renderToStaticMarkup(<CrisOrb color="gold" mood="shy" motion="lively" size={40} />);
+    expect(html).toContain("cris-orb m-shy cr-lively");
+  });
   it("takes a custom label", () => {
     const html = renderToStaticMarkup(<CrisOrb color="gold" mood="idle" motion="still" size={40} label="Open Cris" />);
     expect(html).toContain('aria-label="Open Cris"');

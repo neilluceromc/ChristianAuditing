@@ -11,7 +11,7 @@ export default async function BootstrapPage() {
   if (users > 0) notFound(); // permanently 404s after first run (brief §7 Auth)
 
   return (
-    <div data-theme="dark" className="grid min-h-screen w-full place-items-center bg-canvas p-4 text-fg">
+    <main data-theme="dark" className="grid min-h-screen w-full place-items-center bg-canvas p-4 text-fg">
       <div className="w-full max-w-[400px] rounded-[11px] border border-border bg-surface p-6 shadow-dialog">
         <div className="mb-5 flex items-center gap-2.5">
           <span className="grid size-6 place-items-center rounded-[5px] bg-fg font-mono text-[11px] font-bold text-canvas">
@@ -30,6 +30,6 @@ export default async function BootstrapPage() {
           <BootstrapForm />
         </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -12,9 +12,12 @@ async function login(page: Page, email: string) {
   // directly (rather than /login) keeps this helper safe to call a second
   // time mid-test to switch users (see auth-shell.spec.ts / approvals-audit.spec.ts).
   await page.goto("/logout");
-  await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /^Log in/ }).click();
+  await page.locator('[data-login-ready="true"]').waitFor();
+  await page.getByLabel("Work email", { exact: true }).fill(email);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 

@@ -42,9 +42,12 @@ test.afterAll(async () => {
 // independently.
 async function login(page: Page, email: string) {
   await page.goto("/logout");
-  await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /^Log in/ }).click();
+  await page.locator('[data-login-ready="true"]').waitFor();
+  await page.getByLabel("Work email", { exact: true }).fill(email);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
@@ -91,9 +94,12 @@ test.describe("Phase 28 — the Back control", () => {
     const page = await context.newPage();
     try {
       await page.goto(`/inventory/${headset.id}`);
-      await page.getByLabel(/Email/).fill(IT);
-      await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("link", { name: /^Log in/ }).click();
+      await page.locator('[data-login-ready="true"]').waitFor();
+      await page.getByLabel("Work email", { exact: true }).fill(IT);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+      await page.getByRole("button", { name: "Log in", exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`/inventory/${headset.id}$`));
       const back = page.getByRole("button", { name: "Back" });
       await waitForHydration(back);
