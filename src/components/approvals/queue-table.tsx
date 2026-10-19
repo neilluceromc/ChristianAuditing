@@ -205,7 +205,7 @@ export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; can
                   <Td>
                     <span className="flex flex-col py-1.5 leading-tight">
                       <span className="font-mono text-[11px] text-fg">{row.line1}</span>
-                      <span className="text-xs text-fg-muted">{row.line2}</span>
+                      <span className="block max-w-[20rem] truncate text-xs text-fg-muted" title={row.line2}>{row.line2}</span>
                     </span>
                   </Td>
                   <Td>

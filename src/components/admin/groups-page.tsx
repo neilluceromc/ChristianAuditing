@@ -263,7 +263,7 @@ export function GroupsPage({ rows, canMutate, initialTab }: { rows: GroupRow[]; 
                             }}
                             onBlur={() => { setRenaming(null); setRenameError(null); }}
                           />
-                          {renameError && <p role="alert" className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{renameError}</p>}
+                          {renameError && <p role="alert" className="whitespace-normal text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{renameError}</p>}
                         </div>
                       ) : (
                         <div className="flex flex-col py-1.5">

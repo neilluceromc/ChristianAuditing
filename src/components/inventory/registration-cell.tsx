@@ -15,11 +15,21 @@ import { ResubmitDialog } from "./resubmit-dialog";
 export function RegistrationCell({ row, canEdit, canMutate }: { row: AssetRow; canEdit: boolean; canMutate: boolean }) {
   const [open, setOpen] = useState(false);
   const flagged = row.reg === "needs-correction";
+  const notCapitalised = row.reg === "registered" && row.regNotCapitalised;
   return (
     <div className="flex flex-col items-start gap-1">
-      <StatusPill value={row.reg} label={regLabel(row.reg, row.regNotCapitalised)} ns="registration" />
+      {/* The pill carries the state alone; "not capitalised" sits on its own muted line under it (like
+          the Status cell's attention reason) so the column stays narrow. The sr-only " · " keeps the
+          text "Fully registered · not capitalised" for a screen reader and for the row's text. */}
+      <StatusPill value={row.reg} label={regLabel(row.reg, false)} ns="registration" />
+      {notCapitalised && (
+        <>
+          <span className="sr-only"> · </span>
+          <span className="block text-[10.5px] leading-tight text-fg-muted">not capitalised</span>
+        </>
+      )}
       {flagged && (
-        <div className="flex flex-col gap-1 text-[11px] leading-snug text-fg-secondary">
+        <div className="flex min-w-[12rem] max-w-[18rem] flex-col gap-1 whitespace-normal text-[11px] leading-snug text-fg-secondary">
           {row.regItems.length > 0 && (
             <div>
               <span className="font-medium">Finance flagged:</span>

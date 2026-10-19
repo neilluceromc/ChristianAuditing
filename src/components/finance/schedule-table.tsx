@@ -115,7 +115,7 @@ function GroupRows({ group, subtotalCostC, stickyTag, stickyModel }: { group: Sc
       {group.rows.map((r) => (
         <tr key={r.id} className="group border-b border-border-faint hover:bg-surface-subtle" style={{ height: "var(--row-h)" }}>
           <td className={cn("px-3 bg-surface font-mono text-xs text-fg-muted group-hover:bg-surface-subtle", stickyTag)}>{r.tag}</td>
-          <td className={cn("px-3 bg-surface text-fg-secondary group-hover:bg-surface-subtle", stickyModel)}>{r.model}</td>
+          <td className={cn("px-3 bg-surface text-fg-secondary group-hover:bg-surface-subtle", stickyModel)} title={r.model}>{r.model}</td>
           <td className="whitespace-nowrap px-3 text-left text-fg-secondary">{group.category}</td>
           <td className={cn(TD, "text-fg-secondary")}>{money(r.costC)}</td>
           <Grid grid={r.grid} />

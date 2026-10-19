@@ -56,7 +56,7 @@ export function LotsCard({
                       {l.expiryLabel ?? "—"}
                     </Td>
                     <Td>{l.reference ?? "—"}</Td>
-                    <Td>{l.supplier ?? "—"}</Td>
+                    <Td><span className="block max-w-[12rem] truncate" title={l.supplier ?? undefined}>{l.supplier ?? "—"}</span></Td>
                     <Td align="right" mono>{l.remaining} of {l.quantity}</Td>
                     <Td align="right" mono>{l.unitCost === null ? "—" : fmtMoneyExact(l.unitCost)}</Td>
                     <Td align="right" mono>{l.value === null ? "—" : fmtMoneyExact(l.value)}</Td>

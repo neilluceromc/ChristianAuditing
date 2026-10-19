@@ -100,14 +100,14 @@ export function HoldsTable({
                 {r.tag}
               </Link>
             </Td>
-            <Td>{r.model}</Td>
+            <Td><span className="block max-w-[16rem] truncate" title={r.model}>{r.model}</span></Td>
             <Td>
               <Link href={`/employees/${r.employeeId}`} onClick={(e) => e.stopPropagation()} className="text-accent hover:underline">
                 {r.employeeName}
               </Link>
               <span className="pl-1.5 font-mono text-[10.5px] text-fg-muted">{r.employeeNo}</span>
             </Td>
-            <Td>{r.reason ?? "—"}</Td>
+            <Td wrap>{r.reason ?? "—"}</Td>
             {tab === "ACTIVE" && (
               <Td mono>
                 {r.state === "ACTIVE" && r.expiresAt ? <HoldPill expiresAt={r.expiresAt} today={today} withDate /> : r.expires}

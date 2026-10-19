@@ -165,8 +165,8 @@ export default async function FinanceAssetsPage({
                       </div>
                     </Td>
                     <Td>
-                      <div className="text-fg">{a.model}</div>
-                      {a.holder && <div className="text-xs text-fg-muted">{a.holder}</div>}
+                      <div className="max-w-[16rem] truncate text-fg" title={a.model}>{a.model}</div>
+                      {a.holder && <div className="max-w-[16rem] truncate text-xs text-fg-muted" title={a.holder}>{a.holder}</div>}
                     </Td>
                     <Td mono>{a.category}</Td>
                     <Td><StatusPill value={a.status} label={statusLabel(a.status)} /></Td>
@@ -179,7 +179,7 @@ export default async function FinanceAssetsPage({
                     </Td>
                     <Td align="right" mono>{a.costC === null ? "—" : fmtMoneyExact(a.costC / 100)}</Td>
                     <Td align="right" mono>{a.result ? fmtMoneyExact(a.result.accumulated / 100) : "—"}</Td>
-                    <Td align="right" mono>
+                    <Td align="right" mono wrap>
                       <div>{a.result ? fmtMoneyExact(a.result.bookValue / 100) : "—"}</div>
                       {a.note && <div className="font-sans text-[11px] text-fg-muted">{a.note}</div>}
                     </Td>

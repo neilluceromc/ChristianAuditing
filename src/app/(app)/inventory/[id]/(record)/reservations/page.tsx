@@ -50,7 +50,7 @@ function HoldsTable({
                 {r.employee.name} · {r.employee.employeeNo}
               </a>
             </Td>
-            <Td>{r.reason ?? "—"}</Td>
+            <Td wrap>{r.reason ?? "—"}</Td>
             <Td mono>
               {r.state === "ACTIVE" && r.expiresAt ? <HoldPill expiresAt={r.expiresAt} today={today} withDate /> : fmtDate(r.expiresAt)}
             </Td>

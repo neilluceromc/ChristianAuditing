@@ -43,7 +43,7 @@ export function OnHandTable({ groups }: { groups: OnHandPageGroup[] }) {
                     {item.code}
                   </Link>
                 </Td>
-                <Td>{item.name}</Td>
+                <Td><span className="block max-w-[16rem] truncate" title={item.name}>{item.name}</span></Td>
                 <Td>{item.unit}</Td>
                 <Td align="right" mono>{unitsLabel(item.balance, item.unit)}</Td>
                 <Td align="right" mono>{item.openLots}</Td>

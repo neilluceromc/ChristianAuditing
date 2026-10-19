@@ -265,7 +265,7 @@ export function StocktakeCount({
               {lines.map((l, i) => (
                 <Tr key={l.id}>
                   <Td mono>{l.code}</Td>
-                  <Td>{l.name}</Td>
+                  <Td><span className="block max-w-[16rem] truncate" title={l.name}>{l.name}</span></Td>
                   <Td>{l.unit}</Td>
                   <Td align="right">
                     <span className="inline-flex flex-col items-end gap-1">

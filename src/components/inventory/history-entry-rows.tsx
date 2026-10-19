@@ -34,7 +34,8 @@ export function HistoryEntryRows({
           <Td>{actor}</Td>
           <Td mono className="text-[10.5px]">{action}</Td>
           <Td mono>{row.field}</Td>
-          <Td>
+          {/* a field value can be a long note: the from → to pair may wrap */}
+          <Td wrap>
             <span className="font-mono text-xs">
               <span className="text-fg-faint line-through decoration-[1px]">{row.from}</span>
               <span aria-hidden className="px-1.5 text-fg-faint">→</span>
