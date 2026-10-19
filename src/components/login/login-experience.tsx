@@ -47,7 +47,8 @@ const REST_REDUCED_MS = 1200;
 const SEARCH_MS = 800;
 const RESIZE_DEBOUNCE_MS = 80;
 
-type Guide = { visible: boolean; point: FocusPoint; flying: boolean; lean: number };
+/** `point` null: not measured yet, so CSS stands Cris at its default focus point (a direct load's server render). */
+type Guide = { visible: boolean; point: FocusPoint | null; flying: boolean; lean: number };
 /** Transitions off for one frame: card and Cris ("all": a resize, the first placement) or Cris alone ("guide"). */
 type Snap = { what: "all" | "guide" } | null;
 type Timer = ReturnType<typeof setTimeout> | undefined;
@@ -72,7 +73,13 @@ export function LoginExperience({ initialStep, world, card }: LoginExperiencePro
   const { suspend, resume, crisPoint } = loop;
 
   const [layout, setLayout] = useState<FocusLayout | null>(null);
-  const [guide, setGuide] = useState<Guide>({ visible: false, point: { x: 0, y: 0, scale: 1 }, flying: false, lean: 12 });
+  // A direct load renders Cris already beside the card (CSS default placement) until the first measurement.
+  const [guide, setGuide] = useState<Guide>({
+    visible: initialStep !== "welcome",
+    point: null,
+    flying: false,
+    lean: 12,
+  });
   const [mood, setMood] = useState<CrisMood>("idle");
   const [line, setLine] = useState<string | null>(null);
   // A direct load renders focused from the server: placing the card and Cris on hydration must not animate.
@@ -119,6 +126,8 @@ export function LoginExperience({ initialStep, world, card }: LoginExperiencePro
     };
     const say = (text: string, m: CrisMood) => {
       clearTimeout(t.rest);
+      // A keystroke's search mood must not cut a line short.
+      clearTimeout(t.search);
       setMood(m);
       setLine(text);
       const typing = reducedRef.current ? REST_REDUCED_MS : text.length * FORWARD_MS_PER_CHAR + REST_AFTER_LINE_MS;
@@ -161,7 +170,7 @@ export function LoginExperience({ initialStep, world, card }: LoginExperiencePro
       }
       if (s.out) {
         // Turned back on the way home: fly from where it is.
-        setGuide((g) => ({ ...g, point: to, flying: true, lean: to.x < g.point.x ? -12 : 12 }));
+        setGuide((g) => ({ ...g, point: to, flying: true, lean: g.point && to.x < g.point.x ? -12 : 12 }));
       } else {
         // Drawn over the room Cris with no transition; the snap's next frame sends it to `to`.
         const from = roomPoint(crisPoint(), l);
@@ -233,6 +242,7 @@ export function LoginExperience({ initialStep, world, card }: LoginExperiencePro
             return;
           case "pending":
             quiet();
+            clearTimeout(t.search);
             setLine(null);
             setMood("think");
             return;
@@ -299,7 +309,8 @@ export function LoginExperience({ initialStep, world, card }: LoginExperiencePro
   }, [snap, focus]);
 
   const focused = step !== "welcome";
-  const heroStyle = { "--lw-dx": `${layout ? cardShift(layout).toFixed(1) : 0}px` } as CSSProperties;
+  // Until measured, CSS works the card's shift out from its own geometry (login.css), so the server render is right.
+  const heroStyle = layout ? ({ "--lw-dx": `${cardShift(layout).toFixed(1)}px` } as CSSProperties) : undefined;
 
   // The loop re-renders this component while the clock counts; the card only needs to when its step changes.
   const cardEl = useMemo(

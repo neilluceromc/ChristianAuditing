@@ -32,7 +32,8 @@ describe("LoginExperience focus mode (server render)", () => {
     expect(heroTag(html)).toMatch(/class="lw-hero"/);
     expect(heroTag(html)).not.toContain("data-snap");
     expect(html).toMatch(/class="lw-crisw"/);
-    expect(html).toMatch(/class="lw-guide"/);
+    expect(html).toMatch(/class="lw-guide lw-preset"/);
+    expect(heroTag(html)).not.toContain("--lw-dx");
   });
 
   it("renders a direct load focused, placed without animating, the room Cris hidden", () => {
@@ -41,6 +42,18 @@ describe("LoginExperience focus mode (server render)", () => {
       expect(heroTag(html)).toMatch(/class="lw-hero lw-focus"/);
       expect(heroTag(html)).toContain('data-snap="all"');
       expect(html).toMatch(/class="lw-crisw lw-gone"/);
+    }
+  });
+
+  it("renders a direct load with the forward Cris already beside the card, placed by CSS until measured", () => {
+    for (const step of ["login-email", "signup-name"] as Step[]) {
+      const html = render(step);
+      const guideTag = html.match(/<div class="lw-guide[^"]*"[^>]*>/)?.[0] ?? "";
+      expect(guideTag).toMatch(/class="lw-guide lw-preset lw-on"/);
+      // No inline position: the .lw-preset CSS default stands Cris at the focus point.
+      expect(guideTag).not.toMatch(/left:|top:|transform:/);
+      // No inline card shift: the CSS default (worked out from the card's geometry) centres the card.
+      expect(heroTag(html)).not.toContain("--lw-dx");
     }
   });
 
@@ -54,7 +67,7 @@ describe("LoginExperience focus mode (server render)", () => {
     expect(dayLog).toBeGreaterThan(mainEnd);
     expect(guide).toBeGreaterThan(dayLog);
     expect(bubble).toBeGreaterThan(guide);
-    expect(html).toMatch(/<div class="lw-guide"[^>]*aria-hidden="true"/);
+    expect(html).toMatch(/<div class="lw-guide[^"]*"[^>]*aria-hidden="true"/);
     expect(html).toMatch(/<div class="lw-bubble lw-gb"[^>]*aria-hidden="true"/);
   });
 });

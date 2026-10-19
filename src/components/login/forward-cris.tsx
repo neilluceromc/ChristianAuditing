@@ -25,8 +25,8 @@ export function ForwardCris({
   line,
   layout,
 }: {
-  /** Where Cris is (or is flying to), in hero pixels. */
-  point: FocusPoint;
+  /** Where Cris is (or is flying to), in hero pixels; null before the first measurement (CSS places it). */
+  point: FocusPoint | null;
   /** Leaning into a flight. */
   flying: boolean;
   /** The lean while flying, in degrees. */
@@ -47,7 +47,7 @@ export function ForwardCris({
 
   useLayoutEffect(() => {
     const el = bubbleRef.current;
-    if (!el || !layout) return;
+    if (!el || !layout || !point) return;
     el.style.maxWidth = `${bubbleMaxWidth(point, layout)}px`;
     const b = focusBubble(point, layout, el.offsetWidth);
     el.style.left = `${b.left.toFixed(1)}px`;
@@ -56,15 +56,21 @@ export function ForwardCris({
   }, [point, layout, ghost]);
 
   const guideStyle = {
-    left: `${point.x.toFixed(1)}px`,
-    top: `${point.y.toFixed(1)}px`,
-    transform: `scale(${point.scale.toFixed(3)})`,
+    ...(point && {
+      left: `${point.x.toFixed(1)}px`,
+      top: `${point.y.toFixed(1)}px`,
+      transform: `scale(${point.scale.toFixed(3)})`,
+    }),
     "--lw-glean": `${lean}deg`,
   } as CSSProperties;
 
   return (
     <>
-      <div className={cn("lw-guide", visible && "lw-on", flying && "lw-flying")} style={guideStyle} aria-hidden="true">
+      <div
+        className={cn("lw-guide", !point && "lw-preset", visible && "lw-on", flying && "lw-flying")}
+        style={guideStyle}
+        aria-hidden="true"
+      >
         <div className="lw-gtilt">
           <div className="lw-cris">
             <div className="lw-halo" />
