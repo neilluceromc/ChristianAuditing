@@ -11,9 +11,12 @@ test.afterAll(async () => {
 
 async function login(page: Page, email: string) {
   await page.goto("/login");
-  await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /^Log in/ }).click();
+  await page.locator('[data-login-ready="true"]').waitFor();
+  await page.getByLabel("Work email").fill(email);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
@@ -46,9 +49,12 @@ test.describe("auth", () => {
   test("unauthenticated deep link redirects to login and back", async ({ page }) => {
     await page.goto("/employees");
     await expect(page).toHaveURL(/\/login\?next=%2Femployees|\/login\?next=\/employees/);
-    await page.getByLabel(/Email/).fill("it@thebackroomop.com");
-    await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("link", { name: /^Log in/ }).click();
+    await page.locator('[data-login-ready="true"]').waitFor();
+    await page.getByLabel("Work email").fill("it@thebackroomop.com");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+    await page.getByRole("button", { name: "Log in", exact: true }).click();
     // Headroom, not a weaker assertion. This is the one place in the file that
     // signs in WITHOUT the `login` helper above — the helper uses
     // `waitForURL`, which gets the 30s navigation budget, while a bare
@@ -62,14 +68,17 @@ test.describe("auth", () => {
 
   test("wrong password shows an inline error", async ({ page }) => {
     await page.goto("/login");
-    await page.getByLabel(/Email/).fill("it@thebackroomop.com");
-    await page.getByLabel(/Password/).fill("wrong-password");
-    await page.getByRole("button", { name: "Sign in" }).click();
-    // Scoped to the app's error Banner: Next.js also renders its own (empty,
-    // always-present) role="alert" route announcer, so an unscoped
-    // getByRole("alert") is a strict-mode violation once both exist.
-    const errorAlert = page.getByRole("alert").filter({ hasText: "Wrong email or password" });
-    await expect(errorAlert).toContainText(/Wrong email or password/);
+    await page.getByRole("link", { name: /^Log in/ }).click();
+    await page.locator('[data-login-ready="true"]').waitFor();
+    await page.getByLabel("Work email").fill("it@thebackroomop.com");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByLabel("Password", { exact: true }).fill("wrong-password");
+    await page.getByRole("button", { name: "Log in", exact: true }).click();
+    // The error sits under the Password field (an aria-live region the field points at), and the card stays on
+    // step 2 with the email still shown. Read through the field's accessible description, not a role="alert":
+    // Next.js renders its own always-present, empty role="alert" route announcer.
+    await expect(page.getByLabel("Password", { exact: true })).toHaveAccessibleDescription(/Wrong email or password/);
+    await expect(page.getByText("it@thebackroomop.com", { exact: true })).toBeVisible();
   });
 
   test("roles land on their brief-mandated defaults", async ({ page }) => {

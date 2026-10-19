@@ -12,9 +12,12 @@ const db = new PrismaClient();
 
 async function login(page: Page, email: string) {
   await page.goto("/logout");
-  await page.getByLabel(/Email/).fill(email);
-  await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /^Log in/ }).click();
+  await page.locator('[data-login-ready="true"]').waitFor();
+  await page.getByLabel("Work email").fill(email);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
@@ -82,9 +85,12 @@ test.describe.serial("users & roles", () => {
     await expect(page.getByText(/V. Cruz is disabled/)).toBeVisible({ timeout: 20_000 });
 
     await page.goto("/logout");
-    await page.getByLabel(/Email/).fill("viewer@thebackroomop.com");
-    await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("link", { name: /^Log in/ }).click();
+    await page.locator('[data-login-ready="true"]').waitFor();
+    await page.getByLabel("Work email").fill("viewer@thebackroomop.com");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+    await page.getByRole("button", { name: "Log in", exact: true }).click();
     // Still on /login: authorize() refuses a disabled user.
     await expect(page).toHaveURL(/\/login/);
   });
@@ -139,9 +145,12 @@ test.describe.serial("users & roles", () => {
     // mutation ends the actor's own session.
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
 
-    await page.getByLabel(/Email/).fill("it@thebackroomop.com");
-    await page.getByLabel(/Password/).fill(SEED_PASSWORD);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("link", { name: /^Log in/ }).click();
+    await page.locator('[data-login-ready="true"]').waitFor();
+    await page.getByLabel("Work email").fill("it@thebackroomop.com");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
+    await page.getByRole("button", { name: "Log in", exact: true }).click();
     await expect(page).toHaveURL(/\/inventory/, { timeout: 20_000 });
   });
 });
