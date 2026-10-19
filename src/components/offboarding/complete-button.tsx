@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { completeOffboarding } from "@/server/modules/offboarding/actions";
 import { EMPLOYMENT_LABEL } from "@/lib/labels";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 /**
  * A Dialog, not an inline button: completing an offboarding flips the person to
@@ -37,7 +38,8 @@ export function CompleteButton({
       if (res.ok) {
         setOpen(false);
         toast(`${name} is now ${EMPLOYMENT_LABEL.OFFBOARDED}`, "settled");
-        router.push(`/offboarding/${employeeId}?step=report&done=1`);
+        // A query-only change of this page: if it never commits, the finished wizard would just sit there.
+        pushGuarded(router, `/offboarding/${employeeId}?step=report&done=1`);
       } else if (res.kind === "rate_limited") setRetryAfter(res.retryAfterSec ?? 60);
       else setError(res.message);
     });

@@ -7,8 +7,9 @@
  * navigation to a different pathname always works.
  *
  * The mitigation (24/24 on staging): let Next try; if after `STUCK_NAV_MS` the address bar is still on the page the
- * navigation started from, load the target the ordinary way. A working click stays instant; a stuck one recovers in
- * about a second and a half.
+ * navigation started from, and the browser recorded a request for the target after the navigation began (so the
+ * router really set off, and the app didn't cancel the click), load the target the ordinary way. A working click
+ * stays instant; a stuck one recovers in about a second and a half.
  */
 
 /** How long a same-page query navigation gets to commit before the page is loaded the ordinary way. */
@@ -45,9 +46,48 @@ export interface WatchDeps {
   history?: "push" | "replace";
   /** The path + search the navigation started from, when read before the router call; else read now. */
   from?: string;
+  /** The clock resource entries are timed on (performance.now()). */
+  now?: () => number;
+  /** When the navigation started on that clock, when read before the router call; else read now. */
+  since?: number;
+  /** The browser's recorded requests (performance.getEntriesByType("resource")). */
+  getResourceEntries?: () => ReadonlyArray<ResourceEntryLike>;
+}
+
+/** The parts of a PerformanceResourceTiming entry `requestedSince` reads. */
+export interface ResourceEntryLike {
+  name: string;
+  startTime: number;
 }
 
 const pathAndSearch = (l: { pathname: string; search: string }) => l.pathname + l.search;
+
+/** `?b=2&a=1` and `?a=1&b=2&_rsc=x` compare equal: `_rsc` (Next's cache-busting param) dropped, params sorted. */
+function normalisedSearch(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete("_rsc");
+  params.sort();
+  return params.toString();
+}
+
+/**
+ * True when the browser recorded a request for `target` (ignoring `_rsc` and param order) that started at or after
+ * `since` — i.e. the router actually set off to fetch it. No such request means the app cancelled the click (an
+ * "unsaved changes" confirm declined, a save-first gate) or nothing was attempted: not a stuck navigation.
+ */
+export function requestedSince(target: URL, since: number, entries: ReadonlyArray<ResourceEntryLike>): boolean {
+  const want = normalisedSearch(target.search);
+  return entries.some((e) => {
+    if (e.startTime < since) return false;
+    let u: URL;
+    try {
+      u = new URL(e.name, target.href);
+    } catch {
+      return false;
+    }
+    return u.origin === target.origin && u.pathname === target.pathname && normalisedSearch(u.search) === want;
+  });
+}
 
 /** Only the newest watch may fire: a second click before the first commits supersedes it. */
 let latestToken = 0;
@@ -69,7 +109,11 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
       ? (deps.replace ?? ((url: string) => window.location.replace(url)))
       : (deps.assign ?? ((url: string) => window.location.assign(url)));
 
+  const now = deps.now ?? (() => window.performance.now());
+  const getEntries = deps.getResourceEntries ?? (() => window.performance.getEntriesByType("resource"));
+
   const from = deps.from ?? pathAndSearch(loc);
+  const since = deps.since ?? now();
   const to = pathAndSearch(target);
   const token = ++latestToken;
   let done = false;
@@ -79,6 +123,9 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
     const here = pathAndSearch(loc);
     // Committed (here === to), or the operator has gone somewhere else meanwhile (here !== from): leave it alone.
     if (here === to || here !== from) return;
+    // Self-protection: only a navigation the router actually started can be stuck. A click the app cancelled
+    // (without calling cancelStuckNavWatch) never fetched the target, and reloading would throw away its work.
+    if (!requestedSince(target, since, getEntries())) return;
     fallback(target.href);
   }, STUCK_NAV_MS);
   const cancel = () => {
@@ -94,6 +141,7 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
  * Called by a click handler that cancels a link's navigation (`preventDefault()` with no navigation of its own — an
  * "unsaved changes" confirm the operator declined, a wait for row saves that will navigate later through
  * `pushGuarded`), so the click guard's watch, started in the capture phase before that handler ran, never fires.
+ * A second layer: such a click never requests the target, so `requestedSince` already keeps the watch from firing.
  */
 export function cancelStuckNavWatch(): void {
   latestToken++;
@@ -117,9 +165,11 @@ function guarded(
   const target = typeof window === "undefined" ? null : new URL(href, window.location.href);
   const watch = target !== null && isSamePageQueryNav(window.location, target);
   const from = watch ? pathAndSearch(window.location) : undefined;
+  // The router may start its fetch synchronously inside push/replace, so the clock is read first too.
+  const since = watch ? window.performance.now() : undefined;
   if (history === "replace") router.replace(href, options);
   else router.push(href, options);
-  if (watch && target) watchSamePageNav(target, { history, from });
+  if (watch && target) watchSamePageNav(target, { history, from, since });
 }
 
 /** `router.push(href)`, plus the stuck-navigation fallback when `href` is this page with a different query. */

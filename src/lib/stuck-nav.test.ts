@@ -7,6 +7,7 @@ import {
   pushGuarded,
   watchSamePageNav,
   type ClickLike,
+  type ResourceEntryLike,
   type WatchDeps,
 } from "./stuck-nav";
 
@@ -45,9 +46,13 @@ function harness(start: string) {
   let next = 1;
   const assign = vi.fn<(url: string) => void>();
   const replace = vi.fn<(url: string) => void>();
+  const CLICK_AT = 1000;
+  const entries: ResourceEntryLike[] = [];
   const deps: WatchDeps = {
     enabled: true,
     location: loc,
+    now: () => CLICK_AT,
+    getResourceEntries: () => entries,
     setTimeout: (fn, ms) => {
       expect(ms).toBe(STUCK_NAV_MS);
       const id = next++;
@@ -68,16 +73,49 @@ function harness(start: string) {
     timers.clear();
     for (const fn of fns) fn();
   };
-  return { deps, assign, replace, go, run, pending: () => timers.size };
+  /** The browser recorded a request for `pathAndSearch` (relative to the click: +5 ms after it by default). */
+  const request = (pathAndSearch: string, offset = 5) =>
+    void entries.push({ name: new URL(pathAndSearch, ORIGIN).href, startTime: CLICK_AT + offset });
+  return { deps, assign, replace, go, run, request, pending: () => timers.size };
 }
 
 describe("watchSamePageNav", () => {
-  it("loads the target the ordinary way when the URL hasn't moved after STUCK_NAV_MS", () => {
+  it("loads the target the ordinary way when the URL hasn't moved after STUCK_NAV_MS and the target was requested", () => {
     const h = harness("/inventory");
     watchSamePageNav(to("/inventory?status=SPARE"), h.deps);
+    h.request("/inventory?status=SPARE&_rsc=1x2y3");
     expect(h.assign).not.toHaveBeenCalled();
     h.run();
     expect(h.assign).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/inventory?status=SPARE`);
+  });
+  it("does nothing when no request for the target was recorded (the app cancelled the click)", () => {
+    const h = harness("/admin/equipment-policies?tab=client");
+    watchSamePageNav(to("/admin/equipment-policies?tab=internal"), h.deps);
+    h.request("/admin/equipment-policies?tab=client&_rsc=abc"); // some other request: not the target
+    h.request("/api/whatever?tab=internal");
+    h.run();
+    expect(h.assign).not.toHaveBeenCalled();
+  });
+  it("ignores a request for the target that started before the navigation (a prefetch)", () => {
+    const h = harness("/inventory");
+    h.request("/inventory?status=SPARE&_rsc=abc", -200);
+    watchSamePageNav(to("/inventory?status=SPARE"), h.deps);
+    h.run();
+    expect(h.assign).not.toHaveBeenCalled();
+  });
+  it("matches the request with _rsc anywhere and the params in any order", () => {
+    const h = harness("/employees");
+    watchSamePageNav(to("/employees?kind=CLIENT&page=2&sort=name"), h.deps);
+    h.request("/employees?_rsc=q9&sort=name&kind=CLIENT&page=2");
+    h.run();
+    expect(h.assign).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/employees?kind=CLIENT&page=2&sort=name`);
+  });
+  it("uses the start time read before the router call when given one", () => {
+    const h = harness("/inventory");
+    h.request("/inventory?status=SPARE&_rsc=abc", -3); // fetched synchronously inside router.push
+    watchSamePageNav(to("/inventory?status=SPARE"), { ...h.deps, since: 990 });
+    h.run();
+    expect(h.assign).toHaveBeenCalledOnce();
   });
   it("does nothing when the navigation committed", () => {
     const h = harness("/inventory");
@@ -119,12 +157,16 @@ describe("watchSamePageNav", () => {
     watchSamePageNav(to("/inventory?status=SPARE"), h.deps);
     watchSamePageNav(to("/inventory?status=IN_USE"), h.deps);
     watchSamePageNav(to("/inventory?status=REPAIR"), h.deps);
+    h.request("/inventory?status=SPARE&_rsc=a");
+    h.request("/inventory?status=IN_USE&_rsc=b");
+    h.request("/inventory?status=REPAIR&_rsc=c");
     h.run();
     expect(h.assign).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/inventory?status=REPAIR`);
   });
   it("falls back with location.replace for a replace navigation", () => {
     const h = harness("/equipment-by-client?tab=client");
     watchSamePageNav(to("/equipment-by-client?tab=client&group=g1"), { ...h.deps, history: "replace" });
+    h.request("/equipment-by-client?tab=client&group=g1&_rsc=z");
     h.run();
     expect(h.assign).not.toHaveBeenCalled();
     expect(h.replace).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/equipment-by-client?tab=client&group=g1`);
@@ -150,7 +192,12 @@ describe("pushGuarded", () => {
   it("pushes, and only watches a same-page query navigation", () => {
     const router = { push: vi.fn(), replace: vi.fn() };
     const setTimeout = vi.fn(() => 1);
-    vi.stubGlobal("window", { location: here("/inventory"), setTimeout, clearTimeout: vi.fn() });
+    vi.stubGlobal("window", {
+      location: here("/inventory"),
+      setTimeout,
+      clearTimeout: vi.fn(),
+      performance: { now: () => 0, getEntriesByType: () => [] },
+    });
     vi.stubEnv("NODE_ENV", "production");
     try {
       pushGuarded(router, "/inventory/abc");
