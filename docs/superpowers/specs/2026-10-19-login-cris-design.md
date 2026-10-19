@@ -1,6 +1,6 @@
 # Phase 44 — The Cris login page
 
-**Status:** approved by the owner on 2026-10-19 (mockup version 6, then "yes write the spec and proceed until development").
+**Status:** approved by the owner on 2026-10-19 (mockup version 6, then "yes write the spec and proceed until development"); merged 89e3b5c, deployed to staging 2026-10-19.
 **Mockup:** `docs/mockups/2026-10-19-login-cris.html` (open it in a browser; same content as artifact https://claude.ai/artifact/6BWEA1TnJpjKae7oEbxT1o v6). Where the mockup and this spec differ, this spec wins.
 
 ## 1. Intent
