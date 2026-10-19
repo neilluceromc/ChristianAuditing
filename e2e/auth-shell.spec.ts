@@ -188,11 +188,16 @@ test.describe("shell", () => {
     // The post-login redirect is a fresh navigation; keyboard.press is a
     // single fire-and-forget action with no actionability retry (unlike a
     // locator click), so it can race the client hydration that attaches the
-    // ⌘K listener. Wait for the page to go quiet before firing the shortcut.
+    // ⌘K listener, and networkidle alone does not guarantee it is attached.
+    // So retry the shortcut until the palette is open, pressing only while the
+    // dialog is not visible (a press while it is open would close it).
     await page.waitForLoadState("networkidle");
-    await page.keyboard.press("ControlOrMeta+k");
-    const input = page.getByRole("dialog", { name: "Command palette" }).getByRole("combobox", { name: "Search" });
-    await expect(input).toBeFocused();
+    const dialog = page.getByRole("dialog", { name: "Command palette" });
+    const input = dialog.getByRole("combobox", { name: "Search" });
+    await expect(async () => {
+      if (!(await dialog.isVisible())) await page.keyboard.press("ControlOrMeta+k");
+      await expect(input).toBeFocused({ timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
     await input.fill("BR-LT-0148");
     await expect(page.getByRole("option", { name: /BR-LT-0148/ })).toBeVisible();
     await page.keyboard.press("Enter");
