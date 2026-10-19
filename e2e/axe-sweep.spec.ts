@@ -311,6 +311,9 @@ test.describe("axe sweep", () => {
   test("the public signup page, which no spec had ever scanned", async ({ page }) => {
     await page.goto("/logout");
     await scanRoute(page, "/signup");
+    // Phase 44: the Cris login page, Welcome and the Log in steps (direct load), beside /signup.
+    await scanRoute(page, "/login");
+    await scanRoute(page, "/login?step=login");
   });
 
   test("viewer-reachable routes — the largest group, and the one most likely to have gone unchecked", async ({ page }) => {
