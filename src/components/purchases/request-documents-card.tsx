@@ -86,7 +86,7 @@ export function RequestDocumentsCard({
               {docs.map((d) => (
                 <Tr key={d.id}>
                   <Td>{REQUEST_DOCUMENT_LABEL[d.kind as RequestDocKind] ?? d.kind}</Td>
-                  <Td>{d.fileName}</Td>
+                  <Td><span className="block max-w-[16rem] truncate" title={d.fileName}>{d.fileName}</span></Td>
                   <Td>{d.uploadedBy}</Td>
                   <Td mono>{d.at}</Td>
                   <Td align="right"><a href={d.downloadHref} className="text-accent hover:underline">Download</a></Td>

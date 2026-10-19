@@ -160,7 +160,7 @@ export function StocktakeReview({
                     r.code
                   )}
                 </Td>
-                <Td>{r.name}</Td>
+                <Td><span className="block max-w-[16rem] truncate" title={r.name}>{r.name}</span></Td>
                 <Td align="right" mono>{r.bookQty}</Td>
                 {r.kind === "open" && <Td align="right" mono>{r.currentQty}</Td>}
                 <Td align="right" mono>{r.countedQty ?? "not counted"}</Td>

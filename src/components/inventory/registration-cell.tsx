@@ -19,7 +19,7 @@ export function RegistrationCell({ row, canEdit, canMutate }: { row: AssetRow; c
     <div className="flex flex-col items-start gap-1">
       <StatusPill value={row.reg} label={regLabel(row.reg, row.regNotCapitalised)} ns="registration" />
       {flagged && (
-        <div className="flex flex-col gap-1 text-[11px] leading-snug text-fg-secondary">
+        <div className="flex min-w-[12rem] max-w-[18rem] flex-col gap-1 whitespace-normal text-[11px] leading-snug text-fg-secondary">
           {row.regItems.length > 0 && (
             <div>
               <span className="font-medium">Finance flagged:</span>

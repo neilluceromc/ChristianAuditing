@@ -119,17 +119,26 @@ export function Tr({
   );
 }
 
+/**
+ * Rows are one line (`Tr` pins `--row-h`), so a cell never wraps by default: a
+ * long free-text value truncates inside its own element (with a `title`) and a
+ * wide table scrolls sideways in `Table`'s `overflow-x-auto`. `wrap` is the
+ * opt-out for a cell whose content is multi-line on purpose (a stacked list, a
+ * note or reason paragraph).
+ */
 export function Td({
   className,
   align = "left",
   mono,
+  wrap,
   children,
   ...rest
-}: React.TdHTMLAttributes<HTMLTableCellElement> & { align?: "left" | "right"; mono?: boolean }) {
+}: React.TdHTMLAttributes<HTMLTableCellElement> & { align?: "left" | "right"; mono?: boolean; wrap?: boolean }) {
   return (
     <td
       className={cn(
         "px-3 py-0 text-fg-secondary",
+        wrap ? "whitespace-normal" : "whitespace-nowrap",
         mono && "font-mono text-xs text-fg-muted",
         align === "right" ? "text-right" : "text-left",
         className,

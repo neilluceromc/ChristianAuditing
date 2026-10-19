@@ -124,7 +124,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
                   {request.units.map((unit) => (
                     <Tr key={unit.id} id={`unit-${unit.index}`}>
                       <Td mono>{String(unit.index).padStart(2, "0")}</Td>
-                      <Td>
+                      {/* multi-line on purpose: description, specs, IT and Finance notes, the editor */}
+                      <Td wrap>
                         {/* a div, not a span: UnitEditor renders block elements */}
                         <div className="flex flex-col gap-0.5 py-1.5">
                           <span className="text-fg">{unit.description}</span>

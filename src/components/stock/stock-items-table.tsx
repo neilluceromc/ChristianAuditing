@@ -31,7 +31,7 @@ export function StockItemsTable({ rows }: { rows: StockItemRow[] }) {
                 {r.archived && <Pill>ARCHIVED</Pill>}
               </span>
             </Td>
-            <Td>{r.name}</Td>
+            <Td><span className="block max-w-[16rem] truncate" title={r.name}>{r.name}</span></Td>
             <Td>{r.category}</Td>
             <Td>{r.unit}</Td>
             <Td align="right">

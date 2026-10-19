@@ -71,8 +71,8 @@ export function EmployeesTable({
               </Link>
             </Td>
             <Td>
-              <span className="inline-flex flex-wrap items-center gap-1.5">
-                {row.department}
+              <span className="inline-flex items-center gap-1.5">
+                <span className="block max-w-[14rem] truncate" title={row.department}>{row.department}</span>
                 {row.departmentKind === "CLIENT" && (
                   <span className="rounded-full border border-border-strong bg-surface-subtle px-1.5 py-px text-[10px] font-medium leading-tight text-fg-secondary">
                     Client

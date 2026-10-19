@@ -55,7 +55,7 @@ export function PolicyRow({ row }: { row: PolicyRowData }) {
       <Td className="font-medium text-fg">{row.name}</Td>
       <Td><Pill>{CLASS_LABEL[row.cls]}</Pill></Td>
       <Td align="right" mono>{row.costed}</Td>
-      <Td className="py-2">
+      <Td wrap className="py-2">
         <div className="flex items-center gap-1.5">
           <Input
             type="text" inputMode="numeric" aria-label={`Years for ${row.name}`} className="w-14"
@@ -70,7 +70,7 @@ export function PolicyRow({ row }: { row: PolicyRowData }) {
         </div>
         {lifeMsg && <p role="alert" className="mt-1 text-xs text-[var(--error-text,var(--danger-fg))]">{lifeMsg}</p>}
       </Td>
-      <Td className="py-2">
+      <Td wrap className="py-2">
         <div className="flex items-center gap-1.5">
           <Input
             type="text" inputMode="decimal" aria-label={`Salvage percent for ${row.name}`} className="w-20"
@@ -81,7 +81,7 @@ export function PolicyRow({ row }: { row: PolicyRowData }) {
         {salvageMsg && <p role="alert" className="mt-1 text-xs text-[var(--error-text,var(--danger-fg))]">{salvageMsg}</p>}
       </Td>
       <Td className="text-fg-muted">{changed}</Td>
-      <Td className="py-2">
+      <Td wrap className="py-2">
         <div className="flex flex-col items-start gap-1">
           <Button size="sm" variant="primary" onClick={save} loading={pending} disabled={!dirty}>Save</Button>
           {dirty && row.affected > 0 && (

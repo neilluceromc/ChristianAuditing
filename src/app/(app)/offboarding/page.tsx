@@ -138,7 +138,7 @@ export default async function OffboardingPage({
                             </span>
                           </Link>
                         </Td>
-                        <Td>{r.department}</Td>
+                        <Td><span className="block max-w-[14rem] truncate" title={r.department}>{r.department}</span></Td>
                         <Td mono>{fmtDate(r.started)}</Td>
                         <Td>{r.dueAt ? <DuePill dueAt={r.dueAt} today={today} withDate /> : <span className="text-fg-faint">—</span>}</Td>
                         <Td>

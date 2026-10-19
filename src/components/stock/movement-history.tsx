@@ -85,7 +85,7 @@ export function MovementHistory({
               </Td>
               <Td align="right" mono>{fmtQuantity(m.quantity)}</Td>
               <Td align="right" mono>{costCell(m)}</Td>
-              <Td>{detailFor(m)}</Td>
+              <Td wrap>{detailFor(m)}</Td>
               <Td>{m.actor}</Td>
             </Tr>
           ))}

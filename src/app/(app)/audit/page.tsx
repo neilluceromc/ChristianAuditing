@@ -117,7 +117,7 @@ export default async function AuditPage({
                             )}
                           </span>
                         </Td>
-                        <Td>{row.sentence}</Td>
+                        <Td wrap>{row.sentence}</Td>
                         {/* Phase 40 §6 (overrides P-14): the action's words; an unmapped code falls back to itself. The CSV keeps the code. */}
                         <Td className="text-fg-muted">{actionLabel(row.action)}</Td>
                       </Tr>

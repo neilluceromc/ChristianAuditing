@@ -306,7 +306,7 @@ export function InventoryTable({
                       </Td>
                     );
                   case "model":
-                    return <Td key={col.id}>{row.model}</Td>;
+                    return <Td key={col.id}><span className="block max-w-[16rem] truncate" title={row.model}>{row.model}</span></Td>;
                   case "category":
                     return <Td key={col.id}>{row.category}</Td>;
                   case "assigned":

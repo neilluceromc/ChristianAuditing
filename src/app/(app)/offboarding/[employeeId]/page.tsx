@@ -275,7 +275,7 @@ export default async function OffboardingWizardPage({
                       <Td mono>
                         <TagRef id={i.assetId} tag={i.tag} visible={canSeeClass(user.role, i.cls)} className="text-accent hover:underline" />
                       </Td>
-                      <Td>{i.model}</Td>
+                      <Td><span className="block max-w-[16rem] truncate" title={i.model}>{i.model}</span></Td>
                       <Td mono className="text-[10.5px]">{i.category}</Td>
                       <Td className="text-[10.5px]">{STATUS_LABEL[i.status as AssetStatus] ?? i.status}</Td>
                       <Td align="right" mono>{i.costLabel}</Td>
@@ -574,7 +574,7 @@ export default async function OffboardingWizardPage({
                       <Td mono>
                         <TagRef id={i.assetId} tag={i.tag} visible={canSeeClass(user.role, i.cls)} className="text-accent hover:underline" />
                       </Td>
-                      <Td>{i.model}</Td>
+                      <Td><span className="block max-w-[16rem] truncate" title={i.model}>{i.model}</span></Td>
                       <Td>
                         <StatusPill
                           value={i.decision.toStatus ?? "?"}
@@ -582,7 +582,7 @@ export default async function OffboardingWizardPage({
                         />
                       </Td>
                       <Td mono className="text-[10.5px]">{i.decision.toStatus ? statusLabel(i.decision.toStatus) : "?"}</Td>
-                      <Td>{i.decision.reason ?? "—"}</Td>
+                      <Td wrap>{i.decision.reason ?? "—"}</Td>
                       <Td align="right" mono>{i.costLabel}</Td>
                       {/* linked like the collect step's copy of the same refNo —
                           the report is where you most want the jump */}

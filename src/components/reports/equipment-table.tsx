@@ -138,7 +138,8 @@ export function EquipmentTable({
                     <div className="flex flex-col items-start py-1.5">
                       <button
                         type="button" onClick={() => select(g.id)}
-                        className="text-left text-[12.5px] font-medium text-fg hover:text-accent hover:underline"
+                        title={g.name}
+                        className="block max-w-[16rem] truncate text-left text-[12.5px] font-medium text-fg hover:text-accent hover:underline"
                       >
                         {g.name}
                       </button>

@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 export function FormError({ children, id }: { children: React.ReactNode; id?: string }) {
   if (!children) return null;
   return (
-    <p id={id} role="alert" className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>
+    <p id={id} role="alert" className="whitespace-normal text-[11px] font-medium" style={{ color: "var(--error-text)" }}>
       {children}
     </p>
   );

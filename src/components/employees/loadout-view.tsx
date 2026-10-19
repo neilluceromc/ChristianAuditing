@@ -768,7 +768,7 @@ export function LoadoutView({
               <Tr key={key}>
                 <Td className="pr-0">{a && <StatusDot value={a.status} />}</Td>
                 <Td mono>{a ? <TagRef id={a.id} tag={a.tag} visible={a.visible} className="text-accent hover:underline" /> : "—"}</Td>
-                <Td>{a ? a.model : "—"}</Td>
+                <Td>{a ? <span className="block max-w-[16rem] truncate" title={a.model}>{a.model}</span> : "—"}</Td>
                 <Td mono className="text-[10.5px]">{slot}</Td>
                 <Td mono className="text-[10.5px]">{a ? statusLabel(a.status) : gap ?? "—"}</Td>
                 <Td mono>{a ? a.age : "—"}</Td>

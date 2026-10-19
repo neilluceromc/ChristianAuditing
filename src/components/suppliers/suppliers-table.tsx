@@ -26,16 +26,16 @@ export function SuppliersTable({ rows }: { rows: SupplierRow[] }) {
               <Td>
                 <div className="flex flex-col gap-0.5 py-1">
                   <span className="inline-flex items-center gap-2">
-                    <Link href={`/purchases/suppliers/${s.id}`} className="text-accent hover:underline">
+                    <Link href={`/purchases/suppliers/${s.id}`} title={s.name} className="block max-w-[16rem] truncate text-accent hover:underline">
                       {s.name}
                     </Link>
                     {s.archived && <Pill>ARCHIVED</Pill>}
                   </span>
-                  {s.registeredName && <span className="text-[11px] text-fg-muted">{s.registeredName}</span>}
+                  {s.registeredName && <span className="block max-w-[16rem] truncate text-[11px] text-fg-muted" title={s.registeredName}>{s.registeredName}</span>}
                 </div>
               </Td>
               <Td>{s.category ?? "—"}</Td>
-              <Td>{contact || "—"}</Td>
+              <Td><span className="block max-w-[18rem] truncate" title={contact || undefined}>{contact || "—"}</span></Td>
               <Td>
                 <div className="flex flex-col gap-0.5 py-1">
                   <Pill tone={s.contractStatus === "ACTIVE" ? "accent" : "neutral"}>

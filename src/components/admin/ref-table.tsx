@@ -127,7 +127,7 @@ export function RefTable({
                       }
                     }}
                   />
-                  {fieldError && <p role="alert" className="text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{fieldError}</p>}
+                  {fieldError && <p role="alert" className="whitespace-normal text-[11px] font-medium" style={{ color: "var(--error-text)" }}>{fieldError}</p>}
                 </div>
               </Td>
               {isCategory && (

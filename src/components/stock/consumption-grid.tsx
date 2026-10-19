@@ -44,7 +44,7 @@ export function ConsumptionGridTable({ grid }: { grid: ConsumptionGrid }) {
         <TBody>
           {grid.rows.map((row) => (
             <Tr key={row.department}>
-              <Td>{row.department}</Td>
+              <Td><span className="block max-w-[14rem] truncate" title={row.department}>{row.department}</span></Td>
               {grid.months.map((m) => (
                 <Td key={m} align="right"><CellValue cell={row.cells[m]} /></Td>
               ))}

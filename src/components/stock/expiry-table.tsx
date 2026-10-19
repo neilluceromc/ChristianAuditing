@@ -50,10 +50,10 @@ export function ExpiryTable({
                       {r.code}
                     </Link>
                   </Td>
-                  <Td>{r.item}</Td>
+                  <Td><span className="block max-w-[16rem] truncate" title={r.item}>{r.item}</span></Td>
                   <Td mono>{fmtDate(r.lotDate)}</Td>
                   <Td mono>{r.reference ?? "—"}</Td>
-                  <Td>{r.supplier ?? "—"}</Td>
+                  <Td><span className="block max-w-[12rem] truncate" title={r.supplier ?? undefined}>{r.supplier ?? "—"}</span></Td>
                   <Td mono>{fmtDate(r.expiresAt)}</Td>
                   <Td
                     mono

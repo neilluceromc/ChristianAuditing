@@ -148,7 +148,7 @@ export default async function SupplierProfilePage({
                       <Tr key={r.id}>
                         <Td><Link href={`/purchases/${r.id}`} className="text-accent hover:underline">{r.refNo}</Link></Td>
                         <Td><StatusPill value={r.state} /></Td>
-                        <Td>{r.department ?? "—"}</Td>
+                        <Td><span className="block max-w-[14rem] truncate" title={r.department ?? undefined}>{r.department ?? "—"}</span></Td>
                         <Td>{r.requester}</Td>
                         <Td mono>{fmtDate(r.updatedAt)}</Td>
                       </Tr>
@@ -189,7 +189,7 @@ export default async function SupplierProfilePage({
                     {detail.assets.rows.map((a) => (
                       <Tr key={a.id}>
                         <Td><Link href={`/inventory/${a.id}`} className="text-accent hover:underline">{a.tag}</Link></Td>
-                        <Td>{a.model}</Td>
+                        <Td><span className="block max-w-[16rem] truncate" title={a.model}>{a.model}</span></Td>
                         <Td><StatusPill value={a.status} label={statusLabel(a.status)} /></Td>
                         <Td mono>{fmtDate(a.purchasedAt)}</Td>
                         <Td><Pill>{PROVENANCE_LABEL[a.provenance]}</Pill></Td>
