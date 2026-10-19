@@ -373,9 +373,14 @@ export function SignInCard({
         {(step === "login-email" || step === "login-password") && (
           <>
             {step === "login-email" ? (
-              <StepHead label="Log in · 1 of 2" back="Back to the start" onBack={() => go("welcome")} />
+              <StepHead label="Log in · 1 of 2" back="Back to the start" onBack={() => go("welcome")} disabled={loginPending} />
             ) : (
-              <StepHead label="Log in · 2 of 2" back="Back to your email" onBack={() => go("login-email")} />
+              <StepHead
+                label="Log in · 2 of 2"
+                back="Back to your email"
+                onBack={() => go("login-email")}
+                disabled={loginPending}
+              />
             )}
             {heading(step === "login-email" ? "What's your work email?" : "Enter your password")}
             {step === "login-password" && (
@@ -384,7 +389,7 @@ export function SignInCard({
                   {initials(email)}
                 </span>
                 <span className="lw-who-e">{email.trim()}</span>
-                <button type="button" className="lw-link" onClick={() => go("login-email")}>
+                <button type="button" className="lw-link" onClick={() => go("login-email")} disabled={loginPending}>
                   Change
                 </button>
               </div>
@@ -419,7 +424,12 @@ export function SignInCard({
             {step === "signup-name" ? (
               <StepHead label="Sign up · 1 of 3" back="Back to the start" onBack={() => go("welcome")} />
             ) : (
-              <StepHead label="Sign up · 2 of 3" back="Back to your name and email" onBack={() => go("signup-name")} />
+              <StepHead
+                label="Sign up · 2 of 3"
+                back="Back to your name and email"
+                onBack={() => go("signup-name")}
+                disabled={signupPending}
+              />
             )}
             {heading(step === "signup-name" ? "Create your account" : "Choose a password")}
             <form action={signupAction} onSubmit={onSignupSubmit} noValidate className="lw-stack">
@@ -538,10 +548,20 @@ function CardField({
   );
 }
 
-function StepHead({ label, back, onBack }: { label: string; back: string; onBack: () => void }) {
+function StepHead({
+  label,
+  back,
+  onBack,
+  disabled,
+}: {
+  label: string;
+  back: string;
+  onBack: () => void;
+  disabled?: boolean;
+}) {
   return (
     <div className="lw-stephead">
-      <button type="button" className="lw-back" aria-label={back} onClick={onBack}>
+      <button type="button" className="lw-back" aria-label={back} onClick={onBack} disabled={disabled}>
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M10 3.5 5.5 8 10 12.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
         </svg>

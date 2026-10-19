@@ -168,7 +168,7 @@ test.describe("login page", () => {
     const pause = page.getByRole("button", { name: "Pause the scene" });
     await expect(pause).toHaveAttribute("aria-pressed", "false");
     await pause.click();
-    await expect(page.getByRole("button", { name: "Play the scene" })).toHaveAttribute("aria-pressed", "true");
+    await expect(pause).toHaveAttribute("aria-pressed", "true");
     const before = await clock.textContent();
     await page.waitForTimeout(3000);
     expect(await clock.textContent()).toBe(before);

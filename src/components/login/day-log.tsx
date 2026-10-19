@@ -20,7 +20,7 @@ export function DayLog({ loop }: { loop: RoomLoop }) {
           type="button"
           className="lw-iconbtn"
           aria-pressed={!loop.playing}
-          aria-label={loop.playing ? "Pause the scene" : "Play the scene"}
+          aria-label="Pause the scene"
           onClick={loop.togglePlay}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">

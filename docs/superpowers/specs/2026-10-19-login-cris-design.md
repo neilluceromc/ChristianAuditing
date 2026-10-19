@@ -72,7 +72,7 @@ The bubble starts typing when the second mood starts (scene 2: 2200 ms). Depreci
 Screen space (not scaled), 15 px text (13 px narrow), `max-width: min(300px, 100% − 24px)`, `width: max-content`, typed at 34 ms per character with a caret. Positioned at the scene's anchor, clamped inside the visible room (never under the card), tail pointing at Cris.
 
 ### 4.6 Day log
-A small panel: the clock (mono, 28 px), the area (uppercase mono, accent) and the task; a pause/play icon button (`aria-pressed`, label "Pause the scene" / "Play the scene"); a timeline from 08:00 to 18:00 with one 24 px button per scene (label "08:40 Stockroom: Checking in a returned laptop", `aria-pressed` on the current one, earlier ones filled) and a fill bar up to the current time. It is the only interactive part of the scene and is a labelled `<section aria-label="Cris's day">`.
+A small panel: the clock (mono, 28 px), the area (uppercase mono, accent) and the task; a pause/play icon button (`aria-pressed`, constant label "Pause the scene", `aria-pressed` true while paused); a timeline from 08:00 to 18:00 with one 24 px button per scene (label "08:40 Stockroom: Checking in a returned laptop", `aria-pressed` on the current one, earlier ones filled) and a fill bar up to the current time. It is the only interactive part of the scene and is a labelled `<section aria-label="Cris's day">`.
 
 ## 5. The sign-in card
 
