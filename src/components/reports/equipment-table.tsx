@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Td, TBody, Th, THead, Tr } from "@/components/ui/table";
 import { cn } from "@/lib/cn";
 import { fmtMoney } from "@/lib/format";
+import { replaceGuarded } from "@/lib/stuck-nav";
 import {
   defaultReportSort, equippedTone, filterReportGroups, reportFilterCounts, sortReportGroups,
   type GroupSummary, type ReportFilter, type ReportSort,
@@ -72,7 +73,7 @@ export function EquipmentTable({
 
   function select(id: string) {
     setPicked(id);
-    router.replace(`/equipment-by-client?tab=${tab}&group=${id}`, { scroll: false });
+    replaceGuarded(router, `/equipment-by-client?tab=${tab}&group=${id}`, { scroll: false });
   }
 
   if (rows.length === 0) {

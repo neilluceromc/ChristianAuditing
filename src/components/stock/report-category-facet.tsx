@@ -5,6 +5,7 @@ import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { STOCK_REPORT_LIST_CONFIG } from "@/lib/stock-reports";
 import { serializeListState, withFilter, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 /**
  * Task 7 review (Important): the three report toolbars used a single-select
@@ -45,7 +46,7 @@ export function ReportCategoryFacet({
           if (value) params.set(key, value);
         }
         const s = params.toString();
-        router.push(basePath + (s ? `?${s}` : ""));
+        pushGuarded(router, basePath + (s ? `?${s}` : ""));
       }}
     />
   );

@@ -7,6 +7,7 @@ import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr, rowOpenProps } from "@/components/ui/table";
 import type { ListState } from "@/lib/url-state";
 import type { EmployeeListRow } from "@/server/modules/employees/queries";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 /**
  * Phase 25 (spec §5.2): the employees table as a Client Component — sortable
@@ -25,14 +26,14 @@ export function EmployeesTable({
   function sortProps(key: string) {
     const idx = state.sort.findIndex((s) => s.key === key);
     return {
-      onSort: () => router.push(sortHrefs[key]),
+      onSort: () => pushGuarded(router, sortHrefs[key]),
       sort: idx >= 0 ? state.sort[idx].dir : undefined,
       sortIndex: idx >= 0 && state.sort.length > 1 ? idx + 1 : undefined,
     };
   }
 
   function open(id: string) {
-    router.push(`/employees/${id}`);
+    pushGuarded(router, `/employees/${id}`);
   }
 
   return (

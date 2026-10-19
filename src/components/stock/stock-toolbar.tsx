@@ -9,6 +9,7 @@ import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { STOCK_LIST_CONFIG } from "@/lib/stock-list";
 import { serializeListState, withFilter, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 /** Scaled-down suppliers-toolbar.tsx: search, one facet, a low-stock toggle, an archived toggle, and the export link. */
 export function StockToolbar({
@@ -28,7 +29,7 @@ export function StockToolbar({
   const archived = state.filters.archived?.includes("1") ?? false;
 
   function go(next: ListState) {
-    router.push("/stock" + serializeListState(next, STOCK_LIST_CONFIG));
+    pushGuarded(router, "/stock" + serializeListState(next, STOCK_LIST_CONFIG));
   }
 
   return (

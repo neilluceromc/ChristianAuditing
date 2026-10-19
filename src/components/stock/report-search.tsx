@@ -6,6 +6,7 @@ import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { reportHref } from "@/lib/stock-reports";
 import { withSearch, type ListState } from "@/lib/url-state";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 /**
  * Phase 39 (spec §4.2, §4.3): the On hand and Expiry search box. Enter applies it and lands on page 1, keeping the
@@ -47,7 +48,7 @@ export function ReportSearch({
         onChange={(e) => setQ(e.target.value)}
         className="pl-8"
         onKeyDown={(e) => {
-          if (e.key === "Enter") router.push(reportHref(basePath, withSearch(state, q), extraParams));
+          if (e.key === "Enter") pushGuarded(router, reportHref(basePath, withSearch(state, q), extraParams));
         }}
       />
     </div>

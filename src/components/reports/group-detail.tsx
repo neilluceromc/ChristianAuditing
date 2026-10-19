@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { fmtDayMonth, fmtMoney } from "@/lib/format";
 import type { GroupSummary } from "@/lib/equipment-report";
 import { NO_POLICY_LINE, type ReportTab } from "./equipment-table";
+import { replaceGuarded } from "@/lib/stuck-nav";
 
 /** Spec §3.3: the first 20 people missing something are listed; the rest are on their staff list. */
 export const MISSING_SHOWN = 20;
@@ -54,7 +55,7 @@ export function GroupDetail({
         </div>
         <button
           type="button" aria-label="Close details"
-          onClick={() => router.replace(`/equipment-by-client?tab=${tab}`, { scroll: false })}
+          onClick={() => replaceGuarded(router, `/equipment-by-client?tab=${tab}`, { scroll: false })}
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-(--radius-ctl) text-base text-fg-muted hover:bg-surface-subtle hover:text-fg"
         >
           ×

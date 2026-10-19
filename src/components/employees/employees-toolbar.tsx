@@ -9,6 +9,7 @@ import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { EMPLOYEES_LIST_CONFIG } from "@/lib/employees-list";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { EmployeeFacets } from "@/server/modules/employees/queries";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 export function EmployeesToolbar({
   state,
@@ -56,7 +57,7 @@ export function EmployeesToolbar({
           defaultValue={state.q}
           className="pl-8 pr-7"
           onKeyDown={(e) => {
-            if (e.key === "Enter") router.push(href(withSearch(state, e.currentTarget.value), gapsOnly));
+            if (e.key === "Enter") pushGuarded(router, href(withSearch(state, e.currentTarget.value), gapsOnly));
           }}
         />
         {state.q && (
@@ -64,7 +65,7 @@ export function EmployeesToolbar({
             type="button"
             aria-label="Clear search"
             className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg"
-            onClick={() => router.push(href(withSearch(state, ""), gapsOnly))}
+            onClick={() => pushGuarded(router, href(withSearch(state, ""), gapsOnly))}
           >
             ×
           </button>
@@ -74,19 +75,19 @@ export function EmployeesToolbar({
         label="Works for"
         options={facets.department}
         selected={state.filters.department ?? []}
-        onApply={(values) => router.push(href(withFilter(state, "department", values), gapsOnly))}
+        onApply={(values) => pushGuarded(router, href(withFilter(state, "department", values), gapsOnly))}
       />
       <FacetDropdown
         label="Staff"
         options={facets.kind}
         selected={state.filters.kind ?? []}
-        onApply={(values) => router.push(href(withFilter(state, "kind", values), gapsOnly))}
+        onApply={(values) => pushGuarded(router, href(withFilter(state, "kind", values), gapsOnly))}
       />
       <FacetDropdown
         label="Employment"
         options={facets.employment}
         selected={state.filters.employment ?? []}
-        onApply={(values) => router.push(href(withFilter(state, "employment", values), gapsOnly))}
+        onApply={(values) => pushGuarded(router, href(withFilter(state, "employment", values), gapsOnly))}
       />
       <Link
         href={href(withFilter(state, "leavers", showingLeavers ? [] : ["1"]), gapsOnly)}

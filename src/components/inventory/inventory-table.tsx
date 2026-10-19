@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { AssetClass, Role } from "@prisma/client";
 import { Table, TBody, Td, Th, THead, Tr, rowOpenProps } from "@/components/ui/table";
+import { pushGuarded } from "@/lib/stuck-nav";
 import { StatusDot } from "@/components/ui/status";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button, IconButton } from "@/components/ui/button";
@@ -182,7 +183,7 @@ export function InventoryTable({
   }
 
   function runRowAction(action: RecordAction, row: AssetRow) {
-    if (action === "print-label") { router.push("/inventory/labels" + withClsQS(`?ids=${row.id}`, row.cls)); return; }
+    if (action === "print-label") { pushGuarded(router, "/inventory/labels" + withClsQS(`?ids=${row.id}`, row.cls)); return; }
     setDialog({ kind: action, row });
   }
 
@@ -264,14 +265,14 @@ export function InventoryTable({
               label: actionLabel(a, { cls: row.cls, direct, inMenu: true }),
               onSelect: () => runRowAction(a, row),
             })),
-            { label: "Open record", onSelect: () => router.push(`/inventory/${row.id}`) },
+            { label: "Open record", onSelect: () => pushGuarded(router, `/inventory/${row.id}`) },
           ];
           return (
             <Tr
               key={row.id}
               className="cursor-pointer"
               selected={selected.has(row.id)}
-              {...rowOpenProps(() => router.push(`/inventory/${row.id}`))}
+              {...rowOpenProps(() => pushGuarded(router, `/inventory/${row.id}`))}
             >
               {canMutate && (
                 // The whole cell is the checkbox's target (Fitts): a click on the input toggles through

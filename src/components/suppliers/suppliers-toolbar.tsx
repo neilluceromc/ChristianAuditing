@@ -8,6 +8,7 @@ import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
 import { serializeListState, withFilter, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 /** Scaled-down inventory-toolbar.tsx: one search box, two facets, an archived toggle. */
 export function SuppliersToolbar({
@@ -21,7 +22,7 @@ export function SuppliersToolbar({
   const archived = state.filters.archived?.includes("1") ?? false;
 
   function go(next: ListState) {
-    router.push("/purchases/suppliers" + serializeListState(next, SUPPLIER_LIST_CONFIG));
+    pushGuarded(router, "/purchases/suppliers" + serializeListState(next, SUPPLIER_LIST_CONFIG));
   }
 
   return (

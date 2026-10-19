@@ -11,6 +11,7 @@ import { Icon } from "@/components/ui/icon";
 import { useFocusTrap } from "@/components/ui/use-focus-trap";
 import { useSearchShortcutLabel } from "./use-search-shortcut-label";
 import { paletteSearch, type PaletteHit, type PaletteResults } from "@/server/palette";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 const OPEN_EVENT = "br:open-palette";
 const PLACEHOLDER = "Search assets, people, requests…";
@@ -234,7 +235,7 @@ export function CommandPalette({ destinations }: { destinations: NavDestination[
 
   const go = useCallback(
     (hit: PaletteHit) => {
-      router.push(hit.href);
+      pushGuarded(router, hit.href);
       close();
     },
     [router, close],
