@@ -563,7 +563,7 @@
   color: var(--text-muted);
 }
 .lw-tile-primary .lw-tile-s {
-  color: color-mix(in srgb, var(--accent-fg) 78%, transparent);
+  color: color-mix(in srgb, var(--accent-fg) 90%, transparent);
 }
 .lw-tile svg {
   grid-column: 2;
