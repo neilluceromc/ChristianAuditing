@@ -62,12 +62,15 @@ export interface ResourceEntryLike {
 
 const pathAndSearch = (l: { pathname: string; search: string }) => l.pathname + l.search;
 
-/** `?b=2&a=1` and `?a=1&b=2&_rsc=x` compare equal: `_rsc` (Next's cache-busting param) dropped, params sorted. */
+/**
+ * `?b=2&a=1` and `?a=1&b=2&_rsc=x` compare equal: `_rsc` (Next's cache-busting param) dropped, then every key/value
+ * pair sorted (by key, then value, so repeated keys in any order match) and re-serialised the URLSearchParams way
+ * (`+` and `%20` both read as a space).
+ */
 function normalisedSearch(search: string): string {
-  const params = new URLSearchParams(search);
-  params.delete("_rsc");
-  params.sort();
-  return params.toString();
+  const pairs = [...new URLSearchParams(search)].filter(([k]) => k !== "_rsc");
+  pairs.sort(([ka, va], [kb, vb]) => (ka < kb ? -1 : ka > kb ? 1 : va < vb ? -1 : va > vb ? 1 : 0));
+  return new URLSearchParams(pairs).toString();
 }
 
 /**
@@ -92,6 +95,8 @@ export function requestedSince(target: URL, since: number, entries: ReadonlyArra
 /** Only the newest watch may fire: a second click before the first commits supersedes it. */
 let latestToken = 0;
 let latestCancel: (() => void) | null = null;
+/** The newest watch, while its timer is pending: a repeat of the same navigation keeps its start time. */
+let latestWatch: { token: number; from: string; to: string; since: number } | null = null;
 
 /**
  * After a same-page query navigation has been started, check back in `STUCK_NAV_MS`: if the address bar is still
@@ -113,12 +118,19 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
   const getEntries = deps.getResourceEntries ?? (() => window.performance.getEntriesByType("resource"));
 
   const from = deps.from ?? pathAndSearch(loc);
-  const since = deps.since ?? now();
   const to = pathAndSearch(target);
+  let since = deps.since ?? now();
+  // A repeat of the live watch's navigation (the same stuck link clicked again, or the click guard's watch followed
+  // by NavLink's pushGuarded for the same click) keeps the earlier start: the router dedupes the in-flight request,
+  // so no new resource entry appears after the repeat.
+  const prev = latestWatch;
+  if (prev && prev.token === latestToken && prev.from === from && prev.to === to) since = Math.min(since, prev.since);
   const token = ++latestToken;
+  latestWatch = { token, from, to, since };
   let done = false;
   const id = set(() => {
     done = true;
+    if (latestWatch?.token === token) latestWatch = null;
     if (token !== latestToken) return;
     const here = pathAndSearch(loc);
     // Committed (here === to), or the operator has gone somewhere else meanwhile (here !== from): leave it alone.
@@ -131,6 +143,7 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
   const cancel = () => {
     if (done) return;
     done = true;
+    if (latestWatch?.token === token) latestWatch = null;
     clear(id);
   };
   latestCancel = cancel;
@@ -147,6 +160,12 @@ export function cancelStuckNavWatch(): void {
   latestToken++;
   latestCancel?.();
   latestCancel = null;
+  latestWatch = null;
+}
+
+/** True when `to` is a different page (path or query) from `here`: leaving it, as opposed to a hash-only jump. */
+function leaves(here: LocationLike, to: URL): boolean {
+  return here.origin !== to.origin || pathAndSearch(here) !== pathAndSearch(to);
 }
 
 /** The slice of Next's app router `pushGuarded`/`replaceGuarded` call. */
@@ -164,6 +183,9 @@ function guarded(
   // Read before the router call: the start point is the page the navigation leaves.
   const target = typeof window === "undefined" ? null : new URL(href, window.location.href);
   const watch = target !== null && isSamePageQueryNav(window.location, target);
+  // Going to another page: a pending watch for an earlier stuck filter must not drag the operator back to it if
+  // this navigation hasn't committed by the time that watch fires.
+  if (target !== null && !watch && leaves(window.location, target)) cancelStuckNavWatch();
   const from = watch ? pathAndSearch(window.location) : undefined;
   // The router may start its fetch synchronously inside push/replace, so the clock is read first too.
   const since = watch ? window.performance.now() : undefined;
@@ -198,11 +220,32 @@ interface AnchorLike {
   hasAttribute(name: string): boolean;
 }
 
+/** What the click guard does with a click: watch a same-page query navigation, cancel on leaving, or nothing. */
+export type ClickGuardAction = { action: "watch"; to: URL } | { action: "cancel" } | null;
+
 /**
- * The click guard's filter: the URL to watch when this click is a plain left click (no modifier keys) on an
- * `a[href]` that opens in this tab, isn't a download, and goes to this page with a different query; otherwise null.
+ * The click guard's filter, for a plain left click (no modifier keys) on an `a[href]` that opens in this tab and
+ * isn't a download:
+ * - this page with a different query → `watch` it;
+ * - another page on this origin → `cancel` any pending watch, so an earlier stuck filter can't drag the operator back
+ *   from where they are now going;
+ * - otherwise (a hash-only jump, another origin, a new tab, a modified click, not a link) → null.
  */
+export function classifyClick(e: ClickLike, here: LocationLike & { href: string }): ClickGuardAction {
+  const to = plainLinkTarget(e, here);
+  if (!to) return null;
+  if (isSamePageQueryNav(here, to)) return { action: "watch", to };
+  if (to.origin === here.origin && leaves(here, to)) return { action: "cancel" };
+  return null;
+}
+
+/** The URL to watch for this click (`classifyClick`'s `watch` case), else null. */
 export function clickGuardTarget(e: ClickLike, here: LocationLike & { href: string }): URL | null {
+  const c = classifyClick(e, here);
+  return c?.action === "watch" ? c.to : null;
+}
+
+function plainLinkTarget(e: ClickLike, here: { href: string }): URL | null {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
   const t = e.target as { closest?: (selector: string) => AnchorLike | null } | null;
   if (!t || typeof t.closest !== "function") return null;
@@ -211,11 +254,9 @@ export function clickGuardTarget(e: ClickLike, here: LocationLike & { href: stri
   if (!a || typeof a.href !== "string") return null;
   if (a.target && a.target !== "_self") return null;
   if (a.hasAttribute("download")) return null;
-  let to: URL;
   try {
-    to = new URL(a.href, here.href);
+    return new URL(a.href, here.href);
   } catch {
     return null;
   }
-  return isSamePageQueryNav(here, to) ? to : null;
 }

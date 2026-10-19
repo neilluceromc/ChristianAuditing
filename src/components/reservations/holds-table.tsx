@@ -7,6 +7,7 @@ import { IconButton } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr, rowOpenProps } from "@/components/ui/table";
+import { pushGuarded } from "@/lib/stuck-nav";
 import { HoldPill } from "@/components/ui/hold-pill";
 import { Menu, type MenuItem } from "@/components/ui/menu";
 import { ReleaseHoldDialog } from "@/components/inventory/release-hold-button";
@@ -57,7 +58,7 @@ export function HoldsTable({
   }
 
   function open(assetId: string) {
-    router.push(`/inventory/${assetId}`);
+    pushGuarded(router, `/inventory/${assetId}`);
   }
 
   function menuItems(r: ReservationRow): MenuItem[] {
@@ -66,8 +67,8 @@ export function HoldsTable({
       items.push({ label: `Assign to ${r.employeeName}…`, onSelect: () => setDialog({ kind: "assign", row: r }) });
       items.push({ label: "Release…", onSelect: () => setDialog({ kind: "release", row: r }) });
     }
-    items.push({ label: "Open record", onSelect: () => router.push(`/inventory/${r.assetId}`) });
-    items.push({ label: `Open ${r.employeeName}'s profile`, onSelect: () => router.push(`/employees/${r.employeeId}`) });
+    items.push({ label: "Open record", onSelect: () => pushGuarded(router, `/inventory/${r.assetId}`) });
+    items.push({ label: `Open ${r.employeeName}'s profile`, onSelect: () => pushGuarded(router, `/employees/${r.employeeId}`) });
     return items;
   }
 

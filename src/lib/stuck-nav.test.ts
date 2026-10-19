@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   STUCK_NAV_MS,
   cancelStuckNavWatch,
+  classifyClick,
   clickGuardTarget,
   isSamePageQueryNav,
   pushGuarded,
+  replaceGuarded,
+  requestedSince,
   watchSamePageNav,
   type ClickLike,
   type ResourceEntryLike,
@@ -163,6 +166,33 @@ describe("watchSamePageNav", () => {
     h.run();
     expect(h.assign).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/inventory?status=REPAIR`);
   });
+  it("a repeat of the live watch's navigation keeps the earlier start (the router dedupes the re-request)", () => {
+    const h = harness("/inventory");
+    watchSamePageNav(to("/inventory?status=SPARE"), h.deps); // since 1000
+    h.request("/inventory?status=SPARE&_rsc=a", 5); // the only request, at 1005
+    watchSamePageNav(to("/inventory?status=SPARE"), { ...h.deps, since: 1010 }); // clicked again at 1010
+    h.run();
+    expect(h.assign).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/inventory?status=SPARE`);
+  });
+  it("doesn't carry a start time over from a different, cancelled or finished watch", () => {
+    const h = harness("/inventory");
+    h.request("/inventory?status=SPARE&_rsc=a", 5);
+    watchSamePageNav(to("/inventory?status=SPARE"), h.deps);
+    watchSamePageNav(to("/inventory?status=REPAIR"), { ...h.deps, since: 1010 });
+    watchSamePageNav(to("/inventory?status=SPARE"), { ...h.deps, since: 1010 }); // the live watch was REPAIR's
+    h.run();
+    expect(h.assign).not.toHaveBeenCalled();
+    watchSamePageNav(to("/inventory?status=SPARE"), h.deps);
+    cancelStuckNavWatch();
+    watchSamePageNav(to("/inventory?status=SPARE"), { ...h.deps, since: 1010 });
+    h.run();
+    expect(h.assign).not.toHaveBeenCalled();
+    watchSamePageNav(to("/inventory?status=SPARE"), h.deps);
+    h.run(); // fired (and assigned once)
+    watchSamePageNav(to("/inventory?status=SPARE"), { ...h.deps, since: 1010 });
+    h.run();
+    expect(h.assign).toHaveBeenCalledOnce();
+  });
   it("falls back with location.replace for a replace navigation", () => {
     const h = harness("/equipment-by-client?tab=client");
     watchSamePageNav(to("/equipment-by-client?tab=client&group=g1"), { ...h.deps, history: "replace" });
@@ -185,30 +215,111 @@ describe("watchSamePageNav", () => {
   });
 });
 
-describe("pushGuarded", () => {
+/** A fake `window` for pushGuarded/replaceGuarded: a clock, an address bar, resource entries and timers. */
+function fakeWindow(start: string) {
+  const loc = { ...here(start), assign: vi.fn<(url: string) => void>(), replace: vi.fn<(url: string) => void>() };
+  const timers = new Map<number, () => void>();
+  let next = 1;
+  const clock = { t: 500 };
+  const entries: ResourceEntryLike[] = [];
+  const win = {
+    location: loc,
+    setTimeout: vi.fn((fn: () => void) => {
+      timers.set(next, fn);
+      return next++;
+    }),
+    clearTimeout: vi.fn((id: number) => void timers.delete(id)),
+    performance: { now: () => clock.t, getEntriesByType: () => entries },
+  };
+  vi.stubGlobal("window", win);
+  vi.stubEnv("NODE_ENV", "production");
+  const request = (pathAndSearch: string, at = clock.t) =>
+    void entries.push({ name: new URL(pathAndSearch, ORIGIN).href, startTime: at });
+  const run = () => {
+    const fns = [...timers.values()];
+    timers.clear();
+    for (const fn of fns) fn();
+  };
+  return { win, loc, clock, request, run, pending: () => timers.size };
+}
+
+describe("pushGuarded / replaceGuarded", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
   it("pushes, and only watches a same-page query navigation", () => {
+    const w = fakeWindow("/inventory");
     const router = { push: vi.fn(), replace: vi.fn() };
-    const setTimeout = vi.fn(() => 1);
-    vi.stubGlobal("window", {
-      location: here("/inventory"),
-      setTimeout,
-      clearTimeout: vi.fn(),
-      performance: { now: () => 0, getEntriesByType: () => [] },
-    });
-    vi.stubEnv("NODE_ENV", "production");
-    try {
-      pushGuarded(router, "/inventory/abc");
-      expect(router.push).toHaveBeenCalledWith("/inventory/abc", undefined);
-      expect(setTimeout).not.toHaveBeenCalled();
-      pushGuarded(router, "/inventory?status=SPARE", { scroll: false });
-      expect(router.push).toHaveBeenLastCalledWith("/inventory?status=SPARE", { scroll: false });
-      expect(setTimeout).toHaveBeenCalledOnce();
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    pushGuarded(router, "/inventory/abc");
+    expect(router.push).toHaveBeenCalledWith("/inventory/abc", undefined);
+    expect(w.pending()).toBe(0);
+    pushGuarded(router, "/inventory?status=SPARE", { scroll: false });
+    expect(router.push).toHaveBeenLastCalledWith("/inventory?status=SPARE", { scroll: false });
+    expect(w.pending()).toBe(1);
+  });
+  it("reads `from` and `since` before the router call", () => {
+    const w = fakeWindow("/inventory");
+    const router = {
+      // Next may fetch synchronously inside push; the clock and the address bar move during the call.
+      push: vi.fn(() => {
+        w.request("/inventory?status=SPARE&_rsc=1", w.clock.t + 10);
+        w.clock.t += 50;
+        w.loc.pathname = "/elsewhere";
+      }),
+      replace: vi.fn(),
+    };
+    pushGuarded(router, "/inventory?status=SPARE");
+    w.loc.pathname = "/inventory"; // still stuck on the page it started from
+    w.run();
+    expect(w.loc.assign).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/inventory?status=SPARE`);
+  });
+  it("replaceGuarded replaces, and a stuck replace falls back with location.replace", () => {
+    const w = fakeWindow("/equipment-by-client?tab=client");
+    const router = { push: vi.fn(), replace: vi.fn(() => w.request("/equipment-by-client?tab=client&group=g1&_rsc=9")) };
+    replaceGuarded(router, "/equipment-by-client?tab=client&group=g1", { scroll: false });
+    expect(router.replace).toHaveBeenCalledWith("/equipment-by-client?tab=client&group=g1", { scroll: false });
+    expect(router.push).not.toHaveBeenCalled();
+    w.run();
+    expect(w.loc.assign).not.toHaveBeenCalled();
+    expect(w.loc.replace).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/equipment-by-client?tab=client&group=g1`);
+  });
+  it("a navigation to another page cancels a pending watch, so a stuck filter can't drag the operator back", () => {
+    const w = fakeWindow("/employees");
+    const router = { push: vi.fn((href: string) => w.request(`${href}${href.includes("?") ? "&" : "?"}_rsc=1`)), replace: vi.fn() };
+    pushGuarded(router, "/employees?kind=CLIENT"); // sticks
+    pushGuarded(router, "/employees/e1"); // a row click before the fallback fires; not committed yet either
+    expect(w.pending()).toBe(0);
+    w.run();
+    expect(w.loc.assign).not.toHaveBeenCalled();
+  });
+  it("a hash-only navigation doesn't cancel the pending watch", () => {
+    const w = fakeWindow("/employees");
+    const router = { push: vi.fn((href: string) => w.request(`${href}&_rsc=1`)), replace: vi.fn() };
+    pushGuarded(router, "/employees?kind=CLIENT");
+    pushGuarded({ push: vi.fn(), replace: vi.fn() }, "/employees#main");
+    w.run();
+    expect(w.loc.assign).toHaveBeenCalledOnce();
+  });
+});
+
+describe("requestedSince", () => {
+  const entry = (pathAndSearch: string, startTime = 10) => ({ name: new URL(pathAndSearch, ORIGIN).href, startTime });
+  it("reads + and %20 as the same space", () => {
+    expect(requestedSince(to("/inventory?q=dell%20latitude"), 0, [entry("/inventory?q=dell+latitude&_rsc=1")])).toBe(true);
+    expect(requestedSince(to("/inventory?q=dell+latitude"), 0, [entry("/inventory?_rsc=1&q=dell%20latitude")])).toBe(true);
+  });
+  it("matches repeated keys in any order, but not a different set of values", () => {
+    const target = to("/inventory?status=SPARE&status=IN_USE&page=2");
+    expect(requestedSince(target, 0, [entry("/inventory?status=IN_USE&_rsc=x&page=2&status=SPARE")])).toBe(true);
+    expect(requestedSince(target, 0, [entry("/inventory?status=SPARE&page=2&_rsc=x")])).toBe(false);
+    expect(requestedSince(target, 0, [entry("/inventory?status=SPARE&status=SPARE&status=IN_USE&page=2")])).toBe(false);
+  });
+  it("needs the same origin and pathname, and a start at or after `since`", () => {
+    expect(requestedSince(to("/inventory?a=1"), 0, [{ name: "https://elsewhere.example/inventory?a=1", startTime: 10 }])).toBe(false);
+    expect(requestedSince(to("/inventory?a=1"), 0, [entry("/inventory/x?a=1")])).toBe(false);
+    expect(requestedSince(to("/inventory?a=1"), 10, [entry("/inventory?a=1", 10)])).toBe(true);
+    expect(requestedSince(to("/inventory?a=1"), 11, [entry("/inventory?a=1", 10)])).toBe(false);
   });
 });
 
@@ -244,6 +355,19 @@ describe("clickGuardTarget — the click guard's filter", () => {
     expect(clickGuardTarget(click(anchor("https://elsewhere.example/inventory?status=SPARE")), loc)).toBeNull();
     expect(clickGuardTarget(click(anchor("/employees?kind=CLIENT")), loc)).toBeNull();
     expect(clickGuardTarget(click(anchor("/inventory#main")), loc)).toBeNull();
+  });
+  it("classifies a plain click on a link to another page as cancel", () => {
+    expect(classifyClick(click(anchor("/employees?kind=CLIENT")), loc)).toEqual({ action: "cancel" });
+    expect(classifyClick(click(anchor("/inventory/abc")), loc)).toEqual({ action: "cancel" });
+    expect(classifyClick(click(anchor("/inventory?status=SPARE")), loc)).toMatchObject({ action: "watch" });
+    // not leaving this tab's page: nothing
+    expect(classifyClick(click(anchor("/inventory#main")), loc)).toBeNull();
+    expect(classifyClick(click(anchor("/inventory")), loc)).toBeNull();
+    expect(classifyClick(click(anchor("/employees"), { ctrlKey: true }), loc)).toBeNull();
+    expect(classifyClick(click(anchor("/employees", { target: "_blank" })), loc)).toBeNull();
+    expect(classifyClick(click(anchor("/employees", { download: true })), loc)).toBeNull();
+    expect(classifyClick(click(anchor("https://elsewhere.example/employees")), loc)).toBeNull();
+    expect(classifyClick(click(null), loc)).toBeNull();
   });
   it("ignores clicks that aren't on a link, and SVG links", () => {
     expect(clickGuardTarget(click(null), loc)).toBeNull();

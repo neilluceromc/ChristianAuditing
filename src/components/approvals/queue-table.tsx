@@ -11,6 +11,7 @@ import { Menu, type MenuItem } from "@/components/ui/menu";
 import { Pill } from "@/components/ui/pill";
 import { StatusDot } from "@/components/ui/status";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+import { pushGuarded } from "@/lib/stuck-nav";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { DONE, RUN, RejectApprovalDialog } from "@/components/approvals/approval-header";
@@ -107,7 +108,7 @@ export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; can
       items.push({ label: VERB_LABEL[verb], onSelect: () => actVerb(verb, row), disabled: pending });
     }
     // A menu whose only item is Open would just repeat the row click, so a row with nothing to act on has none.
-    if (items.length > 0) items.push({ label: "Open", onSelect: () => router.push(`/approvals/${row.id}`) });
+    if (items.length > 0) items.push({ label: "Open", onSelect: () => pushGuarded(router, `/approvals/${row.id}`) });
     return items;
   }
 
@@ -137,7 +138,7 @@ export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; can
     const move = queueMoveKey(e);
     if (move === "down") { e.preventDefault(); setFocused((i) => { const n = Math.min(i + 1, rows.length - 1); announceRow(n); return n; }); }
     else if (move === "up") { e.preventDefault(); setFocused((i) => { const n = Math.max(i - 1, 0); announceRow(n); return n; }); }
-    else if (e.key === "Enter" && row) { e.preventDefault(); router.push(`/approvals/${row.id}`); }
+    else if (e.key === "Enter" && row) { e.preventDefault(); pushGuarded(router, `/approvals/${row.id}`); }
     else if (!canAct || pending || !row) return;
     else {
       // Fix round 1: a bare press only — no auto-repeat, no Ctrl/Cmd/Alt (Ctrl+A stays select-all).
@@ -189,7 +190,7 @@ export function QueueTable({ rows, canAct, isAdmin }: { rows: ApprovalRow[]; can
                     "cursor-pointer transition-opacity duration-[340ms]",
                     leaving === row.id && "opacity-0",
                   )}
-                  onClick={() => { setFocused(i); router.push(`/approvals/${row.id}`); }}
+                  onClick={() => { setFocused(i); pushGuarded(router, `/approvals/${row.id}`); }}
                 >
                   <Td className="pr-0">
                     <span className={cn("inline-flex rounded-full", ringing === row.id && "animate-[ring_700ms_var(--ease-std)]")}>

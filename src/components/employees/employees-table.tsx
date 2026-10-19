@@ -33,7 +33,7 @@ export function EmployeesTable({
   }
 
   function open(id: string) {
-    router.push(`/employees/${id}`);
+    pushGuarded(router, `/employees/${id}`);
   }
 
   return (
