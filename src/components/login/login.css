@@ -1,0 +1,530 @@
+/* The Cris login page (Phase 44, spec §3 and §5). Ported from docs/mockups/2026-10-19-login-cris.html ("sign-in
+   card" and "stepped sign-in card"), every class prefixed lw- so nothing collides with Tailwind or the app.
+   Colours are the app's tokens (src/app/globals.css), so light and dark follow [data-theme] on <html>; the few
+   values the app has no token for are lw- tokens with light values here and dark overrides below.
+   Unlayered on purpose: these rules win over the UI kit's Tailwind utilities on the same elements. */
+
+.lw-hero {
+  --lw-glass: color-mix(in srgb, var(--surface) 88%, transparent);
+  --lw-cardshadow: 0 30px 70px -28px rgba(16, 24, 40, 0.42);
+}
+[data-theme="dark"] .lw-hero {
+  --lw-cardshadow: 0 30px 70px -24px rgba(0, 0, 0, 0.7);
+}
+
+/* ---------- hero (desktop: one viewport, card on the right) ---------- */
+.lw-hero {
+  position: relative;
+  height: 100svh;
+  min-height: 640px;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+/* ---------- the card ---------- */
+.lw-card {
+  position: absolute;
+  right: max(32px, 5vw);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: 392px;
+  /* Welcome with Microsoft, quick sign-in and the refused banner can outgrow a short hero: scroll, never clip. */
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  padding: 26px 28px 24px;
+  background: var(--lw-glass);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--lw-cardshadow);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.lw-brandrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.lw-wordmark {
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  color: var(--text);
+}
+.lw-brandtag {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.lw-progress {
+  height: 3px;
+  margin-top: 18px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  transition: opacity 0.25s;
+}
+.lw-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.lw-noprog .lw-progress {
+  opacity: 0;
+}
+
+/* ---------- steps ---------- */
+@keyframes lw-step-in {
+  from { opacity: 0; transform: translateX(18px); }
+}
+@keyframes lw-step-back {
+  from { opacity: 0; transform: translateX(-18px); }
+}
+.lw-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 18px;
+}
+.lw-step.lw-enter {
+  animation: lw-step-in 0.34s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.lw-step.lw-enter-back {
+  animation: lw-step-back 0.34s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.lw-h1 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.lw-h1:focus {
+  outline: none;
+}
+.lw-lede {
+  margin: -8px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.lw-domain {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.lw-foot {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* step header: Back and "Log in · 1 of 2" */
+.lw-stephead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.lw-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  margin: -6px 0 -6px -6px;
+  padding: 0 10px 0 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.lw-back:hover {
+  background: var(--surface-subtle);
+}
+.lw-stepno {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---------- Welcome: tiles, Microsoft, quick sign-in ---------- */
+.lw-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lw-tile {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
+  min-height: 40px;
+  padding: 13px 14px 13px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.lw-tile:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.lw-tile-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.lw-tile-primary:hover {
+  background: var(--accent-hover);
+}
+.lw-tile-t {
+  font-size: 15px;
+  font-weight: 600;
+}
+.lw-tile-s {
+  grid-column: 1;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.lw-tile-primary .lw-tile-s {
+  color: color-mix(in srgb, var(--accent-fg) 78%, transparent);
+}
+.lw-tile svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.lw-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+.lw-or::before,
+.lw-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.lw-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.lw-qhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lw-qtitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.lw-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--accent-soft-bg);
+  color: var(--accent-soft-text);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.lw-qhint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.lw-qform {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lw-qrow {
+  display: flex;
+  gap: 8px;
+}
+.lw-qrow select {
+  flex: 1;
+  min-width: 0;
+}
+.lw-qwho {
+  margin: 0;
+  min-height: 16px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- fields and buttons ---------- */
+.lw-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lw-control {
+  display: flex;
+  flex-direction: column;
+}
+.lw-inp {
+  height: 40px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+.lw-pw {
+  position: relative;
+}
+.lw-pw .lw-inp {
+  padding-right: 64px;
+}
+.lw-show {
+  position: absolute;
+  right: 5px;
+  top: 4px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lw-caps {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--st-attention-text);
+}
+.lw-err {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--error-text);
+}
+.lw-err:not(:empty) {
+  margin-top: 6px;
+}
+
+.lw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 42px;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.lw-btn:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.lw-btn:disabled {
+  cursor: progress;
+  opacity: 0.9;
+}
+.lw-btn2 {
+  height: 40px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  gap: 9px;
+}
+.lw-qrow .lw-btn2 {
+  padding: 0 14px;
+}
+@keyframes lw-spin {
+  to { transform: rotate(360deg); }
+}
+.lw-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-fg) 35%, transparent);
+  border-top-color: var(--accent-fg);
+  animation: lw-spin 0.7s linear infinite;
+}
+
+.lw-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.lw-link:hover {
+  text-decoration: underline;
+}
+
+/* Log in 2: who is signing in */
+.lw-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: -4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--canvas);
+}
+.lw-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-soft-bg);
+  color: var(--accent-soft-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.lw-who-e {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+}
+
+/* Sign up 2: strength bar and the length rule */
+.lw-meter {
+  height: 4px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.lw-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--st-attention-dot);
+  transition: width 0.2s, background 0.2s;
+}
+.lw-meter.lw-ok span {
+  background: var(--st-settled-dot);
+}
+.lw-rules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.lw-rule-mark {
+  display: inline-block;
+  width: 16px;
+}
+.lw-rules li.lw-ok {
+  color: var(--st-settled-text);
+}
+
+/* Sign up 3 */
+.lw-okmark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--st-settled-bg);
+  color: var(--st-settled-dot);
+}
+.lw-rolechip {
+  display: inline-flex;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--accent-soft-bg);
+  color: var(--accent-soft-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+/* ---------- narrow (≤ 900 px): a column inside the 16 px gutter ---------- */
+@media (max-width: 900px) {
+  .lw-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 16px 8px;
+  }
+  .lw-card {
+    position: relative;
+    right: auto;
+    top: auto;
+    transform: none;
+    align-self: center;
+    width: 100%;
+    max-width: 520px;
+    max-height: none;
+    overflow: visible;
+    padding: 24px 20px 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lw-step.lw-enter,
+  .lw-step.lw-enter-back {
+    animation: none;
+  }
+  .lw-progress,
+  .lw-progress span,
+  .lw-meter span,
+  .lw-tile {
+    transition: none;
+  }
+  .lw-spin {
+    animation-duration: 2s;
+  }
+}
