@@ -8,6 +8,7 @@
 .lw-hero {
   --lw-glass: color-mix(in srgb, var(--surface) 88%, transparent);
   --lw-cardshadow: 0 30px 70px -28px rgba(16, 24, 40, 0.42);
+  --lw-focusveil: rgba(240, 243, 247, 0.42);
 
   /* The room (world.ts and the room svg rules below): a bright daytime back room. */
   --lw-accent: var(--accent);
@@ -32,6 +33,7 @@
 }
 [data-theme="dark"] .lw-hero {
   --lw-cardshadow: 0 30px 70px -24px rgba(0, 0, 0, 0.7);
+  --lw-focusveil: rgba(8, 10, 14, 0.5);
 
   /* The same room after hours: lamps lit, light cones, monitors glowing. */
   --lw-wall1: #171c24; --lw-wall2: #141920; --lw-wainscot: #12161d;
@@ -835,6 +837,110 @@
   line-height: 20px;
 }
 
+/* ---------- focus mode (spec §6): Log in / Sign up blur the room, centre the card and bring Cris forward ---------- */
+.lw-scene {
+  transition:
+    filter 0.7s ease,
+    transform 0.9s cubic-bezier(0.5, 0, 0.2, 1);
+}
+.lw-scene::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--lw-focusveil);
+  opacity: 0;
+  transition: opacity 0.7s ease;
+}
+.lw-hero.lw-focus .lw-scene {
+  filter: blur(7px) saturate(0.85);
+  transform: scale(1.04);
+}
+.lw-hero.lw-focus .lw-scene::before {
+  opacity: 1;
+}
+.lw-hero.lw-focus .lw-scene * {
+  animation-play-state: paused !important;
+}
+.lw-hero.lw-focus .lw-scene .lw-bubble {
+  opacity: 0 !important;
+}
+.lw-daylog {
+  transition:
+    opacity 0.35s ease,
+    transform 0.5s ease,
+    visibility 0s linear 0s;
+}
+.lw-hero.lw-focus .lw-daylog {
+  opacity: 0;
+  transform: translateY(16px);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.35s ease,
+    transform 0.5s ease,
+    visibility 0s linear 0.5s;
+}
+.lw-card {
+  transition:
+    transform 0.85s cubic-bezier(0.5, 0, 0.2, 1),
+    box-shadow 0.6s ease;
+}
+/* --lw-dx is set on the hero: the centred card's left edge minus the card's own. */
+.lw-hero.lw-focus .lw-card {
+  transform: translate(var(--lw-dx, 0px), -50%);
+  box-shadow: 0 44px 100px -34px rgba(16, 24, 40, 0.55);
+}
+/* The forward Cris: outside the blurred scene, under the card (it never covers the form), over the room. */
+.lw-guide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    left 0.85s cubic-bezier(0.5, 0, 0.2, 1),
+    top 0.85s cubic-bezier(0.5, 0, 0.2, 1),
+    transform 0.85s cubic-bezier(0.5, 0, 0.2, 1),
+    opacity 0.25s ease;
+}
+.lw-guide.lw-on {
+  opacity: 1;
+}
+.lw-gtilt {
+  width: 200px;
+  height: 200px;
+  transition: transform 0.45s ease;
+}
+.lw-guide.lw-flying .lw-gtilt {
+  transform: rotate(var(--lw-glean, -10deg));
+}
+/* Its bubble is placed by script (clamped clear of the card), so only the fade animates. */
+.lw-bubble.lw-gb {
+  z-index: 5;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.lw-bubble.lw-gb.lw-side {
+  transform: translateY(-50%);
+}
+.lw-bubble.lw-gb.lw-side::after {
+  left: -7px;
+  top: 50%;
+  bottom: auto;
+  margin-top: -6px;
+  transform: rotate(135deg);
+}
+/* A snap (direct load, resize, Cris drawn over the room Cris) places things without animating. */
+.lw-hero[data-snap] .lw-guide,
+.lw-hero[data-snap="all"] .lw-card {
+  transition: none !important;
+}
+
 /* ---------- narrow (≤ 900 px): a column inside the 16 px gutter ---------- */
 @media (max-width: 900px) {
   .lw-hero {
@@ -844,6 +950,8 @@
     height: auto;
     min-height: 0;
     overflow: visible;
+    /* The focus-mode banner is scaled 1.04 and the side bubble can reach the edge: no sideways scroll. */
+    overflow-x: clip;
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
     padding-block: 0 16px;
@@ -886,6 +994,13 @@
     max-height: none;
     overflow: visible;
     padding: 24px 20px 20px;
+  }
+  /* Focus mode: the card stays in the column and the day log leaves the layout. */
+  .lw-hero.lw-focus .lw-card {
+    transform: none;
+  }
+  .lw-hero.lw-focus .lw-daylog {
+    display: none;
   }
 }
 
@@ -1055,6 +1170,13 @@
 [data-at="off"] .lw-a-done3 { animation: lw-pop .45s calc(var(--lw-tv) + 2.3s) both; }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Focus mode switches at once: no blur fade, slide or flight. */
+  .lw-scene,
+  .lw-scene::before,
+  .lw-daylog,
+  .lw-card,
+  .lw-guide,
+  .lw-gtilt,
   .lw-world,
   .lw-crisw,
   .lw-tilt,
@@ -1065,6 +1187,7 @@
     transition: none !important;
   }
   .lw-world *,
+  .lw-guide .lw-halo,
   .lw-caret {
     animation: none !important;
   }

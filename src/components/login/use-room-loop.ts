@@ -46,7 +46,7 @@ export type RoomLoop = LoopState & {
   resume(): void;
   /** Re-place the camera for the current layout without transitions. */
   relayout(): void;
-  /** The room Cris's centre and scale, in scene-element pixels. */
+  /** The room Cris's centre and scale, in scene-element pixels (where the camera is heading, not mid-pan). */
   crisPoint(): { x: number; y: number; scale: number };
   sceneRef: RefObject<HTMLDivElement | null>;
   worldRef: RefObject<HTMLDivElement | null>;
@@ -172,7 +172,8 @@ export function useRoomLoop({ reduced, sceneRef, worldRef, visibleRight }: RoomL
       const prev = m.cur >= 0 ? SCENES[m.cur] : null;
       m.cur = i;
       const reducedNow = opts.current.reduced;
-      const tv = reducedNow ? 0 : travelSeconds(prev ? prev.cx : null, sc.cx);
+      // Suspended (focus mode): jump straight there, so no clock count or travel lean runs behind the blur.
+      const tv = reducedNow || m.suspended ? 0 : travelSeconds(prev ? prev.cx : null, sc.cx);
       scene.style.setProperty("--lw-tv", `${tv}s`);
       world.style.setProperty("--lw-sky1", sc.sky[0]);
       world.style.setProperty("--lw-sky2", sc.sky[1]);
