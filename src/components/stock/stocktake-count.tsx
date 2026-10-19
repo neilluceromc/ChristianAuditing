@@ -14,6 +14,7 @@ import { parseCount, sheetHref, staleSavedLines, type SheetState } from "@/lib/s
 import { countStocktakeLine } from "@/server/modules/stock/stocktake-actions";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import { StocktakeSheetToolbar } from "./stocktake-sheet-toolbar";
+import { cancelStuckNavWatch, pushGuarded } from "@/lib/stuck-nav";
 
 export interface CountLine {
   id: string; // StocktakeLine id — what countStocktakeLine takes as lineId
@@ -224,12 +225,14 @@ export function StocktakeCount({
       const qty = entry(l);
       if (typeof qty === "number" && qty !== lastSaved(l)) save(l, false);
     }
-    if (await waitForAll(pending.current)) router.push(href);
+    if (await waitForAll(pending.current)) pushGuarded(router, href);
   }
 
   const gate: Gate = (e, href) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // a new tab leaves this one as it is
     e.preventDefault();
+    // The click guard watched this link; the navigation (if any) comes later, through pushGuarded in `go`.
+    cancelStuckNavWatch();
     void go(href);
   };
 

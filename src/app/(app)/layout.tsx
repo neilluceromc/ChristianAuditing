@@ -13,6 +13,7 @@ import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { navDestinations } from "@/lib/shell";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
+import { StuckNavGuard } from "@/components/shell/stuck-nav-guard";
 import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
 import { navCountKeys, type NavBadges } from "@/lib/nav-badges";
 import { defaultClassFor } from "@/lib/asset-class";
@@ -84,6 +85,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {cris && <CrisWidget {...cris} />}
       <PageSearchShortcut />
       <Suspense fallback={null}><NavigationTracker /></Suspense>
+      {/* Same-page filter links that never commit in production fall back to an ordinary load (src/lib/stuck-nav.ts). */}
+      <StuckNavGuard />
     </div>
   );
 }

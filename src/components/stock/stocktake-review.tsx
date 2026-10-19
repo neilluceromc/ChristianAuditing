@@ -16,6 +16,7 @@ import { sheetHref, type SheetState } from "@/lib/stocktake";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import { useStockRunner } from "./use-stock-runner";
 import { StocktakeSheetToolbar } from "./stocktake-sheet-toolbar";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 /**
  * I-4: an OPEN review is a live view (today's Now/Variance/MOVED against the
@@ -131,7 +132,7 @@ export function StocktakeReview({
         sheet={sheet}
         categories={categories}
         toggleLabel="Only differences"
-        onChange={(next) => router.push(sheetHref(stocktakeId, "review", next))}
+        onChange={(next) => pushGuarded(router, sheetHref(stocktakeId, "review", next))}
       />
       {error && <Banner tone="fault" title={error} />}
       {rows.length === 0 && (sheet.q || sheet.cats.length > 0 || sheet.only) ? (

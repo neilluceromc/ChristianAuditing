@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import { filterGroups, showCounts, sortGroups, type GroupRow } from "@/lib/groups";
 import { LEAVE_UNSAVED, usePolicyDirty } from "./dirty-context";
+import { cancelStuckNavWatch } from "@/lib/stuck-nav";
 
 export type PolicyTab = "client" | "internal";
 
@@ -41,7 +42,10 @@ export function GroupList({
 
   /** Following a link away from unsaved edits asks first (the editor reports through the page's context). */
   const guard = (e: React.MouseEvent) => {
-    if (dirty.any() && !window.confirm(LEAVE_UNSAVED)) e.preventDefault();
+    if (dirty.any() && !window.confirm(LEAVE_UNSAVED)) {
+      e.preventDefault();
+      cancelStuckNavWatch(); // staying put: the click guard must not load the link anyway
+    }
   };
 
   return (

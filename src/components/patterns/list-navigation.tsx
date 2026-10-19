@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { pushGuarded } from "@/lib/stuck-nav";
 
 /**
  * Phase 30 (spec §6.2, Doherty): every list navigation the inventory page makes in code — a search,
@@ -14,7 +15,7 @@ import { cn } from "@/lib/cn";
 interface ListNavigation {
   /** true while a navigation started through `navigate` is in flight */
   pending: boolean;
-  /** `router.push(href)` inside the shared transition */
+  /** `router.push(href)` inside the shared transition, with the stuck same-page navigation fallback (`pushGuarded`) */
   navigate: (href: string) => void;
 }
 
@@ -24,7 +25,7 @@ export function ListNavigationProvider({ children }: { children: React.ReactNode
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const navigate = useCallback(
-    (href: string) => startTransition(() => router.push(href)),
+    (href: string) => startTransition(() => pushGuarded(router, href)),
     [router],
   );
   const value = useMemo(() => ({ pending, navigate }), [pending, navigate]);
@@ -39,7 +40,7 @@ export function ListNavigationProvider({ children }: { children: React.ReactNode
 export function useListNavigation(): ListNavigation {
   const ctx = useContext(ListNavigationContext);
   const router = useRouter();
-  const fallback = useMemo<ListNavigation>(() => ({ pending: false, navigate: (href) => router.push(href) }), [router]);
+  const fallback = useMemo<ListNavigation>(() => ({ pending: false, navigate: (href) => pushGuarded(router, href) }), [router]);
   return ctx ?? fallback;
 }
 
