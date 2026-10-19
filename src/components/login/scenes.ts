@@ -149,3 +149,40 @@ export function cameraX(focus: number, scale: number, visibleRight: number, view
   const x = visibleRight / 2 - focus * scale;
   return Math.min(0, Math.max(viewportWidth - 3960 * scale, x));
 }
+
+/**
+ * The day-log clock during a travel: the minute `k` (0 to 1) of the way from `from` to `to`, eased in and out.
+ * Always counts forward, so the loop from 17:05 back to 08:40 runs through the night. Not wrapped: format
+ * with `fmtClock`.
+ */
+export function clockAt(from: number, to: number, k: number): number {
+  const t = Math.min(1, Math.max(0, k));
+  const target = to < from ? to + 1440 : to;
+  const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+  return from + (target - from) * e;
+}
+
+/**
+ * Where the room's speech bubble goes, in scene pixels (spec §4.5): at the scene's anchor, kept 12 px inside
+ * the visible room (`right` is where it ends, so never under the card) and at least 70 px from the top. `left`
+ * is the bubble's CSS left (its right edge for a right-aligned bubble, which is drawn translated by -100 %);
+ * `tail` is the tail's offset from the bubble's left edge, still pointing at Cris after a clamp.
+ */
+export function roomBubble(p: {
+  anchor: [number, number];
+  align: "left" | "right";
+  tx: number;
+  scale: number;
+  right: number;
+  width: number;
+}): { left: number; top: number; tail: number } {
+  const ax = p.tx + p.anchor[0] * p.scale;
+  const leftEdge = p.align === "right" ? ax - p.width : ax;
+  const fix = Math.min(Math.max(leftEdge, 12), p.right - p.width - 12) - leftEdge;
+  const tail = p.align === "right" ? p.width - 40 - fix : 26 - fix;
+  return {
+    left: ax + fix,
+    top: Math.max(p.anchor[1] * p.scale, 70),
+    tail: Math.min(Math.max(tail, 14), p.width - 26),
+  };
+}

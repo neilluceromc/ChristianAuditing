@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cameraX, DWELL_MS, dayPct, fmtClock, SCENES, travelSeconds } from "./scenes";
+import { cameraX, clockAt, DWELL_MS, dayPct, fmtClock, roomBubble, SCENES, travelSeconds } from "./scenes";
 
 describe("SCENES", () => {
   it("runs the six scenes in day-log order", () => {
@@ -39,4 +39,45 @@ describe("cameraX", () => {
   it("centres the focus in the visible part of the room", () => expect(cameraX(700, 1, 960, 1440)).toBe(-220));
   it("never shows past the left end", () => expect(cameraX(0, 1, 960, 1440)).toBe(0));
   it("never shows past the right end", () => expect(cameraX(3900, 1, 960, 1440)).toBe(1440 - 3960));
+});
+
+describe("clockAt", () => {
+  it("counts from the old time to the new one, easing in and out", () => {
+    expect(clockAt(520, 595, 0)).toBe(520);
+    expect(clockAt(520, 595, 0.5)).toBe(557.5);
+    expect(clockAt(520, 595, 0.25)).toBeLessThan(520 + 75 / 4);
+    expect(clockAt(520, 595, 1)).toBe(595);
+  });
+  it("runs forward past midnight on the loop", () => {
+    expect(fmtClock(clockAt(1025, 520, 0.5))).toBe("00:53");
+    expect(fmtClock(clockAt(1025, 520, 1))).toBe("08:40");
+  });
+  it("holds the ends outside 0 to 1", () => {
+    expect(clockAt(520, 595, -1)).toBe(520);
+    expect(clockAt(520, 595, 2)).toBe(595);
+  });
+});
+
+describe("roomBubble", () => {
+  it("sits at the anchor in screen space, tail near its left end", () => {
+    expect(roomBubble({ anchor: [968, 226], align: "left", tx: -100, scale: 0.5, right: 800, width: 200 })).toEqual({
+      left: 384,
+      top: 113,
+      tail: 26,
+    });
+  });
+  it("keeps a right-aligned bubble inside the room's left edge and below the top", () => {
+    expect(roomBubble({ anchor: [604, 226], align: "right", tx: 0, scale: 0.25, right: 400, width: 240 })).toEqual({
+      left: 252,
+      top: 70,
+      tail: 99,
+    });
+  });
+  it("never runs under the card, tail still on the bubble", () => {
+    expect(roomBubble({ anchor: [2068, 238], align: "left", tx: -1000, scale: 1, right: 1100, width: 300 })).toEqual({
+      left: 788,
+      top: 238,
+      tail: 274,
+    });
+  });
 });
