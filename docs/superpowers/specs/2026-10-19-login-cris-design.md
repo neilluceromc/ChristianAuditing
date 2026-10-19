@@ -169,7 +169,7 @@ Resizing while focused re-places the card offset, Cris and the bubble without an
   ```ts
   await page.getByRole("link", { name: /^Log in/ }).click();
   await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email").fill(EMAIL);
+  await page.getByLabel("Work email", { exact: true }).fill(EMAIL);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();

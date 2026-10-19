@@ -13,7 +13,7 @@ async function login(page: Page, email: string) {
   await page.goto("/login");
   await page.getByRole("link", { name: /^Log in/ }).click();
   await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email").fill(email);
+  await page.getByLabel("Work email", { exact: true }).fill(email);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
@@ -51,7 +51,7 @@ test.describe("auth", () => {
     await expect(page).toHaveURL(/\/login\?next=%2Femployees|\/login\?next=\/employees/);
     await page.getByRole("link", { name: /^Log in/ }).click();
     await page.locator('[data-login-ready="true"]').waitFor();
-    await page.getByLabel("Work email").fill("it@thebackroomop.com");
+    await page.getByLabel("Work email", { exact: true }).fill("it@thebackroomop.com");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
     await page.getByRole("button", { name: "Log in", exact: true }).click();
@@ -70,7 +70,7 @@ test.describe("auth", () => {
     await page.goto("/login");
     await page.getByRole("link", { name: /^Log in/ }).click();
     await page.locator('[data-login-ready="true"]').waitFor();
-    await page.getByLabel("Work email").fill("it@thebackroomop.com");
+    await page.getByLabel("Work email", { exact: true }).fill("it@thebackroomop.com");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByLabel("Password", { exact: true }).fill("wrong-password");
     await page.getByRole("button", { name: "Log in", exact: true }).click();

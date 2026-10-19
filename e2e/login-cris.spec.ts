@@ -39,7 +39,7 @@ const card = (page: Page) => page.locator("main.lw-card");
 /** Cris's line in the forward bubble. The ghost span beside it always holds the whole line, so read the typed one. */
 const forwardLine = (page: Page) => page.locator(".lw-gb .lw-typed");
 const dayLog = (page: Page) => page.getByRole("region", { name: "Cris's day" });
-const workEmail = (page: Page) => page.getByLabel("Work email");
+const workEmail = (page: Page) => page.getByLabel("Work email", { exact: true });
 const password = (page: Page) => page.getByLabel("Password", { exact: true });
 const cont = (page: Page) => page.getByRole("button", { name: "Continue", exact: true });
 

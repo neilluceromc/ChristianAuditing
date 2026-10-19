@@ -44,7 +44,7 @@ async function login(page: Page, email: string) {
   await page.goto("/logout");
   await page.getByRole("link", { name: /^Log in/ }).click();
   await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email").fill(email);
+  await page.getByLabel("Work email", { exact: true }).fill(email);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
@@ -96,7 +96,7 @@ test.describe("Phase 28 — the Back control", () => {
       await page.goto(`/inventory/${headset.id}`);
       await page.getByRole("link", { name: /^Log in/ }).click();
       await page.locator('[data-login-ready="true"]').waitFor();
-      await page.getByLabel("Work email").fill(IT);
+      await page.getByLabel("Work email", { exact: true }).fill(IT);
       await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
       await page.getByRole("button", { name: "Log in", exact: true }).click();
