@@ -332,9 +332,13 @@ export function InventoryTable({
                         ) : row.hold ? (
                           // README 5c: a hold never changes the status — the asset
                           // still reads SPARE, and the marker says who wants it.
-                          <span className="inline-flex items-center gap-1.5">
-                            <Pill tone="accent">HOLD</Pill>
-                            <span className="text-[11px] text-fg-muted">
+                          // Stacked like the person branch: the markers on line 1, who it's for on line 2.
+                          <span className="flex flex-col items-start gap-0.5 py-1 leading-tight">
+                            <span className="inline-flex items-center gap-1.5">
+                              <Pill tone="accent">HOLD</Pill>
+                              {row.hold.expiresAt && <HoldPill expiresAt={row.hold.expiresAt} today={today} />}
+                            </span>
+                            <span className="block max-w-[12rem] truncate text-[11px] text-fg-muted" title={`for ${row.hold.name}`}>
                               for{" "}
                               <Link
                                 href={`/employees/${row.hold.id}`}
@@ -344,7 +348,6 @@ export function InventoryTable({
                                 {row.hold.name}
                               </Link>
                             </span>
-                            {row.hold.expiresAt && <HoldPill expiresAt={row.hold.expiresAt} today={today} />}
                           </span>
                         ) : (
                           <span className="text-fg-faint">—</span>

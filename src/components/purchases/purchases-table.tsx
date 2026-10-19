@@ -18,8 +18,8 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
           <Th>Request</Th>
           <Th width={78} align="right">Items</Th>
           <Th width={124} align="right">Value</Th>
+          {/* the department sits under the requester's name: one column, so State fits at 1280 px */}
           <Th width={150}>Requested by</Th>
-          <Th width={120}>Department</Th>
           <Th width={150}>Supplier</Th>
           <Th width={168}>State</Th>
         </Tr>
@@ -39,8 +39,15 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
             </Td>
             <Td align="right" mono>{row.totalQty}</Td>
             <Td align="right" mono>{row.total}</Td>
-            <Td>{row.requester}</Td>
-            <Td><span className="block max-w-[11rem] truncate" title={row.department ?? "No department"}>{row.department ?? "No department"}</span></Td>
+            <Td>
+              <span className="flex flex-col leading-tight">
+                <span className="block max-w-[11rem] truncate" title={row.requester}>{row.requester}</span>
+                <span className="sr-only"> · </span>
+                <span className="block max-w-[11rem] truncate text-[11px] text-fg-muted" title={row.department ?? "No department"}>
+                  {row.department ?? "No department"}
+                </span>
+              </span>
+            </Td>
             <Td>{row.supplier ? <span className="block max-w-[11rem] truncate" title={row.supplier}>{row.supplier}</span> : <span className="text-fg-faint">—</span>}</Td>
             <Td>
               <span className="flex flex-col gap-0.5 py-1.5">
