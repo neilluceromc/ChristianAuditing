@@ -1,7 +1,7 @@
 // Cris's looks and moods (spec §5). Pure, so the widget and the settings preview share it.
 import type { CrisPrefs } from "./cris-prefs";
 
-export type CrisMood = "idle" | "think" | "search" | "talk" | "look" | "sad" | "cross";
+export type CrisMood = "idle" | "think" | "search" | "talk" | "look" | "sad" | "cross" | "shy";
 /** The colour preference: a colour, or "auto" to match the theme. */
 export type CrisColorPref = CrisPrefs["color"];
 /** A drawn colour: the preference with "auto" resolved. */
