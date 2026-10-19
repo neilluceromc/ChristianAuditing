@@ -89,7 +89,7 @@ Wordmark **Cris** (23 px, 700, tight tracking) with **IT INVENTORY** beside it (
 
 **Log in · 1 of 2** (progress 50 %)
 - Back (→ Welcome), `h1` "What's your work email?", field **Work email** (`type=email`, `autocomplete=username`, placeholder `name@{domain}` or `name@company.com` when no domain), **Continue**. Footer: "New to Cris? Sign up" (→ Sign up 1).
-- Client checks, in order: empty → "Enter your work email."; not an email → "That doesn't look like an email address. Check for typos."; domain set and not matching → "Use your @{domain} email." Errors show under the field (`aria-live="polite"`, `aria-invalid`, focus moves to the field without scrolling).
+- Client checks, in order: empty → "Enter your work email."; not an email → "That doesn't look like an email address. Check for typos." Log in does not check the allowed domain (the server never has); only Sign up 1 does. Errors show under the field (`aria-live="polite"`, `aria-invalid`, focus moves to the field without scrolling).
 
 **Log in · 2 of 2** (progress 100 %)
 - Back (→ Log in 1), `h1` "Enter your password", a chip with initials (from the email's local part, up to two letters), the email, and **Change** (→ Log in 1). Field **Password** with **Show/Hide** (`aria-pressed`), a "Caps Lock is on." hint, **Log in** (shows a spinner and "Logging in…" while pending). Footer: "Forgot your password? Ask an admin for help."

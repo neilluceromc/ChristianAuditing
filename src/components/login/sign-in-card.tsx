@@ -183,7 +183,8 @@ export function SignInCard({
   function onLoginSubmit(e: React.FormEvent<HTMLFormElement>) {
     if (step === "login-email") {
       e.preventDefault();
-      const problem = emailProblem(email, domain);
+      // Log in never checks the allowed domain (the server never has); only Sign up 1 does.
+      const problem = emailProblem(email, null);
       if (problem) return fail("email", problem);
       go("login-password");
       return;

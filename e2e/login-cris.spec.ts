@@ -280,12 +280,13 @@ test.describe("login page", () => {
     await cont(page).click();
     await expect(workEmail(page)).toHaveAccessibleDescription("That doesn't look like an email address. Check for typos.");
 
-    // The seed turns on allowed_domain, so a well-formed address elsewhere is refused.
+    // Log in does not check the allowed domain (the server never has): a well-formed address elsewhere advances.
     await workEmail(page).fill("neil@example.com");
     await cont(page).click();
-    await expect(workEmail(page)).toHaveAccessibleDescription(`Use your @${ALLOWED_DOMAIN} email.`);
+    await expect(page.getByRole("heading", { name: "Enter your password" })).toBeVisible();
 
     // Log in 2
+    await page.getByRole("button", { name: "Back to your email" }).click();
     await workEmail(page).fill(IT);
     await cont(page).click();
     await expect(page.getByRole("heading", { name: "Enter your password" })).toBeVisible();
@@ -300,6 +301,10 @@ test.describe("login page", () => {
     await page.getByLabel("Full name").fill("Casey Tester");
     await cont(page).click();
     await expect(workEmail(page)).toHaveAccessibleDescription("Enter your work email.");
+    // The seed turns on allowed_domain, so Sign up 1 refuses a well-formed address elsewhere.
+    await workEmail(page).fill("neil@example.com");
+    await cont(page).click();
+    await expect(workEmail(page)).toHaveAccessibleDescription(`Use your @${ALLOWED_DOMAIN} email.`);
     await workEmail(page).fill(`casey@${ALLOWED_DOMAIN}`);
     await cont(page).click();
     await expect(page.getByRole("heading", { name: "Choose a password" })).toBeVisible();
