@@ -306,21 +306,28 @@ export function InventoryTable({
                       </Td>
                     );
                   case "model":
-                    return <Td key={col.id}><span className="block max-w-[16rem] truncate" title={row.model}>{row.model}</span></Td>;
+                    return <Td key={col.id}><span className="block max-w-[13rem] truncate" title={row.model}>{row.model}</span></Td>;
                   case "category":
                     return <Td key={col.id}>{row.category}</Td>;
                   case "assigned":
                     return (
                       <Td key={col.id}>
                         {row.assigneeId !== null && row.assignee !== null ? (
-                          // spec §6.3: the holder is a link to their profile, with the employee number
+                          // spec §6.3: the holder is a link to their profile, with the employee number —
+                          // stacked name over number (like the Employees list) so the column stays narrow.
+                          // The " · " separator is screen-reader only: the link's name and text stay "Name · EMP-…".
                           <Link
                             href={`/employees/${row.assigneeId}`}
-                            className="text-accent hover:underline"
+                            className="flex flex-col leading-tight text-accent hover:underline"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {row.assignee}
-                            {row.assigneeNo && <span className="font-mono text-[11px] text-fg-muted"> · {row.assigneeNo}</span>}
+                            <span className="block max-w-[12rem] truncate" title={row.assignee}>{row.assignee}</span>
+                            {row.assigneeNo && (
+                              <span className="block max-w-[12rem] truncate font-mono text-[11px] text-fg-muted" title={row.assigneeNo}>
+                                <span className="sr-only"> · </span>
+                                {row.assigneeNo}
+                              </span>
+                            )}
                           </Link>
                         ) : row.hold ? (
                           // README 5c: a hold never changes the status — the asset

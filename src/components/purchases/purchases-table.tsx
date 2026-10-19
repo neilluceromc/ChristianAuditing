@@ -35,13 +35,13 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
             </Td>
             <Td className="text-fg">
               {/* what is being bought, not how many rows it took to say it */}
-              <span className="block max-w-[20rem] truncate" title={row.summary}>{row.summary}</span>
+              <span className="block max-w-[16rem] truncate" title={row.summary}>{row.summary}</span>
             </Td>
             <Td align="right" mono>{row.totalQty}</Td>
             <Td align="right" mono>{row.total}</Td>
             <Td>{row.requester}</Td>
-            <Td><span className="block max-w-[12rem] truncate" title={row.department ?? "No department"}>{row.department ?? "No department"}</span></Td>
-            <Td>{row.supplier ? <span className="block max-w-[12rem] truncate" title={row.supplier}>{row.supplier}</span> : <span className="text-fg-faint">—</span>}</Td>
+            <Td><span className="block max-w-[11rem] truncate" title={row.department ?? "No department"}>{row.department ?? "No department"}</span></Td>
+            <Td>{row.supplier ? <span className="block max-w-[11rem] truncate" title={row.supplier}>{row.supplier}</span> : <span className="text-fg-faint">—</span>}</Td>
             <Td>
               <span className="flex flex-col gap-0.5 py-1.5">
                 <StatusPill value={row.state} className="self-start" />
