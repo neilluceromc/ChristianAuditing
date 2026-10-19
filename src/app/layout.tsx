@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import { ToastProvider } from "@/components/ui/toast";
 import { APP_NAME } from "@/lib/page-title";
 import "./globals.css";
+
+// Self-hosted: next/font downloads Geist at build time and serves the files
+// from the app, so every device renders the same face and the LAN staging
+// box never calls Google at runtime. The CSS variables feed --font-sans /
+// --font-mono in globals.css.
+const geistSans = Geist({ subsets: ["latin"], display: "swap", variable: "--font-geist-sans" });
+const geistMono = Geist_Mono({ subsets: ["latin"], display: "swap", variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
   // Spec §5: the fallback when a page sets no title; every page sets "{Page} · Backroom IT".
@@ -19,7 +27,13 @@ export default async function RootLayout({
   const theme = jar.get("br.theme")?.value === "dark" ? "dark" : "light";
   const density = jar.get("br.density")?.value === "compact" ? "compact" : "comfortable";
   return (
-    <html lang="en" data-theme={theme} data-density={density} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable}`}
+      data-theme={theme}
+      data-density={density}
+      suppressHydrationWarning
+    >
       <body className="bg-canvas text-fg font-sans antialiased">
         <ToastProvider>{children}</ToastProvider>
       </body>
