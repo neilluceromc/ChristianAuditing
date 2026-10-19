@@ -7,12 +7,15 @@ import bcrypt from "bcryptjs";
 import { signIn, signOut } from "./index";
 import { requireUser } from "./guards";
 import { prisma } from "../db/client";
-import { flagDomain, isAllowedDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
+import { flagDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
 import { isQuickLoginEmail } from "@/lib/quick-login";
+import { signUpProblem, type SignUpField } from "@/lib/signup-rules";
 import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 
 export interface AuthFormState {
   error?: string;
+  field?: SignUpField;
+  created?: boolean;
 }
 
 function safeNext(raw: FormDataEntryValue | null): string | undefined {
@@ -66,21 +69,15 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   const email = normalizeEmail(String(formData.get("email") ?? ""));
   const password = String(formData.get("password") ?? "");
 
-  if (name.length < 2) return { error: "Enter your name." };
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Enter a valid email." };
-  if (password.length < 10) return { error: "Password must be at least 10 characters." };
-
   const domainFlag = await prisma.featureFlag.findUnique({ where: { key: "allowed_domain" } });
-  const domain = flagDomain(domainFlag);
-  if (!isAllowedDomain(email, domain)) {
-    return { error: `Signup is limited to @${domain} addresses.` };
-  }
+  const problem = signUpProblem({ name, email, password }, flagDomain(domainFlag));
+  if (problem) return problem;
 
   // Exact lookup on the normalized email — NOT mode:"insensitive" (ILIKE),
   // which treats %/_ in the input as wildcards: an unauthenticated enumeration
   // oracle on this public form. Same fix as the login path (commit dc33830).
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) return { error: "An account with that email already exists." };
+  if (existing) return { error: "An account with that email already exists.", field: "email" };
 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
@@ -103,7 +100,7 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   } catch {
     redirect("/login"); // account exists; worst case they sign in manually
   }
-  redirect(ROLE_LANDING.viewer);
+  return { created: true };
 }
 
 export async function createBootstrapAdmin(
