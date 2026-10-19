@@ -43,7 +43,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Pool cap: Prisma's default is 2 x CPUs + 1 (57 on this 28-core host) per process, and Postgres allows 100 in total. Web 15 + worker 5 leaves room for migrate, backup and psql.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?connection_limit=15
       HOSTNAME: 0.0.0.0
     ports:
       - "3000:3000"
@@ -78,7 +79,8 @@ services:
     stop_grace_period: 30s
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Pool cap (see web): the worker runs one job at a time plus the hourly sweeps.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?connection_limit=5
     depends_on:
       db:
         condition: service_healthy
